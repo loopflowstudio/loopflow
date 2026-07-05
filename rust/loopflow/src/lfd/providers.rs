@@ -1,8 +1,8 @@
 use serde::Serialize;
 
 #[cfg(test)]
-use crate::lfd::provider_auth::AuthStatus;
-use crate::lfd::provider_auth::{Provider, ProviderAuthSnapshot};
+use crate::provider_auth::AuthStatus;
+use crate::provider_auth::{Provider, ProviderAuthSnapshot};
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -13,9 +13,6 @@ pub struct ProviderInfo {
     pub models: &'static [ModelInfo],
     pub is_default: bool,
     pub auth_provider: Option<Provider>,
-    /// Known API rates for models used through this harness.
-    /// Empty for subscription harnesses (Claude, Codex).
-    pub model_rates: &'static [ModelRate],
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -23,14 +20,6 @@ pub struct ModelInfo {
     pub id: &'static str,
     pub display_name: &'static str,
     pub is_default: bool,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct CostRates {
-    pub input_per_mtok: f64,
-    pub output_per_mtok: f64,
-    pub cache_read_per_mtok: f64,
-    pub cache_write_per_mtok: f64,
 }
 
 // ── Static catalog ─────────────────────────────────────────────────────
@@ -72,7 +61,6 @@ pub static PROVIDER_CATALOG: &[ProviderInfo] = &[
         models: CLAUDE_MODELS,
         is_default: true,
         auth_provider: Some(Provider::Claude),
-        model_rates: &[],
     },
     ProviderInfo {
         id: "codex",
@@ -80,7 +68,6 @@ pub static PROVIDER_CATALOG: &[ProviderInfo] = &[
         models: CODEX_MODELS,
         is_default: false,
         auth_provider: Some(Provider::Codex),
-        model_rates: &[],
     },
     ProviderInfo {
         id: "opencode",
@@ -88,65 +75,8 @@ pub static PROVIDER_CATALOG: &[ProviderInfo] = &[
         models: OPENCODE_MODELS,
         is_default: false,
         auth_provider: None,
-        model_rates: OPENCODE_MODEL_RATES,
     },
 ];
-
-// ── Model rate lookup ─────────────────────────────────────────────────
-//
-// Per-harness rate tables. Subscription harnesses (Claude, Codex) have
-// no rates. OpenCode hits real APIs with real per-token billing.
-
-#[derive(Debug, Clone)]
-pub struct ModelRate {
-    pub model_prefix: &'static str,
-    pub rates: CostRates,
-}
-
-const OPENCODE_MODEL_RATES: &[ModelRate] = &[
-    // Moonshot — Kimi K2
-    ModelRate {
-        model_prefix: "kimi-k2",
-        rates: CostRates {
-            input_per_mtok: 0.60,
-            output_per_mtok: 2.50,
-            cache_read_per_mtok: 0.15,
-            cache_write_per_mtok: 0.60,
-        },
-    },
-    // Alibaba — Qwen3
-    ModelRate {
-        model_prefix: "qwen3-coder",
-        rates: CostRates {
-            input_per_mtok: 0.22,
-            output_per_mtok: 1.0,
-            cache_read_per_mtok: 0.22,
-            cache_write_per_mtok: 0.22,
-        },
-    },
-    ModelRate {
-        model_prefix: "qwen3-max",
-        rates: CostRates {
-            input_per_mtok: 1.20,
-            output_per_mtok: 6.0,
-            cache_read_per_mtok: 1.20,
-            cache_write_per_mtok: 1.20,
-        },
-    },
-];
-
-/// Look up cost rates for a model within a specific harness.
-/// Matches by prefix so versioned model IDs (e.g. "claude-sonnet-4-20250514")
-/// resolve to the base model's rates. Returns None for subscription
-/// harnesses or unknown models.
-pub fn lookup_cost_rates(harness: &str, model: &str) -> Option<CostRates> {
-    let provider = PROVIDER_CATALOG.iter().find(|p| p.id == harness)?;
-    provider
-        .model_rates
-        .iter()
-        .find(|mr| model.starts_with(mr.model_prefix))
-        .map(|mr| mr.rates)
-}
 
 // ── Auth merging ───────────────────────────────────────────────────────
 
@@ -256,29 +186,5 @@ mod tests {
             .find(|p| p.id == "opencode")
             .expect("opencode");
         assert!(opencode.auth_status.is_none());
-    }
-
-    #[test]
-    fn opencode_has_rates_for_known_models() {
-        assert!(lookup_cost_rates("opencode", "kimi-k2").is_some());
-        assert!(lookup_cost_rates("opencode", "kimi-k2-0711").is_some());
-        assert!(lookup_cost_rates("opencode", "qwen3-coder").is_some());
-        assert!(lookup_cost_rates("opencode", "qwen3-max").is_some());
-    }
-
-    #[test]
-    fn subscription_harnesses_have_no_rates() {
-        assert!(lookup_cost_rates("claude", "anything").is_none());
-        assert!(lookup_cost_rates("codex", "anything").is_none());
-    }
-
-    #[test]
-    fn unknown_model_returns_none() {
-        assert!(lookup_cost_rates("opencode", "unknown-model-v1").is_none());
-    }
-
-    #[test]
-    fn unknown_harness_returns_none() {
-        assert!(lookup_cost_rates("nonexistent", "kimi-k2").is_none());
     }
 }

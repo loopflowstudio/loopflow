@@ -15,7 +15,6 @@ CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$CURRENT_DIR/../helpers.sh"
 
 work_dir="${1:-$(loopflow_pane_path)}"
-mode="$(loopflow_mode)"
 
 # Determine terminal dimensions
 cols="$(tmux display-message -p '#{window_width}' 2>/dev/null || echo 160)"
@@ -29,9 +28,7 @@ if (( cols < 120 )); then
 
     # Top pane: agent
     tmux select-pane -t 0
-    if [[ "$mode" == "container" ]] && loopflow_has_cmd lfq; then
-        tmux send-keys "lfq logs" Enter
-    elif loopflow_has_cmd lf; then
+    if loopflow_has_cmd lf; then
         tmux send-keys "# lf implement  (run your step here)" Enter
     fi
 
@@ -55,9 +52,7 @@ else
 
     # Top-right pane (1): agent
     tmux select-pane -t 1
-    if [[ "$mode" == "container" ]] && loopflow_has_cmd lfq; then
-        tmux send-keys "# lfq run <wave>  (ride a wave)" Enter
-    elif loopflow_has_cmd lf; then
+    if loopflow_has_cmd lf; then
         tmux send-keys "# lf implement  (run your step here)" Enter
     else
         tmux send-keys "# install loopflow: curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh" Enter

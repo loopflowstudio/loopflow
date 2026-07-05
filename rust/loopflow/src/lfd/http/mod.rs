@@ -7,7 +7,7 @@ use axum::http::{StatusCode, Uri};
 use axum::middleware;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use tower_http::trace::TraceLayer;
 
@@ -18,11 +18,13 @@ use crate::lfd::http::routes::{
     session_controls, system, usage, waves, worktrees, ws,
 };
 use crate::lfd::redaction::sanitize_operator_message;
-use crate::lfd::store::StoreError;
+use crate::lfdb::StoreError;
 
 pub use state::HttpState;
 
 pub type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ErrorResponse>)>;
+// TODO(M1): preserve this transport hygiene in the gatekeeper HTTP shell:
+// reject credentials in query params before route handlers or tracing see them.
 const QUERY_TOKEN_ERROR: &str = "authentication credentials must not appear in query parameters";
 const AUTH_LIKE_QUERY_KEYS: [&str; 8] = [
     "token",
@@ -103,10 +105,7 @@ pub fn router(state: HttpState) -> Router {
             "/sessions/{id}/cancel",
             post(session_controls::cancel_session_handler),
         )
-        .route(
-            "/attention",
-            get(attention::list_attention_handler).post(attention::create_attention_handler),
-        )
+        .route("/attention", get(attention::list_attention_handler))
         .route(
             "/attention/history",
             get(attention::list_attention_history_handler),
@@ -115,14 +114,7 @@ pub fn router(state: HttpState) -> Router {
             "/attention/{attention_id}",
             get(attention::get_attention_handler).patch(attention::patch_attention_handler),
         )
-        .route(
-            "/attention/{attention_id}/resolve",
-            post(attention::resolve_attention_handler),
-        )
-        .route(
-            "/waves",
-            get(waves::list_waves_handler).post(waves::create_wave_handler),
-        )
+        .route("/waves", get(waves::list_waves_handler))
         .route(
             "/waves/{wave_id}",
             get(waves::get_wave_handler)
@@ -133,43 +125,13 @@ pub fn router(state: HttpState) -> Router {
             "/waves/{wave_id}/diff",
             get(waves::get_wave_file_diff_handler),
         )
-        .route("/waves/{wave_id}/run", post(waves::run_wave_handler))
         .route(
             "/waves/{wave_id}/agent-tree",
             get(waves::get_wave_agent_tree_handler),
         )
-        .route("/waves/{wave_id}/workers", post(waves::run_worker_handler))
-        .route(
-            "/waves/{wave_id}/triggers",
-            post(waves::add_trigger_handler),
-        )
-        .route(
-            "/waves/{wave_id}/triggers/{trigger_id}",
-            delete(waves::remove_trigger_handler),
-        )
-        .route(
-            "/waves/{wave_id}/triggers",
-            get(waves::list_triggers_handler),
-        )
-        .route(
-            "/waves/{wave_id}/crons",
-            get(waves::list_wave_crons_handler),
-        )
-        .route(
-            "/waves/{wave_id}/activations",
-            get(waves::list_activations_handler),
-        )
         .route("/waves/{wave_id}/stop", post(waves::stop_wave_handler))
-        .route(
-            "/waves/{wave_id}/restart-step",
-            post(waves::restart_step_handler),
-        )
         .route("/waves/{wave_id}/land", post(waves::land_wave_handler))
         .route("/waves/{wave_id}/next", post(waves::next_wave_handler))
-        .route(
-            "/waves/{wave_id}/check-ci",
-            post(waves::check_wave_ci_handler),
-        )
         .route(
             "/waves/{wave_id}/combine",
             post(waves::combine_wave_handler),
@@ -198,13 +160,13 @@ pub fn router(state: HttpState) -> Router {
             auth::auth_middleware,
         ));
 
+    // POST /hooks/git is gone: its only consumer was the activation queue.
     let hook_routes = Router::new()
-        .route("/hooks/git", post(hooks::git_hook_handler))
         .route("/v0/hooks/github", post(hooks::github_webhook_handler))
         .layer(DefaultBodyLimit::max(max_hook_body_bytes));
 
     Router::new()
-        // Unauthenticated: health probes, metrics, git hooks.
+        // Unauthenticated: health probes, metrics, GitHub webhooks.
         .route("/health", get(system::health_handler))
         .route("/metrics", get(system::metrics_handler))
         .nest("/v0", api_routes)

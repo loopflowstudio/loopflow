@@ -63,7 +63,7 @@ def check_idempotent_source() -> bool:
 def check_options_set() -> bool:
     """Verify tmux options are set."""
     ok = True
-    opts = ["@loopflow_mode", "@loopflow_key_prefix", "@loopflow_status_format", "@loopflow_dir"]
+    opts = ["@loopflow_key_prefix", "@loopflow_status_format", "@loopflow_dir"]
     for opt in opts:
         result = run_tmux("show-option", "-gqv", opt, check=False)
         value = result.stdout.strip()
@@ -272,7 +272,6 @@ def print_checklist():
     print()
     print(f"  tmux -L {SOCKET} attach  # attach to review server")
     print(f"  tmux -L {SOCKET} list-keys -T loopflow  # show bindings")
-    print(f"  tmux -L {SOCKET} show-option -gqv @loopflow_mode")
     print(f"  tmux -L {SOCKET} kill-server  # cleanup")
     print()
 

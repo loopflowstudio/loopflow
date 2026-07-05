@@ -135,16 +135,23 @@ pub enum Commands {
         #[command(subcommand)]
         op: OpsCommand,
     },
-    /// Start a wave's reactive server: a long-lived process that autonomously
-    /// runs progress subagents and serves the live conversation + chat over a
-    /// loopback HTTP port (discovery via `wave/<name>/.wave-endpoint`).
-    #[command(name = "wave", alias = "loop")]
+    /// Start a wave: a long-lived listener (journal, doors, live events over
+    /// a loopback HTTP port; discovery via `wave/<name>/.wave-endpoint`)
+    /// that spawns and supervises the wave's mind as a resident child
+    /// process.
+    #[command(name = "wave")]
     Wave {
         /// Wave name (matches wave/<name>/)
         name: String,
         /// Take over even if lfd reports another live wave-agent session
         #[arg(long)]
         force: bool,
+        /// Serve dormant: listener only, no resident (health reads mind: null)
+        #[arg(long, conflicts_with = "mind_only")]
+        no_mind: bool,
+        /// Run only the resident (the mind) against an existing listener
+        #[arg(long, conflicts_with = "no_mind")]
+        mind_only: bool,
     },
     /// Show token usage by repo and provider (from a running lfd)
     Usage,
@@ -166,8 +173,22 @@ pub enum Commands {
         /// Message text (reads stdin when omitted — heredoc-friendly)
         #[arg(trailing_var_arg = true)]
         text: Vec<String>,
+        /// Attribution label for machine speech (e.g. --from ci). Overrides
+        /// the ambient label; absent = the ambient sender (env, else "cli").
+        #[arg(long)]
+        from: Option<String>,
         #[command(flatten)]
         target: WaveTargetArgs,
+    },
+    /// Follow a wave's live event stream (turns, mind state, memory) until
+    /// killed. Defaults to the invoking context's wave; exits 0 with a note
+    /// when no wave resolves.
+    Sub {
+        /// Wave name (default: the ambient wave — env, else worktree)
+        wave: Option<String>,
+        /// Emit raw frames as NDJSON instead of human lines
+        #[arg(long)]
+        json: bool,
     },
     /// Read or curate a wave's MEMORY.md (server-owned; bare `lf memory` = show)
     Memory {
@@ -245,6 +266,9 @@ pub enum WorkerCommand {
         /// Fork the worker's branch from this run's branch (dependent series)
         #[arg(long, value_name = "RUN_ID")]
         stack: Option<String>,
+        /// Skip the automatic `lf op pr` on clean flow exit
+        #[arg(long = "no-pr")]
+        no_pr: bool,
     },
 }
 
@@ -311,6 +335,12 @@ pub enum OpsCommand {
         #[arg(long = "no-prune")]
         no_prune: bool,
     },
+    /// Rotate a recurring wave onto a fresh branch (pushed with upstream)
+    Advance {
+        /// Wave name (default: inferred from the worktree)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+    },
     /// Create next iteration branch
     Next {
         #[arg(short = 'c', long = "create-pr")]
@@ -363,6 +393,22 @@ pub enum OpsCommand {
     Auth {
         #[command(subcommand)]
         cmd: AuthCommand,
+    },
+    /// Merge-queue maintenance for stacked wave runs
+    Queue {
+        #[command(subcommand)]
+        cmd: QueueCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum QueueCommand {
+    /// Run one reconcile pass: stack-status inference, draft/ready flips,
+    /// lazy head rebase, queue-block attention writes
+    Reconcile {
+        /// Only this wave (default: every wave with queue state)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
     },
 }
 
@@ -724,27 +770,39 @@ mod tests {
     #[test]
     fn chat_parses_text_and_targeting() {
         let cli = Cli::try_parse_from(["lf", "chat", "shipped", "the", "parser"]).expect("parse");
-        let Some(Commands::Chat { text, target }) = cli.command else {
+        let Some(Commands::Chat { text, from, target }) = cli.command else {
             panic!("expected chat command");
         };
         assert_eq!(text, vec!["shipped", "the", "parser"]);
+        assert_eq!(from, None);
         assert_eq!(target.wave, None);
         assert!(!target.parent);
 
         // No text: stdin is the body. Flags come before the trailing text.
         let cli = Cli::try_parse_from(["lf", "chat", "--parent"]).expect("parse");
-        let Some(Commands::Chat { text, target }) = cli.command else {
+        let Some(Commands::Chat { text, target, .. }) = cli.command else {
             panic!("expected chat command");
         };
         assert!(text.is_empty());
         assert!(target.parent);
 
         let cli = Cli::try_parse_from(["lf", "chat", "--wave", "goals", "hi"]).expect("parse");
-        let Some(Commands::Chat { text, target }) = cli.command else {
+        let Some(Commands::Chat { text, target, .. }) = cli.command else {
             panic!("expected chat command");
         };
         assert_eq!(text, vec!["hi"]);
         assert_eq!(target.wave.as_deref(), Some("goals"));
+
+        // Machine speech declares itself: --from rides ahead of the text
+        // (the webhook gatekeeper's planned argv).
+        let cli =
+            Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--from", "ci", "CI failed"])
+                .expect("parse");
+        let Some(Commands::Chat { text, from, .. }) = cli.command else {
+            panic!("expected chat command");
+        };
+        assert_eq!(text, vec!["CI failed"]);
+        assert_eq!(from.as_deref(), Some("ci"));
 
         // --wave and --parent are mutually exclusive.
         assert!(Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--parent", "x"]).is_err());
@@ -781,6 +839,54 @@ mod tests {
         };
         assert_eq!(fact, "one fact");
         assert!(target.parent);
+    }
+
+    #[test]
+    fn worker_run_parses_no_pr_flag() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "q",
+            "worker",
+            "run",
+            "goals",
+            "--flow",
+            "implement",
+            "--task",
+            "Do it.",
+            "--no-pr",
+        ])
+        .expect("parse");
+        let Some(Commands::Q {
+            cmd:
+                QCommand::Worker {
+                    cmd: WorkerCommand::Run { wave, no_pr, .. },
+                },
+        }) = cli.command
+        else {
+            panic!("expected q worker run command");
+        };
+        assert_eq!(wave, "goals");
+        assert!(no_pr);
+    }
+
+    #[test]
+    fn op_advance_parses_optional_wave() {
+        let cli = Cli::try_parse_from(["lf", "op", "advance"]).expect("parse");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Op {
+                op: OpsCommand::Advance { wave: None }
+            })
+        ));
+
+        let cli = Cli::try_parse_from(["lf", "op", "advance", "-w", "goals"]).expect("parse");
+        let Some(Commands::Op {
+            op: OpsCommand::Advance { wave },
+        }) = cli.command
+        else {
+            panic!("expected op advance command");
+        };
+        assert_eq!(wave.as_deref(), Some("goals"));
     }
 
     #[test]

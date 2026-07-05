@@ -41,10 +41,15 @@ use time::OffsetDateTime;
 
 use crate::engine::wave_context::{resolve_ambient_wave, AmbientWaveRef};
 use crate::lfd::id::LfdId;
-use crate::lfd::store::{open_existing_store, SharedStore};
 use crate::lfd::types::{Session, SessionStatus, SessionUse, LF_CLI_SOURCE};
+use crate::lfdb::{open_existing_store, SharedStore};
 
 pub const WAVE_ID_ENV: &str = "LFD_WAVE_ID";
+/// The channel a dispatched process speaks on by default — the work line's
+/// ownership name (`goals.148e0e02`), set by `lf q worker run`. A bare run
+/// without it falls back to the worktree name, which is the same channel
+/// name by construction (see `engine::wave_context::resolve_ambient_channel`).
+pub const CHANNEL_ENV: &str = "LFD_CHANNEL";
 pub const SESSION_ID_ENV: &str = "LFD_SESSION_ID";
 pub const SESSION_INHERITED_ENV: &str = "LFD_SESSION_INHERITED";
 
@@ -361,10 +366,10 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{
         RepoWork, Session, SessionStatus, Wave, WaveMode, WaveStatus, TMUX_TERMINAL_SOURCE,
     };
+    use crate::lfdb::{open_store, StorageConfig};
 
     use crate::engine::wave_context::AmbientWaveRef;
 
@@ -440,7 +445,6 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            crons: Vec::new(),
             repos: vec![RepoWork {
                 repo: repo.to_string(),
                 worktree: String::new(),

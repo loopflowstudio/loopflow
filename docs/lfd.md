@@ -5,7 +5,7 @@ title: lfd Daemon Reference
 
 # lfd Daemon Reference
 
-`lfd` runs the loopflow daemon: HTTP API, wave scheduling, agent sessions, and CI/webhook integration.
+`lfd` runs the loopflow daemon: the HTTP read surface, session registry, GitHub webhook ingress translated to `lf` execs, provider token refresh, and worktree cleanup. It dispatches no agent work — `lf q` launches workers as tmux-wrapped `lf` processes, and each wave's resident mind owns its own loop.
 
 ## Choose a deployment shape
 
@@ -14,8 +14,7 @@ title: lfd Daemon Reference
 Use native mode for local or single-user setups on macOS/Linux.
 
 - Storage: sqlite
-- Auth: local session token
-- Executor: local process executor
+- Auth: local capability token
 - Config: none required
 
 ```bash
@@ -23,16 +22,30 @@ lfd install
 lfd serve
 ```
 
-`lfd` writes the local session token to `~/.lf/session-token`. `lfq` and Concerto read it automatically for loopback connections.
+`lfd` writes the local session token to `~/.lf/session-token`. Local clients
+read it automatically. This is a machine-local capability token, not a user
+account system.
 
-### Container
+Remote identity and user auth, including OAuth-backed remote access, are M3
+future work.
 
-Use container mode for self-hosted remote or shared hosts.
+### Legacy Container Mode
+
+Container mode is legacy staging debt and is scheduled for removal with
+postgres in the M2 substrate cut. Use native `lfd` locally; use SSH for
+self-hosted operations.
 
 - Storage: postgres
-- Auth: local bearer token by default
-- Executor: Docker
-- Config: set `mode: container`, then install or run `lfd`
+- Auth: configured bearer token if bound beyond loopback
+- Config: `mode: container` still works until M2, but do not build on it
+
+Docker hosts the daemon itself (plus its postgres), nothing more. Agents still
+run as local `lf` processes dispatched by `lf q`. Do not build new product
+surface on this mode.
+
+Carry forward the useful mechanisms, not the container strategy: hardened
+environment handling, named read-only credential mounts, health checks,
+redaction, and service-file secret hygiene.
 
 ```yaml
 # ~/.lf/lfd.yaml
@@ -43,9 +56,10 @@ mode: container
 lfd install
 ```
 
-`LFD_MODE=container` is still available as a process override, but `~/.lf/lfd.yaml` is the real mode-selection path for installed services.
+`LFD_MODE=container` is still available as a process override until M2, but
+`~/.lf/lfd.yaml` is the real mode-selection path for installed services.
 
-Container mode is Docker-only. If you still have `executor.sandbox` in `~/.lf/lfd.yaml`, delete it and rerun `lfd install`.
+If you still have `executor.sandbox` in `~/.lf/lfd.yaml`, delete it and rerun `lfd install` — `lfd` fails fast on that removed key.
 
 ## Run the daemon
 
@@ -55,7 +69,11 @@ lfd serve
 
 The default listen address is `127.0.0.1:2486`. Override it with `LFD_HTTP_ADDR`.
 
-For a self-hosted native remote daemon, set the remote bind address and bearer token when installing. `lfd install` persists selected `LFD_*` environment variables into the service file, so the daemon survives restarts without hand-editing launchd or systemd units.
+Remote HTTP is not the self-hosted operations path yet. Use SSH for remote
+administration. For local-network experiments only, set the remote bind address
+and bearer token when installing. `lfd install` persists selected `LFD_*`
+environment variables into the service file, so the daemon survives restarts
+without hand-editing launchd or systemd units.
 
 ```bash
 export LFD_HTTP_ADDR=0.0.0.0:2486
@@ -87,7 +105,7 @@ lfd migrate
 lfd migrate --status
 ```
 
-`lfd migrate` uses the configured mode to choose the backend (`sqlite` for native, `postgres` for container). `LFD_DATABASE_URL` is required for postgres migrations.
+`lfd migrate` uses the configured mode to choose the backend (`sqlite` for native, `postgres` for container). `LFD_DATABASE_URL` is required for postgres migrations. Postgres is staging debt scheduled for the M2 substrate cut.
 
 ## Authentication transport
 
@@ -97,7 +115,11 @@ Send credentials in the `Authorization` header:
 curl -H "Authorization: Bearer <token>" "$LFD_ADDR/status"
 ```
 
-`lfd` rejects malformed authorization values before provider validation. Use `Bearer <token>` with a non-empty token (max 4096 bytes) and no embedded whitespace or control characters.
+Local clients read the machine-local session token. If you deliberately bind a
+non-loopback address for a local-network experiment, use a configured bearer
+token. `lfd` rejects malformed authorization values before provider validation:
+use `Bearer <token>` with a non-empty token (max 4096 bytes) and no embedded
+whitespace or control characters.
 
 `lfd` also rejects auth-like query parameters (`token`, `api_key`, `secret`, and similar) with `400 Bad Request`.
 
@@ -110,30 +132,24 @@ curl -H "Authorization: Bearer <token>" "$LFD_ADDR/status"
 Shape selection and daemon settings:
 
 ```bash
-LFD_MODE          # native or container
+LFD_MODE          # native; container is legacy staging debt
 LFD_HTTP_ADDR     # listen address (default 127.0.0.1:2486)
 LFD_DB_PATH       # sqlite path override
-LFD_DATABASE_URL  # postgres URL for container mode
-LFD_MAX_SLOTS     # concurrent run slots
+LFD_DATABASE_URL  # legacy postgres/container staging debt
 ```
 
 Auth tuning within a shape:
 
 ```bash
-LFD_AUTH_TOKEN    # bearer-token override for self-hosted remote hosts
+LFD_AUTH_TOKEN    # bearer token for deliberate non-loopback experiments
 ```
 
-Executor tuning within a shape:
+Legacy container compose generation (scheduled for M2 removal):
 
 ```bash
 LFD_EXECUTOR_CREDENTIALS_ENV
 LFD_EXECUTOR_CREDENTIALS_MOUNTS
 LFD_EXECUTOR_IMAGE
-LFD_EXECUTOR_AGENT_TIMEOUT
-LFD_EXECUTOR_LIMITS_MEMORY
-LFD_EXECUTOR_LIMITS_MEMORY_SWAP
-LFD_EXECUTOR_LIMITS_CPU_QUOTA
-LFD_EXECUTOR_LIMITS_PIDS_LIMIT
 ```
 
 GitHub + HTTP security:
@@ -157,16 +173,10 @@ LFD_HTTP_TRUSTED_PROXY_CIDRS
 mode: native # native (default) or container
 
 auth:
-  token: bundled-session-token # set from Doppler or env for remote hosts
+  token: bundled-session-token # set from Doppler or env for non-loopback experiments
 
 executor:
-  image: loopflow/agent:latest
-  agent_timeout: 45m
-  limits:
-    memory: 8589934592
-    memory_swap: 8589934592
-    cpu_quota: 400000
-    pids_limit: 1024
+  image: loopflow/agent:latest # image the generated compose file runs the daemon from
   credentials:
     env: ["ANTHROPIC_API_KEY", "CODEX_API_KEY"]
     mounts:
@@ -195,7 +205,8 @@ http_security:
 
 `executor.sandbox` was removed. If that key is still present in old config, `lfd` fails fast and tells you to delete it.
 
-Container mode is self-hosted only. Set `LFD_AUTH_TOKEN` from Doppler or another secret store before binding a remote host.
+Container mode is legacy staging debt. Set `LFD_AUTH_TOKEN` if you must run it
+before M2 removes it.
 
 ### Credential mounts
 
@@ -209,7 +220,7 @@ Container mode is self-hosted only. Set `LFD_AUTH_TOKEN` from Doppler or another
 - `ssh` → `~/.ssh`
 - `gnupg` → `~/.gnupg`
 
-Mounts are read-only inside the container. Raw `host:container` strings are rejected.
+Mounts are read-only inside the daemon's container. Raw `host:container` strings are rejected.
 
 ### Compose overrides
 
@@ -228,26 +239,14 @@ services:
     command: postgres -c log_statement=all
 ```
 
-## Query + manage waves
+## Query waves
 
-Examples below use `$LFD_ADDR`:
+The daemon serves reads to Concerto and `lf`. Examples below use `$LFD_ADDR`:
 
 ```bash
 export LFD_ADDR=http://127.0.0.1:2486
-```
-
-Use `lfq` for CLI workflows and `loopflow` for Python orchestration:
-
-```bash
-lfq list
-lfq logs engbot
-```
-
-```python
-import loopflow.api as loopflow
-
-loopflow.create_wave("engbot", repo=".")
-loopflow.run_wave("engbot")
+curl -s -H "Authorization: Bearer $(cat ~/.lf/session-token)" "$LFD_ADDR/v0/waves"
+curl -s -H "Authorization: Bearer $(cat ~/.lf/session-token)" "$LFD_ADDR/v0/waves/shipper"
 ```
 
 Wave intent lives in `wave/<name>/GOAL.md`:
@@ -263,15 +262,7 @@ metrics:
 Run one loop iteration for this wave.
 ```
 
-Create the wave in lfd:
-
-```bash
-curl -s -X POST "$LFD_ADDR/v0/waves" \
-  -H "Content-Type: application/json" \
-  -d '{"repo":"'"$(pwd)"'","name":"shipper","goal":"ship-roadmap","flow":"build"}'
-
-curl -s "$LFD_ADDR/v0/waves/shipper"
-```
+Run it with `lf wave shipper`.
 
 ## Browse the flow catalog
 
@@ -315,32 +306,25 @@ Cancel the session:
 curl -s -X POST "$LFD_ADDR/v0/sessions/<session_id>/cancel"
 ```
 
-The attach endpoint marks the session attached and returns tmux connection info. `lfq sessions` and `lfq attach <session-id>` wrap these endpoints for day-to-day use.
+The attach endpoint marks the session attached and returns tmux connection info. For day-to-day use, `tmux ls` and `tmux attach -t <name>` go straight to the session.
 
-## GitHub CI auto-fix
+## GitHub webhooks
 
 ```bash
 POST /v0/hooks/github
-POST /v0/waves/{wave_id}/check-ci
 ```
 
 Set `github.webhook_secret` or `LFD_GITHUB_WEBHOOK_SECRET` before enabling the webhook. `lfd` verifies `X-Hub-Signature-256` and ignores unsigned requests.
 
-CI fix agents run the built-in `ci-fix` step.
+Webhooks translate inward as `lf` execs. The current demo path keeps CI and
+main-push events as attributed chat notifications; durable facts plus explicit
+commands are the long-term coordination shape.
 
-## Activation telemetry
+- check_run failure → `lf chat --wave <wave> "CI failed: …"` (the wave's mind decides how to fix)
+- PR merged → `lf op queue reconcile --wave <wave>`
+- push to main → `lf chat --wave <wave> "main moved: …"` for each wave in the repo
 
-```bash
-GET /v0/waves/{wave_id}/activations?limit=50
-```
-
-Activation sources are `poll`, `push`, `listen`, or `manual`.
-
-WebSocket streams also emit:
-
-- `activation_queued`
-- `activation_coalesced`
-- `activation_dropped`
+A wave with no live server bounces the notification — logged at debug. No wave resolved → dropped.
 
 ## Stacked PR queue state
 

@@ -18,27 +18,13 @@ python -m pytest test_calc.py    # see the bug
 lf debug -c                       # fix it
 ```
 
-## Query lfd
+## Run a Wave
 
 ```bash
-uv tool install loopflow
-lfq                  # status overview
-lfq list             # list waves
-lfq logs engbot      # tail agent output
-```
-
-## Python API
-
-```bash
-uv pip install loopflow
-```
-
-```python
-import loopflow.api as loopflow
-
-loopflow.waves()
-loopflow.create_wave("engbot", repo=".", flow="build", direction=["clarity"])
-loopflow.run_wave("engbot")
+# author wave/engbot/GOAL.md, then:
+lf wave engbot       # start the wave agent (Ctrl-C to stop)
+tmux ls              # live sessions — the wave agent and its workers
+tmux attach -t <name>  # watch one work
 ```
 
 ---
@@ -90,11 +76,10 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 | **Goal** | A wave's intent and loop prompt | `wave/<name>/GOAL.md` |
 | **Memory** | What a wave remembers between loops | `wave/<name>/MEMORY.md` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
-| **Mode** | Primary execution pattern: manual or loop | goal frontmatter / lfd |
-| **Cron** | Scheduled supplementary flow | lfd |
-| **Trigger** | Signal + flow: repo, wave, ci_failure | lfd |
+| **Mode** | Primary execution pattern: manual or loop | goal frontmatter |
+| **Cron** | Scheduled supplementary flow | goal frontmatter |
 
-A wave is a named agent with a goal. Its `GOAL.md` and `MEMORY.md` are authored in the repo; lfd tracks mode, crons, triggers, status, and live sessions. Mode controls the primary execution pattern. Crons schedule supplementary flows. Triggers fire flows in response to external signals.
+A wave is a named agent with a goal. Everything that defines it — goal, memory, mode, crons — is authored in the repo. Mode controls the primary execution pattern. Crons live in `GOAL.md` frontmatter and are fired by the wave's resident mind. lfd serves wave status and live sessions to clients.
 
 | Mode | Runs |
 |------|------|
@@ -112,12 +97,6 @@ metrics:
 
 Run one loop iteration for this wave.
 ```
-
-| Signal | What changed | Default flow |
-|--------|--------------|--------------|
-| **repo** | Paths changed on main | `integrate` |
-| **wave** | Another wave completed | `build` |
-| **ci_failure** | CI failed on a wave PR | `ci-fix` |
 
 ---
 

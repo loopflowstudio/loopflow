@@ -61,72 +61,6 @@ generate_lf_status() {
     loopflow_apply_format "$status_text" "$branch" "$active_step" "" ""
 }
 
-generate_container_status() {
-    if ! loopflow_has_cmd lfq; then
-        loopflow_apply_format "--" "" "" "" ""
-        return
-    fi
-
-    local timeout_ms
-    timeout_ms="$(loopflow_status_timeout_ms)"
-    local timeout_s
-    timeout_s="$(awk "BEGIN {printf \"%.1f\", $timeout_ms / 1000}")"
-
-    # Check daemon health first
-    local lfq_ok=false
-    if loopflow_has_cmd timeout; then
-        timeout "$timeout_s" lfq list >/dev/null 2>&1 && lfq_ok=true
-    else
-        lfq list >/dev/null 2>&1 && lfq_ok=true
-    fi
-
-    if [[ "$lfq_ok" != true ]]; then
-        # Daemon not responding — check if it's starting or offline
-        local lfd_out=""
-        if loopflow_has_cmd lfd; then
-            if loopflow_has_cmd timeout; then
-                lfd_out="$(timeout "$timeout_s" lfd status 2>/dev/null)"
-            else
-                lfd_out="$(lfd status 2>/dev/null)"
-            fi
-        fi
-        if echo "$lfd_out" | grep -qiE 'starting|running'; then
-            loopflow_apply_format "starting..." "" "" "" ""
-        else
-            loopflow_apply_format "! offline" "" "" "" ""
-        fi
-        return
-    fi
-
-    # Daemon healthy — get wave list
-    local output
-    if loopflow_has_cmd timeout; then
-        output="$(timeout "$timeout_s" lfq list --json 2>/dev/null)"
-    else
-        output="$(lfq list --json 2>/dev/null)"
-    fi
-
-    if [[ -z "$output" ]] || [[ "$output" == "null" ]]; then
-        loopflow_apply_format "idle" "" "" "0" ""
-        return
-    fi
-
-    # Parse wave count and active wave (portable JSON — assumes top-level array of objects)
-    local wave_count active_wave status_text
-    wave_count="$(echo "$output" | grep -c '"name"\s*:' 2>/dev/null || echo "0")"
-    active_wave="$(echo "$output" | grep -o '"name":"[^"]*"' | head -1 | sed 's/"name":"//;s/"//' 2>/dev/null)"
-
-    if [[ "$wave_count" -eq 0 ]]; then
-        loopflow_apply_format "idle" "" "" "0" ""
-    elif [[ -n "$active_wave" ]]; then
-        status_text="$wave_count waves | $active_wave"
-        loopflow_apply_format "$status_text" "" "" "$wave_count" "$active_wave"
-    else
-        status_text="$wave_count waves"
-        loopflow_apply_format "$status_text" "" "" "$wave_count" ""
-    fi
-}
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -138,18 +72,9 @@ main() {
         return 0
     fi
 
-    local mode status_text source="live"
+    local status_text source="live"
 
-    mode="$(loopflow_mode)"
-
-    case "$mode" in
-        container)
-            status_text="$(generate_container_status)"
-            ;;
-        *)
-            status_text="$(generate_lf_status)"
-            ;;
-    esac
+    status_text="$(generate_lf_status)"
 
     # If generation failed, try stale cache
     if [[ -z "$status_text" ]]; then
@@ -165,7 +90,7 @@ main() {
     fi
 
     # Write cache for next invocation
-    loopflow_cache_write "$status_text" "$mode" "$source"
+    loopflow_cache_write "$status_text" "lf" "$source"
 
     echo "$status_text"
 }

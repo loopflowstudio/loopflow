@@ -14,7 +14,7 @@ use crate::engine::error::CoreError;
 use crate::engine::flow::{expand_direction_names, load_direction, load_step, Direction, Step};
 use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::types::RepoId;
-use crate::lfd::wave::memory::Memory;
+use crate::wave::memory::Memory;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -569,17 +569,24 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         "read clipboard"
     );
 
-    // Ambient wave context: every run born inside a wave inherits the wave's
-    // recent chat and memory. Explicit --wave wins; else env/worktree. No
-    // wave (or no wave state) → both stay empty and the prompt gains nothing.
+    // Ambient wave context: every run born inside a wave inherits recent
+    // chat and memory by CHANNEL. Explicit --wave wins; else env/worktree
+    // (a work-line worktree resolves its own channel — the overlay reads
+    // down the tree: its thread plus the parent wave's, compactly). Memory
+    // stays wave-level: MEMORY.md is wave identity, so it resolves through
+    // the channel's family head. No wave (or no wave state) → both stay
+    // empty and the prompt gains nothing.
     let ambient_start = Instant::now();
-    let ambient_wave = opts
+    let ambient_channel = opts
         .wave
         .clone()
-        .or_else(|| crate::engine::wave_context::resolve_ambient_wave_name(repo_root));
-    let wave_chat = ambient_wave
+        .or_else(|| crate::engine::wave_context::resolve_ambient_channel_name(repo_root));
+    let ambient_wave = ambient_channel
         .as_deref()
-        .and_then(|wave| crate::engine::wave_context::gather_wave_chat(repo_root, wave));
+        .map(|channel| crate::wave::channel::family_head(channel).to_string());
+    let wave_chat = ambient_channel
+        .as_deref()
+        .and_then(|channel| crate::engine::wave_context::gather_channel_chat(repo_root, channel));
     if wave_memory.is_none() {
         if let Some(wave) = ambient_wave.as_deref() {
             wave_memory = gather_wave_memory_doc(repo_root, Some(wave))?;
@@ -587,7 +594,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     }
     debug!(
         elapsed_ms = ambient_start.elapsed().as_millis(),
-        wave = ambient_wave.as_deref(),
+        channel = ambient_channel.as_deref(),
         has_chat = wave_chat.is_some(),
         "gathered ambient wave context"
     );
@@ -2372,10 +2379,7 @@ mod tests {
             &goal,
             &crate::engine::flow::GoalRenderContext {
                 flows: vec![],
-                roadmap: "wave/goals".to_string(),
                 memory: "- one source of truth".to_string(),
-                metrics: vec![],
-                in_flight: vec![],
             },
         );
         let components = PromptComponents {
@@ -2410,10 +2414,7 @@ mod tests {
             &goal,
             &crate::engine::flow::GoalRenderContext {
                 flows: vec![],
-                roadmap: "wave/goals".to_string(),
                 memory: String::new(),
-                metrics: vec![],
-                in_flight: vec![],
             },
         );
         assert!(

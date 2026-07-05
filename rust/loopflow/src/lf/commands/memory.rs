@@ -16,7 +16,7 @@ use anyhow::{anyhow, Result};
 
 use crate::lf::commands::chat::{get_json, post_json, resolve_target, CliContext, ResolvedWave};
 use crate::lf::{MemoryCommand, WaveTargetArgs};
-use crate::lfd::wave::memory::Memory;
+use crate::wave::memory::Memory;
 
 pub fn run(cmd: Option<&MemoryCommand>, default_target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
@@ -63,12 +63,16 @@ fn drop_note() {
     eprintln!("no wave here; memory write dropped");
 }
 
+/// Memory is wave-level (MEMORY.md is wave identity; work lines have no
+/// memory — their notes are files), so this resolves the FAMILY HEAD even
+/// inside a work-line worktree and ignores the channel arm entirely.
 async fn resolve(context: &CliContext, target: &WaveTargetArgs) -> Result<Option<ResolvedWave>> {
     resolve_target(
         target,
         context.store.as_ref(),
         context.repo.as_deref(),
         context.env_wave_id.as_deref(),
+        context.env_channel.as_deref(),
     )
     .await
 }
@@ -126,9 +130,9 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
-    use crate::lfd::wave::journal::{journal_path, EventKind, Journal};
-    use crate::lfd::wave::runtime::WaveRuntime;
-    use crate::lfd::wave::server;
+    use crate::wave::journal::{journal_path, EventKind, Journal};
+    use crate::wave::runtime::WaveRuntime;
+    use crate::wave::server;
 
     fn resolved(name: &str, endpoint: Option<String>, root: Option<&Path>) -> ResolvedWave {
         ResolvedWave {
@@ -136,15 +140,21 @@ mod tests {
             endpoint,
             repo_root: root.map(Path::to_path_buf),
             own_name: None,
+            channel: None,
         }
     }
 
     async fn boot_server(origin: &Path, wave: &str) -> (String, Arc<WaveRuntime>) {
-        let (runtime, _inbox_rx) =
+        let runtime =
             WaveRuntime::open(wave.to_string(), origin.to_path_buf()).expect("open runtime");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(runtime.clone());
+        let app = server::router(
+            runtime.clone(),
+            server::ResidentDoor::new("test-token"),
+            None,
+            None,
+        );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
@@ -245,6 +255,7 @@ mod tests {
             store: None,
             repo: Some(tmp.path().to_path_buf()),
             env_wave_id: None,
+            env_channel: None,
         };
         run_with_context(
             &context,
@@ -266,6 +277,7 @@ mod tests {
             store: None,
             repo: Some(tmp.path().to_path_buf()),
             env_wave_id: None,
+            env_channel: None,
         };
         let err = run_with_context(&context, None, &WaveTargetArgs::default())
             .await

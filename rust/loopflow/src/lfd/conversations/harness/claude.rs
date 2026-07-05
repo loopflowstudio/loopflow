@@ -273,7 +273,6 @@ impl Harness for ClaudeHarness {
             // send_input fails with TurnAlreadyInProgress and the caller
             // queues.
             supports_steer: false,
-            supports_interrupt: true,
         }
     }
 

@@ -5,8 +5,8 @@ use time::OffsetDateTime;
 
 use crate::journal::{LfEvent, LfEventType, LfNode};
 use crate::lfd::id::LfdId;
-use crate::lfd::provider_auth::Provider;
-use crate::lfd::types::{AttentionItem, ExecutionProcessStatus, Session};
+use crate::lfd::types::{AttentionItem, Session};
+use crate::provider_auth::Provider;
 
 /// Event payload variants.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,7 +17,6 @@ pub enum Event {
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
-    Ping,
 
     // Provider auth
     #[serde(rename = "auth.flow_started")]
@@ -73,25 +72,6 @@ pub enum Event {
         timestamp: OffsetDateTime,
     },
 
-    // Secrets provider
-    #[serde(rename = "secrets.connected")]
-    SecretsConnected {
-        provider: String,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-    #[serde(rename = "secrets.synced")]
-    SecretsSynced {
-        provider: String,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-    #[serde(rename = "secrets.disconnected")]
-    SecretsDisconnected {
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-
     // Wave lifecycle
     WaveCreated {
         wave_id: LfdId,
@@ -131,51 +111,6 @@ pub enum Event {
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
-    CiFailure {
-        wave_id: LfdId,
-        run_id: LfdId,
-        pr_number: u32,
-        branch: String,
-        commit_sha: String,
-        check_name: String,
-        logs_url: String,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-    ActivationQueued {
-        wave_id: LfdId,
-        trigger_id: Option<LfdId>,
-        reason: String,
-        queue_depth: u32,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-    ActivationCoalesced {
-        wave_id: LfdId,
-        trigger_id: Option<LfdId>,
-        reason: String,
-        queue_depth: u32,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-    ActivationDropped {
-        wave_id: LfdId,
-        trigger_id: Option<LfdId>,
-        reason: String,
-        queue_depth: u32,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-
-    // Worktree
-    WorktreeUpdated {
-        worktree: String,
-        repo: String,
-        branch: Option<String>,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-
     // Runtime journal
     #[serde(rename = "run.started")]
     RunStarted {
@@ -268,21 +203,6 @@ pub enum Event {
         timestamp: OffsetDateTime,
     },
 
-    // Agent
-    AgentStarted {
-        agent_id: LfdId,
-        step: String,
-        worktree: String,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-    AgentEnded {
-        agent_id: LfdId,
-        status: String,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-
     // Attention
     AttentionCreated {
         item: AttentionItem,
@@ -344,26 +264,6 @@ impl Event {
     pub fn attention_resolved(item: AttentionItem) -> Self {
         Self::AttentionResolved {
             item,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn secrets_connected(provider: String) -> Self {
-        Self::SecretsConnected {
-            provider,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn secrets_synced(provider: String) -> Self {
-        Self::SecretsSynced {
-            provider,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn secrets_disconnected() -> Self {
-        Self::SecretsDisconnected {
             timestamp: Self::now(),
         }
     }
@@ -479,15 +379,6 @@ impl Event {
         }
     }
 
-    pub fn worktree_updated(worktree: String, repo: String, branch: Option<String>) -> Self {
-        Self::WorktreeUpdated {
-            worktree,
-            repo,
-            branch,
-            timestamp: Self::now(),
-        }
-    }
-
     pub fn wave_waiting(
         wave_id: LfdId,
         run_id: LfdId,
@@ -501,89 +392,6 @@ impl Event {
             step,
             session_id,
             initial_user_message,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn ci_failure(
-        wave_id: LfdId,
-        run_id: LfdId,
-        pr_number: u32,
-        branch: String,
-        commit_sha: String,
-        check_name: String,
-        logs_url: String,
-    ) -> Self {
-        Self::CiFailure {
-            wave_id,
-            run_id,
-            pr_number,
-            branch,
-            commit_sha,
-            check_name,
-            logs_url,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn activation_queued(
-        wave_id: LfdId,
-        trigger_id: Option<LfdId>,
-        reason: String,
-        queue_depth: u32,
-    ) -> Self {
-        Self::ActivationQueued {
-            wave_id,
-            trigger_id,
-            reason,
-            queue_depth,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn activation_coalesced(
-        wave_id: LfdId,
-        trigger_id: Option<LfdId>,
-        reason: String,
-        queue_depth: u32,
-    ) -> Self {
-        Self::ActivationCoalesced {
-            wave_id,
-            trigger_id,
-            reason,
-            queue_depth,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn activation_dropped(
-        wave_id: LfdId,
-        trigger_id: Option<LfdId>,
-        reason: String,
-        queue_depth: u32,
-    ) -> Self {
-        Self::ActivationDropped {
-            wave_id,
-            trigger_id,
-            reason,
-            queue_depth,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn agent_started(agent_id: LfdId, step: String, worktree: String) -> Self {
-        Self::AgentStarted {
-            agent_id,
-            step,
-            worktree,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn agent_ended(agent_id: LfdId, status: ExecutionProcessStatus) -> Self {
-        Self::AgentEnded {
-            agent_id,
-            status: status.as_str().to_string(),
             timestamp: Self::now(),
         }
     }
@@ -740,29 +548,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_started_serializes_correctly() {
-        let event = Event::agent_started(
-            test_id("agent-1"),
-            "review".to_string(),
-            "/tmp/wt".to_string(),
-        );
-        let json = serde_json::to_value(&event).unwrap();
-        assert_eq!(json["type"], "agent_started");
-        assert_eq!(json["agent_id"], "agent-1");
-        assert_eq!(json["step"], "review");
-        assert_eq!(json["worktree"], "/tmp/wt");
-    }
-
-    #[test]
-    fn agent_ended_serializes_correctly() {
-        let event = Event::agent_ended(test_id("agent-1"), ExecutionProcessStatus::Completed);
-        let json = serde_json::to_value(&event).unwrap();
-        assert_eq!(json["type"], "agent_ended");
-        assert_eq!(json["agent_id"], "agent-1");
-        assert_eq!(json["status"], "completed");
-    }
-
-    #[test]
     fn event_roundtrips_through_json() {
         let id = || LfdId::new();
         let timestamp = Event::now();
@@ -812,8 +597,6 @@ mod tests {
                 error: "boom".to_string(),
                 timestamp,
             },
-            Event::agent_started(id(), "s".to_string(), "/wt".to_string()),
-            Event::agent_ended(id(), ExecutionProcessStatus::Failed),
             Event::auth_connected(Provider::GitHub, Some("jackdanger".to_string())),
             Event::auth_token_refreshed(Provider::GitHub, Some("jackdanger".to_string())),
             Event::auth_refresh_failed(Provider::GitHub, "refresh failed".to_string()),
@@ -880,18 +663,6 @@ mod tests {
     }
 
     #[test]
-    fn non_wave_events_have_no_wave_id_for_enrichment() {
-        // Agent events shouldn't be enriched — verify they don't match wave_id extraction
-        let event = Event::agent_started(
-            test_id("agent-1"),
-            "review".to_string(),
-            "/tmp/wt".to_string(),
-        );
-        let json = serde_json::to_value(&event).unwrap();
-        assert!(json.get("wave_id").is_none());
-    }
-
-    #[test]
     fn runtime_events_use_dotted_type_names() {
         let timestamp = Event::now();
         let event = Event::RunStarted {
@@ -925,18 +696,5 @@ mod tests {
         let step_json = serde_json::to_value(&step).expect("serialize step");
         assert_eq!(step_json["type"], "step.completed");
         assert!(step_json.get("exit_code").is_none());
-    }
-
-    #[test]
-    fn activation_event_serializes_trigger_and_depth() {
-        let event = Event::activation_queued(
-            test_id("wave-1"),
-            Some(test_id("trigger-1")),
-            "refs/heads/main advanced abc..def".to_string(),
-            2,
-        );
-        let json = serde_json::to_value(&event).unwrap();
-        assert_eq!(json["type"], "activation_queued");
-        assert_eq!(json["queue_depth"], 2);
     }
 }

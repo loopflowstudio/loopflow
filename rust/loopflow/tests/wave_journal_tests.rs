@@ -1,5 +1,6 @@
 //! The wave journal spine, end to end: a wave server's thread survives a
-//! restart because the thread is a fold over the append-only journal.
+//! restart because the thread is a fold over the append-only journal. Also
+//! covers the server's read surface over that spine (`/health`).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -8,11 +9,11 @@ use loopflow::lfd::conversations::turns::ChatRole;
 use loopflow::lfd::conversations::types::{
     ConversationEvent, ConversationItem, Lifecycle, TurnUsage,
 };
-use loopflow::lfd::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
-use loopflow::lfd::wave::mind::EventAdapter;
-use loopflow::lfd::wave::runtime::{TurnSink, WaveRuntime};
-use loopflow::lfd::wave::server;
-use loopflow::lfd::wave::state::MindState;
+use loopflow::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
+use loopflow::wave::mind::EventAdapter;
+use loopflow::wave::runtime::WaveRuntime;
+use loopflow::wave::server::{self, ResidentDoor};
+use loopflow::wave::state::MindState;
 
 /// One complete harness turn, as the codex driver would emit it: a command
 /// item, the final agent message, the turn completion, then trailing usage.
@@ -61,13 +62,12 @@ fn codex_turn_events() -> Vec<ConversationEvent> {
 }
 
 /// Run one harness turn through the production pipeline (EventAdapter →
-/// TurnDeltas → TurnSink → journal + thread).
+/// resident wire deltas → the listener's fold), as the resident door would.
 fn run_harness_turn(runtime: Arc<WaveRuntime>, events: &[ConversationEvent]) {
-    let mut sink = TurnSink::new(runtime);
     let mut adapter = EventAdapter::new();
     for event in events {
         for delta in adapter.feed(event) {
-            sink.on_delta(delta);
+            runtime.apply_resident_delta(delta);
         }
     }
 }
@@ -79,9 +79,7 @@ fn turn_seq(id: &str) -> u64 {
 }
 
 fn open_wave(repo: &Path) -> Arc<WaveRuntime> {
-    WaveRuntime::open("ship".into(), repo.to_path_buf())
-        .expect("open runtime")
-        .0
+    WaveRuntime::open("ship".into(), repo.to_path_buf()).expect("open runtime")
 }
 
 #[tokio::test]
@@ -144,7 +142,7 @@ async fn crashed_open_turn_is_finalized_failed_on_reboot() {
     // A server that dies mid-turn leaves started/item events with no finish.
     {
         let (mut journal, _) = Journal::open(&journal_path(tmp.path(), "ship")).expect("open");
-        use loopflow::lfd::wave::journal::EventKind;
+        use loopflow::wave::journal::EventKind;
         journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers: vec![],
@@ -234,25 +232,38 @@ async fn illegal_mind_transition_is_refused() {
     assert!(events.is_empty());
 }
 
+/// `/health` splits channel liveness (`status`, always `serving`) from the
+/// resident's condition (`mind`: null while no resident was ever spawned or
+/// attached, then the mind-state name).
 #[tokio::test]
-async fn health_reports_the_mind_state() {
+async fn health_reports_channel_liveness_and_the_mind_state() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = server::router(rt.clone());
+    let app = server::router(rt.clone(), ResidentDoor::new("test-token"), None, None);
     tokio::spawn(async move {
         axum::serve(listener, app).await.ok();
     });
 
-    let body = reqwest::get(format!("http://{addr}/health"))
+    let body: serde_json::Value = reqwest::get(format!("http://{addr}/health"))
         .await
         .unwrap()
-        .text()
+        .json()
         .await
         .unwrap();
-    assert!(body.contains("\"status\":\"idle\""));
+    assert_eq!(body["status"], "serving");
+    assert!(body["mind"].is_null(), "no resident yet: a dormant channel");
+
+    rt.set_resident_expected();
+    let body: serde_json::Value = reqwest::get(format!("http://{addr}/health"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(body["mind"], "idle");
 
     rt.transition(
         MindState::Turning {
@@ -260,11 +271,12 @@ async fn health_reports_the_mind_state() {
         },
         "test turn",
     );
-    let body = reqwest::get(format!("http://{addr}/health"))
+    let body: serde_json::Value = reqwest::get(format!("http://{addr}/health"))
         .await
         .unwrap()
-        .text()
+        .json()
         .await
         .unwrap();
-    assert!(body.contains("\"status\":\"turning\""));
+    assert_eq!(body["status"], "serving", "channel liveness is constant");
+    assert_eq!(body["mind"], "turning");
 }

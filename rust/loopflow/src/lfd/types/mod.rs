@@ -7,18 +7,18 @@ mod attention;
 mod chat_memory;
 mod chat_message;
 mod event;
-mod execution;
 mod repo;
 mod session;
 mod summary;
-mod trigger;
 mod wave;
+
+/// Flow name used for CI failure remediation runs.
+pub const CI_FIX_FLOW: &str = "ci-fix";
 
 pub use attention::{AttentionItem, AttentionKind, AttentionStatus};
 pub use chat_memory::ChatMemoryBlock;
 pub use chat_message::ChatMessage;
 pub use event::Event;
-pub use execution::{ExecutionProcess, ExecutionProcessStatus};
 pub use repo::{Repo, RepoEdge, RepoId};
 pub use session::{
     tmux_session_name, Session, SessionStatus, SessionUse, LF_CLI_SOURCE, LIVE_SESSION_STATUSES,
@@ -26,10 +26,7 @@ pub use session::{
     WAVE_SERVER_SOURCE,
 };
 pub use summary::Summary;
-pub use trigger::{
-    ActivationLog, ActivationOutcome, PendingActivation, Signal, Trigger, CI_FIX_FLOW,
-};
 pub use wave::{
     LivePrState, LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent,
-    RepoWork, Run, RunStackStatus, RunStatus, Wave, WaveCron, WaveMode, WaveStatus,
+    RepoWork, Run, RunStackStatus, RunStatus, Wave, WaveMode, WaveStatus,
 };

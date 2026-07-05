@@ -1,70 +1,14 @@
 use crate::lfd::id::LfdId;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
-    AttentionItem, AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason, Run, RunStatus,
-    Wave,
+    AttentionItem, AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason,
 };
+use crate::lfdb::SharedStore;
 use serde_json::json;
 use time::OffsetDateTime;
 
 /// Stable ID for queue-block attention items: reuse the run_id so upserts converge.
 pub fn attention_id_for_queue_block(run_id: &LfdId) -> LfdId {
     run_id.clone()
-}
-
-/// Daemon-created algedonic attention: repair chain exhausted.
-pub async fn create_step_failure_attention(
-    store: &SharedStore,
-    wave: &Wave,
-    run: &Run,
-    step_name: &str,
-    error: &str,
-) -> Result<AttentionItem, String> {
-    let item = AttentionItem {
-        id: LfdId::new(),
-        wave_id: wave.id().clone(),
-        run_id: Some(run.id.clone()),
-        kind: AttentionKind::Algedonic,
-        status: AttentionStatus::Surfaced,
-        title: format!("Step failed: {step_name}"),
-        summary: error.to_string(),
-        context: json!({
-            "step": step_name,
-            "error": error,
-        }),
-        surfaced_at: OffsetDateTime::now_utc(),
-        viewed_at: None,
-        resolved_at: None,
-    };
-    store
-        .upsert_attention_item(&item)
-        .await
-        .map_err(|err| format!("upsert step failure attention failed: {err}"))?;
-    Ok(item)
-}
-
-/// Resolve an attention item by ID.
-pub async fn resolve_attention_item(
-    store: &SharedStore,
-    attention_id: &LfdId,
-) -> Result<Option<AttentionItem>, String> {
-    let Some(mut item) = store
-        .get_attention_item(attention_id)
-        .await
-        .map_err(|err| format!("get attention item failed: {err}"))?
-    else {
-        return Ok(None);
-    };
-    if item.status == AttentionStatus::Resolved {
-        return Ok(Some(item));
-    }
-    item.status = AttentionStatus::Resolved;
-    item.resolved_at = Some(OffsetDateTime::now_utc());
-    store
-        .upsert_attention_item(&item)
-        .await
-        .map_err(|err| format!("resolve attention item failed: {err}"))?;
-    Ok(Some(item))
 }
 
 pub async fn mark_attention_viewed(
@@ -90,97 +34,6 @@ pub async fn mark_attention_viewed(
             .map_err(|err| format!("update attention item failed: {err}"))?;
     }
     Ok(Some(item))
-}
-
-/// Reconciliation: auto-resolve stale attention items based on context.
-///
-/// For algedonic items, checks whether the underlying condition has cleared:
-/// - Queue blocks with `reason` in context: never auto-resolve (requires manual intervention)
-/// - Items with `error` in context: resolve when the run is no longer failed or a newer run exists
-/// - All others: resolve when the wave has a newer run
-///
-/// For interactive items: resolve when the wave has a newer run (the human moved on).
-pub async fn reconcile_attention_items(store: &SharedStore) -> Result<Vec<AttentionItem>, String> {
-    let mut resolved = Vec::new();
-    let items = store
-        .list_attention_items(None, None)
-        .await
-        .map_err(|err| format!("list attention items failed: {err}"))?;
-
-    for mut item in items {
-        if item.status == AttentionStatus::Resolved {
-            continue;
-        }
-        let should_resolve = if is_queue_block(&item) {
-            // Queue blocks require manual intervention.
-            false
-        } else if has_step_failure(&item) {
-            should_resolve_step_failure(store, &item).await?
-        } else {
-            // Interactive items and other algedonic items resolve when the wave restarts.
-            should_resolve_when_wave_restarted(store, &item).await?
-        };
-        if should_resolve {
-            item.status = AttentionStatus::Resolved;
-            item.resolved_at = Some(OffsetDateTime::now_utc());
-            store
-                .upsert_attention_item(&item)
-                .await
-                .map_err(|err| format!("resolve attention item failed: {err}"))?;
-            resolved.push(item);
-        }
-    }
-
-    Ok(resolved)
-}
-
-/// Queue blocks have a `reason` field in context (from QueueBlockReason).
-fn is_queue_block(item: &AttentionItem) -> bool {
-    item.context.get("reason").is_some() && item.context.get("conflict_files").is_some()
-}
-
-/// Step failures have an `error` field and a `step` field but no `reason` field.
-fn has_step_failure(item: &AttentionItem) -> bool {
-    item.context.get("error").is_some() && item.context.get("reason").is_none()
-}
-
-async fn should_resolve_step_failure(
-    store: &SharedStore,
-    item: &AttentionItem,
-) -> Result<bool, String> {
-    let Some(run_id) = item.run_id.as_ref() else {
-        return Ok(true);
-    };
-    let Some(run) = store
-        .get_run(run_id)
-        .await
-        .map_err(|err| format!("get wave run failed: {err}"))?
-    else {
-        return Ok(true);
-    };
-    if run.status != RunStatus::Failed {
-        return Ok(true);
-    }
-    let latest = store
-        .get_latest_run(&item.wave_id)
-        .await
-        .map_err(|err| format!("get latest wave run failed: {err}"))?;
-    Ok(latest.is_some_and(|latest| latest.id != run.id))
-}
-
-async fn should_resolve_when_wave_restarted(
-    store: &SharedStore,
-    item: &AttentionItem,
-) -> Result<bool, String> {
-    let latest = store
-        .get_latest_run(&item.wave_id)
-        .await
-        .map_err(|err| format!("get latest wave run failed: {err}"))?;
-    Ok(latest.is_some_and(|run| {
-        item.run_id
-            .as_ref()
-            .is_none_or(|prev_id| &run.id != prev_id)
-    }))
 }
 
 // Queue block <-> attention item conversion helpers.
@@ -267,14 +120,10 @@ pub fn queue_block_attention_item_from_existing(
 mod tests {
     use super::{
         queue_block_attention_item, queue_block_attention_item_from_existing,
-        queue_block_from_attention, resolve_attention_item,
+        queue_block_from_attention,
     };
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
-    use crate::lfd::types::{
-        AttentionItem, AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason,
-    };
-    use std::sync::Arc;
+    use crate::lfd::types::{AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason};
     use time::OffsetDateTime;
 
     #[test]
@@ -322,48 +171,5 @@ mod tests {
         assert_eq!(refreshed.status, AttentionStatus::Viewed);
         assert_eq!(refreshed.surfaced_at, existing.surfaced_at);
         assert_eq!(refreshed.viewed_at, existing.viewed_at);
-    }
-
-    async fn test_store() -> SharedStore {
-        let db_path = std::env::temp_dir().join(format!("lfd-attention-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        Arc::new(open_store(&config).await.expect("sqlite store"))
-    }
-
-    #[tokio::test]
-    async fn resolve_attention_item_by_id() {
-        use crate::lfd::types::Wave;
-        let store = test_store().await;
-        let wave_id = LfdId::new();
-        let wave = Wave::new(wave_id.clone(), "test".to_string(), "/tmp/repo".to_string());
-        store.create_wave(&wave).await.unwrap();
-        let item = AttentionItem {
-            id: LfdId::new(),
-            wave_id,
-            run_id: None,
-            kind: AttentionKind::Interactive,
-            status: AttentionStatus::Surfaced,
-            title: "test".to_string(),
-            summary: "test".to_string(),
-            context: serde_json::json!({}),
-            surfaced_at: OffsetDateTime::now_utc(),
-            viewed_at: None,
-            resolved_at: None,
-        };
-        store.upsert_attention_item(&item).await.unwrap();
-
-        let resolved = resolve_attention_item(&store, &item.id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(resolved.status, AttentionStatus::Resolved);
-        assert!(resolved.resolved_at.is_some());
-
-        // Resolving again returns the already-resolved item
-        let again = resolve_attention_item(&store, &item.id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(again.status, AttentionStatus::Resolved);
     }
 }

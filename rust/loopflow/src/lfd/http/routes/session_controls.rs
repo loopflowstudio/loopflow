@@ -20,6 +20,9 @@ use crate::lfd::types::{Event, Session, SessionUse, LIVE_SESSION_STATUSES};
 
 const COMPLETION_TOKEN_HEADER: &str = "x-terminal-completion-token";
 
+// TODO(M1): move tmux-backed session control behind the session registry owner.
+// Preserve host normalization, attach metadata, completion-token close, and
+// best-effort tmux kill behavior.
 #[derive(Debug, Deserialize)]
 pub struct ListSessionsQuery {
     pub repo: Option<String>,
@@ -348,7 +351,6 @@ mod tests {
             primary_flow: "build".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            crons: Vec::new(),
             repos: vec![RepoWork {
                 repo: repo.to_string(),
                 worktree: String::new(),

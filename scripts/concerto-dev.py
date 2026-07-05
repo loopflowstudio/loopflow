@@ -21,7 +21,7 @@ Commands:
     logs            Tail the app logs
     lfd             Stop installed lfd and run from this branch (native/sqlite)
     lfd -k          Aggressive preflight kill before starting lfd
-    lfd --docker    Run lfd with Docker executor (postgres in container)
+    lfd --docker    Run legacy Docker executor path (postgres in container)
     agent-image     Build the Docker agent image
 
     screenshots     Generate app screenshots
@@ -354,101 +354,6 @@ def cmd_run() -> int:
     return 0
 
 
-def _list_worktree_paths(repo_root: Path) -> list[Path]:
-    """List worktree paths from `git worktree list --porcelain`."""
-    result = run_capture(["git", "-C", str(repo_root), "worktree", "list", "--porcelain"])
-    if result.returncode != 0:
-        return []
-
-    worktrees: list[Path] = []
-    for line in result.stdout.splitlines():
-        if line.startswith("worktree "):
-            worktrees.append(Path(line.split(" ", 1)[1]))
-    return worktrees
-
-
-def _worktree_wave_name(repo_root: Path, worktree: Path) -> str | None:
-    """Infer the wave name from a sibling worktree path."""
-    try:
-        repo_resolved = repo_root.resolve()
-        worktree_resolved = worktree.resolve()
-    except OSError:
-        return None
-
-    if worktree_resolved == repo_resolved:
-        return None
-    if worktree_resolved.parent != repo_resolved.parent:
-        return None
-
-    prefix = f"{repo_resolved.name}."
-    if not worktree_resolved.name.startswith(prefix):
-        return None
-
-    suffix = worktree_resolved.name[len(prefix) :].strip()
-    return suffix or None
-
-
-def _seed_waves_from_wave_dir(repo: Path = REPO_ROOT) -> None:
-    """Bootstrap paused waves from wave/ and connect matching sibling worktrees."""
-    wave_dir = repo / "wave"
-    if not wave_dir.is_dir():
-        return
-
-    wave_names = sorted(
-        d.name for d in wave_dir.iterdir() if d.is_dir() and not d.name.startswith(".")
-    )
-    if not wave_names:
-        return
-
-    import loopflow.api as loopflow
-
-    try:
-        existing = {w.name: w for w in loopflow.waves(repo=str(repo))}
-    except Exception:
-        print("Warning: could not list waves from lfd, skipping wave seed")
-        return
-
-    worktree_by_wave = {
-        wave_name: path
-        for path in _list_worktree_paths(repo)
-        if (wave_name := _worktree_wave_name(repo, path)) is not None
-    }
-
-    created = 0
-    paused = 0
-    for wave_name in wave_names:
-        matched_worktree = worktree_by_wave.get(wave_name)
-        try:
-            if wave_name not in existing:
-                loopflow.create_wave(
-                    wave_name,
-                    repo=str(repo),
-                    status="paused",
-                )
-                created += 1
-                if matched_worktree is not None:
-                    print(f"  Bootstrapped paused wave: {wave_name} (connected {matched_worktree})")
-                else:
-                    print(f"  Bootstrapped paused wave: {wave_name}")
-                continue
-
-            if existing[wave_name].status != "paused":
-                loopflow.update_wave(wave_name, status="paused")
-                paused += 1
-
-            if matched_worktree is not None:
-                print(f"  Connected roadmap wave: {wave_name} -> {matched_worktree}")
-        except Exception as exc:
-            print(f"  Wave {wave_name}: {exc}")
-
-    if created or paused:
-        print(
-            "Bootstrapped roadmap waves: "
-            f"{created} created, {paused} paused, "
-            f"{len(worktree_by_wave)} sibling worktrees discovered"
-        )
-
-
 def _print_run_debug_checklist() -> None:
     """Print the manual review path for terminal embedding and workspace routing."""
     print("Review checklist:")
@@ -490,9 +395,6 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False, repo: Path =
             if lfd_log is not None:
                 lfd_log.close()
             return 1
-
-    if with_lfd:
-        _seed_waves_from_wave_dir(repo)
 
     print("Building and running Concerto (debug mode with logs)...")
     result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)
@@ -731,7 +633,7 @@ def _stop_installed_lfd() -> None:
 
 
 def _lfd_docker() -> int:
-    """Start postgres in a container, run lfd natively with Docker executor.
+    """Start the legacy postgres-backed Docker executor path.
 
     lfd needs host filesystem access to resolve repo paths and build agent
     images, so it runs on the host. Only postgres is containerized.
@@ -807,7 +709,9 @@ def _lfd_docker() -> int:
     if result.returncode != 0:
         return result.returncode
 
-    # Run lfd natively in container mode
+    # Legacy Docker executor path. Container mode is staging debt scheduled for
+    # M2 removal; keep this only so old Concerto dev flows do not break before
+    # the native replacement is fully proven.
     env = os.environ.copy()
     env["LFD_MODE"] = "container"
     env["LFD_DATABASE_URL"] = "postgres://lfd:lfd@127.0.0.1:5432/lfd"
@@ -816,7 +720,7 @@ def _lfd_docker() -> int:
 
     lfd_bin = str(REPO_ROOT / "target" / "debug" / "lfd")
     print(f"Stream log: {LFD_STREAM_LOG}")
-    print("Starting lfd (container mode, debug logging)...")
+    print("Starting lfd (legacy container mode, debug logging)...")
     return stream_with_log([lfd_bin, "serve"], env=env, log_path=LFD_STREAM_LOG)
 
 
@@ -1349,7 +1253,11 @@ def main() -> int:
     for name, (func, help_text) in COMMANDS.items():
         sub = subparsers.add_parser(name, help=help_text)
         if name == "lfd":
-            sub.add_argument("--docker", action="store_true", help="Use Docker executor")
+            sub.add_argument(
+                "--docker",
+                action="store_true",
+                help="Use legacy Docker executor path",
+            )
             sub.add_argument(
                 "-k",
                 "--kill",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from loopflow.models import Trigger, Wave
+from loopflow.models import Wave
 
 FIXTURES = Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures"
 
@@ -28,8 +28,6 @@ def test_wave_fixture_parses():
     assert wave.direction == ["ux", "clarity"]
     assert wave.area == ["src/"]
     assert wave.parent_wave_id == "wave_parent999"
-    assert len(wave.crons) == 1
-    assert wave.crons[0].flow == "wave-polish"
 
     assert len(wave.repos) == 1
     repo = wave.repos[0]
@@ -41,27 +39,3 @@ def test_wave_fixture_parses():
     assert repo.remote_branch == "engbot/build-3"
     assert len(repo.commits) == 1
     assert repo.commits[0].sha == "abc1234"
-
-    assert len(wave.triggers) == 2
-    assert wave.triggers[0].signal == "repo"
-    assert wave.triggers[0].flow == "integrate"
-    assert wave.triggers[1].signal == "ci_failure"
-
-
-def test_trigger_fixture_parses():
-    data = _load("trigger.json")
-    trigger = Trigger.model_validate(data)
-
-    assert trigger.id == "trig_abc123"
-    assert trigger.signal == "wave"
-    assert trigger.flow == "build"
-    assert trigger.source_wave_id == "wave_upstream"
-
-
-def test_activation_log_fixture_has_expected_shape():
-    data = _load("activation_log.json")
-
-    assert data["object"] == "activation_log"
-    assert data["wave_id"] == "wave_abc123"
-    assert data["trigger_id"] == "trig_001"
-    assert data["outcome"] == "started"

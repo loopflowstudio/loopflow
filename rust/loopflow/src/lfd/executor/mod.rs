@@ -1,20 +1,34 @@
-pub(crate) mod docker;
+//! What remains of the executor after the organ cut: the dispatch helpers
+//! `lf q` shares (worktree placement, the tmux wrapper), palette terminal
+//! sessions, boot session reconciliation, and the worktree janitor.
+//!
+//! The agent-spawning engines (docker/local runners), the run-execution
+//! chains, and the repair machinery died with the trigger organs — dispatch
+//! is `lf q worker run`'s job now, and every worker is a tmux-wrapped `lf`
+//! process that registers its own session row.
+
+// TODO(M1): move the remaining session reconciliation and worktree janitor
+// mechanisms to the session/worktree owners; keep cleanup idempotent for both
+// git worktrees and plain directories.
 pub(crate) mod helpers;
-pub(crate) mod local;
 pub(crate) mod wave;
 
 use std::path::Path;
 
 use anyhow::Result;
-use async_trait::async_trait;
-use tokio::io::{AsyncBufReadExt, BufReader};
 
-use crate::engine::stream::{render_event, ParseResult, StreamEvent, StreamParser};
-use crate::lfd::output::{OutputEvent, OutputHub};
-use crate::lfd::types::Wave;
-
+pub(crate) use helpers::resolve_lf_binary;
 pub use helpers::{create_run_for_placement, ensure_wave_worktree, Placement};
 pub use wave::WaveExecutor;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct JanitorReport {
+    pub removed: u32,
+    pub active: u32,
+    pub errors: u32,
+}
+
+// -- Workspace file helpers (used by `lf` fork steps) ------------------------
 
 pub(crate) fn write_workspace_file(cwd: &Path, relative_path: &str, content: &[u8]) -> Result<()> {
     let path = cwd.join(relative_path);
@@ -45,255 +59,4 @@ pub(crate) fn cleanup_workspace_worktree(worktree: &Path) -> Result<()> {
         std::fs::remove_dir_all(worktree)?;
     }
     Ok(())
-}
-
-#[derive(Debug, Clone)]
-pub struct ExecutionContext {
-    pub wave_id: String,
-    pub agent_id: String,
-    pub run_id: String,
-    pub branch: Option<String>,
-    pub output: OutputHub,
-    pub output_prefix: Option<String>,
-    pub extra_env: Vec<(String, String)>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct OutputContext {
-    pub(crate) wave_id: String,
-    pub(crate) run_id: String,
-    pub(crate) agent_id: String,
-    pub(crate) output: OutputHub,
-    pub(crate) output_prefix: Option<String>,
-}
-
-impl From<ExecutionContext> for OutputContext {
-    fn from(context: ExecutionContext) -> Self {
-        Self {
-            wave_id: context.wave_id,
-            run_id: context.run_id,
-            agent_id: context.agent_id,
-            output: context.output,
-            output_prefix: context.output_prefix,
-        }
-    }
-}
-
-#[async_trait]
-pub trait AgentExecutor: Send + Sync {
-    async fn run(&self, cmd: Vec<String>, cwd: &Path, context: ExecutionContext) -> Result<i32>;
-    async fn terminate(&self, agent_id: &str) -> Result<()>;
-    async fn write_to_workspace(
-        &self,
-        cwd: &Path,
-        relative_path: &str,
-        content: &[u8],
-    ) -> Result<()> {
-        write_workspace_file(cwd, relative_path, content)
-    }
-    async fn remove_from_workspace(&self, cwd: &Path, relative_path: &str) -> Result<()> {
-        remove_workspace_file(cwd, relative_path)
-    }
-    async fn cleanup_ephemeral_worktree(&self, _repo: &Path, worktree: &Path) -> Result<()> {
-        cleanup_workspace_worktree(worktree)
-    }
-    async fn recover_startup(&self, _output: &OutputHub) -> Result<StartupRecovery> {
-        Ok(StartupRecovery::default())
-    }
-    async fn ensure_wave_workspace(&self, _wave: &Wave) -> Result<()> {
-        Ok(())
-    }
-    async fn cleanup_wave_workspace(&self, _wave: &Wave) -> Result<()> {
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct StartupRecovery {
-    pub orphaned_runs_failed: u32,
-    pub rehydrated_agents: u32,
-    pub lost_agents_failed: u32,
-    pub orphaned_containers_removed: u32,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct JanitorReport {
-    pub removed: u32,
-    pub active: u32,
-    pub errors: u32,
-}
-
-// -- Stream helpers ----------------------------------------------------------
-
-pub(crate) async fn read_stream<R: tokio::io::AsyncRead + Unpin>(
-    reader: R,
-    context: OutputContext,
-) {
-    let mut parser = StreamParser::new();
-    let mut lines = BufReader::new(reader).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        handle_output_line(&line, &mut parser, &context);
-    }
-}
-
-pub(crate) fn handle_output_line(line: &str, parser: &mut StreamParser, context: &OutputContext) {
-    match parser.feed_line(line) {
-        ParseResult::Events(events) => {
-            for event in &events {
-                if let StreamEvent::Usage {
-                    input_tokens,
-                    output_tokens,
-                    cache_read_tokens,
-                } = event
-                {
-                    context.output.add_usage(
-                        &context.run_id,
-                        *input_tokens,
-                        *output_tokens,
-                        *cache_read_tokens,
-                    );
-                    continue;
-                }
-                let (stdout, stderr) = render_event(event, false);
-                let text = if !stdout.is_empty() { stdout } else { stderr };
-                let text = text.trim_end_matches('\n').to_string();
-                if !text.is_empty() {
-                    send_output(context, text);
-                }
-            }
-        }
-        ParseResult::Skipped => {}
-        ParseResult::Passthrough => {
-            send_output(context, line.to_string());
-        }
-    }
-}
-
-fn send_output(context: &OutputContext, text: String) {
-    let text = if let Some(prefix) = context.output_prefix.as_deref() {
-        format!("{prefix}{text}")
-    } else {
-        text
-    };
-    context.output.send(OutputEvent {
-        wave_id: context.wave_id.clone(),
-        run_id: context.run_id.clone(),
-        agent_id: context.agent_id.clone(),
-        text,
-    });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-    use tokio::io::{AsyncWriteExt, DuplexStream};
-
-    async fn write_lines(mut writer: DuplexStream, lines: &[&str]) {
-        for line in lines {
-            writer
-                .write_all(line.as_bytes())
-                .await
-                .expect("writer should accept line");
-            writer
-                .write_all(b"\n")
-                .await
-                .expect("writer should accept newline");
-        }
-        writer.shutdown().await.expect("writer should shut down");
-    }
-
-    #[tokio::test]
-    async fn read_stream_renders_stream_json_events() {
-        let output_dir = tempdir().expect("tempdir should be created");
-        let output = OutputHub::new(16, output_dir.path().to_path_buf());
-        let (writer, reader) = tokio::io::duplex(4096);
-
-        let write_task = tokio::spawn(write_lines(
-            writer,
-            &[
-                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}"#,
-                r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"src/lib.rs"}}]}}"#,
-                r#"{"type":"result","subtype":"success"}"#,
-            ],
-        ));
-
-        read_stream(
-            reader,
-            OutputContext {
-                wave_id: "wave-1".to_string(),
-                run_id: "run-1".to_string(),
-                agent_id: "agent-1".to_string(),
-                output: output.clone(),
-                output_prefix: None,
-            },
-        )
-        .await;
-
-        write_task.await.expect("writer task should complete");
-
-        let lines = output.read_log("run-1").expect("output log should exist").0;
-
-        assert_eq!(lines, vec!["hello", "-> Read  src/lib.rs", "ok"]);
-    }
-
-    #[tokio::test]
-    async fn read_stream_skips_known_events_and_passes_through_unknown_lines() {
-        let output_dir = tempdir().expect("tempdir should be created");
-        let output = OutputHub::new(16, output_dir.path().to_path_buf());
-        let (writer, reader) = tokio::io::duplex(4096);
-
-        let write_task = tokio::spawn(write_lines(
-            writer,
-            &[
-                r#"{"type":"system","message":"skip me"}"#,
-                r#"{"type":"mystery","payload":42}"#,
-                "plain text line",
-            ],
-        ));
-
-        read_stream(
-            reader,
-            OutputContext {
-                wave_id: "wave-1".to_string(),
-                run_id: "run-2".to_string(),
-                agent_id: "agent-1".to_string(),
-                output: output.clone(),
-                output_prefix: None,
-            },
-        )
-        .await;
-
-        write_task.await.expect("writer task should complete");
-
-        let lines = output.read_log("run-2").expect("output log should exist").0;
-
-        assert_eq!(lines, vec!["plain text line"]);
-    }
-
-    #[test]
-    fn handle_output_line_applies_output_prefix() {
-        let output_dir = tempdir().expect("tempdir should be created");
-        let output = OutputHub::new(16, output_dir.path().to_path_buf());
-        let mut parser = StreamParser::new();
-
-        handle_output_line(
-            "plain text line",
-            &mut parser,
-            &OutputContext {
-                wave_id: "wave-1".to_string(),
-                run_id: "run-prefix".to_string(),
-                agent_id: "agent-1".to_string(),
-                output: output.clone(),
-                output_prefix: Some("[fork-0] ".to_string()),
-            },
-        );
-
-        let lines = output
-            .read_log("run-prefix")
-            .expect("output log should exist")
-            .0;
-
-        assert_eq!(lines, vec!["[fork-0] plain text line"]);
-    }
 }

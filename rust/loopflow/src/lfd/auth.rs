@@ -21,6 +21,11 @@ const THROTTLE_WINDOW: Duration = Duration::from_secs(60);
 const MAX_BEARER_TOKEN_BYTES: usize = 4096;
 
 /// Bearer-token auth for lfd connections.
+///
+/// TODO(M3): keep the local capability-token mechanics here: strict Bearer
+/// parsing, constant-time compare, auth-context hashing, and per-source
+/// throttling. Move real remote user identity into the M3 gatekeeper/auth
+/// design instead of growing OAuth/user semantics in M1/M2.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum AuthProvider {

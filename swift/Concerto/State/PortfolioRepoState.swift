@@ -21,13 +21,38 @@ final class PortfolioRepoState {
         self.waveService = WaveService(connection: connection, tokenProvider: { token })
     }
 
-    /// Create a wave against this repo's lfd via the shared create-wave path
-    /// (`POST /v0/waves`), then refresh so the new wave lands in the list.
-    @discardableResult
-    func createWave(name: String) async throws -> Wave {
-        let wave = try await waveService.createWave(name: name, repo: .local(repo.url))
+    /// Create a wave file-first: a wave IS its markdown. Write
+    /// `wave/<name>/GOAL.md` (+ an empty MEMORY.md) into the repo — the same
+    /// shape the registry overlays when the wave is started (`lf wave <name>`,
+    /// the Start button). No POST; the row is not the wave.
+    ///
+    /// Wave state lives at the ORIGIN repo: every reader (endpoint discovery,
+    /// launcher, session probe) resolves a worktree to its main checkout, so
+    /// the write must land there too — a GOAL.md written into a worktree is a
+    /// wave no reader ever finds.
+    func createWave(name: String) async throws {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw WaveServiceError.commandFailed("Wave name is required")
+        }
+
+        let repoURL = repo.url
+        try await Task.detached {
+            let waveDir = URL(fileURLWithPath: WaveOrigin.resolve(repoURL.path), isDirectory: true)
+                .appendingPathComponent("wave", isDirectory: true)
+                .appendingPathComponent(trimmed, isDirectory: true)
+            let goalURL = waveDir.appendingPathComponent("GOAL.md", isDirectory: false)
+            guard !FileManager.default.fileExists(atPath: goalURL.path) else {
+                throw WaveServiceError.commandFailed("Wave '\(trimmed)' already exists")
+            }
+            try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
+            let goal = "Drive the '\(trimmed)' wave's goal forward.\n"
+            try goal.write(to: goalURL, atomically: true, encoding: .utf8)
+            let memoryURL = waveDir.appendingPathComponent("MEMORY.md", isDirectory: false)
+            try "".write(to: memoryURL, atomically: true, encoding: .utf8)
+        }.value
+
         await refresh()
-        return wave
     }
 
     func refresh() async {

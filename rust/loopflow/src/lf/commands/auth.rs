@@ -8,9 +8,10 @@ use time::OffsetDateTime;
 
 use crate::engine::platform::open_url;
 use crate::lf::AuthCommand;
-use crate::lfd::events::EventHub;
-use crate::lfd::provider_auth::{AuthStatus, Provider, ProviderAuthService, ProviderAuthSnapshot};
-use crate::lfd::store::{open_store, CredentialType, ProviderToken, SharedStore};
+use crate::lfdb::{open_store, CredentialType, ProviderToken, SharedStore};
+use crate::provider_auth::{
+    no_event_sink, AuthStatus, Provider, ProviderAuthService, ProviderAuthSnapshot,
+};
 
 const AUTH_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(180);
 const AUTH_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -60,7 +61,7 @@ async fn status(provider: Option<&str>) -> Result<()> {
 async fn connect(raw_provider: &str) -> Result<()> {
     let provider = parse_provider(raw_provider)?;
     let service = local_auth_service().await?;
-    let flow = service.start_auth(provider, EventHub::new(16)).await?;
+    let flow = service.start_auth(provider, no_event_sink()).await?;
 
     let verification_url = flow
         .verification_uri_complete
@@ -83,7 +84,7 @@ async fn connect(raw_provider: &str) -> Result<()> {
 async fn disconnect(raw_provider: &str) -> Result<()> {
     let provider = parse_provider(raw_provider)?;
     let service = local_auth_service().await?;
-    service.disconnect(provider, EventHub::new(16)).await?;
+    service.disconnect(provider, no_event_sink()).await?;
     let snapshot = service.status(provider).await?;
     if matches!(snapshot.status, AuthStatus::None) {
         println!("Disconnected {}", provider.display_name());
@@ -313,7 +314,45 @@ fn extract_authorization_code(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_authorization_code, format_relative_delta};
+    use time::OffsetDateTime;
+
+    use crate::lfdb::CredentialType;
+    use crate::provider_auth::{AuthStatus, Provider, ProviderAuthSnapshot};
+
+    use super::{extract_authorization_code, format_relative_delta, format_snapshot};
+
+    #[test]
+    fn format_snapshot_shows_login_and_expiry() {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let rendered = format_snapshot(&ProviderAuthSnapshot {
+            provider: Provider::GitHub,
+            status: AuthStatus::Active {
+                login: Some("jackdanger".to_string()),
+            },
+            expires_at: Some(now + 7200),
+            next_refresh_at: None,
+            credential_type: Some(CredentialType::OAuth),
+        });
+
+        assert!(rendered.contains("GitHub"));
+        assert!(rendered.contains("oauth"));
+        assert!(rendered.contains("@jackdanger"));
+        assert!(rendered.contains("expires 1h") || rendered.contains("expires 2h"));
+    }
+
+    #[test]
+    fn format_snapshot_shows_disconnected_providers() {
+        let rendered = format_snapshot(&ProviderAuthSnapshot {
+            provider: Provider::Asana,
+            status: AuthStatus::None,
+            expires_at: None,
+            next_refresh_at: None,
+            credential_type: None,
+        });
+
+        assert!(rendered.contains("Asana"));
+        assert!(rendered.contains("not connected"));
+    }
 
     #[test]
     fn extract_authorization_code_accepts_raw_code() {

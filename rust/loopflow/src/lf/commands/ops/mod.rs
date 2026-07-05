@@ -13,8 +13,8 @@ use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_step;
 use crate::lf::output::Colors;
 use crate::lf::{
-    BranchFilterArgs, BranchesCommand, OpsCommand, PmCommand, ReleaseCommand, ShellCommand,
-    WtCommand,
+    BranchFilterArgs, BranchesCommand, OpsCommand, PmCommand, QueueCommand, ReleaseCommand,
+    ShellCommand, WtCommand,
 };
 use crate::ops::OpsError;
 use crate::ops::{
@@ -69,6 +69,7 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
             yes,
             no_prune,
         } => sync_skills_cmd(*global, *yes, !*no_prune),
+        OpsCommand::Advance { wave } => advance_cmd(wave.as_deref()),
         OpsCommand::Next {
             create_pr,
             no_rebase,
@@ -102,6 +103,11 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
         },
         OpsCommand::Pm { cmd } => pm_cmd(cmd, &progress),
         OpsCommand::Auth { cmd } => crate::lf::commands::auth::run(cmd),
+        OpsCommand::Queue { cmd } => match cmd {
+            QueueCommand::Reconcile { wave } => {
+                crate::ops::queue::reconcile_queue_cmd(wave.as_deref())
+            }
+        },
     }
 }
 
@@ -293,6 +299,15 @@ fn next_branch_cmd(
         progress,
     )?;
     println!("{}", result.new_branch);
+    Ok(())
+}
+
+fn advance_cmd(wave: Option<&str>) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let wave = crate::ops::util::resolve_wave_name(&repo_root, wave)
+        .ok_or_else(|| anyhow!("cannot determine wave name (pass --wave)"))?;
+    let new_branch = crate::ops::advance_branch(&repo_root, &wave)?;
+    println!("{new_branch}");
     Ok(())
 }
 

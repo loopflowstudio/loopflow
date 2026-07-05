@@ -110,7 +110,6 @@ public protocol SessionService: Sendable {
         config: AgentSessionConfig
     ) async throws -> AgentSession
     func getSession(_ id: String) async throws -> AgentSession
-    func stopSession(_ id: String) async throws -> AgentSession
 }
 
 extension LocalWaveService: SessionService {}
@@ -251,15 +250,9 @@ public final class SessionState {
     }
 
     public func endSession() async {
-        guard let sessionId else { return }
+        guard sessionId != nil else { return }
 
         streamPhase = .ending
-
-        do {
-            _ = try await waveService.stopSession(sessionId)
-        } catch {
-            appendMessage(role: .error, content: error.localizedDescription)
-        }
 
         self.sessionId = nil
         persistSessionId(nil)

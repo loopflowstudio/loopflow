@@ -1,11 +1,10 @@
-//! Turn vocabulary: `ChatTurn` (the wire type Concerto consumes) and
-//! `TurnDelta` (the increment vocabulary the wave journal hangs off).
+//! Turn vocabulary: `ChatTurn`, the wire type Concerto consumes.
 //!
 //! The wave's mind runs on a persistent harness session
-//! ([`crate::lfd::conversations::harness`]); its `ConversationEvent` stream is
-//! adapted into `TurnDelta`s (see [`crate::lfd::wave::mind::EventAdapter`])
-//! and folded by the wave runtime's `TurnSink` into journaled, broadcast
-//! turns.
+//! ([`crate::lfd::conversations::harness`]) inside the RESIDENT process; its
+//! `ConversationEvent` stream is adapted into resident wire deltas (see
+//! [`crate::wave::mind::EventAdapter`] and [`crate::wave::wire`]) and folded
+//! by the listener's runtime into journaled, broadcast turns.
 //!
 //! Mapping:
 //! - a human message becomes one `user` turn;
@@ -71,8 +70,8 @@ impl ChatTurn {
 
     /// The one turn-growth rule every projection shares: `Message` prose
     /// joins into `text` (newline-separated), every other item appends to
-    /// `items`. The live snapshot (`TurnSink`), the journal fold
-    /// (`fold_thread`), and the harness adapter (`EventAdapter`) all grow
+    /// `items`. The listener's open-turn snapshot, the journal fold
+    /// (`fold_thread`), and the resident's adapter (`EventAdapter`) all grow
     /// turns through this — a second copy is the live-vs-replay split-brain
     /// the journal exists to kill.
     pub fn absorb_item(&mut self, item: ConversationItem) {
@@ -90,33 +89,6 @@ impl ChatTurn {
         }
         self.text.push_str(fragment);
     }
-}
-
-/// Incremental outcome of one step of turn assembly.
-///
-/// This is the seam the wave's journal hangs off: every increment surfaces to
-/// the runtime's `TurnSink` so it can be recorded (as
-/// `TurnStarted`/`TurnItem`/`TurnFinished` events) the moment it happens, not
-/// only at finalization.
-#[derive(Debug, Clone, PartialEq)]
-pub enum TurnDelta {
-    /// A new assistant turn opened.
-    Opened,
-    /// A prose fragment appended to the open turn's text.
-    Text(String),
-    /// An item added to the open turn.
-    Item(ConversationItem),
-    /// Token usage reported for the open turn.
-    Usage {
-        input_tokens: Option<u64>,
-        output_tokens: Option<u64>,
-        cache_read_tokens: Option<u64>,
-    },
-    /// The open turn finalized. Carries the assembled turn whole.
-    Finished {
-        turn: ChatTurn,
-        cost_usd: Option<f64>,
-    },
 }
 
 #[cfg(test)]

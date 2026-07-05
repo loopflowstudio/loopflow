@@ -259,7 +259,7 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "one-command host setup" in readme
     assert "/etc/loopflow-server.env" in readme
     assert "loopflow-server-update.timer" in readme
-    assert "lfq create root /opt/loopflow" in readme
+    assert "wave/root/GOAL.md" in readme
     assert "deploy/PRIVATE_HOST.md" in readme
     assert "claude,codex,ssh" in readme
     assert "deploy/tailscale-lfd-host.sh install" in readme
@@ -303,7 +303,7 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert '"PATH"' in bootstrap
     assert '"DOCKER_CONFIG"' in bootstrap
     assert '"DOCKER_HOST"' in bootstrap
-    assert "lfq create root" in bootstrap
+    assert "wave/root" in bootstrap
     assert "install -m 0600" in bootstrap
 
     native_host = (ROOT / "deploy/native-lfd-host.sh").read_text()
@@ -339,9 +339,9 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "loopflow.connection.token" in private_client
     assert "concerto.connectionSettings.v2" in private_client
     assert "alias lfdhost='ssh" in private_client
-    assert "lfq list >/dev/null" in private_client
+    assert '"$LFD_URL/v0/waves"' in private_client
     assert 'curl -fsS -H "Authorization: Bearer $LFD_TOKEN" "$LFD_URL/status"' in private_client
-    assert "lfq status" not in private_client
+    assert "lfq" not in private_client
 
     service = (ROOT / "deploy/systemd/loopflow-server.service").read_text()
     assert "ExecStart=/opt/loopflow/deploy/loopflow-server.sh up" in service

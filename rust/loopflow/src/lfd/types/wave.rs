@@ -178,17 +178,6 @@ impl std::str::FromStr for WaveMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WaveCron {
-    pub id: LfdId,
-    pub wave_id: LfdId,
-    pub flow: String,
-    pub schedule: String,
-    pub last_triggered_at: Option<i64>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub created_at: Option<OffsetDateTime>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueueBlockReason {
@@ -234,8 +223,6 @@ pub struct Wave {
     pub primary_flow: String,
     pub goal: String,
     pub metrics: Vec<String>,
-    #[serde(default)]
-    pub crons: Vec<WaveCron>,
     /// Per-repo execution state (worktree/branch/status/iteration), stitched from
     /// `wave_repos` on read. Execution state lives here; the wave carries only
     /// identity plus the wave-level `paused` flag.
@@ -267,7 +254,6 @@ impl Wave {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            crons: Vec::new(),
             repos: vec![RepoWork {
                 repo,
                 worktree: String::new(),
@@ -441,7 +427,6 @@ pub struct Run {
     pub flow_parents: Vec<String>,
     #[serde(skip)]
     pub execution_cursor: Option<String>,
-    pub activation_log_id: Option<LfdId>,
     pub parent_run_id: Option<LfdId>,
     pub parent_pr_number: Option<u32>,
     pub stack_position: u32,
@@ -455,8 +440,8 @@ pub struct Run {
     #[serde(default = "default_target_branch")]
     pub target_branch: String,
     /// When set, this run is a repair attempt for the referenced failed run.
-    /// The executor uses this to decide whether to escalate (algedonic signal)
-    /// or attempt another repair on failure.
+    /// Written by dispatchers that retry failed work; nothing acts on it
+    /// automatically since the repair chain died with the daemon's organs.
     pub repair_of: Option<LfdId>,
     /// The pull request created or associated with this run.
     /// Set when the run creates a PR (auto-create or land --create-pr).
@@ -526,7 +511,6 @@ impl Run {
             error: None,
             flow_parents: Vec::new(),
             execution_cursor: None,
-            activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,

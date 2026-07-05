@@ -7,11 +7,12 @@ use std::path::PathBuf;
 
 use loopflow::lfd::conversations::turns::{ChatRole, ChatTurn};
 use loopflow::lfd::conversations::types::{ConversationItem, Lifecycle};
-use loopflow::lfd::http::dto::{
-    CreateSessionRequestDto, RunWorkerRequestDto, SessionDto, UsageReportDto, WaveDto,
-    WorkerPlacementDto,
+use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, UsageReportDto, WaveDto};
+use loopflow::wave::state::MindState;
+use loopflow::wave::wire::{
+    AttachRequest, AttachResponse, ContextResponse, PostDeltasRequest, ResidentDelta,
+    ResidentStateTo,
 };
-use loopflow::lfd::wave::state::MindState;
 use serde_json::Value;
 
 fn load_fixture(name: &str) -> Value {
@@ -133,49 +134,6 @@ fn create_session_request_fixture_pins_required_fields() {
 }
 
 #[test]
-fn run_worker_request_fixture_pins_placement_shape() {
-    let request: RunWorkerRequestDto =
-        serde_json::from_value(load_fixture("run_worker_request.json"))
-            .expect("run worker request fixture should parse");
-    assert_eq!(request.flow, "implement");
-    assert_eq!(request.task, "Add the workers endpoint.");
-    assert_eq!(
-        request.parent_session_id.as_deref(),
-        Some("lfdsession_01HNX7XYZ0AZ1B2C3D4E5F6G7H")
-    );
-    assert_eq!(
-        request.placement,
-        WorkerPlacementDto::Stack {
-            parent_run_id: "8f14e45f-ceea-467f-a34e-b5a1c3d4e5f6".to_string(),
-        }
-    );
-
-    // Round-trip keeps `stack` as a flat field pair: placement + parent_run_id.
-    let value = serde_json::to_value(&request).expect("serialize request");
-    assert_eq!(value["placement"], "stack");
-    assert_eq!(
-        value["parent_run_id"],
-        "8f14e45f-ceea-467f-a34e-b5a1c3d4e5f6"
-    );
-
-    // Unit placements are the bare tag; the field is required, never defaulted.
-    let fresh: RunWorkerRequestDto = serde_json::from_value(serde_json::json!({
-        "flow": "implement",
-        "task": "t",
-        "parent_session_id": null,
-        "placement": "fresh",
-    }))
-    .expect("fresh placement should parse");
-    assert_eq!(fresh.placement, WorkerPlacementDto::Fresh);
-
-    let missing = serde_json::from_value::<RunWorkerRequestDto>(serde_json::json!({
-        "flow": "implement",
-        "task": "t",
-    }));
-    assert!(missing.is_err(), "placement is required on the wire");
-}
-
-#[test]
 fn usage_report_fixture_pins_repo_provider_shape() {
     let value = load_fixture("usage_report.json");
     assert_eq!(value["object"], "usage_report");
@@ -245,6 +203,158 @@ fn post_message_response_fixture_pins_wave_chat_reply() {
         }
         .name()
     );
+}
+
+/// A work-line channel's `turn` SSE frame (wave/server.rs
+/// `tagged_turn_event`): the ChatTurn JSON plus exactly one extra top-level
+/// key, `"channel"`. The tag is additive — the turn parses whole with the key
+/// present, and stripping it restores the plain turn frame byte-for-value.
+/// Swift's ContractTests decodes the same fixture through FrameChannelTag +
+/// ChatTurn; a drift in either the tag or the turn shape fails one of the two.
+#[test]
+fn channel_tagged_turn_fixture_pins_the_frame_shape() {
+    let value = load_fixture("channel_tagged_turn.json");
+    assert_eq!(value["channel"], "ship.148e0e02");
+
+    // The tag is additive: the whole frame still parses as a ChatTurn.
+    let turn: ChatTurn = serde_json::from_value(value.clone())
+        .expect("tagged frame parses as a ChatTurn (unknown key ignored)");
+    assert_eq!(turn.id, "turn-7");
+    assert_eq!(turn.from.as_deref(), Some("worker"));
+
+    // The frame is EXACTLY turn + channel: re-serialize the turn, re-insert
+    // the tag, and the fixture comes back byte-for-value.
+    let mut rebuilt = serde_json::to_value(&turn).expect("serialize turn");
+    rebuilt
+        .as_object_mut()
+        .expect("object")
+        .insert("channel".to_string(), value["channel"].clone());
+    assert_eq!(rebuilt, value);
+}
+
+/// The resident wire (`POST /resident/deltas` — wave/wire.rs). CARVE-OUT:
+/// unlike the other fixtures this wire is Rust↔Rust only (the listener and
+/// the resident are the same binary), so only this Rust test pins it — Swift
+/// and Python do not consume it (see tests/fixtures/dto/README.md).
+#[test]
+fn resident_deltas_fixture_round_trips_the_wire() {
+    let value = load_fixture("resident_deltas.json");
+    let request: PostDeltasRequest =
+        serde_json::from_value(value.clone()).expect("resident deltas fixture should parse");
+    assert_eq!(request.deltas.len(), 10);
+
+    // Every wire kind appears in the fixture, in a realistic turn order.
+    assert!(matches!(
+        &request.deltas[0],
+        ResidentDelta::ThreadStarted { vendor, thread_id }
+            if vendor == "codex" && thread_id == "thread-0199a"
+    ));
+    assert!(matches!(
+        &request.deltas[1],
+        ResidentDelta::TurnOpened { answers } if answers == &["msg-4", "msg-5"]
+    ));
+    assert!(matches!(&request.deltas[2], ResidentDelta::TurnText { .. }));
+    assert!(matches!(&request.deltas[3], ResidentDelta::TurnItem { .. }));
+    assert!(matches!(
+        &request.deltas[4],
+        ResidentDelta::TurnUsage {
+            input_tokens: Some(1204),
+            output_tokens: Some(96),
+            cache_read_tokens: None,
+        }
+    ));
+    assert!(matches!(
+        &request.deltas[5],
+        ResidentDelta::TurnFinished { status: Lifecycle::Completed, cost_usd: Some(cost) }
+            if (cost - 0.0125).abs() < f64::EPSILON
+    ));
+    assert!(matches!(
+        &request.deltas[6],
+        ResidentDelta::TurnSteered { answers } if answers == &["msg-6"]
+    ));
+    assert!(matches!(
+        &request.deltas[7],
+        ResidentDelta::MessagesRequeued { ids } if ids == &["msg-6"]
+    ));
+    assert!(matches!(
+        &request.deltas[8],
+        ResidentDelta::MindState {
+            to: ResidentStateTo::Interrupting,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &request.deltas[9],
+        ResidentDelta::MindState { to: ResidentStateTo::Failed, reason }
+            if reason.contains("codex_disconnected")
+    ));
+
+    // Round-trip: serializing back reproduces the fixture byte-for-value —
+    // explicit nulls included, no defaults injected or dropped.
+    assert_eq!(
+        serde_json::to_value(&request).expect("serialize request"),
+        value
+    );
+
+    // No serde defaults: an absent required field is a parse error.
+    let missing = serde_json::from_value::<PostDeltasRequest>(serde_json::json!({
+        "deltas": [{ "kind": "turn_finished", "cost_usd": null }]
+    }));
+    assert!(missing.is_err(), "status is required on the wire");
+}
+
+/// The resident door's request/response DTOs (`POST /resident/attach`,
+/// `GET /resident/context` — wave/wire.rs). Same Rust↔Rust carve-out as
+/// `resident_deltas.json`: only this test pins it.
+#[test]
+fn resident_door_fixture_round_trips_attach_and_context() {
+    let value = load_fixture("resident_door.json");
+
+    let attach: AttachRequest = serde_json::from_value(value["attach_request"].clone())
+        .expect("attach request should parse");
+    assert_eq!(attach.pid, 43210);
+
+    let attached: AttachResponse = serde_json::from_value(value["attach_response"].clone())
+        .expect("attach response should parse");
+    assert_eq!(attached.wave, "ship");
+    assert_eq!(attached.thread_id.as_deref(), Some("thread-0199a"));
+
+    let context: ContextResponse = serde_json::from_value(value["context_response"].clone())
+        .expect("context response should parse");
+    assert_eq!(context.thread_id.as_deref(), Some("thread-0199a"));
+    assert_eq!(context.in_flight.len(), 1);
+    assert_eq!(context.in_flight[0].flow, "implement");
+    assert_eq!(context.in_flight[0].task, "Wire the endpoint.");
+
+    // Round-trip: no defaults injected or dropped.
+    assert_eq!(
+        serde_json::to_value(&attach).expect("serialize"),
+        value["attach_request"]
+    );
+    assert_eq!(
+        serde_json::to_value(&attached).expect("serialize"),
+        value["attach_response"]
+    );
+    assert_eq!(
+        serde_json::to_value(&context).expect("serialize"),
+        value["context_response"]
+    );
+
+    // No serde defaults: absent required fields are parse errors; the
+    // explicitly Optional thread_id may be null.
+    assert!(serde_json::from_value::<AttachRequest>(serde_json::json!({})).is_err());
+    assert!(
+        serde_json::from_value::<AttachResponse>(serde_json::json!({ "thread_id": null })).is_err()
+    );
+    assert!(
+        serde_json::from_value::<ContextResponse>(serde_json::json!({ "thread_id": null }))
+            .is_err(),
+        "in_flight is required"
+    );
+    let fresh: AttachResponse =
+        serde_json::from_value(serde_json::json!({ "wave": "ship", "thread_id": null }))
+            .expect("null thread_id parses");
+    assert_eq!(fresh.thread_id, None);
 }
 
 /// The SSE `state` vocabulary (`idle | turning | interrupting | failed`)

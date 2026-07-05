@@ -1,25 +1,8 @@
-pub(crate) mod activation;
-mod ci_failure;
-mod common;
-mod cron;
-mod loop_ticker;
-mod queue_reconcile;
-mod recovery;
-mod summary_refresh;
-mod token_refresh;
-mod watch;
+//! What's left of the trigger organs: token refresh. The activation queue,
+//! loop ticker, watch/cron/ci-failure pollers, repair chain, and recovery
+//! loop died in the collapse's organ cut — webhooks speak `lf chat` /
+//! `lf op queue reconcile`, and cron lives in the wave's resident mind.
 
-pub use activation::{
-    dispatch_wave_if_ready, enqueue_pending_activation, spawn_activation_dispatcher,
-    spawn_immediate_activation, ActivationEnvelope, EnqueueOutcome, ImmediateActivation,
-    DEFAULT_ACTIVATION_QUEUE_LIMIT,
-};
-pub use ci_failure::spawn_ci_failure_handler;
-pub use common::{spawn_run_task_with_session, spawn_run_task_with_slot};
-pub use cron::spawn_cron_poller;
-pub use loop_ticker::spawn_loop_ticker;
-pub use queue_reconcile::spawn_queue_reconciler;
-pub use recovery::spawn_recovery_loop;
-pub use summary_refresh::spawn_summary_refresh;
+mod token_refresh;
+
 pub use token_refresh::spawn_token_refresh;
-pub use watch::spawn_watch_poller;

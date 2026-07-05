@@ -9,8 +9,8 @@ use tracing::{debug, warn};
 use crate::engine::worktrees::{list_worktrees, main_repo_root, wave_name_from_worktree_and_main};
 use crate::journal::{events_path, read_events, runs_root};
 use crate::lfd::events::EventHub;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::Event;
+use crate::lfdb::SharedStore;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 

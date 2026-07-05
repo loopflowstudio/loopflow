@@ -46,6 +46,23 @@ struct WaveChatConnectionTests {
         #expect(conn.turns.map(\.id) == ["turn-1", "turn-2"])
     }
 
+    @Test("channel-tagged frames: own channel renders, other channels skip")
+    func channelTaggedFramesFilterToThePrimaryChannel() {
+        let conn = connection()
+        // A family subscription tags work-line frames with their channel;
+        // the wave's own frames ride untagged. WaveChat renders the primary
+        // channel only — a tagged frame for a work line is skipped, one
+        // tagged with the wave's own name (or untagged) renders.
+        let child = "{\"id\":\"turn-1\",\"role\":\"user\",\"text\":\"child report\",\"status\":\"completed\",\"items\":[],\"created_at\":\"2026-07-04T00:00:00Z\",\"channel\":\"ship.148e\"}"
+        conn.handle(event: "turn", data: child)
+        #expect(conn.turns.isEmpty, "a work-line channel's frame is not this thread")
+
+        let own = "{\"id\":\"turn-2\",\"role\":\"user\",\"text\":\"to the wave\",\"status\":\"completed\",\"items\":[],\"created_at\":\"2026-07-04T00:00:00Z\",\"channel\":\"ship\"}"
+        conn.handle(event: "turn", data: own)
+        conn.handle(event: "turn", data: frame(id: "turn-3", role: "user", text: "untagged", status: "completed"))
+        #expect(conn.turns.map(\.id) == ["turn-2", "turn-3"], "own-channel and untagged frames render")
+    }
+
     @Test("running turns can finalize as failed or interrupted")
     func terminalStatusFlips() {
         let conn = connection()
@@ -92,6 +109,19 @@ struct WaveChatConnectionTests {
         #expect(conn.turns.isEmpty)
     }
 
+    @Test("memory events expose the latest curation summary")
+    func memoryEventsExposeSummary() {
+        let conn = connection()
+        #expect(conn.memorySummary == nil)
+        conn.handle(event: "memory", data: "fold is truth")
+        #expect(conn.memorySummary == "fold is truth")
+        conn.handle(event: "memory", data: "second curation")
+        #expect(conn.memorySummary == "second curation")
+        // Memory payloads never masquerade as turns or states.
+        #expect(conn.turns.isEmpty)
+        #expect(conn.mindState == .idle)
+    }
+
     @Test("state events update the observable mind state")
     func stateEventsUpdateMindState() {
         let conn = connection()
@@ -121,9 +151,10 @@ struct WaveChatConnectionTests {
 
     @Test("a captured real assistant-turn SSE frame decodes and renders")
     func realAssistantFrameDecodes() throws {
-        // Captured verbatim from a live `lf wave goals` server
-        // (GET /conversation/stream, 2026-07-04): a completed assistant turn
-        // with four command items, one failed.
+        // Captured verbatim from a live `lf wave goals` server on 2026-07-04
+        // (then served on /conversation/stream; the same turn frames now ride
+        // GET /events): a completed assistant turn with four command items,
+        // one failed.
         let conn = connection()
         var parser = SSEFrameParser()
         var frames: [SSEFrameParser.Frame] = []

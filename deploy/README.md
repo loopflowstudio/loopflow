@@ -1,6 +1,13 @@
 # Self-hosted deploy
 
-Run your own `lfd` cron host. Use `deploy/PRIVATE_HOST.md` for the first maintained Tailscale host; use the generic Docker/Caddy path below for public or non-private hosts.
+Run your own `lfd` cron host. Self-hosted operations are SSH-first: use
+`deploy/PRIVATE_HOST.md` for the maintained Tailscale/native host path.
+
+The Docker/Caddy/Postgres files are legacy staging scaffolding scheduled for the
+M2 substrate cut. Keep them working while they exist, but do not expand them as a
+product hosting path.
+
+## Legacy Docker/Caddy stack
 
 ```bash
 git clone https://github.com/loopflowstudio/loopflow.git /opt/loopflow
@@ -13,32 +20,41 @@ export LF_TLS_MODE=internal   # Tailscale/private hosts; leave empty for public 
 deploy/loopflow-server.sh up
 ```
 
-Container mode and self-hosted bearer-token auth are the default. Keep secrets in Doppler; `.env` is the local fallback.
+Native `lfd` uses a machine-local capability token at `~/.lf/session-token`.
+Remote identity and user auth are M3 future work. For deliberate non-loopback
+experiments, set a host-local bearer token and keep secrets in Doppler; `.env`
+is the local fallback for the legacy stack.
 
 Cost guardrails live in `deploy/COSTS.md`. The maintained automation budget is $100/month; if actual or projected spend crosses it, stop before adding spend.
 
 ## Loopflow and Cadenza
 
-Use the same server shape for both repos. The Terraform module and `loopflow-server.sh --repo PATH` are repo-parameterized; each repo should carry its own Docker/deploy files and Doppler project/config. Keep the cadence from `release/SCHEDULE.md` identical, then vary only product-specific build, smoke-test, signing, and publish commands.
+Use the same SSH-first operating shape for both repos. The Terraform module and
+`loopflow-server.sh --repo PATH` are repo-parameterized only for maintaining the
+legacy stack while it exists; each repo should carry its own deploy files and
+Doppler project/config. Keep the cadence from `release/SCHEDULE.md` identical,
+then vary only product-specific build, smoke-test, signing, and publish
+commands.
 
 ## Secrets
 
 ```bash
-doppler secrets set LFD_AUTH_TOKEN="$(openssl rand -hex 32)"
-doppler secrets set GH_TOKEN=ghp_xxx
-doppler secrets set ANTHROPIC_API_KEY=sk-ant-xxx
+doppler secrets set LFD_AUTH_TOKEN="$(openssl rand -hex 32)" >/dev/null
+doppler secrets set GH_TOKEN >/dev/null
+doppler secrets set ANTHROPIC_API_KEY >/dev/null
 ```
 
 Minimum useful server secrets:
 
 | Secret | What it does |
 |--------|--------------|
-| `LFD_AUTH_TOKEN` | Bearer token for remote API clients |
+| `LFD_AUTH_TOKEN` | Bearer token for deliberate non-loopback clients |
 | `GH_TOKEN` | Lets agents push branches, inspect PRs, and react to CI |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | Agent provider credentials |
 | `LFD_GITHUB_WEBHOOK_SECRET` | Optional webhook signature secret |
 
-Use `docker/.env.example` only when running without Doppler.
+Use `docker/.env.example` only when maintaining the legacy stack without
+Doppler.
 
 ## Operate
 
@@ -50,13 +66,15 @@ deploy/loopflow-server.sh logs
 deploy/loopflow-server.sh health
 ```
 
-The script uses Doppler automatically when the Doppler CLI is configured or `DOPPLER_TOKEN` is present. Run `doppler setup` in the repo, authenticate the host, or provide a Doppler service token outside the repo. Set `LOOPFLOW_SECRETS=env` to force plain Docker Compose.
+The script uses Doppler automatically when the Doppler CLI is configured or `DOPPLER_TOKEN` is present. Run `doppler setup` in the repo, authenticate the host, or provide a Doppler service token outside the repo. Set `LOOPFLOW_SECRETS=env` to force plain Docker Compose for the legacy stack.
 
 Public hosts leave `LF_TLS_MODE` empty and use `deploy/Caddyfile`, letting Caddy request public ACME certificates. Private or Tailscale-only hosts set `LF_TLS_MODE=internal`; the deploy script mounts `deploy/Caddyfile.internal` for Caddy's internal CA.
 
 ## Bootstrap cron host
 
-`bootstrap-cron-host.sh` is the one-command host setup. It installs the host service, starts `lfd`, waits for health, and creates or shows the root wave on the self-hosted daemon.
+`bootstrap-cron-host.sh` is the one-command host setup for the legacy stack. It
+installs the host service, starts `lfd`, waits for health, and creates or shows
+the root wave on the self-hosted daemon.
 
 ```bash
 export LF_DOMAIN='lfd.example.com'
@@ -72,7 +90,11 @@ deploy/bootstrap-cron-host.sh --host linux
 
 Use Doppler for maintained hosts. On Linux the bootstrap writes `/etc/loopflow-server.env` with `0600` permissions so systemd can reach either `DOPPLER_TOKEN` or host-local fallback secrets. On macOS it writes the same launch environment into `~/Library/LaunchAgents/loopflow.server.plist`; prefer a Doppler service token over embedding long-lived provider credentials there.
 
-The Linux update timer refreshes container hosts nightly. The native macOS private-host path installs `com.loopflow.lfd.update`, which refreshes the repo, rebuilds local binaries, and restarts `lfd` at 04:30 host-local time. Keep local dev binaries fresh with `uv run python scripts/install.py refresh`; server restarts should be predictable.
+The Linux update timer refreshes container hosts nightly while they exist. The
+native macOS private-host path installs `com.loopflow.lfd.update`, which
+refreshes the repo, rebuilds local binaries, and restarts `lfd` at 04:30
+host-local time. Keep local dev binaries fresh with `uv run python
+scripts/install.py refresh`; server restarts should be predictable.
 
 ## Manual Linux service install
 
@@ -116,9 +138,12 @@ deploy/tailscale-lfd-host.sh status       # lfd + `tailscale serve` status
 deploy/tailscale-lfd-host.sh serve-off    # remove the front (leaves lfd running)
 ```
 
-Point Concerto at `https://<host>.<tailnet>.ts.net` (TLS on, port 443) with the bearer token from `LFD_AUTH_TOKEN`.
+For same-tailnet observation experiments, point Concerto at
+`https://<host>.<tailnet>.ts.net` (TLS on, port 443) with the bearer token from
+`LFD_AUTH_TOKEN`. This is not remote identity; SSH remains the operating path.
 
-Use the Docker Compose launchd path only when you explicitly want the container stack:
+Use the Docker Compose launchd path only when you explicitly need the legacy
+container stack:
 
 ```bash
 mkdir -p ~/Library/LaunchAgents
@@ -131,16 +156,14 @@ Use `LF_TLS_MODE=internal` for a Tailscale-only hostname; the deploy script moun
 
 ## Enable repo crons manually
 
-The bootstrap script does this when `lfq` is installed. To do it by hand from the host or a trusted client:
+The bootstrap script authors the wave file directly. To do it by hand on the host:
 
 ```bash
-export LFD_URL=https://lfd.example.com
-export LFD_TOKEN="$LFD_AUTH_TOKEN"
-lfq create root /opt/loopflow
-lfq show root
+mkdir -p /opt/loopflow/wave/root
+echo "Drive this repo's roadmap." > /opt/loopflow/wave/root/GOAL.md
 ```
 
-Wave YAML carries the cron schedule. For this repo, `wave/root/root.yaml` is the conductor cron; once the wave is created, `lfd` owns the scheduled runs.
+The wave is its markdown; `lfd` derives the rest at boot. Wave YAML carries the cron schedule — for this repo, `wave/root/root.yaml` is the conductor cron.
 
 ## Verify
 
@@ -149,7 +172,9 @@ curl -f https://lfd.example.com/health
 curl -H "Authorization: Bearer $LFD_AUTH_TOKEN" https://lfd.example.com/status
 ```
 
-Point Concerto or `lfq` at the host and use the bearer token from `LFD_AUTH_TOKEN`. There is no studio discovery path; each repo owns its deployment.
+For same-tailnet observation experiments, point Concerto at the host and use the
+bearer token from `LFD_AUTH_TOKEN`. There is no studio discovery path; each repo
+owns its deployment.
 
 ## Troubleshoot
 
@@ -159,7 +184,13 @@ deploy/loopflow-server.sh logs
 curl -f http://127.0.0.1:${LFD_PORT:-2486}/health
 ```
 
-Need agent credentials inside execution containers? Set `LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh` in Doppler or `.env` instead of editing compose volume lines.
+Need credentials inside the legacy daemon container? Set
+`LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh` in Doppler or `.env` instead
+of editing compose volume lines.
+
+Useful mechanisms to carry forward from the container work: hardened
+environment handling, named read-only credential mounts, health checks, request
+redaction, and service files that avoid embedding raw secrets.
 
 Common failures:
 

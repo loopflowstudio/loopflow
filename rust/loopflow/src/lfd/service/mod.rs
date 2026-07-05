@@ -11,23 +11,20 @@ use anyhow::Result;
 
 use crate::lfd::config::{LfdConfig, ServiceManager};
 
+// TODO(M2): when container/postgres mode is cut, keep this native service
+// hygiene: explicit env allowlist and 0600 service files when tokens/secrets
+// ride in the generated unit/plist.
 const SERVICE_ENV_KEYS: &[&str] = &[
     "LFD_HTTP_ADDR",
     "LFD_AUTH_TOKEN",
     "LFD_MODE",
     "LFD_DB_PATH",
     "LFD_DATABASE_URL",
-    "LFD_MAX_SLOTS",
     "LFD_GITHUB_WEBHOOK_SECRET",
     "LFD_GITHUB_TOKEN",
     "LFD_EXECUTOR_CREDENTIALS_ENV",
     "LFD_EXECUTOR_CREDENTIALS_MOUNTS",
     "LFD_EXECUTOR_IMAGE",
-    "LFD_EXECUTOR_AGENT_TIMEOUT",
-    "LFD_EXECUTOR_LIMITS_MEMORY",
-    "LFD_EXECUTOR_LIMITS_MEMORY_SWAP",
-    "LFD_EXECUTOR_LIMITS_CPU_QUOTA",
-    "LFD_EXECUTOR_LIMITS_PIDS_LIMIT",
     "LFD_HTTP_MAX_JSON_BODY_BYTES",
     "LFD_HTTP_MAX_HOOK_BODY_BYTES",
     "LFD_HTTP_MAX_WS_FRAME_BYTES",

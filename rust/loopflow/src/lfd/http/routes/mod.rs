@@ -9,7 +9,6 @@ pub mod runs;
 pub mod session_controls;
 pub mod system;
 pub mod usage;
-pub mod wave_config;
 pub mod waves;
 pub mod worktrees;
 pub mod ws;
@@ -159,7 +158,10 @@ pub async fn build_wave_dto(
         });
     }
 
-    let wave_config = wave_config::read_wave_config(std::path::Path::new(wave.repo()), wave.name());
+    let wave_config = crate::engine::wave_config::read_wave_config(
+        std::path::Path::new(wave.repo()),
+        wave.name(),
+    );
 
     Ok(WaveDto {
         id: wave.id().to_string(),

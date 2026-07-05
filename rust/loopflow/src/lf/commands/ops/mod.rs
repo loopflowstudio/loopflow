@@ -69,6 +69,7 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
             yes,
             no_prune,
         } => sync_skills_cmd(*global, *yes, !*no_prune),
+        OpsCommand::Advance { wave } => advance_cmd(wave.as_deref()),
         OpsCommand::Next {
             create_pr,
             no_rebase,
@@ -298,6 +299,15 @@ fn next_branch_cmd(
         progress,
     )?;
     println!("{}", result.new_branch);
+    Ok(())
+}
+
+fn advance_cmd(wave: Option<&str>) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let wave = crate::ops::util::resolve_wave_name(&repo_root, wave)
+        .ok_or_else(|| anyhow!("cannot determine wave name (pass --wave)"))?;
+    let new_branch = crate::ops::advance_branch(&repo_root, &wave)?;
+    println!("{new_branch}");
     Ok(())
 }
 

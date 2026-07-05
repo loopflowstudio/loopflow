@@ -17,7 +17,6 @@ set_default() {
     fi
 }
 
-set_default "@loopflow_mode" "auto"
 set_default "@loopflow_key_prefix" "l"
 set_default "@loopflow_status_format" "[lf: #{status}]"
 set_default "@loopflow_status_ttl_ms" "2000"

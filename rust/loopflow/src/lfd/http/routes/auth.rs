@@ -143,7 +143,7 @@ pub struct ConfigureCredentialRequest {
 }
 
 /// Store an API key for a provider. To switch back to OAuth, run the normal
-/// OAuth connect flow (`lfq auth <provider>`) which overwrites the token and
+/// OAuth connect flow (`lf op auth <provider>`) which overwrites the token and
 /// resets credential_type to OAuth.
 pub async fn configure_credential_handler(
     State(state): State<HttpState>,

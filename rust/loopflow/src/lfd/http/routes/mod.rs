@@ -6,7 +6,6 @@ pub mod hooks;
 pub mod providers;
 pub mod repos;
 pub mod runs;
-pub mod secrets;
 pub mod session_controls;
 pub mod system;
 pub mod usage;

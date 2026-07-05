@@ -63,7 +63,7 @@ async fn tick_loop_waves(
 
         // One brain per wave: a live WaveAgent session — lfd-launched or a
         // self-registered `lf wave` server — IS the wave's brain; the ticker
-        // must not double-drive it. Same fact `run_wave_handler` checks.
+        // must not double-drive it.
         // The probing form closes ghost rows on the spot (a SIGKILL'd
         // `lf wave` server whose pid is dead), so a crashed brain cannot
         // silently stall the loop until the next lfd boot.

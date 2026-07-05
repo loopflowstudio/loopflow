@@ -340,7 +340,6 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Runs) => loopflow::lf::commands::runs::list(),
             Some(Commands::Trace { run_id }) => loopflow::lf::commands::runs::trace(run_id),
             Some(Commands::Q { cmd }) => loopflow::lf::commands::q::run(cmd),
-            Some(Commands::D { cmd }) => loopflow::lf::commands::d::run(cmd),
             Some(Commands::Chat { text, target }) => {
                 loopflow::lf::commands::chat::run(text, target)
             }
@@ -389,7 +388,6 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Runs)
         | Some(Commands::Trace { .. })
         | Some(Commands::Q { .. })
-        | Some(Commands::D { .. })
         | Some(Commands::Chat { .. })
         | Some(Commands::Memory { .. }) => None,
     }
@@ -405,7 +403,7 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "op", "q", "d", "wave", "loop", "chat", "memory", "usage", "runs", "trace", "help",
+            ":", "op", "q", "wave", "chat", "memory", "usage", "runs", "trace", "help",
         ] {
             assert!(tables.commands.contains(command), "command {command}");
         }

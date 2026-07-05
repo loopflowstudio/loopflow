@@ -310,10 +310,9 @@ lf <step>           Run a step (design, implement, review, etc.)
 lf debug -c         Fix error from clipboard
 lf op pr            Create PR from current branch
 lf op wt create X   Create worktree for feature X
-lfq wave run X      Start (or attach to) wave X's agent
-lfq worker run X --flow build --task "..."   Dispatch a PR-producing worker
-lfq sessions        List live sessions (lfq attach <id> to jump in)
-lfq list            List waves
+lf wave X           Start wave X's server (its resident mind)
+lf q worker run X --flow build --task "..."   Dispatch a PR-producing worker
+lf chat -w X "..."  Post into wave X's thread
 
 ## Core Concepts
 Wave: a named agent with a goal. Authored as wave/<name>/GOAL.md (intent + loop

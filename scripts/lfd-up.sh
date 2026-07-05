@@ -25,17 +25,21 @@ _lf_up_msg() {
     echo "loopflow: $1"
 }
 
+_lf_up_healthy() {
+    curl -fsS --max-time 1 "http://127.0.0.1:${LFD_PORT:-2486}/health" >/dev/null 2>&1
+}
+
 _lf_up_health_gate() {
     local attempts=0 max_attempts=60  # 60 * 250ms = 15s
     while (( attempts < max_attempts )); do
-        if lfq list >/dev/null 2>&1; then
+        if _lf_up_healthy; then
             _lf_up_msg "ready"
             return 0
         fi
         (( attempts++ ))
         sleep 0.25
     done
-    _lf_up_msg "timeout waiting for lfd health -- check: lfq list or lfd status"
+    _lf_up_msg "timeout waiting for lfd health -- check: curl /health or lfd status"
     return 1
 }
 
@@ -60,7 +64,7 @@ main() {
     fi
 
     # Step 3: Start daemon if not running
-    if ! lfq list >/dev/null 2>&1; then
+    if ! _lf_up_healthy; then
         _lf_up_msg "starting lfd..."
         lfd start
     fi

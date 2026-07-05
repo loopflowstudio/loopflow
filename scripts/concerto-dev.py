@@ -354,101 +354,6 @@ def cmd_run() -> int:
     return 0
 
 
-def _list_worktree_paths(repo_root: Path) -> list[Path]:
-    """List worktree paths from `git worktree list --porcelain`."""
-    result = run_capture(["git", "-C", str(repo_root), "worktree", "list", "--porcelain"])
-    if result.returncode != 0:
-        return []
-
-    worktrees: list[Path] = []
-    for line in result.stdout.splitlines():
-        if line.startswith("worktree "):
-            worktrees.append(Path(line.split(" ", 1)[1]))
-    return worktrees
-
-
-def _worktree_wave_name(repo_root: Path, worktree: Path) -> str | None:
-    """Infer the wave name from a sibling worktree path."""
-    try:
-        repo_resolved = repo_root.resolve()
-        worktree_resolved = worktree.resolve()
-    except OSError:
-        return None
-
-    if worktree_resolved == repo_resolved:
-        return None
-    if worktree_resolved.parent != repo_resolved.parent:
-        return None
-
-    prefix = f"{repo_resolved.name}."
-    if not worktree_resolved.name.startswith(prefix):
-        return None
-
-    suffix = worktree_resolved.name[len(prefix) :].strip()
-    return suffix or None
-
-
-def _seed_waves_from_wave_dir(repo: Path = REPO_ROOT) -> None:
-    """Bootstrap paused waves from wave/ and connect matching sibling worktrees."""
-    wave_dir = repo / "wave"
-    if not wave_dir.is_dir():
-        return
-
-    wave_names = sorted(
-        d.name for d in wave_dir.iterdir() if d.is_dir() and not d.name.startswith(".")
-    )
-    if not wave_names:
-        return
-
-    import loopflow.api as loopflow
-
-    try:
-        existing = {w.name: w for w in loopflow.waves(repo=str(repo))}
-    except Exception:
-        print("Warning: could not list waves from lfd, skipping wave seed")
-        return
-
-    worktree_by_wave = {
-        wave_name: path
-        for path in _list_worktree_paths(repo)
-        if (wave_name := _worktree_wave_name(repo, path)) is not None
-    }
-
-    created = 0
-    paused = 0
-    for wave_name in wave_names:
-        matched_worktree = worktree_by_wave.get(wave_name)
-        try:
-            if wave_name not in existing:
-                loopflow.create_wave(
-                    wave_name,
-                    repo=str(repo),
-                    status="paused",
-                )
-                created += 1
-                if matched_worktree is not None:
-                    print(f"  Bootstrapped paused wave: {wave_name} (connected {matched_worktree})")
-                else:
-                    print(f"  Bootstrapped paused wave: {wave_name}")
-                continue
-
-            if existing[wave_name].status != "paused":
-                loopflow.update_wave(wave_name, status="paused")
-                paused += 1
-
-            if matched_worktree is not None:
-                print(f"  Connected roadmap wave: {wave_name} -> {matched_worktree}")
-        except Exception as exc:
-            print(f"  Wave {wave_name}: {exc}")
-
-    if created or paused:
-        print(
-            "Bootstrapped roadmap waves: "
-            f"{created} created, {paused} paused, "
-            f"{len(worktree_by_wave)} sibling worktrees discovered"
-        )
-
-
 def _print_run_debug_checklist() -> None:
     """Print the manual review path for terminal embedding and workspace routing."""
     print("Review checklist:")
@@ -490,9 +395,6 @@ def cmd_run_debug(with_lfd: bool = False, docker_lfd: bool = False, repo: Path =
             if lfd_log is not None:
                 lfd_log.close()
             return 1
-
-    if with_lfd:
-        _seed_waves_from_wave_dir(repo)
 
     print("Building and running Concerto (debug mode with logs)...")
     result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)

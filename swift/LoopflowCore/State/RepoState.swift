@@ -99,13 +99,10 @@ public final class RepoState {
     public let terminalWorkspaceStore = TerminalWorkspaceStore()
     public let multiplexerStore = MultiplexerStore()
     public let authProviderStore = AuthProviderStore()
-    public let secretsProviderStore = SecretsProviderStore()
     private var sessionStates: [String: SessionState] = [:]
     private var waitingSessionIds: [String: String] = [:]
     private var optimisticInteractiveWaveIds: Set<String> = []
     private var autoPresentTerminalWaveIds: Set<String> = []
-    private var roadmapBootstrapRepos: Set<String> = []
-    private var bootstrappingRoadmapRepoPath: String?
 
     public var waves: [WaveViewModel] { waveStore.ordered }
     public var waveGroups: WaveGroups { waveStore.groups }
@@ -222,7 +219,6 @@ public final class RepoState {
 
     // Loading
     public var isLoading: Bool = false
-    public var isBootstrappingRoadmapWaves: Bool = false
     public var errorMessage: String?
 
     // Connection
@@ -252,7 +248,6 @@ public final class RepoState {
             shellCommandRunner: shellCommandRunner
         )
         authProviderStore.bindService(waveService)
-        secretsProviderStore.bindService(waveService)
 
         waveStore.onStatusChange = { [weak self] wave, oldStatus, newStatus in
             self?.handleWaveStatusChange(wave: wave, from: oldStatus, to: newStatus)
@@ -532,7 +527,7 @@ public final class RepoState {
                             self.authProviderStore.handleEvent(authEvent)
                         case .terminalSession(let terminalEvent):
                             await self.handleSessionEvent(terminalEvent)
-                        case .agentStarted, .agentEnded, .worktree, .secrets:
+                        case .agentStarted, .agentEnded, .worktree:
                             break
                         }
                     }
@@ -548,11 +543,6 @@ public final class RepoState {
     }
 
     private func handleWaveEvent(_ event: WaveEvent) async {
-        if let bootstrappingRoadmapRepoPath,
-           currentRepo?.path == bootstrappingRoadmapRepoPath {
-            return
-        }
-
         let currentRepoPath = repoTarget?.path.normalizedFilePath
 
         if let currentRepoPath,
@@ -721,15 +711,8 @@ public final class RepoState {
         }
         LoggingService.model("refreshWaves: starting for repo=\(repo.path)")
         do {
-            var newWaves = try await waveService.listWaves(repo: repo)
+            let newWaves = try await waveService.listWaves(repo: repo)
             LoggingService.model("refreshWaves: got \(newWaves.count) waves")
-            let bootstrapped = await bootstrapRoadmapWavesIfNeeded(repo: repo, existingWaves: newWaves)
-            if bootstrapped {
-                newWaves = try await waveService.listWaves(repo: repo)
-                LoggingService.model("refreshWaves: after bootstrap got \(newWaves.count) waves")
-                await refreshWorktrees()
-                await refreshFlowsAsync()
-            }
             waveStore.setAll(newWaves.map(makeWaveViewModel))
             preloadWaveContent(for: waves)
             await refreshAttention()
@@ -743,61 +726,6 @@ public final class RepoState {
         }
     }
 
-    private func bootstrapRoadmapWavesIfNeeded(
-        repo: RepoTarget,
-        existingWaves: [Wave]
-    ) async -> Bool {
-        guard case .local(let repoURL) = repo else { return false }
-
-        let repoPath = repoURL.path
-        let roadmapWaves = roadmapWaveNames(in: repoURL)
-        guard !roadmapWaves.isEmpty else { return false }
-
-        let existingNames = Set(existingWaves.map(\.name))
-        let missingWaves = roadmapWaves.filter { !existingNames.contains($0) }
-        guard !missingWaves.isEmpty else {
-            roadmapBootstrapRepos.insert(repoPath)
-            return false
-        }
-
-        if roadmapBootstrapRepos.contains(repoPath) {
-            return false
-        }
-
-        LoggingService.model(
-            "bootstrapRoadmapWaves: repo=\(repoPath) creating \(missingWaves.count) waves"
-        )
-
-        bootstrappingRoadmapRepoPath = repoPath
-        isBootstrappingRoadmapWaves = true
-        defer {
-            bootstrappingRoadmapRepoPath = nil
-            isBootstrappingRoadmapWaves = false
-        }
-
-        var created = 0
-        for waveName in missingWaves {
-            do {
-                _ = try await waveService.createWave(
-                    name: waveName,
-                    repo: repo,
-                    flow: "ship-roadmap",
-                    run: false,
-                    status: .paused
-                )
-                created += 1
-            } catch {
-                LoggingService.model(
-                    "bootstrapRoadmapWaves: wave=\(waveName) error=\(error.localizedDescription)"
-                )
-            }
-        }
-
-        if created == missingWaves.count {
-            roadmapBootstrapRepos.insert(repoPath)
-        }
-        return created > 0
-    }
 
     private func roadmapWaveNames(in repoURL: URL) -> [String] {
         let waveRoot = repoURL.appendingPathComponent("wave", isDirectory: true)
@@ -972,89 +900,6 @@ public final class RepoState {
         }
     }
 
-    @discardableResult
-    public func createWave(name: String) async throws -> Wave {
-        try await createWaveInternal(name: name, flow: "ship-roadmap", run: false)
-    }
-
-    @discardableResult
-    public func createAndRunWave(name: String) async throws -> Wave {
-        try await createWaveInternal(name: name, flow: "ship", run: true)
-    }
-
-    @discardableResult
-    private func createWaveInternal(name: String, flow: String, run: Bool) async throws -> Wave {
-        guard let repo = repoTarget else {
-            LoggingService.model("createWave: no repoTarget")
-            throw WaveServiceError.commandFailed("No repository selected")
-        }
-
-        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let waveName = normalizedName.isEmpty ? NameGenerator.generate() : normalizedName
-        LoggingService.model("createWave: name=\(waveName) repo=\(repo.path)")
-
-        let pendingId = "pending-\(UUID().uuidString)"
-        let pending = WaveViewModel(
-            api: Wave(id: pendingId, name: waveName.isEmpty ? "New wave" : waveName, repo: repo.path)
-        )
-        waveStore.insertPending(pending)
-        if run {
-            setOptimisticInteractiveSessionStart(for: pendingId, isStarting: true)
-        } else {
-            selectedWaveId = pendingId
-        }
-
-        do {
-            let wave = try await waveService.createWave(
-                name: waveName,
-                repo: repo,
-                flow: flow,
-                run: run
-            )
-            var createdWave = WaveViewModel(api: wave)
-            if run {
-                createdWave.status = .waiting
-            }
-            waveStore.replacePending(pendingId, with: createdWave)
-            if run {
-                setOptimisticInteractiveSessionStart(for: pendingId, isStarting: false)
-                setOptimisticInteractiveSessionStart(for: wave.id, isStarting: true)
-            }
-            selectedWaveId = wave.id
-            await refreshFlowsAsync()
-            LoggingService.model("createWave: selectedWave=\(wave.id)")
-            return wave
-        } catch {
-            waveStore.removePending(pendingId)
-            setOptimisticInteractiveSessionStart(for: pendingId, isStarting: false)
-            if selectedWaveId == pendingId { selectedWaveId = nil }
-            throw error
-        }
-    }
-
-    public func runWave(
-        wave: WaveViewModel,
-        area: [String]? = nil,
-        direction: [String]? = nil,
-        flow: String? = nil
-    ) async throws {
-        try await optimisticAction(wave.id, mutation: { $0.status = .running }) {
-            let overrides = RunOverrides(area: area, direction: direction, flow: flow)
-            let session = try await self.waveService.ensureWaveAgent(waveId: wave.id, overrides: overrides)
-            self.terminalWorkspaceStore.upsert(session, select: true)
-        }
-    }
-
-    public func ingestAndBuild(wave: WaveViewModel, item: RoadmapItem) async throws {
-        try await optimisticAction(wave.id, mutation: { $0.status = .running }) {
-            let flow = wave.configuredFlow.isEmpty ? "build" : wave.configuredFlow
-            let overrides = RunOverrides(flow: flow, roadmapItem: item.fileName)
-            let session = try await self.waveService.ensureWaveAgent(waveId: wave.id, overrides: overrides)
-            self.terminalWorkspaceStore.upsert(session, select: true)
-        }
-        loadWaveContent(for: wave.id)
-    }
-
     public func updateRoadmapPriority(
         wave: WaveViewModel,
         item: RoadmapItem,
@@ -1101,39 +946,6 @@ public final class RepoState {
         }
     }
 
-    public func restartStep(_ wave: WaveViewModel) async throws {
-        try await optimisticAction(wave.id, mutation: { _ in }) {
-            try await self.waveService.restartStep(wave.id)
-        }
-    }
-
-    public func cloneWave(_ wave: WaveViewModel) async throws -> WaveViewModel {
-        let pendingId = "pending-\(UUID().uuidString)"
-        let pendingWave = Wave(
-            id: pendingId,
-            name: "\(wave.name) (copy)",
-            repo: wave.repo,
-            flow: wave.api.flow,
-            direction: wave.api.direction,
-            area: wave.api.area,
-            triggers: wave.api.triggers
-        )
-        let pending = WaveViewModel(api: pendingWave)
-        waveStore.insertPending(pending)
-        selectedWaveId = pendingId
-
-        do {
-            let cloned = try await waveService.cloneWave(wave.id, name: nil)
-            let viewModel = WaveViewModel(api: cloned)
-            waveStore.replacePending(pendingId, with: viewModel)
-            selectedWaveId = viewModel.id
-            return viewModel
-        } catch {
-            waveStore.removePending(pendingId)
-            if selectedWaveId == pendingId { selectedWaveId = nil }
-            throw error
-        }
-    }
 
     public func deleteWave(_ wave: WaveViewModel) async throws {
         waveStore.applyDelete(wave.id)
@@ -1387,7 +1199,6 @@ public final class RepoState {
             shellCommandRunner: shellCommandRunner
         )
         authProviderStore.bindService(waveService)
-        secretsProviderStore.bindService(waveService)
         outputBuffer?.configureConnection(connection, tokenProvider: { token })
 
         Task {
@@ -1560,10 +1371,6 @@ public final class RepoState {
         for wave in waves {
             loadWaveContent(for: wave.id)
         }
-    }
-
-    public func fileDiff(waveId: String, path: String) async throws -> String {
-        try await waveService.fileDiff(waveId: waveId, path: path)
     }
 
     /// Apply the daemon's initial wave snapshot, scoped to this window's repo.

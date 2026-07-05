@@ -43,30 +43,6 @@ pub async fn create_step_failure_attention(
     Ok(item)
 }
 
-/// Resolve an attention item by ID.
-pub async fn resolve_attention_item(
-    store: &SharedStore,
-    attention_id: &LfdId,
-) -> Result<Option<AttentionItem>, String> {
-    let Some(mut item) = store
-        .get_attention_item(attention_id)
-        .await
-        .map_err(|err| format!("get attention item failed: {err}"))?
-    else {
-        return Ok(None);
-    };
-    if item.status == AttentionStatus::Resolved {
-        return Ok(Some(item));
-    }
-    item.status = AttentionStatus::Resolved;
-    item.resolved_at = Some(OffsetDateTime::now_utc());
-    store
-        .upsert_attention_item(&item)
-        .await
-        .map_err(|err| format!("resolve attention item failed: {err}"))?;
-    Ok(Some(item))
-}
-
 pub async fn mark_attention_viewed(
     store: &SharedStore,
     attention_id: &LfdId,
@@ -267,14 +243,10 @@ pub fn queue_block_attention_item_from_existing(
 mod tests {
     use super::{
         queue_block_attention_item, queue_block_attention_item_from_existing,
-        queue_block_from_attention, resolve_attention_item,
+        queue_block_from_attention,
     };
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{
-        AttentionItem, AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason,
-    };
-    use crate::lfdb::{open_store, SharedStore, StorageConfig};
-    use std::sync::Arc;
+    use crate::lfd::types::{AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason};
     use time::OffsetDateTime;
 
     #[test]
@@ -322,48 +294,5 @@ mod tests {
         assert_eq!(refreshed.status, AttentionStatus::Viewed);
         assert_eq!(refreshed.surfaced_at, existing.surfaced_at);
         assert_eq!(refreshed.viewed_at, existing.viewed_at);
-    }
-
-    async fn test_store() -> SharedStore {
-        let db_path = std::env::temp_dir().join(format!("lfd-attention-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        Arc::new(open_store(&config).await.expect("sqlite store"))
-    }
-
-    #[tokio::test]
-    async fn resolve_attention_item_by_id() {
-        use crate::lfd::types::Wave;
-        let store = test_store().await;
-        let wave_id = LfdId::new();
-        let wave = Wave::new(wave_id.clone(), "test".to_string(), "/tmp/repo".to_string());
-        store.create_wave(&wave).await.unwrap();
-        let item = AttentionItem {
-            id: LfdId::new(),
-            wave_id,
-            run_id: None,
-            kind: AttentionKind::Interactive,
-            status: AttentionStatus::Surfaced,
-            title: "test".to_string(),
-            summary: "test".to_string(),
-            context: serde_json::json!({}),
-            surfaced_at: OffsetDateTime::now_utc(),
-            viewed_at: None,
-            resolved_at: None,
-        };
-        store.upsert_attention_item(&item).await.unwrap();
-
-        let resolved = resolve_attention_item(&store, &item.id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(resolved.status, AttentionStatus::Resolved);
-        assert!(resolved.resolved_at.is_some());
-
-        // Resolving again returns the already-resolved item
-        let again = resolve_attention_item(&store, &item.id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(again.status, AttentionStatus::Resolved);
     }
 }

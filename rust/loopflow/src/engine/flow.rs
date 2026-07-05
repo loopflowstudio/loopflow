@@ -140,55 +140,8 @@ pub struct Goal {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GoalRenderContext {
     pub flows: Vec<String>,
-    pub roadmap: String,
     pub memory: String,
-    pub metrics: Vec<String>,
-    pub in_flight: Vec<InFlightDispatch>,
 }
-
-/// A wave run that is still dispatched — not yet completed, failed, or landed.
-/// Fed into `render_goal` so the loop's read step sees what's already in flight
-/// before picking the next move.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InFlightDispatch {
-    pub task: Option<String>,
-    pub flow: String,
-    pub status: String,
-    pub pr_url: Option<String>,
-    pub pr_state: Option<String>,
-}
-
-const LOOPFLOW_OPERATING_PROMPT: &str = r#"You are the Looping Agent for this Wave — an orchestrator, not an implementer.
-
-A Wave runs one Goal in a loop against a Roadmap (its Asana backlog), driving a
-set of Metrics. Each iteration:
-
-1. Read the roadmap and the current metrics. Pick the next move that most
-   advances the goal.
-2. Capture, then dispatch — never solve substantial work yourself. If the move is
-   a real subproject, first write it to the roadmap as an Asana task, then run
-   `lf q worker run <this-wave> --flow <flow> --task "<task>"`. Small,
-   atomic fixes can dispatch directly. Either way the work runs as its own
-   attachable tmux session — watch it with `lfq sessions`, join one with
-   `lfq attach <id>`; read the result back when it lands.
-3. Re-measure against the goal's metrics. Decide what changed about the next move.
-4. Repeat until the metrics say done, or record a blocker if no safe move remains.
-
-Three powers:
-- Dispatch flows/steps via `lf q worker run` — your default hand; the inner work
-  pipeline you run each iteration.
-- Fan out — when the budget allows and the roadmap holds well-scoped, independent
-  tasks, launch parallel subagents instead of advancing one move at a time: one
-  subagent per task, each running the flow against its specific roadmap task.
-  Spawn a child wave when a task is itself a looping unit of work.
-- Run any `lf` flow on demand — beyond your standing flow.
-
-Operate autonomously. Make the executive call and keep the loop moving; don't
-stall waiting for direction. Keep this transcript about decisions and
-coordination — what you chose, why, what came back.
-
-Don't invent work. If the roadmap is empty or every move is unsafe, record the
-blocker and stop."#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConcreteStep {
@@ -343,46 +296,15 @@ pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let metrics = if ctx.metrics.is_empty() {
-        "No metrics are configured.".to_string()
-    } else {
-        ctx.metrics
-            .iter()
-            .map(|metric| format!("- {metric}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
     let memory = wave_memory_section(&ctx.memory).unwrap_or_else(|| {
         "<lf:wave-memory>\nNo wave memory is recorded.\n</lf:wave-memory>".to_string()
     });
-    let in_flight = if ctx.in_flight.is_empty() {
-        "No work is in flight.".to_string()
-    } else {
-        ctx.in_flight
-            .iter()
-            .map(|dispatch| {
-                let task = dispatch.task.as_deref().unwrap_or("(no task)");
-                let pr = match (&dispatch.pr_state, &dispatch.pr_url) {
-                    (Some(state), Some(url)) => format!(" ({state} {url})"),
-                    (Some(state), None) => format!(" ({state})"),
-                    (None, Some(url)) => format!(" ({url})"),
-                    (None, None) => String::new(),
-                };
-                format!("- [{}] {}: {}{}", dispatch.status, dispatch.flow, task, pr)
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
 
     format!(
-        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n{}\n\n<lf:in-flight>\n{}\n</lf:in-flight>\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n\nMetrics:\n{}\n</lf:goal-context>",
-        LOOPFLOW_OPERATING_PROMPT,
+        "{}\n\n{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n</lf:goal-context>",
         goal.prompt.trim(),
         memory,
-        in_flight,
         flows,
-        ctx.roadmap,
-        metrics
     )
 }
 
@@ -1700,7 +1622,7 @@ mod tests {
     }
 
     #[test]
-    fn render_goal_includes_flow_and_roadmap_context() {
+    fn render_goal_includes_flows_and_memory() {
         let goal = Goal {
             prompt: "Drive the work.".to_string(),
         };
@@ -1708,27 +1630,15 @@ mod tests {
             &goal,
             &GoalRenderContext {
                 flows: vec!["build".to_string(), "qa".to_string()],
-                roadmap: "wave/goals".to_string(),
                 memory: "Last loop found the docs drift.".to_string(),
-                metrics: vec!["tests pass".to_string(), "docs updated".to_string()],
-                in_flight: Vec::new(),
             },
         );
 
         assert!(rendered.contains("Drive the work."));
-        assert!(rendered.contains("<lf:loopflow-operating-prompt>"));
         assert!(rendered.contains("<lf:wave-memory>"));
         assert!(rendered.contains("Last loop found the docs drift."));
-        assert!(rendered.contains("an orchestrator, not an implementer."));
-        assert!(rendered.contains("never solve substantial work yourself"));
-        assert!(rendered.contains("lf q worker run"));
-        assert!(rendered.contains("lfq sessions"));
-        assert!(rendered.contains("lfq attach"));
         assert!(rendered.contains("- build"));
         assert!(rendered.contains("- qa"));
-        assert!(rendered.contains("wave/goals"));
-        assert!(rendered.contains("- tests pass"));
-        assert!(rendered.contains("- docs updated"));
     }
 
     #[test]
@@ -1740,45 +1650,12 @@ mod tests {
             &goal,
             &GoalRenderContext {
                 flows: Vec::new(),
-                roadmap: "wave/goals".to_string(),
                 memory: String::new(),
-                metrics: Vec::new(),
-                in_flight: Vec::new(),
             },
         );
 
         assert!(rendered.contains("<lf:wave-memory>\nNo wave memory is recorded."));
         assert!(rendered.contains("No flows are available."));
-        assert!(rendered.contains("No metrics are configured."));
-        assert!(rendered.contains("<lf:in-flight>\nNo work is in flight."));
-    }
-
-    #[test]
-    fn render_goal_includes_in_flight_dispatches() {
-        let goal = Goal {
-            prompt: "Drive the work.".to_string(),
-        };
-        let rendered = render_goal(
-            &goal,
-            &GoalRenderContext {
-                flows: Vec::new(),
-                roadmap: "wave/goals".to_string(),
-                memory: String::new(),
-                metrics: Vec::new(),
-                in_flight: vec![InFlightDispatch {
-                    task: Some("Add the dispatch endpoint.".to_string()),
-                    flow: "implement".to_string(),
-                    status: "running".to_string(),
-                    pr_url: Some("https://github.com/example/repo/pull/42".to_string()),
-                    pr_state: Some("open".to_string()),
-                }],
-            },
-        );
-
-        assert!(rendered.contains("<lf:in-flight>"));
-        assert!(rendered.contains(
-            "- [running] implement: Add the dispatch endpoint. (open https://github.com/example/repo/pull/42)"
-        ));
     }
 
     #[test]

@@ -18,27 +18,13 @@ python -m pytest test_calc.py    # see the bug
 lf debug -c                       # fix it
 ```
 
-## Query lfd
+## Run a Wave
 
 ```bash
-uv tool install loopflow
-lfq                  # status overview
-lfq list             # list waves
-lfq logs engbot      # tail agent output
-```
-
-## Python API
-
-```bash
-uv pip install loopflow
-```
-
-```python
-import loopflow.api as loopflow
-
-loopflow.waves()
-loopflow.create_wave("engbot", repo=".", flow="build", direction=["clarity"])
-loopflow.run_wave("engbot")
+# author wave/engbot/GOAL.md, then:
+lf wave engbot       # start the wave agent (Ctrl-C to stop)
+tmux ls              # live sessions — the wave agent and its workers
+tmux attach -t <name>  # watch one work
 ```
 
 ---

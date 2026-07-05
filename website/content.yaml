@@ -96,10 +96,10 @@ homepage:
         - "Authentication built in — WorkOS OAuth via Loopflow Studio"
       terminal_lines:
         - type: "command"
-          content: "lfq wave run billing"
+          content: "lf wave billing"
         - type: "output"
           content: "wave agent · reading GOAL.md + MEMORY.md"
         - type: "output"
           content: "dispatch · worker: build \"generate invoices\""
         - type: "output"
-          content: "session billing-w3 · lfq attach billing-w3"
+          content: "session billing-w3 · tmux attach -t billing-w3"

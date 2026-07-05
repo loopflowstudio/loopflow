@@ -23,7 +23,7 @@ lfd install
 lfd serve
 ```
 
-`lfd` writes the local session token to `~/.lf/session-token`. `lfq` and Concerto read it automatically for loopback connections.
+`lfd` writes the local session token to `~/.lf/session-token`. `lf` and Concerto read it automatically for loopback connections.
 
 ### Container
 
@@ -228,26 +228,14 @@ services:
     command: postgres -c log_statement=all
 ```
 
-## Query + manage waves
+## Query waves
 
-Examples below use `$LFD_ADDR`:
+The daemon serves reads to Concerto and `lf`. Examples below use `$LFD_ADDR`:
 
 ```bash
 export LFD_ADDR=http://127.0.0.1:2486
-```
-
-Use `lfq` for CLI workflows and `loopflow` for Python orchestration:
-
-```bash
-lfq list
-lfq logs engbot
-```
-
-```python
-import loopflow.api as loopflow
-
-loopflow.create_wave("engbot", repo=".")
-loopflow.run_wave("engbot")
+curl -s -H "Authorization: Bearer $(cat ~/.lf/session-token)" "$LFD_ADDR/v0/waves"
+curl -s -H "Authorization: Bearer $(cat ~/.lf/session-token)" "$LFD_ADDR/v0/waves/shipper"
 ```
 
 Wave intent lives in `wave/<name>/GOAL.md`:
@@ -263,15 +251,7 @@ metrics:
 Run one loop iteration for this wave.
 ```
 
-Create the wave in lfd:
-
-```bash
-curl -s -X POST "$LFD_ADDR/v0/waves" \
-  -H "Content-Type: application/json" \
-  -d '{"repo":"'"$(pwd)"'","name":"shipper","goal":"ship-roadmap","flow":"build"}'
-
-curl -s "$LFD_ADDR/v0/waves/shipper"
-```
+Run it with `lf wave shipper`.
 
 ## Browse the flow catalog
 
@@ -315,13 +295,12 @@ Cancel the session:
 curl -s -X POST "$LFD_ADDR/v0/sessions/<session_id>/cancel"
 ```
 
-The attach endpoint marks the session attached and returns tmux connection info. `lfq sessions` and `lfq attach <session-id>` wrap these endpoints for day-to-day use.
+The attach endpoint marks the session attached and returns tmux connection info. For day-to-day use, `tmux ls` and `tmux attach -t <name>` go straight to the session.
 
 ## GitHub CI auto-fix
 
 ```bash
 POST /v0/hooks/github
-POST /v0/waves/{wave_id}/check-ci
 ```
 
 Set `github.webhook_secret` or `LFD_GITHUB_WEBHOOK_SECRET` before enabling the webhook. `lfd` verifies `X-Hub-Signature-256` and ignores unsigned requests.

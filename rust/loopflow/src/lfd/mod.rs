@@ -20,7 +20,6 @@ pub mod providers;
 pub mod queue;
 pub mod redaction;
 pub mod scheduler;
-pub mod secrets;
 pub mod security;
 pub mod service;
 pub mod session_token;

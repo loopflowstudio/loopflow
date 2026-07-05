@@ -16,11 +16,10 @@ use time::OffsetDateTime;
 
 #[cfg(test)]
 use crate::engine::flow::ConcreteStep;
-use crate::engine::flow::InFlightDispatch;
 use crate::engine::worktree::remove_worktree;
 use crate::lfd::config::{ExecutorConfig, ExecutorType, GitHubConfig};
 use crate::lfd::events::EventHub;
-use crate::lfd::http::routes::{infer_wave_git_state_for_worktree, is_open_pr_state};
+use crate::lfd::http::routes::infer_wave_git_state_for_worktree;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
@@ -40,12 +39,13 @@ use crate::lfd::types::{
 use crate::lfd::types::{AttentionItem, AttentionKind, AttentionStatus};
 use crate::lfdb::RunTokenUsage;
 use crate::lfdb::SharedStore;
+use crate::ops::advance_branch;
 
 use super::docker::DockerExecutor;
 use super::helpers::{
-    advance_branch, auto_create_pr, build_lf_dispatch_command, build_lf_inline_command,
-    build_lf_step_command, cleanup_run_worktree, is_active_run_status, is_ephemeral_worktree_path,
-    launch_session_in_tmux, tmux_exit_file, worker_dispatch_task, TMUX_EXIT_TAIL,
+    auto_create_pr, build_lf_dispatch_command, build_lf_inline_command, build_lf_step_command,
+    cleanup_run_worktree, is_active_run_status, is_ephemeral_worktree_path, launch_session_in_tmux,
+    tmux_exit_file, worker_dispatch_task, TMUX_EXIT_TAIL,
 };
 use super::local::LocalProcessExecutor;
 use super::{AgentExecutor, JanitorReport, StartupRecovery};
@@ -80,9 +80,6 @@ impl Drop for GitStatePollerTask {
 }
 
 fn tmux_available() -> bool {
-    if std::env::var_os("LFD_DISABLE_TMUX").is_some() {
-        return false;
-    }
     std::process::Command::new("tmux")
         .arg("-V")
         .output()
@@ -138,32 +135,30 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
         .filter(|branch| !branch.is_empty())
 }
 
-fn build_run_command(
-    wave: &Wave,
-    run: &Run,
-    in_flight: Vec<InFlightDispatch>,
-) -> Result<(Vec<String>, String)> {
+fn build_run_command(wave: &Wave, run: &Run) -> Result<(Vec<String>, String)> {
     if let Some(task) = run.task.as_ref() {
         // Every dispatched worker's prompt closes the reporting loop through
         // the one door every process has — exec: it finishes by posting an
-        // `lf chat` report into the wave's thread. Decorating here covers the
-        // HTTP worker route and every other lfd-side dispatch; `lf q worker
-        // run` applies the same decoration at its own command build.
+        // `lf chat` report into the wave's thread. Decorating here covers
+        // every lfd-side dispatch; `lf q worker run` applies the same
+        // decoration at its own command build.
         let task = worker_dispatch_task(task);
         let cmd =
             build_lf_dispatch_command(&run.flow, &task, &run.direction, &run.area, wave.name());
         return Ok((cmd, format!("dispatch:{}", run.flow)));
     }
 
-    build_wave_agent_command(wave, &run.worktree, &run.direction, &run.area, in_flight)
+    build_wave_agent_command(wave, &run.worktree, &run.direction, &run.area)
 }
 
+/// Goal seed for a trigger-activated (task-less) run. Still alive only
+/// because the trigger organs are: they die in the collapse's organ cut,
+/// and this goes with them.
 fn build_wave_agent_command(
     wave: &Wave,
     worktree: &str,
     direction: &[String],
     area: &[String],
-    in_flight: Vec<InFlightDispatch>,
 ) -> Result<(Vec<String>, String)> {
     let repo = Path::new(worktree);
     let goal = crate::engine::load_goal(wave.goal(), repo)?;
@@ -172,40 +167,11 @@ fn build_wave_agent_command(
         &goal,
         &crate::engine::GoalRenderContext {
             flows: crate::engine::available_flow_names(repo),
-            roadmap: format!("wave/{}", wave.name()),
             memory,
-            metrics: wave.metrics().clone(),
-            in_flight,
         },
     );
     let cmd = build_lf_inline_command(&prompt, true, direction, area, wave.name());
     Ok((cmd, format!("goal:{}", wave.goal())))
-}
-
-/// Runs that are still dispatched — active status or an open PR — excluding
-/// `exclude_run_id` (the run about to launch, which isn't in flight yet).
-async fn list_in_flight_dispatches(
-    store: &SharedStore,
-    wave_id: &LfdId,
-    exclude_run_id: Option<&LfdId>,
-) -> Result<Vec<InFlightDispatch>> {
-    let runs = store.list_runs(Some(wave_id), None).await?;
-    let in_flight = runs
-        .into_iter()
-        .filter(|run| exclude_run_id != Some(&run.id))
-        .filter(|run| {
-            is_active_run_status(run.status)
-                || is_open_pr_state(run.pr.as_ref().and_then(|pr| pr.state.as_deref()))
-        })
-        .map(|run| InFlightDispatch {
-            task: run.task.clone(),
-            flow: run.flow.clone(),
-            status: format!("{:?}", run.status).to_lowercase(),
-            pr_url: run.pr.as_ref().map(|pr| pr.url.clone()),
-            pr_state: run.pr.as_ref().and_then(|pr| pr.state.clone()),
-        })
-        .collect();
-    Ok(in_flight)
 }
 
 fn read_wave_memory(repo: &Path, wave_name: &str) -> Result<String> {
@@ -400,67 +366,6 @@ impl WaveExecutor {
         Ok(running)
     }
 
-    pub async fn launch_wave_agent_session(&self, wave_id: &LfdId) -> Result<Session> {
-        let wave = self
-            .store
-            .get_wave(wave_id)
-            .await?
-            .ok_or_else(|| anyhow!("wave not found"))?;
-        self.ensure_wave_workspace(&wave).await?;
-
-        let worktree = crate::engine::worktrees::worktree_path(Path::new(wave.repo()), wave.name());
-        let worktree = worktree.display().to_string();
-        let session_id = LfdId::new();
-        let in_flight = list_in_flight_dispatches(&self.store, wave.id(), None).await?;
-        let (cmd, terminal_step) =
-            build_wave_agent_command(&wave, &worktree, wave.direction(), wave.area(), in_flight)?;
-        let branch = infer_branch_name(&worktree)
-            .unwrap_or_else(|| format!("{}-{}", wave.name(), session_id));
-        let tmux_managed = !self.disable_tmux && tmux_available();
-        let session = Session {
-            id: session_id.clone(),
-            wave_id: wave.id().clone(),
-            run_id: None,
-            parent_session_id: None,
-            session_use: SessionUse::WaveAgent,
-            step: terminal_step,
-            agent: "lf".to_string(),
-            cwd: worktree,
-            argv: cmd,
-            env: BTreeMap::from([
-                ("LFD_WAVE_ID".to_string(), wave.id().to_string()),
-                ("LFD_SESSION_ID".to_string(), session_id.to_string()),
-                (
-                    "LFD_AGENT_ROLE".to_string(),
-                    SessionUse::WaveAgent.as_str().to_string(),
-                ),
-            ]),
-            source: if tmux_managed {
-                TMUX_TERMINAL_SOURCE.to_string()
-            } else {
-                "wave_agent".to_string()
-            },
-            tmux_name: tmux_session_name(&format!("{branch}-{}", session_id.as_str())),
-            status: SessionStatus::Pending,
-            attached_at: None,
-            started_at: None,
-            completed_at: None,
-            created_at: OffsetDateTime::now_utc(),
-            completion_token: (!tmux_managed).then(|| session_id.to_string()),
-        };
-        self.store.create_control_session(&session).await?;
-        self.event_hub.send(Event::session_created(session.clone()));
-
-        if tmux_managed {
-            let running = self.launch_tmux_session(session).await?;
-            self.spawn_session_completion_watcher(running.clone());
-            Ok(running)
-        } else {
-            self.spawn_process_session(session.clone());
-            Ok(session)
-        }
-    }
-
     pub async fn reconcile_sessions(&self) -> Result<u32> {
         let active = self
             .store
@@ -597,8 +502,7 @@ impl WaveExecutor {
             .ok_or_else(|| anyhow!("wave not found"))?;
         let session_id = LfdId::new();
         let mut env = flow_step_env(wave.id(), &run.id, Some(&session_id));
-        let in_flight = list_in_flight_dispatches(&self.store, &run.wave_id, Some(&run.id)).await?;
-        let (cmd, terminal_step) = build_run_command(&wave, &run, in_flight)?;
+        let (cmd, terminal_step) = build_run_command(&wave, &run)?;
         let session_use = if run.task.is_some() {
             SessionUse::Worker
         } else {
@@ -1078,46 +982,6 @@ impl WaveExecutor {
         });
     }
 
-    fn spawn_session_completion_watcher(&self, session: Session) {
-        let executor = self.clone();
-        tokio::spawn(async move {
-            if let Err(err) = executor.wait_for_tmux_session_exit(&session).await {
-                warn!(session_id = %session.id, error = %err, "terminal completion watcher failed");
-            }
-        });
-    }
-
-    fn spawn_process_session(&self, session: Session) {
-        let executor = self.clone();
-        tokio::spawn(async move {
-            if let Err(err) = executor.run_process_session(session.clone()).await {
-                warn!(session_id = %session.id, error = %err, "process terminal session failed");
-                let _ = executor.complete_session(&session.id, 1).await;
-            }
-        });
-    }
-
-    async fn run_process_session(&self, session: Session) -> Result<()> {
-        let mut running = session.clone();
-        let _ = running.start();
-        self.store.update_control_session(&running).await?;
-        self.event_hub.send(Event::session_updated(running.clone()));
-
-        let mut argv = running.argv.iter();
-        let program = argv
-            .next()
-            .ok_or_else(|| anyhow!("terminal session command is empty"))?;
-        let status = Command::new(program)
-            .args(argv)
-            .current_dir(&running.cwd)
-            .envs(&running.env)
-            .status()
-            .await?;
-        self.complete_session(&running.id, status.code().unwrap_or(1))
-            .await?;
-        Ok(())
-    }
-
     async fn wait_for_palette_session_completion(&self, session: &Session) -> Result<i32> {
         let exit_file = tmux_exit_file(Path::new(&session.cwd), &session.id);
         loop {
@@ -1410,7 +1274,7 @@ pub(crate) fn classify_repair_flow(failed_run: &Run) -> String {
 mod tests {
     use super::*;
     use crate::engine::flow::Step;
-    use crate::lfd::types::{PullRequest, RepoWork, Signal, Trigger};
+    use crate::lfd::types::{RepoWork, Signal, Trigger};
     use crate::lfdb::{open_store, StorageConfig};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
@@ -1709,7 +1573,6 @@ mod tests {
         let prompt = cmd.last().expect("inline prompt should be last arg");
         assert!(prompt.contains("Execute the custom goal body."));
         assert!(prompt.contains("- custom"));
-        assert!(prompt.contains("wave/goal-wave"));
     }
 
     #[tokio::test]
@@ -2281,45 +2144,13 @@ mod tests {
         let mut run = Run::new(LfdId::new(), wave.id().clone());
         run.worktree = repo.path().to_string_lossy().to_string();
 
-        let (cmd, terminal_step) =
-            build_run_command(&wave, &run, Vec::new()).expect("build wave command");
+        let (cmd, terminal_step) = build_run_command(&wave, &run).expect("build wave command");
         let rendered = cmd.join("\n");
 
         assert_eq!(terminal_step, "goal:memory-wave");
         assert!(rendered.contains("Drive the memory wave."));
         assert!(rendered.contains("<lf:wave-memory>"));
         assert!(rendered.contains("Last loop found the roadmap gap."));
-        assert!(rendered.contains("<lf:in-flight>\nNo work is in flight."));
-    }
-
-    #[test]
-    fn build_run_command_includes_in_flight_dispatches() {
-        let repo = tempdir().expect("tempdir");
-        let wave_dir = repo.path().join("wave").join("memory-wave");
-        std::fs::create_dir_all(&wave_dir).expect("create wave dir");
-        std::fs::write(wave_dir.join("GOAL.md"), "Drive the memory wave.\n").expect("write goal");
-
-        let mut wave = make_wave("memory-wave", repo.path(), "build", WaveStatus::Running);
-        wave.goal = "memory-wave".to_string();
-        let mut run = Run::new(LfdId::new(), wave.id().clone());
-        run.worktree = repo.path().to_string_lossy().to_string();
-
-        let in_flight = vec![InFlightDispatch {
-            task: Some("Add the dispatch endpoint.".to_string()),
-            flow: "implement".to_string(),
-            status: "running".to_string(),
-            pr_url: Some("https://github.com/example/repo/pull/7".to_string()),
-            pr_state: Some("open".to_string()),
-        }];
-
-        let (cmd, _terminal_step) =
-            build_run_command(&wave, &run, in_flight).expect("build wave command");
-        let rendered = cmd.join("\n");
-
-        assert!(rendered.contains("<lf:in-flight>"));
-        assert!(rendered.contains(
-            "- [running] implement: Add the dispatch endpoint. (open https://github.com/example/repo/pull/7)"
-        ));
     }
 
     #[test]
@@ -2331,8 +2162,7 @@ mod tests {
         run.flow = "implement".to_string();
         run.task = Some("Add the dispatch endpoint.".to_string());
 
-        let (cmd, terminal_step) =
-            build_run_command(&wave, &run, Vec::new()).expect("build dispatch command");
+        let (cmd, terminal_step) = build_run_command(&wave, &run).expect("build dispatch command");
 
         assert_eq!(terminal_step, "dispatch:implement");
         assert!(cmd.contains(&"implement:".to_string()));
@@ -2398,7 +2228,7 @@ mod tests {
         let mut run = Run::new(LfdId::new(), wave.id().clone());
         run.worktree = repo.path().to_string_lossy().to_string();
 
-        let err = build_run_command(&wave, &run, Vec::new()).expect_err("memory read should fail");
+        let err = build_run_command(&wave, &run).expect_err("memory read should fail");
         assert!(err.to_string().contains("failed to read wave memory"));
     }
 
@@ -2442,65 +2272,5 @@ mod tests {
         // Verify persisted
         let loaded = store.get_run(&repair.id).await.unwrap().unwrap();
         assert_eq!(loaded.repair_of.unwrap(), failed_run.id);
-    }
-
-    #[tokio::test]
-    async fn list_in_flight_dispatches_includes_active_and_open_pr_runs_only() {
-        let tmp = tempdir().expect("tempdir");
-        let db_path = tmp.path().join("test.db");
-        let store: SharedStore = Arc::new(
-            open_store(&StorageConfig::sqlite(db_path))
-                .await
-                .expect("store should open"),
-        );
-        let repo = TestRepo::new();
-        let wave = make_wave("in-flight-wave", repo.path(), "build", WaveStatus::Running);
-        store.create_wave(&wave).await.unwrap();
-
-        // The run about to launch — excluded from its own in-flight list.
-        let launching_run = create_main_run(&store, &wave, RunStatus::Pending).await;
-
-        // Still running — included regardless of PR state.
-        let mut running_run = create_main_run(&store, &wave, RunStatus::Running).await;
-        running_run.task = Some("Fix the flaky test.".to_string());
-        store.update_run(&running_run).await.unwrap();
-
-        // Completed, but the PR is still open — included.
-        let mut completed_open_pr = create_main_run(&store, &wave, RunStatus::Completed).await;
-        completed_open_pr.pr = Some(PullRequest {
-            url: "https://github.com/example/repo/pull/1".to_string(),
-            number: Some(1),
-            state: Some("open".to_string()),
-            title: None,
-            branch: Some("feature".to_string()),
-        });
-        store.update_run(&completed_open_pr).await.unwrap();
-
-        // Completed with a merged PR — excluded.
-        let mut completed_merged_pr = create_main_run(&store, &wave, RunStatus::Completed).await;
-        completed_merged_pr.pr = Some(PullRequest {
-            url: "https://github.com/example/repo/pull/2".to_string(),
-            number: Some(2),
-            state: Some("merged".to_string()),
-            title: None,
-            branch: Some("feature-2".to_string()),
-        });
-        store.update_run(&completed_merged_pr).await.unwrap();
-
-        // Completed with no PR at all — excluded.
-        let _completed_no_pr = create_main_run(&store, &wave, RunStatus::Completed).await;
-
-        let in_flight = list_in_flight_dispatches(&store, wave.id(), Some(&launching_run.id))
-            .await
-            .expect("list in-flight dispatches");
-
-        assert_eq!(in_flight.len(), 2);
-        assert!(in_flight
-            .iter()
-            .any(|dispatch| dispatch.task.as_deref() == Some("Fix the flaky test.")));
-        assert!(in_flight
-            .iter()
-            .any(|dispatch| dispatch.pr_url.as_deref()
-                == Some("https://github.com/example/repo/pull/1")));
     }
 }

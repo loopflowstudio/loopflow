@@ -18,7 +18,7 @@ alias lfdhost="ssh $LFD_SSH_USER@$LFD_HOST"
 | Client URL | `http://<tailscale-host-or-ip>:2486` |
 | Auth | `Authorization: Bearer $LFD_AUTH_TOKEN` |
 
-Use HTTP over Tailscale for the first cut. Tailscale provides the encrypted private network; `lfd` still requires the bearer token for non-loopback requests. This avoids Caddy internal-CA setup blocking `lfq`, Concerto, Codex, or Claude-driven sessions. Caddy/TLS can remain available for public or polished remote access later.
+Use HTTP over Tailscale for the first cut. Tailscale provides the encrypted private network; `lfd` still requires the bearer token for non-loopback requests. This avoids Caddy internal-CA setup blocking Concerto, Codex, or Claude-driven sessions. Caddy/TLS can remain available for public or polished remote access later.
 
 ## Bring the host online
 
@@ -67,7 +67,7 @@ After `LFD_AUTH_TOKEN` exists on the host, run locally:
 ```bash
 deploy/setup-private-client.sh --host "$LFD_HOST" --ssh-user "$LFD_SSH_USER" --token "$LFD_AUTH_TOKEN"
 source ~/.lf/private-host.env
-lfq list
+curl -H "Authorization: Bearer $LFD_TOKEN" "$LFD_URL/v0/waves"
 ```
 
 The setup script writes:
@@ -83,9 +83,9 @@ Open Concerto after running the script. It should connect to the host remote `lf
 Use the host as the execution host. Local clients only send control traffic.
 
 ```bash
-source ~/.lf/private-host.env
-lfq create root /Users/jack/src/loopflow
-lfq show root
+lfdhost
+mkdir -p ~/src/loopflow/wave/root
+echo "Drive this repo's roadmap." > ~/src/loopflow/wave/root/GOAL.md
 ```
 
 Concerto remote repo actions use the repo paths on the host. Remote terminal and IDE launches use SSH:
@@ -104,8 +104,8 @@ Claude and Codex sessions run inside `lfd` executor containers when waves or ses
 source ~/.lf/private-host.env
 curl -f "$LFD_URL/health"
 curl -H "Authorization: Bearer $LFD_TOKEN" "$LFD_URL/status"
-lfq list
-uv run python scripts/test_remote_smoke.py --url "$LFD_URL" --token "$LFD_TOKEN" --repo /Users/jack/src/loopflow --insecure
+curl -H "Authorization: Bearer $LFD_TOKEN" "$LFD_URL/v0/waves"
+uv run python scripts/test_remote_smoke.py --url "$LFD_URL" --token "$LFD_TOKEN" --insecure
 ```
 
 `--insecure` is only for smoke scripts against a trusted Tailscale/private endpoint when TLS is involved. Plain Tailscale HTTP does not need it.
@@ -128,6 +128,6 @@ From this Mac:
 
 ```bash
 source ~/.lf/private-host.env
-lfq list
+curl -H "Authorization: Bearer $LFD_TOKEN" "$LFD_URL/v0/waves"
 ssh "$LFD_SSH_USER@$LFD_HOST" 'cd ~/src/loopflow && deploy/native-lfd-host.sh status'
 ```

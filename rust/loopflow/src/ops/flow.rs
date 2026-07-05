@@ -115,6 +115,13 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             )?;
             Ok(())
         }
+        OpsCommand::Advance { wave } => {
+            let wave = crate::ops::util::resolve_wave_name(repo, wave.as_deref())
+                .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
+            let branch = crate::ops::advance_branch(repo, &wave)?;
+            progress.status(&format!("Advanced to branch: {branch}"));
+            Ok(())
+        }
         OpsCommand::Next {
             create_pr,
             no_rebase,

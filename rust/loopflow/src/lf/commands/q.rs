@@ -28,7 +28,7 @@ use time::OffsetDateTime;
 
 use crate::lf::{QCommand, WorkerCommand};
 use crate::lfd::executor::helpers::{
-    build_lf_dispatch_command, launch_session_in_tmux, worker_dispatch_task, TMUX_EXIT_TAIL,
+    build_lf_dispatch_command, launch_session_in_tmux, worker_dispatch_task, worker_exit_tail,
 };
 use crate::lfd::executor::{create_run_for_placement, Placement};
 use crate::lfd::id::LfdId;
@@ -47,12 +47,20 @@ pub fn run(cmd: &QCommand) -> Result<()> {
                     task,
                     pool,
                     stack,
+                    no_pr,
                 },
-        } => worker_run(wave, flow, task, *pool, stack.as_deref()),
+        } => worker_run(wave, flow, task, *pool, stack.as_deref(), *no_pr),
     }
 }
 
-fn worker_run(wave: &str, flow: &str, task: &str, pool: bool, stack: Option<&str>) -> Result<()> {
+fn worker_run(
+    wave: &str,
+    flow: &str,
+    task: &str,
+    pool: bool,
+    stack: Option<&str>,
+    no_pr: bool,
+) -> Result<()> {
     let placement = match (pool, stack) {
         (true, _) => Placement::Pool,
         (false, Some(run_id)) => Placement::Stack {
@@ -73,7 +81,7 @@ fn worker_run(wave: &str, flow: &str, task: &str, pool: bool, stack: Option<&str
             anyhow!("no run registry on this machine — nothing has created ~/.lf/lfd.db yet")
         })?);
         let dispatched = dispatch(&store, wave, flow, task, placement, parent_session_id).await?;
-        launch_worker_tmux(&store, dispatched.session.clone()).await?;
+        launch_worker_tmux(&store, dispatched.session.clone(), no_pr).await?;
         println!("dispatched {flow} worker for wave '{wave}'");
         println!("  run       {}", dispatched.run.id);
         println!("  session   {}", dispatched.session.id);
@@ -93,22 +101,8 @@ pub(crate) struct Dispatch {
 
 /// Write the dispatch into the registry: resolve placement into a worktree +
 /// branch, create the Run row, then the worker's Session row carrying the
-/// env contract. No process is spawned here.
-///
-/// DIVERGENCE — two dispatch worlds still exist (the other is lfd's
-/// `POST /waves/{id}/worker`, `launch_worker_run` in http/routes/waves.rs):
-///
-///   `lf q worker run` (here)          | HTTP worker route (lfd)
-///   ----------------------------------|----------------------------------
-///   no scheduler slot                 | scheduler.acquire_guard
-///   worker completes its own row      | executor watcher / completion_token
-///   no lfd events                     | Event::session_created/updated
-///
-/// Both decorate the task via `helpers::worker_dispatch_task` and launch
-/// through `helpers::launch_session_in_tmux`, so workers behave identically
-/// where it matters. Full convergence — the route exec'ing `lf q`, or one
-/// shared dispatch core behind both doors — is the architecture wave's hard
-/// cut, not this branch's.
+/// env contract. No process is spawned here. This is the one worker dispatch
+/// door — the lfd HTTP worker route died with the collapse.
 pub(crate) async fn dispatch(
     store: &SharedStore,
     wave_name: &str,
@@ -217,10 +211,12 @@ pub(crate) async fn dispatch(
 /// Launch the worker in a detached tmux session through the shared wrapper
 /// (`helpers::launch_session_in_tmux` — one authoring site for the exit-file
 /// contract and the inherited-marker unset, byte-identical to the lfd
-/// executor's launches).
-async fn launch_worker_tmux(store: &SharedStore, session: Session) -> Result<()> {
+/// executor's launches). The tail carries the auto-PR guarantee: on clean
+/// flow exit the wrapper runs `lf op pr` itself unless `--no-pr` was passed
+/// at dispatch.
+async fn launch_worker_tmux(store: &SharedStore, session: Session, no_pr: bool) -> Result<()> {
     let mut session = session;
-    match launch_session_in_tmux(&session, TMUX_EXIT_TAIL).await {
+    match launch_session_in_tmux(&session, &worker_exit_tail(no_pr)).await {
         Ok(()) => {
             session.start();
             store.update_control_session(&session).await?;
@@ -413,12 +409,24 @@ mod tests {
         .await
         .expect("dispatch");
 
-        let wrapper = tmux_shell_command(&dispatched.session, TMUX_EXIT_TAIL);
+        let wrapper = tmux_shell_command(&dispatched.session, &worker_exit_tail(false));
         assert!(
             wrapper.starts_with("unset LFD_SESSION_INHERITED; "),
             "worker wrapper must clear the marker the tmux server inherits: {wrapper}"
         );
         assert!(wrapper.contains(&format!("LFD_SESSION_ID='{}' ", dispatched.session.id)));
+        // The dispatcher's auto-PR guarantee rides the wrapper, not the prompt.
+        assert!(
+            wrapper.contains(r#"if [ "$EXIT_CODE" -eq 0 ]; then "#)
+                && wrapper.contains(" op pr; fi; "),
+            "clean exits run lf op pr: {wrapper}"
+        );
+        // --no-pr strips it.
+        let wrapper = tmux_shell_command(&dispatched.session, &worker_exit_tail(true));
+        assert!(
+            !wrapper.contains(" op pr"),
+            "--no-pr removes the PR step: {wrapper}"
+        );
     }
 
     #[tokio::test]

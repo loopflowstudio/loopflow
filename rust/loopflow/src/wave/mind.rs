@@ -234,10 +234,7 @@ fn build_goal_seed(repo: &Path, wave: &str, memory: &Memory) -> String {
         Ok(goal) => {
             let ctx = GoalRenderContext {
                 flows: available_flow_names(repo),
-                roadmap: String::new(),
                 memory: memory.read(),
-                metrics: Vec::new(),
-                in_flight: Vec::new(),
             };
             render_goal(&goal, &ctx)
         }

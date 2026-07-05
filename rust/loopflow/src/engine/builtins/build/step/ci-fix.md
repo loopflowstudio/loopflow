@@ -14,20 +14,7 @@ Find the wave's current PR, identify the latest failing checks on its head commi
 
 1. **Resolve the PR for this wave**
    - If the prompt message already includes check metadata (PR number, branch, commit SHA, logs URL), use it directly.
-   - Otherwise, identify the wave from the current worktree, then get its PR number.
-   - Prefer loopflow metadata first:
-     ```bash
-     cwd=$(pwd -P)
-     lfq list --json | jq -r --arg cwd "$cwd" '
-       .[] as $wave
-       | $wave.repos[]
-       | .worktree = (.active_run.local_worktree // .local_worktree // "")
-       | select(.worktree != "" and ($cwd | startswith(.worktree)))
-       | [$wave.name, (.active_run.pr.number // .pr.number // ""), .worktree]
-       | @tsv
-     ' | sort -k3 | tail -1
-     ```
-   - If wave metadata is unavailable, fall back to GitHub CLI for the current branch:
+   - Otherwise, resolve the PR for the current branch with the GitHub CLI:
      ```bash
      gh pr view --json number,headRefName,headRefOid,url
      ```

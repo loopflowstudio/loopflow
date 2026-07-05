@@ -103,10 +103,7 @@ pub fn router(state: HttpState) -> Router {
             "/sessions/{id}/cancel",
             post(session_controls::cancel_session_handler),
         )
-        .route(
-            "/attention",
-            get(attention::list_attention_handler).post(attention::create_attention_handler),
-        )
+        .route("/attention", get(attention::list_attention_handler))
         .route(
             "/attention/history",
             get(attention::list_attention_history_handler),
@@ -115,14 +112,7 @@ pub fn router(state: HttpState) -> Router {
             "/attention/{attention_id}",
             get(attention::get_attention_handler).patch(attention::patch_attention_handler),
         )
-        .route(
-            "/attention/{attention_id}/resolve",
-            post(attention::resolve_attention_handler),
-        )
-        .route(
-            "/waves",
-            get(waves::list_waves_handler).post(waves::create_wave_handler),
-        )
+        .route("/waves", get(waves::list_waves_handler))
         .route(
             "/waves/{wave_id}",
             get(waves::get_wave_handler)
@@ -133,12 +123,10 @@ pub fn router(state: HttpState) -> Router {
             "/waves/{wave_id}/diff",
             get(waves::get_wave_file_diff_handler),
         )
-        .route("/waves/{wave_id}/run", post(waves::run_wave_handler))
         .route(
             "/waves/{wave_id}/agent-tree",
             get(waves::get_wave_agent_tree_handler),
         )
-        .route("/waves/{wave_id}/workers", post(waves::run_worker_handler))
         .route(
             "/waves/{wave_id}/triggers",
             post(waves::add_trigger_handler),
@@ -160,16 +148,8 @@ pub fn router(state: HttpState) -> Router {
             get(waves::list_activations_handler),
         )
         .route("/waves/{wave_id}/stop", post(waves::stop_wave_handler))
-        .route(
-            "/waves/{wave_id}/restart-step",
-            post(waves::restart_step_handler),
-        )
         .route("/waves/{wave_id}/land", post(waves::land_wave_handler))
         .route("/waves/{wave_id}/next", post(waves::next_wave_handler))
-        .route(
-            "/waves/{wave_id}/check-ci",
-            post(waves::check_wave_ci_handler),
-        )
         .route(
             "/waves/{wave_id}/combine",
             post(waves::combine_wave_handler),

@@ -85,7 +85,7 @@ pub async fn create_run_for_placement(
         .expect("wave always has at least one RepoWork");
     let main_repo = Path::new(&repo_work.repo);
 
-    // Targeted activations (non-main branch, e.g. CI fixes on a PR branch)
+    // Dispatches targeting a non-main branch (e.g. a fix on a PR branch)
     // always get their own worktree tracking that branch, since the wave's
     // shared worktree is on a different branch.
     let is_targeted = target_branch
@@ -221,8 +221,8 @@ fn unique_wave_branch(main_repo: &Path, wave_name: &str) -> anyhow::Result<Strin
 /// branch — independent PR, independent land.
 ///
 /// When `target_branch` is `Some` and not `"main"`, the worktree instead
-/// tracks that branch directly (e.g. a PR branch for CI-fix activations).
-pub fn create_run_worktree(
+/// tracks that branch directly (e.g. a fix dispatched onto a PR branch).
+pub(crate) fn create_run_worktree(
     main_repo: &Path,
     wave_name: &str,
     run_id: &str,
@@ -234,7 +234,7 @@ pub fn create_run_worktree(
         .map(|b| !b.is_empty() && b != "main")
         .unwrap_or(false);
     if is_targeted {
-        // Targeted activation: track the specified branch directly through a
+        // Targeted dispatch: track the specified branch directly through a
         // run-local branch, so git push from the worktree lands on it.
         let tb = target_branch.expect("checked above");
         fetch(main_repo, "origin", tb)?;
@@ -274,7 +274,7 @@ pub fn create_run_worktree(
 ///
 /// Stack placement: the new branch starts at the parent run's branch tip
 /// (remote tip when available), so dependent work builds on unlanded work.
-pub fn create_stacked_run_worktree(
+pub(crate) fn create_stacked_run_worktree(
     main_repo: &Path,
     wave_name: &str,
     run_id: &str,

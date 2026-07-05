@@ -3,9 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use time::OffsetDateTime;
 
 use crate::lfd::queue::QueueRunView;
-use crate::lfd::types::{
-    AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState, Run, RunStatus, Session,
-};
+use crate::lfd::types::{AttentionItem, LivePullRequestState, Run, RunStatus, Session};
 use crate::lfdb::TokenUsageReport;
 
 #[derive(Debug, Serialize)]
@@ -307,40 +305,8 @@ pub struct WaveAgentTreeDto {
 }
 
 #[derive(Debug, Serialize)]
-pub struct ChatMemoryBlockDto {
-    pub object: String,
-    pub name: String,
-    pub content: String,
-    pub position: u32,
-    pub updated_at: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ChatStartedDto {
-    pub object: String,
-    pub wave_id: String,
-    pub status: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ChatMessageDto {
-    pub id: String,
-    pub object: String,
-    pub role: String,
-    pub content: String,
-    pub created_at: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
 pub struct StopWaveResponse {
     pub stopped: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ContinueWaveResponse {
-    pub continued: bool,
-    pub wave_id: String,
-    pub run_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -422,26 +388,6 @@ pub fn run_dto(
         queue_blocked_at: format_datetime(queue_view.and_then(|value| value.blocked_at)),
         next_action: queue_view.map(|value| value.next_action.as_str().to_string()),
         created_at: format_datetime(run.started_at),
-    }
-}
-
-pub fn chat_memory_block_dto(block: ChatMemoryBlock) -> ChatMemoryBlockDto {
-    ChatMemoryBlockDto {
-        object: "memory_block".to_string(),
-        name: block.name,
-        content: block.content,
-        position: block.position,
-        updated_at: format_datetime(block.updated_at),
-    }
-}
-
-pub fn chat_message_dto(message: ChatMessage) -> ChatMessageDto {
-    ChatMessageDto {
-        id: message.id.to_string(),
-        object: "chat_message".to_string(),
-        role: message.role,
-        content: message.content,
-        created_at: format_datetime(Some(message.created_at)),
     }
 }
 

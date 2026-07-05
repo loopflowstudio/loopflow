@@ -17,17 +17,10 @@ use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, run_live_pr_key, LivePrSnapshot};
 use crate::lfd::types::{
-    AttentionStatus, Event, LivePrState, LivePullRequestState, QueueBlock, QueueBlockReason,
-    QueueMergeEvent, Run, RunStackStatus,
+    AttentionStatus, Event, LivePrState, LivePullRequestState, QueueBlock, QueueBlockReason, Run,
+    RunStackStatus,
 };
 use crate::lfdb::SharedStore;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QueueTrigger {
-    RunCompleted,
-    WebhookMerged,
-    Poll,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueRole {
@@ -175,34 +168,6 @@ impl QueueOps for RealQueueOps {
     }
 }
 
-pub async fn reconcile_wave_queue(
-    store: &SharedStore,
-    github_config: &GitHubConfig,
-    wave_id: &LfdId,
-    trigger: QueueTrigger,
-) -> Result<(), String> {
-    reconcile_wave_queue_with_events(store, github_config, wave_id, trigger, None).await
-}
-
-pub async fn reconcile_wave_queue_with_events(
-    store: &SharedStore,
-    github_config: &GitHubConfig,
-    wave_id: &LfdId,
-    trigger: QueueTrigger,
-    event_hub: Option<&EventHub>,
-) -> Result<(), String> {
-    let _guard = acquire_reconcile_lock(wave_id).await;
-    reconcile_wave_queue_with_ops(
-        store,
-        github_config,
-        wave_id,
-        trigger,
-        &RealQueueOps,
-        event_hub,
-    )
-    .await
-}
-
 pub async fn remove_reconcile_lock(wave_id: &LfdId) {
     let mut locks = QUEUE_RECONCILE_LOCKS.lock().await;
     locks.remove(&wave_id.to_string());
@@ -224,7 +189,6 @@ pub(crate) async fn reconcile_wave_queue_with_ops(
     store: &SharedStore,
     github_config: &GitHubConfig,
     wave_id: &LfdId,
-    trigger: QueueTrigger,
     ops: &dyn QueueOps,
     event_hub: Option<&EventHub>,
 ) -> Result<(), String> {
@@ -268,7 +232,7 @@ pub(crate) async fn reconcile_wave_queue_with_ops(
 
     let head_index = find_queue_head_index(&runs, &live_snapshot);
     let Some(head_index) = head_index else {
-        tracing::debug!(wave_id = %wave_id_for_log, ?trigger, "queue reconcile: no active queue head");
+        tracing::debug!(wave_id = %wave_id_for_log, "queue reconcile: no active queue head");
         return Ok(());
     };
 
@@ -406,71 +370,6 @@ pub(crate) async fn reconcile_wave_queue_with_ops(
 
     clear_queue_block(store, wave_id, &head.id, event_hub).await?;
     Ok(())
-}
-
-pub async fn handle_pr_merged(
-    store: &SharedStore,
-    github_config: &GitHubConfig,
-    wave_id: &LfdId,
-    merged_pr_number: u32,
-    merged_at: OffsetDateTime,
-) -> Result<bool, String> {
-    handle_pr_merged_with_events(
-        store,
-        github_config,
-        wave_id,
-        merged_pr_number,
-        merged_at,
-        None,
-    )
-    .await
-}
-
-pub async fn handle_pr_merged_with_events(
-    store: &SharedStore,
-    github_config: &GitHubConfig,
-    wave_id: &LfdId,
-    merged_pr_number: u32,
-    merged_at: OffsetDateTime,
-    event_hub: Option<&EventHub>,
-) -> Result<bool, String> {
-    let event = QueueMergeEvent {
-        wave_id: wave_id.clone(),
-        pr_number: merged_pr_number,
-        merged_at,
-        processed_at: OffsetDateTime::now_utc(),
-    };
-    let inserted = store
-        .record_merge_event(&event)
-        .await
-        .map_err(|err| format!("record_merge_event failed: {err}"))?;
-    if !inserted {
-        return Ok(false);
-    }
-
-    if let Some(mut run) = store
-        .list_stack_runs(wave_id)
-        .await
-        .map_err(|err| format!("list_stack_runs failed: {err}"))?
-        .into_iter()
-        .find(|run| pr_number(run) == Some(merged_pr_number))
-    {
-        run.stack_status = RunStackStatus::Merged;
-        let _ = store.update_run(&run).await;
-    }
-
-    if let Err(err) = reconcile_wave_queue_with_events(
-        store,
-        github_config,
-        wave_id,
-        QueueTrigger::WebhookMerged,
-        event_hub,
-    )
-    .await
-    {
-        tracing::warn!(wave_id = %wave_id, error = %err, "queue reconcile after merge failed");
-    }
-    Ok(true)
 }
 
 pub fn project_queue_views<F>(
@@ -811,16 +710,9 @@ mod tests {
             scratch_clean: true,
             ..Default::default()
         };
-        reconcile_wave_queue_with_ops(
-            &store,
-            &GitHubConfig::default(),
-            wave.id(),
-            QueueTrigger::RunCompleted,
-            &ops,
-            None,
-        )
-        .await
-        .expect("reconcile");
+        reconcile_wave_queue_with_ops(&store, &GitHubConfig::default(), wave.id(), &ops, None)
+            .await
+            .expect("reconcile");
 
         let blocks = store
             .list_queue_blocks(wave.id())
@@ -854,29 +746,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn handle_pr_merged_is_idempotent() {
-        let store = sqlite_store().await;
-        let wave = make_wave(".");
-        store.create_wave(&wave).await.expect("wave");
-        let run1 = make_run(&wave, 0, 21);
-        let run2 = make_run(&wave, 1, 22);
-        store.create_run(&run1).await.expect("run1");
-        store.create_run(&run2).await.expect("run2");
-        set_live_open(&store, &run1, false).await;
-        set_live_open(&store, &run2, true).await;
-
-        let merged_at = OffsetDateTime::now_utc();
-        let first = handle_pr_merged(&store, &GitHubConfig::default(), wave.id(), 21, merged_at)
-            .await
-            .expect("first merge");
-        let second = handle_pr_merged(&store, &GitHubConfig::default(), wave.id(), 21, merged_at)
-            .await
-            .expect("second merge");
-        assert!(first);
-        assert!(!second);
-    }
-
-    #[tokio::test]
     async fn scratch_dirty_marks_blocked_with_resolve_conflict_action() {
         let store = sqlite_store().await;
         let wave = make_wave(".");
@@ -889,16 +758,9 @@ mod tests {
             scratch_clean: false,
             ..Default::default()
         };
-        reconcile_wave_queue_with_ops(
-            &store,
-            &GitHubConfig::default(),
-            wave.id(),
-            QueueTrigger::RunCompleted,
-            &ops,
-            None,
-        )
-        .await
-        .expect("reconcile");
+        reconcile_wave_queue_with_ops(&store, &GitHubConfig::default(), wave.id(), &ops, None)
+            .await
+            .expect("reconcile");
 
         let block = store
             .list_queue_blocks(wave.id())
@@ -943,7 +805,6 @@ mod tests {
             &store,
             &GitHubConfig::default(),
             wave.id(),
-            QueueTrigger::Poll,
             &ops,
             Some(&event_hub),
         )
@@ -960,7 +821,6 @@ mod tests {
             &store,
             &GitHubConfig::default(),
             wave.id(),
-            QueueTrigger::Poll,
             &ops,
             Some(&event_hub),
         )
@@ -998,7 +858,6 @@ mod tests {
             &store,
             &GitHubConfig::default(),
             wave.id(),
-            QueueTrigger::Poll,
             &blocked_ops,
             Some(&event_hub),
         )
@@ -1014,7 +873,6 @@ mod tests {
             &store,
             &GitHubConfig::default(),
             wave.id(),
-            QueueTrigger::Poll,
             &cleared_ops,
             Some(&event_hub),
         )

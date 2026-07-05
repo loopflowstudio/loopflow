@@ -440,8 +440,8 @@ pub struct Run {
     #[serde(default = "default_target_branch")]
     pub target_branch: String,
     /// When set, this run is a repair attempt for the referenced failed run.
-    /// The executor uses this to decide whether to escalate (algedonic signal)
-    /// or attempt another repair on failure.
+    /// Written by dispatchers that retry failed work; nothing acts on it
+    /// automatically since the repair chain died with the daemon's organs.
     pub repair_of: Option<LfdId>,
     /// The pull request created or associated with this run.
     /// Set when the run creates a PR (auto-create or land --create-pr).

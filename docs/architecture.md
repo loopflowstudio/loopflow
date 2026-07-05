@@ -6,8 +6,9 @@ title: Architecture
 # Architecture
 
 Loopflow turns repo-authored intent into persistent agent work. Steps and flows
-run one job. Waves keep working: they remember, react to triggers, dispatch
-workers, surface attention, and leave an auditable trail.
+run one job. Waves keep working: they remember, dispatch workers, respond to
+what's spoken into their thread, surface attention, and leave an auditable
+trail.
 
 ## System Map
 
@@ -32,8 +33,9 @@ Execution engine
 Local CLI                 Daemon
   lf                        lfd
   rust/.../lf               rust/.../lfd
-  rust/.../ops              HTTP API, store, scheduler,
-                            triggers, sessions, executor
+  rust/.../ops              HTTP read surface, sessions,
+                            webhooks-as-speech, worktree
+                            janitor, token refresh
         |                        |
         v                        v
 Git/PR/PM ops             Clients
@@ -49,12 +51,12 @@ Git/PR/PM ops             Clients
 | Step | `.lf/steps/` and built-ins | `engine` |
 | Flow | `.lf/flows/` and built-ins | `engine` |
 | Direction | `.lf/directions/` | `engine` prompt assembly |
-| Wave goal | `wave/<name>/GOAL.md` | lfd scheduler |
+| Wave goal | `wave/<name>/GOAL.md` | `lf wave` server + resident mind |
 | Wave memory | `wave/<name>/MEMORY.md` | wave agent |
-| Roadmap item | `wave/<name>/` | PM sync and wave flows |
-| Session | lfd store | lfd executor |
-| Run/event | lfd store | lfd HTTP/event stream |
-| Attention | lfd store | lfd + Concerto |
+| Roadmap item | Asana | `lf op pm` and wave flows |
+| Session | lfdb | `lf q` dispatch (tmux-wrapped `lf`) |
+| Run/event | lfdb | lfd HTTP/event stream |
+| Attention | lfdb | lfd + Concerto |
 
 ## CLI and Engine
 
@@ -87,7 +89,7 @@ Important paths:
 - `rust/loopflow/src/lfd/http/`
 - `rust/loopflow/src/lfdb/`
 - `rust/loopflow/src/lfd/triggers/` (token refresh — the one surviving loop)
-- `rust/loopflow/src/lfd/executor/`
+- `rust/loopflow/src/lfd/executor/` (dispatch helpers shared with `lf q`, worktree janitor)
 - `rust/loopflow/src/lfd/types/`
 
 Native mode uses sqlite and a local session token; container mode uses
@@ -117,11 +119,11 @@ Important paths:
 
 ```text
 1. Read GOAL.md, MEMORY.md, roadmap, and relevant docs.
-2. Assess current wave state and external triggers.
+2. Assess current wave state and anything spoken into the thread.
 3. Pick one move: study, ingest, dispatch, unblock, review, or wait.
 4. Run a step or flow, often by dispatching a worker.
 5. Record events, update PM/repo state, and surface attention.
-6. Loop when mode, cron, or trigger asks for another pass.
+6. Loop when mode, a `GOAL.md` cron, or an incoming message asks for another pass.
 ```
 
 A wave agent coordinates. Workers do scoped implementation and report back
@@ -148,10 +150,10 @@ the fixture tests in the same unit of work.
 Loopflow integrates with:
 
 - Git and worktrees for branch isolation.
-- GitHub for PRs, CI failure triggers, and release workflows.
+- GitHub for PRs, webhooks spoken inward as `lf` execs, and release workflows.
 - Asana, Linear, and Notion for PM-backed wave roadmaps.
 - tmux and local processes for interactive sessions.
-- Docker and postgres for container-mode remote execution.
+- Docker and postgres for hosting the daemon on remote hosts.
 - Swift/macOS services for Concerto and native host behavior.
 
 ## Where Complexity Collects

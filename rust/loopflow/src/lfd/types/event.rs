@@ -17,7 +17,6 @@ pub enum Event {
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
-    Ping,
 
     // Provider auth
     #[serde(rename = "auth.flow_started")]
@@ -112,15 +111,6 @@ pub enum Event {
         #[serde(with = "time::serde::rfc3339")]
         timestamp: OffsetDateTime,
     },
-    // Worktree
-    WorktreeUpdated {
-        worktree: String,
-        repo: String,
-        branch: Option<String>,
-        #[serde(with = "time::serde::rfc3339")]
-        timestamp: OffsetDateTime,
-    },
-
     // Runtime journal
     #[serde(rename = "run.started")]
     RunStarted {
@@ -385,15 +375,6 @@ impl Event {
     pub fn wave_stopped(wave_id: LfdId) -> Self {
         Self::WaveStopped {
             wave_id,
-            timestamp: Self::now(),
-        }
-    }
-
-    pub fn worktree_updated(worktree: String, repo: String, branch: Option<String>) -> Self {
-        Self::WorktreeUpdated {
-            worktree,
-            repo,
-            branch,
             timestamp: Self::now(),
         }
     }

@@ -10,8 +10,8 @@ matrix every pass. Stdlib only.
     uv run python scripts/test.py --list     # print the plan, run nothing
 
 Suites mirror the jobs in .github/workflows/ci.yml. Slow suites (concerto,
-e2e, docker) stay off in changed-mode unless forced with --all or their own
-flag, since they dominate wall-clock time.
+e2e) stay off in changed-mode unless forced with --all or their own flag,
+since they dominate wall-clock time.
 """
 
 from __future__ import annotations
@@ -189,16 +189,6 @@ def _e2e_commands(_changed: list[str]) -> list[Command]:
     ]
 
 
-def _docker_commands(_changed: list[str]) -> list[Command]:
-    return [
-        Command(
-            ["cargo", "test", "-p", "loopflow", "docker_", "--", "--nocapture"],
-            REPO_ROOT,
-            "docker",
-        )
-    ]
-
-
 # Ordered fast -> slow. Slow suites are gated behind --all / their own flag.
 SUITES: list[Suite] = [
     Suite(
@@ -231,15 +221,6 @@ SUITES: list[Suite] = [
         trigger_desc="swift/",
         match=lambda c: _touches(c, "swift/"),
         build=_swift_commands,
-    ),
-    Suite(
-        name="docker",
-        slow=True,
-        trigger_desc="docker/ or lfd docker executor",
-        match=lambda c: _touches(
-            c, "docker/", "rust/loopflow/src/lfd/executor/docker/"
-        ),
-        build=_docker_commands,
     ),
     Suite(
         name="e2e",

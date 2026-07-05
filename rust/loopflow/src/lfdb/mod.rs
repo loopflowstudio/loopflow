@@ -5,6 +5,11 @@
 //!
 //! The persisted domain types still live in `crate::lfd::types` for now; the
 //! type split is a later, non-mechanical step.
+//!
+//! Seam note: a handful of registry methods lost their last caller in the
+//! collapse (chat memory/messages, merge events, fork-run cleanup, a few
+//! attention/session lookups). They ride along untouched — this crate is
+//! scheduled for whole deletion when the filesystem becomes the database.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -623,21 +628,6 @@ impl Store {
         TokenStore::list_provider_tokens(self).await
     }
 
-    pub async fn upsert_secrets_provider_config(
-        &self,
-        config: &SecretsProviderConfig,
-    ) -> StoreResult<()> {
-        SecretsProviderStore::upsert_secrets_provider_config(self, config).await
-    }
-
-    pub async fn delete_secrets_provider_config(&self, provider: &str) -> StoreResult<()> {
-        SecretsProviderStore::delete_secrets_provider_config(self, provider).await
-    }
-
-    pub async fn list_secrets_provider_configs(&self) -> StoreResult<Vec<SecretsProviderConfig>> {
-        SecretsProviderStore::list_secrets_provider_configs(self).await
-    }
-
     pub async fn health_check(&self) -> StoreResult<()> {
         StoreAdmin::health_check(self).await
     }
@@ -797,24 +787,6 @@ pub trait TokenStore: Send + Sync {
     async fn upsert_provider_token(&self, token: &ProviderToken) -> StoreResult<()>;
     async fn delete_provider_token(&self, provider: &str) -> StoreResult<()>;
     async fn list_provider_tokens(&self) -> StoreResult<Vec<ProviderToken>>;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SecretsProviderConfig {
-    pub provider: String,
-    pub project: Option<String>,
-    pub config: Option<String>,
-    pub updated_at: i64,
-}
-
-#[async_trait::async_trait]
-pub trait SecretsProviderStore: Send + Sync {
-    async fn upsert_secrets_provider_config(
-        &self,
-        config: &SecretsProviderConfig,
-    ) -> StoreResult<()>;
-    async fn delete_secrets_provider_config(&self, provider: &str) -> StoreResult<()>;
-    async fn list_secrets_provider_configs(&self) -> StoreResult<Vec<SecretsProviderConfig>>;
 }
 
 #[async_trait::async_trait]
@@ -1562,47 +1534,6 @@ impl TokenStore for Store {
                 run_sqlite(store, |store| store.list_provider_tokens()).await
             }
             StoreBackend::Postgres(store) => store.list_provider_tokens().await,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl SecretsProviderStore for Store {
-    async fn upsert_secrets_provider_config(
-        &self,
-        config: &SecretsProviderConfig,
-    ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let config = config.clone();
-                run_sqlite(store, move |store| {
-                    store.upsert_secrets_provider_config(&config)
-                })
-                .await
-            }
-            StoreBackend::Postgres(_) => Ok(()),
-        }
-    }
-
-    async fn delete_secrets_provider_config(&self, provider: &str) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let provider = provider.to_string();
-                run_sqlite(store, move |store| {
-                    store.delete_secrets_provider_config(&provider)
-                })
-                .await
-            }
-            StoreBackend::Postgres(_) => Ok(()),
-        }
-    }
-
-    async fn list_secrets_provider_configs(&self) -> StoreResult<Vec<SecretsProviderConfig>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                run_sqlite(store, |store| store.list_secrets_provider_configs()).await
-            }
-            StoreBackend::Postgres(_) => Ok(Vec::new()),
         }
     }
 }

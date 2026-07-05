@@ -1,5 +1,6 @@
 //! The wave journal spine, end to end: a wave server's thread survives a
-//! restart because the thread is a fold over the append-only journal.
+//! restart because the thread is a fold over the append-only journal. Also
+//! covers the server's read surface over that spine (`/health`).
 
 use std::path::Path;
 use std::sync::Arc;

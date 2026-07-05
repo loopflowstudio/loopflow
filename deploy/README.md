@@ -157,7 +157,7 @@ deploy/loopflow-server.sh logs
 curl -f http://127.0.0.1:${LFD_PORT:-2486}/health
 ```
 
-Need agent credentials inside execution containers? Set `LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh` in Doppler or `.env` instead of editing compose volume lines.
+Need credentials inside the daemon container? Set `LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh` in Doppler or `.env` instead of editing compose volume lines.
 
 Common failures:
 

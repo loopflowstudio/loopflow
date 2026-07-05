@@ -61,13 +61,11 @@ aes-gcm = "0.10"
 axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"
 bytes = "1"
-bollard = "0.19"
 cron = "0.17"
 deadpool-postgres = "0.14"
 futures-util = "0.3"
 gethostname = "1.1"
 hmac = "0.12"
-humantime = "2"
 ipnet = "2"
 libc = "0.2"
 reqwest = { version = "0.13", features = ["blocking", "json", "stream"] }
@@ -79,7 +77,6 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tower-http = { version = "0.7", features = ["trace"] }
 tempfile = "3.27"
-tar = "0.4"
 
 [dev-dependencies]
 loopflow-test-support = { path = "../loopflow-test-support" }

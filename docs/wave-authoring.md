@@ -93,9 +93,10 @@ Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels l
 | `mode` | Primary execution pattern: `manual` or `loop` |
 | `metrics` | Criteria the loop re-judges each iteration |
 | `agent` | Preferred agent harness/model |
+| `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident mind |
 | `pm.asana_project` | Asana project id backing the wave's roadmap (written by `lf op pm init`) |
 
-Crons and triggers are live lfd state — configure them through the HTTP API; they are not read from `GOAL.md`.
+The resident mind reads `crons:` directly from this frontmatter and opens a system turn when a schedule comes due; edits land without a restart. See [Crons](waves.md#crons).
 
 ---
 
@@ -146,34 +147,30 @@ tmux attach -t <name>       # jump into one; agent output lives here
 
 In **Concerto**, a wave's detail view groups its live work — the wave agent session, worker runs, PR state, and anything needing your attention.
 
-### Modes, Crons, and Triggers
+### Modes and Crons
 
-Mode controls the primary execution pattern. Crons schedule supplementary flows. Triggers fire flows in response to signals.
+Mode controls the primary execution pattern. Crons schedule supplementary flows.
 
 | Mode | Behavior |
 |------|----------|
 | **manual** | Single run, then stop |
 | **loop** | Continuously until stopped or the roadmap empties |
 
-`workers: 0` in `GOAL.md` is valid for a wave that only runs scheduled flows. Configure crons and triggers through the API:
+Crons live in `GOAL.md` frontmatter; the wave's resident mind fires each due schedule as a system turn and dispatches the flow with judgment. `workers: 0` is valid for a wave that only runs scheduled flows:
 
-```python
-import loopflow.api as loopflow
-
-loopflow.create_wave("governance", repo=".", flow="garden", workers=0,
-                     crons=[{"flow": "govern-coordination", "schedule": "0 0 * * *"}])
-
-# React to another wave completing
-loopflow.add_trigger("mywave", signal="wave", source_wave_id="infra")
+```markdown
+<!-- wave/governance/GOAL.md -->
+---
+primary_flow: garden
+workers: 0
+mode: manual
+crons:
+  - flow: govern-coordination
+    schedule: "0 0 0 * * * *"
+---
 ```
 
-| Signal | What changed | Default flow |
-|--------|--------------|--------------|
-| **repo** | Paths changed on main | `integrate` |
-| **wave** | Another wave completed | `build` |
-| **ci_failure** | CI failed on the wave's PR | `ci-fix` |
-
-[Modes and triggers →](waves.md)
+[Modes and crons →](waves.md)
 
 ---
 

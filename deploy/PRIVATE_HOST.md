@@ -96,7 +96,7 @@ cursor --remote "ssh-remote+$LFD_SSH_USER@$LFD_HOST" /Users/jack/src/loopflow
 code --remote "ssh-remote+$LFD_SSH_USER@$LFD_HOST" /Users/jack/src/loopflow
 ```
 
-Claude and Codex sessions run inside `lfd` executor containers when waves or sessions use those harnesses. Keep the host's Doppler config or mounted credentials able to provide Claude, Codex, GitHub, and SSH credentials; do not route those through a global studio host.
+Claude and Codex sessions run as `lf` processes on the host itself. Keep the host's Doppler config or credentials able to provide Claude, Codex, GitHub, and SSH credentials; do not route those through a global studio host.
 
 ## Verify
 

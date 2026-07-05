@@ -49,16 +49,16 @@
 //! observer that journals `RunObserved`/`RunCompleted` observations. No
 //! registry store on the machine → warn once, fully functional anyway.
 
-pub mod channel;
+pub(crate) mod channel;
 pub mod journal;
-pub mod memory;
+pub(crate) mod memory;
 pub mod mind;
-pub mod registry;
+pub(crate) mod registry;
 pub mod resident;
 pub mod runtime;
 pub mod server;
 pub mod state;
-pub mod supervisor;
+pub(crate) mod supervisor;
 pub mod wire;
 
 use std::future::Future;

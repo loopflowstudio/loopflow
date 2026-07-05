@@ -287,6 +287,24 @@ fn wave_server_pid(session: &Session) -> Option<u32> {
         .and_then(|pid| pid.parse().ok())
 }
 
+/// The endpoint a wave's live server listens on, off the live WaveAgent
+/// session row's env (trimmed, empty dropped). Shared by `lf chat`'s target
+/// resolution and `lf q`'s channel-opened knock; callers fall back to the
+/// `wave/<name>/.wave-endpoint` discovery file when the store has no live row.
+pub(crate) async fn wave_server_endpoint(
+    store: &SharedStore,
+    wave_id: &LfdId,
+) -> anyhow::Result<Option<String>> {
+    let Some(session) = store.live_wave_agent_session(wave_id).await? else {
+        return Ok(None);
+    };
+    Ok(session
+        .env
+        .get(WAVE_SERVER_ENDPOINT_ENV)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty()))
+}
+
 /// Whether a process with `pid` is running on this host (`kill -0` probe).
 /// Shared with the supervisor's attached-resident probe.
 pub(crate) async fn process_alive(pid: u32) -> bool {

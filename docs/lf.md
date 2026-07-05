@@ -118,6 +118,32 @@ lf ship -w feature-branch
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
+## Speaking to Waves
+
+```bash
+lf chat "ship the button audit first"       # post into the current wave's thread
+lf chat -w infra "CI is red on the PR"      # target a wave by name
+lf chat --parent "blocked on schema change" # escalate to the parent wave
+lf sub                                      # follow the wave's live event stream
+lf sub infra --json                         # raw frames as NDJSON
+lf memory                                   # print the wave's MEMORY.md
+lf memory add "buttons: variants unified"   # append one curated fact
+lf memory update < MEMORY.md                # replace it from stdin
+```
+
+| Command | What it does |
+|---------|--------------|
+| `lf chat [TEXT]` | Post a message into a wave's thread; reads stdin when TEXT is omitted. Outside any wave the publish drops silently (exit 0), so the verb is safe in every prompt |
+| `lf sub [WAVE] [--json]` | Follow a wave's live events (turns, mind state, memory) until killed; exits 0 with a note when no wave resolves |
+| `lf memory [show\|update\|add]` | Read or curate a wave's `MEMORY.md` — written by the live server and journaled; `update --summary "..."` sets the journaled one-liner |
+
+All three default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
+
+| Flag | Description |
+|------|-------------|
+| `-w, --wave NAME` | Target a wave by name |
+| `--parent` | Target the invoking wave's parent (`lf chat` / `lf memory`) |
+
 ## What's Included by Default
 
 Every step automatically includes:

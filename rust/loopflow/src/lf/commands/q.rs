@@ -262,7 +262,7 @@ pub(crate) async fn dispatch(
 /// dispatch already succeeded.
 async fn notify_channel_opened(store: &SharedStore, dispatched: &Dispatch) {
     let wave = &dispatched.wave;
-    let mut endpoint = crate::lf::commands::chat::wave_server_endpoint(store, wave.id())
+    let mut endpoint = crate::wave::registry::wave_server_endpoint(store, wave.id())
         .await
         .ok()
         .flatten();

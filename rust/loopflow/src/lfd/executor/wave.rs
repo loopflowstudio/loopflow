@@ -25,8 +25,8 @@ use super::helpers::{
     build_lf_step_command, is_active_run_status, is_ephemeral_worktree_path,
     launch_session_in_tmux, tmux_exit_file, tmux_session_exists, TMUX_EXIT_TAIL,
 };
-use crate::wave::registry::process_alive;
 use super::JanitorReport;
+use crate::wave::registry::process_alive;
 
 fn tmux_available() -> bool {
     std::process::Command::new("tmux")

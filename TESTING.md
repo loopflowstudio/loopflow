@@ -31,7 +31,7 @@ uv run python scripts/test.py --all    # run every suite (the full matrix)
 to the CI jobs above, and runs just those—fast suites first. Use it as the
 tight loop while iterating; run `--all` once before you ship.
 
-Slow suites (`concerto`, `e2e`, `docker`) stay off in changed-mode even when
+Slow suites (`concerto`, `e2e`) stay off in changed-mode even when
 their paths change—the run prints why and how to force them:
 
 ```bash
@@ -49,11 +49,10 @@ Path → suite mapping:
 | `swift/` | swift | `swift test --package-path swift -Xswiftc -gnone` |
 | `swift/Concerto/`, `swift/project.yml` | concerto *(slow)* | xcodegen + xcodebuild |
 | lfd `http`/`store`, `tests/e2e/` | e2e *(slow)* | e2e + API smoke |
-| `docker/`, lfd docker executor | docker *(slow)* | `cargo test -p loopflow docker_` |
 
 ## Python Tests
 
-Unit and integration tests for the Python client (`python/loopflow/`).
+Unit and integration tests for the Python package (`python/loopflow/` — wire models and workstyle helpers).
 
 ```bash
 uv run pytest python/tests/                          # All Python tests
@@ -102,7 +101,6 @@ See `.github/workflows/ci.yml`. Six parallel jobs:
 | `python-test` | ubuntu-latest | `uv run pytest python/tests/` |
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` |
-| `docker-smoke` | ubuntu-latest | `docker version` + `cargo test -p loopflow docker_` |
 | `swift-test` | macos-15 | `swift test --package-path swift` |
 | `concerto-ui-test` | macos-15 | xcodegen + xcodebuild |
 

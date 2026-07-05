@@ -71,31 +71,28 @@ The wave's `mode` controls its execution pattern.
 
 ### Crons
 
-Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. `workers: 0` is valid for a cron-only wave.
+Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. They live in `GOAL.md` frontmatter; the wave's resident mind fires each due schedule as a system turn. `workers: 0` is valid for a cron-only wave.
 
-```python
-import loopflow.api as loopflow
-
-# workers handle the primary flow; crons sweep maintenance
-loopflow.create_wave("designer", repo=".", flow="build", workers=2,
-                     crons=[{"flow": "sync", "schedule": "0 0 1 * *"}])
-
-# cron-only governance wave — no workers, all work comes from schedules
-loopflow.create_wave("governance", repo=".", flow="garden", workers=0,
-                     crons=[{"flow": "govern-identity", "schedule": "0 0 * * 0"}])
+```markdown
+<!-- wave/governance/GOAL.md -->
+---
+primary_flow: garden
+workers: 0
+crons:
+  - flow: govern-identity
+    schedule: "0 0 0 * * Sun *"
+---
 ```
 
-### Triggers
+### GitHub webhooks
 
-A trigger pairs a signal (what changed) with a flow (what to run). Triggers are a list — multiple triggers of the same signal are fine.
+External signals arrive as speech, not machinery. `lfd` verifies each GitHub webhook and speaks it inward as an `lf` exec:
 
-| Signal | What changed | Default flow |
-|--------|--------------|--------------|
-| **repo** | Paths changed on main | `integrate` |
-| **wave** | Another wave completed | `build` |
-| **ci_failure** | CI failed on a wave PR | `ci-fix` |
-
-Every new wave ships with two default triggers: `repo` (whole repo → integrate) and `ci_failure` → `ci-fix`.
+| Event | What lfd runs |
+|-------|---------------|
+| CI fails on a wave's PR | `lf chat --wave <name> "CI failed: …"` — the mind decides how to fix (usually a `ci-fix` worker) |
+| PR merged | `lf op queue reconcile --wave <name>` |
+| Push to main | `lf chat --wave <name> "main moved: …"` — the mind decides whether to rebase or integrate |
 
 ## Steps
 
@@ -149,7 +146,7 @@ Manual work — you invoke these, often interactively.
 
 ### Govern steps (`govern/`)
 
-Autonomous coordination — crons, triggers, and waves-watching-waves drive these.
+Autonomous coordination — crons and waves-watching-waves drive these.
 
 | Step | What it does |
 |------|--------------|

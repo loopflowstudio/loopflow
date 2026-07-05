@@ -82,17 +82,6 @@ jobs:
       - name: Run E2E smoke test
         run: tests/e2e/test_smoke.sh
 
-  docker-smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Verify Docker is available
-        run: docker version
-      - name: Run Docker executor smoke tests
-        run: cargo test -p loopflow docker_ -- --nocapture
-
   swift-test:
     runs-on: macos-15
     steps:
@@ -160,7 +149,6 @@ jobs:
       - python-test
       - website-test
       - e2e-smoke
-      - docker-smoke
       - swift-test
       - concerto-ui-test
     steps:
@@ -172,7 +160,6 @@ jobs:
           PYTHON_TEST: ${{ needs.python-test.result }}
           WEBSITE_TEST: ${{ needs.website-test.result }}
           E2E_SMOKE: ${{ needs.e2e-smoke.result }}
-          DOCKER_SMOKE: ${{ needs.docker-smoke.result }}
           SWIFT_TEST: ${{ needs.swift-test.result }}
           CONCERTO_UI_TEST: ${{ needs.concerto-ui-test.result }}
         run: |
@@ -201,7 +188,6 @@ jobs:
           check_result "python-test" "$PYTHON_TEST"
           check_result "website-test" "$WEBSITE_TEST"
           check_result "e2e-smoke" "$E2E_SMOKE"
-          check_result "docker-smoke" "$DOCKER_SMOKE"
           check_result "swift-test" "$SWIFT_TEST"
           check_result "concerto-ui-test" "$CONCERTO_UI_TEST"
 

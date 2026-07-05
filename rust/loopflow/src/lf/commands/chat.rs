@@ -50,7 +50,7 @@ use crate::engine::wave_context::{
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::WaveTargetArgs;
-use crate::lfd::types::{Wave, WAVE_SERVER_ENDPOINT_ENV};
+use crate::lfd::types::Wave;
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::wave::channel::family_head;
 use crate::wave::journal::Attribution;
@@ -268,7 +268,7 @@ pub(crate) async fn resolve_target(
     // discovery file is the fallback when the store has no row.
     let mut endpoint = None;
     if let (Some(store), Some(row)) = (store, &target_row) {
-        endpoint = wave_server_endpoint(store, row.id()).await?;
+        endpoint = crate::wave::registry::wave_server_endpoint(store, row.id()).await?;
     }
     let repo_root = target_row
         .as_ref()
@@ -288,24 +288,6 @@ pub(crate) async fn resolve_target(
         own_name,
         channel,
     }))
-}
-
-/// The endpoint a wave's live server listens on, off the live WaveAgent
-/// session row's env (trimmed, empty dropped). Shared with `lf q`'s
-/// channel-opened knock; callers fall back to the `wave/<name>/.wave-endpoint`
-/// discovery file when the store has no live row.
-pub(crate) async fn wave_server_endpoint(
-    store: &SharedStore,
-    wave_id: &crate::lfd::id::LfdId,
-) -> Result<Option<String>> {
-    let Some(session) = store.live_wave_agent_session(wave_id).await? else {
-        return Ok(None);
-    };
-    Ok(session
-        .env
-        .get(WAVE_SERVER_ENDPOINT_ENV)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty()))
 }
 
 /// Attribution from env: `LFD_SESSION_ID` when present; label from
@@ -379,8 +361,8 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        RepoWork, Session, SessionStatus, SessionUse, WaveMode, WaveStatus, WAVE_SERVER_PID_ENV,
-        WAVE_SERVER_SOURCE,
+        RepoWork, Session, SessionStatus, SessionUse, WaveMode, WaveStatus,
+        WAVE_SERVER_ENDPOINT_ENV, WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
     };
     use crate::lfdb::{open_store, StorageConfig};
     use crate::wave::journal::{EventKind, MessageOp};

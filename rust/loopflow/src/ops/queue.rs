@@ -19,7 +19,7 @@ use secrecy::SecretString;
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::id::LfdId;
 use crate::lfd::queue::{
-    acquire_reconcile_lock, reconcile_wave_queue_with_ops, QueueOps, QueueTrigger, RealQueueOps,
+    acquire_reconcile_lock, reconcile_wave_queue_with_ops, QueueOps, RealQueueOps,
 };
 use crate::lfd::types::Wave;
 use crate::lfdb::{open_store, SharedStore};
@@ -132,7 +132,6 @@ async fn reconcile_wave_queues_with_ops(
             store,
             github,
             wave_row.id(),
-            QueueTrigger::Poll,
             ops,
             None, // no EventHub in the verb; see module docs
         )

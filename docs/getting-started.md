@@ -156,7 +156,7 @@ Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter
 lf wave shipper
 ```
 
-The wave agent coordinates; it dispatches a **worker** per task (`lf q worker run shipper --flow build --task "…"`) and folds each shipped PR into memory. Triggers fire flows in response to signals — repo changes, other waves completing, CI failures.
+The wave agent coordinates; it dispatches a **worker** per task (`lf q worker run shipper --flow build --task "…"`) and folds each shipped PR into memory. External signals arrive as speech — CI failures and pushes to main land in the wave's thread via `lf chat`, and the mind decides how to react.
 
 **Concerto** (macOS) is the native wave experience — monitor progress, browse flows, review PRs. Requires `lfd`.
 

@@ -38,6 +38,24 @@ lf implement "quick isolated pass" --dispatch
 agent in that worktree. The implementation can land the `lf op wt` side first,
 but the abstraction should be shaped for both surfaces from the start.
 
+This branch is the parent for the rebase-efficiency behavior: placement
+planning, rebase classification, scratch preservation, ignored telemetry, and
+command-surface parity. It must not pretend to finish the broader naming-config
+grammar. The current repo config still says:
+
+```yaml
+branch_names:
+  schema: "{user}.{name}.{ts}"
+```
+
+That schema uses dots for root branch names, which conflicts visually with the
+new ancestry rule. Preserve configured root-branch naming in this PR where
+changing it would be a migration. Create a stacked child/follow-up that owns
+the config/naming redesign: branch-name schema grammar, escaping or rejection
+rules, config migration, docs, and fixture updates. The parent can still make
+stacked children deterministic by appending child segments to the concrete
+parent chosen by placement.
+
 ## Invariants
 
 Branch names encode ancestry. Metadata may cache or validate, but must not be
@@ -65,6 +83,11 @@ If someone types `api.v2`, fail fast:
 "api.v2" is not a worktree segment. Dots are reserved for stack ancestry.
 Use `api-v2`, or create ancestry with `--stack`.
 ```
+
+Scope note: dots are reserved for **new placement segments** in this PR. Existing
+configured root branch schemas may still produce dotted names until the config
+grammar follow-up lands. Treat those roots as concrete branch names, not as a
+promise that the parent PR has solved every dotted-name ambiguity.
 
 Default base policy:
 
@@ -215,7 +238,7 @@ child branch with meaningful diff
 
 ```text
 before reset/rebase:
-  copy scratch/ to .lf/scratch-stash/<branch>-<timestamp>/
+  copy scratch/ to .lf/tmp/scratch-stash/<branch>-<timestamp>/
 
 after reset/rebase:
   copy scratch/ back if doing so does not overwrite newer scratch
@@ -237,8 +260,9 @@ branch a.b.c, parent a.b landed/gone/squash-equivalent on main
 ## Observability
 
 Add ops telemetry from the first implementation, not after behavior changes.
-Write local JSONL under `.lf/metrics/ops.jsonl` or reuse the existing run journal
-if that is less code. Do not include diffs, secrets, or raw prompt content.
+Write local JSONL under `.lf/tmp/metrics/ops.jsonl` or reuse the existing run
+journal if that is less code. Do not include diffs, secrets, or raw prompt
+content.
 
 Each `lf op wt create`, `lf op rebase`, `lf op land`, and later placed `lf`
 execution emits:
@@ -267,7 +291,7 @@ Also add human-readable status lines:
 ```text
 Classified branch: scratch_only
 Strategy: reset_to_base
-Stashed scratch: .lf/scratch-stash/goals-m1-api-20260705T120102Z
+Stashed scratch: .lf/tmp/scratch-stash/goals-m1-api-20260705T120102Z
 Reset branch to origin/main.
 Restored scratch/.
 ```
@@ -371,6 +395,8 @@ dot rejection
 
 command surface parity
   generated loopflow prompt commands parse under the active lf binary
+  source/local-bin/installed help agree on wt create flags
+  --stack optional-parent parsing has a non-ambiguous happy path
 ```
 
 ## Implementation sequence
@@ -380,6 +406,17 @@ command surface parity
 Add telemetry scaffolding and `--plan` output. Wire it into the current `rebase`
 and `wt create` paths with existing behavior. This gives before/after data and
 a safe place to test formatting.
+
+Telemetry and scratch stash state must live under ignored `.lf/tmp/`:
+
+```text
+.lf/tmp/metrics/ops.jsonl
+.lf/tmp/scratch-stash/<branch>-<timestamp>/
+```
+
+Do not write `.lf/metrics`, `.lf/scratch-stash`, or any tracked scratch-stash
+artifact. Rebase/reset paths must not dirty the repo solely because they
+preserved scratch or recorded an ops decision.
 
 ### 2. Add placement planning
 
@@ -395,6 +432,11 @@ lf op wt create --plan ...
 ```
 
 Flip the default to stacked-from-current when current branch is not main.
+
+Root branch creation continues to use the configured schema for now. Stacked
+child creation uses placement ancestry from the selected parent. Open the
+config/naming-schema child before landing this parent so the remaining dotted
+root ambiguity is explicit rather than hidden in "open choices."
 
 ### 3. Add scratch stash
 
@@ -430,6 +472,25 @@ Add the parser/API shape for `--stack`, `--fork`, and `--dispatch` on ordinary
 `lf` runs only if it is cheap in this branch. If not, leave the placement module
 ready and document the follow-up. The important thing is that future execution
 flags call the same placement engine as `lf op wt create`.
+
+### 7. Polish command-surface parity
+
+Make this part of the parent PR, not vague follow-up work. The issue found
+during review was concrete:
+
+- a stale installed `lf` did not match source/local-bin behavior.
+- source/local-bin supports `lf op wt create --stack [PARENT]`, `--main`,
+  `--fork`, and `--plan`.
+- optional `--stack [PARENT]` is ambiguous with positional `NAME`; users have
+  to write awkward forms like `--stack -- name` or
+  `--stack=__current__ name`.
+
+Before land, source help, local-bin help, installed help, docs, and prompt
+guidance should describe commands the active binary can parse. Polish the
+`--stack` edge so the normal stacked-from-current invocation is not a parser
+trap. Prefer an unambiguous CLI shape over documenting a surprising sentinel.
+If the parser shape cannot change safely in this parent, the parent must at
+least include a failing/expected test and exact docs for the accepted spelling.
 
 ## Demo
 
@@ -467,16 +528,21 @@ No rebase agent launches.
 Next, show placement:
 
 ```bash
-git checkout -b demo.parent
+lf op wt create demo-parent
+cd ../loopflow.demo-parent
 lf op wt create child
 ```
 
 Expected:
 
 ```text
-Created branch demo.parent.child
-Created worktree ../loopflow.demo.parent.child
+Created branch <schema-demo-parent>.child
+Created worktree ../loopflow.<schema-demo-parent>.child
 ```
+
+The parent branch is created through `lf op wt create`, not raw
+`git checkout -b demo.parent`. Ancestry is demonstrated through placement:
+first create/select the parent worktree, then create the child from there.
 
 Then:
 
@@ -493,7 +559,7 @@ error: dots are reserved for stack ancestry
 Finally:
 
 ```bash
-tail -n 5 .lf/metrics/ops.jsonl
+tail -n 5 .lf/tmp/metrics/ops.jsonl
 ```
 
 Expected: visible decisions for the reset and placement operations, including
@@ -514,18 +580,31 @@ stacked child with one command, and left telemetry proving what happened.
 - branch-name ancestry works for `a.b.c -> a.b`.
 - `lf op wt create child` from a non-main branch creates a stacked child, with
   `--main` as the escape hatch.
+- scratch stash and ops telemetry use ignored `.lf/tmp/` paths and do not dirty
+  the repo.
 - ops telemetry records strategy decisions without raw diffs.
+- command-surface parity covers source/local-bin/installed drift and the
+  optional-`--stack` parser edge.
 - E2E tests cover the demo path.
+- the config/naming-schema follow-up exists and explicitly owns root branch
+  schema grammar, dot ambiguity, migration, and docs.
 - `cargo fmt`, `cargo test -p loopflow`, and the relevant E2E workflow tests
   pass.
 
 ## Open choices to settle during implementation
 
 - Exact generated/checkpoint commit subject allowlist.
-- Whether root branch names keep the configured timestamp schema while stack
-  children are literal dotted branches, or whether this branch introduces a new
-  stack-aware schema formatter.
 - Whether `lf op land` flips to no-advance in this branch or waits for a follow
   up after telemetry confirms the repair pain.
-- Whether telemetry lives in `.lf/metrics/ops.jsonl` or the existing run journal
-  fold. Prefer the smallest code path that can answer the metrics.
+- Exact CLI spelling for stacked-from-current if `--stack [PARENT]` cannot be
+  made unambiguous with positional `NAME`.
+
+## Follow-ups
+
+- Config/naming-schema child: redesign `branch_names.schema` so branch ancestry
+  and root branch formatting no longer fight over dots. Include migration,
+  config docs, DTO/fixture updates if wire shapes change, and prompt guidance.
+- Normal `lf <flow-or-step> --stack|--fork|--dispatch` execution placement if
+  the parent lands only the shared placement engine and `lf op wt create`
+  surface.
+- Land/advance default split after telemetry shows the repair cost clearly.

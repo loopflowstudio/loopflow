@@ -8,7 +8,7 @@ dot rejection for user-provided worktree segments, `--main`, `--fork`,
 
 Added rebase planning for `lf op rebase --plan`, deterministic reset/rebase
 classification, scratch stash/restore for disposable reset paths, and local
-ops telemetry under `.lf/metrics/ops.jsonl`.
+ops telemetry under ignored `.lf/tmp/metrics/ops.jsonl`.
 
 The gate pass fixed classifier drift for branches that are only behind their
 base: upstream changes are no longer counted as local authored files. The new
@@ -16,7 +16,10 @@ E2E covers the demo path for scratch-only reset, stack placement planning, and
 dot rejection.
 
 The gate pass updated `docs/lfop.md`, embedded Loopflow guidance, and prompt
-goldens so user docs and agent guidance match the new command surface.
+goldens so user docs and agent guidance match the new command surface. Before
+land, verify the installed `lf`, source binary, local-bin shim, docs, and prompt
+guidance agree on `lf op wt create --stack [PARENT]`, `--main`, `--fork`, and
+`--plan`.
 
 ## Key choices
 
@@ -32,6 +35,11 @@ this branch.
 
 Root branch names still follow the configured branch schema. Stacked children
 append the new segment to the parent branch with a dot.
+
+The broader branch-schema grammar remains follow-up work. This repo's current
+`.lf/config.yaml` uses `branch_names.schema: "{user}.{name}.{ts}"`, so dotted
+root branch names still exist. The parent PR should create a stacked
+config/naming-schema child instead of claiming this ambiguity is fully solved.
 
 ## How it fits together
 
@@ -53,6 +61,10 @@ dots can visually resemble stack ancestry.
 The scratch stash restore is intentionally simple. It replaces `scratch/` after
 reset instead of resolving conflicting scratch edits.
 
+The optional `--stack [PARENT]` parser shape is easy to trip over because it
+competes with positional `NAME`; users may need forms like `--stack -- name` or
+`--stack=__current__ name`. Polish or document this edge before land.
+
 ## What's not included
 
 Normal `lf <flow-or-step> --stack|--fork|--dispatch` placement flags are not
@@ -61,6 +73,9 @@ implemented in this branch.
 `lf op land` no-advance behavior is not changed.
 
 Telemetry is local JSONL only. There is no aggregation or dashboard.
+
+Config/naming-schema redesign is not included in this parent. It should land as
+a stacked child/follow-up with migration and docs.
 
 ## Validation
 

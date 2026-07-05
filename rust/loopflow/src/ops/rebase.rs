@@ -44,7 +44,7 @@ pub struct RebasePlan {
     pub unique_commits: usize,
     pub changed_files: Vec<PathBuf>,
     pub protected: bool,
-    pub scratch_stash: Option<PathBuf>,
+    pub scratch_stashed: bool,
 }
 
 pub fn plan_rebase(repo: &Path, onto: Option<&str>) -> OpsResult<RebasePlan> {
@@ -109,9 +109,8 @@ pub fn plan_rebase(repo: &Path, onto: Option<&str>) -> OpsResult<RebasePlan> {
         (RebaseClass::CleanAuthored, RebaseStrategy::DirectRebase)
     };
 
-    let scratch_stash = matches!(strategy, RebaseStrategy::ResetToBase)
-        .then(|| repo.join(".lf").join("scratch-stash"))
-        .filter(|_| repo.join("scratch").exists());
+    let scratch_stashed =
+        matches!(strategy, RebaseStrategy::ResetToBase) && repo.join("scratch").exists();
 
     Ok(RebasePlan {
         branch,
@@ -122,7 +121,7 @@ pub fn plan_rebase(repo: &Path, onto: Option<&str>) -> OpsResult<RebasePlan> {
         unique_commits,
         changed_files,
         protected,
-        scratch_stash,
+        scratch_stashed,
     })
 }
 

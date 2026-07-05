@@ -162,6 +162,16 @@ constraint is that branch names do fully encode ancestry (`a.b.c` has parent
 `a.b`). For rebase-efficiency, branch-name ancestry wins; metadata may annotate
 or validate but cannot be required to understand the stack.
 
+There is a second naming conflict that the parent PR should acknowledge without
+claiming to solve completely: the current repo config uses
+`branch_names.schema: "{user}.{name}.{ts}"`. Those root branch names contain
+dots before any stack ancestry is introduced. The rebase-efficiency parent can
+still make placement deterministic by appending stack child segments to the
+concrete parent branch, but config grammar needs its own stacked follow-up:
+schema redesign, migration, docs, prompt guidance, and tests. Until that child
+lands, "dots are reserved" means "reserved for new user-provided placement
+segments," not "all existing dotted branch names are unambiguous ancestry."
+
 ### External Patterns
 
 Graphite is the closest comparison for stacked branch mechanics. Its docs frame
@@ -340,8 +350,11 @@ anecdotes.
 
 ### Dogfood Loop
 
-For two weeks, emit local JSONL telemetry under `.lf/metrics/ops.jsonl` or the
-existing journal layer. Do not include raw diffs or secret values.
+For two weeks, emit local JSONL telemetry under ignored
+`.lf/tmp/metrics/ops.jsonl` or the existing journal layer if that also avoids
+repo dirtiness. Do not include raw diffs or secret values. Scratch preservation
+uses ignored `.lf/tmp/scratch-stash/<branch>-<timestamp>/`; never
+`.lf/scratch-stash`, `.lf/metrics`, or tracked files.
 
 Review weekly:
 
@@ -361,12 +374,12 @@ Then change exactly one default at a time:
 ## Open Questions
 
 - What exact commit-message patterns count as generated/checkpoint-only?
-- Should root branches still use timestamp schema while stack children use
-  literal dot suffixes?
 - Should `a.b.c` be legal if `a.b` does not exist locally but exists on origin?
 - How should branch names escape dots inside user-provided child names?
 - Should `lf op land` default to no-advance, with `--advance` restoring old
   behavior, or keep old behavior under `land` and add `land --no-advance`?
+- What is the final non-ambiguous spelling for stacked-from-current if
+  `--stack [PARENT]` keeps colliding with positional `NAME`?
 
 ## Recommendations
 
@@ -386,7 +399,10 @@ coverage.
 ### Make Stack Ancestry A Pure Branch-Name Function
 
 **Observation**: The user wants `a.b.c` to fully encode ancestry. That keeps
-agent reasoning simple and avoids hidden state drift.
+agent reasoning simple and avoids hidden state drift. The current
+`branch_names.schema` also uses dots, so this recommendation needs a scoped
+staging rule: the parent PR reserves dots for new placement segments and opens a
+config/naming-schema child for root-branch grammar.
 
 **Cost**: Low to medium. Naming validation and escaping rules need care.
 
@@ -394,6 +410,20 @@ agent reasoning simple and avoids hidden state drift.
 single rule.
 
 **Verdict**: Adopt as the core invariant.
+
+### Keep Temporary Ops State Ignored
+
+**Observation**: scratch stash and telemetry are operational byproducts. Writing
+them under `.lf/metrics` or `.lf/scratch-stash` risks dirtying the repo and
+turning a recovery path into more work.
+
+**Cost**: Low. Use `.lf/tmp/metrics/ops.jsonl` and
+`.lf/tmp/scratch-stash/...`, or route through an existing ignored journal.
+
+**Benefit**: High. Rebase and land flows can preserve context and record
+decisions without adding cleanup debt.
+
+**Verdict**: Required for the parent PR.
 
 ### Split Land From Advancement
 
@@ -410,13 +440,19 @@ system behavior.
 ### Treat Command-Surface Drift As A First-Class Test
 
 **Observation**: This checkout's source and prompts mention `lf q worker run`,
-but the active installed binary does not support it.
+but the active installed binary does not support it. Review also found a more
+specific `lf op wt create` drift: source/local-bin supports `--stack [PARENT]`,
+`--main`, `--fork`, and `--plan`, while a stale installed `lf` can lag behind.
+The optional `--stack [PARENT]` value is ambiguous with positional `NAME`, so
+users may need awkward spellings like `--stack -- name` or
+`--stack=__current__ name`.
 
-**Cost**: Low. Add a parity test that compares generated loopflow guidance
-against `lf --help`/parse results for listed commands.
+**Cost**: Low to medium. Add a parity test that compares generated loopflow
+guidance against `lf --help`/parse results for listed commands, and polish the
+`--stack` parser/help so the stacked-from-current happy path is not surprising.
 
 **Benefit**: High for agent reliability. A prompt that tells agents to run
 missing commands guarantees drift.
 
-**Verdict**: Add early. It prevents future workflow instructions from becoming
-fiction.
+**Verdict**: Include in the parent PR before land. It prevents future workflow
+instructions from becoming fiction.

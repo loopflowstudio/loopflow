@@ -169,7 +169,7 @@ fn rebase_current(onto: Option<&str>, plan_only: bool, progress: &impl Progress)
                     "unique_commits": plan.unique_commits,
                     "changed_files": plan.changed_files.len(),
                     "protected": plan.protected,
-                    "scratch_stashed": plan.scratch_stash.is_some(),
+                    "scratch_stashed": plan.scratch_stashed,
                     "agent_launched": false,
                     "duration_ms": started.elapsed().as_millis(),
                     "exit_status": "ok",

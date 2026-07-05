@@ -8,7 +8,46 @@ Executes the architecture item "Collapse lfd/lfq into lf; shrink lfd to a
 guarded subscription server," under waves-outward. All decisions ratified
 (Jack, 2026-07-05).
 
-## Target shape
+## Target shape (revised 2026-07-05: the filesystem is the database)
+
+**The trinity (Jack):** the filesystem is the database; lf is the hands;
+lfd is the GATEKEEPER — the machine's face to the outside world: discovery
+("which waves exist here"), aggregation (union of the machine's channels),
+relay (push outward), gate (auth inward), token custody. sqlite survives
+only as the gatekeeper's PRIVATE REBUILDABLE INDEX over the filesystem —
+derived state, crash-harmless, exactly what the doorman tests demanded.
+"Yesterday's db-is-the-registry was a transitional stop, not the
+destination."
+
+Substrate mapping (what replaces each registry job):
+- session/run lifecycle → publications on the run's own channel journal;
+  the parent folds child journals (the observer reads files, not tables)
+- one-brain / liveness → endpoint + pid files + probes (the floor exists)
+- capacity → the parent listener is the single dispatcher; serialization
+  by sovereignty, no lock
+- runs/trace ledger → per-run journals + gatekeeper index (coordinate with
+  the lf-meta run_events branch — same data, table costume)
+- attention → messages on channels
+- PR/queue state → git and gh are truth; derived
+- wave rows → derived from wave/<name>/ markdown (always were)
+- provider tokens → keychain/file custody under the gatekeeper
+- discovery → the gatekeeper's name index (config or ~/.lf/waves.d/)
+
+**Dispatch dissolves placement (Jack):** `--dispatch z` from inside channel
+x.y mints child channel x.y.z (worktree = channel name) forked from HERE —
+stack is just depth; pool is just not dispatching; fresh is dispatching
+from the wave root. The placement trichotomy dies.
+
+**lf d dies entirely (Jack):** the row is not the wave — reads are the
+gatekeeper's job to serve; creation is writing markdown; update is editing
+markdown (boot re-syncs derived fields); delete/gc → lf op wt + files.
+
+Migration staging (honest): (1) run lifecycle publishes to channel journals
+[depends on realign Wave B channels]; (2) readers move to files (observer,
+context); (3) lf stops writing sqlite; gatekeeper indexes files; (4) tables
+drop. Old target shape below stands where not superseded.
+
+## Target shape (original)
 
 ```
 lfdb        crate::lfdb (module now, crate when earned): backends, migrations,

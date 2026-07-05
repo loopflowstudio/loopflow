@@ -234,8 +234,10 @@ async fn illegal_mind_transition_is_refused() {
     assert!(events.is_empty());
 }
 
+/// `/health` splits channel liveness (`status`, always `serving`) from the
+/// resident's condition (`mind`, the mind-state name).
 #[tokio::test]
-async fn health_reports_the_mind_state() {
+async fn health_reports_channel_liveness_and_the_mind_state() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
 
@@ -246,13 +248,14 @@ async fn health_reports_the_mind_state() {
         axum::serve(listener, app).await.ok();
     });
 
-    let body = reqwest::get(format!("http://{addr}/health"))
+    let body: serde_json::Value = reqwest::get(format!("http://{addr}/health"))
         .await
         .unwrap()
-        .text()
+        .json()
         .await
         .unwrap();
-    assert!(body.contains("\"status\":\"idle\""));
+    assert_eq!(body["status"], "serving");
+    assert_eq!(body["mind"], "idle");
 
     rt.transition(
         MindState::Turning {
@@ -260,11 +263,12 @@ async fn health_reports_the_mind_state() {
         },
         "test turn",
     );
-    let body = reqwest::get(format!("http://{addr}/health"))
+    let body: serde_json::Value = reqwest::get(format!("http://{addr}/health"))
         .await
         .unwrap()
-        .text()
+        .json()
         .await
         .unwrap();
-    assert!(body.contains("\"status\":\"turning\""));
+    assert_eq!(body["status"], "serving", "channel liveness is constant");
+    assert_eq!(body["mind"], "turning");
 }

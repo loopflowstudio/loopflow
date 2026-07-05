@@ -22,7 +22,7 @@ a busy-loop.
   work is dispatched to subagents (`lf q worker run <wave> --flow F --task T`,
   daemonless — run + session rows written straight to the shared store, the
   worker launched in a detached tmux session). The server polls the same
-  store and journals `WorkerDispatched`/`WorkerFinished` observations (it is
+  store and journals `RunObserved`/`RunCompleted` observations (it is
   never in the dispatch path) — every ~10s and once before each mind turn;
   dispatched-not-finished workers ride each heartbeat as a compact
   `<in_flight>` section.
@@ -76,6 +76,11 @@ finish with an `lf chat` report, closing the loop through the same door —
 it arrives in the thread with a `from` byline (label from `LFD_AGENT_ROLE`,
 session id from `LFD_SESSION_ID`) and wakes the mind like any input.
 
+`lf sub [NAME] [--json]` is the read half: follow the wave's `/events`
+stream (turns, mind state, memory) until killed, reconnecting with backoff
+and re-resolving the endpoint across server restarts. Same targeting and
+drop semantics as `lf chat` — outside any wave it exits 0 with one note.
+
 The context flows back out the same way: every `lf` run born inside a wave
 (env, else worktree) inherits ambient wave context in its assembled prompt —
 `<lf:wave-chat-recent>` (the newest turns, hard-capped) and
@@ -102,9 +107,9 @@ wave/<name>/.wave-endpoint   →   127.0.0.1:<port>     (address only; removed o
 
 | Method + path             | Behavior |
 |---------------------------|----------|
-| `GET /health`             | `{status, wave, turns, workers, uptime_seconds}`; `status` is the mind state: `idle \| turning \| interrupting \| failed`; `workers` counts observed in-flight worker runs |
+| `GET /health`             | `{status, mind, wave, turns, workers, uptime_seconds}`; `status` is channel liveness — always `serving` while the process answers; `mind` is the resident's state (`idle \| turning \| interrupting \| failed`), null for a channel with no resident — a live channel whose mind died reads `serving` + `failed`; `workers` counts observed in-flight worker runs |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread; `?limit=N` tails the last N turns (open turn included) |
-| `GET /conversation/stream`| SSE, two event names: `state` (`data:` the mind-state name, sent on subscribe and on every transition — the composer keys its verb off it) and `turn` (`data:` a `Turn` JSON; the thread replays on connect, then streams live; turn ids repeat — each frame replaces the client's previous state for that id). |
+| `GET /events`             | SSE, the wave's one unified stream. Three event names: `state` (`data:` the mind-state name, sent on subscribe and on every transition — the composer keys its verb off it), `turn` (`data:` a `Turn` JSON; the thread replays on connect, then streams live; turn ids repeat — each frame replaces the client's previous state for that id), and `memory` (`data:` the `MemoryUpdated` summary string, fired on every curation; live-only — MEMORY.md is the durable state). |
 | `POST /messages {op, text, from?}` | `op` required: `message` (queued; the next turn answers it), `steer` (into the live turn when supported), `interrupt` (cancel the open turn; non-empty text becomes the next turn), or `say` (an attributed emission — `lf chat`; `from {session_id?, label}` required for `say`, rejected otherwise). Returns `{turn, state}`. |
 | `GET /memory`             | `{content}` — the wave's MEMORY.md (origin repo). |
 | `POST /memory {op, content, summary}` | `op`: `update` (full replacement) or `add` (append one bullet). `summary` null → first non-empty content line. The server holds MEMORY.md's pen and journals `MemoryUpdated`. Returns `{summary}`. |
@@ -139,7 +144,7 @@ curl 127.0.0.1:52306/health
 curl -X POST 127.0.0.1:52306/messages -H 'content-type: application/json' \
      -d '{"op":"message","text":"status?"}'
 curl 127.0.0.1:52306/conversation
-curl -N 127.0.0.1:52306/conversation/stream
+curl -N 127.0.0.1:52306/events
 ```
 
 The full guided walk — chat, steer, interrupt, worker dispatch, attributed

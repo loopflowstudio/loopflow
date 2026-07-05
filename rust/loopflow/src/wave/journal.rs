@@ -14,13 +14,15 @@
 //! depends on explicit fields. Each line carries `v: 1` so the format can be
 //! migrated.
 //!
-//! `WorkerDispatched`/`WorkerFinished` are produced by the registry observer
+//! `RunObserved`/`RunCompleted` are produced by the registry observer
 //! ([`crate::wave::registry::StoreObserver`]): the server polls the
 //! shared store — these are confirmed facts, not commands — and the in-flight
 //! view is their fold ([`fold_workers`]). `MemoryUpdated` is produced by the
 //! server's memory routes (`lf memory update`/`add` — the server holds
 //! MEMORY.md's pen). `ThreadStarted` is produced by the mind: the vendor
 //! thread id is its first durable act, journaled before the first turn.
+//! `ServerStarted` is appended once per boot, after replay — restarts are
+//! forensically visible in the record.
 
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
@@ -120,8 +122,8 @@ impl WorkerOutcome {
     }
 }
 
-/// One dispatched worker, folded from `WorkerDispatched`/`WorkerFinished`
-/// rows. `finished` is `None` while the worker is in flight.
+/// One dispatched worker, folded from `RunObserved`/`RunCompleted` rows.
+/// `finished` is `None` while the worker is in flight.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkerRecord {
     pub run_id: String,
@@ -215,13 +217,18 @@ pub enum EventKind {
         reason: String,
     },
     // -- orchestration (observations, not commands) --
-    WorkerDispatched {
+    // The serde aliases keep yesterday's journals replayable: these kinds
+    // were written as `worker_dispatched`/`worker_finished` before the
+    // rename. New writes always carry the new names.
+    #[serde(alias = "worker_dispatched")]
+    RunObserved {
         run_id: String,
         session_id: String,
         flow: String,
         task: String,
     },
-    WorkerFinished {
+    #[serde(alias = "worker_finished")]
+    RunCompleted {
         run_id: String,
         outcome: WorkerOutcome,
         summary: String,
@@ -229,6 +236,13 @@ pub enum EventKind {
     // -- memory --
     MemoryUpdated {
         summary: String,
+    },
+    // -- server lifecycle --
+    /// One boot of the wave server, appended after replay. Folds ignore it;
+    /// it exists so restarts are visible in the forensic record.
+    ServerStarted {
+        pid: u32,
+        endpoint: String,
     },
 }
 
@@ -422,14 +436,14 @@ impl Narrator {
             EventKind::MindState { from, to, reason } => {
                 info(format!("state {} → {} ({reason})", from.name(), to.name()))
             }
-            EventKind::WorkerDispatched {
+            EventKind::RunObserved {
                 run_id, flow, task, ..
             } => info(format!(
                 "observed run {} flow={flow} dispatched · {}",
                 short_id(run_id),
                 ellipsize(task, 60)
             )),
-            EventKind::WorkerFinished {
+            EventKind::RunCompleted {
                 run_id,
                 outcome,
                 summary,
@@ -441,6 +455,9 @@ impl Narrator {
             )),
             EventKind::MemoryUpdated { summary } => {
                 info(format!("memory curated: {}", ellipsize(summary, 70)))
+            }
+            EventKind::ServerStarted { pid, endpoint } => {
+                info(format!("server started · pid {pid} · {endpoint}"))
             }
         }
     }
@@ -752,9 +769,10 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             }
             // Steer consumption affects the queue fold, not the thread: the
             // steered text is already a user turn via its `UserMessage` row.
-            EventKind::WorkerDispatched { .. }
-            | EventKind::WorkerFinished { .. }
-            | EventKind::MemoryUpdated { .. } => {}
+            EventKind::RunObserved { .. }
+            | EventKind::RunCompleted { .. }
+            | EventKind::MemoryUpdated { .. }
+            | EventKind::ServerStarted { .. } => {}
         }
     }
 
@@ -782,25 +800,21 @@ fn mark_consumed(
 }
 
 /// Fold the worker observations: one record per dispatched run, in dispatch
-/// order, finished stamped when its `WorkerFinished` arrives. The map keyed
+/// order, finished stamped when its `RunCompleted` arrives. The map keyed
 /// on `run_id` is the idempotence guard's ground truth — a run dispatches
 /// exactly once, whatever the observer saw.
 pub fn fold_workers(events: &[Event]) -> Vec<WorkerRecord> {
     let mut workers: Vec<WorkerRecord> = Vec::new();
     for event in events {
         match &event.kind {
-            EventKind::WorkerDispatched {
+            EventKind::RunObserved {
                 run_id,
                 session_id,
                 flow,
                 task,
             } => {
                 if workers.iter().any(|w| &w.run_id == run_id) {
-                    tracing::warn!(
-                        run_id,
-                        seq = event.seq,
-                        "duplicate WorkerDispatched in journal"
-                    );
+                    tracing::warn!(run_id, seq = event.seq, "duplicate RunObserved in journal");
                     continue;
                 }
                 workers.push(WorkerRecord {
@@ -811,12 +825,12 @@ pub fn fold_workers(events: &[Event]) -> Vec<WorkerRecord> {
                     finished: None,
                 });
             }
-            EventKind::WorkerFinished {
+            EventKind::RunCompleted {
                 run_id, outcome, ..
             } => match workers.iter_mut().find(|w| &w.run_id == run_id) {
                 Some(worker) => worker.finished = Some(*outcome),
                 None => {
-                    tracing::warn!(run_id, seq = event.seq, "WorkerFinished for unknown worker");
+                    tracing::warn!(run_id, seq = event.seq, "RunCompleted for unknown worker");
                 }
             },
             _ => {}
@@ -969,19 +983,23 @@ mod tests {
                 },
                 reason: "turn opened".into(),
             },
-            EventKind::WorkerDispatched {
+            EventKind::RunObserved {
                 run_id: "run-1".into(),
                 session_id: "sess-1".into(),
                 flow: "design".into(),
                 task: "sketch the journal".into(),
             },
-            EventKind::WorkerFinished {
+            EventKind::RunCompleted {
                 run_id: "run-1".into(),
                 outcome: WorkerOutcome::Completed,
                 summary: "landed".into(),
             },
             EventKind::MemoryUpdated {
                 summary: "learned the fold".into(),
+            },
+            EventKind::ServerStarted {
+                pid: 4242,
+                endpoint: "127.0.0.1:50123".into(),
             },
         ];
         for (i, kind) in kinds.into_iter().enumerate() {
@@ -995,6 +1013,78 @@ mod tests {
             let decoded: Event = serde_json::from_str(&line).expect("deserialize");
             assert_eq!(decoded, event);
         }
+    }
+
+    /// Yesterday's journals carry the pre-rename kind names
+    /// (`worker_dispatched`/`worker_finished`); the serde aliases must keep
+    /// them decoding — and folding — exactly as the new names do, while new
+    /// writes always carry the new names.
+    #[test]
+    fn old_worker_kind_names_still_replay_and_fold_identically() {
+        let (_tmp, path) = open_tmp();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let old_lines = concat!(
+            "{\"v\":1,\"seq\":1,\"at\":\"2026-07-03T00:00:00Z\",\"kind\":{\"type\":\"worker_dispatched\",\"run_id\":\"run-1\",\"session_id\":\"sess-1\",\"flow\":\"implement\",\"task\":\"wire it\"}}\n",
+            "{\"v\":1,\"seq\":2,\"at\":\"2026-07-03T00:01:00Z\",\"kind\":{\"type\":\"worker_dispatched\",\"run_id\":\"run-2\",\"session_id\":\"sess-2\",\"flow\":\"design\",\"task\":\"sketch it\"}}\n",
+            "{\"v\":1,\"seq\":3,\"at\":\"2026-07-03T00:02:00Z\",\"kind\":{\"type\":\"worker_finished\",\"run_id\":\"run-1\",\"outcome\":\"completed\",\"summary\":\"pr landed\"}}\n",
+        );
+        std::fs::write(&path, old_lines).unwrap();
+
+        let (mut journal, old_events) = Journal::open(&path).expect("old journal replays");
+        assert_eq!(old_events.len(), 3, "every old line decoded");
+        let old_fold = fold_workers(&old_events);
+
+        // The same facts written by this build, under the new names.
+        let new_events = vec![
+            Event {
+                v: FORMAT_VERSION,
+                seq: 1,
+                at: OffsetDateTime::now_utc(),
+                kind: EventKind::RunObserved {
+                    run_id: "run-1".into(),
+                    session_id: "sess-1".into(),
+                    flow: "implement".into(),
+                    task: "wire it".into(),
+                },
+            },
+            Event {
+                v: FORMAT_VERSION,
+                seq: 2,
+                at: OffsetDateTime::now_utc(),
+                kind: EventKind::RunObserved {
+                    run_id: "run-2".into(),
+                    session_id: "sess-2".into(),
+                    flow: "design".into(),
+                    task: "sketch it".into(),
+                },
+            },
+            Event {
+                v: FORMAT_VERSION,
+                seq: 3,
+                at: OffsetDateTime::now_utc(),
+                kind: EventKind::RunCompleted {
+                    run_id: "run-1".into(),
+                    outcome: WorkerOutcome::Completed,
+                    summary: "pr landed".into(),
+                },
+            },
+        ];
+        assert_eq!(
+            old_fold,
+            fold_workers(&new_events),
+            "old names fold identically to new names"
+        );
+
+        // New appends carry the new names on disk, never the aliases.
+        journal.append(|_| EventKind::RunCompleted {
+            run_id: "run-2".into(),
+            outcome: WorkerOutcome::Failed,
+            summary: "process gone".into(),
+        });
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let last = raw.lines().last().unwrap();
+        assert!(last.contains("\"run_completed\""), "{last}");
+        assert!(!last.contains("worker_finished"), "{last}");
     }
 
     /// Every `EventKind` narrates without panicking. The compile-time half of
@@ -1074,19 +1164,23 @@ mod tests {
                 },
                 reason: "turn opened".into(),
             },
-            EventKind::WorkerDispatched {
+            EventKind::RunObserved {
                 run_id: "run-1".into(),
                 session_id: "sess-1".into(),
                 flow: "design".into(),
                 task: "sketch the journal".into(),
             },
-            EventKind::WorkerFinished {
+            EventKind::RunCompleted {
                 run_id: "run-1".into(),
                 outcome: WorkerOutcome::Completed,
                 summary: "landed".into(),
             },
             EventKind::MemoryUpdated {
                 summary: "learned the fold".into(),
+            },
+            EventKind::ServerStarted {
+                pid: 4242,
+                endpoint: "127.0.0.1:50123".into(),
             },
         ];
         let mut narrator = Narrator::default();
@@ -1240,7 +1334,7 @@ mod tests {
         });
         assert_eq!(n.line, "mind thread codex thread-7f3a");
 
-        let n = render(EventKind::WorkerDispatched {
+        let n = render(EventKind::RunObserved {
             run_id: "run-8c1d2e3f4a".into(),
             session_id: "sess-9".into(),
             flow: "build".into(),
@@ -1251,7 +1345,7 @@ mod tests {
             "observed run run-8c1d flow=build dispatched · wire the narration tap into the journal"
         );
 
-        let n = render(EventKind::WorkerFinished {
+        let n = render(EventKind::RunCompleted {
             run_id: "run-8c1d2e3f4a".into(),
             outcome: WorkerOutcome::Completed,
             summary: "narration tap landed, suite green".into(),
@@ -1268,6 +1362,12 @@ mod tests {
             n.line,
             "memory curated: journal is the console's source of truth"
         );
+
+        let n = render(EventKind::ServerStarted {
+            pid: 4242,
+            endpoint: "127.0.0.1:50123".into(),
+        });
+        assert_eq!(n.line, "server started · pid 4242 · 127.0.0.1:50123");
     }
 
     /// Long text is flattened and cut; a fresh turn resets the prose gist.
@@ -1433,7 +1533,7 @@ mod tests {
     fn fold_workers_tracks_dispatch_and_finish_once_per_run() {
         let (_tmp, path) = open_tmp();
         let (mut journal, _) = Journal::open(&path).expect("open");
-        let dispatch = |run: &str| EventKind::WorkerDispatched {
+        let dispatch = |run: &str| EventKind::RunObserved {
             run_id: run.to_string(),
             session_id: format!("sess-{run}"),
             flow: "implement".to_string(),
@@ -1444,7 +1544,7 @@ mod tests {
             journal.append(|_| dispatch("run-2")),
             // Duplicate dispatch rows are tolerated by the fold (first wins).
             journal.append(|_| dispatch("run-1")),
-            journal.append(|_| EventKind::WorkerFinished {
+            journal.append(|_| EventKind::RunCompleted {
                 run_id: "run-1".to_string(),
                 outcome: WorkerOutcome::Completed,
                 summary: "pr landed".to_string(),

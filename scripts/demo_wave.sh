@@ -69,7 +69,7 @@ thread() {
 }
 
 last_turn_status() { curl -sf "http://$ADDR/conversation" | jq -r '.turns[-1].status'; }
-mind_state()       { curl -sf "http://$ADDR/health" | jq -r '.status'; }
+mind_state()       { curl -sf "http://$ADDR/health" | jq -r '.mind'; }
 
 journal_types() {
     jq -r '.kind.type' "$JOURNAL" 2>/dev/null | sort | uniq -c | sed 's/^/  /'
@@ -192,7 +192,7 @@ curl -sf -X POST "http://$ADDR/messages" -H 'content-type: application/json' \
     -d '{"op":"message","text":"Introduce yourself in two sentences, then list what is on TODO.md."}' |
     jq -c '{state}' | sed 's/^/  /'
 say "polling the thread until the turn finalizes (SSE is the live view:"
-say "  curl -N http://$ADDR/conversation/stream )"
+say "  curl -N http://$ADDR/events )"
 poll "assistant turn finalized" 180 sh -c \
     "curl -sf http://$ADDR/conversation | jq -e '.turns[-1] | .role == \"assistant\" and .status != \"running\" and .status != \"pending\"'" || true
 thread
@@ -226,7 +226,7 @@ sleep 4
 say 'POST {"op":"interrupt","text":""} — cooperative cancel, 10s force deadline'
 curl -sf -X POST "http://$ADDR/messages" -H 'content-type: application/json' \
     -d '{"op":"interrupt","text":""}' | jq -c '{state}' | sed 's/^/  /'
-poll "mind back to idle" 30 sh -c "[ \"\$(curl -sf http://$ADDR/health | jq -r .status)\" = idle ]" || true
+poll "mind back to idle" 30 sh -c "[ \"\$(curl -sf http://$ADDR/health | jq -r .mind)\" = idle ]" || true
 say "last turn (look for status=interrupted; if the turn beat the interrupt,"
 say "an idle interrupt is a documented no-op):"
 thread | tail -3
@@ -241,9 +241,9 @@ hr "act 5 · the mind dispatches a worker (lf q worker run)"
 say "asking the mind to delegate — orchestration lives in the prompt, loopflow is the toolset"
 curl -sf -X POST "http://$ADDR/messages" -H 'content-type: application/json' \
     -d '{"op":"message","text":"Dispatch one worker via lf q worker run to make the next TODO.md improvement. Do not do the work inline. After dispatching, reply with the run id."}' >/dev/null
-poll "worker_dispatched journaled (mind turn + dispatch; model-dependent)" 300 journal_has worker_dispatched || true
-if journal_has worker_dispatched; then
-    jq -c 'select(.kind.type == "worker_dispatched") | .kind' "$JOURNAL" | sed 's/^/  /'
+poll "run_observed journaled (mind turn + dispatch; model-dependent)" 300 journal_has run_observed || true
+if journal_has run_observed; then
+    jq -c 'select(.kind.type == "run_observed") | .kind' "$JOURNAL" | sed 's/^/  /'
     say "the worker is a real detached tmux session:"
     tmux list-sessions 2>/dev/null | grep -v "^$TMUX_SESSION" | sed 's/^/  /' || true
     say "and a real sibling worktree — <repo>.<wave>.<id> (three segments = wave worker):"
@@ -262,7 +262,7 @@ say "the mind curates what it learned (lf memory add)."
 poll "a from-attributed worker report in the thread (workers take minutes)" 600 sh -c \
     "curl -sf http://$ADDR/conversation | jq -e '.turns[] | select(.from == \"worker\")'" || true
 thread | tail -6
-poll "worker_finished journaled" 120 journal_has worker_finished || true
+poll "run_completed journaled" 120 journal_has run_completed || true
 if journal_has memory_updated; then
     ok "memory_updated journaled — the mind curated MEMORY.md unprompted:"
     curl -sf "http://$ADDR/memory" | jq -r .content | sed 's/^/  /'

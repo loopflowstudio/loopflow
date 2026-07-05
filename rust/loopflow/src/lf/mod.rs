@@ -169,6 +169,16 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
+    /// Follow a wave's live event stream (turns, mind state, memory) until
+    /// killed. Defaults to the invoking context's wave; exits 0 with a note
+    /// when no wave resolves.
+    Sub {
+        /// Wave name (default: the ambient wave — env, else worktree)
+        wave: Option<String>,
+        /// Emit raw frames as NDJSON instead of human lines
+        #[arg(long)]
+        json: bool,
+    },
     /// Read or curate a wave's MEMORY.md (server-owned; bare `lf memory` = show)
     Memory {
         #[command(subcommand)]

@@ -1,20 +1,24 @@
 //! The wave server's HTTP surface — a thin view over in-process state.
 //!
 //! Every endpoint reads or nudges [`WaveRuntime`]; none of them own logic. The
-//! timeline is served as-is, live turns stream over SSE, and a POSTed message
+//! timeline is served as-is, live events stream over SSE, and a POSTed message
 //! is dropped into the in-process inbox. Discovery is a dumb pointer file, not
 //! a transport: `wave/<name>/.wave-endpoint` holds `127.0.0.1:<port>` and
 //! nothing else.
 //!
 //! Wire contract (snake_case, stable — a Concerto worker builds against it):
-//! - `GET /health` → `{status, wave, turns, workers, uptime_seconds}`;
-//!   `status` is the mind state (`idle | turning | interrupting | failed`);
-//!   `workers` counts this wave's observed in-flight worker runs.
+//! - `GET /health` → `{status, mind, wave, turns, workers, uptime_seconds}`;
+//!   `status` is CHANNEL liveness — always `serving` while this process
+//!   answers; `mind` is the resident's state (`idle | turning | interrupting
+//!   | failed`), or null for a channel with no resident (dormant channels,
+//!   when they exist — a served channel whose resident died reads
+//!   `status: "serving", mind: "failed"`); `workers` counts this wave's
+//!   observed in-flight worker runs.
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
 //!   `running`), if one is in progress, after the finalized thread. Optional
 //!   `?limit=N` tails the last N turns (open turn included) — `wave_context`
 //!   passes 12; absent means the whole thread.
-//! - `GET /conversation/stream` → SSE, two event names and no more:
+//! - `GET /events` → SSE, the wave's one unified stream. Three event names:
 //!   - `state`: data is the mind-state name (`idle | turning | interrupting |
 //!     failed`), sent once on subscribe (before the turn replay) and again on
 //!     every transition — the composer keys its verb off it.
@@ -23,6 +27,8 @@
 //!     in-progress turn is re-sent whole as it grows and finalization sends
 //!     the terminal turn under the same id — each frame replaces the client's
 //!     previous state for that id (upsert, never append-if-seen).
+//!   - `memory`: data is the `MemoryUpdated` summary string, fired on every
+//!     curation. Live-only, no replay — MEMORY.md itself is the durable state.
 //! - `POST /messages {op, text, from?}` → `{turn, state}`. `op` is required —
 //!   `"message"` (queued; the next turn answers it), `"steer"` (into the live
 //!   turn when the harness supports it, else degrades to a queued message),
@@ -71,7 +77,13 @@ pub const ENDPOINT_FILE: &str = ".wave-endpoint";
 
 #[derive(Debug, Serialize)]
 struct HealthBody {
+    /// Channel liveness: always `"serving"` while this process answers. The
+    /// resident's condition is `mind` — a served channel whose resident died
+    /// is `status: "serving", mind: "failed"`.
     status: String,
+    /// Resident (mind) state name, or null for a channel with no resident —
+    /// design-ready for dormant channels; this server always has a mind.
+    mind: Option<String>,
     wave: String,
     turns: usize,
     /// Workers observed in flight for this wave (dispatch is daemonless —
@@ -156,7 +168,7 @@ pub fn router(runtime: Arc<WaveRuntime>) -> Router {
     Router::new()
         .route("/health", get(health_handler))
         .route("/conversation", get(conversation_handler))
-        .route("/conversation/stream", get(conversation_stream_handler))
+        .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
         .with_state(state)
@@ -164,7 +176,8 @@ pub fn router(runtime: Arc<WaveRuntime>) -> Router {
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
     Json(HealthBody {
-        status: state.runtime.mind_state().name().to_string(),
+        status: "serving".to_string(),
+        mind: Some(state.runtime.mind_state().name().to_string()),
         wave: state.runtime.name().to_string(),
         turns: state.runtime.thread_snapshot().len(),
         workers: state.runtime.in_flight_workers().len(),
@@ -184,59 +197,36 @@ async fn conversation_handler(
     Json(ConversationBody { turns })
 }
 
+/// The door is opaque on resident ops: this handler validates SHAPE only —
+/// `from` rides `say` and nothing else; `text` may be empty only for
+/// `interrupt` — then hands the op to the runtime uninterpreted
+/// ([`WaveRuntime::deliver`]). What steer or interrupt *means* lives with the
+/// resident, not the ear. Honest partial: the `{turn, state}` echo still
+/// leaks that a bare interrupt appends nothing (`turn: null`), but that fact
+/// comes back from the runtime's return, not from the door interpreting.
 async fn messages_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostMessage>,
 ) -> Result<Json<PostMessageResponse>, (StatusCode, String)> {
-    let empty = body.text.trim().is_empty();
     if body.from.is_some() && !matches!(body.op, MessageOp::Say) {
         return Err((
             StatusCode::BAD_REQUEST,
             "`from` is only valid for the say op".to_string(),
         ));
     }
-    let turn = match body.op {
-        MessageOp::Say => {
-            if empty {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    "text is required for the say op".to_string(),
-                ));
-            }
-            let Some(from) = body.from else {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    "`from` is required for the say op".to_string(),
-                ));
-            };
-            Some(state.runtime.deliver_say(body.text, from))
-        }
-        MessageOp::Message | MessageOp::Steer => {
-            if empty {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    "text is required for message/steer ops".to_string(),
-                ));
-            }
-            Some(state.runtime.deliver_user_message(body.text, body.op))
-        }
-        MessageOp::Interrupt => {
-            if empty {
-                // Bare interrupt: nothing said, nothing appended. While idle
-                // this is a no-op success — the returned state says so.
-                state.runtime.deliver_interrupt();
-                None
-            } else {
-                // Interrupt & send: the text is journaled (op records intent)
-                // and becomes the next turn after the cancel settles.
-                Some(
-                    state
-                        .runtime
-                        .deliver_user_message(body.text, MessageOp::Interrupt),
-                )
-            }
-        }
-    };
+    if matches!(body.op, MessageOp::Say) && body.from.is_none() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "`from` is required for the say op".to_string(),
+        ));
+    }
+    if body.text.trim().is_empty() && !matches!(body.op, MessageOp::Interrupt) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "text is required for every op but interrupt".to_string(),
+        ));
+    }
+    let turn = state.runtime.deliver(body.op, body.text, body.from);
     Ok(Json(PostMessageResponse {
         turn,
         state: state.runtime.mind_state().name().to_string(),
@@ -288,14 +278,15 @@ fn first_line(content: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// SSE: send the mind state, replay the thread on connect (open turn
-/// included, status `running`), then stream live frames as-is — `state` on
-/// every transition, `turn` ids repeating by design (every frame replaces the
-/// client's state for that id, so an in-progress turn updates in place and
-/// its terminal frame lands under the same id). Snapshot and subscription are
-/// atomic in the runtime (broadcasts share the append lock), so no live frame
-/// is ever older than the replayed snapshot.
-async fn conversation_stream_handler(
+/// The unified `/events` SSE: send the mind state, replay the thread on
+/// connect (open turn included, status `running`), then stream live frames
+/// as-is — `state` on every transition, `turn` ids repeating by design
+/// (every frame replaces the client's state for that id, so an in-progress
+/// turn updates in place and its terminal frame lands under the same id),
+/// `memory` on every curation (live-only; the file is the durable state).
+/// Snapshot and subscription are atomic in the runtime (broadcasts share the
+/// append lock), so no live frame is ever older than the replayed snapshot.
+async fn events_handler(
     State(state): State<ServerState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let sub = state.runtime.subscribe_with_snapshot();
@@ -320,8 +311,17 @@ async fn conversation_stream_handler(
         };
         async move { out }
     });
+    let live_memory = BroadcastStream::new(sub.memory_rx).filter_map(move |res| {
+        let out = match res {
+            Ok(summary) => Some(Ok(memory_event(&summary))),
+            // Lagged: fine — MEMORY.md itself is the durable state.
+            Err(_) => None,
+        };
+        async move { out }
+    });
 
-    Sse::new(replay.chain(stream::select(live_turns, live_states))).keep_alive(KeepAlive::default())
+    let live = stream::select(live_turns, stream::select(live_states, live_memory));
+    Sse::new(replay.chain(live)).keep_alive(KeepAlive::default())
 }
 
 fn turn_event(turn: &ChatTurn) -> Event {
@@ -332,6 +332,10 @@ fn turn_event(turn: &ChatTurn) -> Event {
 
 fn state_event(state: &MindState) -> Event {
     Event::default().event("state").data(state.name())
+}
+
+fn memory_event(summary: &str) -> Event {
+    Event::default().event("memory").data(summary)
 }
 
 /// Path to the discovery pointer for a wave.

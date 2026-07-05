@@ -45,6 +45,10 @@ const TURN_BROADCAST_CAPACITY: usize = 256;
 /// turn); a lagged subscriber just resyncs from the next transition.
 const STATE_BROADCAST_CAPACITY: usize = 64;
 
+/// Capacity of the live memory broadcast. Curation is deliberate and rare;
+/// a lagged subscriber reads MEMORY.md itself.
+const MEMORY_BROADCAST_CAPACITY: usize = 64;
+
 /// One item from the HTTP surface to the mind's scheduler.
 #[derive(Debug, Clone)]
 pub enum InboxItem {
@@ -69,6 +73,9 @@ pub struct Subscription {
     pub turn_rx: broadcast::Receiver<Arc<ChatTurn>>,
     pub state: MindState,
     pub state_rx: broadcast::Receiver<MindState>,
+    /// Live `MemoryUpdated` summaries — fired on every curation, no replay
+    /// (the file itself is the durable state).
+    pub memory_rx: broadcast::Receiver<String>,
 }
 
 /// Everything that must stay mutually consistent: the journal (truth), the
@@ -90,7 +97,7 @@ struct Inner {
     /// send (the thread's *last* turn at that point is usually the steer's
     /// own user turn, which must never be named as a consumer).
     last_assistant_turn_id: Option<String>,
-    /// Dispatched workers, folded from `WorkerDispatched`/`WorkerFinished`
+    /// Dispatched workers, folded from `RunObserved`/`RunCompleted`
     /// observations (the lfd tail). Keyed on run id — the idempotence guard:
     /// a run dispatches once and finishes once, however many times the
     /// observer sees it (live event + reconnect snapshot).
@@ -114,6 +121,8 @@ pub struct WaveRuntime {
     /// Fans mind-state transitions out to live SSE subscribers (the composer
     /// keys its verb off this).
     state_tx: broadcast::Sender<MindState>,
+    /// Fans `MemoryUpdated` summaries out to live SSE subscribers.
+    memory_tx: broadcast::Sender<String>,
     /// Durable shared brain (read-only here; the mind curates it deliberately).
     memory: Memory,
     /// In-process user-message inbox (a channel, not a file).
@@ -169,6 +178,7 @@ impl WaveRuntime {
 
         let (turn_tx, _) = broadcast::channel(TURN_BROADCAST_CAPACITY);
         let (state_tx, _) = broadcast::channel(STATE_BROADCAST_CAPACITY);
+        let (memory_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
         let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
         let memory = Memory::for_wave(&repo_root, &name);
         let runtime = Arc::new(Self {
@@ -186,6 +196,7 @@ impl WaveRuntime {
             }),
             turn_tx,
             state_tx,
+            memory_tx,
             memory,
             inbox_tx,
         });
@@ -238,9 +249,9 @@ impl WaveRuntime {
     // on run id, so a live event plus a reconnect snapshot never journals a
     // worker twice.
 
-    /// Journal a `WorkerDispatched` observation. Returns false (and appends
+    /// Journal a `RunObserved` observation. Returns false (and appends
     /// nothing) when the run is already known.
-    pub fn journal_worker_dispatched(
+    pub fn journal_run_observed(
         &self,
         run_id: &str,
         session_id: &str,
@@ -251,7 +262,7 @@ impl WaveRuntime {
         if inner.workers.iter().any(|w| w.run_id == run_id) {
             return false;
         }
-        inner.journal.append(|_| EventKind::WorkerDispatched {
+        inner.journal.append(|_| EventKind::RunObserved {
             run_id: run_id.to_string(),
             session_id: session_id.to_string(),
             flow: flow.to_string(),
@@ -267,9 +278,9 @@ impl WaveRuntime {
         true
     }
 
-    /// Journal a `WorkerFinished` observation. Returns false (and appends
+    /// Journal a `RunCompleted` observation. Returns false (and appends
     /// nothing) when the run was never dispatched or already finished.
-    pub fn journal_worker_finished(
+    pub fn journal_run_completed(
         &self,
         run_id: &str,
         outcome: WorkerOutcome,
@@ -284,7 +295,7 @@ impl WaveRuntime {
             return false;
         };
         inner.workers[pos].finished = Some(outcome);
-        inner.journal.append(|_| EventKind::WorkerFinished {
+        inner.journal.append(|_| EventKind::RunCompleted {
             run_id: run_id.to_string(),
             outcome,
             summary: summary.to_string(),
@@ -292,7 +303,7 @@ impl WaveRuntime {
         true
     }
 
-    /// Whether a `WorkerDispatched` is already journaled for `run_id` —
+    /// Whether a `RunObserved` is already journaled for `run_id` —
     /// the observer checks before fetching run details it won't need.
     pub fn worker_known(&self, run_id: &str) -> bool {
         self.inner().workers.iter().any(|w| w.run_id == run_id)
@@ -327,6 +338,8 @@ impl WaveRuntime {
         inner.journal.append(|_| EventKind::MemoryUpdated {
             summary: summary.to_string(),
         });
+        // A send error just means no live subscribers.
+        let _ = self.memory_tx.send(summary.to_string());
         Ok(())
     }
 
@@ -345,7 +358,18 @@ impl WaveRuntime {
         inner.journal.append(|_| EventKind::MemoryUpdated {
             summary: summary.to_string(),
         });
+        let _ = self.memory_tx.send(summary.to_string());
         Ok(())
+    }
+
+    /// Journal this boot's `ServerStarted` — once, after replay, when the
+    /// listener is bound. Folds ignore it; the record gains a restart marker.
+    pub fn journal_server_started(&self, pid: u32, endpoint: &str) {
+        let mut inner = self.inner();
+        inner.journal.append(|_| EventKind::ServerStarted {
+            pid,
+            endpoint: endpoint.to_string(),
+        });
     }
 
     /// Journal the vendor thread the mind runs on. The borrowed-handle rule:
@@ -372,6 +396,7 @@ impl WaveRuntime {
             turn_rx: self.turn_tx.subscribe(),
             state: inner.state.clone(),
             state_rx: self.state_tx.subscribe(),
+            memory_rx: self.memory_tx.subscribe(),
         }
     }
 
@@ -470,6 +495,25 @@ impl WaveRuntime {
         // A send error just means no live subscribers — the store has it.
         let _ = self.turn_tx.send(Arc::new(turn.clone()));
         turn
+    }
+
+    /// Deliver one resident-directed op, uninterpreted by the caller: the
+    /// door validates SHAPE (op names, text/`from` presence) and hands the op
+    /// here; what an op *means* lives in this runtime and the mind's
+    /// scheduler. A bare interrupt (empty text) journals nothing and appends
+    /// no turn — `None`; every other delivery journals a `UserMessage`,
+    /// commits the user turn, and queues for the mind.
+    pub fn deliver(
+        &self,
+        op: MessageOp,
+        text: String,
+        from: Option<Attribution>,
+    ) -> Option<ChatTurn> {
+        if op == MessageOp::Interrupt && text.trim().is_empty() {
+            self.deliver_interrupt();
+            return None;
+        }
+        Some(self.deliver_message(text, op, from))
     }
 
     /// Deliver a user message: append its `UserMessage` event (recording the
@@ -1163,15 +1207,15 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         {
             let (rt, _rx) = open_runtime(tmp.path());
-            assert!(rt.journal_worker_dispatched("run-1", "sess-1", "implement", "wire it"));
+            assert!(rt.journal_run_observed("run-1", "sess-1", "implement", "wire it"));
             // Same run seen again (reconnect snapshot): guarded, not journaled.
-            assert!(!rt.journal_worker_dispatched("run-1", "sess-1", "implement", "wire it"));
+            assert!(!rt.journal_run_observed("run-1", "sess-1", "implement", "wire it"));
             assert_eq!(rt.in_flight_workers().len(), 1);
 
             // A finish for a run never dispatched is refused.
-            assert!(!rt.journal_worker_finished("run-9", WorkerOutcome::Failed, "?"));
-            assert!(rt.journal_worker_finished("run-1", WorkerOutcome::Completed, "pr landed"));
-            assert!(!rt.journal_worker_finished(
+            assert!(!rt.journal_run_completed("run-9", WorkerOutcome::Failed, "?"));
+            assert!(rt.journal_run_completed("run-1", WorkerOutcome::Completed, "pr landed"));
+            assert!(!rt.journal_run_completed(
                 "run-1",
                 WorkerOutcome::Completed,
                 "pr landed again"
@@ -1182,17 +1226,17 @@ mod tests {
         // A restarted runtime folds the same guard state back out of the log:
         // the finished run stays finished, a new run dispatches normally.
         let (rt, _rx) = open_runtime(tmp.path());
-        assert!(!rt.journal_worker_dispatched("run-1", "sess-1", "implement", "wire it"));
-        assert!(rt.journal_worker_dispatched("run-2", "sess-2", "design", "sketch it"));
+        assert!(!rt.journal_run_observed("run-1", "sess-1", "implement", "wire it"));
+        assert!(rt.journal_run_observed("run-2", "sess-2", "design", "sketch it"));
         assert_eq!(rt.in_flight_workers().len(), 1);
         assert_eq!(rt.in_flight_workers()[0].run_id, "run-2");
 
-        // Exactly one WorkerDispatched per run in the journal itself.
+        // Exactly one RunObserved per run in the journal itself.
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
         let dispatched: Vec<&str> = events
             .iter()
             .filter_map(|e| match &e.kind {
-                EventKind::WorkerDispatched { run_id, .. } => Some(run_id.as_str()),
+                EventKind::RunObserved { run_id, .. } => Some(run_id.as_str()),
                 _ => None,
             })
             .collect();
@@ -1200,7 +1244,7 @@ mod tests {
         let finished: Vec<&str> = events
             .iter()
             .filter_map(|e| match &e.kind {
-                EventKind::WorkerFinished { run_id, .. } => Some(run_id.as_str()),
+                EventKind::RunCompleted { run_id, .. } => Some(run_id.as_str()),
                 _ => None,
             })
             .collect();

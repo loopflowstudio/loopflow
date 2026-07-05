@@ -29,7 +29,7 @@
 //! [`registry`] (the same local store lfd serves from — the db IS the
 //! registry): a `WaveAgent` session row registered store-direct at boot (one
 //! brain per wave, enforced by a pid-probing pre-flight) and a store-polling
-//! observer that journals `WorkerDispatched`/`WorkerFinished` observations,
+//! observer that journals `RunObserved`/`RunCompleted` observations,
 //! which fold into the mind's `<in_flight>` heartbeat context. No registry
 //! store on the machine → warn once, fully functional anyway.
 
@@ -190,6 +190,10 @@ async fn serve(
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
+    // Boot marker, once per life, after replay: restarts are visible in the
+    // journal itself (the boot janitor already leaks process lifecycle into
+    // the record; make it honest and forensically legible).
+    runtime.journal_server_started(std::process::id(), &addr.to_string());
 
     // Registry seat: write the WaveAgent row (one-brain pre-flight — a live
     // brain refuses the start unless --force) and start the store-polling
@@ -640,22 +644,39 @@ mod tests {
         assert!(runtime.thread_snapshot().is_empty());
     }
 
+    /// `/health` splits channel liveness from the resident: `status` says
+    /// the channel serves; `mind` carries the resident's state — a dead
+    /// resident on a live channel reads `serving` + `failed`.
     #[tokio::test]
-    async fn health_reports_status_and_turn_count() {
+    async fn health_splits_channel_liveness_from_the_mind() {
         let (base, runtime, _tmp) = boot().await;
         narrate(&runtime, "first");
-        let body = reqwest::get(format!("{base}/health"))
+        let body: serde_json::Value = reqwest::get(format!("{base}/health"))
             .await
             .unwrap()
-            .text()
+            .json()
             .await
             .unwrap();
-        assert!(
-            body.contains("\"status\":\"idle\""),
-            "health status is the mind state"
+        assert_eq!(body["status"], "serving", "status is channel liveness");
+        assert_eq!(body["mind"], "idle", "mind is the resident's state");
+        assert_eq!(body["wave"], "ship");
+        assert_eq!(body["turns"], 1);
+
+        // The resident dies; the channel keeps serving.
+        runtime.transition(
+            crate::wave::state::MindState::Failed {
+                reason: "vendor gone".into(),
+            },
+            "test",
         );
-        assert!(body.contains("\"wave\":\"ship\""));
-        assert!(body.contains("\"turns\":1"));
+        let body: serde_json::Value = reqwest::get(format!("{base}/health"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(body["status"], "serving");
+        assert_eq!(body["mind"], "failed");
     }
 
     #[tokio::test]
@@ -666,9 +687,7 @@ mod tests {
         let host = base.strip_prefix("http://").unwrap().to_string();
         let mut stream = tokio::net::TcpStream::connect(&host).await.unwrap();
         stream
-            .write_all(
-                b"GET /conversation/stream HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n",
-            )
+            .write_all(b"GET /events HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n")
             .await
             .unwrap();
 
@@ -714,7 +733,7 @@ mod tests {
             let mut stream = tokio::net::TcpStream::connect(host).await.unwrap();
             stream
                 .write_all(
-                    b"GET /conversation/stream HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n",
+                    b"GET /events HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n",
                 )
                 .await
                 .unwrap();

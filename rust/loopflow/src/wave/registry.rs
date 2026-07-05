@@ -19,7 +19,7 @@
 //!
 //! - **Observation.** [`StoreObserver`] polls the store — this wave's worker
 //!   sessions and runs — and journals confirmed worker facts:
-//!   `WorkerDispatched` when a worker session+run appears, `WorkerFinished`
+//!   `RunObserved` when a worker session+run appears, `RunCompleted`
 //!   when the session goes terminal (summary = what the registry knows:
 //!   session exit status, run error, PR url). These are OBSERVATIONS — the
 //!   server is never in the dispatch path. The runtime's run-id guard keeps
@@ -386,7 +386,7 @@ impl StoreObserver {
         }
     }
 
-    /// Whether a `WorkerDispatched` is already journaled for `run_id`,
+    /// Whether a `RunObserved` is already journaled for `run_id`,
     /// via the local seen-cache first (the runtime lock is taken at most
     /// once per run id over the observer's lifetime).
     fn known(&self, run_id: &str) -> bool {
@@ -542,7 +542,7 @@ impl StoreObserver {
                     tracing::warn!(run_id, "observed worker session with no run row; skipped");
                     continue;
                 };
-                if self.runtime.journal_worker_dispatched(
+                if self.runtime.journal_run_observed(
                     &run_id,
                     session.id.as_str(),
                     &run.flow,
@@ -581,7 +581,7 @@ impl StoreObserver {
             };
             if self
                 .runtime
-                .journal_worker_finished(&run_id, outcome, &summary)
+                .journal_run_completed(&run_id, outcome, &summary)
             {
                 tracing::info!(run_id, outcome = outcome.name(), summary, "worker finished");
             }
@@ -1000,7 +1000,7 @@ mod tests {
         let dispatched: Vec<String> = events
             .iter()
             .filter_map(|event| match &event.kind {
-                EventKind::WorkerDispatched {
+                EventKind::RunObserved {
                     run_id, flow, task, ..
                 } => Some(format!("{run_id}/{flow}/{task}")),
                 _ => None,
@@ -1018,7 +1018,7 @@ mod tests {
         let finished: Vec<(String, String)> = events
             .iter()
             .filter_map(|event| match &event.kind {
-                EventKind::WorkerFinished {
+                EventKind::RunCompleted {
                     run_id, summary, ..
                 } => Some((run_id.clone(), summary.clone())),
                 _ => None,
@@ -1090,7 +1090,7 @@ mod tests {
         let finished: Vec<(String, WorkerOutcome, String)> = events
             .iter()
             .filter_map(|event| match &event.kind {
-                EventKind::WorkerFinished {
+                EventKind::RunCompleted {
                     run_id,
                     outcome,
                     summary,

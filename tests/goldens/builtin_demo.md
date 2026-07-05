@@ -59,6 +59,9 @@ text. Everything proactive goes through `lf`:
   thread; the post wakes the wave's mind like any message. One short
   paragraph: what landed, links, anything surprising. Pipe stdin for longer.
 - `lf chat --parent "<report>"` - escalate to the parent wave.
+- `lf sub` - listen to your wave: follow its live events (turns, mind state,
+  memory) until killed. Workers may run it in a background terminal to
+  receive steering mid-task. Outside a wave it exits silently.
 - `lf memory add "<fact>"` - record a durable learning. `lf memory update`
   rewrites the whole file from stdin.
 - `wave/<name>/MEMORY.md` is server-owned - never edit the file directly.

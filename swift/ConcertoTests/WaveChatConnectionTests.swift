@@ -92,6 +92,19 @@ struct WaveChatConnectionTests {
         #expect(conn.turns.isEmpty)
     }
 
+    @Test("memory events expose the latest curation summary")
+    func memoryEventsExposeSummary() {
+        let conn = connection()
+        #expect(conn.memorySummary == nil)
+        conn.handle(event: "memory", data: "fold is truth")
+        #expect(conn.memorySummary == "fold is truth")
+        conn.handle(event: "memory", data: "second curation")
+        #expect(conn.memorySummary == "second curation")
+        // Memory payloads never masquerade as turns or states.
+        #expect(conn.turns.isEmpty)
+        #expect(conn.mindState == .idle)
+    }
+
     @Test("state events update the observable mind state")
     func stateEventsUpdateMindState() {
         let conn = connection()
@@ -121,9 +134,10 @@ struct WaveChatConnectionTests {
 
     @Test("a captured real assistant-turn SSE frame decodes and renders")
     func realAssistantFrameDecodes() throws {
-        // Captured verbatim from a live `lf wave goals` server
-        // (GET /conversation/stream, 2026-07-04): a completed assistant turn
-        // with four command items, one failed.
+        // Captured verbatim from a live `lf wave goals` server on 2026-07-04
+        // (then served on /conversation/stream; the same turn frames now ride
+        // GET /events): a completed assistant turn with four command items,
+        // one failed.
         let conn = connection()
         var parser = SSEFrameParser()
         var frames: [SSEFrameParser.Frame] = []

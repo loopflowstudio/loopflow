@@ -1416,21 +1416,21 @@ mod tests {
         {
             let (runtime, _rx) =
                 WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
-            assert!(runtime.journal_worker_dispatched(
+            assert!(runtime.journal_run_observed(
                 "run-7",
                 "sess-7",
                 "implement",
                 "wire the observation tail",
             ));
-            assert!(runtime.journal_worker_dispatched("run-8", "sess-8", "design", "next item"));
+            assert!(runtime.journal_run_observed("run-8", "sess-8", "design", "next item"));
             // Multi-line task: must flatten to one line in the prompt.
-            assert!(runtime.journal_worker_dispatched(
+            assert!(runtime.journal_run_observed(
                 "run-9",
                 "sess-9",
                 "design",
                 "multi-line task\n  with an indented second line",
             ));
-            assert!(runtime.journal_worker_finished(
+            assert!(runtime.journal_run_completed(
                 "run-8",
                 crate::wave::journal::WorkerOutcome::Completed,
                 "landed",

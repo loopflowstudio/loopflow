@@ -2,10 +2,10 @@ import Foundation
 
 // Live client for a wave's chat server. A running `lf wave <name>` publishes its
 // loopback address to `wave/<name>/.wave-endpoint`; this client discovers it,
-// replays + streams the conversation over SSE, and posts messages back. When the
-// pointer file is absent or the server refuses the connection, the connection
-// settles into `.notRunning` and keeps polling so it attaches the moment the
-// wave comes up.
+// consumes the unified `GET /events` SSE stream (turn + state + memory frames,
+// thread replay on connect), and posts messages back. When the pointer file is
+// absent or the server refuses the connection, the connection settles into
+// `.notRunning` and keeps polling so it attaches the moment the wave comes up.
 
 public enum WaveChatError: Error, Sendable {
     case notRunning
@@ -171,6 +171,9 @@ public final class WaveChatConnection {
     /// Last mind state seen — sent once on subscribe, again on every
     /// transition, and echoed by `POST /messages` responses.
     public private(set) var mindState: WaveMindState = .idle
+    /// Last `memory` frame's summary — the wave's most recent MEMORY.md
+    /// curation. Live-only (no replay); exposed for the UI to adopt later.
+    public private(set) var memorySummary: String?
 
     private var currentEndpoint: String?
     private var loop: Task<Void, Never>?
@@ -258,7 +261,7 @@ public final class WaveChatConnection {
     }
 
     private func stream(endpoint: String) async throws {
-        guard let url = URL(string: "http://\(endpoint)/conversation/stream") else {
+        guard let url = URL(string: "http://\(endpoint)/events") else {
             throw WaveChatError.badEndpoint(endpoint)
         }
         var request = URLRequest(url: url)
@@ -286,17 +289,22 @@ public final class WaveChatConnection {
         }
     }
 
-    /// One SSE frame. Two event names: `state` carries the bare mind-state
-    /// name (sent on subscribe and on every transition); `turn` carries a
-    /// whole turn — re-sent under the same id as it grows, then a terminal
-    /// frame at finalization, every frame replacing the previous state of its
-    /// id. Unknown events drop. A turn payload that fails to decode is a hole
-    /// in the transcript: logged always, asserted in debug — never silent.
-    /// Internal for tests.
+    /// One SSE frame off `/events`. Three event names: `state` carries the
+    /// bare mind-state name (sent on subscribe and on every transition);
+    /// `turn` carries a whole turn — re-sent under the same id as it grows,
+    /// then a terminal frame at finalization, every frame replacing the
+    /// previous state of its id; `memory` carries a MEMORY.md curation
+    /// summary (live-only, parsed and exposed, no UI yet). Unknown events
+    /// drop. A turn payload that fails to decode is a hole in the transcript:
+    /// logged always, asserted in debug — never silent. Internal for tests.
     func handle(event: String, data: String) {
         if event == "state" {
             guard let state = WaveMindState(rawValue: data) else { return }
             mindState = state
+            return
+        }
+        if event == "memory" {
+            memorySummary = data
             return
         }
         guard event.isEmpty || event == "turn", let json = data.data(using: .utf8) else { return }

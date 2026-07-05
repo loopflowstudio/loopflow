@@ -53,7 +53,10 @@ enum LocalWaveAgentLauncher {
         if let reason = launchBlockReason(
             sessionName: sessionName,
             sessionExists: sessionExists(repoPath: origin, waveName: waveName),
-            endpoint: WaveEndpoint.read(repoPath: origin, waveName: waveName)
+            endpoint: liveEndpoint(
+                recorded: WaveEndpoint.read(repoPath: origin, waveName: waveName),
+                waveName: waveName
+            )
         ) {
             throw WaveLaunchError.alreadyRunning(reason)
         }
@@ -67,7 +70,10 @@ enum LocalWaveAgentLauncher {
         try runChecked(args, cwd: origin)
     }
 
-    /// Why a launch must not happen, or nil when the way is clear.
+    /// Why a launch must not happen, or nil when the way is clear. `endpoint`
+    /// must be a PROBED address (`liveEndpoint`), never the raw pointer file:
+    /// a SIGKILL or power loss leaves the file behind, and blocking on its
+    /// mere existence would refuse the Start button forever.
     static func launchBlockReason(sessionName: String, sessionExists: Bool, endpoint: String?) -> String? {
         if let endpoint {
             return "Wave already has a live server at \(endpoint)."
@@ -76,6 +82,40 @@ enum LocalWaveAgentLauncher {
             return "tmux session '\(sessionName)' already exists — the wave may still be starting."
         }
         return nil
+    }
+
+    /// The recorded endpoint, but only when a live wave server for `waveName`
+    /// answers there. Mirrors Rust `server::live_endpoint`: a missing pointer,
+    /// a dead address, or an answer for a different wave is stale — nil, clear
+    /// to launch (the new server's own boot floor overwrites the file). Runs
+    /// only on the launch click path, never on the 1s status poll.
+    static func liveEndpoint(
+        recorded: String?,
+        waveName: String,
+        probe: (String) -> String? = healthWaveName
+    ) -> String? {
+        guard let recorded else { return nil }
+        return probe(recorded) == waveName ? recorded : nil
+    }
+
+    /// The `wave` a server at `endpoint` reports on `GET /health`, or nil when
+    /// nothing answers within 2s (mirrors Rust `ENDPOINT_PROBE_TIMEOUT`).
+    static func healthWaveName(endpoint: String) -> String? {
+        guard let url = URL(string: "http://\(endpoint)/health") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 2
+        let semaphore = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var name: String?
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            defer { semaphore.signal() }
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+                  let data,
+                  let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return }
+            name = body["wave"] as? String
+        }.resume()
+        semaphore.wait()
+        return name
     }
 
     /// The detached tmux invocation: session named after the wave, cwd at the

@@ -11,6 +11,7 @@ use loopflow::lfd::http::dto::{
     CreateSessionRequestDto, RunWorkerRequestDto, SessionDto, UsageReportDto, WaveDto,
     WorkerPlacementDto,
 };
+use loopflow::lfd::wave::state::MindState;
 use serde_json::Value;
 
 fn load_fixture(name: &str) -> Value {
@@ -213,4 +214,65 @@ fn usage_report_fixture_pins_repo_provider_shape() {
         .expect("array")
         .iter()
         .any(|row| row["repo"].is_null()));
+}
+
+/// `POST /messages` response — `{turn, state}` (wave/server.rs
+/// `PostMessageResponse`). The same fixture Concerto's ContractTests decodes;
+/// `turn` must parse as a `ChatTurn` and `state` must be a mind-state name.
+#[test]
+fn post_message_response_fixture_pins_wave_chat_reply() {
+    let value = load_fixture("post_message_response.json");
+    let turn: ChatTurn =
+        serde_json::from_value(value["turn"].clone()).expect("turn should parse as ChatTurn");
+    assert_eq!(turn.id, "turn-4");
+    assert_eq!(turn.role, ChatRole::User);
+    assert_eq!(turn.status, Lifecycle::Completed);
+    assert_eq!(turn.from, None);
+
+    // Round-trip: the reply's turn serializes back to the fixture shape.
+    assert_eq!(
+        serde_json::to_value(&turn).expect("serialize turn"),
+        value["turn"]
+    );
+
+    // `state` carries the mind-state name at acceptance; it must be a name
+    // MindState actually produces (renaming a state fails here AND in Swift).
+    let state = value["state"].as_str().expect("state is a string");
+    assert_eq!(
+        state,
+        MindState::Turning {
+            turn_id: turn.id.clone(),
+        }
+        .name()
+    );
+}
+
+/// The SSE `state` vocabulary (`idle | turning | interrupting | failed`)
+/// crosses the boundary as bare names. The fixture pins the shared list:
+/// renaming a `MindState` variant fails here, and Swift's ContractTests pin
+/// the same file against `WaveMindState`.
+#[test]
+fn wave_mind_states_fixture_pins_the_state_vocabulary() {
+    let value = load_fixture("wave_mind_states.json");
+    let fixture_names: Vec<&str> = value["states"]
+        .as_array()
+        .expect("states array")
+        .iter()
+        .map(|name| name.as_str().expect("state name is a string"))
+        .collect();
+
+    let variants = [
+        MindState::Idle,
+        MindState::Turning {
+            turn_id: "turn-1".to_string(),
+        },
+        MindState::Interrupting {
+            turn_id: "turn-1".to_string(),
+        },
+        MindState::Failed {
+            reason: "dead".to_string(),
+        },
+    ];
+    let names: Vec<&str> = variants.iter().map(MindState::name).collect();
+    assert_eq!(fixture_names, names);
 }

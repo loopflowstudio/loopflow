@@ -127,6 +127,65 @@ struct LocalWaveAgentLauncherTests {
         #expect(reason == "Wave already has a live server at 127.0.0.1:52340.")
     }
 
+    // MARK: - Endpoint liveness probe
+
+    @Test("a probed endpoint answering for this wave is live")
+    func probedEndpointIsLive() {
+        let live = LocalWaveAgentLauncher.liveEndpoint(
+            recorded: "127.0.0.1:52340",
+            waveName: "goals",
+            probe: { endpoint in
+                #expect(endpoint == "127.0.0.1:52340")
+                return "goals"
+            }
+        )
+
+        #expect(live == "127.0.0.1:52340")
+    }
+
+    @Test("a dead endpoint is stale: the pointer file alone never blocks")
+    func deadEndpointIsStale() {
+        // SIGKILL / power loss leaves `.wave-endpoint` behind; a probe that
+        // gets no answer must clear the launch, mirroring Rust live_endpoint.
+        let live = LocalWaveAgentLauncher.liveEndpoint(
+            recorded: "127.0.0.1:52340",
+            waveName: "goals",
+            probe: { _ in nil }
+        )
+
+        #expect(live == nil)
+        #expect(LocalWaveAgentLauncher.launchBlockReason(
+            sessionName: "lf-loopflow-goals",
+            sessionExists: false,
+            endpoint: live
+        ) == nil, "stale pointer: clear to launch")
+    }
+
+    @Test("a server answering for a different wave is stale")
+    func mismatchedWaveIsStale() {
+        let live = LocalWaveAgentLauncher.liveEndpoint(
+            recorded: "127.0.0.1:52340",
+            waveName: "goals",
+            probe: { _ in "ship" }
+        )
+
+        #expect(live == nil)
+    }
+
+    @Test("no pointer file: nothing to probe, clear to launch")
+    func missingPointerNeverProbes() {
+        let live = LocalWaveAgentLauncher.liveEndpoint(
+            recorded: nil,
+            waveName: "goals",
+            probe: { _ in
+                Issue.record("must not probe without a recorded endpoint")
+                return nil
+            }
+        )
+
+        #expect(live == nil)
+    }
+
     @Test("an existing tmux session blocks the launch")
     func tmuxSessionBlocksLaunch() {
         let reason = LocalWaveAgentLauncher.launchBlockReason(

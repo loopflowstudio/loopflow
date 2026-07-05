@@ -67,6 +67,12 @@ struct WaveChatConnectionTests {
         conn.handle(event: "turn", data: frame(id: "turn-3", role: "user", text: "hey", status: "completed"))
         conn.handle(event: "turn", data: frame(id: "turn-2", text: "grinding", status: "running"))
         #expect(conn.turns.map(\.id) == ["turn-2", "turn-3"])
+
+        // A replace frame (same id, so the same (sequence, id) sort key) skips
+        // the sort — the order must survive the in-place growth untouched.
+        conn.handle(event: "turn", data: frame(id: "turn-2", text: "grinding\\nstill", status: "running"))
+        #expect(conn.turns.map(\.id) == ["turn-2", "turn-3"])
+        #expect(conn.turns[0].text == "grinding\nstill")
     }
 
     @Test("unparseable ids keep a deterministic order")

@@ -132,8 +132,13 @@ final class PortfolioRepoState {
         )
     }
 
+    /// The tmux session name for a wave. Named after the wave's ORIGIN repo
+    /// (`WaveOrigin.resolve`, memoized): the launcher launches at the origin,
+    /// so the rail's status probe and the attach hint must derive the same
+    /// name from a worktree path — one resolution feeds probe, launcher,
+    /// guard, and hint.
     nonisolated static func waveAgentSessionName(repoPath: String, waveName: String) -> String {
-        let repoName = URL(fileURLWithPath: repoPath).lastPathComponent
+        let repoName = URL(fileURLWithPath: WaveOrigin.resolve(repoPath)).lastPathComponent
         return "lf-\(repoName)-\(sanitizeWavePathComponent(waveName))"
             .replacingOccurrences(of: ".", with: "-")
             .replacingOccurrences(of: ":", with: "-")

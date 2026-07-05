@@ -142,6 +142,15 @@ public func composerVerbs(state: WaveMindState, hasText: Bool) -> ComposerVerbs 
     }
 }
 
+/// `POST /messages {op, text}` response: the appended user turn (null for a
+/// bare interrupt) plus the mind-state name at acceptance. Mirrors Rust
+/// `PostMessageResponse` (wave/server.rs); pinned by the
+/// `post_message_response.json` fixture in ContractTests.
+struct PostMessageResponse: Decodable {
+    let turn: ChatTurn?
+    let state: String
+}
+
 /// Observable connection to one wave's chat server: the live thread plus a phase
 /// the UI renders (not running / connecting / live).
 @MainActor
@@ -193,13 +202,6 @@ public final class WaveChatConnection {
     public func stop() {
         loop?.cancel()
         loop = nil
-    }
-
-    /// `POST /messages {op, text}` response: the appended user turn (null for
-    /// a bare interrupt) plus the mind-state name at acceptance.
-    private struct PostMessageResponse: Decodable {
-        let turn: ChatTurn?
-        let state: String
     }
 
     /// POST a message with an explicit op; a created user turn is applied
@@ -310,13 +312,16 @@ public final class WaveChatConnection {
     /// grows, then finalized under the same id), or append a new one. Ordered
     /// by monotonic sequence, id as tie-break: `sort` isn't guaranteed stable
     /// and unparseable ids share a `.max` sentinel sequence, so the tie-break
-    /// keeps the order deterministic. Internal for tests.
+    /// keeps the order deterministic. A replace skips the sort — the key is
+    /// (sequence, id) and both derive from the id, so an in-place frame can't
+    /// move; no reason to re-sort the thread on every SSE growth frame.
+    /// Internal for tests.
     func upsert(_ turn: ChatTurn) {
         if let index = turns.firstIndex(where: { $0.id == turn.id }) {
             turns[index] = turn
-        } else {
-            turns.append(turn)
+            return
         }
+        turns.append(turn)
         turns.sort { a, b in
             if a.sequence != b.sequence { return a.sequence < b.sequence }
             return a.id < b.id

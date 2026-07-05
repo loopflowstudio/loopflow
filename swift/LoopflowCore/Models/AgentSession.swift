@@ -103,7 +103,9 @@ public struct FileEdit: Sendable, Hashable, Codable {
     public let kind: String?
     public let diff: String?
 
-    public init(path: String, kind: String? = nil, diff: String? = nil) {
+    // No default parameters: FileEdit crosses the wire (ConversationItem.file),
+    // and DTO fields are required or explicitly Optional — see CLAUDE.md "DTOs".
+    public init(path: String, kind: String?, diff: String?) {
         self.path = path
         self.kind = kind
         self.diff = diff

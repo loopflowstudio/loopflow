@@ -265,9 +265,9 @@ fn run_target_in_repo(
     cli: &Cli,
     command: &[String],
 ) -> anyhow::Result<()> {
-    match loopflow::lf::discovery::discover_target(&repo_root, name)? {
-        loopflow::lf::discovery::Target::Step(_) => with_runtime(&repo_root, command, || {
-            with_step_runtime(&repo_root, name, || {
+    match loopflow::lf::discovery::discover_target(repo_root, name)? {
+        loopflow::lf::discovery::Target::Step(_) => with_runtime(repo_root, command, || {
+            with_step_runtime(repo_root, name, || {
                 loopflow::lf::commands::run::run(Some(name), message, cli)?;
                 // Commit any uncommitted changes left by the step.
                 // When running inside a flow, the flow executor handles this;
@@ -277,12 +277,12 @@ fn run_target_in_repo(
                     message: Some(format!("lf commit: {name}")),
                     ..loopflow::ops::CommitOptions::for_task(name)
                 };
-                loopflow::ops::commit_workflow(&repo_root, &options, &loopflow::ops::NullProgress)?;
+                loopflow::ops::commit_workflow(repo_root, &options, &loopflow::ops::NullProgress)?;
                 Ok(())
             })
         }),
-        loopflow::lf::discovery::Target::Flow(flow) => with_runtime(&repo_root, command, || {
-            loopflow::lf::commands::flow::run(&flow, message, cli, &repo_root)
+        loopflow::lf::discovery::Target::Flow(flow) => with_runtime(repo_root, command, || {
+            loopflow::lf::commands::flow::run(&flow, message, cli, repo_root)
         }),
     }
 }

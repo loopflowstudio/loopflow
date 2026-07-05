@@ -49,12 +49,15 @@ sequencing, and reading results back.
 
 ## Speak
 
-Answers return on the channel they came in: when a human's message reaches
-you, reply in your own turn text. Everything proactive goes through `lf`:
+You already hear the wave: its curated memory and recent thread ride this
+prompt as `<lf:wave-memory>` and `<lf:wave-chat-recent>`, snapshotted at
+launch - there is no live feed to poll mid-run. Answers return on the channel
+they came in: when a human's message reaches you, reply in your own turn
+text. Everything proactive goes through `lf`:
 
 - `lf chat "<note>"` - report outcomes, FYIs, and blockers to the wave's
-  thread. One short paragraph: what landed, links, anything surprising. Pipe
-  stdin for longer.
+  thread; the post wakes the wave's mind like any message. One short
+  paragraph: what landed, links, anything surprising. Pipe stdin for longer.
 - `lf chat --parent "<report>"` - escalate to the parent wave.
 - `lf memory add "<fact>"` - record a durable learning. `lf memory update`
   rewrites the whole file from stdin.

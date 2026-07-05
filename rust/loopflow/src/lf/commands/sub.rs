@@ -51,8 +51,11 @@ pub fn run(wave: Option<&str>, json: bool) -> Result<()> {
     })
 }
 
-/// Reconnect backoff: floor doubling to the ceiling, reset on a successful
-/// connect.
+/// Reconnect backoff: floor doubling to the ceiling, reset once a connect
+/// actually streams a frame (the server opens every subscription with a
+/// replay, so any real connect delivers one). A dial that is merely accepted
+/// and then dropped keeps climbing the ladder — a flapping server never gets
+/// hammered at the floor rate.
 const BACKOFF_FLOOR: Duration = Duration::from_secs(1);
 const BACKOFF_CEIL: Duration = Duration::from_secs(30);
 
@@ -89,14 +92,19 @@ async fn follow(wave: Option<&str>, json: bool) -> Result<()> {
             None => String::new(),
         };
         if let Some(endpoint) = &resolved.endpoint {
-            match stream_events(endpoint, &query, &mut |frame| renderer.render(frame)).await {
-                Ok(()) => {
-                    // The server closed the stream (restart, shutdown).
-                    backoff = BACKOFF_FLOOR;
-                }
-                Err(err) => {
-                    tracing::debug!(error = %err, wave = resolved.name, "event stream dropped");
-                }
+            let mut saw_frame = false;
+            let result = stream_events(endpoint, &query, &mut |frame| {
+                saw_frame = true;
+                renderer.render(frame);
+            })
+            .await;
+            if let Err(err) = result {
+                tracing::debug!(error = %err, wave = resolved.name, "event stream dropped");
+            }
+            if saw_frame {
+                // The connect really streamed: back to the floor, however
+                // the stream ended (graceful close or mid-stream drop).
+                backoff = BACKOFF_FLOOR;
             }
             waiting_note_shown = false;
         } else if !waiting_note_shown {
@@ -586,6 +594,7 @@ mod tests {
         let app = server::router(
             runtime.clone(),
             server::ResidentDoor::new("test-token"),
+            None,
             None,
         );
         tokio::spawn(async move {

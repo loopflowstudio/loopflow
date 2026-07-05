@@ -26,6 +26,7 @@
 //! supervisor owns the respawn ladder.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use tokio::sync::mpsc;
@@ -240,9 +241,75 @@ fn inbox_item(frame: InboxFrame) -> InboxItem {
     }
 }
 
+/// Per-attempt bound on resident-door calls. Generous: serving
+/// `/resident/context` makes the listener poll the store, which can be slow
+/// — a busy listener must not read as a dead one.
+const LISTENER_CALL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Sleeps between transient-failure retries: a slow or briefly-unreachable
+/// listener gets three attempts over ~30s of patience before the residency
+/// concludes ListenerGone. A listener that ANSWERS with an error (bad token
+/// = replaced boot, 404 = wave gone) is fatal on the first attempt —
+/// retrying can't fix a replaced keeper.
+const LISTENER_RETRY_DELAYS: [Duration; 2] = [Duration::from_secs(5), Duration::from_secs(10)];
+
+/// One failed listener call, classified for the retry loop.
+#[derive(Debug)]
+enum CallError {
+    /// The listener answered and refused; the residency is over.
+    Fatal(anyhow::Error),
+    /// Transport trouble (timeout, refused, reset); the listener may merely
+    /// be slow — worth retrying before concluding it is gone.
+    Transient(anyhow::Error),
+}
+
+/// `error_for_status` errors carry the status: the listener is alive and
+/// said no. Everything else is transport trouble.
+fn classify(err: reqwest::Error) -> CallError {
+    if err.status().is_some() {
+        CallError::Fatal(err.into())
+    } else {
+        CallError::Transient(err.into())
+    }
+}
+
+/// Run `attempt` with in-place backoff on transient errors. Fatal errors and
+/// exhausted retries return `Err` — the caller concludes ListenerGone.
+async fn with_retries<T, F, Fut>(what: &str, delays: &[Duration], mut attempt: F) -> Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = std::result::Result<T, CallError>>,
+{
+    let mut remaining = delays.iter();
+    loop {
+        match attempt().await {
+            Ok(value) => return Ok(value),
+            Err(CallError::Fatal(err)) => {
+                return Err(err.context(format!("{what}: listener refused")));
+            }
+            Err(CallError::Transient(err)) => match remaining.next() {
+                Some(delay) => {
+                    tracing::warn!(
+                        error = %format!("{err:#}"),
+                        what,
+                        delay_secs = delay.as_secs(),
+                        "listener call failed; retrying"
+                    );
+                    tokio::time::sleep(*delay).await;
+                }
+                None => {
+                    return Err(err.context(format!("{what}: listener unreachable after retries")));
+                }
+            },
+        }
+    }
+}
+
 /// The resident's HTTP client for the listener's resident door. Every call
-/// carries this boot's token; any transport or auth failure means the
-/// listener is gone (or replaced) — the caller ends cleanly.
+/// carries this boot's token. Deltas and context calls retry transient
+/// transport failures in place (see [`LISTENER_RETRY_DELAYS`]); a refusal
+/// (replaced token, vanished wave) or an exhausted retry ladder means the
+/// listener is gone — the caller ends cleanly.
 #[derive(Debug, Clone)]
 pub struct ListenerClient {
     endpoint: String,
@@ -256,7 +323,7 @@ impl ListenerClient {
             endpoint,
             token,
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
+                .timeout(LISTENER_CALL_TIMEOUT)
                 .build()
                 .expect("reqwest client always builds"),
         }
@@ -280,30 +347,48 @@ impl ListenerClient {
 
     /// Send an ordered batch of deltas. The resident sends serially (awaits
     /// each response before the next batch), so per-turn order is total.
+    /// Transient failures retry in place before the caller may conclude
+    /// ListenerGone.
     pub async fn send_deltas(&self, deltas: Vec<ResidentDelta>) -> Result<()> {
         if deltas.is_empty() {
             return Ok(());
         }
-        self.http
-            .post(format!("http://{}/resident/deltas", self.endpoint))
-            .header(RESIDENT_TOKEN_HEADER, &self.token)
-            .json(&PostDeltasRequest { deltas })
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(())
+        with_retries("send deltas", &LISTENER_RETRY_DELAYS, || {
+            let request = PostDeltasRequest {
+                deltas: deltas.clone(),
+            };
+            async move {
+                let response = self
+                    .http
+                    .post(format!("http://{}/resident/deltas", self.endpoint))
+                    .header(RESIDENT_TOKEN_HEADER, &self.token)
+                    .json(&request)
+                    .send()
+                    .await
+                    .map_err(classify)?;
+                response.error_for_status().map_err(classify)?;
+                Ok(())
+            }
+        })
+        .await
     }
 
     /// The pre-turn snapshot (also freshens the listener's store fold).
+    /// Retries like [`ListenerClient::send_deltas`] — the listener's poll
+    /// can be slow.
     pub async fn context(&self) -> Result<ContextResponse> {
-        let response = self
-            .http
-            .get(format!("http://{}/resident/context", self.endpoint))
-            .header(RESIDENT_TOKEN_HEADER, &self.token)
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(response.json().await?)
+        with_retries("fetch context", &LISTENER_RETRY_DELAYS, || async {
+            let response = self
+                .http
+                .get(format!("http://{}/resident/context", self.endpoint))
+                .header(RESIDENT_TOKEN_HEADER, &self.token)
+                .send()
+                .await
+                .map_err(classify)?;
+            let response = response.error_for_status().map_err(classify)?;
+            response.json().await.map_err(classify)
+        })
+        .await
     }
 }
 
@@ -361,6 +446,89 @@ mod tests {
         std::fs::write(dir.join("GOAL.md"), "---\nmind: hal9000\n---\nShip.\n").unwrap();
         let err = resolve_mind_vendor(tmp.path(), "ship").expect_err("unknown vendor");
         assert!(err.to_string().contains("hal9000"), "{err}");
+    }
+
+    /// The retry ladder: transient errors retry through the delays; fatal
+    /// errors (the listener answered and refused) stop on the first attempt;
+    /// exhausted transients give up after every rung.
+    #[tokio::test]
+    async fn with_retries_discriminates_transient_from_fatal() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        // Transient twice, then success: the ladder rides it out.
+        let calls = AtomicU32::new(0);
+        let value = with_retries("test", &[Duration::ZERO, Duration::ZERO], || {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if n < 2 {
+                    Err(CallError::Transient(anyhow!("slow listener")))
+                } else {
+                    Ok(n)
+                }
+            }
+        })
+        .await
+        .expect("third attempt succeeds");
+        assert_eq!(value, 2);
+
+        // Fatal: one attempt, no retry — the listener said no.
+        let calls = AtomicU32::new(0);
+        let err = with_retries::<(), _, _>("test", &[Duration::ZERO, Duration::ZERO], || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Err(CallError::Fatal(anyhow!("401 unauthorized"))) }
+        })
+        .await
+        .expect_err("fatal is final");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "no retry on refusal");
+        assert!(err.to_string().contains("listener refused"), "{err:#}");
+
+        // Transient forever: three attempts (initial + both delays), then gone.
+        let calls = AtomicU32::new(0);
+        let err = with_retries::<(), _, _>("test", &[Duration::ZERO, Duration::ZERO], || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Err(CallError::Transient(anyhow!("connection refused"))) }
+        })
+        .await
+        .expect_err("exhausted retries conclude ListenerGone");
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "three attempts");
+        assert!(err.to_string().contains("after retries"), "{err:#}");
+    }
+
+    /// Over the real wire: a listener that ANSWERS with 401 (a replaced
+    /// boot's token) is fatal immediately — no retry ladder, no ~30s stall.
+    #[tokio::test]
+    async fn refused_listener_call_is_fatal_not_retried() {
+        use crate::wave::runtime::WaveRuntime;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime =
+            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = server::router(
+            runtime,
+            server::ResidentDoor::new("right-token"),
+            None,
+            None,
+        );
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        let client = ListenerClient::new(addr.to_string(), "wrong-token".to_string());
+        let started = std::time::Instant::now();
+        let err = client
+            .send_deltas(vec![ResidentDelta::ThreadStarted {
+                vendor: "codex".into(),
+                thread_id: "t-1".into(),
+            }])
+            .await
+            .expect_err("wrong token is refused");
+        assert!(err.to_string().contains("listener refused"), "{err:#}");
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "refusal did not walk the retry ladder"
+        );
     }
 
     #[test]

@@ -224,22 +224,21 @@ async fn serve(
         );
     }
 
-    let runtime = WaveRuntime::open(wave.clone(), repo_root.clone())?;
-
+    // Bind before opening the journal for writing: the registry pre-flight
+    // needs this boot's endpoint, and a refused start must scribble NOTHING —
+    // no journal opened, no ServerStarted appended. Binding a loopback port
+    // writes nothing.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
-    // Boot marker, once per life, after replay: restarts are visible in the
-    // journal itself (the boot janitor already leaks process lifecycle into
-    // the record; make it honest and forensically legible).
-    runtime.journal_server_started(std::process::id(), &addr.to_string());
 
     // Registry seat: write the WaveAgent row (one-brain pre-flight — a live
-    // brain refuses the start unless --force) and start the store-polling
-    // observer. Best-effort by design: a store failure degrades to the
-    // registry-less status quo.
+    // brain refuses the start unless --force) BEFORE the journal opens, so a
+    // refusal exits having written nothing. Best-effort by design: a store
+    // failure degrades to the registry-less status quo. `registered` carries
+    // the store + wave id forward to build the observer once the runtime is
+    // open.
     let mut registration: Option<registry::Registration> = None;
-    let mut observer: Option<Arc<registry::StoreObserver>> = None;
-    let mut observer_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut registered: Option<(SharedStore, crate::lfd::id::LfdId)> = None;
     // Wave-session context handed to the spawned resident: a bare `lf`
     // inside the mind self-registers under this wave with the listener's
     // session as its parent (see lf::session for the env contract).
@@ -275,14 +274,7 @@ async fn serve(
                     hook_registration.deregister_blocking();
                 });
                 registration = Some(reg);
-
-                let obs = Arc::new(registry::StoreObserver::new(
-                    runtime.clone(),
-                    config.store.clone(),
-                    config.wave.id().clone(),
-                ));
-                observer_task = Some(tokio::spawn(Arc::clone(&obs).run(registry::POLL_CADENCE)));
-                observer = Some(obs);
+                registered = Some((config.store.clone(), config.wave.id().clone()));
             }
             Ok(registry::RegisterOutcome::Refused { message }) => {
                 return Err(anyhow!(
@@ -299,6 +291,26 @@ async fn serve(
                 );
             }
         }
+    }
+
+    // Refusals are behind us: NOW open the journal for writing and mark the
+    // boot. The store-polling observer starts once the runtime exists.
+    let runtime = WaveRuntime::open(wave.clone(), repo_root.clone())?;
+    // Boot marker, once per life, after replay: restarts are visible in the
+    // journal itself (the boot janitor already leaks process lifecycle into
+    // the record; make it honest and forensically legible).
+    runtime.journal_server_started(std::process::id(), &addr.to_string());
+
+    let mut observer: Option<Arc<registry::StoreObserver>> = None;
+    let mut observer_task: Option<tokio::task::JoinHandle<()>> = None;
+    if let Some((store, wave_id)) = registered {
+        let obs = Arc::new(registry::StoreObserver::new(
+            runtime.clone(),
+            store,
+            wave_id,
+        ));
+        observer_task = Some(tokio::spawn(Arc::clone(&obs).run(registry::POLL_CADENCE)));
+        observer = Some(obs);
     }
 
     // The resident door: a per-boot token, published beside the endpoint
@@ -320,15 +332,18 @@ async fn serve(
         )),
         MindPolicy::Dormant => None,
     };
-    let supervisor_task = tokio::spawn(
-        supervisor::Supervisor::new(
-            runtime.clone(),
-            door.clone(),
-            spawner,
-            supervisor::SupervisorConfig::default(),
-        )
-        .run(),
+    // Build the supervisor before spawning so the attach door can hold its
+    // handle: an attached resident (`--mind-only`) signals the keeper to
+    // stand the respawn ladder down, so the deadline never spawns a second
+    // mind over it.
+    let supervisor = supervisor::Supervisor::new(
+        runtime.clone(),
+        door.clone(),
+        spawner,
+        supervisor::SupervisorConfig::default(),
     );
+    let supervisor_handle = supervisor.handle();
+    let supervisor_task = tokio::spawn(supervisor.run());
 
     server::write_endpoint(&repo_root, &wave, addr)?;
     // Ctrl+C exits the process before graceful shutdown runs, so clean up
@@ -357,7 +372,12 @@ async fn serve(
         }
     );
 
-    let app = server::router(runtime.clone(), door.clone(), observer);
+    let app = server::router(
+        runtime.clone(),
+        door.clone(),
+        observer,
+        Some(supervisor_handle),
+    );
     let result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
         .await;
@@ -430,7 +450,7 @@ mod tests {
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(runtime.clone(), ResidentDoor::new("test-token"), None);
+        let app = server::router(runtime.clone(), ResidentDoor::new("test-token"), None, None);
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
@@ -1169,7 +1189,7 @@ mod tests {
         let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("reopen");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(runtime.clone(), ResidentDoor::new("test-token"), None);
+        let app = server::router(runtime.clone(), ResidentDoor::new("test-token"), None, None);
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
@@ -1210,7 +1230,7 @@ mod tests {
         let runtime = WaveRuntime::open("ship".into(), origin).expect("open runtime");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(runtime.clone(), ResidentDoor::new("test-token"), None);
+        let app = server::router(runtime.clone(), ResidentDoor::new("test-token"), None, None);
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
@@ -1247,17 +1267,19 @@ mod tests {
             crate::wave::channel::child_journal_path(runtime.repo_root(), "ship.148e");
         let events = journal::read_events(&child_journal);
         assert_eq!(events.len(), 1);
-        assert!(
-            runtime.thread_snapshot().is_empty(),
-            "wave thread untouched"
-        );
+        // The report also folds UP: a child `say` forwards to the wave as
+        // attributed speech so the mind hears its workers (the report
+        // doctrine). The child journal keeps its own copy above.
+        let forwarded = runtime.thread_snapshot();
+        assert_eq!(forwarded.len(), 1, "the report reached the wave thread");
+        assert_eq!(forwarded[0].text, "landed the parser");
         assert_eq!(
             journal::read_events(&journal::journal_path(runtime.repo_root(), "ship"))
                 .iter()
                 .filter(|e| matches!(e.kind, journal::EventKind::UserMessage { .. }))
                 .count(),
-            0,
-            "wave journal untouched"
+            1,
+            "the forwarded report is journaled on the wave channel",
         );
 
         // Addressing the wave channel by name = the unaddressed path.
@@ -1267,7 +1289,7 @@ mod tests {
             .send()
             .await
             .unwrap();
-        assert_eq!(runtime.thread_snapshot().len(), 1);
+        assert_eq!(runtime.thread_snapshot().len(), 2);
 
         // Outside the family, or a work line with no worktree: 404.
         for channel in ["concerto", "ship.ghost"] {

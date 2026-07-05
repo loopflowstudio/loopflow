@@ -13,7 +13,10 @@
 //!   rung (5m/15m/45m by default, the last rung repeating; an empty ladder
 //!   disables it). A completed assistant turn resets the ladder. A human
 //!   message revives a dead resident immediately, ladder or no ladder —
-//!   talking to the wave brings it back.
+//!   talking to the wave brings it back. An ATTACHED resident is a revival
+//!   too: the attach door signals the supervisor ([`SupervisorHandle`]),
+//!   which disarms and resets the ladder and probes the seat by pid; and a
+//!   spawn never fires over a live seat (probe before spawn).
 //! - **Interrupt janitor.** When an interrupt op is delivered while a turn is
 //!   live, a deadline arms. The RESIDENT owns the cooperative cancel (its own
 //!   shorter deadline force-closes through the wire); this janitor is the
@@ -28,14 +31,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::process::Child;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tokio::time::Instant;
 
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
 use crate::lfd::conversations::types::Lifecycle;
 use crate::wave::journal::MessageOp;
 use crate::wave::registry::process_alive;
-use crate::wave::runtime::{InboxItem, WaveRuntime};
+use crate::wave::runtime::{InboxItem, TurnFrame, WaveRuntime};
 use crate::wave::server::ResidentDoor;
 use crate::wave::state::MindState;
 
@@ -100,10 +103,30 @@ async fn wait_child(child: &mut Option<Child>) -> std::io::Result<std::process::
         .await
 }
 
-async fn sleep_until_opt(deadline: Option<Instant>) {
+/// Sleep until an optional deadline; `None` never fires. Shared with the
+/// mind's scheduler loop ([`crate::wave::mind`]).
+pub(crate) async fn sleep_until_opt(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
         None => std::future::pending().await,
+    }
+}
+
+/// The listener's line into the keeper: the attach door signals the
+/// supervisor so an attached resident stands the respawn ladder down.
+/// Obtained from [`Supervisor::handle`] before the supervisor is spawned;
+/// cloneable into the router state.
+#[derive(Debug, Clone)]
+pub struct SupervisorHandle {
+    attach_tx: mpsc::UnboundedSender<u32>,
+}
+
+impl SupervisorHandle {
+    /// A resident attached through the door (its pid already holds the
+    /// seat). Fire-and-forget: the supervisor may already be gone at
+    /// shutdown.
+    pub fn on_attach(&self, pid: u32) {
+        let _ = self.attach_tx.send(pid);
     }
 }
 
@@ -118,7 +141,11 @@ pub struct Supervisor {
     config: SupervisorConfig,
     inbox_rx: broadcast::Receiver<InboxItem>,
     state_rx: broadcast::Receiver<MindState>,
-    turn_rx: broadcast::Receiver<Arc<ChatTurn>>,
+    turn_rx: broadcast::Receiver<Arc<TurnFrame>>,
+    /// Attach signals from the listener's door (see [`SupervisorHandle`]).
+    /// The paired sender is kept alive by `handle`, so `recv` never closes.
+    attach_rx: mpsc::UnboundedReceiver<u32>,
+    attach_tx: mpsc::UnboundedSender<u32>,
     /// The spawned resident, when this supervisor owns spawning and one is
     /// believed alive. `None` for attached residents (probed by pid).
     child: Option<Child>,
@@ -143,6 +170,7 @@ impl Supervisor {
         spawner: Option<SpawnResident>,
         config: SupervisorConfig,
     ) -> Self {
+        let (attach_tx, attach_rx) = mpsc::unbounded_channel();
         Self {
             inbox_rx: runtime.subscribe_inbox(),
             state_rx: runtime.subscribe_states(),
@@ -151,6 +179,8 @@ impl Supervisor {
             door,
             spawner,
             config,
+            attach_rx,
+            attach_tx,
             child: None,
             respawn_at: None,
             attempts: 0,
@@ -158,10 +188,17 @@ impl Supervisor {
         }
     }
 
+    /// A handle for the attach door, taken before `run` consumes self.
+    pub fn handle(&self) -> SupervisorHandle {
+        SupervisorHandle {
+            attach_tx: self.attach_tx.clone(),
+        }
+    }
+
     /// Run until aborted (server shutdown).
     pub async fn run(mut self) {
         if self.spawner.is_some() {
-            self.spawn();
+            self.spawn().await;
         }
         let mut probe = tokio::time::interval(self.config.attach_probe);
         probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -178,9 +215,14 @@ impl Supervisor {
                 }
                 item = self.inbox_rx.recv() => {
                     match item {
-                        Ok(item) => self.on_inbox(item),
+                        Ok(item) => self.on_inbox(item).await,
                         Err(broadcast::error::RecvError::Lagged(_)) => {}
                         Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+                attached = self.attach_rx.recv() => {
+                    if let Some(pid) = attached {
+                        self.on_attach(pid);
                     }
                 }
                 state = self.state_rx.recv() => {
@@ -199,7 +241,7 @@ impl Supervisor {
                 }
                 turn = self.turn_rx.recv() => {
                     if let Ok(turn) = turn {
-                        self.on_turn_frame(&turn);
+                        self.on_turn_frame(&turn.turn);
                     }
                 }
                 _ = sleep_until_opt(self.interrupt_at), if self.interrupt_at.is_some() => {
@@ -221,7 +263,7 @@ impl Supervisor {
                         attempt = self.attempts,
                         "auto-respawning the resident"
                     );
-                    self.spawn();
+                    self.spawn().await;
                 }
                 _ = probe.tick() => {
                     self.probe_attached().await;
@@ -230,11 +272,28 @@ impl Supervisor {
         }
     }
 
-    fn spawn(&mut self) {
-        let Some(spawner) = self.spawner.as_mut() else {
+    async fn spawn(&mut self) {
+        if self.spawner.is_none() {
             return;
-        };
+        }
         self.respawn_at = None;
+        // Never spawn over a live seat: a resident may have attached while
+        // the ladder was armed (the attach signal disarms it, but a deadline
+        // already due can race the signal). The attached resident IS the
+        // revival; spawning would seat a second mind and orphan the first.
+        if self.child.is_none() {
+            if let Some(pid) = self.door.seat_pid() {
+                if process_alive(pid).await {
+                    tracing::info!(
+                        wave = self.runtime.name(),
+                        pid,
+                        "a live resident already holds the seat; not spawning"
+                    );
+                    return;
+                }
+            }
+        }
+        let spawner = self.spawner.as_mut().expect("checked above");
         match spawner() {
             Ok(child) => {
                 if let Some(pid) = child.id() {
@@ -283,7 +342,7 @@ impl Supervisor {
         }
     }
 
-    fn on_inbox(&mut self, item: InboxItem) {
+    async fn on_inbox(&mut self, item: InboxItem) {
         let is_interrupt = match &item {
             InboxItem::Interrupt => true,
             InboxItem::Message(message) => {
@@ -297,7 +356,7 @@ impl Supervisor {
                         wave = self.runtime.name(),
                         "message for a dead resident; respawning now"
                     );
-                    self.spawn();
+                    self.spawn().await;
                 }
                 message.op == MessageOp::Interrupt
             }
@@ -313,6 +372,50 @@ impl Supervisor {
         {
             self.interrupt_at = Some(Instant::now() + self.config.interrupt_deadline);
         }
+    }
+
+    /// The attach door admitted a resident (its pid already on the seat).
+    /// For a foreign resident — `lf wave <name> --mind-only`, not our own
+    /// spawned child — the attach IS the revival: the respawn ladder stands
+    /// down and resets, and the seat is watched by pid probe
+    /// (attached-not-child). Without this, an armed respawn deadline would
+    /// later spawn a second mind over the attached one and overwrite its
+    /// seat pid.
+    fn on_attach(&mut self, pid: u32) {
+        if self
+            .child
+            .as_ref()
+            .is_some_and(|child| child.id() == Some(pid))
+        {
+            // Our own spawned child announcing itself; the exit-watch
+            // already covers it and the ladder state is spawn's business.
+            return;
+        }
+        if let Some(mut child) = self.child.take() {
+            // Defensive: the door seated a foreign resident over a live
+            // spawned child. One seat, one mind — ask the replaced child to
+            // leave, and reap it off-loop so its exit is never journaled as
+            // a death.
+            if let Some(old_pid) = child.id() {
+                tracing::warn!(
+                    wave = self.runtime.name(),
+                    old_pid,
+                    new_pid = pid,
+                    "attach replaced a spawned resident; terminating the old one"
+                );
+                tokio::spawn(async move {
+                    terminate_resident(old_pid).await;
+                    let _ = child.wait().await;
+                });
+            }
+        }
+        self.respawn_at = None;
+        self.attempts = 0;
+        tracing::info!(
+            wave = self.runtime.name(),
+            pid,
+            "resident attached; respawn stood down"
+        );
     }
 
     fn on_turn_frame(&mut self, turn: &ChatTurn) {
@@ -566,6 +669,85 @@ mod tests {
         let fold = crate::wave::journal::fold_thread(&events);
         assert!(fold.open.is_empty());
         assert_eq!(fold.turns.last().unwrap().status, Lifecycle::Interrupted);
+    }
+
+    /// An attach through the door disarms an armed respawn: the attached
+    /// resident IS the revival, and the deadline must not spawn a second
+    /// mind over it (nor overwrite its seat pid).
+    #[tokio::test]
+    async fn attach_disarms_the_respawn_ladder() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let door = ResidentDoor::new("tok");
+        let (spawner, spawns) = counting_spawner("exit 0");
+        let sup = Supervisor::new(
+            rt.clone(),
+            door.clone(),
+            Some(spawner),
+            config(vec![Duration::from_millis(120)]),
+        );
+        let handle = sup.handle();
+        let task = tokio::spawn(sup.run());
+
+        // The spawned resident dies; the ladder arms (120ms out).
+        wait_for("mind failed", || {
+            matches!(rt.mind_state(), MindState::Failed { .. })
+        })
+        .await;
+        let before = spawns.load(Ordering::SeqCst);
+
+        // A resident attaches by hand: the door seats its (live) pid and the
+        // attach handler signals the supervisor.
+        door.record_pid(std::process::id());
+        handle.on_attach(std::process::id());
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(
+            spawns.load(Ordering::SeqCst),
+            before,
+            "no respawn over the attached resident"
+        );
+        assert_eq!(
+            door.seat_pid(),
+            Some(std::process::id()),
+            "the attached resident keeps its seat"
+        );
+        task.abort();
+    }
+
+    /// The race half of the same anti-wedge: a respawn deadline that fires
+    /// anyway (before the attach signal lands) still refuses to spawn over a
+    /// live seat — probe before spawn.
+    #[tokio::test]
+    async fn respawn_deadline_never_spawns_over_a_live_seat() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let door = ResidentDoor::new("tok");
+        let (spawner, spawns) = counting_spawner("exit 0");
+        let task = tokio::spawn(
+            Supervisor::new(
+                rt.clone(),
+                door.clone(),
+                Some(spawner),
+                config(vec![Duration::from_millis(60)]),
+            )
+            .run(),
+        );
+
+        wait_for("mind failed", || {
+            matches!(rt.mind_state(), MindState::Failed { .. })
+        })
+        .await;
+        let before = spawns.load(Ordering::SeqCst);
+        // Only the seat is taken (no attach signal): the deadline fires, the
+        // pre-spawn probe finds a live pid, and no second mind spawns.
+        door.record_pid(std::process::id());
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(
+            spawns.load(Ordering::SeqCst),
+            before,
+            "the deadline aborted rather than spawning over a live seat"
+        );
+        task.abort();
     }
 
     /// An attached resident (no child handle) is probed by pid: a dead pid

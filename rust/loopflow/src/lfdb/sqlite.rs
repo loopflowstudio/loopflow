@@ -784,6 +784,29 @@ impl SqliteStore {
         Ok(runs)
     }
 
+    /// Non-terminal runs plus runs that ended at or after `ended_since` —
+    /// the push bridge's working set (see `Query::ListRunsActiveOrEndedSince`).
+    pub fn list_runs_active_or_ended_since(
+        &self,
+        ended_since: time::OffsetDateTime,
+    ) -> StoreResult<Vec<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::ListRunsActiveOrEndedSince))?;
+        let rows = stmt.query_map(
+            params![
+                RunStatus::Completed.as_i32() as i64,
+                RunStatus::Failed.as_i32() as i64,
+                ended_since.unix_timestamp(),
+            ],
+            |row| Ok(map_run_row(row)),
+        )?;
+        let mut runs = Vec::new();
+        for run in rows {
+            runs.push(run??);
+        }
+        Ok(runs)
+    }
+
     pub fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(Self::sql(Query::GetRunById))?;

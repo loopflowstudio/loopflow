@@ -11,8 +11,9 @@
 //!   wave in the repo — the mind decides to rebase/integrate with judgment.
 //!
 //! Execs are spawned detached; a wave whose server is down bounces the chat
-//! with exit ≠ 0 — logged at debug, which is correct pubsub semantics, not an
-//! error. No wave resolved → log-and-drop.
+//! with exit ≠ 0 — logged at warn and, for CI failures, the dedupe key is NOT
+//! recorded, so the next delivery of that wave+sha replays instead of
+//! vanishing. No wave resolved → log-and-drop.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -45,21 +46,27 @@ struct WaveCiTarget {
 
 /// One `lf` invocation the gatekeeper will spawn — argv after the binary.
 /// Planners return these so tests assert on the exact command line without
-/// spawning anything.
+/// spawning anything. `dedupe_key` (CI failures: `<wave_id>:<sha>`) is
+/// recorded in the shared cache only after the exec exits 0 — a bounced chat
+/// leaves the key absent so the wave+sha can replay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfExec {
     pub args: Vec<String>,
+    pub dedupe_key: Option<String>,
 }
 
 impl LfExec {
-    fn chat(wave: &str, text: String) -> Self {
+    fn chat(wave: &str, text: String, from: &str) -> Self {
         Self {
             args: vec![
                 "chat".to_string(),
                 "--wave".to_string(),
                 wave.to_string(),
+                "--from".to_string(),
+                from.to_string(),
                 text,
             ],
+            dedupe_key: None,
         }
     }
 
@@ -72,38 +79,58 @@ impl LfExec {
                 "--wave".to_string(),
                 wave.to_string(),
             ],
+            dedupe_key: None,
         }
+    }
+
+    fn with_dedupe_key(mut self, key: String) -> Self {
+        self.dedupe_key = Some(key);
+        self
     }
 }
 
 /// Spawn each exec detached — the webhook response never waits on `lf`.
-/// A non-zero exit is a bounced message (wave server down), logged at debug.
-fn spawn_lf_execs(execs: Vec<LfExec>) {
+fn spawn_lf_execs(cache: &Arc<Mutex<HashSet<String>>>, execs: Vec<LfExec>) {
     let lf = resolve_lf_binary();
     for exec in execs {
         let lf = lf.clone();
+        let cache = cache.clone();
         tokio::spawn(async move {
-            let result = tokio::process::Command::new(&lf)
-                .args(&exec.args)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
-            match result {
-                Ok(status) if status.success() => {}
-                Ok(status) => tracing::debug!(
-                    args = ?exec.args,
-                    code = ?status.code(),
-                    "lf exec bounced (no live subscriber)"
-                ),
-                Err(err) => tracing::debug!(
-                    args = ?exec.args,
-                    error = %err,
-                    "lf exec failed to spawn"
-                ),
-            }
+            settle_exec(&lf, exec, &cache).await;
         });
+    }
+}
+
+/// Run one exec to completion and settle its dedupe key: exit 0 records the
+/// key (that wave+sha has been heard); a bounce (wave server down, exit ≠ 0)
+/// or spawn failure records nothing, so the next webhook for the same
+/// wave+sha replays instead of being swallowed.
+async fn settle_exec(lf: &std::path::Path, exec: LfExec, cache: &Arc<Mutex<HashSet<String>>>) {
+    let result = tokio::process::Command::new(lf)
+        .args(&exec.args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await;
+    match result {
+        Ok(status) if status.success() => {
+            if let Some(key) = exec.dedupe_key {
+                cache.lock().await.insert(key);
+            }
+        }
+        Ok(status) => tracing::warn!(
+            args = ?exec.args,
+            dedupe_key = ?exec.dedupe_key,
+            code = ?status.code(),
+            "lf exec bounced (no live subscriber); will replay on next delivery"
+        ),
+        Err(err) => tracing::warn!(
+            args = ?exec.args,
+            dedupe_key = ?exec.dedupe_key,
+            error = %err,
+            "lf exec failed to spawn"
+        ),
     }
 }
 
@@ -127,7 +154,7 @@ async fn plan_push_speech(
     Ok(waves
         .iter()
         .filter(|wave| wave_in_github_repo(wave, repo_full_name))
-        .map(|wave| LfExec::chat(wave.name(), text.clone()))
+        .map(|wave| LfExec::chat(wave.name(), text.clone(), "github"))
         .collect())
 }
 
@@ -141,13 +168,16 @@ fn main_moved_text(before: &str, after: &str) -> String {
 
 /// Failed check_run → `lf chat` to each wave owning an open PR the check ran
 /// against. Deduped per wave+commit through the shared CI-failure cache so a
-/// red matrix speaks once. No wave resolved → empty (the caller drops).
+/// red matrix speaks once — but the key is only RECORDED once the spawned
+/// exec exits 0 (see [`settle_exec`]); planning just reads the cache, so a
+/// bounced chat replays. No wave resolved → empty (the caller drops).
 async fn plan_check_run_speech(
     store: &SharedStore,
     cache: &Arc<Mutex<HashSet<String>>>,
     event: &GitHubCheckRunEvent,
 ) -> Result<Vec<LfExec>, String> {
     let mut execs = Vec::new();
+    let mut planned: HashSet<String> = HashSet::new();
     for pr in &event.check_run.pull_requests {
         let targets = find_wave_ci_targets(
             store,
@@ -158,11 +188,8 @@ async fn plan_check_run_speech(
         .await?;
         for target in targets {
             let key = format!("{}:{}", target.wave_id, event.check_run.head_sha);
-            {
-                let mut cache = cache.lock().await;
-                if !cache.insert(key) {
-                    continue;
-                }
+            if cache.lock().await.contains(&key) || !planned.insert(key.clone()) {
+                continue;
             }
             let Some(wave) = store
                 .get_wave(&target.wave_id)
@@ -171,13 +198,17 @@ async fn plan_check_run_speech(
             else {
                 continue;
             };
-            execs.push(LfExec::chat(
-                wave.name(),
-                format!(
-                    "CI failed: {} on PR #{} — {}",
-                    event.check_run.name, target.pr_number, event.check_run.html_url
-                ),
-            ));
+            execs.push(
+                LfExec::chat(
+                    wave.name(),
+                    format!(
+                        "CI failed: {} on PR #{} — {}",
+                        event.check_run.name, target.pr_number, event.check_run.html_url
+                    ),
+                    "ci",
+                )
+                .with_dedupe_key(key),
+            );
         }
     }
     Ok(execs)
@@ -280,7 +311,7 @@ pub async fn github_webhook_handler(
                     "push webhook matched no waves; dropped"
                 );
             }
-            spawn_lf_execs(execs);
+            spawn_lf_execs(&state.ci_failure_cache, execs);
             Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
         }
         "check_run" => {
@@ -326,7 +357,7 @@ pub async fn github_webhook_handler(
                     "CI failure spoken to waves via lf chat"
                 );
             }
-            spawn_lf_execs(execs);
+            spawn_lf_execs(&state.ci_failure_cache, execs);
             Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
         }
         "pull_request" => {
@@ -354,7 +385,7 @@ pub async fn github_webhook_handler(
                 )
             })?;
             let processed = execs.len() as u32;
-            spawn_lf_execs(execs);
+            spawn_lf_execs(&state.ci_failure_cache, execs);
             Ok(Json(
                 serde_json::json!({ "ok": true, "processed": processed }),
             ))
@@ -644,12 +675,16 @@ mod tests {
                     "chat".to_string(),
                     "--wave".to_string(),
                     "ship".to_string(),
+                    "--from".to_string(),
+                    "github".to_string(),
                     "main moved: abc..def".to_string(),
                 ],
                 vec![
                     "chat".to_string(),
                     "--wave".to_string(),
                     "systems".to_string(),
+                    "--from".to_string(),
+                    "github".to_string(),
                     "main moved: abc..def".to_string(),
                 ],
             ]
@@ -678,10 +713,10 @@ mod tests {
         assert!(execs.is_empty());
     }
 
-    /// CI failure resolves the owning wave and plans the chat exec; the same
-    /// wave+commit never speaks twice; an unknown repo drops.
+    /// CI failure resolves the owning wave and plans the chat exec carrying
+    /// the wave+sha dedupe key; an unknown repo drops.
     #[tokio::test]
-    async fn check_run_failure_plans_chat_once_per_wave_and_commit() {
+    async fn check_run_failure_plans_attributed_chat_with_dedupe_key() {
         let tmp = tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
@@ -698,19 +733,19 @@ mod tests {
         let execs = plan_check_run_speech(&store, &cache, &event)
             .await
             .expect("plan");
+        let expected_key = format!("{}:abc123", wave.id());
         assert_eq!(
             execs,
             vec![LfExec::chat(
                 "ship",
                 "CI failed: test-check on PR #1 — https://example.test/logs".to_string(),
-            )]
+                "ci",
+            )
+            .with_dedupe_key(expected_key.clone())]
         );
 
-        // Same wave+commit again: deduped to nothing.
-        let repeat = plan_check_run_speech(&store, &cache, &event)
-            .await
-            .expect("plan repeat");
-        assert!(repeat.is_empty(), "one speech per wave+commit");
+        // Planning must NOT record the key — only a delivered exec does.
+        assert!(!cache.lock().await.contains(&expected_key));
 
         // Unknown repo: no wave resolves, dropped.
         let unknown = check_run_event("loopflowstudio/ghost", "feature", 1);
@@ -718,6 +753,56 @@ mod tests {
             .await
             .expect("plan unknown");
         assert!(dropped.is_empty(), "no wave resolved → drop");
+    }
+
+    /// The bounce contract: a failed exec leaves the dedupe key absent so
+    /// the same wave+sha replays; a delivered exec records it so the replay
+    /// dedupes to nothing.
+    #[tokio::test]
+    async fn bounced_ci_exec_leaves_key_absent_so_replay_succeeds() {
+        let tmp = tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
+        let wave = make_wave("ship", &repo);
+        store.create_wave(&wave).await.expect("wave");
+        store
+            .create_run(&run_with_open_pr(&wave, "build", "feature", 1))
+            .await
+            .expect("run");
+
+        let cache = Arc::new(Mutex::new(HashSet::new()));
+        let event = check_run_event("loopflowstudio/loopflow", "feature", 1);
+
+        // First delivery bounces (wave server down → exit ≠ 0).
+        let execs = plan_check_run_speech(&store, &cache, &event)
+            .await
+            .expect("plan");
+        assert_eq!(execs.len(), 1);
+        settle_exec(
+            std::path::Path::new("/usr/bin/false"),
+            execs[0].clone(),
+            &cache,
+        )
+        .await;
+        assert!(cache.lock().await.is_empty(), "bounce records nothing");
+
+        // Replay: the same wave+sha plans again…
+        let replay = plan_check_run_speech(&store, &cache, &event)
+            .await
+            .expect("plan replay");
+        assert_eq!(replay.len(), 1, "bounced wave+sha replays");
+
+        // …and this time delivery succeeds, so the key settles.
+        settle_exec(
+            std::path::Path::new("/usr/bin/true"),
+            replay[0].clone(),
+            &cache,
+        )
+        .await;
+        let deduped = plan_check_run_speech(&store, &cache, &event)
+            .await
+            .expect("plan deduped");
+        assert!(deduped.is_empty(), "delivered wave+sha never speaks twice");
     }
 
     /// PR merged plans the queue-reconcile verb for the owning wave.

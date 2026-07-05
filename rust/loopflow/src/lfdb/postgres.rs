@@ -897,6 +897,28 @@ impl PostgresStore {
         .await
     }
 
+    /// Non-terminal runs plus runs that ended at or after `ended_since` —
+    /// the push bridge's working set (see `Query::ListRunsActiveOrEndedSince`).
+    pub async fn list_runs_active_or_ended_since(
+        &self,
+        ended_since: time::OffsetDateTime,
+    ) -> StoreResult<Vec<Run>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    Self::sql(Query::ListRunsActiveOrEndedSince),
+                    &[
+                        &RunStatus::Completed.as_i32(),
+                        &RunStatus::Failed.as_i32(),
+                        &ended_since.unix_timestamp(),
+                    ],
+                )
+                .await?;
+            rows.iter().map(map_run_row).collect()
+        })
+        .await
+    }
+
     pub async fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
         self.with_client(|client| async move {
             let statuses = [

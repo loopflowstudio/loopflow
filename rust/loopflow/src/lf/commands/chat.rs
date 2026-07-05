@@ -37,7 +37,10 @@
 //! # Attribution
 //! Sender context comes from env: `LFD_SESSION_ID` (the registry session, when
 //! there is one) plus a label — `LFD_AGENT_ROLE` when set (workers), `wave
-//! <own>` when escalating with `--parent`, else `cli`.
+//! <own>` when escalating with `--parent`, else `cli`. `--from <label>`
+//! overrides the label outright: machine speech (the webhook gatekeeper's
+//! `--from ci` / `--from github`) must arrive attributed, never riding the
+//! from-absent human path.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -55,11 +58,11 @@ use crate::lfdb::{open_existing_store, SharedStore};
 use crate::wave::channel::family_head;
 use crate::wave::journal::Attribution;
 
-pub fn run(text_args: &[String], target: &WaveTargetArgs) -> Result<()> {
+pub fn run(text_args: &[String], from_label: Option<&str>, target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let context = CliContext::detect().await;
-        run_with_context(&context, text_args, target).await
+        run_with_context(&context, text_args, from_label, target).await
     })
 }
 
@@ -68,6 +71,7 @@ pub fn run(text_args: &[String], target: &WaveTargetArgs) -> Result<()> {
 pub(crate) async fn run_with_context(
     context: &CliContext,
     text_args: &[String],
+    from_label: Option<&str>,
     target: &WaveTargetArgs,
 ) -> Result<()> {
     let Some(resolved) = resolve_target(
@@ -84,7 +88,10 @@ pub(crate) async fn run_with_context(
     };
     let text = message_text(text_args, std::io::stdin())?;
     let endpoint = resolved.require_endpoint()?;
-    let from = sender_attribution(target.parent, resolved.own_name.as_deref());
+    let mut from = sender_attribution(target.parent, resolved.own_name.as_deref());
+    if let Some(label) = from_label {
+        from.label = label.to_string();
+    }
     let mut body = serde_json::json!({ "op": "say", "text": text, "from": from });
     if let Some(channel) = &resolved.channel {
         body["channel"] = serde_json::Value::String(channel.clone());
@@ -453,6 +460,7 @@ mod tests {
             runtime.clone(),
             server::ResidentDoor::new("test-token"),
             None,
+            None,
         );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
@@ -549,9 +557,56 @@ mod tests {
         .expect("resolve");
         assert!(resolved.is_none(), "plain temp dir is not a wave context");
 
-        run_with_context(&context, &["hello".into()], &WaveTargetArgs::default())
+        run_with_context(
+            &context,
+            &["hello".into()],
+            None,
+            &WaveTargetArgs::default(),
+        )
+        .await
+        .expect("dropped publish exits 0");
+    }
+
+    /// `--from` attributes machine speech: the label lands on the journaled
+    /// turn verbatim, overriding the ambient "cli" fallback — webhook execs
+    /// (`lf chat --wave x --from ci "CI failed"`) never ride the from-absent
+    /// human path.
+    #[tokio::test]
+    async fn from_flag_overrides_the_attribution_label() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let origin = tmp.path().join("repo");
+        std::fs::create_dir_all(&origin).unwrap();
+        let (addr, runtime, _inbox) = boot_server(&origin, "ship").await;
+        let wave = make_wave("ship", &origin, None);
+        store.create_wave(&wave).await.expect("seed wave");
+        store
+            .register_session(&live_server_session(&wave, &addr))
             .await
-            .expect("dropped publish exits 0");
+            .expect("seed brain");
+
+        let context = CliContext {
+            store: Some(store),
+            repo: None,
+            env_wave_id: None,
+            env_channel: None,
+        };
+        run_with_context(
+            &context,
+            &["CI".into(), "failed".into()],
+            Some("ci"),
+            &WaveTargetArgs {
+                wave: Some("ship".into()),
+                parent: false,
+            },
+        )
+        .await
+        .expect("post with --from");
+
+        let thread = runtime.thread_snapshot();
+        assert_eq!(thread.len(), 1);
+        assert_eq!(thread[0].text, "CI failed");
+        assert_eq!(thread[0].from.as_deref(), Some("ci"));
     }
 
     /// `--parent` walks `parent_wave_id` and posts to the parent's live
@@ -708,7 +763,8 @@ mod tests {
         assert_eq!(ambient.channel.as_deref(), Some("ship.148e"));
 
         // The whole door: POST with the channel field lands in the child
-        // journal, not the wave's thread.
+        // journal, and a `say` also folds up to the wave thread (the report
+        // reaches the mind).
         let mut body = serde_json::json!({
             "op": "say",
             "text": "child-bound",
@@ -716,9 +772,10 @@ mod tests {
         });
         body["channel"] = serde_json::Value::String("ship.148e".into());
         post_json(&addr, "/messages", &body).await.expect("post");
-        assert!(
-            runtime.thread_snapshot().is_empty(),
-            "wave thread untouched"
+        assert_eq!(
+            runtime.thread_snapshot().len(),
+            1,
+            "the report folded up to the wave thread",
         );
         let events = crate::wave::journal::read_events(&crate::wave::channel::child_journal_path(
             &origin,

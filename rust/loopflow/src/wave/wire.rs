@@ -84,6 +84,13 @@ pub enum ResidentDelta {
     /// steering input, so the CURRENT turn answers them (journaled as
     /// `TurnSteered.answers`). Validated like `TurnOpened.answers`.
     TurnSteered { answers: Vec<String> },
+    /// The undo of a consumption claim: these message ids were declared
+    /// consumed (`TurnSteered`) but the vendor never received the input —
+    /// the harness send failed AFTER the claim was journaled. The listener
+    /// returns them to its pending fold so the next resident's replay
+    /// re-delivers them. The claim rides first, the undo is explicit:
+    /// at-most-once to the vendor, never a silent redelivery.
+    MessagesRequeued { ids: Vec<String> },
     /// The resident's reported mind state ([`ResidentStateTo`]). `Turning`
     /// and the boundary `Idle` are DERIVED by the listener from
     /// `TurnOpened`/`TurnFinished`; only the transitions the turn deltas
@@ -207,6 +214,9 @@ mod tests {
             ResidentDelta::TurnSteered {
                 answers: vec!["msg-3".into()],
             },
+            ResidentDelta::MessagesRequeued {
+                ids: vec!["msg-3".into()],
+            },
             ResidentDelta::MindState {
                 to: ResidentStateTo::Failed,
                 reason: "harness disconnected".into(),
@@ -233,6 +243,7 @@ mod tests {
             serde_json::json!({ "kind": "turn_finished", "cost_usd": null }),
             serde_json::json!({ "kind": "turn_text" }),
             serde_json::json!({ "kind": "mind_state", "to": "failed" }),
+            serde_json::json!({ "kind": "messages_requeued" }),
             serde_json::json!({ "kind": "thread_started", "vendor": "codex" }),
         ] {
             assert!(

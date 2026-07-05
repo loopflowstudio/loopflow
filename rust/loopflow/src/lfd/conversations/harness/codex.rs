@@ -550,7 +550,6 @@ impl Harness for CodexHarness {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             supports_steer: true,
-            supports_interrupt: true,
         }
     }
 

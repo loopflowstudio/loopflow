@@ -173,6 +173,10 @@ pub enum Commands {
         /// Message text (reads stdin when omitted — heredoc-friendly)
         #[arg(trailing_var_arg = true)]
         text: Vec<String>,
+        /// Attribution label for machine speech (e.g. --from ci). Overrides
+        /// the ambient label; absent = the ambient sender (env, else "cli").
+        #[arg(long)]
+        from: Option<String>,
         #[command(flatten)]
         target: WaveTargetArgs,
     },
@@ -766,27 +770,39 @@ mod tests {
     #[test]
     fn chat_parses_text_and_targeting() {
         let cli = Cli::try_parse_from(["lf", "chat", "shipped", "the", "parser"]).expect("parse");
-        let Some(Commands::Chat { text, target }) = cli.command else {
+        let Some(Commands::Chat { text, from, target }) = cli.command else {
             panic!("expected chat command");
         };
         assert_eq!(text, vec!["shipped", "the", "parser"]);
+        assert_eq!(from, None);
         assert_eq!(target.wave, None);
         assert!(!target.parent);
 
         // No text: stdin is the body. Flags come before the trailing text.
         let cli = Cli::try_parse_from(["lf", "chat", "--parent"]).expect("parse");
-        let Some(Commands::Chat { text, target }) = cli.command else {
+        let Some(Commands::Chat { text, target, .. }) = cli.command else {
             panic!("expected chat command");
         };
         assert!(text.is_empty());
         assert!(target.parent);
 
         let cli = Cli::try_parse_from(["lf", "chat", "--wave", "goals", "hi"]).expect("parse");
-        let Some(Commands::Chat { text, target }) = cli.command else {
+        let Some(Commands::Chat { text, target, .. }) = cli.command else {
             panic!("expected chat command");
         };
         assert_eq!(text, vec!["hi"]);
         assert_eq!(target.wave.as_deref(), Some("goals"));
+
+        // Machine speech declares itself: --from rides ahead of the text
+        // (the webhook gatekeeper's planned argv).
+        let cli =
+            Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--from", "ci", "CI failed"])
+                .expect("parse");
+        let Some(Commands::Chat { text, from, .. }) = cli.command else {
+            panic!("expected chat command");
+        };
+        assert_eq!(text, vec!["CI failed"]);
+        assert_eq!(from.as_deref(), Some("ci"));
 
         // --wave and --parent are mutually exclusive.
         assert!(Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--parent", "x"]).is_err());

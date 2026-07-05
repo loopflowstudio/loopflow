@@ -153,6 +153,7 @@ mod tests {
             runtime.clone(),
             server::ResidentDoor::new("test-token"),
             None,
+            None,
         );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();

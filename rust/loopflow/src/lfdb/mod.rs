@@ -333,6 +333,13 @@ impl Store {
         WaveStateStore::list_runs(self, wave_id, limit).await
     }
 
+    pub async fn list_runs_active_or_ended_since(
+        &self,
+        ended_since: time::OffsetDateTime,
+    ) -> StoreResult<Vec<Run>> {
+        WaveStateStore::list_runs_active_or_ended_since(self, ended_since).await
+    }
+
     pub async fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>> {
         WaveStateStore::get_run(self, run_id).await
     }
@@ -652,6 +659,13 @@ pub trait WaveStateStore: Send + Sync {
 
     async fn list_runs(&self, wave_id: Option<&LfdId>, limit: Option<u32>)
         -> StoreResult<Vec<Run>>;
+    /// Non-terminal runs plus runs that ended at or after `ended_since` —
+    /// the push bridge's working set, so it never scans the whole terminal
+    /// history.
+    async fn list_runs_active_or_ended_since(
+        &self,
+        ended_since: time::OffsetDateTime,
+    ) -> StoreResult<Vec<Run>>;
     async fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>>;
     async fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>>;
     async fn count_active_runs(&self, wave_id: &LfdId) -> StoreResult<u32>;
@@ -915,6 +929,23 @@ impl WaveStateStore for Store {
                 run_sqlite(store, move |store| store.list_runs(wave_id.as_ref(), limit)).await
             }
             StoreBackend::Postgres(store) => store.list_runs(wave_id, limit).await,
+        }
+    }
+
+    async fn list_runs_active_or_ended_since(
+        &self,
+        ended_since: time::OffsetDateTime,
+    ) -> StoreResult<Vec<Run>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                run_sqlite(store, move |store| {
+                    store.list_runs_active_or_ended_since(ended_since)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store.list_runs_active_or_ended_since(ended_since).await
+            }
         }
     }
 

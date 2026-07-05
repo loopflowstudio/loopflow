@@ -36,15 +36,17 @@ lf memory add "buttons: variants unified" # curate what it knows
 Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
 `tmux attach -t <name>` to jump into one.
 
-`lf wave <name>` starts a long-lived server in the wave's own worktree: one
-persistent codex thread handles progress and chat as a single conversation —
-messages queue mid-turn, steer redirects a live turn, interrupt finalizes a
-partial one. Truth is an append-only journal, so a restart keeps the whole
-thread. `lf chat` and `lf memory` are the speech surface — the same doors for
-minds, workers, humans, and scripts; worker reports arrive attributed in the
-thread. Outside any wave a publish drops silently (exit 0) — the verbs are
-safe in every prompt. See `rust/loopflow/src/wave/README.md` for the wire
-contract, and `scripts/demo_wave.sh` for the guided demo.
+`lf wave <name>` starts a long-lived server at the repo's main checkout (the
+wave's journal and endpoint live at the origin); the resident mind — one
+persistent codex thread — enters the wave's worktree to work. Progress and
+chat are a single conversation: human speech steers a live turn by default,
+attributed speech (workers, scripts) queues for the next one, interrupt
+finalizes a partial turn. Truth is an append-only journal, so a restart keeps
+the whole thread. `lf chat` and `lf memory` are the speech surface — the same
+doors for minds, workers, humans, and scripts; worker reports arrive
+attributed in the thread. Outside any wave a publish drops silently (exit 0)
+— the verbs are safe in every prompt. See `rust/loopflow/src/wave/README.md`
+for the wire contract, and `scripts/demo_wave.sh` for the guided demo.
 
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 

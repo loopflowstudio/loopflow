@@ -230,9 +230,14 @@ const CHILD_CHAT_MAX_CHARS: usize = WAVE_CHAT_MAX_CHARS - PARENT_CHAT_MAX_CHARS;
 /// the channel lives) plus, compactly, the parent wave channel's recent
 /// turns — under the same total cap as a wave-home overlay.
 pub fn gather_channel_chat(repo_root: &Path, channel: &str) -> Option<String> {
-    let Some((wave, _)) = channel.split_once('.') else {
+    // Family membership and the head split are ONE predicate, shared with the
+    // server's scoping (`crate::wave::channel::family_head`): a channel with
+    // no dot (the wave's own channel) reads as a plain wave chat; a work-line
+    // channel reads down the tree from its family head.
+    let wave = crate::wave::channel::family_head(channel);
+    if wave == channel {
         return gather_wave_chat(repo_root, channel);
-    };
+    }
     // The work line's own thread: its journal travels with the branch —
     // journal fold only, read-only (the family head's server holds the pen;
     // a vanished/never-opened journal is just an empty section).

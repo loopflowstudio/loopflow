@@ -203,7 +203,8 @@ pub(crate) async fn dispatch(
 
     // The worker's prompt closes the reporting loop through the one door
     // every process has — exec: it finishes by posting an `lf chat` report
-    // into the wave's thread (attributed via LFD_SESSION_ID from its env).
+    // on its own channel (LFD_CHANNEL; the listener forwards child-channel
+    // says to the mind), attributed via LFD_SESSION_ID from its env.
     // The Run row keeps the raw task; only the dispatched prompt grows.
     let dispatch_task = worker_dispatch_task(task);
 
@@ -505,6 +506,7 @@ mod tests {
         let app = crate::wave::server::router(
             runtime.clone(),
             crate::wave::server::ResidentDoor::new("test-token"),
+            None,
             None,
         );
         tokio::spawn(async move {

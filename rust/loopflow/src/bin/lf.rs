@@ -345,8 +345,8 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Runs) => loopflow::lf::commands::runs::list(),
             Some(Commands::Trace { run_id }) => loopflow::lf::commands::runs::trace(run_id),
             Some(Commands::Q { cmd }) => loopflow::lf::commands::q::run(cmd),
-            Some(Commands::Chat { text, target }) => {
-                loopflow::lf::commands::chat::run(text, target)
+            Some(Commands::Chat { text, from, target }) => {
+                loopflow::lf::commands::chat::run(text, from.as_deref(), target)
             }
             Some(Commands::Sub { wave, json }) => {
                 loopflow::lf::commands::sub::run(wave.as_deref(), *json)

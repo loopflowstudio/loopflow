@@ -39,6 +39,12 @@ pub(crate) struct WaveConfig {
     /// The wave's mind vendor (`codex` default; `claude`, `opencode`) — read
     /// by the RESIDENT (`crate::wave::resident::resolve_mind_vendor`).
     pub mind: Option<String>,
+    /// The safety valve: `paused: true` in GOAL.md frontmatter tells the wave
+    /// listener to refuse to START turns (message→turn, heartbeat, cron)
+    /// while keeping the channel serving and queueing. File-first and re-read
+    /// live (`crate::wave::runtime::WaveRuntime::paused`), not the registry
+    /// row.
+    pub paused: Option<bool>,
 }
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.

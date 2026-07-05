@@ -33,10 +33,13 @@ use tokio::sync::broadcast;
 
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
 use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
-use crate::wave::channel::{in_family, scan_child_channels, ChannelFrame, ChildChannel};
+use crate::lfd::http::routes::wave_config::read_wave_config;
+use crate::lfd::security::sanitize_fs_component;
+use crate::wave::channel::{matches_prefix, scan_child_channels, ChannelFrame, ChildChannel};
 use crate::wave::journal::{
-    channel_opened_turn, fold_thread, fold_workers, journal_path, Attribution, EventKind, Journal,
-    MessageId, MessageOp, PendingMessage, Usage, WorkerOutcome, WorkerRecord,
+    channel_opened_turn, fold_thread, fold_workers, journal_path, restore_pending,
+    run_completed_turn, Attribution, EventKind, Journal, MessageId, MessageOp, PendingMessage,
+    Usage, WorkerOutcome, WorkerRecord,
 };
 use crate::wave::memory::Memory;
 use crate::wave::state::{can_transition, MindState};
@@ -64,6 +67,55 @@ const FAMILY_BROADCAST_CAPACITY: usize = 256;
 /// durable queue; a lagged subscriber resyncs from the pending replay.
 const INBOX_BROADCAST_CAPACITY: usize = 256;
 
+/// How a channel name relates to a wave's family, per [`channel_role`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelRole {
+    /// The wave's own channel (raw or sanitized spelling of its name).
+    Primary,
+    /// A work line: a dot-descendant of the wave's channel name.
+    Child,
+}
+
+/// A wave's primary channel name: the sanitized filesystem form of its name.
+/// Worktree basenames — and therefore child channel names — derive from it
+/// (`web/ui` mints `web-ui` worktrees and `web-ui.<run>` channels; see
+/// `lfd::security::sanitize_fs_component`).
+pub fn wave_channel_name(wave: &str) -> String {
+    sanitize_fs_component(wave)
+}
+
+/// THE family-membership predicate: how `channel` relates to `wave`, or
+/// `None` when it is outside the family. The message door, `/events` scoping,
+/// and the ambient dot-split (`engine::wave_context`) all route through it,
+/// so every consumer agrees on what the family is called. Membership compares
+/// against the SANITIZED wave name ([`wave_channel_name`]) — the form channel
+/// names actually carry — while the raw spelling still addresses the primary.
+pub fn channel_role(wave: &str, channel: &str) -> Option<ChannelRole> {
+    let family = wave_channel_name(wave);
+    if channel == wave || channel == family {
+        return Some(ChannelRole::Primary);
+    }
+    matches_prefix(channel, &family).then_some(ChannelRole::Child)
+}
+
+/// One live turn frame: the turn plus its wire JSON, serialized ONCE at the
+/// send site so N subscribers share one serialization instead of performing
+/// N (the delta-granular wire — sending increments instead of whole turns —
+/// stays future work).
+#[derive(Debug)]
+pub struct TurnFrame {
+    pub turn: ChatTurn,
+    /// The turn as `/events` `turn`-frame JSON.
+    pub json: String,
+}
+
+impl TurnFrame {
+    fn share(turn: ChatTurn) -> Arc<Self> {
+        let json = serde_json::to_string(&turn).unwrap_or_default();
+        Arc::new(Self { turn, json })
+    }
+}
+
 /// One resident-directed op, broadcast live to the resident's subscription
 /// (`inbox` SSE frames) and the supervisor.
 #[derive(Debug, Clone)]
@@ -83,10 +135,10 @@ pub enum InboxItem {
 #[derive(Debug)]
 pub struct Subscription {
     pub turns: Vec<ChatTurn>,
-    /// Live turn frames ride as `Arc`s: the broadcast clones once per
-    /// subscriber, so N subscribers share one allocation per frame instead of
-    /// N deep `ChatTurn` clones. Clone out of the `Arc` only on need.
-    pub turn_rx: broadcast::Receiver<Arc<ChatTurn>>,
+    /// Live turn frames ride as `Arc<TurnFrame>`s: the broadcast clones once
+    /// per subscriber, so N subscribers share one allocation — and one JSON
+    /// serialization — per frame instead of N.
+    pub turn_rx: broadcast::Receiver<Arc<TurnFrame>>,
     pub state: MindState,
     pub state_rx: broadcast::Receiver<MindState>,
     /// Live `MemoryUpdated` summaries — fired on every curation, no replay
@@ -135,6 +187,13 @@ struct Inner {
     workers: Vec<WorkerRecord>,
     /// Durable scheduler queue folded from the journal on boot.
     pending_messages: Vec<PendingMessage>,
+    /// Every journaled user message by id — requeues restore pending entries
+    /// from it (an id alone can't rebuild the text/op/from).
+    messages: HashMap<MessageId, PendingMessage>,
+    /// Message ids the OPEN turn claimed (`TurnOpened.answers` plus any
+    /// mid-turn `TurnSteered.answers`). Requeued if the turn ends without
+    /// completing; cleared on any close.
+    open_turn_claims: Vec<MessageId>,
     /// Run ids whose `ChannelOpened` is already journaled — the dispatch
     /// notification door's idempotence guard, folded from the journal.
     opened_channel_runs: HashSet<String>,
@@ -144,14 +203,19 @@ struct Inner {
 #[derive(Debug)]
 pub struct WaveRuntime {
     name: String,
+    /// The primary channel's name — the wave name sanitized to its
+    /// filesystem form ([`wave_channel_name`]); child channels are its
+    /// dot-descendants.
+    channel_name: String,
     repo_root: PathBuf,
     /// Journal + materialized thread + mind state, behind one lock so their
     /// orders never diverge.
     inner: Mutex<Inner>,
     /// Fans turn frames out to live SSE subscribers: open-turn snapshots as a
     /// turn grows, then the terminal turn under the same id. Frames are
-    /// `Arc`-shared so a delta costs one clone total, not one per subscriber.
-    turn_tx: broadcast::Sender<Arc<ChatTurn>>,
+    /// `Arc`-shared so a delta costs one clone (and one serialization) total,
+    /// not one per subscriber.
+    turn_tx: broadcast::Sender<Arc<TurnFrame>>,
     /// Fans mind-state transitions out to live SSE subscribers (the composer
     /// keys its verb off this).
     state_tx: broadcast::Sender<MindState>,
@@ -183,8 +247,10 @@ impl WaveRuntime {
     /// cache is rebuilt from the log and turn ids continue from its seq.
     ///
     /// Boot janitor: turns left open by a crash are finalized as `Failed`
-    /// (appended to the journal, so the log itself is closed), and a non-idle
-    /// mind state settles back to `Idle`.
+    /// (appended to the journal, so the log itself is closed), the messages
+    /// those turns had claimed are requeued (`MessagesRequeued` — a crashed
+    /// turn never answered them), and a non-idle mind state settles back to
+    /// `Idle`.
     ///
     /// # Errors
     /// Journal I/O failure or an unreadable (future-versioned) journal.
@@ -202,6 +268,18 @@ impl WaveRuntime {
             });
             turn.status = Lifecycle::Failed;
             fold.turns.push(turn);
+        }
+        // Janitor: what the crashed turns claimed goes back in the queue —
+        // they never answered it; the next resident replay re-delivers.
+        let requeued = restore_pending(
+            &mut fold.pending_messages,
+            &fold.messages,
+            &fold.open_claims,
+        );
+        if !requeued.is_empty() {
+            journal.append(|_| EventKind::MessagesRequeued {
+                ids: requeued.clone(),
+            });
         }
         // Seed the steer-consumption fallback from the replayed thread.
         let last_assistant_turn_id = fold
@@ -229,6 +307,7 @@ impl WaveRuntime {
         let (inbox_tx, _) = broadcast::channel(INBOX_BROADCAST_CAPACITY);
         let memory = Memory::for_wave(&repo_root, &name);
         Ok(Arc::new(Self {
+            channel_name: wave_channel_name(&name),
             name,
             repo_root,
             inner: Mutex::new(Inner {
@@ -243,6 +322,8 @@ impl WaveRuntime {
                 last_assistant_turn_id,
                 workers,
                 pending_messages: fold.pending_messages,
+                messages: fold.messages,
+                open_turn_claims: Vec::new(),
                 opened_channel_runs: fold.opened_channel_runs,
             }),
             turn_tx,
@@ -260,8 +341,26 @@ impl WaveRuntime {
         &self.name
     }
 
+    /// The primary channel's name (the wave name, sanitized — see
+    /// [`wave_channel_name`]). Family scans and default `/events` scopes key
+    /// off this, never the raw name.
+    pub fn channel_name(&self) -> &str {
+        &self.channel_name
+    }
+
     pub fn repo_root(&self) -> &std::path::Path {
         &self.repo_root
+    }
+
+    /// Whether the wave is paused, from GOAL.md frontmatter (`paused: true`).
+    /// File-first by design — the flag lives with the goal, re-read live, no
+    /// restart; the registry row's `paused` column is not consulted. A paused
+    /// wave keeps serving and queueing, but the listener refuses to start
+    /// turns ([`WaveRuntime::apply_resident_delta`] drops `TurnOpened`).
+    pub fn paused(&self) -> bool {
+        read_wave_config(&self.repo_root, &self.name)
+            .and_then(|config| config.paused)
+            .unwrap_or(false)
     }
 
     pub fn memory(&self) -> &Memory {
@@ -273,9 +372,33 @@ impl WaveRuntime {
     }
 
     /// Snapshot of the whole thread — finalized turns plus the open turn
-    /// (status `Running`), if one is in progress — for `/conversation`.
+    /// (status `Running`), if one is in progress.
     pub fn thread_snapshot(&self) -> Vec<ChatTurn> {
         snapshot_locked(&self.inner())
+    }
+
+    /// The last `limit` turns (open turn included, newest last), cloned
+    /// inside the lock — a `/conversation?limit=N` tail never clones the
+    /// whole thread. `None` serves everything.
+    pub fn thread_tail(&self, limit: Option<usize>) -> Vec<ChatTurn> {
+        let inner = self.inner();
+        let open_count = usize::from(inner.open_turn.is_some());
+        let total = inner.thread.len() + open_count;
+        let take = limit.unwrap_or(total).min(total);
+        let take_open = take.min(open_count);
+        let take_thread = take - take_open;
+        let mut turns = inner.thread[inner.thread.len() - take_thread..].to_vec();
+        if take_open == 1 {
+            turns.extend(inner.open_turn.clone());
+        }
+        turns
+    }
+
+    /// Thread length (open turn included) without cloning a single turn —
+    /// `/health`'s counter.
+    pub fn thread_len(&self) -> usize {
+        let inner = self.inner();
+        inner.thread.len() + usize::from(inner.open_turn.is_some())
     }
 
     /// Current mind state, for `/health` and the composer.
@@ -308,7 +431,7 @@ impl WaveRuntime {
     }
 
     /// Live turn frames (no snapshot).
-    pub fn subscribe_turns(&self) -> broadcast::Receiver<Arc<ChatTurn>> {
+    pub fn subscribe_turns(&self) -> broadcast::Receiver<Arc<TurnFrame>> {
         self.turn_tx.subscribe()
     }
 
@@ -358,7 +481,10 @@ impl WaveRuntime {
         true
     }
 
-    /// Journal a `RunCompleted` observation. Returns false (and appends
+    /// Journal a `RunCompleted` observation and commit its thread-visible
+    /// turn on the PRIMARY channel ("run <id> completed/failed · <summary>",
+    /// broadcast live) — a worker that died without reporting still ends
+    /// visibly, failure summary on the wire. Returns false (and appends
     /// nothing) when the run was never dispatched or already finished.
     pub fn journal_run_completed(
         &self,
@@ -375,11 +501,13 @@ impl WaveRuntime {
             return false;
         };
         inner.workers[pos].finished = Some(outcome);
-        inner.journal.append(|_| EventKind::RunCompleted {
+        let event = inner.journal.append(|_| EventKind::RunCompleted {
             run_id: run_id.to_string(),
             outcome,
             summary: summary.to_string(),
         });
+        let turn = run_completed_turn(&event, run_id, outcome, summary);
+        self.commit_locked(&mut inner, turn);
         true
     }
 
@@ -408,10 +536,16 @@ impl WaveRuntime {
     // journals and folded separately; the family view folds upward through
     // the tagged `family_tx` bus. Consumption markers never cross journals.
 
-    /// Whether `channel` is within this wave's family: the wave itself or a
-    /// dot-descendant (`goals`, `goals.148e0e02`, `goals.a.b`).
+    /// Whether `channel` is within this wave's family: the primary channel
+    /// or a dot-descendant of the sanitized wave name (see [`channel_role`]).
     pub fn in_family(&self, channel: &str) -> bool {
-        in_family(&self.name, channel)
+        channel_role(&self.name, channel).is_some()
+    }
+
+    /// Whether `channel` addresses this wave's PRIMARY channel (raw or
+    /// sanitized spelling).
+    pub fn is_primary(&self, channel: &str) -> bool {
+        channel_role(&self.name, channel) == Some(ChannelRole::Primary)
     }
 
     /// Materialize (or fetch) a child channel by name. `Ok(None)` when the
@@ -420,7 +554,7 @@ impl WaveRuntime {
     /// `~/.lf/journal/<repo>/<worktree>`, is unbuilt). Errors on a name
     /// outside this wave's family, or journal I/O.
     pub fn child_channel(&self, name: &str) -> anyhow::Result<Option<Arc<ChildChannel>>> {
-        if name == self.name || !self.in_family(name) {
+        if channel_role(&self.name, name) != Some(ChannelRole::Child) {
             anyhow::bail!("channel '{name}' is not a child of wave '{}'", self.name);
         }
         let mut children = self.children.lock().expect("children lock poisoned");
@@ -445,6 +579,12 @@ impl WaveRuntime {
     /// identical to an unaddressed delivery); a child name journals in that
     /// channel's worktree journal and broadcasts tagged. `Ok(None)` = nothing
     /// appended (a bare interrupt).
+    ///
+    /// Fold-upward doctrine: a `say` on a child channel is a worker report —
+    /// the mind must hear it. The child journal keeps its record, AND the
+    /// same speech lands on the primary channel attributed to the work line
+    /// ("[goals.148e] landed PR #42"), queued for the mind like any input;
+    /// consumption is marked parent-side (it entered the parent's pending).
     pub fn deliver_to_channel(
         &self,
         channel: &str,
@@ -452,7 +592,7 @@ impl WaveRuntime {
         text: String,
         from: Option<Attribution>,
     ) -> anyhow::Result<Option<ChatTurn>> {
-        if channel == self.name {
+        if self.is_primary(channel) {
             return Ok(self.deliver(op, text, from));
         }
         let Some(child) = self.child_channel(channel)? else {
@@ -460,7 +600,20 @@ impl WaveRuntime {
                 "channel '{channel}' has no live worktree — the work line is gone or was never opened"
             );
         };
-        child.deliver(&self.family_tx, op, text, from)
+        let turn = child.deliver(&self.family_tx, op, text.clone(), from.clone())?;
+        if turn.is_some() && op == MessageOp::Say {
+            // The byline is the CHANNEL — which work line spoke — richer than
+            // the say's own label; the sender's session id rides along.
+            let session_id = from.and_then(|from| from.session_id);
+            self.deliver_say(
+                text,
+                Attribution {
+                    session_id,
+                    label: channel.to_string(),
+                },
+            );
+        }
+        Ok(turn)
     }
 
     /// Journal a `ChannelOpened` fact on the PRIMARY channel (the dispatch
@@ -492,10 +645,11 @@ impl WaveRuntime {
         Vec<(String, Vec<ChatTurn>)>,
         broadcast::Receiver<ChannelFrame>,
     ) {
+        self.sweep_dead_children();
         let rx = self.family_tx.subscribe();
         let mut snapshots = Vec::new();
-        for name in scan_child_channels(&self.repo_root, &self.name) {
-            if !crate::wave::channel::matches_prefix(&name, prefix) {
+        for name in scan_child_channels(&self.repo_root, &self.channel_name) {
+            if !matches_prefix(&name, prefix) {
                 continue;
             }
             match self.child_channel(&name) {
@@ -507,6 +661,39 @@ impl WaveRuntime {
             }
         }
         (snapshots, rx)
+    }
+
+    /// Subscribe to the family bus and snapshot exactly ONE child channel —
+    /// the strict `?channel=` scope, no descendants (a `?prefix=` subtree
+    /// goes through [`WaveRuntime::subscribe_children`]). Bus first, snapshot
+    /// second, same duplicate-not-missed contract. The snapshot is `None`
+    /// when the channel has no live worktree yet — the subscription still
+    /// carries later frames if the channel opens.
+    pub fn subscribe_child(
+        &self,
+        name: &str,
+    ) -> (Option<Vec<ChatTurn>>, broadcast::Receiver<ChannelFrame>) {
+        self.sweep_dead_children();
+        let rx = self.family_tx.subscribe();
+        let snapshot = match self.child_channel(name) {
+            Ok(Some(channel)) => Some(channel.thread_snapshot()),
+            Ok(None) => None,
+            Err(err) => {
+                tracing::warn!(channel = name, error = %err, "child channel failed to open");
+                None
+            }
+        };
+        (snapshot, rx)
+    }
+
+    /// Drop dead child channels (worktree gone): a lingering entry pins the
+    /// journal's file handle until removed. Runs on every family subscribe
+    /// and on the store observer's poll cadence.
+    pub fn sweep_dead_children(&self) {
+        self.children
+            .lock()
+            .expect("children lock poisoned")
+            .retain(|_, channel| channel.alive());
     }
 
     // -- Memory (the server holds MEMORY.md's pen) --
@@ -633,11 +820,12 @@ impl WaveRuntime {
 
     /// Janitor: finalize the open turn without a resident terminal delta —
     /// the interrupt deadline expired with the resident silent, or the
-    /// resident process died mid-turn. Journals `TurnFinished`, commits and
-    /// broadcasts the turn as accumulated so far, settles the mind to `Idle`,
-    /// and arms the drop guard: late wire deltas for the closed turn are
-    /// ignored until the next `TurnOpened`. Returns whether there was an open
-    /// turn to finalize.
+    /// resident process died mid-turn. Journals `TurnFinished`, requeues what
+    /// the turn had claimed (it never answered it), commits and broadcasts
+    /// the turn as accumulated so far, settles the mind to `Idle`, and arms
+    /// the drop guard: late wire deltas for the closed turn are ignored until
+    /// the next `TurnOpened`. Returns whether there was an open turn to
+    /// finalize.
     pub fn force_finalize_open_turn(&self, status: Lifecycle, reason: &str) -> bool {
         let mut inner = self.inner();
         let Some(mut turn) = inner.open_turn.take() else {
@@ -651,10 +839,29 @@ impl WaveRuntime {
             status,
             usage: Usage::empty(),
         });
+        let claims = std::mem::take(&mut inner.open_turn_claims);
+        if status != Lifecycle::Completed {
+            self.requeue_locked(&mut inner, &claims);
+        }
         turn.status = status;
         self.transition_locked(&mut inner, MindState::Idle, reason);
         self.commit_locked(&mut inner, turn);
         true
+    }
+
+    /// Return claimed-but-unanswered messages to the durable queue: journal
+    /// `MessagesRequeued` and restore the pending fold, exactly what the fold
+    /// replays. No live inbox re-broadcast — redelivery is the pending
+    /// replay's job (the resident's next subscription), never a silent
+    /// double-send to a mind that may still hold its own copy.
+    fn requeue_locked(&self, inner: &mut Inner, ids: &[MessageId]) {
+        let restored = restore_pending(&mut inner.pending_messages, &inner.messages, ids);
+        if restored.is_empty() {
+            return;
+        }
+        inner
+            .journal
+            .append(|_| EventKind::MessagesRequeued { ids: restored });
     }
 
     /// Push a turn into the thread cache and broadcast it live. The journal
@@ -665,7 +872,7 @@ impl WaveRuntime {
         }
         inner.thread.push(turn.clone());
         // A send error just means no live subscribers — the store has it.
-        let _ = self.turn_tx.send(Arc::new(turn.clone()));
+        let _ = self.turn_tx.send(TurnFrame::share(turn.clone()));
         turn
     }
 
@@ -719,6 +926,7 @@ impl WaveRuntime {
         // The pending fold stays live (not boot-only): it is the replay the
         // resident's subscription serves and the validator for its `answers`.
         let pending = PendingMessage { id, op, text, from };
+        inner.messages.insert(pending.id.clone(), pending.clone());
         inner.pending_messages.push(pending.clone());
         // Inbox broadcast still under the lock, so inbox order == journal
         // order — sending after release lets two deliveries invert. A send
@@ -803,6 +1011,7 @@ impl WaveRuntime {
                 self.resident_turn_finished(status, cost_usd)
             }
             ResidentDelta::TurnSteered { answers } => self.resident_turn_steered(answers),
+            ResidentDelta::MessagesRequeued { ids } => self.resident_requeue(ids),
             ResidentDelta::MindState { to, reason } => match to {
                 ResidentStateTo::Interrupting => {
                     if !self.begin_interrupt(&reason) {
@@ -825,11 +1034,13 @@ impl WaveRuntime {
     }
 
     fn resident_turn_opened(&self, answers: Vec<String>) {
+        let paused = self.paused();
         let mut inner = self.inner();
         inner.drop_deltas_until_opened = false;
         // Defensive: an Opened over an open turn closes the stale one failed
         // (the resident's adapter prevents this; a rogue sequence must not
-        // wedge the fold).
+        // wedge the fold). What the stale turn claimed is requeued — it never
+        // answered it.
         if let Some(mut stale) = inner.open_turn.take() {
             tracing::warn!(
                 turn_id = stale.id,
@@ -841,11 +1052,25 @@ impl WaveRuntime {
                 status: Lifecycle::Failed,
                 usage: stale_usage,
             });
+            let claims = std::mem::take(&mut inner.open_turn_claims);
+            self.requeue_locked(&mut inner, &claims);
             stale.status = Lifecycle::Failed;
             self.transition_locked(&mut inner, MindState::Idle, "stale open turn closed");
             self.commit_locked(&mut inner, stale);
         }
+        // The safety valve: a paused wave (GOAL.md `paused: true`) refuses to
+        // start turns — nothing journaled, the queue keeps its messages for
+        // an unpaused turn, and the refused turn's deltas drop whole.
+        if paused {
+            tracing::warn!(
+                wave = self.name,
+                "wave is paused (GOAL.md frontmatter); turn refused, deltas dropped until the next TurnOpened"
+            );
+            inner.drop_deltas_until_opened = true;
+            return;
+        }
         let answers = claim_answers(&mut inner, answers);
+        inner.open_turn_claims = answers.clone();
         let event = inner.journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers,
@@ -867,7 +1092,7 @@ impl WaveRuntime {
             created_at: event.at_rfc3339(),
             from: None,
         };
-        let _ = self.turn_tx.send(Arc::new(open.clone()));
+        let _ = self.turn_tx.send(TurnFrame::share(open.clone()));
         inner.open_turn = Some(open);
         inner.open_usage = Usage::empty();
         inner.open_text_items = 0;
@@ -911,7 +1136,7 @@ impl WaveRuntime {
         let open = inner.open_turn.as_mut().expect("checked by callers");
         let turn_id = open.id.clone();
         open.absorb_item(item.clone());
-        let frame = Arc::new(open.clone());
+        let frame = TurnFrame::share(open.clone());
         inner
             .journal
             .append(|_| EventKind::TurnItem { turn_id, item });
@@ -952,6 +1177,12 @@ impl WaveRuntime {
             status,
             usage,
         });
+        // Any non-Completed end requeues what the turn claimed: a failed or
+        // interrupted turn never answered its messages.
+        let claims = std::mem::take(&mut inner.open_turn_claims);
+        if status != Lifecycle::Completed {
+            self.requeue_locked(&mut inner, &claims);
+        }
         turn.status = status;
         self.transition_locked(&mut inner, MindState::Idle, "turn finalized");
         self.commit_locked(&mut inner, turn);
@@ -968,10 +1199,10 @@ impl WaveRuntime {
     /// or journaled — the message stays pending.
     fn resident_turn_steered(&self, answers: Vec<String>) {
         let mut inner = self.inner();
-        let turn_id = match inner.state.clone() {
-            MindState::Turning { turn_id } | MindState::Interrupting { turn_id } => turn_id,
+        let (turn_id, turn_live) = match inner.state.clone() {
+            MindState::Turning { turn_id } | MindState::Interrupting { turn_id } => (turn_id, true),
             _ => match inner.last_assistant_turn_id.clone() {
-                Some(turn_id) => turn_id,
+                Some(turn_id) => (turn_id, false),
                 None => {
                     tracing::warn!("TurnSteered with no assistant turn anywhere; kept pending");
                     return;
@@ -982,9 +1213,28 @@ impl WaveRuntime {
         if answers.is_empty() {
             return;
         }
+        // Steered into the live turn: part of its claims, requeued with them
+        // if the turn ends without completing. The boundary-race fallback
+        // names a turn that already closed completed — nothing to track.
+        if turn_live {
+            inner.open_turn_claims.extend(answers.iter().cloned());
+        }
         inner
             .journal
             .append(|_| EventKind::TurnSteered { turn_id, answers });
+    }
+
+    /// The resident's explicit consumption undo ([`ResidentDelta::
+    /// MessagesRequeued`]): it claimed these ids but the vendor never
+    /// received the input (harness send failed after the claim journaled).
+    /// Restore them to the pending fold — the next replay re-delivers; ids
+    /// still pending or unknown are dropped by the restore's own guards.
+    fn resident_requeue(&self, ids: Vec<String>) {
+        let mut inner = self.inner();
+        let ids: Vec<MessageId> = ids.into_iter().map(MessageId).collect();
+        // Undone claims must not requeue a second time when the turn ends.
+        inner.open_turn_claims.retain(|claim| !ids.contains(claim));
+        self.requeue_locked(&mut inner, &ids);
     }
 }
 
@@ -1368,14 +1618,14 @@ mod tests {
         // The turn opens empty and running, then the text lands in a second
         // frame under the same id.
         rt.apply_resident_delta(d_opened(&[]));
-        let opened = frames.try_recv().expect("opened frame");
+        let opened = frames.try_recv().expect("opened frame").turn.clone();
         assert_eq!(opened.status, Lifecycle::Running);
         assert_eq!(opened.text, "");
         rt.apply_resident_delta(d_text("thinking"));
         let grown = frames.try_recv().expect("text frame");
-        assert_eq!(grown.id, opened.id);
-        assert_eq!(grown.text, "thinking");
-        assert_eq!(grown.status, Lifecycle::Running);
+        assert_eq!(grown.turn.id, opened.id);
+        assert_eq!(grown.turn.text, "thinking");
+        assert_eq!(grown.turn.status, Lifecycle::Running);
 
         // Mid-turn, the open turn rides the snapshot after the thread.
         let mid = rt.thread_snapshot();
@@ -1386,16 +1636,16 @@ mod tests {
         // An item delta grows the same snapshot.
         rt.apply_resident_delta(d_tool());
         let with_item = frames.try_recv().expect("item frame");
-        assert_eq!(with_item.id, opened.id);
-        assert_eq!(with_item.items.len(), 1);
-        assert_eq!(with_item.text, "thinking");
+        assert_eq!(with_item.turn.id, opened.id);
+        assert_eq!(with_item.turn.items.len(), 1);
+        assert_eq!(with_item.turn.text, "thinking");
 
         // Finalization replaces the running turn under the same id.
         rt.apply_resident_delta(d_usage(10, 5));
         rt.apply_resident_delta(d_finished(Lifecycle::Completed));
         let terminal = frames.try_recv().expect("terminal frame");
-        assert_eq!(terminal.id, opened.id);
-        assert_eq!(terminal.status, Lifecycle::Completed);
+        assert_eq!(terminal.turn.id, opened.id);
+        assert_eq!(terminal.turn.status, Lifecycle::Completed);
 
         // No stale running turn remains anywhere.
         let after = rt.thread_snapshot();
@@ -1464,6 +1714,298 @@ mod tests {
         assert_eq!(thread.len(), 2);
         assert_eq!(thread[1].text, "fresh");
         assert_eq!(thread[1].status, Lifecycle::Completed);
+    }
+
+    /// Fold-upward doctrine: a `say` on a CHILD channel journals there AND
+    /// lands on the primary channel's inbox as attributed speech, so the
+    /// mind's next turn can answer it. The child's own journal keeps its
+    /// record; consumption is parent-side.
+    /// Family membership compares against the SANITIZED wave name: a wave
+    /// whose name sanitizes (`web/ui` → `web-ui`) mints `web-ui.<run>`
+    /// channels — those must pass `in_family`, and the raw name still
+    /// addresses the primary. This is the one predicate server scoping and
+    /// the ambient dot-split share.
+    #[test]
+    fn channel_role_compares_against_the_sanitized_wave_name() {
+        // The raw name and its sanitized form both address the primary.
+        assert_eq!(channel_role("web/ui", "web/ui"), Some(ChannelRole::Primary));
+        assert_eq!(channel_role("web/ui", "web-ui"), Some(ChannelRole::Primary));
+        // A child channel carries the sanitized head (worktree basenames do).
+        assert_eq!(
+            channel_role("web/ui", "web-ui.148e0e02"),
+            Some(ChannelRole::Child)
+        );
+        // The un-sanitized dotted form is NOT the family (no such channel).
+        assert_eq!(channel_role("web/ui", "web/ui.148e"), None);
+        // A plain name is its own sanitized form.
+        assert_eq!(channel_role("goals", "goals"), Some(ChannelRole::Primary));
+        assert_eq!(
+            channel_role("goals", "goals.148e0e02"),
+            Some(ChannelRole::Child)
+        );
+        assert_eq!(channel_role("goals", "goalsmith"), None);
+        assert_eq!(channel_role("goals", "concerto"), None);
+    }
+
+    /// A sanitized-name wave routes a child delivery by the sanitized channel
+    /// and folds it upward with the channel byline — end to end through
+    /// `deliver_to_channel`, the door's path.
+    #[test]
+    fn sanitized_wave_delivers_and_folds_child_channels() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let origin = tmp.path().join("repo");
+        std::fs::create_dir_all(crate::wave::channel::child_worktree_path(
+            &origin,
+            "web-ui.148e",
+        ))
+        .unwrap();
+        let rt = WaveRuntime::open("web/ui".into(), origin).expect("open runtime");
+        assert_eq!(rt.channel_name(), "web-ui");
+        assert!(rt.in_family("web-ui.148e"));
+        rt.deliver_to_channel(
+            "web-ui.148e",
+            MessageOp::Say,
+            "child report".into(),
+            Some(Attribution {
+                session_id: None,
+                label: "worker".into(),
+            }),
+        )
+        .expect("deliver")
+        .expect("appends");
+        // Forwarded to the primary, bylined with the channel.
+        assert_eq!(rt.thread_snapshot()[0].from.as_deref(), Some("web-ui.148e"));
+    }
+
+    #[test]
+    fn child_say_forwards_to_the_primary_inbox_as_attributed_speech() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let origin = tmp.path().join("repo");
+        std::fs::create_dir_all(crate::wave::channel::child_worktree_path(
+            &origin, "ship.148e",
+        ))
+        .unwrap();
+        let rt = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
+        let mut inbox = rt.subscribe_inbox();
+
+        rt.deliver_to_channel(
+            "ship.148e",
+            MessageOp::Say,
+            "landed PR #42".into(),
+            Some(Attribution {
+                session_id: Some("sess-9".into()),
+                label: "worker".into(),
+            }),
+        )
+        .expect("deliver")
+        .expect("say appends");
+
+        // The child journal kept its own row.
+        let child = rt.child_channel("ship.148e").unwrap().expect("child live");
+        assert_eq!(child.thread_snapshot().len(), 1);
+        assert_eq!(child.thread_snapshot()[0].text, "landed PR #42");
+
+        // The primary inbox received the forwarded speech, bylined with the
+        // CHANNEL (which work line spoke), session id carried through.
+        let InboxItem::Message(msg) = inbox.try_recv().expect("forwarded inbox item") else {
+            panic!("expected a message");
+        };
+        assert_eq!(msg.op, MessageOp::Say);
+        assert_eq!(msg.text, "landed PR #42");
+        assert_eq!(msg.from.as_ref().map(|f| f.label.as_str()), Some("ship.148e"));
+        assert_eq!(
+            msg.from.as_ref().and_then(|f| f.session_id.as_deref()),
+            Some("sess-9")
+        );
+
+        // It is on the PRIMARY thread and pending queue — a boundary turn
+        // answering it drains the queue.
+        assert_eq!(rt.thread_snapshot().len(), 1);
+        assert_eq!(rt.pending_messages().len(), 1);
+        let claimed = msg_id(&rt.thread_snapshot()[0]);
+        rt.apply_resident_delta(d_opened(&[&claimed]));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
+        assert!(
+            rt.pending_messages().is_empty(),
+            "the boundary turn answered the forwarded report"
+        );
+    }
+
+    /// A non-say op on a child channel (a plain message) journals in the
+    /// child only — no fold-upward: forwarding is the report doctrine, not
+    /// every child utterance.
+    #[test]
+    fn child_non_say_does_not_forward() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let origin = tmp.path().join("repo");
+        std::fs::create_dir_all(crate::wave::channel::child_worktree_path(&origin, "ship.a"))
+            .unwrap();
+        let rt = WaveRuntime::open("ship".into(), origin).expect("open runtime");
+        rt.deliver_to_channel("ship.a", MessageOp::Message, "note to self".into(), None)
+            .expect("deliver")
+            .expect("appends");
+        assert!(
+            rt.thread_snapshot().is_empty(),
+            "a plain child message never reaches the primary thread"
+        );
+        assert!(rt.pending_messages().is_empty());
+    }
+
+    /// `RunCompleted` commits a thread-visible turn on the primary channel —
+    /// the died-silently backstop: a worker that never reported still ends
+    /// visibly, the failure summary on the wire.
+    #[test]
+    fn run_completed_commits_a_thread_visible_turn() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        rt.journal_run_observed("run-abcdef12", "sess-1", "implement", "wire it");
+        let mut frames = rt.subscribe_turns();
+
+        assert!(rt.journal_run_completed(
+            "run-abcdef12",
+            WorkerOutcome::Failed,
+            "session failed; error: boom"
+        ));
+        let turn = &rt.thread_snapshot()[0];
+        assert!(turn.text.contains("run run-abcd"), "short id: {}", turn.text);
+        assert!(turn.text.contains("failed"));
+        assert!(turn.text.contains("boom"), "failure summary on the turn");
+        assert_eq!(turn.from.as_deref(), Some("observer"));
+
+        // It rode the live turn broadcast.
+        let frame = frames.try_recv().expect("run-completed frame");
+        assert_eq!(frame.turn.id, turn.id);
+
+        // Never queued for the mind (only UserMessage rows feed pending).
+        assert!(rt.pending_messages().is_empty());
+
+        // A restart folds the same turn back out of the journal, once.
+        let rt2 = open_runtime(tmp.path());
+        let completed: Vec<_> = rt2
+            .thread_snapshot()
+            .into_iter()
+            .filter(|t| t.from.as_deref() == Some("observer"))
+            .collect();
+        assert_eq!(completed.len(), 1);
+    }
+
+    /// Claimed-but-unanswered messages are requeued when a turn ends without
+    /// completing: a Failed TurnFinished returns its claims to pending, and a
+    /// restart re-delivers them (never lost). A Completed turn keeps them
+    /// consumed.
+    #[test]
+    fn failed_turn_requeues_its_claimed_messages() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let m1 = rt.deliver_user_message("do the thing".into(), MessageOp::Message);
+
+        rt.apply_resident_delta(d_opened(&[&msg_id(&m1)]));
+        assert!(rt.pending_messages().is_empty(), "claimed at open");
+        // The turn fails: the vendor never answered it, back to pending.
+        rt.apply_resident_delta(d_finished(Lifecycle::Failed));
+        let pending = rt.pending_messages();
+        assert_eq!(pending.len(), 1, "failed turn requeues its claim");
+        assert_eq!(pending[0].text, "do the thing");
+
+        // The fold agrees on restart — the requeue is journaled.
+        let rt2 = open_runtime(tmp.path());
+        assert_eq!(rt2.pending_messages().len(), 1);
+
+        // A completed turn keeps its claim consumed (own journal — the shared
+        // path above still holds m1's requeue, which never re-answered).
+        let tmp3 = tempfile::tempdir().expect("tempdir");
+        let rt3 = open_runtime(tmp3.path());
+        let m2 = rt3.deliver_user_message("second".into(), MessageOp::Message);
+        rt3.apply_resident_delta(d_opened(&[&msg_id(&m2)]));
+        rt3.apply_resident_delta(d_finished(Lifecycle::Completed));
+        assert!(
+            rt3.pending_messages().is_empty(),
+            "a completed turn consumes its claim for good"
+        );
+    }
+
+    /// The boot janitor requeues what a CRASHED turn had claimed: a turn
+    /// started (claiming a message) but never finished loses its claim to the
+    /// crash — the next boot returns it to pending so a fresh resident
+    /// re-delivers.
+    #[test]
+    fn boot_janitor_requeues_a_crashed_turns_claims() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let claimed = {
+            let rt = open_runtime(tmp.path());
+            let m = rt.deliver_user_message("answer me".into(), MessageOp::Message);
+            // Turn opens and claims it, then the server crashes (no finish).
+            rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
+            assert!(rt.pending_messages().is_empty());
+            msg_id(&m)
+        };
+        // Second life: the janitor closes the crashed turn AND requeues.
+        let rt = open_runtime(tmp.path());
+        let pending = rt.pending_messages();
+        assert_eq!(pending.len(), 1, "crashed turn's claim is requeued");
+        assert_eq!(pending[0].id, MessageId(claimed));
+        // Idempotent: a third boot doesn't requeue twice.
+        let rt2 = open_runtime(tmp.path());
+        assert_eq!(rt2.pending_messages().len(), 1);
+    }
+
+    /// The resident's explicit consumption undo (`MessagesRequeued`): a claim
+    /// the vendor never received is returned to pending, and the turn's own
+    /// terminal delta does not requeue it a second time.
+    #[test]
+    fn resident_requeue_undoes_a_claim_at_most_once() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let m = rt.deliver_user_message("steer".into(), MessageOp::Steer);
+        rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
+        // The harness send failed after the claim: the resident undoes it.
+        rt.apply_resident_delta(ResidentDelta::MessagesRequeued {
+            ids: vec![msg_id(&m)],
+        });
+        assert_eq!(rt.pending_messages().len(), 1, "undone claim back to pending");
+        // The turn then finishes failed: the already-undone claim is not
+        // requeued a second time (still exactly one pending).
+        rt.apply_resident_delta(d_finished(Lifecycle::Failed));
+        assert_eq!(rt.pending_messages().len(), 1, "no double requeue");
+    }
+
+    /// A paused wave (GOAL.md `paused: true`) refuses to START a turn: the
+    /// TurnOpened is dropped, its would-be claims stay pending, and the mind
+    /// settles without a thread turn. Unpausing lets the next turn through.
+    #[test]
+    fn paused_wave_refuses_to_start_turns() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let origin = tmp.path();
+        std::fs::create_dir_all(origin.join("wave/ship")).unwrap();
+        std::fs::write(
+            origin.join("wave/ship/GOAL.md"),
+            "---\npaused: true\n---\nShip it.\n",
+        )
+        .unwrap();
+        let rt = open_runtime(origin);
+        assert!(rt.paused(), "GOAL.md says paused");
+        let m = rt.deliver_user_message("go".into(), MessageOp::Message);
+
+        rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
+        rt.apply_resident_delta(d_text("working"));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
+        // No assistant turn committed; the message is still queued.
+        assert!(
+            rt.thread_snapshot().iter().all(|t| t.role == ChatRole::User),
+            "paused: no assistant turn started"
+        );
+        assert_eq!(rt.pending_messages().len(), 1, "the message waits");
+
+        // Unpause: the next turn goes through.
+        std::fs::write(
+            origin.join("wave/ship/GOAL.md"),
+            "---\npaused: false\n---\nShip it.\n",
+        )
+        .unwrap();
+        assert!(!rt.paused());
+        rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
+        assert!(rt.pending_messages().is_empty(), "unpaused turn answered it");
     }
 
     #[test]
@@ -1650,9 +2192,12 @@ mod tests {
             .expect("deliver b")
             .expect("appended");
 
-        // Each thread holds exactly its own turns.
-        assert_eq!(rt.thread_snapshot().len(), 1);
-        assert_eq!(rt.thread_snapshot()[0].text, "to the wave");
+        // The parent holds its own turn plus the child `say` folded up (the
+        // report doctrine); the child `message` to ship.b does NOT forward.
+        let wave = rt.thread_snapshot();
+        assert_eq!(wave.len(), 2);
+        assert_eq!(wave[0].text, "to the wave");
+        assert_eq!(wave[1].text, "to a", "the say folded up; the message did not");
         let a = rt.child_channel("ship.a").unwrap().expect("a live");
         let b = rt.child_channel("ship.b").unwrap().expect("b live");
         assert_eq!(a.thread_snapshot().len(), 1);
@@ -1678,15 +2223,21 @@ mod tests {
                 .iter()
                 .filter(|e| matches!(e.kind, EventKind::UserMessage { .. }))
                 .count();
-            assert_eq!(messages, 1, "one message in {channel}'s journal");
+            // The parent carries its own message plus the child say's forward;
+            // each child carries exactly its own.
+            let expected = if channel == "ship" { 2 } else { 1 };
+            assert_eq!(messages, expected, "message count in {channel}'s journal");
         }
 
-        // Consumption is local: the parent's pending queue never sees the
-        // children's messages, and consuming the parent's leaves theirs be.
+        // Consumption: the parent's queue holds its own message AND the
+        // forwarded report (so the mind answers it) — but NOT the plain
+        // `message` to ship.b, which never folds up.
         let rt2 = WaveRuntime::open("ship".into(), origin.clone()).expect("reopen");
         let pending = rt2.pending_messages();
-        assert_eq!(pending.len(), 1, "only the wave channel's message queues");
-        assert_eq!(pending[0].text, "to the wave");
+        assert_eq!(pending.len(), 2, "the wave message and the forwarded report");
+        let texts: Vec<_> = pending.iter().map(|m| m.text.as_str()).collect();
+        assert!(texts.contains(&"to the wave") && texts.contains(&"to a"));
+        assert!(!texts.contains(&"to b"), "the child message never folded up");
 
         // Family membership is enforced; a foreign name is refused.
         assert!(rt2

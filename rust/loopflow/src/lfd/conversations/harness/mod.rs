@@ -45,9 +45,6 @@ pub struct Capabilities {
     /// When false, mid-turn input fails with `TurnAlreadyInProgress` and the
     /// caller must queue.
     pub supports_steer: bool,
-    /// `interrupt` cancels the in-flight turn while the session (and its
-    /// vendor id) stays usable for the next turn.
-    pub supports_interrupt: bool,
 }
 
 /// How a harness answers vendor approval/permission requests.
@@ -182,7 +179,6 @@ mod tests {
                 .expect("known harness");
             let caps = harness.capabilities();
             assert_eq!(caps.supports_steer, steer, "steer for {name}");
-            assert!(caps.supports_interrupt, "interrupt for {name}");
         }
     }
 }

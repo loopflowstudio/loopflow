@@ -29,10 +29,10 @@ use crate::wave::journal::{
     fold_thread, journal_path, Attribution, EventKind, Journal, MessageId, MessageOp,
 };
 
-/// Whether `channel` is `wave` itself or a descendant (`wave.x`, `wave.x.y`).
-pub fn in_family(wave: &str, channel: &str) -> bool {
-    matches_prefix(channel, wave)
-}
+// Family MEMBERSHIP lives in one place: `runtime::channel_role` (it compares
+// against the sanitized wave name — the form channel names actually carry).
+// This module keeps only the name mechanics: prefix matching, head split,
+// path derivation.
 
 /// Whether `channel` matches a subtree `prefix`: the prefix itself or any
 /// dot-descendant of it.
@@ -75,6 +75,24 @@ pub fn child_journal_path(origin: &Path, channel: &str) -> PathBuf {
 pub struct ChannelFrame {
     pub channel: String,
     pub turn: std::sync::Arc<ChatTurn>,
+    /// The tagged wire JSON (turn + `"channel"` key), serialized once at the
+    /// send site so N subscribers share one serialization.
+    pub json: std::sync::Arc<str>,
+}
+
+/// A child channel's turn as `/events` wire JSON: the `Turn` object plus one
+/// extra key, `"channel"`. Additive — the primary channel's frames stay
+/// untagged, so a family of one is byte-identical to the pre-family wire.
+/// Shared by the live send site (once per frame) and the replay path.
+pub fn tagged_turn_json(channel: &str, turn: &ChatTurn) -> String {
+    let mut value = serde_json::to_value(turn).unwrap_or(serde_json::Value::Null);
+    if let serde_json::Value::Object(map) = &mut value {
+        map.insert(
+            "channel".to_string(),
+            serde_json::Value::String(channel.to_string()),
+        );
+    }
+    value.to_string()
 }
 
 /// A materialized child channel: the pen over its journal plus the thread
@@ -174,6 +192,7 @@ impl ChildChannel {
         // A send error just means no live subscribers.
         let _ = family_tx.send(ChannelFrame {
             channel: self.name.clone(),
+            json: tagged_turn_json(&self.name, &turn).into(),
             turn: std::sync::Arc::new(turn.clone()),
         });
         Ok(Some(turn))
@@ -215,15 +234,14 @@ mod tests {
 
     #[test]
     fn family_naming_rules() {
-        assert!(in_family("goals", "goals"));
-        assert!(in_family("goals", "goals.148e0e02"));
-        assert!(in_family("goals", "goals.a.b"));
-        assert!(!in_family("goals", "goalsmith"));
-        assert!(!in_family("goals", "concerto"));
         assert_eq!(family_head("goals.148e0e02"), "goals");
         assert_eq!(family_head("goals"), "goals");
+        assert!(matches_prefix("goals", "goals"));
+        assert!(matches_prefix("goals.148e0e02", "goals"));
         assert!(matches_prefix("goals.a.b", "goals.a"));
         assert!(!matches_prefix("goals.ab", "goals.a"));
+        assert!(!matches_prefix("goalsmith", "goals"));
+        assert!(!matches_prefix("concerto", "goals"));
     }
 
     #[test]

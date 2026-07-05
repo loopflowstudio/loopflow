@@ -14,9 +14,13 @@
 //! re-derive.
 //!
 //! Cost, honestly: none of these tables carry an `updated_at` column, so
-//! every poll is a full scan of all four — acceptable for a small
-//! machine-local db at a 5s cadence, and the first thing to revisit if the
-//! row counts ever stop being small.
+//! every poll fully scans waves, sessions, and attention — acceptable for a
+//! small machine-local db at a 5s cadence. Runs are the one table that grows
+//! without bound (terminal history), so that scan is filtered: non-terminal
+//! runs plus runs ended since the last poll (with one cadence of overlap —
+//! a duplicate event converges, a missed one doesn't). Waves/sessions/
+//! attention full scans are the next thing to revisit if their row counts
+//! ever stop being small.
 //!
 //! Duplicates, honestly: the daemon still emits in-process events for its own
 //! actions (until cut 4 removes the organs), so a daemon-side write is
@@ -42,16 +46,33 @@ pub const POLL_CADENCE: Duration = Duration::from_secs(5);
 /// fingerprint of the whole row (any field change flips it) plus whatever
 /// the diff needs to name the event (wave name for creates, owning wave for
 /// runs, resolution state for attention).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Snapshot {
+    /// When this snapshot's read started — the next poll's runs-scan floor.
+    taken_at: time::OffsetDateTime,
     /// wave id → (fingerprint, name)
     waves: HashMap<String, (u64, String)>,
-    /// run id → (fingerprint, wave id)
-    runs: HashMap<String, (u64, String)>,
+    /// run id → (fingerprint, wave id, terminal?). Holds only the filtered
+    /// working set; a TERMINAL run aging out of the scan window is not news,
+    /// a NON-terminal run vanishing is (deleted, or ended long ago with no
+    /// `ended_at` to catch it).
+    runs: HashMap<String, (u64, String, bool)>,
     /// session id → fingerprint
     sessions: HashMap<String, u64>,
     /// attention id → (fingerprint, resolved?)
     attention: HashMap<String, (u64, bool)>,
+}
+
+impl Snapshot {
+    fn empty(taken_at: time::OffsetDateTime) -> Self {
+        Self {
+            taken_at,
+            waves: HashMap::new(),
+            runs: HashMap::new(),
+            sessions: HashMap::new(),
+            attention: HashMap::new(),
+        }
+    }
 }
 
 /// Polls the store and emits events for rows that changed since the last
@@ -85,6 +106,15 @@ impl StoreBridge {
     /// without advancing the snapshot — a transient store error must never
     /// masquerade as a wave of deletions.
     pub async fn poll_once(&self) {
+        let taken_at = time::OffsetDateTime::now_utc();
+        // Runs-scan floor: everything non-terminal, plus runs ended since the
+        // previous poll started (one extra cadence of overlap for reads that
+        // raced the write — duplicates converge, misses don't). The seed poll
+        // has no floor to honor; any value works, it only builds a baseline.
+        let ended_since = {
+            let guard = self.snapshot.lock().expect("bridge snapshot poisoned");
+            guard.as_ref().map_or(taken_at, |prev| prev.taken_at) - POLL_CADENCE
+        };
         let (waves, runs, sessions, attention) = match tokio::try_join!(
             async {
                 self.store
@@ -94,7 +124,7 @@ impl StoreBridge {
             },
             async {
                 self.store
-                    .list_runs(None, None)
+                    .list_runs_active_or_ended_since(ended_since)
                     .await
                     .map_err(|err| err.to_string())
             },
@@ -118,7 +148,7 @@ impl StoreBridge {
             }
         };
 
-        let mut next = Snapshot::default();
+        let mut next = Snapshot::empty(taken_at);
         for wave in &waves {
             next.waves.insert(
                 wave.id().to_string(),
@@ -128,7 +158,7 @@ impl StoreBridge {
         for run in &runs {
             next.runs.insert(
                 run.id.to_string(),
-                (fingerprint(run), run.wave_id.to_string()),
+                (fingerprint(run), run.wave_id.to_string(), is_terminal(run)),
             );
         }
         for session in &sessions {
@@ -174,21 +204,24 @@ impl StoreBridge {
         // Runs: any change (new row, status flip, PR attached, removal) is
         // announced as wave_updated for the owning wave — the /ws enrichment
         // attaches the full WaveDto, which is where run state lives for
-        // consumers. Coalesced per wave per poll.
+        // consumers. Coalesced per wave per poll. A run leaving the filtered
+        // set is news only if it was last seen NON-terminal (deleted, or
+        // finished untracked); a terminal run aging out of the ended_since
+        // window is expected and silent.
         let mut touched_waves: HashSet<String> = HashSet::new();
-        for (run_id, (fp, wave_id)) in &next.runs {
+        for (run_id, (fp, wave_id, _)) in &next.runs {
             match prev.runs.get(run_id) {
                 None => {
                     touched_waves.insert(wave_id.clone());
                 }
-                Some((prev_fp, _)) if prev_fp != fp => {
+                Some((prev_fp, _, _)) if prev_fp != fp => {
                     touched_waves.insert(wave_id.clone());
                 }
                 Some(_) => {}
             }
         }
-        for (run_id, (_, wave_id)) in prev.runs.iter() {
-            if !next.runs.contains_key(run_id) {
+        for (run_id, (_, wave_id, was_terminal)) in prev.runs.iter() {
+            if !was_terminal && !next.runs.contains_key(run_id) {
                 touched_waves.insert(wave_id.clone());
             }
         }
@@ -239,6 +272,13 @@ impl StoreBridge {
 
 fn is_resolved(item: &AttentionItem) -> bool {
     item.status == AttentionStatus::Resolved
+}
+
+fn is_terminal(run: &crate::lfd::types::Run) -> bool {
+    matches!(
+        run.status,
+        crate::lfd::types::RunStatus::Completed | crate::lfd::types::RunStatus::Failed
+    )
 }
 
 /// A whole-row fingerprint via the row's `Debug` form — every persisted type
@@ -457,6 +497,47 @@ mod tests {
         bridge.poll_once().await;
 
         assert!(event_types(&mut rx).is_empty(), "no storm on quiet state");
+    }
+
+    /// The filtered runs scan: a completion is announced once (the ended_since
+    /// window catches it), then the terminal run ages out of the working set
+    /// SILENTLY — no phantom wave_updated when it leaves the window.
+    #[tokio::test]
+    async fn completed_run_is_announced_once_then_ages_out_silently() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db = tmp.path().join("lfd.db");
+        let daemon_store = store_at(&db).await;
+        let other_process = store_at(&db).await;
+
+        let wave = make_wave("ship");
+        let mut run = make_run(&wave);
+        other_process.create_wave(&wave).await.expect("wave");
+        other_process.create_run(&run).await.expect("run");
+
+        let hub = EventHub::new(64);
+        let mut rx = hub.subscribe();
+        let bridge = StoreBridge::new(daemon_store, hub);
+        bridge.poll_once().await; // seed
+
+        run.status = RunStatus::Completed;
+        run.ended_at = Some(OffsetDateTime::now_utc());
+        other_process.update_run(&run).await.expect("complete run");
+
+        bridge.poll_once().await;
+        let types = event_types(&mut rx);
+        assert_eq!(
+            types,
+            vec!["wave_updated".to_string()],
+            "completion announced once"
+        );
+
+        // The terminal run leaves the scan window across later polls: quiet.
+        bridge.poll_once().await;
+        bridge.poll_once().await;
+        assert!(
+            event_types(&mut rx).is_empty(),
+            "terminal run ages out without phantom events"
+        );
     }
 
     /// Run mutations surface as wave_updated (coalesced per wave); attention

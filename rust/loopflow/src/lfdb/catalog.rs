@@ -46,6 +46,7 @@ pub(crate) enum Query {
     RecordRunTokenUsage,
     AggregateTokenUsageByWaveProvider,
     AggregateTokenUsageByRepoProvider,
+    ListRunsActiveOrEndedSince,
 }
 
 impl Query {
@@ -87,10 +88,11 @@ impl Query {
         Self::RecordRunTokenUsage,
         Self::AggregateTokenUsageByWaveProvider,
         Self::AggregateTokenUsageByRepoProvider,
+        Self::ListRunsActiveOrEndedSince,
     ];
 }
 
-const QUERY_COUNT: usize = Query::AggregateTokenUsageByRepoProvider as usize + 1;
+const QUERY_COUNT: usize = Query::ListRunsActiveOrEndedSince as usize + 1;
 
 #[derive(Debug, Clone, Copy)]
 struct QueryDef {
@@ -303,6 +305,16 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     // group together. CAST mirrors the wave/provider aggregate above.
     QueryDef {
         template: "SELECT repo, provider,\n                    CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT),\n                    CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT),\n                    CAST(COALESCE(SUM(cache_read_tokens), 0) AS BIGINT)\n             FROM run_token_usage\n             GROUP BY repo, provider\n             ORDER BY repo, provider",
+        sqlite_override: None,
+        postgres_override: None,
+    },
+    // ListRunsActiveOrEndedSince — the push bridge's working set: every
+    // non-terminal run ({p1}/{p2} = the terminal statuses) plus runs that
+    // ended at or after {p3}, so a completion is seen once without scanning
+    // the whole terminal history forever. NULL ended_at on a terminal row
+    // compares false and drops out, as intended.
+    QueryDef {
+        template: "SELECT id, wave_id, iteration, step_index, status, worktree, branch,\n                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_task,\n                    snapshot_direction, snapshot_area, snapshot_pr, flow_parents, execution_cursor,\n                    parent_run_id, parent_pr_number, stack_position,\n                    stack_group_id, stack_status, lineage_inferred, target_branch, repair_of\n             FROM runs\n             WHERE status NOT IN ({p1}, {p2}) OR ended_at >= {p3}\n             ORDER BY started_at DESC",
         sqlite_override: None,
         postgres_override: None,
     },

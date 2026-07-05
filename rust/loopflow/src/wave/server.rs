@@ -120,10 +120,12 @@ use time::OffsetDateTime;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::lfd::conversations::turns::ChatTurn;
+use crate::wave::channel::tagged_turn_json;
 use crate::wave::journal::{Attribution, MessageOp, PendingMessage};
-use crate::wave::registry::StoreObserver;
+use crate::wave::registry::{process_alive, StoreObserver};
 use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::state::MindState;
+use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
     AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, PostDeltasRequest,
     PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
@@ -199,14 +201,17 @@ struct HealthBody {
     /// resident's condition is `mind` — a served channel whose resident died
     /// is `status: "serving", mind: "failed"`.
     status: String,
-    /// Resident (mind) state name, or null for a channel with no resident —
-    /// design-ready for dormant channels; this server always has a mind.
+    /// Resident (mind) state name, or null for a channel with no resident
+    /// (a dormant `--no-mind` channel, or before any resident attaches).
     mind: Option<String>,
     wave: String,
     turns: usize,
     /// Workers observed in flight for this wave (dispatch is daemonless —
     /// `lf q worker run` — so the store fold, not a task registry, is truth).
     workers: usize,
+    /// Whether the wave is paused (GOAL.md `paused: true`): the listener
+    /// refuses to start turns while set, though it keeps serving and queueing.
+    paused: bool,
     uptime_seconds: i64,
 }
 
@@ -301,27 +306,32 @@ struct PostMessageResponse {
 }
 
 /// Server state: the runtime, the resident door, the store observer (for the
-/// context door's freshness poll), and when the server started (for uptime).
+/// context door's freshness poll), the supervisor handle (to signal an
+/// attach), and when the server started (for uptime).
 #[derive(Clone)]
 struct ServerState {
     runtime: Arc<WaveRuntime>,
     resident: ResidentDoor,
     observer: Option<Arc<StoreObserver>>,
+    supervisor: Option<SupervisorHandle>,
     started_at: OffsetDateTime,
 }
 
 /// Build the router over a running [`WaveRuntime`]. `observer` is the store
 /// poller when this server is registered — `GET /resident/context` freshens
-/// it before serving.
+/// it before serving. `supervisor` lets the attach door stand the respawn
+/// ladder down (`None` in tests without a supervisor).
 pub fn router(
     runtime: Arc<WaveRuntime>,
     resident: ResidentDoor,
     observer: Option<Arc<StoreObserver>>,
+    supervisor: Option<SupervisorHandle>,
 ) -> Router {
     let state = ServerState {
         runtime,
         resident,
         observer,
+        supervisor,
         started_at: OffsetDateTime::now_utc(),
     };
     Router::new()
@@ -348,8 +358,9 @@ async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
         status: "serving".to_string(),
         mind,
         wave: state.runtime.name().to_string(),
-        turns: state.runtime.thread_snapshot().len(),
+        turns: state.runtime.thread_len(),
         workers: state.runtime.in_flight_workers().len(),
+        paused: state.runtime.paused(),
         uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
     })
 }
@@ -362,8 +373,30 @@ async fn resident_attach_handler(
     Json(body): Json<AttachRequest>,
 ) -> Result<Json<AttachResponse>, (StatusCode, String)> {
     state.resident.authorize(&headers)?;
+    // Seat exclusivity: one mind per wave. A live seat already probed alive
+    // refuses the attach naming it — a second resident would split-brain the
+    // wire. A dead/absent seat is free (takeover after a crash rides the same
+    // door; the supervisor's own seat probe frees a dead pid on its cadence).
+    // `--force` is `lf wave`'s boot flag, not the door's business.
+    if let Some(seated) = state.resident.seat_pid() {
+        if seated != body.pid && process_alive(seated).await {
+            return Err((
+                StatusCode::CONFLICT,
+                format!(
+                    "wave '{}' already has a live resident on the seat (pid {seated}); \
+                     stop it before attaching, or use `lf wave <name> --force` to take over",
+                    state.runtime.name()
+                ),
+            ));
+        }
+    }
     state.resident.record_pid(body.pid);
     state.runtime.set_resident_expected();
+    // Tell the keeper: an attached resident stands the respawn ladder down
+    // (the fresh resident IS the revival) and is watched by pid probe.
+    if let Some(supervisor) = &state.supervisor {
+        supervisor.on_attach(body.pid);
+    }
     // A fresh resident IS the revival: a failed mind goes idle on attach.
     if matches!(state.runtime.mind_state(), MindState::Failed { .. }) {
         state
@@ -420,12 +453,11 @@ async fn conversation_handler(
     State(state): State<ServerState>,
     Query(query): Query<ConversationQuery>,
 ) -> Json<ConversationBody> {
-    let mut turns = state.runtime.thread_snapshot();
-    if let Some(limit) = query.limit {
-        let skip = turns.len().saturating_sub(limit);
-        turns.drain(..skip);
-    }
-    Json(ConversationBody { turns })
+    // The tail is taken inside the runtime lock: a `?limit=N` request clones
+    // only the N turns it serves, not the whole thread.
+    Json(ConversationBody {
+        turns: state.runtime.thread_tail(query.limit),
+    })
 }
 
 /// The door is opaque on resident ops: this handler validates SHAPE only —
@@ -487,7 +519,7 @@ async fn channels_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostChannel>,
 ) -> Result<Json<PostChannelResponse>, (StatusCode, String)> {
-    if body.name == state.runtime.name() || !state.runtime.in_family(&body.name) {
+    if state.runtime.is_primary(&body.name) || !state.runtime.in_family(&body.name) {
         return Err((
             StatusCode::NOT_FOUND,
             format!(
@@ -580,14 +612,17 @@ async fn events_handler(
             ));
         }
         (Some(channel), None) => {
-            let primary = channel == wave;
+            let primary = state.runtime.is_primary(&channel);
             (Scope::Channel(channel), primary)
         }
         (None, Some(prefix)) => {
-            let primary = prefix == wave;
+            let primary = state.runtime.is_primary(&prefix);
             (Scope::Prefix(prefix), primary)
         }
-        (None, None) => (Scope::Prefix(wave.clone()), true),
+        (None, None) => (
+            Scope::Prefix(state.runtime.channel_name().to_string()),
+            true,
+        ),
     };
     let name = scope.name();
     if !state.runtime.in_family(name) {
@@ -597,11 +632,18 @@ async fn events_handler(
         ));
     }
 
-    // Child channels: live bus first, snapshots second (see method doc).
+    // Child channels: live bus first, snapshots second (see method doc). A
+    // `?channel=` scope replays STRICTLY the one named channel (no
+    // descendants), matching how it streams (strict equality); a `?prefix=`
+    // scope replays the whole subtree. The primary scope carries no child
+    // snapshots — its own thread rides the primary subscription below.
     let (child_snapshots, family_rx) = match &scope {
-        Scope::Channel(channel) if channel == &wave => (Vec::new(), None),
+        Scope::Channel(channel) if state.runtime.is_primary(channel) => (Vec::new(), None),
         Scope::Channel(channel) => {
-            let (snapshots, rx) = state.runtime.subscribe_children(channel);
+            let (snapshot, rx) = state.runtime.subscribe_child(channel);
+            let snapshots = snapshot
+                .map(|turns| vec![(channel.clone(), turns)])
+                .unwrap_or_default();
             (snapshots, Some(rx))
         }
         Scope::Prefix(prefix) => {
@@ -619,8 +661,10 @@ async fn events_handler(
         let scope = scope.clone();
         BroadcastStream::new(rx).filter_map(move |res| {
             let out = match res {
+                // The frame carries its tagged JSON, serialized once at the
+                // send site — every subscriber reuses it.
                 Ok(frame) if scope.matches(&frame.channel) => {
-                    Some(Ok(tagged_turn_event(&frame.channel, &frame.turn)))
+                    Some(Ok(Event::default().event("turn").data(frame.json.as_ref())))
                 }
                 // Out of scope, or lagged (the journal has it; a client
                 // that fell behind resyncs on reconnect).
@@ -651,7 +695,8 @@ async fn events_handler(
         );
         let live_turns = BroadcastStream::new(sub.turn_rx).filter_map(move |res| {
             let out = match res {
-                Ok(turn) => Some(Ok(turn_event(&turn))),
+                // The frame's wire JSON was serialized once at the send site.
+                Ok(frame) => Some(Ok(Event::default().event("turn").data(frame.json.as_str()))),
                 // Lagged: the client fell behind. Skip; it resyncs from /conversation.
                 Err(_) => None,
             };
@@ -741,18 +786,14 @@ fn turn_event(turn: &ChatTurn) -> Event {
         .data(serde_json::to_string(turn).unwrap_or_default())
 }
 
-/// A child channel's turn frame: the `Turn` JSON plus one extra key,
-/// `"channel"`. Additive — the primary channel's frames stay untagged, so a
+/// A child channel's turn frame for the REPLAY path: the `Turn` JSON plus one
+/// extra key, `"channel"` (the live path reuses the frame's pre-serialized
+/// `json`). Additive — the primary channel's frames stay untagged, so a
 /// family of one is byte-identical to the pre-family wire.
 fn tagged_turn_event(channel: &str, turn: &ChatTurn) -> Event {
-    let mut value = serde_json::to_value(turn).unwrap_or(serde_json::Value::Null);
-    if let serde_json::Value::Object(map) = &mut value {
-        map.insert(
-            "channel".to_string(),
-            serde_json::Value::String(channel.to_string()),
-        );
-    }
-    Event::default().event("turn").data(value.to_string())
+    Event::default()
+        .event("turn")
+        .data(tagged_turn_json(channel, turn))
 }
 
 fn state_event(state: &MindState) -> Event {

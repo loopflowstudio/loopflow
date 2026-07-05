@@ -26,7 +26,7 @@
 //! `ServerStarted` is appended once per boot, after replay — restarts are
 //! forensically visible in the record.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -202,6 +202,14 @@ pub enum EventKind {
         /// `TurnStarted.answers` can't be amended (append-only log), so
         /// mid-turn consumption gets its own row.
         answers: Vec<MessageId>,
+    },
+    /// The undo of a consumption claim: these messages were named in an
+    /// `answers` but the turn that claimed them never completed (janitor- or
+    /// force-finalized, failed, or the resident reported the vendor never
+    /// received them). The fold returns them to the pending queue, so a
+    /// resident replay re-delivers them instead of losing them forever.
+    MessagesRequeued {
+        ids: Vec<MessageId>,
     },
     TurnFinished {
         turn_id: String,
@@ -432,6 +440,10 @@ impl Narrator {
                 "turn {turn_id} steered{}",
                 answers_segment(answers)
             )),
+            EventKind::MessagesRequeued { ids } => {
+                let ids: Vec<&str> = ids.iter().map(|id| id.0.as_str()).collect();
+                info(format!("messages requeued: {}", ids.join(", ")))
+            }
             EventKind::TurnFinished {
                 turn_id,
                 status,
@@ -702,8 +714,16 @@ pub struct ThreadFold {
     /// mind's persistent vendor session.
     pub thread_id: Option<String>,
     /// User messages not named by any `TurnStarted.answers` or
-    /// `TurnSteered.answers`; this seeds the scheduler queue on restart.
+    /// `TurnSteered.answers` (minus what `MessagesRequeued` restored); this
+    /// seeds the scheduler queue on restart.
     pub pending_messages: Vec<PendingMessage>,
+    /// Every journaled user message by id — `MessagesRequeued` restores
+    /// pending entries from it (an id alone can't rebuild the text/op/from).
+    pub messages: HashMap<MessageId, PendingMessage>,
+    /// Message ids claimed (`answers`) by turns still open at the end of the
+    /// log — the crash tail's consumption. The boot janitor requeues these
+    /// when it finalizes the crashed turns as `Failed`.
+    pub open_claims: Vec<MessageId>,
     /// Run ids of `ChannelOpened` events — the idempotence guard for the
     /// dispatch-notification door (one dispatch, one opening).
     pub opened_channel_runs: HashSet<String>,
@@ -723,6 +743,53 @@ pub fn channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
     turn
 }
 
+/// The thread-visible turn a `RunCompleted` observation materializes: the
+/// worker's ending as a bylined statement, never queued for the mind (only
+/// `UserMessage` rows feed the pending queue). Covers the died-silently case
+/// — a worker that never reported still ends visibly, failure summary on the
+/// wire. Shared by the fold and the live append so replay and the live
+/// thread agree byte for byte.
+pub fn run_completed_turn(
+    event: &Event,
+    run_id: &str,
+    outcome: WorkerOutcome,
+    summary: &str,
+) -> ChatTurn {
+    let mut text = format!("run {} {}", short_id(run_id), outcome.name());
+    if !summary.trim().is_empty() {
+        text.push_str(&format!(" · {}", summary.trim()));
+    }
+    let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text);
+    turn.created_at = event.at_rfc3339();
+    turn.from = Some("observer".to_string());
+    turn
+}
+
+/// Re-queue `ids` into `pending`: each id known in `messages` and not already
+/// pending is appended, in `ids` order. Returns the ids actually restored —
+/// unknown or still-pending ids are skipped (idempotent by construction).
+/// Shared by the fold (`MessagesRequeued` events) and the live runtime, which
+/// journals exactly what this restored.
+pub fn restore_pending(
+    pending: &mut Vec<PendingMessage>,
+    messages: &HashMap<MessageId, PendingMessage>,
+    ids: &[MessageId],
+) -> Vec<MessageId> {
+    let mut restored = Vec::new();
+    for id in ids {
+        if pending.iter().any(|message| &message.id == id) {
+            continue;
+        }
+        let Some(message) = messages.get(id) else {
+            tracing::warn!(id = %id, "requeue of an unknown message id; dropped");
+            continue;
+        };
+        pending.push(message.clone());
+        restored.push(id.clone());
+    }
+    restored
+}
+
 /// Fold journal events into the thread — the pure function the in-memory
 /// `Vec<ChatTurn>` cache materializes.
 ///
@@ -736,7 +803,11 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut state = MindState::Idle;
     let mut thread_id: Option<String> = None;
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
+    let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
     let mut consumed_messages: HashSet<MessageId> = HashSet::new();
+    // Claims (`answers`) per still-open turn — the crash tail's consumption,
+    // exported so the boot janitor can requeue it.
+    let mut claims_by_open_turn: HashMap<String, Vec<MessageId>> = HashMap::new();
     let mut opened_channel_runs: HashSet<String> = HashSet::new();
 
     for event in events {
@@ -746,17 +817,20 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 turn.created_at = event.at_rfc3339();
                 turn.from = from.as_ref().map(|from| from.label.clone());
                 turns.push(turn);
+                let message = PendingMessage {
+                    id: id.clone(),
+                    op: *op,
+                    text: text.clone(),
+                    from: from.clone(),
+                };
                 if !consumed_messages.contains(id) {
-                    pending_messages.push(PendingMessage {
-                        id: id.clone(),
-                        op: *op,
-                        text: text.clone(),
-                        from: from.clone(),
-                    });
+                    pending_messages.push(message.clone());
                 }
+                messages.insert(id.clone(), message);
             }
             EventKind::TurnStarted { turn_id, answers } => {
                 mark_consumed(&mut pending_messages, &mut consumed_messages, answers);
+                claims_by_open_turn.insert(turn_id.clone(), answers.clone());
                 open.push(ChatTurn {
                     id: turn_id.clone(),
                     role: ChatRole::Assistant,
@@ -791,6 +865,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 };
                 let mut turn = open.remove(pos);
                 turn.status = *status;
+                claims_by_open_turn.remove(turn_id);
                 turns.push(turn);
             }
             EventKind::MindState { to, .. } => {
@@ -801,21 +876,44 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             } => {
                 thread_id = Some(started.clone());
             }
-            EventKind::TurnSteered { answers, .. } => {
+            // Steer consumption affects the queue fold, not the thread: the
+            // steered text is already a user turn via its `UserMessage` row.
+            EventKind::TurnSteered { turn_id, answers } => {
                 mark_consumed(&mut pending_messages, &mut consumed_messages, answers);
+                // Steered into a still-open turn: part of that turn's claims
+                // (requeued with them if the turn crashes). The fallback arm
+                // names an already-closed turn — the vendor heard the text,
+                // nothing to requeue.
+                if let Some(claims) = claims_by_open_turn.get_mut(turn_id) {
+                    claims.extend(answers.iter().cloned());
+                }
+            }
+            EventKind::MessagesRequeued { ids } => {
+                restore_pending(&mut pending_messages, &messages, ids);
             }
             EventKind::ChannelOpened { name, run_id } => {
                 opened_channel_runs.insert(run_id.clone());
                 turns.push(channel_opened_turn(event, name));
             }
-            // Steer consumption affects the queue fold, not the thread: the
-            // steered text is already a user turn via its `UserMessage` row.
+            EventKind::RunCompleted {
+                run_id,
+                outcome,
+                summary,
+            } => {
+                turns.push(run_completed_turn(event, run_id, *outcome, summary));
+            }
             EventKind::RunObserved { .. }
-            | EventKind::RunCompleted { .. }
             | EventKind::MemoryUpdated { .. }
             | EventKind::ServerStarted { .. } => {}
         }
     }
+
+    // The crash tail's claims, in the open turns' start order.
+    let open_claims = open
+        .iter()
+        .filter_map(|turn| claims_by_open_turn.remove(&turn.id))
+        .flatten()
+        .collect();
 
     ThreadFold {
         turns,
@@ -823,6 +921,8 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         state,
         thread_id,
         pending_messages,
+        messages,
+        open_claims,
         opened_channel_runs,
     }
 }

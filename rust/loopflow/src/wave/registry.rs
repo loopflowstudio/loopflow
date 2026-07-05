@@ -40,12 +40,12 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use tokio::process::Command;
 
-use crate::lfd::executor::helpers::tmux_session_exists;
+use crate::lfd::executor::helpers::{is_active_run_status, tmux_session_exists};
 use crate::lfd::http::routes::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    Run, Session, SessionStatus, SessionUse, Wave, LIVE_SESSION_STATUSES, WAVE_SERVER_ENDPOINT_ENV,
-    WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
+    Run, RunStatus, Session, SessionStatus, SessionUse, Wave, WaveStatus, LIVE_SESSION_STATUSES,
+    WAVE_SERVER_ENDPOINT_ENV, WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
 };
 use crate::lfdb::{SharedStore, StoreResult};
 use crate::wave::journal::WorkerOutcome;
@@ -151,11 +151,14 @@ pub async fn ensure_wave_row(
             wave.goal = goal;
         }
     }
-    // Born paused: this row exists so the SERVER can register as the wave's
-    // brain. The daemon loop that once read `paused` died in the collapse's
-    // organ cut; nothing in the server or lf q consults it — it only
-    // silences any legacy daemon still running an old build.
-    wave.paused = true;
+    // Not born paused: the row exists so the SERVER can register as the
+    // wave's brain, not to silence a daemon (the ticker that read this column
+    // died in the collapse). The safety valve now lives in GOAL.md
+    // frontmatter, read file-first by the listener — a registry row born
+    // `paused: true` was a lie that only confused Concerto.
+    wave.paused = read_wave_config(main_repo, name)
+        .and_then(|config| config.paused)
+        .unwrap_or(false);
     store.create_wave(&wave).await?;
     tracing::info!(
         wave = name,
@@ -451,6 +454,9 @@ impl StoreObserver {
     /// journal new dispatches and fresh finishes. Store errors are logged
     /// and skipped — the next poll retries.
     pub async fn poll_once(&self) {
+        // Sweep dead child channels on the poll cadence: a landed/deleted
+        // work line's channel pins its journal file handle until dropped.
+        self.runtime.sweep_dead_children();
         let poll_started = OffsetDateTime::now_utc();
         let cutoff = *self
             .terminal_cutoff
@@ -597,6 +603,70 @@ impl StoreObserver {
             {
                 tracing::info!(run_id, outcome = outcome.name(), summary, "worker finished");
             }
+            // Close the loop the trinity leaves open: a terminal worker
+            // SESSION whose Run row is still active keeps the run — and the
+            // wave — counted Running forever, starving capacity. Mark the run
+            // row terminal here (the observer is the daemonless authority),
+            // then reset the wave's repo status if no active runs remain.
+            self.close_run_and_maybe_idle_wave(&runs, &run_id, outcome)
+                .await;
+        }
+    }
+
+    /// Mark a finished worker's Run row terminal and, when the wave has no
+    /// active runs left, reset its repo status `Running → Idle`. Idempotent:
+    /// an already-terminal run row is skipped, and the wave reset is a no-op
+    /// once the status is settled. Store errors are logged and retried next
+    /// poll — never fatal.
+    async fn close_run_and_maybe_idle_wave(
+        &self,
+        runs: &HashMap<String, Run>,
+        run_id: &str,
+        outcome: WorkerOutcome,
+    ) {
+        let Some(run) = runs.get(run_id) else {
+            return;
+        };
+        if is_active_run_status(run.status) {
+            let mut run = run.clone();
+            run.status = match outcome {
+                WorkerOutcome::Completed => RunStatus::Completed,
+                WorkerOutcome::Failed => RunStatus::Failed,
+            };
+            run.ended_at = Some(OffsetDateTime::now_utc());
+            if let Err(err) = self.store.update_run(&run).await {
+                tracing::debug!(run_id, error = %err, "failed to close run row; retry next poll");
+                return;
+            }
+        }
+        // No active runs → the wave is idle again. Reset every repo still
+        // stamped Running (the status create_run_for_placement set on
+        // dispatch); leave Paused and already-Idle repos alone.
+        match self.store.count_active_runs(&self.wave_id).await {
+            Ok(0) => self.reset_wave_repos_to_idle().await,
+            Ok(_) => {}
+            Err(err) => {
+                tracing::debug!(error = %err, "active-run count failed; wave status unchanged");
+            }
+        }
+    }
+
+    async fn reset_wave_repos_to_idle(&self) {
+        let Ok(Some(mut wave)) = self.store.get_wave(&self.wave_id).await else {
+            return;
+        };
+        let mut changed = false;
+        for repo in &mut wave.repos {
+            if repo.status == WaveStatus::Running {
+                repo.status = WaveStatus::Idle;
+                changed = true;
+            }
+        }
+        if !changed {
+            return;
+        }
+        if let Err(err) = self.store.update_wave(&wave).await {
+            tracing::debug!(wave_id = %self.wave_id, error = %err, "failed to reset wave status to idle");
         }
     }
 }

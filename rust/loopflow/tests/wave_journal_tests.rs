@@ -242,7 +242,7 @@ async fn health_reports_channel_liveness_and_the_mind_state() {
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = server::router(rt.clone(), ResidentDoor::new("test-token"), None);
+    let app = server::router(rt.clone(), ResidentDoor::new("test-token"), None, None);
     tokio::spawn(async move {
         axum::serve(listener, app).await.ok();
     });

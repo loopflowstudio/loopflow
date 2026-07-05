@@ -25,6 +25,11 @@ final class PortfolioRepoState {
     /// `wave/<name>/GOAL.md` (+ an empty MEMORY.md) into the repo — the same
     /// shape the registry overlays when the wave is started (`lf wave <name>`,
     /// the Start button). No POST; the row is not the wave.
+    ///
+    /// Wave state lives at the ORIGIN repo: every reader (endpoint discovery,
+    /// launcher, session probe) resolves a worktree to its main checkout, so
+    /// the write must land there too — a GOAL.md written into a worktree is a
+    /// wave no reader ever finds.
     func createWave(name: String) async throws {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -33,7 +38,7 @@ final class PortfolioRepoState {
 
         let repoURL = repo.url
         try await Task.detached {
-            let waveDir = repoURL
+            let waveDir = URL(fileURLWithPath: WaveOrigin.resolve(repoURL.path), isDirectory: true)
                 .appendingPathComponent("wave", isDirectory: true)
                 .appendingPathComponent(trimmed, isDirectory: true)
             let goalURL = waveDir.appendingPathComponent("GOAL.md", isDirectory: false)

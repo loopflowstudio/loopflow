@@ -40,6 +40,10 @@
       "answers": ["msg-6"]
     },
     {
+      "kind": "messages_requeued",
+      "ids": ["msg-6"]
+    },
+    {
       "kind": "mind_state",
       "to": "interrupting",
       "reason": "user interrupt"

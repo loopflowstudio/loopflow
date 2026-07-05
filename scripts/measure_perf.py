@@ -18,8 +18,6 @@ import json
 import statistics
 import subprocess
 import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -40,9 +38,7 @@ LOCAL_SUITES: dict[str, list[str]] = {
 
 
 def _gh_json(args: list[str]) -> object:
-    out = subprocess.run(
-        ["gh", *args], capture_output=True, text=True, cwd=REPO_ROOT
-    )
+    out = subprocess.run(["gh", *args], capture_output=True, text=True, cwd=REPO_ROOT)
     if out.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)} failed: {out.stderr.strip()}")
     return json.loads(out.stdout)
@@ -51,7 +47,10 @@ def _gh_json(args: list[str]) -> object:
 def _seconds(started: Optional[str], completed: Optional[str]) -> float:
     if not started or not completed:
         return 0.0
-    fmt = lambda t: datetime.fromisoformat(t.replace("Z", "+00:00"))
+
+    def fmt(t: str) -> datetime:
+        return datetime.fromisoformat(t.replace("Z", "+00:00"))
+
     return (fmt(completed) - fmt(started)).total_seconds()
 
 
@@ -76,8 +75,16 @@ def ci_bottlenecks(workflow: str, limit: int) -> list[JobStat]:
     """Median duration per CI job across recent successful runs, slowest first."""
     runs = _gh_json(
         [
-            "run", "list", "--workflow", workflow, "--status", "success",
-            "--limit", str(limit), "--json", "databaseId",
+            "run",
+            "list",
+            "--workflow",
+            workflow,
+            "--status",
+            "success",
+            "--limit",
+            str(limit),
+            "--json",
+            "databaseId",
         ]
     )
     stats: dict[str, JobStat] = {}
@@ -95,8 +102,16 @@ def green_on_main(workflow: str, limit: int) -> tuple[float, int]:
     """Success rate and current green streak for CI on main."""
     runs = _gh_json(
         [
-            "run", "list", "--branch", "main", "--workflow", workflow,
-            "--limit", str(limit), "--json", "conclusion",
+            "run",
+            "list",
+            "--branch",
+            "main",
+            "--workflow",
+            workflow,
+            "--limit",
+            str(limit),
+            "--json",
+            "conclusion",
         ]
     )
     conclusions = [r["conclusion"] for r in runs if r["conclusion"]]
@@ -138,8 +153,9 @@ def main() -> None:
     critical = jobs[0] if jobs else None
 
     print("Systems north stars")
-    print(f"  green on main : {rate * 100:.0f}% over last {args.limit} runs, "
-          f"{streak} green in a row")
+    print(
+        f"  green on main : {rate * 100:.0f}% over last {args.limit} runs, {streak} green in a row"
+    )
     print("  billing       : (not wired — read deploy/budget.json + Actions minutes)")
     print("  prod uptime   : (not wired — needs a host health endpoint)")
     print()
@@ -169,8 +185,10 @@ def main() -> None:
         print(f"\nWrote snapshot to {args.json}")
 
     if critical:
-        print(f"\nGrind target: {critical.name} at {_fmt(critical.median)} "
-              f"is the slowest gate on a green PR.")
+        print(
+            f"\nGrind target: {critical.name} at {_fmt(critical.median)} "
+            f"is the slowest gate on a green PR."
+        )
 
 
 if __name__ == "__main__":

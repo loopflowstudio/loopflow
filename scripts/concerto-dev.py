@@ -935,30 +935,74 @@ def _create_dev_signing_identity() -> None:
             "keyUsage = critical,digitalSignature\n"
             "extendedKeyUsage = critical,codeSigning\n"
         )
-        run([
-            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-            "-keyout", str(key), "-out", str(cert),
-            "-days", "3650", "-config", str(config), "-extensions", "v3",
-        ])
+        run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-keyout",
+                str(key),
+                "-out",
+                str(cert),
+                "-days",
+                "3650",
+                "-config",
+                str(config),
+                "-extensions",
+                "v3",
+            ]
+        )
         # An empty p12 password trips a MAC-verification failure in macOS'
         # `security import`, so use a transient one.
-        run([
-            "openssl", "pkcs12", "-export", "-inkey", str(key), "-in", str(cert),
-            "-out", str(p12), "-name", DEV_SIGNING_IDENTITY,
-            "-passout", f"pass:{p12_password}",
-        ])
+        run(
+            [
+                "openssl",
+                "pkcs12",
+                "-export",
+                "-inkey",
+                str(key),
+                "-in",
+                str(cert),
+                "-out",
+                str(p12),
+                "-name",
+                DEV_SIGNING_IDENTITY,
+                "-passout",
+                f"pass:{p12_password}",
+            ]
+        )
         # -A lets any app (incl. codesign) use the private key without an access
         # prompt. Importing into the already-unlocked login keychain is
         # non-interactive.
-        run([
-            "security", "import", str(p12),
-            "-k", str(LOGIN_KEYCHAIN),
-            "-P", p12_password,
-            "-A",
-        ])
+        run(
+            [
+                "security",
+                "import",
+                str(p12),
+                "-k",
+                str(LOGIN_KEYCHAIN),
+                "-P",
+                p12_password,
+                "-A",
+            ]
+        )
         # Trust the cert for code signing so codesign/find-identity accept it.
-        run(["security", "add-trusted-cert", "-r", "trustRoot", "-p", "codeSign",
-             "-k", str(LOGIN_KEYCHAIN), str(cert)])
+        run(
+            [
+                "security",
+                "add-trusted-cert",
+                "-r",
+                "trustRoot",
+                "-p",
+                "codeSign",
+                "-k",
+                str(LOGIN_KEYCHAIN),
+                str(cert),
+            ]
+        )
 
 
 def _ensure_dev_signing_identity() -> str:

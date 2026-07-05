@@ -124,9 +124,7 @@ def _python_commands(changed: list[str]) -> list[Command]:
     test_files = [
         p
         for p in changed
-        if p.startswith("python/tests/")
-        and Path(p).name.startswith("test_")
-        and p.endswith(".py")
+        if p.startswith("python/tests/") and Path(p).name.startswith("test_") and p.endswith(".py")
     ]
     touches_source = (
         any(p.startswith("python/") and p not in test_files for p in changed)
@@ -195,17 +193,18 @@ SUITES: list[Suite] = [
         name="python",
         slow=False,
         trigger_desc="python/ or top-level *.py",
-        match=lambda c: _touches(c, "python/")
-        or _toplevel_py(c)
-        or _touches_exact(c, "pyproject.toml", "uv.lock"),
+        match=lambda c: (
+            _touches(c, "python/")
+            or _toplevel_py(c)
+            or _touches_exact(c, "pyproject.toml", "uv.lock")
+        ),
         build=_python_commands,
     ),
     Suite(
         name="rust",
         slow=False,
         trigger_desc="rust/ or Cargo.toml/lock",
-        match=lambda c: _touches(c, "rust/")
-        or _touches_exact(c, "Cargo.toml", "Cargo.lock"),
+        match=lambda c: _touches(c, "rust/") or _touches_exact(c, "Cargo.toml", "Cargo.lock"),
         build=_rust_commands,
     ),
     Suite(
@@ -238,8 +237,10 @@ SUITES: list[Suite] = [
         name="concerto",
         slow=True,
         trigger_desc="Concerto app/UI (swift/Concerto, project.yml)",
-        match=lambda c: _touches(c, "swift/Concerto/", "swift/ConcertoUITests/")
-        or _touches_exact(c, "swift/project.yml"),
+        match=lambda c: (
+            _touches(c, "swift/Concerto/", "swift/ConcertoUITests/")
+            or _touches_exact(c, "swift/project.yml")
+        ),
         build=_concerto_commands,
     ),
 ]
@@ -256,9 +257,7 @@ class Plan:
     commands: list[Command]
 
 
-def build_plan(
-    changed: list[str], run_all: bool, forced: set[str]
-) -> list[Plan]:
+def build_plan(changed: list[str], run_all: bool, forced: set[str]) -> list[Plan]:
     plans: list[Plan] = []
     for suite in SUITES:
         matched = suite.match(changed)
@@ -266,14 +265,10 @@ def build_plan(
             plans.append(Plan(suite, True, "all suites (--all)", suite.build(changed)))
             continue
         if suite.name in forced:
-            plans.append(
-                Plan(suite, True, f"forced (--{suite.name})", suite.build(changed))
-            )
+            plans.append(Plan(suite, True, f"forced (--{suite.name})", suite.build(changed)))
             continue
         if not matched:
-            plans.append(
-                Plan(suite, False, f"skipped (no {suite.trigger_desc} changes)", [])
-            )
+            plans.append(Plan(suite, False, f"skipped (no {suite.trigger_desc} changes)", []))
             continue
         if suite.slow:
             plans.append(
@@ -285,9 +280,7 @@ def build_plan(
                 )
             )
             continue
-        plans.append(
-            Plan(suite, True, "matched (changed paths)", suite.build(changed))
-        )
+        plans.append(Plan(suite, True, "matched (changed paths)", suite.build(changed)))
     return plans
 
 
@@ -324,8 +317,7 @@ def _run_suite(plan: Plan) -> bool:
         result = subprocess.run(cmd.argv, cwd=cmd.cwd)
         if result.returncode != 0:
             print(
-                f"\n[{plan.suite.name}] command failed "
-                f"({cmd.label}, exit {result.returncode})",
+                f"\n[{plan.suite.name}] command failed ({cmd.label}, exit {result.returncode})",
                 flush=True,
             )
             return False
@@ -356,8 +348,7 @@ def run_plans(plans: list[Plan]) -> int:
         print("No suites ran (nothing changed). Use --all to force the full matrix.")
         return 0
     if failed:
-        print(f"Result: FAIL ({len(passed)} passed, {len(failed)} failed: "
-              f"{', '.join(failed)})")
+        print(f"Result: FAIL ({len(passed)} passed, {len(failed)} failed: {', '.join(failed)})")
         return 1
     print(f"Result: PASS ({len(passed)} suites)")
     return 0
@@ -371,9 +362,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         prog="scripts/test.py",
         description="Run only the CI suites the branch changed.",
     )
-    parser.add_argument(
-        "--all", action="store_true", help="run every suite, slow ones included"
-    )
+    parser.add_argument("--all", action="store_true", help="run every suite, slow ones included")
     parser.add_argument(
         "--base",
         metavar="REF",

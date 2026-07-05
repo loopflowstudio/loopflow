@@ -151,9 +151,9 @@ pub async fn ensure_wave_row(
         }
     }
     // Born paused: this row exists so the SERVER can register as the wave's
-    // brain — a legacy lfd daemon's loop_ticker (predating the one-brain
-    // guard) must never see it as loopable. Nothing in the server or lf q
-    // consults `paused`; it only silences legacy tickers.
+    // brain. The daemon loop that once read `paused` died in the collapse's
+    // organ cut; nothing in the server or lf q consults it — it only
+    // silences any legacy daemon still running an old build.
     wave.paused = true;
     store.create_wave(&wave).await?;
     tracing::info!(
@@ -618,7 +618,6 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            crons: Vec::new(),
             repos: vec![RepoWork {
                 repo: "/tmp/repo".to_string(),
                 worktree: String::new(),
@@ -719,7 +718,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             execution_cursor: None,
-            activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,

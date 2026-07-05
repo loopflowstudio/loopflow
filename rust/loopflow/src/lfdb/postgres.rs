@@ -7,21 +7,15 @@ use tokio_postgres::NoTls;
 use crate::lfd::attention::{queue_block_attention_item, queue_block_from_attention};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
-    ExecutionProcess, ExecutionProcessStatus, LivePullRequestState, PendingActivation, QueueBlock,
-    QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run, RunStatus, Session, SessionStatus,
-    SessionUse, Summary, Trigger, Wave, WaveCron, WaveStatus,
+    AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
+    LivePullRequestState, QueueBlock, QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run,
+    RunStatus, Session, SessionStatus, SessionUse, Summary, Wave, WaveStatus,
 };
-use crate::lfdb::catalog::{
-    list_agent_history_query, list_runs_query, list_triggers_query, list_waves_query, sql, Query,
-    SqlDialect,
-};
+use crate::lfdb::catalog::{list_runs_query, list_waves_query, sql, Query, SqlDialect};
 use crate::lfdb::rows::{
-    map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
-    map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
-    map_repo_provider_usage_row, map_repo_row, map_run_row, map_summary_row, map_trigger_row,
-    map_wave_cron_row, map_wave_provider_usage_row, map_wave_repo_row, map_wave_row, now_unix,
-    serialize_pr,
+    map_chat_memory_block_row, map_chat_message_row, map_fork_run_row, map_live_pr_state_row,
+    map_repo_edge_row, map_repo_provider_usage_row, map_repo_row, map_run_row, map_summary_row,
+    map_wave_provider_usage_row, map_wave_repo_row, map_wave_row, now_unix, serialize_pr,
 };
 use crate::lfdb::token_crypto;
 use crate::lfdb::{
@@ -758,42 +752,12 @@ impl PostgresStore {
         self.read_waves(repo).await
     }
 
-    pub async fn list_loopable_waves(&self) -> StoreResult<Vec<Wave>> {
-        self.with_client(|client| async move {
-            let rows = client
-                .query(Self::sql(Query::ListLoopableWaves), &[])
-                .await?;
-            rows.iter().map(map_wave_row).collect()
-        })
-        .await
-    }
-
     pub async fn list_child_waves(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
         self.with_client(|client| async move {
             let rows = client
                 .query(Self::sql(Query::ListChildWaves), &[&parent])
                 .await?;
             rows.iter().map(map_wave_row).collect()
-        })
-        .await
-    }
-
-    pub async fn list_wave_crons(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveCron>> {
-        self.with_client(|client| async move {
-            let rows = client
-                .query(Self::sql(Query::ListWaveCrons), &[&wave_id])
-                .await?;
-            rows.iter().map(map_wave_cron_row).collect()
-        })
-        .await
-    }
-
-    pub async fn list_all_active_crons(&self) -> StoreResult<Vec<WaveCron>> {
-        self.with_client(|client| async move {
-            let rows = client
-                .query(Self::sql(Query::ListAllActiveCrons), &[])
-                .await?;
-            rows.iter().map(map_wave_cron_row).collect()
         })
         .await
     }
@@ -847,60 +811,6 @@ impl PostgresStore {
                 .await?;
             client
                 .execute(Self::sql(Query::DeleteWaveById), &[&wave_id])
-                .await?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn create_wave_cron(&self, cron: &WaveCron) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            let created_at = cron
-                .created_at
-                .map(|value| value.unix_timestamp())
-                .unwrap_or_else(now_unix);
-            client
-                .execute(
-                    Self::sql(Query::InsertWaveCron),
-                    &[
-                        &cron.id.as_str(),
-                        &cron.wave_id.as_str(),
-                        &cron.flow,
-                        &cron.schedule,
-                        &cron.last_triggered_at,
-                        &created_at,
-                    ],
-                )
-                .await?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn update_wave_cron_last_triggered(
-        &self,
-        cron_id: &LfdId,
-        last_triggered_at: Option<i64>,
-    ) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            client
-                .execute(
-                    Self::sql(Query::UpdateWaveCronLastTriggered),
-                    &[&last_triggered_at, &cron_id.as_str()],
-                )
-                .await?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn delete_wave_crons(&self, wave_id: &LfdId) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            client
-                .execute(
-                    Self::sql(Query::DeleteWaveCronsByWave),
-                    &[&wave_id.as_str()],
-                )
                 .await?;
             Ok(())
         })
@@ -1062,7 +972,6 @@ impl PostgresStore {
                         &serialize_pr(&run.pr)?,
                         &flow_parents_json,
                         &execution_cursor,
-                        &run.activation_log_id,
                         &run.parent_run_id,
                         &run.parent_pr_number.map(|value| value as i64),
                         &(run.stack_position as i32),
@@ -1103,7 +1012,6 @@ impl PostgresStore {
                         &serialize_pr(&run.pr)?,
                         &flow_parents_json,
                         &execution_cursor,
-                        &run.activation_log_id,
                         &run.parent_run_id,
                         &run.parent_pr_number.map(|value| value as i64),
                         &(run.stack_position as i32),
@@ -1375,263 +1283,6 @@ impl PostgresStore {
         .await
     }
 
-    pub async fn list_triggers(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Trigger>> {
-        self.with_client(|client| async move {
-            let rows = if let Some(wave_id) = wave_id {
-                client
-                    .query(Self::sql(list_triggers_query(true)), &[&wave_id])
-                    .await?
-            } else {
-                client
-                    .query(Self::sql(list_triggers_query(false)), &[])
-                    .await?
-            };
-            rows.iter().map(map_trigger_row).collect()
-        })
-        .await
-    }
-
-    pub async fn list_triggers_by_signal(&self, signal: i32) -> StoreResult<Vec<Trigger>> {
-        self.with_client(|client| async move {
-            let rows = client
-                .query(Self::sql(Query::ListTriggersBySignal), &[&signal])
-                .await?;
-            rows.iter().map(map_trigger_row).collect()
-        })
-        .await
-    }
-
-    pub async fn get_trigger(&self, trigger_id: &LfdId) -> StoreResult<Option<Trigger>> {
-        self.with_client(|client| async move {
-            let row = client
-                .query_opt(Self::sql(Query::GetTriggerById), &[&trigger_id])
-                .await?;
-            row.as_ref().map(map_trigger_row).transpose()
-        })
-        .await
-    }
-
-    pub async fn create_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            let created_at = trigger
-                .created_at
-                .map(|dt| dt.unix_timestamp())
-                .unwrap_or_else(now_unix);
-            let enabled: i32 = if trigger.enabled { 1 } else { 0 };
-
-            client
-                .execute(
-                    Self::sql(Query::InsertTrigger),
-                    &[
-                        &trigger.id,
-                        &trigger.wave_id,
-                        &trigger.signal.as_i32(),
-                        &trigger.flow,
-                        &trigger.last_main_sha,
-                        &trigger.last_triggered_at,
-                        &created_at,
-                        &enabled,
-                        &trigger.source_wave_id,
-                        &trigger.max_iterations.map(|v| v as i32),
-                    ],
-                )
-                .await?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn update_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            let enabled: i32 = if trigger.enabled { 1 } else { 0 };
-            let updated = client
-                .execute(
-                    Self::sql(Query::UpdateTrigger),
-                    &[
-                        &trigger.signal.as_i32(),
-                        &trigger.flow,
-                        &trigger.last_main_sha,
-                        &trigger.last_triggered_at,
-                        &enabled,
-                        &trigger.source_wave_id,
-                        &trigger.max_iterations.map(|v| v as i32),
-                        &trigger.id,
-                    ],
-                )
-                .await?;
-            if updated == 0 {
-                return Err(StoreError::NotFound);
-            }
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn delete_trigger(&self, trigger_id: &LfdId) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            client
-                .execute(Self::sql(Query::DeleteTriggerById), &[&trigger_id])
-                .await?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn list_pending_activations(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Vec<PendingActivation>> {
-        self.with_client(|client| async move {
-            let rows = client
-                .query(Self::sql(Query::ListPendingActivationsByWave), &[&wave_id])
-                .await?;
-            rows.iter().map(map_pending_activation_row).collect()
-        })
-        .await
-    }
-
-    pub async fn create_pending_activation(
-        &self,
-        activation: &PendingActivation,
-    ) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            client
-                .execute(
-                    Self::sql(Query::InsertPendingActivation),
-                    &[
-                        &activation.id,
-                        &activation.wave_id,
-                        &activation.trigger_id,
-                        &activation.reason,
-                        &activation.from_sha,
-                        &activation.to_sha,
-                        &activation.queued_at,
-                        &activation.target_branch,
-                    ],
-                )
-                .await?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn update_pending_activation(
-        &self,
-        activation: &PendingActivation,
-    ) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            let updated = client
-                .execute(
-                    Self::sql(Query::UpdatePendingActivation),
-                    &[
-                        &activation.reason,
-                        &activation.from_sha,
-                        &activation.to_sha,
-                        &activation.target_branch,
-                        &activation.id,
-                    ],
-                )
-                .await?;
-            if updated == 0 {
-                return Err(StoreError::NotFound);
-            }
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn get_pending_for_trigger(
-        &self,
-        wave_id: &LfdId,
-        trigger_id: Option<&LfdId>,
-    ) -> StoreResult<Option<PendingActivation>> {
-        self.with_client(|client| async move {
-            let row = match trigger_id {
-                Some(tid) => {
-                    client
-                        .query_opt(
-                            Self::sql(Query::GetPendingActivationForTrigger),
-                            &[&wave_id, &tid],
-                        )
-                        .await?
-                }
-                None => {
-                    client
-                        .query_opt(Self::sql(Query::GetPendingActivationForWave), &[&wave_id])
-                        .await?
-                }
-            };
-            row.as_ref().map(map_pending_activation_row).transpose()
-        })
-        .await
-    }
-
-    pub async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32> {
-        self.with_client(|client| async move {
-            let deleted = client
-                .execute(
-                    Self::sql(Query::DeletePendingActivationById),
-                    &[&activation_id],
-                )
-                .await?;
-            Ok(deleted as u32)
-        })
-        .await
-    }
-
-    pub async fn create_activation_log(&self, log: &ActivationLog) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            client
-                .execute(
-                    Self::sql(Query::InsertActivationLog),
-                    &[
-                        &log.id,
-                        &log.wave_id,
-                        &log.trigger_id,
-                        &log.reason,
-                        &log.outcome.as_str(),
-                        &log.created_at,
-                    ],
-                )
-                .await?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn list_activation_log(
-        &self,
-        wave_id: &LfdId,
-        limit: u32,
-    ) -> StoreResult<Vec<ActivationLog>> {
-        self.with_client(|client| async move {
-            let rows = client
-                .query(
-                    Self::sql(Query::ListActivationLogByWave),
-                    &[&wave_id, &(limit as i32)],
-                )
-                .await?;
-            rows.iter().map(map_activation_log_row).collect()
-        })
-        .await
-    }
-
-    pub async fn get_activation_log(
-        &self,
-        activation_log_id: &LfdId,
-    ) -> StoreResult<Option<ActivationLog>> {
-        self.with_client(|client| async move {
-            let row = client
-                .query_opt(
-                    Self::sql(Query::GetActivationLogById),
-                    &[&activation_log_id],
-                )
-                .await?;
-            row.as_ref().map(map_activation_log_row).transpose()
-        })
-        .await
-    }
-
     pub async fn list_fork_runs(
         &self,
         run_id: &LfdId,
@@ -1706,188 +1357,6 @@ impl PostgresStore {
                 )
                 .await?;
             Ok(deleted as u32)
-        })
-        .await
-    }
-
-    pub async fn list_agents(&self) -> StoreResult<Vec<ExecutionProcess>> {
-        self.list_agent_history(None, None, None).await
-    }
-
-    pub async fn list_agent_history(
-        &self,
-        worktree: Option<&str>,
-        repo: Option<&str>,
-        limit: Option<u32>,
-    ) -> StoreResult<Vec<ExecutionProcess>> {
-        self.with_client(|client| async move {
-            let query = Self::sql(list_agent_history_query(
-                worktree.is_some(),
-                repo.is_some(),
-                limit.is_some(),
-            ));
-            let mut params: Vec<Box<dyn ToSql + Sync + Send>> = Vec::new();
-
-            if let Some(worktree) = worktree {
-                params.push(Box::new(worktree.to_string()));
-            }
-            if let Some(repo) = repo {
-                params.push(Box::new(repo.to_string()));
-            }
-            if let Some(limit) = limit {
-                params.push(Box::new(limit as i64));
-            }
-
-            let params_ref: Vec<&(dyn ToSql + Sync)> = params
-                .iter()
-                .map(|v| v.as_ref() as &(dyn ToSql + Sync))
-                .collect();
-            let rows = client.query(query, &params_ref).await?;
-            rows.iter().map(map_agent_row).collect()
-        })
-        .await
-    }
-
-    pub async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<ExecutionProcess>> {
-        self.with_client(|client| async move {
-            let row = client
-                .query_opt(Self::sql(Query::GetAgentById), &[&agent_id])
-                .await?;
-            row.as_ref().map(map_agent_row).transpose()
-        })
-        .await
-    }
-
-    pub async fn get_waiting_agent_for_wave(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Option<ExecutionProcess>> {
-        self.with_client(|client| async move {
-            let row = client
-                .query_opt(
-                    Self::sql(Query::GetWaitingAgentForWave),
-                    &[&wave_id, &ExecutionProcessStatus::Waiting.as_i32()],
-                )
-                .await?;
-            row.as_ref().map(map_agent_row).transpose()
-        })
-        .await
-    }
-
-    pub async fn start_agent(&self, execution_run: &ExecutionProcess) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            let started_at = execution_run
-                .started_at
-                .map(|dt| dt.unix_timestamp())
-                .unwrap_or_else(now_unix);
-            let ended_at = execution_run.ended_at.map(|dt| dt.unix_timestamp());
-            let pid = execution_run.pid.map(|v| v as i32);
-            let container_id = execution_run.container_id.as_deref();
-            client
-                .execute(
-                    Self::sql(Query::InsertAgent),
-                    &[
-                        &execution_run.id,
-                        &execution_run.step,
-                        &execution_run.repo,
-                        &execution_run.worktree,
-                        &execution_run.run_id,
-                        &execution_run.status.as_i32(),
-                        &started_at,
-                        &ended_at,
-                        &pid,
-                        &container_id,
-                        &execution_run.agent,
-                        &execution_run.run_mode,
-                    ],
-                )
-                .await?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn update_agent_status(
-        &self,
-        agent_id: &LfdId,
-        status: i32,
-        pid: Option<u32>,
-        container_id: Option<&str>,
-    ) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            let pid = pid.map(|v| v as i32);
-            let container_id = container_id.map(str::to_string);
-            let updated = client
-                .execute(
-                    Self::sql(Query::UpdateExecutionStatus),
-                    &[&status, &pid, &container_id, &agent_id],
-                )
-                .await?;
-            if updated == 0 {
-                return Err(StoreError::NotFound);
-            }
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            let updated = client
-                .execute(Self::sql(Query::EndAgent), &[&status, &ended_at, &agent_id])
-                .await?;
-            if updated == 0 {
-                return Err(StoreError::NotFound);
-            }
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn get_active_agents_for_wave(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Vec<ExecutionProcess>> {
-        self.with_client(|client| async move {
-            let rows = client
-                .query(Self::sql(Query::GetActiveAgentsForWave), &[&wave_id])
-                .await?;
-            rows.iter().map(map_agent_row).collect()
-        })
-        .await
-    }
-
-    pub async fn end_active_agent_for_wave(
-        &self,
-        wave_id: &LfdId,
-        status: i32,
-        ended_at: i64,
-    ) -> StoreResult<()> {
-        self.with_client(|client| async move {
-            let updated = client
-                .execute(
-                    Self::sql(Query::EndActiveAgentsForWave),
-                    &[&status, &ended_at, &wave_id.as_str()],
-                )
-                .await?;
-            if updated == 0 {
-                return Err(StoreError::NotFound);
-            }
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn get_stuck_agents(
-        &self,
-        older_than_secs: u64,
-    ) -> StoreResult<Vec<ExecutionProcess>> {
-        self.with_client(|client| async move {
-            let cutoff = now_unix() - older_than_secs as i64;
-            let rows = client
-                .query(Self::sql(Query::GetStuckAgents), &[&cutoff])
-                .await?;
-            rows.iter().map(map_agent_row).collect()
         })
         .await
     }

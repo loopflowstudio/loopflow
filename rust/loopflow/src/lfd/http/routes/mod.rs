@@ -19,8 +19,7 @@ pub(crate) mod test_helpers;
 
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::http::dto::{
-    format_datetime, run_dto, trigger_dto, wave_cron_dto, CommitEntryDto, ErrorResponse,
-    PullRequestDto, RepoWorkDto, WaveDto,
+    format_datetime, run_dto, CommitEntryDto, ErrorResponse, PullRequestDto, RepoWorkDto, WaveDto,
 };
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
@@ -160,13 +159,6 @@ pub async fn build_wave_dto(
         });
     }
 
-    let triggers_list = store
-        .list_triggers(Some(wave.id()))
-        .await
-        .unwrap_or_default();
-    let triggers = triggers_list.into_iter().map(trigger_dto).collect();
-    let crons_list = store.list_wave_crons(wave.id()).await.unwrap_or_default();
-    let crons = crons_list.into_iter().map(wave_cron_dto).collect();
     let wave_config = wave_config::read_wave_config(std::path::Path::new(wave.repo()), wave.name());
 
     Ok(WaveDto {
@@ -186,8 +178,6 @@ pub async fn build_wave_dto(
         flow_steps,
         has_stale_pr_state,
         workers: wave.workers(),
-        triggers,
-        crons,
         repos,
         parent_wave_id: wave.parent_wave_id().map(|id| id.to_string()),
     })
@@ -468,7 +458,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             execution_cursor: None,
-            activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -505,7 +494,6 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            crons: Vec::new(),
             repos: vec![RepoWork {
                 repo: repo.to_string(),
                 worktree: String::new(),
@@ -543,7 +531,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             execution_cursor: None,
-            activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: pr_number,

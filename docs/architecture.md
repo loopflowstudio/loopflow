@@ -75,23 +75,23 @@ side-effectful workflows around git, PRs, PM providers, and release artifacts.
 
 ## Daemon
 
-`lfd` is the long-running runtime. It serves the HTTP API, stores waves and
-sessions, schedules loop/crons/triggers, executes local or container workers,
-and streams events to clients.
+`lfd` is the gatekeeper: it serves read routes and the event push, verifies
+GitHub webhooks and speaks them inward as `lf` execs, refreshes provider
+tokens, and tidies the registry at boot. It dispatches no work — `lf q`
+launches workers, and each wave's resident mind owns its own loop and cron
+schedules.
 
 Important paths:
 
 - `rust/loopflow/src/bin/lfd.rs`
 - `rust/loopflow/src/lfd/http/`
 - `rust/loopflow/src/lfdb/`
-- `rust/loopflow/src/lfd/scheduler.rs`
-- `rust/loopflow/src/lfd/triggers/`
+- `rust/loopflow/src/lfd/triggers/` (token refresh — the one surviving loop)
 - `rust/loopflow/src/lfd/executor/`
 - `rust/loopflow/src/lfd/types/`
 
-Native mode uses sqlite, a local process executor, and a local session token.
-Container mode uses postgres and Docker-backed execution for shared or remote
-hosts.
+Native mode uses sqlite and a local session token; container mode uses
+postgres for shared or remote hosts.
 
 ## Clients
 

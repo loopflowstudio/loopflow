@@ -3,12 +3,11 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use time::OffsetDateTime;
 
 use crate::engine::config::{load_config, load_config_or_default};
-use crate::engine::flow::ConcreteStep;
 use crate::engine::git::{
     current_branch, fetch, get_default_branch, is_ancestor, rev_parse, sync_main, worktree_add,
     WorktreeBranch,
@@ -20,10 +19,7 @@ use crate::engine::worktrees::{
 };
 
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{
-    ExecutionProcess, ExecutionProcessStatus, Run, RunStackStatus, RunStatus, Session, Wave,
-    WaveStatus,
-};
+use crate::lfd::types::{Run, RunStackStatus, RunStatus, Session, Wave, WaveStatus};
 use crate::lfdb::SharedStore;
 use crate::ops::{rebase_with_recovery, Progress, RebaseOptions};
 
@@ -138,7 +134,6 @@ pub async fn create_run_for_placement(
         error: None,
         flow_parents: Vec::new(),
         execution_cursor: None,
-        activation_log_id: None,
         parent_run_id,
         parent_pr_number,
         stack_position,
@@ -378,30 +373,6 @@ fn has_run_suffix(path_component: &str) -> bool {
     !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
-pub(crate) fn build_agent_for_step(
-    run_id: &LfdId,
-    repo: &str,
-    worktree: &str,
-    step: &ConcreteStep,
-    status: ExecutionProcessStatus,
-    agent: &str,
-) -> ExecutionProcess {
-    ExecutionProcess {
-        id: LfdId::new(),
-        step: step.step.name.clone(),
-        repo: repo.to_string(),
-        worktree: worktree.to_string(),
-        run_id: Some(run_id.clone()),
-        status,
-        started_at: Some(OffsetDateTime::now_utc()),
-        ended_at: None,
-        pid: None,
-        container_id: None,
-        agent: agent.to_string(),
-        run_mode: "auto".to_string(),
-    }
-}
-
 pub(crate) fn resolve_lf_binary() -> PathBuf {
     if let Ok(path) = std::env::var("LF_BIN") {
         let trimmed = path.trim();
@@ -578,20 +549,6 @@ pub(crate) async fn launch_session_in_tmux(session: &Session, tail: &str) -> Res
     Ok(())
 }
 
-pub(crate) fn build_lf_inline_command(
-    prompt: &str,
-    batch: bool,
-    directions: &[String],
-    docs: &[String],
-    wave_name: &str,
-) -> Vec<String> {
-    let mut cmd = vec![resolve_lf_binary().to_string_lossy().to_string()];
-    append_lf_run_options(&mut cmd, batch, directions, docs, wave_name);
-    cmd.push(":".to_string());
-    cmd.push(prompt.to_string());
-    cmd
-}
-
 fn append_lf_run_options(
     cmd: &mut Vec<String>,
     batch: bool,
@@ -613,132 +570,6 @@ fn append_lf_run_options(
     }
     cmd.push("-w".to_string());
     cmd.push(wave_name.to_string());
-}
-
-/// Commit any remaining changes, push, and create a draft PR.
-/// Returns the PR info if successful, None if skipped or failed.
-pub(crate) fn auto_create_pr(
-    worktree: &Path,
-    wave_name: Option<String>,
-) -> Option<crate::lfd::types::PullRequest> {
-    use crate::ops::{commit_workflow, current_pr, CommitOptions, NullProgress};
-
-    let commit_options = CommitOptions {
-        add: true,
-        push: true,
-        create_draft_pr: true,
-        message: Some("lfd: auto-create draft PR".to_string()),
-        ..CommitOptions::for_task("commit")
-    };
-    if let Err(err) = commit_workflow(worktree, &commit_options, &NullProgress) {
-        warn!(worktree = %worktree.display(), error = %err, "auto-create PR: commit/push failed");
-        return None;
-    }
-
-    match current_pr(worktree) {
-        Ok(Some(pr)) => {
-            let title = draft_pr_title(worktree, wave_name.as_deref());
-            if let Some(draft_title) = title.as_deref() {
-                if let Err(err) = set_pr_title(worktree, pr.number, draft_title) {
-                    warn!(
-                        worktree = %worktree.display(),
-                        error = %err,
-                        "auto-create PR: failed to set draft title"
-                    );
-                }
-            }
-
-            Some(crate::lfd::types::PullRequest {
-                url: pr.url,
-                number: Some(pr.number as u32),
-                state: Some(pr.state),
-                branch: Some(pr.branch),
-                title,
-            })
-        }
-        Ok(None) => {
-            debug!(worktree = %worktree.display(), "auto-create PR: no PR found after push");
-            None
-        }
-        Err(err) => {
-            warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to fetch PR info");
-            None
-        }
-    }
-}
-
-fn draft_pr_title(worktree: &Path, wave_name: Option<&str>) -> Option<String> {
-    if let Some(name) = wave_name.map(str::trim).filter(|name| !name.is_empty()) {
-        return Some(format!("{name}: draft"));
-    }
-
-    first_branch_commit_subject(worktree)
-}
-
-fn first_branch_commit_subject(worktree: &Path) -> Option<String> {
-    let default_branch = get_default_branch(worktree).ok()?;
-    let merge_base_output = std::process::Command::new("git")
-        .args(["merge-base", "HEAD", &format!("origin/{default_branch}")])
-        .current_dir(worktree)
-        .output()
-        .ok()?;
-    if !merge_base_output.status.success() {
-        return None;
-    }
-
-    let merge_base = String::from_utf8_lossy(&merge_base_output.stdout)
-        .trim()
-        .to_string();
-    if merge_base.is_empty() {
-        return None;
-    }
-
-    let range = format!("{merge_base}..HEAD");
-    let log_output = std::process::Command::new("git")
-        .args(["log", "--reverse", "--format=%s", &range])
-        .current_dir(worktree)
-        .output()
-        .ok()?;
-    if !log_output.status.success() {
-        return None;
-    }
-
-    String::from_utf8_lossy(&log_output.stdout)
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(ToString::to_string)
-}
-
-fn set_pr_title(worktree: &Path, number: u64, title: &str) -> Result<()> {
-    let output = std::process::Command::new("gh")
-        .arg("pr")
-        .arg("edit")
-        .arg(number.to_string())
-        .arg("--title")
-        .arg(title)
-        .current_dir(worktree)
-        .output()
-        .map_err(|err| anyhow!("failed to run gh pr edit: {err}"))?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "gh pr edit failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(())
-}
-
-/// Clean up a run-scoped worktree after the run completes.
-///
-/// Only removes per-run worktrees (`<repo>.<wave>.<short-run-id>`, or the
-/// legacy `-run-` suffix) — never shared wave or human worktrees.
-pub(crate) fn cleanup_run_worktree(worktree: &Path) -> Result<()> {
-    let name = worktree.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if !has_run_suffix(name) && !has_run_id_segment(name) {
-        return Ok(());
-    }
-    super::cleanup_workspace_worktree(worktree)
 }
 
 pub(crate) fn short_hash(value: &str, chars: usize) -> String {
@@ -1091,43 +922,6 @@ mod tests {
         // Non-hex or wrong-length final segments.
         assert!(!is_ephemeral_worktree_path("/tmp/repo.wave.release"));
         assert!(!is_ephemeral_worktree_path("/tmp/repo.wave.a1b2"));
-    }
-
-    #[test]
-    fn cleanup_run_worktree_removes_worker_tree_and_spares_named_trees() {
-        let (_temp, main_repo, _origin) = setup_repo_with_remote();
-        let parent = main_repo.parent().expect("main repo parent");
-
-        let worker = parent.join("main.wave.a1b2c3d4");
-        run_git(
-            &main_repo,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                "worker-branch",
-                worker.to_str().unwrap(),
-                "main",
-            ],
-        );
-        let human = parent.join("main.feature");
-        run_git(
-            &main_repo,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                "feature-branch",
-                human.to_str().unwrap(),
-                "main",
-            ],
-        );
-
-        super::cleanup_run_worktree(&worker).expect("remove worker tree");
-        super::cleanup_run_worktree(&human).expect("no-op on human tree");
-
-        assert!(!worker.exists(), "worker worktree should be removed");
-        assert!(human.exists(), "human worktree must be left alone");
     }
 
     #[test]

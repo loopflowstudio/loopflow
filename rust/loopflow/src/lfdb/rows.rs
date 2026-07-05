@@ -1,9 +1,7 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    ActivationLog, ActivationOutcome, ChatMemoryBlock, ChatMessage, ExecutionProcess,
-    ExecutionProcessStatus, LivePrState, LivePullRequestState, PendingActivation, PullRequest,
-    Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus, RunStatus, Signal, Summary, Trigger,
-    Wave, WaveCron, WaveMode, WaveStatus,
+    ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PullRequest, Repo, RepoEdge,
+    RepoId, RepoWork, Run, RunStackStatus, RunStatus, Summary, Wave, WaveMode, WaveStatus,
 };
 use crate::lfdb::{
     ForkRun, ForkRunStatus, RepoProviderUsage, StoreError, StoreResult, WaveProviderUsage,
@@ -122,7 +120,6 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         primary_flow,
         goal,
         metrics,
-        crons: Vec::new(),
         repos: Vec::new(),
         direction,
         area,
@@ -130,18 +127,6 @@ pub fn map_wave_row(row: &impl StoreRow) -> StoreResult<Wave> {
         created_at: Some(created_at),
         workers,
         parent_wave_id,
-    })
-}
-
-/// SELECT id, wave_id, flow, schedule, last_triggered_at, created_at
-pub fn map_wave_cron_row(row: &impl StoreRow) -> StoreResult<WaveCron> {
-    Ok(WaveCron {
-        id: LfdId::from_raw(row.text(0)?),
-        wave_id: LfdId::from_raw(row.text(1)?),
-        flow: row.text(2)?,
-        schedule: row.text(3)?,
-        last_triggered_at: row.opt_bigint(4)?,
-        created_at: row.opt_bigint(5)?.map(unix_to_datetime),
     })
 }
 
@@ -180,7 +165,7 @@ pub fn map_repo_edge_row(row: &impl StoreRow) -> StoreResult<RepoEdge> {
 /// SELECT id, wave_id, iteration, step_index, status, worktree, branch,
 ///        started_at, ended_at, error, snapshot_repo, snapshot_flow,
 ///        snapshot_task, snapshot_direction, snapshot_area, snapshot_pr,
-///        flow_parents, execution_cursor, activation_log_id, parent_run_id,
+///        flow_parents, execution_cursor, parent_run_id,
 ///        parent_pr_number, stack_position, stack_group_id, stack_status,
 ///        lineage_inferred, target_branch, repair_of
 pub fn map_run_row(row: &impl StoreRow) -> StoreResult<Run> {
@@ -191,15 +176,14 @@ pub fn map_run_row(row: &impl StoreRow) -> StoreResult<Run> {
     let snapshot_pr = parse_pr(row.opt_text(15)?)?;
     let flow_parents = parse_json_vec(&row.text(16)?)?;
     let execution_cursor = row.opt_text(17)?;
-    let activation_log_id = row.opt_text(18)?.map(LfdId::from_raw);
-    let parent_run_id = row.opt_text(19)?.map(LfdId::from_raw);
-    let parent_pr_number = row.opt_bigint(20)?.map(|value| value as u32);
-    let stack_position = row.int(21)? as u32;
-    let stack_group_id = row.text(22)?;
-    let stack_status = RunStackStatus::from_i32(row.int(23)?);
-    let lineage_inferred = row.int(24)? != 0;
-    let target_branch = row.text(25)?;
-    let repair_of = row.opt_text(26)?.map(LfdId::from_raw);
+    let parent_run_id = row.opt_text(18)?.map(LfdId::from_raw);
+    let parent_pr_number = row.opt_bigint(19)?.map(|value| value as u32);
+    let stack_position = row.int(20)? as u32;
+    let stack_group_id = row.text(21)?;
+    let stack_status = RunStackStatus::from_i32(row.int(22)?);
+    let lineage_inferred = row.int(23)? != 0;
+    let target_branch = row.text(24)?;
+    let repair_of = row.opt_text(25)?.map(LfdId::from_raw);
 
     Ok(Run {
         id: LfdId::from_raw(row.text(0)?),
@@ -219,7 +203,6 @@ pub fn map_run_row(row: &impl StoreRow) -> StoreResult<Run> {
         error: row.opt_text(9)?,
         flow_parents,
         execution_cursor,
-        activation_log_id,
         parent_run_id,
         parent_pr_number,
         stack_position,
@@ -249,54 +232,6 @@ pub fn map_live_pr_state_row(row: &impl StoreRow) -> StoreResult<LivePullRequest
     })
 }
 
-/// SELECT id, wave_id, signal, flow, last_main_sha, last_triggered_at, created_at,
-///        enabled, source_wave_id, max_iterations
-pub fn map_trigger_row(row: &impl StoreRow) -> StoreResult<Trigger> {
-    let created_at = unix_to_datetime(row.bigint(6)?);
-
-    Ok(Trigger {
-        id: LfdId::from_raw(row.text(0)?),
-        wave_id: LfdId::from_raw(row.text(1)?),
-        signal: Signal::from_i32(row.int(2)?).expect("stored signal must be valid"),
-        flow: row.opt_text(3)?,
-        last_main_sha: row.opt_text(4)?,
-        last_triggered_at: row.opt_bigint(5)?,
-        created_at: Some(created_at),
-        enabled: row.int(7)? != 0,
-        source_wave_id: row.opt_text(8)?.map(LfdId::from_raw),
-        max_iterations: row.opt_int(9)?.map(|v| v as u32),
-    })
-}
-
-/// SELECT id, wave_id, trigger_id, reason, from_sha, to_sha, queued_at, target_branch
-pub fn map_pending_activation_row(row: &impl StoreRow) -> StoreResult<PendingActivation> {
-    Ok(PendingActivation {
-        id: LfdId::from_raw(row.text(0)?),
-        wave_id: LfdId::from_raw(row.text(1)?),
-        trigger_id: row.opt_text(2)?.map(LfdId::from_raw),
-        reason: row.text(3)?,
-        from_sha: row.text(4)?,
-        to_sha: row.text(5)?,
-        queued_at: row.bigint(6)?,
-        target_branch: row.text(7)?,
-    })
-}
-
-/// SELECT id, wave_id, trigger_id, reason, outcome, created_at
-pub fn map_activation_log_row(row: &impl StoreRow) -> StoreResult<ActivationLog> {
-    let outcome = ActivationOutcome::parse(&row.text(4)?)
-        .ok_or_else(|| StoreError::InvalidData("invalid activation log outcome".to_string()))?;
-
-    Ok(ActivationLog {
-        id: LfdId::from_raw(row.text(0)?),
-        wave_id: LfdId::from_raw(row.text(1)?),
-        trigger_id: row.opt_text(2)?.map(LfdId::from_raw),
-        reason: row.text(3)?,
-        outcome,
-        created_at: row.bigint(5)?,
-    })
-}
-
 /// SELECT id, run_id, step_index, branch_index, status, worktree
 pub fn map_fork_run_row(row: &impl StoreRow) -> StoreResult<ForkRun> {
     let status = ForkRunStatus::from_i64(row.int(4)? as i64)
@@ -309,31 +244,6 @@ pub fn map_fork_run_row(row: &impl StoreRow) -> StoreResult<ForkRun> {
         branch_index: row.int(3)? as u32,
         status,
         worktree: row.text(5)?,
-    })
-}
-
-/// SELECT id, step, repo, worktree, run_id, status,
-///        started_at, ended_at, pid, container_id, model, run_mode
-pub fn map_agent_row(row: &impl StoreRow) -> StoreResult<ExecutionProcess> {
-    let started_at = unix_to_datetime(row.bigint(6)?);
-    let ended_at = row.opt_bigint(7)?;
-    let pid = row.opt_int(8)?;
-    let container_id = row.opt_text(9)?;
-    let run_id = row.opt_text(4)?;
-
-    Ok(ExecutionProcess {
-        id: LfdId::from_raw(row.text(0)?),
-        step: row.text(1)?,
-        repo: row.text(2)?,
-        worktree: row.text(3)?,
-        run_id: run_id.map(LfdId::from_raw),
-        status: ExecutionProcessStatus::from_i32(row.int(5)?),
-        started_at: Some(started_at),
-        ended_at: ended_at.map(unix_to_datetime),
-        pid: pid.map(|v| v as u32),
-        container_id,
-        agent: row.text(10)?,
-        run_mode: row.text(11)?,
     })
 }
 

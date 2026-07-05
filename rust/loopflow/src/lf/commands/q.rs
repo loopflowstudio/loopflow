@@ -345,7 +345,6 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            crons: Vec::new(),
             repos: vec![RepoWork {
                 repo: repo.display().to_string(),
                 worktree: String::new(),

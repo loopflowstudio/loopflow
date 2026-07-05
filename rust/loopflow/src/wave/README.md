@@ -40,6 +40,12 @@ respawn affordance, and one day the human-as-mind seat.
   journaling `TurnStarted.answers`. Quiet for 5 minutes with an empty queue →
   a heartbeat turn nudges the next orchestration step, carrying the
   `<in_flight>` worker fold fetched from `GET /resident/context`.
+- **Crons are the third deadline.** `crons: [{flow, schedule}]` in the
+  wave's `GOAL.md` frontmatter (re-read live, no restart); a due schedule
+  while idle opens a system turn — "cron due: <flow> — dispatch it" — and
+  the mind dispatches with judgment. Mid-turn due dates fire at the
+  boundary; occurrences older than 24h are missed, not replayed. The
+  daemon's cron poller and `wave_crons` table died in the collapse.
 - **The mind's vendor is wave config**: `mind: claude` (or `opencode`) in
   `wave/<name>/GOAL.md` frontmatter; codex when unset. Read by the resident.
 - **The mind orchestrates, never grinds.** Its operating prompt is the

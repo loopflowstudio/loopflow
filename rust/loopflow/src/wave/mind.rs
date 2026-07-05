@@ -30,9 +30,15 @@
 //! - **Heartbeat**: idle for [`HEARTBEAT_IDLE`] with an empty queue → a
 //!   progress turn carrying a compact nudge plus the `<in_flight>` fold
 //!   fetched from `GET /resident/context`.
+//! - **Cron**: the wave's `crons:` frontmatter (GOAL.md, re-read at every
+//!   deadline computation so edits land without a restart) arms a third
+//!   deadline; a due schedule opens a system turn ("cron due: <flow> —
+//!   dispatch it") exactly like the heartbeat nudge. Like the heartbeat,
+//!   crons only fire while idle — a schedule that comes due mid-turn fires
+//!   at the boundary (within [`CRON_GRACE`]). The daemon's cron poller and
+//!   the `wave_crons` table died in the collapse's organ cut.
 //!
-//! The select is `biased` toward the inbox, and deliberately shaped to take
-//! one more deadline arm (cron-into-the-mind is collapse cut 3's item).
+//! The select is `biased` toward the inbox.
 //!
 //! # Failure
 //! A failed turn returns the mind to idle. [`MAX_CONSECUTIVE_TURN_FAILURES`]
@@ -52,12 +58,14 @@
 //! journaled by the listener — the break in continuity is explicit in the
 //! log. The visible thread survives regardless: it is the listener's fold.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -66,6 +74,7 @@ use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRend
 use crate::lfd::conversations::harness::{is_terminal_harness_error, Harness};
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
 use crate::lfd::conversations::types::{ConversationEvent, ConversationItem, Lifecycle};
+use crate::lfd::http::routes::wave_config::{read_wave_config, WaveCronDef};
 use crate::wave::journal::{ellipsize, MessageId, MessageOp, PendingMessage};
 use crate::wave::memory::Memory;
 use crate::wave::resident::ListenerClient;
@@ -88,6 +97,12 @@ pub const MAX_CONSECUTIVE_TURN_FAILURES: u32 = 3;
 /// (`supervisor::LISTENER_INTERRUPT_DEADLINE`): the resident closes first
 /// when it can; the listener's fires only for a silent resident.
 pub const INTERRUPT_DEADLINE: Duration = Duration::from_secs(10);
+
+/// How far back a never-fired (or long-idle) cron schedule is checked: an
+/// occurrence within this window still fires; anything older is missed, not
+/// replayed. Mirrors the dead daemon poller's grace so a wave that was down
+/// over its weekly schedule still runs it on revival.
+pub const CRON_GRACE: chrono::Duration = chrono::Duration::hours(24);
 
 /// Compact nudge for heartbeat turns. The thread is persistent, so heartbeats
 /// never re-send the seed — the first turn carried it.
@@ -119,6 +134,44 @@ pub fn heartbeat_prompt(workers: &[InFlightWorker]) -> String {
     }
     prompt.push_str("</in_flight>");
     prompt
+}
+
+// -- Cron: the third deadline ------------------------------------------------
+
+/// The wave's cron lines, re-read from GOAL.md frontmatter on every deadline
+/// computation — editing the file reschedules a live mind, no restart.
+fn read_crons(origin_repo: &Path, wave: &str) -> Vec<WaveCronDef> {
+    read_wave_config(origin_repo, wave)
+        .and_then(|config| config.crons)
+        .unwrap_or_default()
+}
+
+/// Identity of one cron line for last-fired bookkeeping: the schedule and
+/// flow together, so editing either resets the line's history.
+fn cron_key(cron: &WaveCronDef) -> String {
+    format!("{} {}", cron.schedule, cron.flow)
+}
+
+/// The next fire time for one schedule: the first occurrence after
+/// `last_fired` (or `now - CRON_GRACE` for a line that never fired).
+/// Unparseable schedules never fire.
+fn next_cron_fire(
+    schedule: &str,
+    last_fired: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    let schedule = cron::Schedule::from_str(schedule).ok()?;
+    let check_from = last_fired.unwrap_or(now - CRON_GRACE);
+    schedule.after(&check_from).next()
+}
+
+/// The system turn a due schedule opens — the mind dispatches the flow with
+/// judgment, exactly like it acts on a heartbeat nudge.
+pub(crate) fn cron_prompt(due: &[WaveCronDef]) -> String {
+    due.iter()
+        .map(|cron| format!("cron due: {} — dispatch it", cron.flow))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Scheduler knobs. `Default` is production: codex vendor, 5-minute
@@ -442,6 +495,7 @@ pub async fn run_mind(
         started: false,
         idle_since: Instant::now(),
         interrupt_deadline: None,
+        cron_last_fired: HashMap::new(),
         end: None,
     };
 
@@ -452,6 +506,7 @@ pub async fn run_mind(
     let mut events_open = true;
     while mind.end.is_none() {
         let heartbeat_at = mind.heartbeat_deadline();
+        let cron_at = mind.cron_deadline();
         let interrupt_at = mind.interrupt_deadline;
         tokio::select! {
             // Biased toward the inbox: a message that arrived before a turn
@@ -477,8 +532,12 @@ pub async fn run_mind(
             _ = sleep_until_opt(interrupt_at), if interrupt_at.is_some() => {
                 mind.on_interrupt_deadline().await;
             }
-            // Cron-into-the-mind (collapse cut 3) adds its deadline as one
-            // more arm here — the loop is shaped for a third deadline.
+            // The third deadline: a due cron schedule from GOAL.md
+            // frontmatter opens a system turn. Armed only while idle, like
+            // the heartbeat — a mid-turn due date fires at the boundary.
+            _ = sleep_until_opt(cron_at), if cron_at.is_some() => {
+                mind.on_cron().await;
+            }
             _ = sleep_until_opt(heartbeat_at) => {
                 mind.on_heartbeat().await;
             }
@@ -529,14 +588,45 @@ struct Mind {
     /// fires, cleared at the turn boundary. Past it, the resident
     /// force-closes through the wire.
     interrupt_deadline: Option<Instant>,
+    /// When each cron line (keyed by [`cron_key`]) last opened a turn — the
+    /// scheduler's working memory; a respawned resident re-checks within
+    /// [`CRON_GRACE`].
+    cron_last_fired: HashMap<String, DateTime<Utc>>,
     /// Set once, ends the loop (see [`MindEnd`]).
     end: Option<MindEnd>,
 }
 
 impl Mind {
     fn heartbeat_deadline(&self) -> Option<Instant> {
-        (self.started && self.end.is_none() && !self.in_flight && self.queue.is_empty())
-            .then(|| self.idle_since + self.config.heartbeat_idle)
+        (self.idle()).then(|| self.idle_since + self.config.heartbeat_idle)
+    }
+
+    /// Idle and able to open a turn: the arming condition shared by the
+    /// heartbeat and cron deadlines.
+    fn idle(&self) -> bool {
+        self.started && self.end.is_none() && !self.in_flight && self.queue.is_empty()
+    }
+
+    /// The earliest upcoming cron fire across the wave's `crons:` frontmatter
+    /// lines, as a select deadline. `None` while turning (the boundary
+    /// re-arms) or when no schedule parses.
+    fn cron_deadline(&self) -> Option<Instant> {
+        if !self.idle() {
+            return None;
+        }
+        let now = Utc::now();
+        let next = read_crons(&self.origin_repo, &self.wave)
+            .iter()
+            .filter_map(|cron| {
+                next_cron_fire(
+                    &cron.schedule,
+                    self.cron_last_fired.get(&cron_key(cron)).copied(),
+                    now,
+                )
+            })
+            .min()?;
+        let wait = (next - now).to_std().unwrap_or(Duration::ZERO);
+        Some(Instant::now() + wait)
     }
 
     /// Start the vendor thread and report `ThreadStarted` — the mind's first
@@ -779,6 +869,37 @@ impl Mind {
             return;
         }
         let prompt = heartbeat_prompt(&workers);
+        self.send_turn(prompt, Vec::new()).await;
+    }
+
+    /// A cron deadline fired: re-check which lines are due (the file may
+    /// have changed while we slept), mark them fired, and open one system
+    /// turn covering all of them.
+    async fn on_cron(&mut self) {
+        let now = Utc::now();
+        let due: Vec<WaveCronDef> = read_crons(&self.origin_repo, &self.wave)
+            .into_iter()
+            .filter(|cron| {
+                next_cron_fire(
+                    &cron.schedule,
+                    self.cron_last_fired.get(&cron_key(cron)).copied(),
+                    now,
+                )
+                .is_some_and(|fire_at| fire_at <= now)
+            })
+            .collect();
+        if due.is_empty() {
+            return; // the schedule moved under us; the loop re-arms
+        }
+        for cron in &due {
+            self.cron_last_fired.insert(cron_key(cron), now);
+        }
+        tracing::info!(
+            wave = self.wave,
+            flows = ?due.iter().map(|cron| cron.flow.as_str()).collect::<Vec<_>>(),
+            "cron due; opening a system turn"
+        );
+        let prompt = cron_prompt(&due);
         self.send_turn(prompt, Vec::new()).await;
     }
 
@@ -1384,6 +1505,81 @@ mod tests {
         .await;
         let answers = started_answers(&mind.journal_events());
         assert_eq!(answers[1], vec![message_id(&m2), message_id(&m3)]);
+    }
+
+    // -- Cron: the third deadline --
+
+    fn write_goal_with_crons(tmp: &std::path::Path, crons_yaml: &str) {
+        let dir = tmp.join("wave/ship");
+        std::fs::create_dir_all(&dir).expect("wave dir");
+        std::fs::write(
+            dir.join("GOAL.md"),
+            format!("---\ncrons:\n{crons_yaml}---\nShip.\n"),
+        )
+        .expect("write GOAL.md");
+    }
+
+    #[test]
+    fn next_cron_fire_honors_grace_last_fired_and_garbage() {
+        let now = Utc::now();
+
+        // Never fired, hourly schedule: an occurrence within the 24h grace
+        // window is due (fire_at <= now).
+        let due = next_cron_fire("0 0 * * * *", None, now).expect("hourly parses");
+        assert!(due <= now, "an occurrence inside the grace window is due");
+
+        // Fired moments ago: the next occurrence is in the future.
+        let fired = next_cron_fire("0 0 * * * *", Some(now), now).expect("hourly parses");
+        assert!(fired > now, "a just-fired schedule waits for the next slot");
+
+        // Garbage never fires.
+        assert!(next_cron_fire("not-a-cron", None, now).is_none());
+    }
+
+    #[test]
+    fn cron_prompt_names_each_due_flow() {
+        let due = vec![
+            WaveCronDef {
+                flow: "qa".into(),
+                schedule: "* * * * * *".into(),
+            },
+            WaveCronDef {
+                flow: "wave-polish".into(),
+                schedule: "0 0 0 * * Mon *".into(),
+            },
+        ];
+        assert_eq!(
+            cron_prompt(&due),
+            "cron due: qa — dispatch it\ncron due: wave-polish — dispatch it"
+        );
+    }
+
+    /// A due schedule in GOAL.md frontmatter opens a system turn while idle.
+    #[tokio::test]
+    async fn cron_due_opens_a_system_turn() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Every second: due immediately at boot (grace window), and the
+        // heartbeat is far away so the first input is the cron's.
+        write_goal_with_crons(tmp.path(), "  - flow: qa\n    schedule: '* * * * * *'\n");
+        let mind = boot_in(tmp, Duration::from_secs(600)).await;
+
+        wait_for("cron turn sent", || mind.input_count() >= 1).await;
+        assert_eq!(mind.inputs.lock().unwrap()[0], "cron due: qa — dispatch it");
+    }
+
+    /// A schedule with no occurrence between the grace window and now stays
+    /// quiet — no turn opens.
+    #[tokio::test]
+    async fn cron_not_due_stays_quiet() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_goal_with_crons(
+            tmp.path(),
+            "  - flow: qa\n    schedule: '0 0 0 1 1 * 2099'\n",
+        );
+        let mind = boot_in(tmp, Duration::from_secs(600)).await;
+
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(mind.input_count(), 0, "nothing due, nothing fired");
     }
 
     #[tokio::test]

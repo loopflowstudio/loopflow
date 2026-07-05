@@ -1,10 +1,9 @@
 use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
-use crate::lfd::config::{ExecutorConfig, GitHubConfig, HttpSecurityConfig};
+use crate::lfd::config::{GitHubConfig, HttpSecurityConfig};
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::output::OutputHub;
-use crate::lfd::scheduler::Scheduler;
 use crate::lfdb::{open_store, StorageConfig};
 use crate::provider_auth::ProviderAuthService;
 use std::path::Path;
@@ -22,24 +21,12 @@ pub async fn test_http_state() -> HttpState {
             .await
             .expect("open sqlite store"),
     );
-    let scheduler = Arc::new(Scheduler::new(1));
     let output_hub = OutputHub::new(128, tmp.path().join("output"));
     let event_hub = EventHub::new(128);
-    let executor = Arc::new(
-        WaveExecutor::new(
-            store.clone(),
-            scheduler.clone(),
-            output_hub.clone(),
-            event_hub.clone(),
-            ExecutorConfig::default(),
-            GitHubConfig::default(),
-        )
-        .expect("build executor"),
-    );
+    let executor = Arc::new(WaveExecutor::new(store.clone(), event_hub.clone()));
 
     HttpState {
         store: store.clone(),
-        scheduler,
         executor,
         event_hub,
         output_hub,

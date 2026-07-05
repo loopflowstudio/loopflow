@@ -4,8 +4,7 @@ use time::OffsetDateTime;
 
 use crate::lfd::queue::QueueRunView;
 use crate::lfd::types::{
-    ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState, Run,
-    RunStatus, Session, Trigger, WaveCron,
+    AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState, Run, RunStatus, Session,
 };
 use crate::lfdb::TokenUsageReport;
 
@@ -15,7 +14,6 @@ pub struct HealthResponse {
     pub uptime_seconds: i64,
     pub database: bool,
     pub waves_running: u32,
-    pub agents_active: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -25,18 +23,12 @@ pub struct StatusResponse {
     pub role: String,
     pub waves_defined: u32,
     pub waves_running: u32,
-    pub agents_active: u32,
-    pub slots_used: u32,
-    pub slots_total: u32,
 }
 
 #[derive(Debug, Serialize)]
 pub struct MetricsResponse {
     pub waves_total: u32,
     pub waves_running: u32,
-    pub agents_active: u32,
-    pub slots_used: u32,
-    pub slots_total: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -97,8 +89,6 @@ pub struct WaveDto {
     pub flow_steps: Vec<String>,
     pub has_stale_pr_state: bool,
     pub workers: u32,
-    pub triggers: Vec<TriggerDto>,
-    pub crons: Vec<WaveCronDto>,
     /// Per-repo execution state, one entry per repo the wave runs in.
     pub repos: Vec<RepoWorkDto>,
     /// Parent wave in the chord tree. `null` for a root wave. Always emitted
@@ -184,32 +174,6 @@ pub struct PullRequestDto {
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TriggerDto {
-    pub id: String,
-    pub signal: String,
-    pub enabled: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub flow: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_wave_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_main_sha: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_triggered_at: Option<i64>,
-    pub created_at: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct WaveCronDto {
-    pub id: String,
-    pub flow: String,
-    pub schedule: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_triggered_at: Option<i64>,
-    pub created_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -342,18 +306,6 @@ pub struct WaveAgentTreeDto {
     pub sessions: Vec<WaveAgentTreeSessionDto>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ActivationLogDto {
-    pub id: String,
-    pub object: String,
-    pub wave_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trigger_id: Option<String>,
-    pub reason: String,
-    pub outcome: String,
-    pub created_at: Option<String>,
-}
-
 #[derive(Debug, Serialize)]
 pub struct ChatMemoryBlockDto {
     pub object: String,
@@ -470,41 +422,6 @@ pub fn run_dto(
         queue_blocked_at: format_datetime(queue_view.and_then(|value| value.blocked_at)),
         next_action: queue_view.map(|value| value.next_action.as_str().to_string()),
         created_at: format_datetime(run.started_at),
-    }
-}
-
-pub fn trigger_dto(t: Trigger) -> TriggerDto {
-    TriggerDto {
-        id: t.id.to_string(),
-        signal: t.signal.as_str().to_string(),
-        enabled: t.enabled,
-        flow: t.flow,
-        source_wave_id: t.source_wave_id.map(|value| value.to_string()),
-        last_main_sha: t.last_main_sha,
-        last_triggered_at: t.last_triggered_at,
-        created_at: format_datetime(t.created_at),
-    }
-}
-
-pub fn wave_cron_dto(cron: WaveCron) -> WaveCronDto {
-    WaveCronDto {
-        id: cron.id.to_string(),
-        flow: cron.flow,
-        schedule: cron.schedule,
-        last_triggered_at: cron.last_triggered_at,
-        created_at: format_datetime(cron.created_at),
-    }
-}
-
-pub fn activation_log_dto(log: ActivationLog) -> ActivationLogDto {
-    ActivationLogDto {
-        id: log.id.to_string(),
-        object: "activation_log".to_string(),
-        wave_id: log.wave_id.to_string(),
-        trigger_id: log.trigger_id.map(|id| id.to_string()),
-        reason: log.reason,
-        outcome: log.outcome.as_str().to_string(),
-        created_at: format_datetime(time::OffsetDateTime::from_unix_timestamp(log.created_at).ok()),
     }
 }
 
@@ -673,8 +590,6 @@ mod contract_tests {
             area: Vec::new(),
             agent: None,
             step_agents: None,
-            triggers: Vec::new(),
-            crons: Vec::new(),
             status: "idle".to_string(),
             workers: 1,
             created_at: None,
@@ -721,32 +636,5 @@ mod contract_tests {
 
         let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
         assert!(err.to_string().contains("missing field `repos`"));
-    }
-
-    #[test]
-    fn trigger_fixture_deserializes() {
-        let json = fixture("trigger.json");
-        let trigger: TriggerDto = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(trigger.id, "trig_abc123");
-        assert_eq!(trigger.signal, "wave");
-        assert!(trigger.enabled);
-        assert_eq!(trigger.flow.as_deref(), Some("build"));
-        assert_eq!(trigger.source_wave_id.as_deref(), Some("wave_upstream"));
-        assert_eq!(trigger.last_main_sha.as_deref(), Some("deadbeef1234"));
-        assert_eq!(trigger.last_triggered_at, Some(1737000000));
-    }
-
-    #[test]
-    fn activation_log_fixture_deserializes() {
-        let json = fixture("activation_log.json");
-        let log: ActivationLogDto = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(log.id, "act_abc123");
-        assert_eq!(log.object, "activation_log");
-        assert_eq!(log.wave_id, "wave_abc123");
-        assert_eq!(log.trigger_id.as_deref(), Some("trig_001"));
-        assert_eq!(log.outcome, "started");
-        assert!(log.reason.contains("main"));
     }
 }

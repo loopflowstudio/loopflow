@@ -210,12 +210,21 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "049_runs_rename",
         sql: include_str!("migrations/049_runs_rename.sql"),
     },
+    Migration {
+        version: "050_drop_trigger_organs",
+        sql: include_str!("migrations/050_drop_trigger_organs.sql"),
+    },
 ];
 
-/// Migrations that rename schema objects fresh dbs never had under the old
-/// names (the collapse edited historical CREATEs in place): their "no such
-/// table/column" failure means "already in the target state".
-const RENAME_CONVERGENCE_MIGRATIONS: &[&str] = &["048_terminal_sessions_run_id", "049_runs_rename"];
+/// Migrations that rename or drop schema objects some dbs never had (the
+/// collapse edited historical CREATEs in place; drops may re-run against an
+/// already-converged db): their "no such table/column" failure means
+/// "already in the target state".
+const RENAME_CONVERGENCE_MIGRATIONS: &[&str] = &[
+    "048_terminal_sessions_run_id",
+    "049_runs_rename",
+    "050_drop_trigger_organs",
+];
 
 /// Per-migration failures that mean "the db is already in the target state":
 /// record the migration as applied and converge instead of crashing.
@@ -471,14 +480,24 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        for expected in ["waves", "repos", "triggers", "runs"] {
+        for expected in ["waves", "repos", "runs", "terminal_sessions"] {
             assert!(
                 tables.iter().any(|t| t == expected),
                 "expected table {expected} not found; tables: {tables:?}"
             );
         }
 
-        for unexpected in ["chords", "chord_members"] {
+        // Chords died long ago; the trigger organs died in migration 050.
+        for unexpected in [
+            "chords",
+            "chord_members",
+            "triggers",
+            "stimuli",
+            "pending_activations",
+            "activation_log",
+            "agents",
+            "wave_crons",
+        ] {
             assert!(
                 tables.iter().all(|t| t != unexpected),
                 "unexpected table {unexpected} found; tables: {tables:?}"
@@ -556,15 +575,17 @@ mod drift_tests {
     #[test]
     fn runs_rename_converges_an_old_schema_db() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
+        // Old-world shape: pre-rename table names, and runs still carrying
+        // the activation_log_id column migration 050 removes.
         conn.execute_batch(
-            "CREATE TABLE wave_runs (id TEXT PRIMARY KEY, wave_id TEXT NOT NULL);
+            "CREATE TABLE wave_runs (id TEXT PRIMARY KEY, wave_id TEXT NOT NULL, activation_log_id TEXT);
              CREATE TABLE agents (id TEXT PRIMARY KEY, wave_run_id TEXT);
              CREATE TABLE fork_runs (id TEXT PRIMARY KEY, wave_run_id TEXT);
              CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);",
         )
         .unwrap();
         for m in migrations() {
-            if m.version != "049_runs_rename" {
+            if m.version != "049_runs_rename" && m.version != "050_drop_trigger_organs" {
                 conn.execute(
                     "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, 0)",
                     rusqlite::params![m.version],
@@ -581,21 +602,26 @@ mod drift_tests {
             )
             .unwrap();
         assert!(runs_exists, "wave_runs should be renamed to runs");
-        for table in ["agents", "fork_runs"] {
-            let has_run_id: bool = conn
-                .query_row(
-                    &format!(
-                        "SELECT COUNT(*) > 0 FROM pragma_table_info('{table}') WHERE name='run_id'"
-                    ),
-                    [],
-                    |r| r.get(0),
-                )
-                .unwrap();
-            assert!(
-                has_run_id,
-                "{table}.wave_run_id should be renamed to run_id"
-            );
-        }
+        let has_run_id: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('fork_runs') WHERE name='run_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            has_run_id,
+            "fork_runs.wave_run_id should be renamed to run_id"
+        );
+        // Migration 050 drops the agents table after 049 renamed its column.
+        let agents_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='agents'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!agents_exists, "agents should be dropped by migration 050");
     }
 
     #[test]

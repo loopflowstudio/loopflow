@@ -11,10 +11,9 @@ use std::sync::Arc;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
-    ExecutionProcess, LivePrState, LivePullRequestState, PendingActivation, QueueBlock,
-    QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus, Session, SessionStatus,
-    Summary, Trigger, Wave, WaveCron,
+    AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage, LivePrState,
+    LivePullRequestState, QueueBlock, QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run,
+    RunStackStatus, Session, SessionStatus, Summary, Wave,
 };
 
 pub mod catalog;
@@ -254,42 +253,6 @@ impl Store {
         WaveStateStore::list_waves(self, repo).await
     }
 
-    pub async fn list_loopable_waves(&self) -> StoreResult<Vec<Wave>> {
-        WaveStateStore::list_loopable_waves(self).await
-    }
-
-    pub async fn list_wave_crons(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveCron>> {
-        WaveStateStore::list_wave_crons(self, wave_id).await
-    }
-
-    pub async fn list_all_active_crons(&self) -> StoreResult<Vec<WaveCron>> {
-        WaveStateStore::list_all_active_crons(self).await
-    }
-
-    pub async fn create_wave_cron(&self, cron: &WaveCron) -> StoreResult<()> {
-        WaveStateStore::create_wave_cron(self, cron).await
-    }
-
-    pub async fn replace_wave_crons(&self, wave_id: &LfdId, crons: &[WaveCron]) -> StoreResult<()> {
-        self.delete_wave_crons(wave_id).await?;
-        for cron in crons {
-            self.create_wave_cron(cron).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn update_wave_cron_last_triggered(
-        &self,
-        cron_id: &LfdId,
-        last_triggered_at: Option<i64>,
-    ) -> StoreResult<()> {
-        WaveStateStore::update_wave_cron_last_triggered(self, cron_id, last_triggered_at).await
-    }
-
-    pub async fn delete_wave_crons(&self, wave_id: &LfdId) -> StoreResult<()> {
-        WaveStateStore::delete_wave_crons(self, wave_id).await
-    }
-
     pub async fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>> {
         WaveStateStore::list_wave_repos(self, wave_id).await
     }
@@ -460,82 +423,6 @@ impl Store {
         WaveStateStore::record_merge_event(self, event).await
     }
 
-    pub async fn list_triggers(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Trigger>> {
-        WaveStateStore::list_triggers(self, wave_id).await
-    }
-
-    pub async fn list_triggers_by_signal(&self, signal: i32) -> StoreResult<Vec<Trigger>> {
-        WaveStateStore::list_triggers_by_signal(self, signal).await
-    }
-
-    pub async fn get_trigger(&self, trigger_id: &LfdId) -> StoreResult<Option<Trigger>> {
-        WaveStateStore::get_trigger(self, trigger_id).await
-    }
-
-    pub async fn create_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
-        WaveStateStore::create_trigger(self, trigger).await
-    }
-
-    pub async fn update_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
-        WaveStateStore::update_trigger(self, trigger).await
-    }
-
-    pub async fn delete_trigger(&self, trigger_id: &LfdId) -> StoreResult<()> {
-        WaveStateStore::delete_trigger(self, trigger_id).await
-    }
-
-    pub async fn list_pending_activations(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Vec<PendingActivation>> {
-        WaveStateStore::list_pending_activations(self, wave_id).await
-    }
-
-    pub async fn create_pending_activation(
-        &self,
-        activation: &PendingActivation,
-    ) -> StoreResult<()> {
-        WaveStateStore::create_pending_activation(self, activation).await
-    }
-
-    pub async fn update_pending_activation(
-        &self,
-        activation: &PendingActivation,
-    ) -> StoreResult<()> {
-        WaveStateStore::update_pending_activation(self, activation).await
-    }
-
-    pub async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32> {
-        WaveStateStore::delete_pending_activation_by_id(self, activation_id).await
-    }
-
-    pub async fn get_pending_for_trigger(
-        &self,
-        wave_id: &LfdId,
-        trigger_id: Option<&LfdId>,
-    ) -> StoreResult<Option<PendingActivation>> {
-        WaveStateStore::get_pending_for_trigger(self, wave_id, trigger_id).await
-    }
-
-    pub async fn create_activation_log(&self, log: &ActivationLog) -> StoreResult<()> {
-        WaveStateStore::create_activation_log(self, log).await
-    }
-
-    pub async fn list_activation_log(
-        &self,
-        wave_id: &LfdId,
-        limit: u32,
-    ) -> StoreResult<Vec<ActivationLog>> {
-        WaveStateStore::list_activation_log(self, wave_id, limit).await
-    }
-
-    pub async fn get_activation_log(
-        &self,
-        activation_log_id: &LfdId,
-    ) -> StoreResult<Option<ActivationLog>> {
-        WaveStateStore::get_activation_log(self, activation_log_id).await
-    }
-
     pub async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
         WaveStateStore::get_summary(self, wave_id).await
     }
@@ -629,71 +516,6 @@ impl Store {
 
     pub async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
         ExecutionStore::delete_fork_runs(self, run_id, step_index).await
-    }
-
-    pub async fn list_agents(&self) -> StoreResult<Vec<ExecutionProcess>> {
-        ExecutionStore::list_agents(self).await
-    }
-
-    pub async fn list_agent_history(
-        &self,
-        worktree: Option<&str>,
-        repo: Option<&str>,
-        limit: Option<u32>,
-    ) -> StoreResult<Vec<ExecutionProcess>> {
-        ExecutionStore::list_agent_history(self, worktree, repo, limit).await
-    }
-
-    pub async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<ExecutionProcess>> {
-        ExecutionStore::get_agent(self, agent_id).await
-    }
-
-    pub async fn get_waiting_agent_for_wave(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Option<ExecutionProcess>> {
-        ExecutionStore::get_waiting_agent_for_wave(self, wave_id).await
-    }
-
-    pub async fn start_agent(&self, execution_run: &ExecutionProcess) -> StoreResult<()> {
-        ExecutionStore::start_agent(self, execution_run).await
-    }
-
-    pub async fn update_agent_status(
-        &self,
-        agent_id: &LfdId,
-        status: i32,
-        pid: Option<u32>,
-        container_id: Option<&str>,
-    ) -> StoreResult<()> {
-        ExecutionStore::update_agent_status(self, agent_id, status, pid, container_id).await
-    }
-
-    pub async fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
-        ExecutionStore::end_agent(self, agent_id, status, ended_at).await
-    }
-
-    pub async fn get_active_agents_for_wave(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Vec<ExecutionProcess>> {
-        ExecutionStore::get_active_agents_for_wave(self, wave_id).await
-    }
-
-    pub async fn end_active_agent_for_wave(
-        &self,
-        wave_id: &LfdId,
-        status: i32,
-        ended_at: i64,
-    ) -> StoreResult<()> {
-        ExecutionStore::end_active_agent_for_wave(self, wave_id, status, ended_at).await
-    }
-
-    pub async fn get_stuck_agents(
-        &self,
-        older_than_secs: u64,
-    ) -> StoreResult<Vec<ExecutionProcess>> {
-        ExecutionStore::get_stuck_agents(self, older_than_secs).await
     }
 
     pub async fn fail_orphaned_runs(&self) -> StoreResult<u32> {
@@ -828,22 +650,12 @@ impl Store {
 #[async_trait::async_trait]
 pub trait WaveStateStore: Send + Sync {
     async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>>;
-    async fn list_loopable_waves(&self) -> StoreResult<Vec<Wave>>;
-    async fn list_wave_crons(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveCron>>;
-    async fn list_all_active_crons(&self) -> StoreResult<Vec<WaveCron>>;
     async fn children_of(&self, parent: &LfdId) -> StoreResult<Vec<Wave>>;
     async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>>;
     async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>>;
     async fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
     async fn update_wave(&self, wave: &Wave) -> StoreResult<()>;
     async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
-    async fn create_wave_cron(&self, cron: &WaveCron) -> StoreResult<()>;
-    async fn update_wave_cron_last_triggered(
-        &self,
-        cron_id: &LfdId,
-        last_triggered_at: Option<i64>,
-    ) -> StoreResult<()>;
-    async fn delete_wave_crons(&self, wave_id: &LfdId) -> StoreResult<()>;
     async fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>>;
     async fn upsert_wave_repo(&self, wave_id: &LfdId, repo: &RepoWork) -> StoreResult<()>;
     async fn delete_wave_repos(&self, wave_id: &LfdId) -> StoreResult<()>;
@@ -883,35 +695,6 @@ pub trait WaveStateStore: Send + Sync {
     async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32>;
     async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool>;
 
-    async fn list_triggers(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Trigger>>;
-    async fn list_triggers_by_signal(&self, signal: i32) -> StoreResult<Vec<Trigger>>;
-    async fn get_trigger(&self, trigger_id: &LfdId) -> StoreResult<Option<Trigger>>;
-    async fn create_trigger(&self, trigger: &Trigger) -> StoreResult<()>;
-    async fn update_trigger(&self, trigger: &Trigger) -> StoreResult<()>;
-    async fn delete_trigger(&self, trigger_id: &LfdId) -> StoreResult<()>;
-    async fn list_pending_activations(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Vec<PendingActivation>>;
-    async fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
-    async fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
-    async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32>;
-    async fn get_pending_for_trigger(
-        &self,
-        wave_id: &LfdId,
-        trigger_id: Option<&LfdId>,
-    ) -> StoreResult<Option<PendingActivation>>;
-    async fn create_activation_log(&self, log: &ActivationLog) -> StoreResult<()>;
-    async fn list_activation_log(
-        &self,
-        wave_id: &LfdId,
-        limit: u32,
-    ) -> StoreResult<Vec<ActivationLog>>;
-    async fn get_activation_log(
-        &self,
-        activation_log_id: &LfdId,
-    ) -> StoreResult<Option<ActivationLog>>;
-
     async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>>;
     async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()>;
 
@@ -946,39 +729,6 @@ pub trait ExecutionStore: Send + Sync {
     async fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>>;
     async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()>;
     async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32>;
-
-    async fn list_agents(&self) -> StoreResult<Vec<ExecutionProcess>>;
-    async fn list_agent_history(
-        &self,
-        worktree: Option<&str>,
-        repo: Option<&str>,
-        limit: Option<u32>,
-    ) -> StoreResult<Vec<ExecutionProcess>>;
-    async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<ExecutionProcess>>;
-    async fn get_waiting_agent_for_wave(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Option<ExecutionProcess>>;
-    async fn start_agent(&self, execution_run: &ExecutionProcess) -> StoreResult<()>;
-    async fn update_agent_status(
-        &self,
-        agent_id: &LfdId,
-        status: i32,
-        pid: Option<u32>,
-        container_id: Option<&str>,
-    ) -> StoreResult<()>;
-    async fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()>;
-    async fn get_active_agents_for_wave(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Vec<ExecutionProcess>>;
-    async fn end_active_agent_for_wave(
-        &self,
-        wave_id: &LfdId,
-        status: i32,
-        ended_at: i64,
-    ) -> StoreResult<()>;
-    async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<ExecutionProcess>>;
 
     async fn fail_orphaned_runs(&self) -> StoreResult<u32>;
 }
@@ -1088,35 +838,6 @@ impl WaveStateStore for Store {
         self.attach_repos_vec(waves).await
     }
 
-    async fn list_loopable_waves(&self) -> StoreResult<Vec<Wave>> {
-        let waves = match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                run_sqlite(store, move |store| store.list_loopable_waves()).await
-            }
-            StoreBackend::Postgres(store) => store.list_loopable_waves().await,
-        }?;
-        self.attach_repos_vec(waves).await
-    }
-
-    async fn list_wave_crons(&self, wave_id: &LfdId) -> StoreResult<Vec<WaveCron>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.list_wave_crons(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.list_wave_crons(wave_id).await,
-        }
-    }
-
-    async fn list_all_active_crons(&self) -> StoreResult<Vec<WaveCron>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                run_sqlite(store, move |store| store.list_all_active_crons()).await
-            }
-            StoreBackend::Postgres(store) => store.list_all_active_crons().await,
-        }
-    }
-
     async fn children_of(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
         let waves = match &self.backend {
             StoreBackend::Sqlite(store) => {
@@ -1177,47 +898,6 @@ impl WaveStateStore for Store {
                 run_sqlite(store, move |store| store.delete_wave(&wave_id)).await
             }
             StoreBackend::Postgres(store) => store.delete_wave(wave_id).await,
-        }
-    }
-
-    async fn create_wave_cron(&self, cron: &WaveCron) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let cron = cron.clone();
-                run_sqlite(store, move |store| store.create_wave_cron(&cron)).await
-            }
-            StoreBackend::Postgres(store) => store.create_wave_cron(cron).await,
-        }
-    }
-
-    async fn update_wave_cron_last_triggered(
-        &self,
-        cron_id: &LfdId,
-        last_triggered_at: Option<i64>,
-    ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let cron_id = cron_id.clone();
-                run_sqlite(store, move |store| {
-                    store.update_wave_cron_last_triggered(&cron_id, last_triggered_at)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .update_wave_cron_last_triggered(cron_id, last_triggered_at)
-                    .await
-            }
-        }
-    }
-
-    async fn delete_wave_crons(&self, wave_id: &LfdId) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.delete_wave_crons(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.delete_wave_crons(wave_id).await,
         }
     }
 
@@ -1510,182 +1190,6 @@ impl WaveStateStore for Store {
         }
     }
 
-    async fn list_triggers(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Trigger>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.cloned();
-                run_sqlite(store, move |store| store.list_triggers(wave_id.as_ref())).await
-            }
-            StoreBackend::Postgres(store) => store.list_triggers(wave_id).await,
-        }
-    }
-
-    async fn list_triggers_by_signal(&self, signal: i32) -> StoreResult<Vec<Trigger>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                run_sqlite(store, move |store| store.list_triggers_by_signal(signal)).await
-            }
-            StoreBackend::Postgres(store) => store.list_triggers_by_signal(signal).await,
-        }
-    }
-
-    async fn get_trigger(&self, trigger_id: &LfdId) -> StoreResult<Option<Trigger>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let trigger_id = trigger_id.clone();
-                run_sqlite(store, move |store| store.get_trigger(&trigger_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_trigger(trigger_id).await,
-        }
-    }
-
-    async fn create_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let trigger = trigger.clone();
-                run_sqlite(store, move |store| store.create_trigger(&trigger)).await
-            }
-            StoreBackend::Postgres(store) => store.create_trigger(trigger).await,
-        }
-    }
-
-    async fn update_trigger(&self, trigger: &Trigger) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let trigger = trigger.clone();
-                run_sqlite(store, move |store| store.update_trigger(&trigger)).await
-            }
-            StoreBackend::Postgres(store) => store.update_trigger(trigger).await,
-        }
-    }
-
-    async fn delete_trigger(&self, trigger_id: &LfdId) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let trigger_id = trigger_id.clone();
-                run_sqlite(store, move |store| store.delete_trigger(&trigger_id)).await
-            }
-            StoreBackend::Postgres(store) => store.delete_trigger(trigger_id).await,
-        }
-    }
-
-    async fn list_pending_activations(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Vec<PendingActivation>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| store.list_pending_activations(&wave_id)).await
-            }
-            StoreBackend::Postgres(store) => store.list_pending_activations(wave_id).await,
-        }
-    }
-
-    async fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let activation = activation.clone();
-                run_sqlite(store, move |store| {
-                    store.create_pending_activation(&activation)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.create_pending_activation(activation).await,
-        }
-    }
-
-    async fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let activation = activation.clone();
-                run_sqlite(store, move |store| {
-                    store.update_pending_activation(&activation)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.update_pending_activation(activation).await,
-        }
-    }
-
-    async fn delete_pending_activation_by_id(&self, activation_id: &LfdId) -> StoreResult<u32> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let activation_id = activation_id.clone();
-                run_sqlite(store, move |store| {
-                    store.delete_pending_activation_by_id(&activation_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store.delete_pending_activation_by_id(activation_id).await
-            }
-        }
-    }
-
-    async fn get_pending_for_trigger(
-        &self,
-        wave_id: &LfdId,
-        trigger_id: Option<&LfdId>,
-    ) -> StoreResult<Option<PendingActivation>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                let trigger_id = trigger_id.cloned();
-                run_sqlite(store, move |store| {
-                    store.get_pending_for_trigger(&wave_id, trigger_id.as_ref())
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store.get_pending_for_trigger(wave_id, trigger_id).await
-            }
-        }
-    }
-
-    async fn create_activation_log(&self, log: &ActivationLog) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let log = log.clone();
-                run_sqlite(store, move |store| store.create_activation_log(&log)).await
-            }
-            StoreBackend::Postgres(store) => store.create_activation_log(log).await,
-        }
-    }
-
-    async fn list_activation_log(
-        &self,
-        wave_id: &LfdId,
-        limit: u32,
-    ) -> StoreResult<Vec<ActivationLog>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| {
-                    store.list_activation_log(&wave_id, limit)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.list_activation_log(wave_id, limit).await,
-        }
-    }
-
-    async fn get_activation_log(
-        &self,
-        activation_log_id: &LfdId,
-    ) -> StoreResult<Option<ActivationLog>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let activation_log_id = activation_log_id.clone();
-                run_sqlite(store, move |store| {
-                    store.get_activation_log(&activation_log_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.get_activation_log(activation_log_id).await,
-        }
-    }
-
     async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
@@ -1922,152 +1426,6 @@ impl ExecutionStore for Store {
                 .await
             }
             StoreBackend::Postgres(store) => store.delete_fork_runs(run_id, step_index).await,
-        }
-    }
-
-    async fn list_agents(&self) -> StoreResult<Vec<ExecutionProcess>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => run_sqlite(store, |store| store.list_agents()).await,
-            StoreBackend::Postgres(store) => store.list_agents().await,
-        }
-    }
-
-    async fn list_agent_history(
-        &self,
-        worktree: Option<&str>,
-        repo: Option<&str>,
-        limit: Option<u32>,
-    ) -> StoreResult<Vec<ExecutionProcess>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let worktree = worktree.map(str::to_string);
-                let repo = repo.map(str::to_string);
-                run_sqlite(store, move |store| {
-                    store.list_agent_history(worktree.as_deref(), repo.as_deref(), limit)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.list_agent_history(worktree, repo, limit).await,
-        }
-    }
-
-    async fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<ExecutionProcess>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let agent_id = agent_id.clone();
-                run_sqlite(store, move |store| store.get_agent(&agent_id)).await
-            }
-            StoreBackend::Postgres(store) => store.get_agent(agent_id).await,
-        }
-    }
-
-    async fn get_waiting_agent_for_wave(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Option<ExecutionProcess>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| {
-                    store.get_waiting_agent_for_wave(&wave_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.get_waiting_agent_for_wave(wave_id).await,
-        }
-    }
-
-    async fn start_agent(&self, execution_run: &ExecutionProcess) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let execution_run = execution_run.clone();
-                run_sqlite(store, move |store| store.start_agent(&execution_run)).await
-            }
-            StoreBackend::Postgres(store) => store.start_agent(execution_run).await,
-        }
-    }
-
-    async fn update_agent_status(
-        &self,
-        agent_id: &LfdId,
-        status: i32,
-        pid: Option<u32>,
-        container_id: Option<&str>,
-    ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let agent_id = agent_id.clone();
-                let container_id = container_id.map(str::to_string);
-                run_sqlite(store, move |store| {
-                    store.update_agent_status(&agent_id, status, pid, container_id.as_deref())
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .update_agent_status(agent_id, status, pid, container_id)
-                    .await
-            }
-        }
-    }
-
-    async fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let agent_id = agent_id.clone();
-                run_sqlite(store, move |store| {
-                    store.end_agent(&agent_id, status, ended_at)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.end_agent(agent_id, status, ended_at).await,
-        }
-    }
-
-    async fn get_active_agents_for_wave(
-        &self,
-        wave_id: &LfdId,
-    ) -> StoreResult<Vec<ExecutionProcess>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| {
-                    store.get_active_agents_for_wave(&wave_id)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => store.get_active_agents_for_wave(wave_id).await,
-        }
-    }
-
-    async fn end_active_agent_for_wave(
-        &self,
-        wave_id: &LfdId,
-        status: i32,
-        ended_at: i64,
-    ) -> StoreResult<()> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                let wave_id = wave_id.clone();
-                run_sqlite(store, move |store| {
-                    store.end_active_agent_for_wave(&wave_id, status, ended_at)
-                })
-                .await
-            }
-            StoreBackend::Postgres(store) => {
-                store
-                    .end_active_agent_for_wave(wave_id, status, ended_at)
-                    .await
-            }
-        }
-    }
-
-    async fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<ExecutionProcess>> {
-        match &self.backend {
-            StoreBackend::Sqlite(store) => {
-                run_sqlite(store, move |store| store.get_stuck_agents(older_than_secs)).await
-            }
-            StoreBackend::Postgres(store) => store.get_stuck_agents(older_than_secs).await,
         }
     }
 
@@ -2335,10 +1693,9 @@ mod tests {
     use super::{ExecutionStore, ForkRun, ForkRunStatus, RunTokenUsage, StorageConfig};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        ChatMemoryBlock, ExecutionProcess, ExecutionProcessStatus, LivePrState,
-        LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, QueueMergeEvent, Repo,
-        RepoEdge, RepoId, RepoWork, Run, RunStackStatus, RunStatus, Signal, Summary, Trigger, Wave,
-        WaveCron, WaveMode, WaveStatus,
+        ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest, QueueBlock,
+        QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus,
+        RunStatus, Summary, Wave, WaveMode, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -2352,7 +1709,6 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            crons: Vec::new(),
             repos: vec![RepoWork {
                 repo: repo.to_string(),
                 worktree: String::new(),
@@ -2390,7 +1746,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             execution_cursor: None,
-            activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -2419,39 +1774,6 @@ mod tests {
         assert_eq!(loaded.repos.len(), 1);
         assert_eq!(loaded.repos[0].repo, "/repo");
         assert_eq!(loaded.repos[0].status, WaveStatus::Paused);
-        let loopable = store
-            .list_loopable_waves()
-            .await
-            .expect("list loopable waves");
-        assert!(loopable.iter().all(|candidate| candidate.id() != wave.id()));
-
-        let cron = WaveCron {
-            id: LfdId::new(),
-            wave_id: wave.id().clone(),
-            flow: "wave-polish".to_string(),
-            schedule: "0 0 * * 1".to_string(),
-            last_triggered_at: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-        };
-        store
-            .create_wave_cron(&cron)
-            .await
-            .expect("create wave cron");
-        let listed_crons = store
-            .list_wave_crons(wave.id())
-            .await
-            .expect("list wave crons");
-        assert_eq!(listed_crons.len(), 1);
-        assert_eq!(listed_crons[0].flow, "wave-polish");
-        store
-            .update_wave_cron_last_triggered(&cron.id, Some(1234))
-            .await
-            .expect("update cron last_triggered_at");
-        let updated_crons = store
-            .list_wave_crons(wave.id())
-            .await
-            .expect("list updated wave crons");
-        assert_eq!(updated_crons[0].last_triggered_at, Some(1234));
 
         let repo = Repo {
             path: "/tmp/repo".to_string(),
@@ -2540,35 +1862,6 @@ mod tests {
             .expect("list edges after delete")
             .is_empty());
 
-        let source_wave = make_wave("/repo");
-        store
-            .create_wave(&source_wave)
-            .await
-            .expect("create source wave");
-
-        let trigger = Trigger {
-            id: LfdId::new(),
-            wave_id: wave.id().clone(),
-            source_wave_id: Some(source_wave.id().clone()),
-            signal: Signal::Wave,
-            flow: None,
-            last_main_sha: None,
-            last_triggered_at: None,
-            created_at: Some(OffsetDateTime::now_utc()),
-            enabled: true,
-            max_iterations: None,
-        };
-        store
-            .create_trigger(&trigger)
-            .await
-            .expect("create trigger");
-        let triggers = store
-            .list_triggers(Some(wave.id()))
-            .await
-            .expect("list triggers");
-        assert_eq!(triggers.len(), 1);
-        assert_eq!(triggers[0].source_wave_id.as_ref(), Some(source_wave.id()));
-
         let run = make_run(&wave, RunStatus::Running);
         store.create_run(&run).await.expect("create wave run");
         assert!(store
@@ -2614,30 +1907,6 @@ mod tests {
             .await
             .expect("delete fork runs");
         assert_eq!(deleted_forks, 1);
-
-        let execution_run = ExecutionProcess {
-            id: LfdId::new(),
-            step: "plan".to_string(),
-            repo: "/repo".to_string(),
-            worktree: "/repo".to_string(),
-            run_id: Some(run.id.clone()),
-            status: ExecutionProcessStatus::Waiting,
-            started_at: Some(OffsetDateTime::now_utc()),
-            ended_at: None,
-            pid: None,
-            container_id: None,
-            agent: "claude-code".to_string(),
-            run_mode: "auto".to_string(),
-        };
-        store
-            .start_agent(&execution_run)
-            .await
-            .expect("start agent");
-        assert!(store
-            .get_waiting_agent_for_wave(wave.id())
-            .await
-            .expect("get waiting")
-            .is_some());
 
         let summary = Summary {
             id: LfdId::new(),
@@ -3357,7 +2626,6 @@ mod tests {
                     error: None,
                     flow_parents: Vec::new(),
                     execution_cursor: None,
-                    activation_log_id: None,
                     parent_run_id,
                     parent_pr_number,
                     stack_position: iteration.saturating_sub(1),

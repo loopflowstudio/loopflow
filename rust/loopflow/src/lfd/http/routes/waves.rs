@@ -12,25 +12,20 @@ use tracing::warn;
 use super::session_controls::connection_host;
 use crate::engine::git::{branch_rename, current_branch, delete_remote_branch, push_with_upstream};
 use crate::engine::naming::sanitize_for_branch;
-use crate::engine::platform::kill_process;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
 use crate::lfd::executor::ensure_wave_worktree;
 use crate::lfd::http::dto::{
-    activation_log_dto, session_connection_info_dto, session_dto, trigger_dto, wave_cron_dto,
-    ActivationLogDto, CombineResponse, CombineResponseResult, DeletedResourceResponse,
-    ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse, StopWaveResponse,
-    WaveAgentTreeDto, WaveAgentTreeSessionDto, WaveCronDto, WaveDto,
+    session_connection_info_dto, session_dto, CombineResponse, CombineResponseResult,
+    DeletedResourceResponse, LandWaveResponse, ListResponse, NextWaveResponse, StopWaveResponse,
+    WaveAgentTreeDto, WaveAgentTreeSessionDto, WaveDto,
 };
-use crate::lfd::http::routes::wave_config::{update_wave_agent_config, WaveCronDef};
+use crate::lfd::http::routes::wave_config::update_wave_agent_config;
 use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{
-    Event, ExecutionProcessStatus, Run, RunStatus, Signal, Trigger, Wave, WaveCron, WaveStatus,
-    LIVE_SESSION_STATUSES,
-};
+use crate::lfd::types::{Event, Run, RunStatus, Wave, WaveStatus, LIVE_SESSION_STATUSES};
 
 #[derive(Debug, Deserialize)]
 pub struct ListWavesQuery {
@@ -46,11 +41,6 @@ pub struct ListWavesQuery {
 pub struct ExpandQuery {
     #[serde(default, rename = "expand[]")]
     expand: ExpandParam,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct ListActivationsQuery {
-    limit: Option<u32>,
 }
 
 /// Accept `expand[]=value` as either a single string or repeated params.
@@ -102,7 +92,6 @@ pub struct UpdateWaveRequest {
     name: Option<String>,
     flow: Option<String>,
     goal: Option<String>,
-    crons: Option<Vec<WaveCronDef>>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
     workers: Option<u32>,
@@ -110,14 +99,6 @@ pub struct UpdateWaveRequest {
     agent: Option<String>,
     step_agents: Option<std::collections::HashMap<String, String>>,
     serialized: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AddTriggerRequest {
-    signal: Signal,
-    flow: Option<String>,
-    source_wave_id: Option<String>,
-    max_iterations: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -161,32 +142,6 @@ fn trimmed_non_empty(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-}
-
-fn required_trimmed(
-    value: &str,
-    message: &'static str,
-) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
-    trimmed_non_empty(Some(value)).ok_or_else(|| api_error(StatusCode::BAD_REQUEST, message))
-}
-
-fn build_wave_crons(
-    wave_id: &LfdId,
-    cron_defs: &[WaveCronDef],
-) -> Result<Vec<WaveCron>, (StatusCode, Json<ErrorResponse>)> {
-    cron_defs
-        .iter()
-        .map(|cron| {
-            Ok(WaveCron {
-                id: LfdId::new(),
-                wave_id: wave_id.clone(),
-                flow: required_trimmed(&cron.flow, "wave cron flow is required")?,
-                schedule: required_trimmed(&cron.schedule, "wave cron schedule is required")?,
-                last_triggered_at: None,
-                created_at: Some(OffsetDateTime::now_utc()),
-            })
-        })
-        .collect()
 }
 
 fn update_wave_workers(
@@ -317,15 +272,6 @@ pub async fn update_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    if let Some(cron_defs) = payload.crons {
-        let crons = build_wave_crons(wave.id(), &cron_defs)?;
-        state
-            .store
-            .replace_wave_crons(wave.id(), &crons)
-            .await
-            .map_err(map_store_error)?;
-    }
-
     state.event_hub.send(Event::wave_updated(wave.id().clone()));
 
     let view = build_wave_dto(&state.store, &state.github, wave, false)
@@ -348,9 +294,7 @@ pub async fn delete_wave_handler(
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
-    terminate_active_agents(&state, &wave_id).await?;
-
-    // Delete from the store (cascades to runs, agents, etc.).
+    // Delete from the store (cascades to runs, sessions, etc.).
     state
         .store
         .delete_wave(&wave_id)
@@ -358,14 +302,6 @@ pub async fn delete_wave_handler(
         .map_err(map_store_error)?;
 
     crate::lfd::queue::remove_reconcile_lock(&wave_id).await;
-
-    if let Err(err) = state.executor.cleanup_wave_workspace(&wave).await {
-        warn!(
-            wave_id = %wave.id(),
-            error = %err,
-            "failed to remove executor wave workspace"
-        );
-    }
 
     // Clean up the worktree on disk.
     let repo = wave.repo().to_string();
@@ -450,158 +386,17 @@ pub async fn get_wave_agent_tree_handler(
     }))
 }
 
-// Trigger CRUD handlers
-
-pub async fn add_trigger_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-    Json(payload): Json<AddTriggerRequest>,
-) -> ApiResult<serde_json::Value> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-
-    // Verify wave exists.
-    state
-        .store
-        .get_wave(&wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-
-    let source_wave_id = match payload.signal {
-        Signal::Wave => {
-            let source = payload.source_wave_id.as_deref().ok_or_else(|| {
-                api_error(
-                    StatusCode::BAD_REQUEST,
-                    "wave trigger requires source_wave_id",
-                )
-            })?;
-            let resolved = resolve_wave_id(&state, source).await?;
-            if resolved == wave_id {
-                return Err(api_error(
-                    StatusCode::BAD_REQUEST,
-                    "wave trigger cannot target the same wave",
-                ));
-            }
-            Some(resolved)
-        }
-        _ => {
-            if payload.source_wave_id.is_some() {
-                return Err(api_error(
-                    StatusCode::BAD_REQUEST,
-                    "source_wave_id is only valid for wave trigger",
-                ));
-            }
-            None
-        }
-    };
-
-    let trigger = Trigger {
-        id: LfdId::new(),
-        wave_id,
-        source_wave_id,
-        signal: payload.signal,
-        flow: payload.flow,
-        last_main_sha: None,
-        last_triggered_at: None,
-        created_at: Some(OffsetDateTime::now_utc()),
-        enabled: true,
-        max_iterations: payload.max_iterations,
-    };
-
-    state
-        .store
-        .create_trigger(&trigger)
-        .await
-        .map_err(map_store_error)?;
-
-    Ok(Json(serde_json::json!({
-        "id": trigger.id.to_string(),
-        "signal": trigger.signal.as_str(),
-        "flow": trigger.flow,
-        "source_wave_id": trigger.source_wave_id.as_ref().map(ToString::to_string),
-    })))
-}
-
-pub async fn remove_trigger_handler(
-    State(state): State<HttpState>,
-    Path((wave_id, trigger_id)): Path<(String, String)>,
-) -> ApiResult<serde_json::Value> {
-    let _wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let trigger_id = LfdId::from_str(&trigger_id)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid trigger id"))?;
-
-    state
-        .store
-        .delete_trigger(&trigger_id)
-        .await
-        .map_err(map_store_error)?;
-
-    Ok(Json(serde_json::json!({ "deleted": true })))
-}
-
-pub async fn list_triggers_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-) -> ApiResult<serde_json::Value> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-
-    let triggers = state
-        .store
-        .list_triggers(Some(&wave_id))
-        .await
-        .map_err(map_store_error)?;
-
-    let dtos: Vec<_> = triggers.into_iter().map(trigger_dto).collect();
-
-    Ok(Json(serde_json::json!({ "data": dtos })))
-}
-
-pub async fn list_wave_crons_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-) -> ApiResult<ListResponse<WaveCronDto>> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let crons = state
-        .store
-        .list_wave_crons(&wave_id)
-        .await
-        .map_err(map_store_error)?;
-    let data = crons.into_iter().map(wave_cron_dto).collect();
-    Ok(Json(ListResponse::new(data, false)))
-}
-
-pub async fn list_activations_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-    Query(query): Query<ListActivationsQuery>,
-) -> ApiResult<ListResponse<ActivationLogDto>> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let limit = query.limit.unwrap_or(50).min(200);
-    let logs = state
-        .store
-        .list_activation_log(&wave_id, limit)
-        .await
-        .map_err(map_store_error)?;
-    let data = logs.into_iter().map(activation_log_dto).collect();
-    Ok(Json(ListResponse::new(data, false)))
-}
-
 pub async fn stop_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
 ) -> ApiResult<StopWaveResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
-    terminate_active_agents(&state, &wave_id).await?;
-
     let run = state
         .store
         .get_active_run(&wave_id)
         .await
         .map_err(map_store_error)?;
-
-    // Disable all auto triggers so tickers won't restart the wave.
-    let has_auto_trigger = set_wave_triggers_enabled(&state, &wave_id, false).await;
 
     if let Some(mut run) = run {
         run.status = RunStatus::Failed;
@@ -620,27 +415,7 @@ pub async fn stop_wave_handler(
             .await
             .map_err(map_store_error)?
         {
-            wave.set_status(if has_auto_trigger {
-                WaveStatus::Paused
-            } else {
-                WaveStatus::Failed
-            });
-            state
-                .store
-                .update_wave(&wave)
-                .await
-                .map_err(map_store_error)?;
-        }
-        mark_active_agents_failed(&state, &wave_id).await;
-    } else if has_auto_trigger {
-        // No active run, but still pause the wave so the auto trigger doesn't restart it.
-        if let Some(mut wave) = state
-            .store
-            .get_wave(&wave_id)
-            .await
-            .map_err(map_store_error)?
-        {
-            wave.set_status(WaveStatus::Paused);
+            wave.set_status(WaveStatus::Failed);
             state
                 .store
                 .update_wave(&wave)
@@ -698,39 +473,6 @@ async fn cancel_active_session(state: &HttpState, run: &Run) -> Result<(), ApiEr
     }
 
     Ok(())
-}
-
-async fn terminate_active_agents(
-    state: &HttpState,
-    wave_id: &LfdId,
-) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
-    let agents = state
-        .store
-        .get_active_agents_for_wave(wave_id)
-        .await
-        .map_err(map_store_error)?;
-
-    for agent in agents {
-        if let Err(err) = state.executor.terminate_agent(&agent.id).await {
-            warn!(agent_id = %agent.id, error = %err, "failed to terminate agent executor handle");
-        }
-        if let Some(pid) = agent.pid {
-            kill_process(pid);
-        }
-    }
-
-    Ok(())
-}
-
-async fn mark_active_agents_failed(state: &HttpState, wave_id: &LfdId) {
-    let _ = state
-        .store
-        .end_active_agent_for_wave(
-            wave_id,
-            ExecutionProcessStatus::Failed.as_i32(),
-            OffsetDateTime::now_utc().unix_timestamp(),
-        )
-        .await;
 }
 
 pub async fn land_wave_handler(
@@ -1008,25 +750,6 @@ fn resolve_wave_work_dir(
     Ok(worktree)
 }
 
-async fn set_wave_triggers_enabled(state: &HttpState, wave_id: &LfdId, enabled: bool) -> bool {
-    // All remaining signals (Repo, Wave, CiFailure) are reactive/auto.
-    let triggers = match state.store.list_triggers(Some(wave_id)).await {
-        Ok(triggers) => triggers,
-        Err(_) => return false,
-    };
-    let mut matched = false;
-    for mut trigger in triggers {
-        matched = true;
-        if trigger.enabled != enabled {
-            trigger.enabled = enabled;
-            if state.store.update_trigger(&trigger).await.is_err() {
-                return false;
-            }
-        }
-    }
-    matched
-}
-
 /// Move a wave's worktree and rename its branch to match the new name.
 /// Returns Ok(()) if no worktree exists (legacy wave). Returns Err with a
 /// user-facing message if the rename is not possible.
@@ -1081,80 +804,11 @@ fn rename_wave_worktree(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
-    use crate::lfd::config::{GitHubConfig, HttpSecurityConfig};
-    use crate::lfd::events::EventHub;
-    use crate::lfd::executor::{AgentExecutor, ExecutionContext, WaveExecutor};
     use crate::lfd::http::routes::test_helpers::{init_git_repo, test_http_state};
-    use crate::lfd::output::OutputHub;
-    use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::types::{
-        RepoWork, Session, SessionStatus, SessionUse, Signal, Wave, WaveMode, WaveStatus,
-    };
-    use crate::lfdb::{open_store, StorageConfig};
-    use crate::provider_auth::ProviderAuthService;
-    use anyhow::Result;
-    use async_trait::async_trait;
+    use crate::lfd::types::{RepoWork, Session, SessionStatus, SessionUse, Wave, WaveMode};
     use std::path::Path;
-    use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;
-    use tokio::sync::Mutex;
-
-    struct FailingRunner;
-
-    #[async_trait]
-    impl AgentExecutor for FailingRunner {
-        async fn run(
-            &self,
-            _cmd: Vec<String>,
-            _cwd: &Path,
-            _context: ExecutionContext,
-        ) -> Result<i32> {
-            Ok(1)
-        }
-
-        async fn terminate(&self, _agent_id: &str) -> Result<()> {
-            Ok(())
-        }
-    }
-
-    async fn test_http_state_with_runner() -> HttpState {
-        let tmp = tempdir().expect("tempdir");
-        let db_path = tmp.path().join("lfd.db");
-        let store: crate::lfdb::SharedStore = Arc::new(
-            open_store(&StorageConfig::sqlite(db_path))
-                .await
-                .expect("open sqlite store"),
-        );
-        let scheduler = Arc::new(Scheduler::new(1));
-        let output_hub = OutputHub::new(128, tmp.path().join("output"));
-        let event_hub = EventHub::new(128);
-        let executor = Arc::new(WaveExecutor::with_runner(
-            store.clone(),
-            scheduler.clone(),
-            output_hub.clone(),
-            event_hub.clone(),
-            Arc::new(FailingRunner),
-        ));
-
-        HttpState {
-            store: store.clone(),
-            scheduler,
-            executor,
-            event_hub,
-            output_hub,
-            provider_auth: ProviderAuthService::new(store),
-            auth: AuthProvider::Bearer {
-                session_token: secrecy::SecretString::from("test-token".to_string()),
-            },
-            started_at: OffsetDateTime::now_utc(),
-            github: GitHubConfig::default(),
-            http_security: HttpSecurityConfig::default(),
-            auth_failure_throttle: AuthFailureThrottle::new(),
-            ci_failure_cache: Arc::new(Mutex::new(std::collections::HashSet::new())),
-        }
-    }
 
     fn make_wave(repo: &str, name: &str) -> Wave {
         Wave {
@@ -1164,7 +818,6 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            crons: Vec::new(),
             repos: vec![RepoWork {
                 repo: repo.to_string(),
                 worktree: String::new(),
@@ -1206,30 +859,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn build_wave_crons_requires_flow_and_schedule() {
-        let wave_id = LfdId::new();
-        assert!(build_wave_crons(
-            &wave_id,
-            &[WaveCronDef {
-                flow: "".to_string(),
-                schedule: "0 0 * * *".to_string(),
-            }]
-        )
-        .is_err());
-        assert!(build_wave_crons(
-            &wave_id,
-            &[WaveCronDef {
-                flow: "wave-polish".to_string(),
-                schedule: "".to_string(),
-            }]
-        )
-        .is_err());
-    }
-
     #[tokio::test]
     async fn get_wave_agent_tree_returns_sessions_with_connection() {
-        let state = test_http_state_with_runner().await;
+        let state = test_http_state().await;
         let repo = tempdir().expect("tempdir");
         init_git_repo(repo.path());
         let wave = make_wave(&repo.path().to_string_lossy(), "tree-wave");
@@ -1287,7 +919,7 @@ mod tests {
     // ancestry query drives which children a chord would loop.
     #[tokio::test]
     async fn get_wave_agent_tree_returns_child_waves_for_chord() {
-        let state = test_http_state_with_runner().await;
+        let state = test_http_state().await;
         let repo_a = tempdir().expect("tempdir a");
         let repo_b = tempdir().expect("tempdir b");
         init_git_repo(repo_a.path());
@@ -1524,62 +1156,5 @@ mod tests {
         )
         .await;
         assert!(matches!(missing, Err((StatusCode::NOT_FOUND, _))));
-    }
-
-    #[tokio::test]
-    async fn trigger_add_remove_handlers() {
-        let state = test_http_state().await;
-        let wave = make_wave("/tmp/repo", "trigger-wave");
-        state.store.create_wave(&wave).await.expect("seed wave");
-
-        let Json(initial) =
-            list_triggers_handler(State(state.clone()), Path(wave.id().to_string()))
-                .await
-                .expect("list initial triggers");
-        let initial_data = initial["data"].as_array().expect("triggers data array");
-        assert!(initial_data.is_empty());
-
-        let Json(added) = add_trigger_handler(
-            State(state.clone()),
-            Path(wave.id().to_string()),
-            Json(AddTriggerRequest {
-                signal: Signal::Repo,
-                flow: Some("integrate".to_string()),
-                source_wave_id: None,
-                max_iterations: None,
-            }),
-        )
-        .await
-        .expect("add trigger");
-        let trigger_id = added["id"]
-            .as_str()
-            .expect("trigger id in add response")
-            .to_string();
-
-        let Json(after_add) =
-            list_triggers_handler(State(state.clone()), Path(wave.id().to_string()))
-                .await
-                .expect("list added triggers");
-        let after_add_data = after_add["data"].as_array().expect("triggers data array");
-        assert_eq!(after_add_data.len(), 1);
-        assert_eq!(
-            after_add_data[0]["id"].as_str().expect("trigger id"),
-            trigger_id
-        );
-
-        let _ = remove_trigger_handler(
-            State(state.clone()),
-            Path((wave.id().to_string(), trigger_id)),
-        )
-        .await
-        .expect("remove trigger");
-
-        let Json(after_remove) = list_triggers_handler(State(state), Path(wave.id().to_string()))
-            .await
-            .expect("list triggers after remove");
-        let after_remove_data = after_remove["data"]
-            .as_array()
-            .expect("triggers data array");
-        assert!(after_remove_data.is_empty());
     }
 }

@@ -58,7 +58,7 @@ Continuous work. Each iteration picks a task, runs the flow, creates a PR. When 
 
 ## Crons
 
-Crons schedule supplementary flows on a wave. They do not replace the wave's primary flow, and they do not consume the wave's `workers` budget.
+Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter and are read by the wave's resident mind: when a schedule comes due while the mind is idle, it opens a system turn ("cron due: <flow> — dispatch it") and dispatches the flow with judgment. Edits to the file land without a restart.
 
 ```markdown
 <!-- wave/shipper/GOAL.md -->
@@ -66,6 +66,9 @@ Crons schedule supplementary flows on a wave. They do not replace the wave's pri
 primary_flow: build
 workers: 2
 mode: loop
+crons:
+  - flow: sync
+    schedule: "0 0 0 1 * * *"
 metrics:
   - backlog is empty
 ---
@@ -73,18 +76,7 @@ metrics:
 Run one loop iteration for the shipper wave.
 ```
 
-Configure cron schedules through the live API:
-
-```python
-import loopflow.api as loopflow
-
-loopflow.create_wave(
-    "shipper",
-    repo=".",
-    flow="build",
-    crons=[{"flow": "sync", "schedule": "0 0 1 * *"}],
-)
-```
+Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due mid-turn fires at the next turn boundary; occurrences older than 24 hours are missed, not replayed.
 
 Use `workers: 0` in `GOAL.md` for waves that only run from cron schedules:
 
@@ -94,85 +86,15 @@ Use `workers: 0` in `GOAL.md` for waves that only run from cron schedules:
 primary_flow: garden
 workers: 0
 mode: manual
+crons:
+  - flow: govern-identity
+    schedule: "0 0 0 * * Sun *"
+  - flow: govern-coordination
+    schedule: "0 0 0 * * * *"
 ---
 
 Run one loop iteration for the governance wave.
 ```
-
-Then configure the cron schedules in lfd:
-
-```python
-import loopflow.api as loopflow
-
-loopflow.create_wave(
-    "governance",
-    repo=".",
-    flow="garden",
-    crons=[
-        {"flow": "govern-identity", "schedule": "0 0 * * 0"},
-        {"flow": "govern-coordination", "schedule": "0 0 * * *"},
-    ],
-)
-```
-
-## Triggers
-
-A trigger pairs a signal (what changed) with a flow (what to run). They fire regardless of mode.
-
-| Signal | What changed | Default flow |
-|--------|--------------|--------------|
-| **repo** | Paths changed on main | `integrate` |
-| **wave** | Another wave completed | `build` |
-| **ci_failure** | CI failed on a wave PR | `ci-fix` |
-
-Every new wave ships with two default triggers: `repo` (whole repo → integrate) and `ci_failure` → `ci-fix`.
-
-### Repo
-
-React to changes on main. By default watches the whole repo and runs `integrate` (rebase + update wave content). Add a trigger with specific paths to watch a subset.
-
-```bash
-# Watch main with a custom flow (triggers ride the lfd API)
-curl -X POST -H "Authorization: Bearer $(cat ~/.lf/session-token)" \
-  -H "Content-Type: application/json" \
-  -d '{"signal": "repo", "flow": "build"}' \
-  http://127.0.0.1:2486/v0/waves/syncer/triggers
-```
-
-When a repo trigger fires, the diff of changed files is included in context.
-
-### Wave
-
-React to another wave completing. More deliberate than a repo trigger — signals that specific changes are likely relevant.
-
-```bash
-curl -X POST -H "Authorization: Bearer $(cat ~/.lf/session-token)" \
-  -H "Content-Type: application/json" \
-  -d '{"signal": "wave", "source_wave_id": "infra"}' \
-  http://127.0.0.1:2486/v0/waves/ux/triggers
-```
-
-### CiFailure
-
-Runs `ci-fix` when CI fails on a wave's PR. Ships as a default trigger — no need to declare it.
-
-### Multiple Triggers
-
-Triggers are a list. Multiple triggers of the same signal are fine — watch different paths, react to different waves.
-
-```bash
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.create_wave("swift-falcon", repo=".", flow="build")
-loopflow.add_trigger("swift-falcon", signal="wave", source_wave_id="infra")
-loopflow.run_wave("swift-falcon")
-PY
-```
-
-Read the wave's setup in `wave/swift-falcon/GOAL.md`; stop it with Ctrl-C in its `lf wave` session.
-
-When a wave is already running and another trigger fires, the activation queues. Repo triggers coalesce—multiple commits combine into a single activation with a combined diff.
 
 ---
 

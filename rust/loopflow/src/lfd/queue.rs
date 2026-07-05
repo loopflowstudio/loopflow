@@ -721,7 +721,6 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            crons: Vec::new(),
             repos: vec![RepoWork {
                 repo: repo.to_string(),
                 worktree: String::new(),
@@ -759,7 +758,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             execution_cursor: None,
-            activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position,

@@ -7,7 +7,7 @@ use axum::http::{StatusCode, Uri};
 use axum::middleware;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use tower_http::trace::TraceLayer;
 
@@ -126,26 +126,6 @@ pub fn router(state: HttpState) -> Router {
         .route(
             "/waves/{wave_id}/agent-tree",
             get(waves::get_wave_agent_tree_handler),
-        )
-        .route(
-            "/waves/{wave_id}/triggers",
-            post(waves::add_trigger_handler),
-        )
-        .route(
-            "/waves/{wave_id}/triggers/{trigger_id}",
-            delete(waves::remove_trigger_handler),
-        )
-        .route(
-            "/waves/{wave_id}/triggers",
-            get(waves::list_triggers_handler),
-        )
-        .route(
-            "/waves/{wave_id}/crons",
-            get(waves::list_wave_crons_handler),
-        )
-        .route(
-            "/waves/{wave_id}/activations",
-            get(waves::list_activations_handler),
         )
         .route("/waves/{wave_id}/stop", post(waves::stop_wave_handler))
         .route("/waves/{wave_id}/land", post(waves::land_wave_handler))

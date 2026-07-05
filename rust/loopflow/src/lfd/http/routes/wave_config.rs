@@ -4,14 +4,9 @@ use std::collections::HashMap;
 use std::path::Path;
 use tracing::warn;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub(crate) struct TriggerDef {
-    pub signal: String,
-    pub flow: Option<String>,
-    pub source: Option<String>,
-    pub source_repo: Option<String>,
-}
-
+/// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
+/// The wave's resident mind reads these and opens a system turn when a
+/// schedule comes due (`crate::wave::mind`) — no daemon poller, no table.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct WaveCronDef {
     pub flow: String,
@@ -36,7 +31,6 @@ pub(crate) struct WaveConfig {
     pub workers: Option<u32>,
     pub serialized: Option<bool>,
     pub area: Option<Vec<String>>,
-    pub triggers: Option<TriggerDef>,
     pub direction: Option<Vec<String>>,
     pub metrics: Option<Vec<String>>,
     pub agent: Option<String>,
@@ -70,8 +64,6 @@ pub(crate) fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     };
     config.goal = config.goal.or_else(|| Some(name.to_string()));
     config.flow = None;
-    config.crons = None;
-    config.triggers = None;
     config.serialized = None;
     config.area = None;
     config.direction = None;
@@ -243,20 +235,24 @@ mod tests {
         assert_eq!(pm.asana_project.as_deref(), Some("1234567890"));
     }
 
+    /// Crons live in GOAL.md frontmatter — the resident mind's schedule
+    /// source. Legacy `triggers:` keys are simply unknown fields now.
     #[test]
-    fn read_wave_config_ignores_crons_and_triggers() {
+    fn read_wave_config_parses_crons_and_ignores_legacy_triggers() {
         let temp = tempdir().expect("temp dir");
         let dir = temp.path().join("wave").join("scan");
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 * * 1'\ntriggers:\n  signal: wave\n  source: infra\n  source_repo: /tmp/source\n---\nDrive the work.\n",
+            "---\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 0 * * Mon *'\ntriggers:\n  signal: wave\n  source: infra\n  source_repo: /tmp/source\n---\nDrive the work.\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert!(config.crons.is_none());
-        assert!(config.triggers.is_none());
+        let crons = config.crons.expect("crons parse from frontmatter");
+        assert_eq!(crons.len(), 1);
+        assert_eq!(crons[0].flow, "wave-polish");
+        assert_eq!(crons[0].schedule, "0 0 0 * * Mon *");
     }
 
     #[test]

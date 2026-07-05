@@ -20,7 +20,6 @@ pub mod pm;
 pub mod providers;
 pub mod queue;
 pub mod redaction;
-pub mod scheduler;
 pub mod security;
 pub mod service;
 pub mod session_token;
@@ -132,12 +131,6 @@ pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
 
 pub fn default_output_dir() -> PathBuf {
     lf_home_dir().join("output")
-}
-
-pub fn default_max_slots() -> usize {
-    std::thread::available_parallelism()
-        .map(|count| std::cmp::max(1, count.get() / 2))
-        .unwrap_or(1)
 }
 
 #[cfg(test)]

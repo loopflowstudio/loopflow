@@ -313,20 +313,6 @@ Webhooks speak inward as `lf`:
 
 A wave with no live server bounces the message — correct pubsub, logged at debug. No wave resolved → dropped.
 
-## Activation telemetry
-
-```bash
-GET /v0/waves/{wave_id}/activations?limit=50
-```
-
-Activation sources are `poll`, `push`, `listen`, or `manual`.
-
-WebSocket streams also emit:
-
-- `activation_queued`
-- `activation_coalesced`
-- `activation_dropped`
-
 ## Stacked PR queue state
 
 ```bash

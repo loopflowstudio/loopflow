@@ -13,10 +13,6 @@
 //! Execs are spawned detached; a wave whose server is down bounces the chat
 //! with exit ≠ 0 — logged at debug, which is correct pubsub semantics, not an
 //! error. No wave resolved → log-and-drop.
-//!
-//! The CI *polling* path below (`poll_all_waves_ci`) still emits
-//! `Event::CiFailure` into the hub for the in-process trigger organ; it dies
-//! with the organs in cut 4. The webhook ingress is off it as of this file.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -28,24 +24,20 @@ use axum::Json;
 use bytes::Bytes;
 use tokio::sync::Mutex;
 
-use crate::lfd::events::EventHub;
 use crate::lfd::executor::resolve_lf_binary;
 use crate::lfd::github::{
-    github_repo_from_local, poll_check_runs, verify_webhook_signature, CheckRun,
-    GitHubCheckRunEvent, GitHubPullRequestEvent, GitHubPushEvent,
+    github_repo_from_local, verify_webhook_signature, GitHubCheckRunEvent, GitHubPullRequestEvent,
+    GitHubPushEvent,
 };
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Event, Run, Wave, CI_FIX_FLOW};
+use crate::lfd::types::{Run, Wave, CI_FIX_FLOW};
 use crate::lfdb::SharedStore;
 
 #[derive(Debug, Clone)]
 struct WaveCiTarget {
     wave_id: LfdId,
-    run_id: LfdId,
-    repo_full_name: String,
-    branch: String,
     pr_number: u32,
 }
 
@@ -373,63 +365,6 @@ pub async fn github_webhook_handler(
     }
 }
 
-// -- CI polling (organ path; dies in cut 4) --------------------------------
-
-pub async fn poll_all_waves_ci(
-    store: &SharedStore,
-    event_hub: &EventHub,
-    token: &str,
-    cache: &Arc<Mutex<HashSet<String>>>,
-) -> Result<u32, String> {
-    let targets = list_wave_ci_targets(store, None).await?;
-    emit_ci_failures_for_targets(event_hub, cache, token, targets).await
-}
-
-async fn emit_ci_failures_for_targets(
-    event_hub: &EventHub,
-    cache: &Arc<Mutex<HashSet<String>>>,
-    token: &str,
-    targets: Vec<WaveCiTarget>,
-) -> Result<u32, String> {
-    let mut emitted = 0_u32;
-
-    for target in targets {
-        let check_runs = poll_check_runs(&target.repo_full_name, &target.branch, token).await?;
-        for check_run in check_runs {
-            if !is_failed_check_run(&check_run.status, check_run.conclusion.as_deref()) {
-                continue;
-            }
-
-            let event = build_ci_failure_event(&target, &check_run);
-            if emit_ci_failure(event_hub, cache, event).await {
-                emitted += 1;
-            }
-        }
-    }
-
-    Ok(emitted)
-}
-
-async fn list_wave_ci_targets(
-    store: &SharedStore,
-    wave_filter: Option<LfdId>,
-) -> Result<Vec<WaveCiTarget>, String> {
-    let waves = if let Some(wave_id) = wave_filter {
-        store
-            .get_wave(&wave_id)
-            .await
-            .map_err(|err| err.to_string())?
-            .map(|wave| vec![wave])
-            .unwrap_or_default()
-    } else {
-        store
-            .list_waves(None)
-            .await
-            .map_err(|err| err.to_string())?
-    };
-    collect_wave_ci_targets(store, waves, None, None, None).await
-}
-
 async fn find_wave_ci_targets(
     store: &SharedStore,
     repo_full_name: &str,
@@ -487,9 +422,7 @@ async fn collect_wave_ci_targets(
             continue;
         }
 
-        let Some(target) =
-            find_wave_ci_target(store, &wave, &repo_full_name, branch, pr_number).await?
-        else {
+        let Some(target) = find_wave_ci_target(store, &wave, branch, pr_number).await? else {
             continue;
         };
         targets.push(target);
@@ -501,7 +434,6 @@ async fn collect_wave_ci_targets(
 async fn find_wave_ci_target(
     store: &SharedStore,
     wave: &Wave,
-    repo_full_name: &str,
     branch: Option<&str>,
     pr_number: Option<u32>,
 ) -> Result<Option<WaveCiTarget>, String> {
@@ -513,7 +445,7 @@ async fn find_wave_ci_target(
         .into_iter()
         .find(|run| run_matches_ci_target(run, branch, pr_number));
 
-    Ok(run.and_then(|run| wave_ci_target(wave.id(), repo_full_name, &run)))
+    Ok(run.and_then(|run| wave_ci_target(wave.id(), &run)))
 }
 
 fn run_matches_ci_target(run: &Run, branch: Option<&str>, pr_number: Option<u32>) -> bool {
@@ -533,56 +465,18 @@ fn is_failed_check_run(status: &str, conclusion: Option<&str>) -> bool {
     status == "completed" && conclusion == Some("failure")
 }
 
-fn wave_ci_target(wave_id: &LfdId, repo_full_name: &str, run: &Run) -> Option<WaveCiTarget> {
+fn wave_ci_target(wave_id: &LfdId, run: &Run) -> Option<WaveCiTarget> {
     let pr = run.pr.as_ref()?;
     Some(WaveCiTarget {
         wave_id: wave_id.clone(),
-        run_id: run.id.clone(),
-        repo_full_name: repo_full_name.to_string(),
-        branch: pr.branch.clone()?,
         pr_number: pr.number?,
     })
-}
-
-fn build_ci_failure_event(target: &WaveCiTarget, check_run: &CheckRun) -> Event {
-    Event::ci_failure(
-        target.wave_id.clone(),
-        target.run_id.clone(),
-        target.pr_number,
-        target.branch.clone(),
-        check_run.head_sha.clone(),
-        check_run.name.clone(),
-        check_run.html_url.clone(),
-    )
-}
-
-async fn emit_ci_failure(
-    event_hub: &EventHub,
-    cache: &Arc<Mutex<HashSet<String>>>,
-    event: Event,
-) -> bool {
-    let (wave_id, commit_sha) = match &event {
-        Event::CiFailure {
-            wave_id,
-            commit_sha,
-            ..
-        } => (wave_id.clone(), commit_sha.clone()),
-        _ => return false,
-    };
-
-    let key = format!("{wave_id}:{commit_sha}");
-    let mut cache = cache.lock().await;
-    if !cache.insert(key) {
-        return false;
-    }
-    event_hub.send(event);
-    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::github::{CheckRunPR, CheckRunRef, GitHubRepository};
+    use crate::lfd::github::{CheckRun, CheckRunPR, CheckRunRef, GitHubRepository};
     use crate::lfd::types::{
         PullRequest, RepoWork, RunStackStatus, RunStatus, WaveMode, WaveStatus,
     };
@@ -632,7 +526,6 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            crons: Vec::new(),
             repos: vec![RepoWork {
                 repo: repo.to_string_lossy().to_string(),
                 worktree: String::new(),
@@ -670,7 +563,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             execution_cursor: None,
-            activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -872,7 +764,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             execution_cursor: None,
-            activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -908,23 +799,5 @@ mod tests {
 
         let ci_fix = run_with_pr("ci-fix", Some("open"), Some("feature"));
         assert!(!run_matches_ci_target(&ci_fix, Some("feature"), Some(1)));
-    }
-
-    #[tokio::test]
-    async fn emit_ci_failure_deduplicates_by_wave_and_commit_sha() {
-        let event_hub = EventHub::new(8);
-        let cache = Arc::new(Mutex::new(HashSet::new()));
-        let event = Event::ci_failure(
-            LfdId::new(),
-            LfdId::new(),
-            1,
-            "feature".to_string(),
-            "abc123".to_string(),
-            "test-check".to_string(),
-            "https://example.test/logs".to_string(),
-        );
-
-        assert!(emit_ci_failure(&event_hub, &cache, event.clone()).await);
-        assert!(!emit_ci_failure(&event_hub, &cache, event).await);
     }
 }

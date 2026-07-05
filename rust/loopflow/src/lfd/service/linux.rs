@@ -18,7 +18,7 @@ fn unit_path() -> Result<PathBuf> {
     Ok(config.join("systemd/user").join(UNIT_NAME))
 }
 
-pub fn install(config: &LfdConfig, force: bool) -> Result<()> {
+pub fn install(_config: &LfdConfig, force: bool) -> Result<()> {
     let unit_path = unit_path()?;
     if unit_path.exists() && !force {
         anyhow::bail!("lfd is already installed. Re-run `lfd install --force` to replace it.");

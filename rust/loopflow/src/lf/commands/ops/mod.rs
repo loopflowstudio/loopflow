@@ -2,8 +2,9 @@ use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, sync_main};
 use crate::engine::worktrees::{
-    create_with_schema_synced, list_worktrees, main_repo_root, wave_name_from_worktree,
-    wave_name_from_worktree_and_main, worktree_path,
+    create_from_placement_plan, list_worktrees, main_repo_root, plan_placement,
+    wave_name_from_worktree, wave_name_from_worktree_and_main, worktree_path, PlacementRequest,
+    PlacementStrategy, WorktreeSegment,
 };
 use crate::engine::{
     prepare_launch_prompt, sync_skills, ContextSourceOverrides, LaunchPromptInput,
@@ -19,22 +20,23 @@ use crate::lf::{
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, land, list_branch_candidates,
-    next_branch, prune_branches, rebase_with_recovery, release_bump, release_check, release_notes,
-    release_run, release_status, release_tag, AbandonOptions, BranchFilterOptions,
-    BranchListOptions, BranchPruneOptions, CommitOptions, LandOptions, NextOptions, PrOptions,
-    Progress, RebaseOptions, RotationResult,
+    next_branch, plan_rebase, prune_branches, rebase_class_name, rebase_strategy_name,
+    rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
+    release_tag, AbandonOptions, BranchFilterOptions, BranchListOptions, BranchPruneOptions,
+    CommitOptions, LandOptions, NextOptions, PrOptions, Progress, RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::process::Command;
+use std::time::Instant;
 
 pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match op {
         OpsCommand::Cp { paths, exclude } => copy_context(paths, exclude),
         OpsCommand::Doctor => doctor(),
-        OpsCommand::Rebase { onto } => rebase_current(onto.as_deref(), &progress),
+        OpsCommand::Rebase { plan, onto } => rebase_current(onto.as_deref(), *plan, &progress),
         OpsCommand::Push { force } => push_current(*force),
         OpsCommand::Land {
             strict,
@@ -137,12 +139,15 @@ impl Progress for CliProgress {
     }
 }
 
-fn rebase_current(onto: Option<&str>, progress: &impl Progress) -> Result<()> {
+fn rebase_current(onto: Option<&str>, plan_only: bool, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let base = get_default_branch(&repo_root)?;
-    let onto_ref = onto
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| format!("origin/{base}"));
+    let started = Instant::now();
+    let plan = plan_rebase(&repo_root, onto)?;
+    let onto_ref = plan.base_ref.clone();
+    if plan_only {
+        print_rebase_plan(&plan);
+        return Ok(());
+    }
     match rebase_with_recovery(
         &repo_root,
         &RebaseOptions {
@@ -151,7 +156,27 @@ fn rebase_current(onto: Option<&str>, progress: &impl Progress) -> Result<()> {
         },
         progress,
     ) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            record_ops_metric(
+                &repo_root,
+                serde_json::json!({
+                    "op": "rebase",
+                    "branch": plan.branch,
+                    "base_ref": plan.base_ref,
+                    "stack_parent": plan.stack_parent,
+                    "class": rebase_class_name(&plan.class),
+                    "strategy": rebase_strategy_name(&plan.strategy),
+                    "unique_commits": plan.unique_commits,
+                    "changed_files": plan.changed_files.len(),
+                    "protected": plan.protected,
+                    "scratch_stashed": plan.scratch_stash.is_some(),
+                    "agent_launched": false,
+                    "duration_ms": started.elapsed().as_millis(),
+                    "exit_status": "ok",
+                }),
+            );
+            Ok(())
+        }
         Err(OpsError::RebaseConflict { onto, detail }) => {
             let context = format!(
                 "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
@@ -161,6 +186,20 @@ fn rebase_current(onto: Option<&str>, progress: &impl Progress) -> Result<()> {
         }
         Err(err) => Err(err.into()),
     }
+}
+
+fn print_rebase_plan(plan: &crate::ops::RebasePlan) {
+    println!("branch: {}", plan.branch);
+    println!("base: {}", plan.base_ref);
+    if let Some(parent) = plan.stack_parent.as_deref() {
+        println!("stack_parent: {parent}");
+    }
+    println!("class: {}", rebase_class_name(&plan.class));
+    println!("strategy: {}", rebase_strategy_name(&plan.strategy));
+    println!("unique_commits: {}", plan.unique_commits);
+    println!("changed_files: {}", plan.changed_files.len());
+    println!("protected: {}", plan.protected);
+    println!("agent_launched: false");
 }
 
 fn push_current(force: bool) -> Result<()> {
@@ -672,7 +711,14 @@ fn print_branch_candidates(candidates: &[crate::ops::BranchCandidate]) {
 
 fn run_worktree(cmd: &WtCommand) -> Result<()> {
     match cmd {
-        WtCommand::Create { name, base, stack } => wt_create(name, base.as_deref(), *stack),
+        WtCommand::Create {
+            name,
+            base,
+            stack,
+            main,
+            fork,
+            plan,
+        } => wt_create(name, base.as_deref(), stack.as_deref(), *main, *fork, *plan),
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { format, .. } => wt_list(format.as_deref()),
         WtCommand::Remove { name, force } => wt_remove(name, *force),
@@ -684,27 +730,86 @@ fn run_worktree(cmd: &WtCommand) -> Result<()> {
     }
 }
 
-fn wt_create(name: &str, base: Option<&str>, stack: bool) -> Result<()> {
+fn wt_create(
+    name: &str,
+    base: Option<&str>,
+    stack: Option<&str>,
+    main: bool,
+    fork: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let started = Instant::now();
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
-
-    let mut base_branch = base.map(str::to_string);
-    if stack {
-        let current = current_branch(&repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
-        if current == "main" || current == "master" {
-            return Err(anyhow!("cannot stack on main/master"));
-        }
-        base_branch = Some(current);
-    }
-
     let config = crate::engine::config::load_config(Some(&main_repo))
         .ok()
         .flatten();
     let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
-    let result =
-        create_with_schema_synced(&main_repo, name, base_branch.as_deref(), branch_config)?;
+    let segment = WorktreeSegment::parse(name)?;
+    let current = current_branch(&repo_root)?;
+    let request = if main {
+        PlacementRequest::Main { segment }
+    } else if fork {
+        PlacementRequest::Fork { segment }
+    } else if let Some(parent) = base {
+        PlacementRequest::Stack {
+            parent: parent.to_string(),
+            segment,
+        }
+    } else if let Some(parent) = stack {
+        let parent = if parent == "__current__" {
+            current
+                .as_deref()
+                .ok_or_else(|| anyhow!("not on a branch"))?
+                .to_string()
+        } else {
+            parent.to_string()
+        };
+        PlacementRequest::Stack { parent, segment }
+    } else {
+        PlacementRequest::Default { segment }
+    };
 
-    println!("Created worktree: {}", result.path.display());
+    let default_branch = get_default_branch(&main_repo)?;
+    let current_for_plan = current.as_deref().filter(|branch| *branch != "HEAD");
+    let sync_default_base = match &request {
+        PlacementRequest::Default { .. } => current_for_plan
+            .map(|branch| branch == default_branch)
+            .unwrap_or(true),
+        PlacementRequest::Main { .. } | PlacementRequest::Fork { .. } => true,
+        PlacementRequest::Stack { .. } | PlacementRequest::Dispatch { .. } => false,
+    };
+    if sync_default_base {
+        let _ = sync_main(&main_repo, &default_branch);
+    }
+
+    let placement = plan_placement(&main_repo, current_for_plan, request, branch_config)?;
+
+    if dry_run {
+        print_placement_plan(&placement);
+        return Ok(());
+    }
+
+    let result = create_from_placement_plan(&main_repo, &placement)?;
+    record_ops_metric(
+        &repo_root,
+        serde_json::json!({
+            "op": "wt.create",
+            "branch": placement.branch,
+            "base_ref": placement.base_ref,
+            "stack_parent": placement.parent_branch,
+            "strategy": placement_strategy_name(&placement.strategy),
+            "stack_depth": placement.stack_depth,
+            "duration_ms": started.elapsed().as_millis(),
+            "exit_status": "ok",
+        }),
+    );
+
+    if placement.strategy == PlacementStrategy::UseExistingWorktree {
+        println!("Using existing worktree: {}", result.path.display());
+    } else {
+        println!("Created worktree: {}", result.path.display());
+    }
     if result.branch != name {
         println!("Branch: {}", result.branch);
     }
@@ -718,6 +823,53 @@ fn wt_create(name: &str, base: Option<&str>, stack: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn print_placement_plan(plan: &crate::engine::worktrees::PlacementPlan) {
+    println!("branch: {}", plan.branch);
+    println!("base: {}", plan.base_ref);
+    if let Some(parent) = plan.parent_branch.as_deref() {
+        println!("parent: {parent}");
+    }
+    println!("worktree: {}", plan.worktree_path.display());
+    println!("stack_depth: {}", plan.stack_depth);
+    println!("strategy: {}", placement_strategy_name(&plan.strategy));
+}
+
+fn placement_strategy_name(strategy: &PlacementStrategy) -> &'static str {
+    match strategy {
+        PlacementStrategy::CreateRoot => "create_root",
+        PlacementStrategy::CreateStackChild => "create_stack_child",
+        PlacementStrategy::CheckoutExisting => "checkout_existing",
+        PlacementStrategy::UseExistingWorktree => "use_existing_worktree",
+    }
+}
+
+fn record_ops_metric(repo: &Path, mut event: serde_json::Value) {
+    let Some(object) = event.as_object_mut() else {
+        return;
+    };
+    object.insert(
+        "ts".to_string(),
+        serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+    );
+    let path = repo.join(".lf").join("metrics").join("ops.jsonl");
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    if serde_json::to_writer(&mut file, &event).is_ok() {
+        let _ = writeln!(file);
+    }
 }
 
 fn wt_switch(name: &str) -> Result<()> {

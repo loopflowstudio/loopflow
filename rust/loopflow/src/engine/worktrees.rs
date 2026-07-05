@@ -12,6 +12,123 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
+use thiserror::Error;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeSegment(String);
+
+impl WorktreeSegment {
+    pub fn parse(raw: &str) -> Result<Self, PlacementError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(PlacementError::EmptySegment);
+        }
+        if trimmed.contains('.') {
+            return Err(PlacementError::DotsReserved(trimmed.to_string()));
+        }
+        Ok(Self(trimmed.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StackBranch {
+    pub name: String,
+    pub segments: Vec<WorktreeSegment>,
+}
+
+impl StackBranch {
+    pub fn parse(branch: &str, default_branch: &str) -> Option<Self> {
+        if branch == default_branch || branch.trim().is_empty() {
+            return None;
+        }
+        let segments = branch
+            .split('.')
+            .map(WorktreeSegment::parse)
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        if segments.is_empty() {
+            return None;
+        }
+        Some(Self {
+            name: branch.to_string(),
+            segments,
+        })
+    }
+
+    pub fn parent(&self) -> Option<String> {
+        if self.segments.len() < 2 {
+            return None;
+        }
+        Some(
+            self.segments[..self.segments.len() - 1]
+                .iter()
+                .map(WorktreeSegment::as_str)
+                .collect::<Vec<_>>()
+                .join("."),
+        )
+    }
+
+    pub fn child(&self, segment: &WorktreeSegment) -> String {
+        format!("{}.{}", self.name, segment.as_str())
+    }
+
+    pub fn depth(&self) -> usize {
+        self.segments.len()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlacementRequest {
+    Default {
+        segment: WorktreeSegment,
+    },
+    Main {
+        segment: WorktreeSegment,
+    },
+    Stack {
+        parent: String,
+        segment: WorktreeSegment,
+    },
+    Fork {
+        segment: WorktreeSegment,
+    },
+    Dispatch {
+        segment: Option<WorktreeSegment>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlacementStrategy {
+    CreateRoot,
+    CreateStackChild,
+    CheckoutExisting,
+    UseExistingWorktree,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PlacementPlan {
+    pub base_ref: String,
+    pub parent_branch: Option<String>,
+    pub branch: String,
+    pub worktree_path: PathBuf,
+    pub stack_depth: usize,
+    pub strategy: PlacementStrategy,
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum PlacementError {
+    #[error("worktree segment cannot be empty")]
+    EmptySegment,
+    #[error(
+        "\"{0}\" is not a worktree segment. Dots are reserved for stack ancestry. Use a hyphen, or create ancestry with --stack."
+    )]
+    DotsReserved(String),
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WorktreeState {
@@ -463,6 +580,201 @@ pub fn create_with_schema_synced(
     create_with_schema_internal(repo, short_name, base, branch_config, true)
 }
 
+pub fn plan_placement(
+    repo: &Path,
+    current_branch: Option<&str>,
+    request: PlacementRequest,
+    branch_config: Option<&BranchNameConfig>,
+) -> Result<PlacementPlan, GitError> {
+    let default_branch = get_default_branch(repo)?;
+    let (branch, base_ref, parent_branch, root_segment, stack_depth) = match request {
+        PlacementRequest::Default { segment } => {
+            if let Some(current) = current_branch {
+                if current != default_branch {
+                    let parent = StackBranch::parse(current, &default_branch);
+                    let branch = parent
+                        .as_ref()
+                        .map(|stack| stack.child(&segment))
+                        .unwrap_or_else(|| format!("{current}.{}", segment.as_str()));
+                    let depth = parent.map(|stack| stack.depth() + 1).unwrap_or(2);
+                    (
+                        branch,
+                        current.to_string(),
+                        Some(current.to_string()),
+                        segment,
+                        depth,
+                    )
+                } else {
+                    let branch = planned_root_branch(repo, segment.as_str(), branch_config)?;
+                    (branch, default_branch.clone(), None, segment, 1)
+                }
+            } else {
+                let branch = planned_root_branch(repo, segment.as_str(), branch_config)?;
+                (branch, default_branch.clone(), None, segment, 1)
+            }
+        }
+        PlacementRequest::Main { segment } | PlacementRequest::Fork { segment } => {
+            let branch = planned_root_branch(repo, segment.as_str(), branch_config)?;
+            (branch, default_branch.clone(), None, segment, 1)
+        }
+        PlacementRequest::Stack { parent, segment } => {
+            let parent_stack = StackBranch::parse(&parent, &default_branch);
+            let base_ref = if branch_exists(repo, &parent)? {
+                parent.clone()
+            } else {
+                let remote_parent = format!("origin/{parent}");
+                if rev_parse(repo, &remote_parent).is_ok() {
+                    remote_parent
+                } else {
+                    parent.clone()
+                }
+            };
+            let branch = parent_stack
+                .as_ref()
+                .map(|stack| stack.child(&segment))
+                .unwrap_or_else(|| format!("{parent}.{}", segment.as_str()));
+            let depth = parent_stack.map(|stack| stack.depth() + 1).unwrap_or(2);
+            (branch, base_ref, Some(parent), segment, depth)
+        }
+        PlacementRequest::Dispatch { segment } => {
+            let segment = segment.unwrap_or_else(|| WorktreeSegment("dispatch".to_string()));
+            let branch = planned_root_branch(repo, segment.as_str(), branch_config)?;
+            (branch, default_branch.clone(), None, segment, 1)
+        }
+    };
+
+    let planned_path = if parent_branch.is_some() {
+        stack_worktree_path(repo, &branch)
+    } else {
+        worktree_path_with_config(repo, root_segment.as_str(), branch_config)
+    };
+    let existing_worktree_path =
+        list_porcelain(repo)?
+            .into_iter()
+            .find_map(|(path, existing_branch)| {
+                (existing_branch.as_deref() == Some(&branch)).then_some(path)
+            });
+    let strategy = if existing_worktree_path.is_some() {
+        PlacementStrategy::UseExistingWorktree
+    } else if branch_exists(repo, &branch)? || rev_parse(repo, &format!("origin/{branch}")).is_ok()
+    {
+        PlacementStrategy::CheckoutExisting
+    } else if parent_branch.is_some() {
+        PlacementStrategy::CreateStackChild
+    } else {
+        PlacementStrategy::CreateRoot
+    };
+
+    Ok(PlacementPlan {
+        base_ref,
+        parent_branch,
+        branch,
+        worktree_path: existing_worktree_path.unwrap_or(planned_path),
+        stack_depth,
+        strategy,
+    })
+}
+
+fn planned_root_branch(
+    repo: &Path,
+    short_name: &str,
+    branch_config: Option<&BranchNameConfig>,
+) -> Result<String, GitError> {
+    let remote_branch = format!("origin/{short_name}");
+    if rev_parse(repo, &remote_branch).is_ok() {
+        return Ok(short_name.to_string());
+    }
+    format_branch_name(short_name, branch_config, repo)
+}
+
+fn stack_worktree_path(repo: &Path, branch: &str) -> PathBuf {
+    let repo_root = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let dir_name = branch
+        .split('.')
+        .map(sanitize_fs_component)
+        .collect::<Vec<_>>()
+        .join(".");
+    let repo_name = repo_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("repo");
+    repo_root
+        .parent()
+        .unwrap_or(repo_root.as_path())
+        .join(format!("{repo_name}.{dir_name}"))
+}
+
+pub fn create_from_placement_plan(
+    repo: &Path,
+    plan: &PlacementPlan,
+) -> Result<CreateWorktreeResult, GitError> {
+    match plan.strategy {
+        PlacementStrategy::UseExistingWorktree => Ok(CreateWorktreeResult {
+            path: plan.worktree_path.clone(),
+            branch: plan.branch.clone(),
+            base_branch: plan.parent_branch.clone(),
+            base_commit: None,
+        }),
+        PlacementStrategy::CheckoutExisting => {
+            if plan.worktree_path.exists() {
+                return Err(GitError::CommandFailed {
+                    command: "git worktree add".to_string(),
+                    stderr: format!("worktree path already exists: {:?}", plan.worktree_path),
+                });
+            }
+            let remote_branch = format!("origin/{}", plan.branch);
+            let mode = if branch_exists(repo, &plan.branch)? {
+                WorktreeBranch::Existing
+            } else {
+                WorktreeBranch::Track {
+                    remote: &remote_branch,
+                }
+            };
+            worktree_add(repo, &plan.worktree_path, &plan.branch, mode)?;
+            Ok(CreateWorktreeResult {
+                path: plan.worktree_path.clone(),
+                branch: plan.branch.clone(),
+                base_branch: plan.parent_branch.clone(),
+                base_commit: None,
+            })
+        }
+        PlacementStrategy::CreateRoot | PlacementStrategy::CreateStackChild => {
+            if plan.worktree_path.exists() {
+                return Err(GitError::CommandFailed {
+                    command: "git worktree add".to_string(),
+                    stderr: format!("worktree path already exists: {:?}", plan.worktree_path),
+                });
+            }
+            if branch_exists(repo, &plan.branch)? {
+                return Err(GitError::CommandFailed {
+                    command: "git worktree add".to_string(),
+                    stderr: format!("branch exists without worktree: {}", plan.branch),
+                });
+            }
+            let base_commit = if plan.parent_branch.is_some() {
+                rev_parse(repo, &plan.base_ref).ok()
+            } else {
+                None
+            };
+            worktree_add(
+                repo,
+                &plan.worktree_path,
+                &plan.branch,
+                WorktreeBranch::New {
+                    start_point: &plan.base_ref,
+                },
+            )?;
+            schedule_upstream_sync(plan.worktree_path.clone(), plan.branch.clone());
+            Ok(CreateWorktreeResult {
+                path: plan.worktree_path.clone(),
+                branch: plan.branch.clone(),
+                base_branch: plan.parent_branch.clone(),
+                base_commit,
+            })
+        }
+    }
+}
+
 fn create_with_schema_internal(
     repo: &Path,
     short_name: &str,
@@ -616,10 +928,32 @@ pub fn preserve_worktree(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_network_enrichment, worktree_path, worktree_path_with_config, WorktreeState,
+        apply_network_enrichment, plan_placement, worktree_path, worktree_path_with_config,
+        PlacementError, PlacementRequest, PlacementStrategy, StackBranch, WorktreeSegment,
+        WorktreeState,
     };
+    use crate::engine::config::BranchNameConfig;
     use std::collections::HashSet;
     use std::path::Path;
+    use std::process::Command;
+
+    fn init_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(dir.path())
+            .args(["init", "-b", "main"])
+            .output()
+            .expect("git init");
+        assert!(output.status.success());
+        dir
+    }
+
+    fn literal_branch_names() -> BranchNameConfig {
+        BranchNameConfig {
+            schema_: "{name}".to_string(),
+        }
+    }
 
     #[test]
     fn worktree_path_sanitizes_wave_name_for_filesystem_component() {
@@ -691,5 +1025,66 @@ mod tests {
             "new squashed-equivalent branch should stay unprunable while fresh"
         );
         assert!(new.fresh, "new branch should remain fresh");
+    }
+
+    #[test]
+    fn worktree_segment_rejects_dots() {
+        let err = WorktreeSegment::parse("api.v2").unwrap_err();
+        assert_eq!(err, PlacementError::DotsReserved("api.v2".to_string()));
+    }
+
+    #[test]
+    fn stack_branch_derives_parent_and_child() {
+        let branch = StackBranch::parse("a.b.c", "main").expect("stack branch");
+        assert_eq!(branch.parent().as_deref(), Some("a.b"));
+        assert_eq!(branch.depth(), 3);
+        let segment = WorktreeSegment::parse("d").unwrap();
+        assert_eq!(branch.child(&segment), "a.b.c.d");
+    }
+
+    #[test]
+    fn default_placement_from_stack_creates_child_branch() {
+        let repo = init_repo();
+        let segment = WorktreeSegment::parse("child").unwrap();
+        let config = literal_branch_names();
+        let plan = plan_placement(
+            repo.path(),
+            Some("a.b"),
+            PlacementRequest::Default { segment },
+            Some(&config),
+        )
+        .expect("plan placement");
+
+        assert_eq!(plan.branch, "a.b.child");
+        assert_eq!(plan.base_ref, "a.b");
+        assert_eq!(plan.parent_branch.as_deref(), Some("a.b"));
+        assert_eq!(plan.stack_depth, 3);
+        assert_eq!(plan.strategy, PlacementStrategy::CreateStackChild);
+        let file_name = plan
+            .worktree_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("worktree path file name");
+        assert!(file_name.ends_with(".a.b.child"), "{file_name}");
+    }
+
+    #[test]
+    fn main_placement_from_stack_creates_root_branch() {
+        let repo = init_repo();
+        let segment = WorktreeSegment::parse("child").unwrap();
+        let config = literal_branch_names();
+        let plan = plan_placement(
+            repo.path(),
+            Some("a.b"),
+            PlacementRequest::Main { segment },
+            Some(&config),
+        )
+        .expect("plan placement");
+
+        assert_eq!(plan.branch, "child");
+        assert_eq!(plan.base_ref, "main");
+        assert_eq!(plan.parent_branch, None);
+        assert_eq!(plan.stack_depth, 1);
+        assert_eq!(plan.strategy, PlacementStrategy::CreateRoot);
     }
 }

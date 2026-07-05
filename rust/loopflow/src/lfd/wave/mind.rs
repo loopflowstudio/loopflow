@@ -45,9 +45,13 @@
 //! A failed turn is `TurnFinished { status: Failed }` and the mind returns to
 //! `Idle`. [`MAX_CONSECUTIVE_TURN_FAILURES`] consecutive failures (or a
 //! terminal harness error) move the mind to `MindState::Failed` and stop the
-//! heartbeat. The next user message revives it (`Failed → Idle`, allowed by
-//! the state table) — a human talking to the wave brings it back, restarting
-//! the vendor thread if it died. Algedonic attention wiring is a later phase.
+//! heartbeat. A user message revives it immediately (`Failed → Idle`, allowed
+//! by the state table) — a human talking to the wave brings it back,
+//! restarting the vendor thread if it died. Unattended, the mind also revives
+//! itself on a backoff ladder ([`AUTO_REVIVE_BACKOFF`]) so a transient vendor
+//! outage never halts a wave permanently; each auto-revival is journaled as a
+//! `MindState` transition with reason `auto-revive attempt N`. This is the
+//! bridge until algedonic attention wires failures to a human's feed.
 //!
 //! # Resume
 //! On boot the last journaled `ThreadStarted` id is seeded via
@@ -79,9 +83,9 @@ use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRend
 use crate::lfd::conversations::harness::{is_terminal_harness_error, Harness};
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn, TurnDelta};
 use crate::lfd::conversations::types::{ConversationEvent, ConversationItem, Lifecycle};
-use crate::lfd::wave::journal::{MessageId, MessageOp};
+use crate::lfd::wave::journal::{ellipsize, MessageId, MessageOp, PendingMessage};
 use crate::lfd::wave::memory::Memory;
-use crate::lfd::wave::runtime::{InboxItem, TurnSink, UserMessage, WaveRuntime};
+use crate::lfd::wave::runtime::{InboxItem, TurnSink, WaveRuntime};
 use crate::lfd::wave::state::MindState;
 
 /// How long the mind sits idle (empty queue, no turn) before a heartbeat
@@ -93,6 +97,29 @@ pub const HEARTBEAT_IDLE: Duration = Duration::from_secs(300);
 /// Consecutive failed turns before the mind itself is declared `Failed` and
 /// the heartbeat stops. A user message resets the count and revives the mind.
 pub const MAX_CONSECUTIVE_TURN_FAILURES: u32 = 3;
+
+/// Backoff ladder for automatic revival from `Failed` — the bridge until
+/// algedonic attention routes failures to a human. Attempt N (0-based) waits
+/// the Nth entry; past the end, the last entry repeats (a 60-minute steady
+/// state). Each attempt walks the same revive path a human message takes,
+/// vendor-thread restart included; a successful turn resets the ladder, and a
+/// human message still revives immediately.
+pub const AUTO_REVIVE_BACKOFF: [Duration; 4] = [
+    Duration::from_secs(5 * 60),
+    Duration::from_secs(15 * 60),
+    Duration::from_secs(45 * 60),
+    Duration::from_secs(60 * 60),
+];
+
+/// The delay before auto-revival attempt number `attempts_made + 1`, from a
+/// ladder like [`AUTO_REVIVE_BACKOFF`]. `None` iff the ladder is empty —
+/// auto-revival disabled.
+fn auto_revive_delay(backoff: &[Duration], attempts_made: u32) -> Option<Duration> {
+    backoff
+        .get(attempts_made as usize)
+        .or(backoff.last())
+        .copied()
+}
 
 /// How long `Interrupting` may last before the janitor force-path fires. The
 /// harness's cooperative cancel should finalize the turn in well under this;
@@ -122,13 +149,9 @@ pub fn heartbeat_prompt(runtime: &WaveRuntime) -> String {
     let mut prompt = String::from(HEARTBEAT_PROMPT);
     prompt.push_str("\n\n<in_flight>\n");
     for worker in &workers {
-        let task: String = if worker.task.chars().count() > IN_FLIGHT_TASK_CHARS {
-            let mut excerpt: String = worker.task.chars().take(IN_FLIGHT_TASK_CHARS).collect();
-            excerpt.push('…');
-            excerpt
-        } else {
-            worker.task.clone()
-        };
+        // Whitespace-flattened, so a multi-line task can't break the
+        // one-line-per-worker format.
+        let task = ellipsize(&worker.task, IN_FLIGHT_TASK_CHARS);
         prompt.push_str(&format!(
             "- run {} · {}: {} · running\n",
             worker.run_id, worker.flow, task
@@ -139,7 +162,7 @@ pub fn heartbeat_prompt(runtime: &WaveRuntime) -> String {
 }
 
 /// Scheduler knobs. `Default` is production: codex vendor, 5-minute
-/// heartbeat, 10-second interrupt deadline.
+/// heartbeat, 10-second interrupt deadline, 5m/15m/45m/60m auto-revival.
 #[derive(Debug, Clone)]
 pub struct MindConfig {
     /// Vendor label journaled in `ThreadStarted`.
@@ -148,6 +171,9 @@ pub struct MindConfig {
     pub heartbeat_idle: Duration,
     /// Janitor bound on `Interrupting` (see [`INTERRUPT_DEADLINE`]).
     pub interrupt_deadline: Duration,
+    /// Auto-revival backoff ladder (see [`AUTO_REVIVE_BACKOFF`]); empty
+    /// disables auto-revival (a human message is then the only revive).
+    pub auto_revive_backoff: Vec<Duration>,
 }
 
 impl Default for MindConfig {
@@ -156,6 +182,7 @@ impl Default for MindConfig {
             vendor: "codex".to_string(),
             heartbeat_idle: HEARTBEAT_IDLE,
             interrupt_deadline: INTERRUPT_DEADLINE,
+            auto_revive_backoff: AUTO_REVIVE_BACKOFF.to_vec(),
         }
     }
 }
@@ -271,13 +298,19 @@ pub struct EventAdapter {
     finished: Option<ChatTurn>,
     /// Streaming prose from harnesses that do not send a final Message item.
     buffered_text_delta: String,
-    /// Whether this turn already received final prose as a Message item.
-    saw_message_item: bool,
 }
 
 impl EventAdapter {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether the adapter is mid-assembly: a turn is open, or finalized and
+    /// awaiting its trailing usage. The scheduler uses this to spot a vendor
+    /// `TurnCompleted` for a turn the adapter never saw open — the wedge
+    /// class that needs a synthetic boundary.
+    pub fn tracking(&self) -> bool {
+        self.open.is_some() || self.finished.is_some()
     }
 
     pub fn feed(&mut self, event: &ConversationEvent) -> Vec<TurnDelta> {
@@ -301,7 +334,6 @@ impl EventAdapter {
                     from: None,
                 });
                 self.buffered_text_delta.clear();
-                self.saw_message_item = false;
                 deltas.push(TurnDelta::Opened);
             }
             ConversationEvent::ItemCompleted { item, .. } => {
@@ -319,7 +351,6 @@ impl EventAdapter {
                 };
                 open.absorb_item(item.clone());
                 if let ConversationItem::Message { text, .. } = item {
-                    self.saw_message_item = true;
                     deltas.push(TurnDelta::Text(text.clone()));
                 } else {
                     deltas.push(TurnDelta::Item(item.clone()));
@@ -370,22 +401,20 @@ impl EventAdapter {
             self.finished = Some(turn);
         }
         self.buffered_text_delta.clear();
-        self.saw_message_item = false;
     }
 
     fn flush_buffered_text(&mut self, deltas: &mut Vec<TurnDelta>) {
-        if self.saw_message_item || self.buffered_text_delta.is_empty() {
-            self.buffered_text_delta.clear();
-            return;
-        }
+        let text = std::mem::take(&mut self.buffered_text_delta);
         let Some(open) = self.open.as_mut() else {
-            self.buffered_text_delta.clear();
             return;
         };
-        open.push_text(&self.buffered_text_delta);
-        deltas.push(TurnDelta::Text(std::mem::take(
-            &mut self.buffered_text_delta,
-        )));
+        // Prose already landed as a final Message item (open.text non-empty):
+        // the buffered stream is the same prose, discarded.
+        if text.is_empty() || !open.text.is_empty() {
+            return;
+        }
+        open.push_text(&text);
+        deltas.push(TurnDelta::Text(text));
     }
 
     fn flush_finished(&mut self, deltas: &mut Vec<TurnDelta>, cost_usd: Option<f64>) {
@@ -434,6 +463,8 @@ pub async fn run_mind(
         started: false,
         idle_since: Instant::now(),
         interrupt_deadline: None,
+        auto_revive_at: None,
+        auto_revive_attempts: 0,
     };
 
     if let Err(err) = mind.start_thread().await {
@@ -446,6 +477,7 @@ pub async fn run_mind(
     loop {
         let heartbeat_at = mind.heartbeat_deadline();
         let interrupt_at = mind.interrupt_deadline;
+        let revive_at = mind.auto_revive_at;
         tokio::select! {
             // Biased toward the inbox: a message that arrived before a turn
             // boundary is queued before the boundary drains, so coalescing
@@ -466,6 +498,9 @@ pub async fn run_mind(
             }
             _ = sleep_until_opt(interrupt_at), if interrupt_at.is_some() => {
                 mind.on_interrupt_deadline().await;
+            }
+            _ = sleep_until_opt(revive_at), if revive_at.is_some() => {
+                mind.on_auto_revive().await;
             }
             _ = sleep_until_opt(heartbeat_at) => {
                 mind.on_heartbeat().await;
@@ -497,7 +532,7 @@ struct Mind {
     /// Messages awaiting a turn. The journal's fold is the durable queue
     /// (`UserMessage`s not named in any `TurnStarted.answers`); this is the
     /// scheduler's working copy.
-    queue: Vec<UserMessage>,
+    queue: Vec<PendingMessage>,
     consecutive_failures: u32,
     /// A turn's input has been sent and its `Finished` hasn't landed yet.
     in_flight: bool,
@@ -510,6 +545,12 @@ struct Mind {
     /// Janitor bound while `Interrupting`: set when the cancel fires, cleared
     /// at the turn boundary. Past it, the force-path finalizes the turn.
     interrupt_deadline: Option<Instant>,
+    /// When the next automatic revival fires; set on entering `Failed`,
+    /// cleared by any revival (see [`AUTO_REVIVE_BACKOFF`]).
+    auto_revive_at: Option<Instant>,
+    /// Auto-revival attempts since the last successful turn — the backoff
+    /// ladder index.
+    auto_revive_attempts: u32,
 }
 
 impl Mind {
@@ -554,7 +595,7 @@ impl Mind {
         }
     }
 
-    async fn on_message(&mut self, message: UserMessage) {
+    async fn on_message(&mut self, message: PendingMessage) {
         self.queue.push(message);
         if self.failed {
             self.revive().await;
@@ -570,7 +611,7 @@ impl Mind {
     /// queued message; the next boundary answers it. The `UserMessage{op:
     /// Steer}` row was journaled at delivery either way: intent in the log,
     /// consumption recording what actually happened.
-    async fn on_steer(&mut self, message: UserMessage) {
+    async fn on_steer(&mut self, message: PendingMessage) {
         let steerable = self.in_flight
             && self.interrupt_deadline.is_none()
             && self.harness.capabilities().supports_steer;
@@ -581,12 +622,12 @@ impl Mind {
         match self.harness.send_input(&message.text).await {
             Ok(()) => {
                 // The vendor accepted the text; consumption lands against the
-                // live turn, or the just-closed one when the turn finished
+                // live turn, or the last assistant turn when the turn closed
                 // during the send (the boundary race — see journal_steered).
                 if !self.runtime.journal_steered(vec![message.id.clone()]) {
-                    // No turn exists at all to consume against; keep the
-                    // message queued so the next boundary answers it instead
-                    // of orphaning it as pending-forever.
+                    // No assistant turn exists at all to consume against; keep
+                    // the message queued so the next boundary answers it
+                    // instead of orphaning it as pending-forever.
                     tracing::warn!("steer accepted but no turn to consume against; re-queued");
                     self.queue.push(message);
                 }
@@ -605,7 +646,7 @@ impl Mind {
     /// post-interrupt boundary starts the next turn answering it. While idle
     /// there is nothing to cancel — a no-op, except that text starts the next
     /// turn immediately. While already interrupting, only the text queues.
-    async fn on_interrupt(&mut self, message: Option<UserMessage>) {
+    async fn on_interrupt(&mut self, message: Option<PendingMessage>) {
         if let Some(message) = message {
             self.queue.push(message);
         }
@@ -688,6 +729,22 @@ impl Mind {
         }
         if let Some(status) = boundary_status {
             self.on_turn_boundary(status).await;
+        } else if self.in_flight && !self.adapter.tracking() {
+            if let ConversationEvent::TurnCompleted { status, .. } = &event {
+                // Belt-and-suspenders for the wedge class: the vendor closed
+                // a turn the adapter never saw open (e.g. an earlier spurious
+                // error finalized the record while the input kept steering
+                // into the live vendor turn). Without a boundary here,
+                // `in_flight` would stay true forever — heartbeat and
+                // interrupt both unreachable — so the vendor's completion is
+                // treated as a synthetic boundary.
+                tracing::warn!(
+                    wave = self.runtime.name(),
+                    status = ?status,
+                    "vendor turn completed with no open turn; synthetic boundary"
+                );
+                self.on_turn_boundary(*status).await;
+            }
         }
     }
 
@@ -706,6 +763,9 @@ impl Mind {
             }
         } else {
             self.consecutive_failures = 0;
+            // A turn that reached a non-failed boundary resets the
+            // auto-revival backoff ladder.
+            self.auto_revive_attempts = 0;
         }
         if !self.queue.is_empty() {
             self.start_queued_turn().await;
@@ -771,16 +831,35 @@ impl Mind {
     }
 
     /// `Failed → Idle` on a user message: a human talking to the wave revives
-    /// it. Restarts the vendor thread if the session died (journaling the new
-    /// `ThreadStarted`), then answers the queue.
+    /// it immediately.
     async fn revive(&mut self) {
-        if !self
-            .runtime
-            .transition(MindState::Idle, "user message revived the mind")
-        {
+        self.revive_with("user message revived the mind").await;
+    }
+
+    /// The auto-revival timer fired: walk the same revive path a human
+    /// message takes, journaling the attempt number in the `MindState`
+    /// reason. If the revival itself fails, `fail` schedules the next
+    /// attempt one rung further up the ladder.
+    async fn on_auto_revive(&mut self) {
+        self.auto_revive_at = None;
+        self.auto_revive_attempts += 1;
+        let reason = format!("auto-revive attempt {}", self.auto_revive_attempts);
+        tracing::info!(
+            wave = self.runtime.name(),
+            attempt = self.auto_revive_attempts,
+            "auto-reviving the failed mind"
+        );
+        self.revive_with(&reason).await;
+    }
+
+    /// `Failed → Idle`: restart the vendor thread if the session died
+    /// (journaling the new `ThreadStarted`), then answer the queue.
+    async fn revive_with(&mut self, reason: &str) {
+        if !self.runtime.transition(MindState::Idle, reason) {
             return;
         }
         self.failed = false;
+        self.auto_revive_at = None;
         self.consecutive_failures = 0;
         self.idle_since = Instant::now();
         if !self.started {
@@ -800,13 +879,21 @@ impl Mind {
         tracing::error!(
             wave = self.runtime.name(),
             reason,
-            "wave mind failed; heartbeat stopped (a user message revives it)"
+            "wave mind failed; heartbeat stopped (a user message or the \
+             auto-revival timer revives it)"
         );
         self.failed = true;
         self.in_flight = false;
         // A dead mind has no turn for the janitor to force-finalize; the
         // failure path already closed whatever was open.
         self.interrupt_deadline = None;
+        // Arm the self-heal: retry on the backoff ladder so an unattended
+        // wave never halts permanently (empty ladder = disabled).
+        if let Some(delay) =
+            auto_revive_delay(&self.config.auto_revive_backoff, self.auto_revive_attempts)
+        {
+            self.auto_revive_at = Some(Instant::now() + delay);
+        }
         self.runtime.transition(
             MindState::Failed {
                 reason: reason.to_string(),
@@ -946,6 +1033,19 @@ mod tests {
         interrupt_deadline: Duration,
         supports_steer: bool,
     ) -> TestMind {
+        boot_config(
+            tmp,
+            MindConfig {
+                vendor: "codex".to_string(),
+                heartbeat_idle: heartbeat,
+                interrupt_deadline,
+                auto_revive_backoff: AUTO_REVIVE_BACKOFF.to_vec(),
+            },
+            supports_steer,
+        )
+    }
+
+    fn boot_config(tmp: tempfile::TempDir, config: MindConfig, supports_steer: bool) -> TestMind {
         let (runtime, inbox_rx) =
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
         let (events_tx, events_rx) = mpsc::unbounded_channel();
@@ -967,11 +1067,7 @@ mod tests {
             harness,
             events_rx,
             tmp.path().to_path_buf(),
-            MindConfig {
-                vendor: "codex".to_string(),
-                heartbeat_idle: heartbeat,
-                interrupt_deadline,
-            },
+            config,
             None,
         ));
         TestMind {
@@ -1327,6 +1423,13 @@ mod tests {
                 "wire the observation tail",
             ));
             assert!(runtime.journal_worker_dispatched("run-8", "sess-8", "design", "next item"));
+            // Multi-line task: must flatten to one line in the prompt.
+            assert!(runtime.journal_worker_dispatched(
+                "run-9",
+                "sess-9",
+                "design",
+                "multi-line task\n  with an indented second line",
+            ));
             assert!(runtime.journal_worker_finished(
                 "run-8",
                 crate::lfd::wave::journal::WorkerOutcome::Completed,
@@ -1343,6 +1446,12 @@ mod tests {
         assert!(
             !prompt.contains("run-8"),
             "finished workers are not in flight"
+        );
+        assert!(
+            prompt.contains(
+                "run run-9 · design: multi-line task with an indented second line · running"
+            ),
+            "multi-line tasks flatten to one in-flight line"
         );
     }
 
@@ -1790,5 +1899,197 @@ mod tests {
         mind.runtime
             .deliver_user_message("still there?".into(), MessageOp::Message);
         wait_for("fresh turn sent", || mind.input_count() == 2).await;
+    }
+
+    // -- Wedge escape and self-heal --
+
+    /// The belt-and-suspenders escape: a vendor `turn/completed` for a turn
+    /// the adapter never saw open must still reach `on_turn_boundary`, or
+    /// `in_flight` sticks true forever (heartbeat and interrupt both gated
+    /// off). Models the verified cascade: a spurious mid-turn error finalized
+    /// the turn record, the next input steered into the still-running vendor
+    /// turn, and the real completion then found nothing open.
+    #[tokio::test]
+    async fn synthetic_boundary_unwedges_a_completion_with_no_open_turn() {
+        let mind = boot(Duration::from_secs(600));
+        mind.runtime
+            .deliver_user_message("start".into(), MessageOp::Message);
+        wait_for("turn sent", || mind.input_count() == 1).await;
+        mind.emit(ConversationEvent::TurnStarted {
+            turn_id: "vt".into(),
+        });
+        wait_for("turning", || mind.runtime.mind_state().name() == "turning").await;
+        // Spurious non-terminal error: the adapter finalizes the turn record
+        // as failed while the vendor turn keeps running.
+        mind.emit(ConversationEvent::Error {
+            code: "codex_error".into(),
+            message: "spurious".into(),
+        });
+        wait_for("record finalized", || {
+            mind.runtime.mind_state() == MindState::Idle
+        })
+        .await;
+
+        // The next message sends input into the vendor's still-running turn:
+        // in_flight goes true, but no vendor TurnStarted will ever arrive.
+        mind.runtime
+            .deliver_user_message("second".into(), MessageOp::Message);
+        wait_for("second input sent", || mind.input_count() == 2).await;
+
+        // The vendor's REAL completion of its turn: the adapter has nothing
+        // open — the synthetic boundary must clear in_flight anyway.
+        mind.emit(ConversationEvent::TurnCompleted {
+            turn_id: "vt".into(),
+            status: Lifecycle::Completed,
+        });
+        mind.emit(ConversationEvent::TurnUsage {
+            turn_id: "vt".into(),
+            usage: TurnUsage::default(),
+        });
+
+        // Unwedged: a fresh message starts a fresh turn immediately.
+        mind.runtime
+            .deliver_user_message("third".into(), MessageOp::Message);
+        wait_for("scheduler unwedged: third turn sent", || {
+            mind.input_count() == 3
+        })
+        .await;
+    }
+
+    #[test]
+    fn auto_revive_delay_walks_the_ladder_and_caps() {
+        assert_eq!(
+            auto_revive_delay(&AUTO_REVIVE_BACKOFF, 0),
+            Some(Duration::from_secs(5 * 60))
+        );
+        assert_eq!(
+            auto_revive_delay(&AUTO_REVIVE_BACKOFF, 1),
+            Some(Duration::from_secs(15 * 60))
+        );
+        assert_eq!(
+            auto_revive_delay(&AUTO_REVIVE_BACKOFF, 2),
+            Some(Duration::from_secs(45 * 60))
+        );
+        assert_eq!(
+            auto_revive_delay(&AUTO_REVIVE_BACKOFF, 3),
+            Some(Duration::from_secs(60 * 60))
+        );
+        assert_eq!(
+            auto_revive_delay(&AUTO_REVIVE_BACKOFF, 42),
+            Some(Duration::from_secs(60 * 60)),
+            "past the ladder the cap repeats"
+        );
+        assert_eq!(
+            auto_revive_delay(&[], 0),
+            None,
+            "empty ladder disables auto-revival"
+        );
+    }
+
+    fn boot_reviving(heartbeat: Duration, backoff: Vec<Duration>) -> TestMind {
+        boot_config(
+            tempfile::tempdir().expect("tempdir"),
+            MindConfig {
+                vendor: "codex".to_string(),
+                heartbeat_idle: heartbeat,
+                interrupt_deadline: INTERRUPT_DEADLINE,
+                auto_revive_backoff: backoff,
+            },
+            true,
+        )
+    }
+
+    /// Fail enough turns to kill the mind; `mind.input_count()` must already
+    /// be `sent_before` when this starts (heartbeats drive the turns).
+    async fn fail_to_death(mind: &TestMind, sent_before: usize) {
+        for failure in 1..=MAX_CONSECUTIVE_TURN_FAILURES as usize {
+            wait_for("turn sent", || mind.input_count() == sent_before + failure).await;
+            mind.emit_turn("boom", Lifecycle::Failed);
+        }
+        wait_for("mind failed", || {
+            matches!(mind.runtime.mind_state(), MindState::Failed { .. })
+        })
+        .await;
+    }
+
+    fn auto_revive_reasons(mind: &TestMind) -> Vec<String> {
+        mind.journal_events()
+            .iter()
+            .filter_map(|kind| match kind {
+                EventKind::MindState { to, reason, .. }
+                    if *to == MindState::Idle && reason.starts_with("auto-revive") =>
+                {
+                    Some(reason.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// An unattended failed mind revives itself: the timer fires, the revival
+    /// is journaled with its attempt number, and repeated failures without a
+    /// success climb the ladder (attempt 2, not attempt 1 again).
+    #[tokio::test]
+    async fn failed_mind_auto_revives_and_the_ladder_climbs() {
+        let mind = boot_reviving(Duration::from_millis(30), vec![Duration::from_millis(40)]);
+
+        fail_to_death(&mind, 0).await;
+        wait_for("auto-revived once", || {
+            mind.runtime.mind_state() == MindState::Idle
+        })
+        .await;
+        assert_eq!(auto_revive_reasons(&mind), vec!["auto-revive attempt 1"]);
+
+        // No success in between: the next death revives one rung higher.
+        fail_to_death(&mind, MAX_CONSECUTIVE_TURN_FAILURES as usize).await;
+        wait_for("auto-revived twice", || {
+            mind.runtime.mind_state() == MindState::Idle
+        })
+        .await;
+        assert_eq!(
+            auto_revive_reasons(&mind),
+            vec!["auto-revive attempt 1", "auto-revive attempt 2"]
+        );
+    }
+
+    /// A successful turn resets the backoff ladder: the next death starts
+    /// over at attempt 1.
+    #[tokio::test]
+    async fn successful_turn_resets_the_auto_revive_ladder() {
+        let mind = boot_reviving(Duration::from_millis(30), vec![Duration::from_millis(40)]);
+
+        fail_to_death(&mind, 0).await;
+        wait_for("auto-revived", || {
+            mind.runtime.mind_state() == MindState::Idle
+        })
+        .await;
+
+        // The revived mind's next heartbeat turn succeeds: ladder reset.
+        let sent = MAX_CONSECUTIVE_TURN_FAILURES as usize;
+        wait_for("post-revival turn", || mind.input_count() == sent + 1).await;
+        mind.emit_turn("back on track", Lifecycle::Completed);
+        wait_for("success journaled", || {
+            mind.journal_events().iter().any(|kind| {
+                matches!(
+                    kind,
+                    EventKind::TurnFinished {
+                        status: Lifecycle::Completed,
+                        ..
+                    }
+                )
+            })
+        })
+        .await;
+
+        fail_to_death(&mind, sent + 1).await;
+        wait_for("auto-revived again", || {
+            mind.runtime.mind_state() == MindState::Idle
+        })
+        .await;
+        assert_eq!(
+            auto_revive_reasons(&mind),
+            vec!["auto-revive attempt 1", "auto-revive attempt 1"],
+            "a successful turn resets the ladder"
+        );
     }
 }

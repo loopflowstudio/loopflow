@@ -32,7 +32,7 @@ use crate::lfd::conversations::harness::codex_mapping::ItemPhase;
 use crate::lfd::conversations::harness::common::spawn_stderr_logger;
 use crate::lfd::conversations::harness::lf_tag::LfTagParser;
 use crate::lfd::conversations::harness::{codex_mapping, ApprovalPolicy, Capabilities, Harness};
-use crate::lfd::conversations::types::{ConversationEvent, TurnUsage};
+use crate::lfd::conversations::types::{ConversationEvent, ConversationItem, TurnUsage};
 
 /// SIGKILL an entire process group. Killing only the direct child orphans
 /// the real app-server when `codex` on PATH is an npm shim that spawns it as
@@ -227,14 +227,38 @@ pub(super) fn process_notification(
         }
         "error" => {
             // ErrorNotification: {threadId, turnId, error: TurnError, willRetry}.
-            let _ = events.send(ConversationEvent::Error {
-                code: "codex_error".to_string(),
-                message: params
-                    .pointer("/error/message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("codex error")
-                    .to_string(),
-            });
+            let message = params
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or("codex error")
+                .to_string();
+            let will_retry = params
+                .get("willRetry")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if will_retry {
+                // The vendor keeps the turn alive and retries on its own. A
+                // terminal Error here would finalize a turn that is still
+                // running: the next send_input becomes turn/steer into a
+                // "failed" turn, the real turn/completed then finds nothing
+                // open, and the scheduler wedges (verified cascade). Surface
+                // the error non-terminally instead — it still lands in the
+                // journal as a turn item.
+                tracing::warn!(message, "codex reported a retryable error; turn continues");
+                let tid = state.resolve_turn_id(turn_id_from_params);
+                let _ = events.send(ConversationEvent::ItemCompleted {
+                    turn_id: tid,
+                    item: ConversationItem::Thought {
+                        id: format!("retry_{}", uuid::Uuid::new_v4()),
+                        text: format!("codex error (will retry): {message}"),
+                    },
+                });
+            } else {
+                let _ = events.send(ConversationEvent::Error {
+                    code: "codex_error".to_string(),
+                    message,
+                });
+            }
         }
         // Known 0.142.5 chatter with no conversation-level meaning.
         "thread/status/changed"

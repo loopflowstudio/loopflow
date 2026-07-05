@@ -1,9 +1,5 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use time::OffsetDateTime;
-
-use crate::engine::prompt::Surface;
-use crate::lfd::id::LfdId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -190,59 +186,6 @@ impl ConversationEvent {
             Self::Error { .. } => "error",
         }
     }
-}
-
-// -- Conversation config and record --
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct ConversationConfig {
-    #[serde(default)]
-    pub step: String,
-    #[serde(default)]
-    pub repo_root: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub directions: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub area: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wave: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub surface: Option<Surface>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_turns: Option<u32>,
-    #[serde(default)]
-    pub yolo_mode: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_has_ui: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_compact: Option<bool>,
-}
-
-/// Conversation and usage record for a single interactive agent session.
-///
-/// `Conversation` stores persisted chat/session lifecycle and token usage events.
-/// For process-level lifecycle (PID/container/run status), see `ExecutionProcess`.
-/// When present, `run_id` links this session back to the corresponding
-/// wave execution lineage.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Conversation {
-    pub id: LfdId,
-    pub harness: String,
-    pub status: ConversationStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider_session_id: Option<String>,
-    pub config: ConversationConfig,
-    pub created_at: OffsetDateTime,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ended_at: Option<OffsetDateTime>,
 }
 
 #[cfg(test)]

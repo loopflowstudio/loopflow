@@ -286,6 +286,43 @@ fn codex_trace_error_turn() {
     ));
 }
 
+/// A `willRetry: true` error mid-turn must NOT produce a terminal Error
+/// event: the vendor keeps the turn alive and retries, so the turn survives
+/// to its real completion. The error surfaces non-terminally as a Thought
+/// item (journaled, visible, harmless to the scheduler).
+#[test]
+fn codex_trace_will_retry_error_does_not_end_the_turn() {
+    let events = replay_codex_trace("codex_error_will_retry.jsonl");
+    let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
+    assert_eq!(
+        event_types,
+        vec![
+            "turn_started",
+            "item_completed", // the retryable error, as a Thought
+            "item_completed", // the real answer after the retry
+            "turn_completed",
+            "turn_usage",
+        ],
+        "no terminal error event for a retryable error"
+    );
+    assert!(matches!(
+        &events[1],
+        ConversationEvent::ItemCompleted {
+            item: ConversationItem::Thought { text, .. },
+            ..
+        } if text.contains("will retry") && text.contains("stream disconnected")
+    ));
+    assert!(matches!(
+        events
+            .iter()
+            .find(|event| matches!(event, ConversationEvent::TurnCompleted { .. })),
+        Some(ConversationEvent::TurnCompleted {
+            status: Lifecycle::Completed,
+            ..
+        })
+    ));
+}
+
 #[test]
 fn codex_rpc_error_response_maps_to_error_event() {
     // Live 0.142.5 shape: malformed requests (e.g. `content` instead of

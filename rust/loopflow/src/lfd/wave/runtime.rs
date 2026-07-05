@@ -45,23 +45,13 @@ const TURN_BROADCAST_CAPACITY: usize = 256;
 /// turn); a lagged subscriber just resyncs from the next transition.
 const STATE_BROADCAST_CAPACITY: usize = 64;
 
-/// A journaled user message pulled from the inbox, awaiting consumption
-/// (named in a `TurnStarted.answers` or `TurnSteered.answers`).
-#[derive(Debug, Clone)]
-pub struct UserMessage {
-    pub id: MessageId,
-    pub op: MessageOp,
-    pub text: String,
-    /// Attribution for `Say` emissions; `None` for plain user messages.
-    pub from: Option<Attribution>,
-}
-
 /// One item from the HTTP surface to the mind's scheduler.
 #[derive(Debug, Clone)]
 pub enum InboxItem {
     /// A journaled user message (`message`, `steer`, or `interrupt` carrying
-    /// text — "interrupt & send").
-    Message(UserMessage),
+    /// text — "interrupt & send"), awaiting consumption (named in a
+    /// `TurnStarted.answers` or `TurnSteered.answers`).
+    Message(PendingMessage),
     /// A bare interrupt (no text): cancel the open turn. Nothing is journaled
     /// for it — the `MindState` transition records the interrupt itself.
     Interrupt,
@@ -73,7 +63,10 @@ pub enum InboxItem {
 #[derive(Debug)]
 pub struct Subscription {
     pub turns: Vec<ChatTurn>,
-    pub turn_rx: broadcast::Receiver<ChatTurn>,
+    /// Live turn frames ride as `Arc`s: the broadcast clones once per
+    /// subscriber, so N subscribers share one allocation per frame instead of
+    /// N deep `ChatTurn` clones. Clone out of the `Arc` only on need.
+    pub turn_rx: broadcast::Receiver<Arc<ChatTurn>>,
     pub state: MindState,
     pub state_rx: broadcast::Receiver<MindState>,
 }
@@ -92,6 +85,11 @@ struct Inner {
     open_turn: Option<ChatTurn>,
     state: MindState,
     thread_id: Option<String>,
+    /// Id of the mind's current or most recently committed assistant turn —
+    /// what `journal_steered` falls back to when the turn closed during the
+    /// send (the thread's *last* turn at that point is usually the steer's
+    /// own user turn, which must never be named as a consumer).
+    last_assistant_turn_id: Option<String>,
     /// Dispatched workers, folded from `WorkerDispatched`/`WorkerFinished`
     /// observations (the lfd tail). Keyed on run id — the idempotence guard:
     /// a run dispatches once and finishes once, however many times the
@@ -110,8 +108,9 @@ pub struct WaveRuntime {
     /// orders never diverge.
     inner: Mutex<Inner>,
     /// Fans turn frames out to live SSE subscribers: open-turn snapshots as a
-    /// turn grows, then the terminal turn under the same id.
-    turn_tx: broadcast::Sender<ChatTurn>,
+    /// turn grows, then the terminal turn under the same id. Frames are
+    /// `Arc`-shared so a delta costs one clone total, not one per subscriber.
+    turn_tx: broadcast::Sender<Arc<ChatTurn>>,
     /// Fans mind-state transitions out to live SSE subscribers (the composer
     /// keys its verb off this).
     state_tx: broadcast::Sender<MindState>,
@@ -149,6 +148,13 @@ impl WaveRuntime {
             turn.status = Lifecycle::Failed;
             fold.turns.push(turn);
         }
+        // Seed the steer-consumption fallback from the replayed thread.
+        let last_assistant_turn_id = fold
+            .turns
+            .iter()
+            .rev()
+            .find(|turn| turn.role == ChatRole::Assistant)
+            .map(|turn| turn.id.clone());
         // Janitor: no turn is live on a fresh boot, whatever the log says.
         let state = if fold.state == MindState::Idle {
             MindState::Idle
@@ -174,6 +180,7 @@ impl WaveRuntime {
                 open_turn: None,
                 state,
                 thread_id: fold.thread_id,
+                last_assistant_turn_id,
                 workers,
                 pending_messages: fold.pending_messages,
             }),
@@ -220,17 +227,8 @@ impl WaveRuntime {
     /// User messages journaled before a restart but not yet consumed by a
     /// turn. The mind drains this once at boot before listening to the live
     /// inbox.
-    pub fn pending_messages(&self) -> Vec<UserMessage> {
-        self.inner()
-            .pending_messages
-            .iter()
-            .map(|message| UserMessage {
-                id: message.id.clone(),
-                op: message.op,
-                text: message.text.clone(),
-                from: message.from.clone(),
-            })
-            .collect()
+    pub fn pending_messages(&self) -> Vec<PendingMessage> {
+        self.inner().pending_messages.clone()
     }
 
     // -- Worker observations (the lfd tail's write surface) --
@@ -416,24 +414,22 @@ impl WaveRuntime {
         self.transition_locked(&mut inner, MindState::Interrupting { turn_id }, reason)
     }
 
-    /// Journal that the open turn consumed steered messages mid-flight
-    /// (`TurnSteered.answers` — see [`crate::lfd::wave::journal`]). Returns
-    /// whether the marker was appended — false when no turn is turning, in
-    /// which case the caller should have queued instead of steered.
-    /// Journal steer consumption for `answers`. Normally the live turn
-    /// consumed the message; when the turn closed between the harness
-    /// accepting the input and this call (the send/journal race), consumption
-    /// is journaled against the just-closed turn — the vendor heard the text
-    /// either way, and an unmarked message would stay pending forever and be
-    /// re-sent as a fresh turn on every restart. Returns `false` only when
-    /// there is no turn at all to consume against (nothing journaled — the
-    /// caller keeps the message queued).
+    /// Journal steer consumption for `answers` (`TurnSteered.answers` — see
+    /// [`crate::lfd::wave::journal`]). Normally the live turn consumed the
+    /// message; when the turn closed between the harness accepting the input
+    /// and this call (the send/journal race), consumption is journaled
+    /// against the last assistant turn — the vendor heard the text either
+    /// way, and an unmarked message would stay pending forever and be re-sent
+    /// as a fresh turn on every restart. A user turn is never named (the
+    /// thread's last turn at that point is usually the steer's own user
+    /// turn). Returns `false` when no assistant turn has ever existed
+    /// (nothing journaled — the caller keeps the message queued).
     pub fn journal_steered(&self, answers: Vec<MessageId>) -> bool {
         let mut inner = self.inner();
         let turn_id = match inner.state.clone() {
             MindState::Turning { turn_id } | MindState::Interrupting { turn_id } => turn_id,
-            _ => match inner.thread.last() {
-                Some(turn) => turn.id.clone(),
+            _ => match inner.last_assistant_turn_id.clone() {
+                Some(turn_id) => turn_id,
                 None => return false,
             },
         };
@@ -467,9 +463,12 @@ impl WaveRuntime {
     /// Push a turn into the thread cache and broadcast it live. The journal
     /// events for the turn must already be appended (same lock).
     fn commit_locked(&self, inner: &mut Inner, turn: ChatTurn) -> ChatTurn {
+        if turn.role == ChatRole::Assistant {
+            inner.last_assistant_turn_id = Some(turn.id.clone());
+        }
         inner.thread.push(turn.clone());
         // A send error just means no live subscribers — the store has it.
-        let _ = self.turn_tx.send(turn.clone());
+        let _ = self.turn_tx.send(Arc::new(turn.clone()));
         turn
     }
 
@@ -489,24 +488,25 @@ impl WaveRuntime {
     }
 
     fn deliver_message(&self, text: String, op: MessageOp, from: Option<Attribution>) -> ChatTurn {
-        let (turn, id) = {
-            let mut inner = self.inner();
-            let event = inner.journal.append(|seq| EventKind::UserMessage {
-                id: MessageId(format!("msg-{seq}")),
-                op,
-                text: text.clone(),
-                from: from.clone(),
-            });
-            let id = MessageId(format!("msg-{}", event.seq));
-            let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
-            turn.created_at = event.at_rfc3339();
-            turn.from = from.as_ref().map(|from| from.label.clone());
-            (self.commit_locked(&mut inner, turn), id)
-        };
-        // Unbounded inbox: delivering a message never blocks the mind.
+        let mut inner = self.inner();
+        let event = inner.journal.append(|seq| EventKind::UserMessage {
+            id: MessageId(format!("msg-{seq}")),
+            op,
+            text: text.clone(),
+            from: from.clone(),
+        });
+        let id = MessageId(format!("msg-{}", event.seq));
+        let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
+        turn.created_at = event.at_rfc3339();
+        turn.from = from.as_ref().map(|from| from.label.clone());
+        let turn = self.commit_locked(&mut inner, turn);
+        // Inbox send still under the lock, so inbox order == journal order —
+        // sending after release lets two deliveries invert. The channel is
+        // unbounded: the send never blocks, so this cannot deadlock or stall
+        // the mind.
         let _ = self
             .inbox_tx
-            .send(InboxItem::Message(UserMessage { id, op, text, from }));
+            .send(InboxItem::Message(PendingMessage { id, op, text, from }));
         turn
     }
 
@@ -590,7 +590,7 @@ impl WaveRuntime {
             created_at: event.at_rfc3339(),
             from: None,
         };
-        let _ = self.turn_tx.send(open.clone());
+        let _ = self.turn_tx.send(Arc::new(open.clone()));
         inner.open_turn = Some(open);
         event
     }
@@ -608,7 +608,7 @@ impl WaveRuntime {
             return;
         };
         open.absorb_item(item);
-        let _ = self.turn_tx.send(open.clone());
+        let _ = self.turn_tx.send(Arc::new(open.clone()));
     }
 
     fn sink_turn_finished(&self, turn: ChatTurn, usage: Usage) -> ChatTurn {
@@ -1219,6 +1219,10 @@ mod tests {
         // Two real queued messages, ids from the journal fold.
         rt.deliver_user_message("steer me".into(), MessageOp::Message);
         rt.deliver_user_message("me too".into(), MessageOp::Message);
+        assert!(
+            !rt.journal_steered(vec![MessageId("msg-1".into())]),
+            "user turns are never named as consumers: no assistant turn yet"
+        );
         let pending_ids: Vec<MessageId> = {
             let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
             fold_thread(&events)
@@ -1239,11 +1243,11 @@ mod tests {
 
         // The send/journal boundary race: the turn closed between the harness
         // accepting the input and the consumption write. The marker must
-        // still land (against the just-closed turn) or the message stays
+        // still land (against the last assistant turn) or the message stays
         // pending forever and is re-sent on every restart.
         assert!(
             rt.journal_steered(vec![pending_ids[1].clone()]),
-            "boundary race consumes against the just-closed turn"
+            "boundary race consumes against the last assistant turn"
         );
 
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
@@ -1277,6 +1281,89 @@ mod tests {
             fold.pending_messages.is_empty(),
             "consumed messages never re-send: {:?}",
             fold.pending_messages
+        );
+    }
+
+    /// The steer-consumption fallback is seeded from the journal on boot: a
+    /// restarted runtime still names the last assistant turn, never the user
+    /// turn that carried the steer text.
+    #[test]
+    fn journal_steered_fallback_survives_restart() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let assistant_id = {
+            let (rt, _rx) = open_runtime(tmp.path());
+            let mut sink = TurnSink::new(rt.clone());
+            let mut adapter = EventAdapter::new();
+            feed(&mut adapter, &mut sink, ev_started());
+            feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
+            feed(&mut adapter, &mut sink, ev_usage(1, 1));
+            rt.thread_snapshot()
+                .iter()
+                .find(|turn| turn.role == ChatRole::Assistant)
+                .expect("assistant turn")
+                .id
+                .clone()
+        };
+
+        let (rt, _rx) = open_runtime(tmp.path());
+        // The steer's own user turn is now the thread's last turn.
+        rt.deliver_user_message("steer me".into(), MessageOp::Steer);
+        assert!(rt.journal_steered(vec![MessageId("msg-9".into())]));
+
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+        let steered_turn = events
+            .iter()
+            .find_map(|e| match &e.kind {
+                EventKind::TurnSteered { turn_id, .. } => Some(turn_id.clone()),
+                _ => None,
+            })
+            .expect("TurnSteered journaled");
+        assert_eq!(
+            steered_turn, assistant_id,
+            "fallback names the first life's assistant turn, not the user turn"
+        );
+    }
+
+    /// Journal order and inbox order are one order: the inbox send happens
+    /// under the same lock as the append, so concurrent deliveries can never
+    /// invert between the durable queue fold and the live channel.
+    #[test]
+    fn concurrent_deliveries_keep_inbox_order_equal_to_journal_order() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (rt, mut rx) = open_runtime(tmp.path());
+
+        let mut handles = Vec::new();
+        for writer in 0..4 {
+            let rt = rt.clone();
+            handles.push(std::thread::spawn(move || {
+                for i in 0..50 {
+                    rt.deliver_user_message(format!("m-{writer}-{i}"), MessageOp::Message);
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("writer thread");
+        }
+
+        let mut inbox_ids = Vec::new();
+        while let Ok(item) = rx.try_recv() {
+            let InboxItem::Message(message) = item else {
+                panic!("only messages were delivered");
+            };
+            inbox_ids.push(message.id);
+        }
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+        let journal_ids: Vec<MessageId> = events
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EventKind::UserMessage { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(inbox_ids.len(), 200);
+        assert_eq!(
+            inbox_ids, journal_ids,
+            "inbox consumption order == journal fold order"
         );
     }
 }

@@ -10,8 +10,11 @@
 //!   (codex/claude/opencode). It maps raw agent output into
 //!   [`types::ConversationItem`]s and [`types::ConversationEvent`]s. The
 //!   conformance tests under `harness/` pin this mapping against captured traces.
-//! - [`turns`]: folds a live [`crate::engine::stream::StreamEvent`] sequence into
-//!   [`turns::ChatTurn`]s — the wire type the wave server streams to Concerto.
+//! - [`turns`]: the turn vocabulary — [`turns::ChatTurn`] (the wire type the
+//!   wave server streams to Concerto) and [`turns::TurnDelta`]. The mind's
+//!   [`types::ConversationEvent`] stream is adapted into `TurnDelta`s (see
+//!   [`crate::lfd::wave::mind::EventAdapter`]) and folded by the wave
+//!   runtime's `TurnSink` into journaled, broadcast turns.
 //!
 //! The reactive server that hosts these lives in [`crate::lfd::wave`]. (The old
 //! file-based `server.rs` — `MAILBOX.md` + NDJSON sink — was rejected and is not

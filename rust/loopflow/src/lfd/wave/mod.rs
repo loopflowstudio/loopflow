@@ -407,6 +407,53 @@ mod tests {
         assert!(body.contains("\"role\":\"assistant\""));
     }
 
+    /// `?limit=N` tails the thread: the last N turns (open turn included),
+    /// newest still last; a limit past the thread length serves everything.
+    #[tokio::test]
+    async fn conversation_limit_tails_the_thread() {
+        let (base, runtime, _tmp) = boot().await;
+        narrate(&runtime, "first");
+        narrate(&runtime, "second");
+        narrate(&runtime, "third");
+
+        let body: serde_json::Value = reqwest::get(format!("{base}/conversation?limit=2"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let turns = body["turns"].as_array().unwrap();
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0]["text"], "second");
+        assert_eq!(turns[1]["text"], "third");
+
+        // A limit past the thread length serves the whole thread; no limit
+        // does too.
+        for url in [
+            format!("{base}/conversation?limit=99"),
+            format!("{base}/conversation"),
+        ] {
+            let body: serde_json::Value = reqwest::get(url).await.unwrap().json().await.unwrap();
+            assert_eq!(body["turns"].as_array().unwrap().len(), 3);
+        }
+
+        // The open turn counts as the newest turn in the tail.
+        let mut sink = TurnSink::new(runtime.clone());
+        let mut adapter = EventAdapter::new();
+        feed(&mut adapter, &mut sink, ev_started());
+        feed(&mut adapter, &mut sink, ev_text("in progress"));
+        let body: serde_json::Value = reqwest::get(format!("{base}/conversation?limit=1"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let turns = body["turns"].as_array().unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0]["status"], "running");
+        assert_eq!(turns[0]["text"], "in progress");
+    }
+
     #[tokio::test]
     async fn posted_message_appears_as_user_turn() {
         let (base, runtime, _tmp) = boot().await;

@@ -466,7 +466,9 @@ impl Narrator {
 }
 
 /// Flatten whitespace and cap at `max` chars (with an ellipsis when cut).
-fn ellipsize(text: &str, max: usize) -> String {
+/// Shared with the mind's heartbeat prompt, where the flattening keeps
+/// multi-line worker tasks from breaking the one-line `<in_flight>` format.
+pub(crate) fn ellipsize(text: &str, max: usize) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.chars().count() <= max {
         return flat;

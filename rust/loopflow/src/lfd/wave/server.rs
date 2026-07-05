@@ -11,7 +11,9 @@
 //!   `status` is the mind state (`idle | turning | interrupting | failed`);
 //!   `workers` counts this wave's observed in-flight worker runs.
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
-//!   `running`), if one is in progress, after the finalized thread.
+//!   `running`), if one is in progress, after the finalized thread. Optional
+//!   `?limit=N` tails the last N turns (open turn included) — `wave_context`
+//!   passes 12; absent means the whole thread.
 //! - `GET /conversation/stream` → SSE, two event names and no more:
 //!   - `state`: data is the mind-state name (`idle | turning | interrupting |
 //!     failed`), sent once on subscribe (before the turn replay) and again on
@@ -49,7 +51,7 @@ use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
@@ -81,6 +83,13 @@ struct HealthBody {
 #[derive(Debug, Serialize)]
 struct ConversationBody {
     turns: Vec<ChatTurn>,
+}
+
+/// `GET /conversation` query. `limit` is explicitly Optional: `None` serves
+/// the whole thread, `Some(n)` tails the last n turns.
+#[derive(Debug, Deserialize)]
+struct ConversationQuery {
+    limit: Option<usize>,
 }
 
 /// `POST /messages` request body. `op` is required — explicit, never inferred
@@ -163,10 +172,16 @@ async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
     })
 }
 
-async fn conversation_handler(State(state): State<ServerState>) -> Json<ConversationBody> {
-    Json(ConversationBody {
-        turns: state.runtime.thread_snapshot(),
-    })
+async fn conversation_handler(
+    State(state): State<ServerState>,
+    Query(query): Query<ConversationQuery>,
+) -> Json<ConversationBody> {
+    let mut turns = state.runtime.thread_snapshot();
+    if let Some(limit) = query.limit {
+        let skip = turns.len().saturating_sub(limit);
+        turns.drain(..skip);
+    }
+    Json(ConversationBody { turns })
 }
 
 async fn messages_handler(

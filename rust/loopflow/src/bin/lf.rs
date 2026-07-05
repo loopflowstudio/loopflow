@@ -333,15 +333,23 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Op { op }) => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::ops::run(op, cli.model.as_deref())
             }),
-            Some(Commands::Wave { name, force }) => {
-                in_repo_runtime(&args, |_| loopflow::lfd::wave::run(name, *force))
-            }
+            Some(Commands::Wave {
+                name,
+                force,
+                no_mind,
+                mind_only,
+            }) => in_repo_runtime(&args, |_| {
+                loopflow::wave::run(name, *force, *no_mind, *mind_only)
+            }),
             Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
             Some(Commands::Runs) => loopflow::lf::commands::runs::list(),
             Some(Commands::Trace { run_id }) => loopflow::lf::commands::runs::trace(run_id),
             Some(Commands::Q { cmd }) => loopflow::lf::commands::q::run(cmd),
-            Some(Commands::Chat { text, target }) => {
-                loopflow::lf::commands::chat::run(text, target)
+            Some(Commands::Chat { text, from, target }) => {
+                loopflow::lf::commands::chat::run(text, from.as_deref(), target)
+            }
+            Some(Commands::Sub { wave, json }) => {
+                loopflow::lf::commands::sub::run(wave.as_deref(), *json)
             }
             Some(Commands::Memory { cmd, target }) => {
                 loopflow::lf::commands::memory::run(cmd.as_ref(), target)
@@ -368,7 +376,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Session label for agent-launching invocations; `None` for utility commands
-/// (`lf op`, `lf q`, `lf usage`, `lf chat`, `lf memory`, `lf -l`) and
+/// (`lf op`, `lf q`, `lf usage`, `lf chat`, `lf sub`, `lf memory`, `lf -l`) and
 /// `lf wave`, which never self-register (`lf q` creates the worker's row
 /// itself; `lf wave` registers as the wave's agent session; chat/memory are
 /// one-shot POSTs attributed via the env they inherit).
@@ -389,6 +397,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Trace { .. })
         | Some(Commands::Q { .. })
         | Some(Commands::Chat { .. })
+        | Some(Commands::Sub { .. })
         | Some(Commands::Memory { .. }) => None,
     }
 }
@@ -403,7 +412,7 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "op", "q", "wave", "loop", "chat", "memory", "usage", "runs", "trace", "help",
+            ":", "op", "q", "wave", "chat", "memory", "usage", "runs", "trace", "help",
         ] {
             assert!(tables.commands.contains(command), "command {command}");
         }

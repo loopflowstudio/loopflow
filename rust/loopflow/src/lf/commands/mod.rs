@@ -7,5 +7,6 @@ pub mod ops;
 pub mod q;
 pub mod run;
 pub mod runs;
+pub mod sub;
 pub mod usage;
 pub mod util;

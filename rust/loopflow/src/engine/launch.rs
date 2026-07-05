@@ -306,7 +306,7 @@ Test step body.
         assert!(prepared.prompt.contains("<lf:loopflow>"));
         assert!(prepared.config.system_prompt.contains("lf op commit"));
         assert!(prepared.config.system_prompt.contains("lf q worker run"));
-        assert!(prepared.config.system_prompt.contains("lfq attach"));
+        assert!(prepared.config.system_prompt.contains("tmux attach"));
     }
 
     #[test]

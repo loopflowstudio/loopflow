@@ -6,8 +6,9 @@ title: Architecture
 # Architecture
 
 Loopflow turns repo-authored intent into persistent agent work. Steps and flows
-run one job. Waves keep working: they remember, react to triggers, dispatch
-workers, surface attention, and leave an auditable trail.
+run one job. Waves keep working: they remember, dispatch workers, respond to
+what's spoken into their thread, surface attention, and leave an auditable
+trail.
 
 ## System Map
 
@@ -32,13 +33,15 @@ Execution engine
 Local CLI                 Daemon
   lf                        lfd
   rust/.../lf               rust/.../lfd
-  rust/.../ops              HTTP API, store, scheduler,
-                            triggers, sessions, executor
+  rust/.../ops              HTTP read surface, sessions,
+                            webhooks-as-speech, worktree
+                            janitor, token refresh
         |                        |
         v                        v
 Git/PR/PM ops             Clients
-                            lfq / Python API
+                            lf CLI
                             Concerto Swift app
+                            webhooks
 ```
 
 ## Core Concepts
@@ -48,12 +51,12 @@ Git/PR/PM ops             Clients
 | Step | `.lf/steps/` and built-ins | `engine` |
 | Flow | `.lf/flows/` and built-ins | `engine` |
 | Direction | `.lf/directions/` | `engine` prompt assembly |
-| Wave goal | `wave/<name>/GOAL.md` | lfd scheduler |
+| Wave goal | `wave/<name>/GOAL.md` | `lf wave` server + resident mind |
 | Wave memory | `wave/<name>/MEMORY.md` | wave agent |
-| Roadmap item | `wave/<name>/` | PM sync and wave flows |
-| Session | lfd store | lfd executor |
-| Run/event | lfd store | lfd HTTP/event stream |
-| Attention | lfd store | lfd + Concerto |
+| Roadmap item | Asana | `lf op pm` and wave flows |
+| Session | lfdb | `lf q` dispatch (tmux-wrapped `lf`) |
+| Run/event | lfdb | lfd HTTP/event stream |
+| Attention | lfdb | lfd + Concerto |
 
 ## CLI and Engine
 
@@ -74,32 +77,31 @@ side-effectful workflows around git, PRs, PM providers, and release artifacts.
 
 ## Daemon
 
-`lfd` is the long-running runtime. It serves the HTTP API, stores waves and
-sessions, schedules loop/crons/triggers, executes local or container workers,
-and streams events to clients.
+`lfd` is the gatekeeper: it serves read routes and the event push, verifies
+GitHub webhooks and speaks them inward as `lf` execs, refreshes provider
+tokens, and tidies the registry at boot. It dispatches no work — `lf q`
+launches workers, and each wave's resident mind owns its own loop and cron
+schedules.
 
 Important paths:
 
 - `rust/loopflow/src/bin/lfd.rs`
 - `rust/loopflow/src/lfd/http/`
-- `rust/loopflow/src/lfd/store/`
-- `rust/loopflow/src/lfd/scheduler.rs`
-- `rust/loopflow/src/lfd/triggers/`
-- `rust/loopflow/src/lfd/executor/`
+- `rust/loopflow/src/lfdb/`
+- `rust/loopflow/src/lfd/triggers/` (token refresh — the one surviving loop)
+- `rust/loopflow/src/lfd/executor/` (dispatch helpers shared with `lf q`, worktree janitor)
 - `rust/loopflow/src/lfd/types/`
 
-Native mode uses sqlite, a local process executor, and a local session token.
-Container mode uses postgres and Docker-backed execution for shared or remote
-hosts.
+Native mode uses sqlite and a local session token; container mode uses
+postgres for shared or remote hosts.
 
 ## Clients
 
-`lfq` and the Python API are lightweight clients for lfd.
+`lf` and Concerto read lfd state; webhooks push events in. The Python package
+is a library of wire models only.
 
 Important paths:
 
-- `python/loopflow/cli.py`
-- `python/loopflow/client.py`
 - `python/loopflow/models.py`
 
 Concerto is the Swift app. It reads lfd state, renders waves and sessions, and
@@ -117,11 +119,11 @@ Important paths:
 
 ```text
 1. Read GOAL.md, MEMORY.md, roadmap, and relevant docs.
-2. Assess current wave state and external triggers.
+2. Assess current wave state and anything spoken into the thread.
 3. Pick one move: study, ingest, dispatch, unblock, review, or wait.
 4. Run a step or flow, often by dispatching a worker.
 5. Record events, update PM/repo state, and surface attention.
-6. Loop when mode, cron, or trigger asks for another pass.
+6. Loop when mode, a `GOAL.md` cron, or an incoming message asks for another pass.
 ```
 
 A wave agent coordinates. Workers do scoped implementation and report back
@@ -148,17 +150,17 @@ the fixture tests in the same unit of work.
 Loopflow integrates with:
 
 - Git and worktrees for branch isolation.
-- GitHub for PRs, CI failure triggers, and release workflows.
+- GitHub for PRs, webhooks spoken inward as `lf` execs, and release workflows.
 - Asana, Linear, and Notion for PM-backed wave roadmaps.
 - tmux and local processes for interactive sessions.
-- Docker and postgres for container-mode remote execution.
+- Docker and postgres for hosting the daemon on remote hosts.
 - Swift/macOS services for Concerto and native host behavior.
 
 ## Where Complexity Collects
 
 - Context assembly: every agent session depends on it, and the sources span
   docs, prompts, skills, wave memory, scratch notes, and command arguments.
-- Session lifecycle: lfd, lfq, Concerto, tmux, and external agents must agree on
+- Session lifecycle: lfd, Concerto, tmux, and external agents must agree on
   what is running, blocked, attachable, complete, or failed.
 - DTO parity: Rust, Python, Swift, and fixtures can drift unless changes are
   made as one contract update.

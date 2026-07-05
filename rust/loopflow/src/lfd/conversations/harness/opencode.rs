@@ -379,7 +379,6 @@ impl Harness for OpenCodeHarness {
             // steering the running turn; send_input reports
             // TurnAlreadyInProgress and the caller queues.
             supports_steer: false,
-            supports_interrupt: true,
         }
     }
 

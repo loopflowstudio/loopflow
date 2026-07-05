@@ -8,8 +8,8 @@ use loopflow::engine::naming::sanitize_for_branch;
 use loopflow::engine::worktrees::{branch_exists, create_with_schema, worktree_path};
 use loopflow::lfd::executor::{create_run_for_placement, ensure_wave_worktree, Placement};
 use loopflow::lfd::id::LfdId;
-use loopflow::lfd::store::{open_store, SharedStore, StorageConfig};
 use loopflow::lfd::types::{RepoWork, Wave, WaveMode, WaveStatus};
+use loopflow::lfdb::{open_store, SharedStore, StorageConfig};
 use loopflow_test_support::TestRepo;
 
 async fn make_store() -> SharedStore {
@@ -32,7 +32,6 @@ fn make_wave(repo: &str, name: &str) -> Wave {
         primary_flow: "ship-roadmap".to_string(),
         goal: "ship-roadmap".to_string(),
         metrics: Vec::new(),
-        crons: Vec::new(),
         repos: vec![RepoWork {
             repo: repo.to_string(),
             worktree: String::new(),

@@ -7,9 +7,8 @@ use crate::lfd::id::LfdId;
 /// Two attention paths:
 /// - `Interactive`: `lf` is at a step that needs a human. Created and resolved by `lf` via API.
 /// - `Algedonic`: something is wrong and the system is escalating. Created by daemon policy
-///   (repair chain exhaustion, queue blocks) or by `lf` when an agent decides to escalate.
-///   Routes through the wave hierarchy — child wave escalates to parent, only root escalates
-///   to human.
+///   (queue blocks) or by `lf` when an agent decides to escalate. Routes through the wave
+///   hierarchy — child wave escalates to parent, only root escalates to human.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]

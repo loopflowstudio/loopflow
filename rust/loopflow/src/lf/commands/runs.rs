@@ -11,7 +11,8 @@ use anyhow::{anyhow, Result};
 
 use crate::journal::open_ledger;
 use crate::lf::output::Colors;
-use crate::lfd::store::RunEventRow;
+use crate::lfdb::RunEventRow;
+use crate::wave::journal::short_id;
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
@@ -372,10 +373,6 @@ fn format_tokens(value: i64) -> String {
     }
 }
 
-fn short_id(run_id: &str) -> String {
-    run_id.chars().take(8).collect()
-}
-
 fn truncate(value: &str, width: usize) -> String {
     if value.chars().count() <= width {
         return value.to_string();
@@ -387,7 +384,7 @@ fn truncate(value: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{format_duration, format_tokens, summarize};
-    use crate::lfd::store::RunEventRow;
+    use crate::lfdb::RunEventRow;
 
     fn row(run_id: &str, seq: i64, ts: i64, node: &str, event: &str) -> RunEventRow {
         RunEventRow {

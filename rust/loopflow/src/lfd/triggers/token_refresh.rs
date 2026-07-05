@@ -8,10 +8,10 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::lfd::events::EventHub;
-use crate::lfd::provider_auth::{refresh_provider_token, Provider};
-use crate::lfd::store::rows::now_unix;
-use crate::lfd::store::{ProviderToken, SharedStore};
 use crate::lfd::types::Event;
+use crate::lfdb::rows::now_unix;
+use crate::lfdb::{ProviderToken, SharedStore};
+use crate::provider_auth::{refresh_provider_token, Provider};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const REFRESH_THRESHOLD: Duration = Duration::from_secs(20 * 60);
@@ -243,7 +243,7 @@ fn emit_refresh_failure(event_hub: &EventHub, provider: Provider, reason: String
 mod tests {
     use super::*;
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::{open_store, StorageConfig};
+    use crate::lfdb::{open_store, StorageConfig};
     use std::collections::VecDeque;
     use std::sync::Mutex as StdMutex;
 
@@ -316,7 +316,7 @@ mod tests {
             expires_at: Some(now_unix() + 60),
             login: login.map(str::to_string),
             updated_at: now_unix(),
-            credential_type: crate::lfd::store::CredentialType::OAuth,
+            credential_type: crate::lfdb::CredentialType::OAuth,
         };
         store
             .upsert_provider_token(&token)
@@ -343,7 +343,7 @@ mod tests {
             expires_at: Some(now_unix() + 3600),
             login: None,
             updated_at: now_unix(),
-            credential_type: crate::lfd::store::CredentialType::OAuth,
+            credential_type: crate::lfdb::CredentialType::OAuth,
         };
         let refresher = Arc::new(FakeTokenRefresher::new(HashMap::from([(
             Provider::GitHub,
@@ -401,7 +401,7 @@ mod tests {
             expires_at: Some(now_unix() + 3600),
             login: None,
             updated_at: now_unix(),
-            credential_type: crate::lfd::store::CredentialType::OAuth,
+            credential_type: crate::lfdb::CredentialType::OAuth,
         };
         let refresher = Arc::new(FakeTokenRefresher::new(HashMap::from([(
             Provider::GitHub,
@@ -452,7 +452,7 @@ mod tests {
             expires_at: Some(now_unix() + 3600),
             login: None,
             updated_at: now_unix(),
-            credential_type: crate::lfd::store::CredentialType::OAuth,
+            credential_type: crate::lfdb::CredentialType::OAuth,
         };
         let refresher = Arc::new(FakeTokenRefresher::new(HashMap::from([
             (
@@ -534,7 +534,7 @@ mod tests {
             expires_at: Some(now_unix() + 3600),
             login: None,
             updated_at: now_unix(),
-            credential_type: crate::lfd::store::CredentialType::OAuth,
+            credential_type: crate::lfdb::CredentialType::OAuth,
         };
         let refresher = Arc::new(FakeTokenRefresher::new(HashMap::from([(
             Provider::GitHub,

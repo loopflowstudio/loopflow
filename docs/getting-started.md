@@ -14,12 +14,6 @@ lf init
 
 Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.
 
-Install the Python CLI/API (lfq + loopflow) separately:
-
-```bash
-uv tool install loopflow
-```
-
 Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://github.com/anomalyco/opencode).
 
 ### Setup Paths
@@ -156,32 +150,24 @@ Ready to automate? Waves run your workflows continuously.
 
 `lf` steps are manual building blocks. A wave is a named agent that runs them for you — reading a roadmap, dispatching workers to build each item, watching their PRs, and looping.
 
-Author `wave/shipper/GOAL.md`, then run the agent:
+Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter sets `primary_flow:` / `mode:`), then run the agent:
 
 ```bash
-lfq wave run shipper
+lf wave shipper
 ```
 
-```python
-import loopflow.api as loopflow
+The wave agent coordinates; it dispatches a **worker** per task (`lf q worker run shipper --flow build --task "…"`) and folds each shipped PR into memory. External signals arrive as speech — CI failures and pushes to main land in the wave's thread via `lf chat`, and the mind decides how to react.
 
-loopflow.create_wave("shipper", repo=".", flow="build")
-loopflow.run_wave("shipper")
-```
+**Concerto** (macOS) is the native wave experience — monitor progress, browse flows, review PRs. Requires `lfd`.
 
-The wave agent coordinates; it dispatches a **worker** per task (`lfq worker run shipper --flow build --task "…"`) and folds each shipped PR into memory. Triggers fire flows in response to signals — repo changes, other waves completing, CI failures.
-
-**Concerto** (macOS) is the native wave experience — create waves, monitor progress, browse flows, review PRs. Requires `lfd`.
-
-**lfq** is the CLI equivalent — same `lfd` backend, terminal interface.
+Sessions are plain tmux:
 
 ```bash
-lfq list             # list waves
-lfq sessions          # list live agent sessions
-lfq attach <id>       # attach to one over tmux
-lfq logs shipper     # tail agent output
-lfq stop shipper     # stop a wave
+tmux ls               # live agent sessions
+tmux attach -t <name> # attach to one; agent output lives here
 ```
+
+Stop a wave with Ctrl-C in its `lf wave` session.
 
 ### Browse flows
 
@@ -191,7 +177,7 @@ lfq stop shipper     # stop a wave
 
 `lfd` serves the same resolved catalog at `/v0/catalog?repo=/path/to/repo`, including builtin definitions and any `.lf/flows/*.yaml` or `.lf/steps/*.md` overrides in the repo.
 
-You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, Concerto and lfq pick them up and run them.
+You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf wave <name>` runs them and Concerto picks them up.
 
 [Wave Authoring Guide →](wave-authoring.md) · [Waves Reference →](waves.md)
 
@@ -209,18 +195,15 @@ YAML
 lfd install
 ```
 
-Concerto mobile connects to remote `lfd` — monitor and manage waves from your phone. `lfq` works the same way over the network. See `deploy/README.md` for the Docker + TLS recipe.
+Concerto mobile connects to remote `lfd` — monitor and manage waves from your phone. See `deploy/README.md` for the Docker + TLS recipe.
 
 Auth connects your providers:
 
 ```bash
-lf op auth asana    # connect Asana for local `lf op pm` commands
-lf op auth status   # check local lf credentials
-
-lfq auth github      # connect GitHub
-lfq auth claude      # connect Claude
-lfq auth asana       # connect Asana with OAuth
-lfq auth status      # check connections
+lf op auth github    # connect GitHub
+lf op auth claude    # connect Claude
+lf op auth asana     # connect Asana with OAuth
+lf op auth status    # check connections
 ```
 
 ---

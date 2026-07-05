@@ -3,15 +3,14 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use time::OffsetDateTime;
 
 use crate::engine::config::{load_config, load_config_or_default};
-use crate::engine::flow::ConcreteStep;
 use crate::engine::git::{
-    create_branch, current_branch, fetch, get_default_branch, is_ancestor, push_with_upstream,
-    rev_parse, sync_main, worktree_add, WorktreeBranch,
+    current_branch, fetch, get_default_branch, is_ancestor, rev_parse, sync_main, worktree_add,
+    WorktreeBranch,
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::worktrees::{
@@ -20,11 +19,8 @@ use crate::engine::worktrees::{
 };
 
 use crate::lfd::id::LfdId;
-use crate::lfd::store::SharedStore;
-use crate::lfd::types::{
-    ExecutionProcess, ExecutionProcessStatus, Run, RunStackStatus, RunStatus, Session, Wave,
-    WaveStatus,
-};
+use crate::lfd::types::{Run, RunStackStatus, RunStatus, Session, Wave, WaveStatus};
+use crate::lfdb::SharedStore;
 use crate::ops::{rebase_with_recovery, Progress, RebaseOptions};
 
 /// Where a dispatched run's work happens on disk.
@@ -89,7 +85,7 @@ pub async fn create_run_for_placement(
         .expect("wave always has at least one RepoWork");
     let main_repo = Path::new(&repo_work.repo);
 
-    // Targeted activations (non-main branch, e.g. CI fixes on a PR branch)
+    // Dispatches targeting a non-main branch (e.g. a fix on a PR branch)
     // always get their own worktree tracking that branch, since the wave's
     // shared worktree is on a different branch.
     let is_targeted = target_branch
@@ -138,7 +134,6 @@ pub async fn create_run_for_placement(
         error: None,
         flow_parents: Vec::new(),
         execution_cursor: None,
-        activation_log_id: None,
         parent_run_id,
         parent_pr_number,
         stack_position,
@@ -226,8 +221,8 @@ fn unique_wave_branch(main_repo: &Path, wave_name: &str) -> anyhow::Result<Strin
 /// branch — independent PR, independent land.
 ///
 /// When `target_branch` is `Some` and not `"main"`, the worktree instead
-/// tracks that branch directly (e.g. a PR branch for CI-fix activations).
-pub fn create_run_worktree(
+/// tracks that branch directly (e.g. a fix dispatched onto a PR branch).
+pub(crate) fn create_run_worktree(
     main_repo: &Path,
     wave_name: &str,
     run_id: &str,
@@ -239,7 +234,7 @@ pub fn create_run_worktree(
         .map(|b| !b.is_empty() && b != "main")
         .unwrap_or(false);
     if is_targeted {
-        // Targeted activation: track the specified branch directly through a
+        // Targeted dispatch: track the specified branch directly through a
         // run-local branch, so git push from the worktree lands on it.
         let tb = target_branch.expect("checked above");
         fetch(main_repo, "origin", tb)?;
@@ -279,7 +274,7 @@ pub fn create_run_worktree(
 ///
 /// Stack placement: the new branch starts at the parent run's branch tip
 /// (remote tip when available), so dependent work builds on unlanded work.
-pub fn create_stacked_run_worktree(
+pub(crate) fn create_stacked_run_worktree(
     main_repo: &Path,
     wave_name: &str,
     run_id: &str,
@@ -378,30 +373,6 @@ fn has_run_suffix(path_component: &str) -> bool {
     !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
-pub(crate) fn build_agent_for_step(
-    run_id: &LfdId,
-    repo: &str,
-    worktree: &str,
-    step: &ConcreteStep,
-    status: ExecutionProcessStatus,
-    agent: &str,
-) -> ExecutionProcess {
-    ExecutionProcess {
-        id: LfdId::new(),
-        step: step.step.name.clone(),
-        repo: repo.to_string(),
-        worktree: worktree.to_string(),
-        run_id: Some(run_id.clone()),
-        status,
-        started_at: Some(OffsetDateTime::now_utc()),
-        ended_at: None,
-        pid: None,
-        container_id: None,
-        agent: agent.to_string(),
-        run_mode: "auto".to_string(),
-    }
-}
-
 pub(crate) fn resolve_lf_binary() -> PathBuf {
     if let Ok(path) = std::env::var("LF_BIN") {
         let trimmed = path.trim();
@@ -488,6 +459,18 @@ pub(crate) fn shell_escape(value: &str) -> String {
     format!("'{escaped}'")
 }
 
+/// Whether a tmux session with this name exists (`tmux has-session` probe).
+/// Shared by the executor's session reconciliation and the wave registry's
+/// worker-liveness observer.
+pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
+    let status = tokio::process::Command::new("tmux")
+        .args(["has-session", "-t", session_name])
+        .status()
+        .await
+        .map_err(|err| anyhow!("tmux session probe failed: {err}"))?;
+    Ok(status.success())
+}
+
 /// Where a tmux-wrapped session records its exit code (read by whoever
 /// reconciles the session — the lfd executor's watcher today).
 pub(crate) fn tmux_exit_file(cwd: &Path, session_id: &LfdId) -> PathBuf {
@@ -497,6 +480,20 @@ pub(crate) fn tmux_exit_file(cwd: &Path, session_id: &LfdId) -> PathBuf {
 
 /// Wrapper tail for run-to-completion sessions: propagate the exit code.
 pub(crate) const TMUX_EXIT_TAIL: &str = r#"exit "$EXIT_CODE""#;
+
+/// Tail for dispatched workers: after a clean flow exit the wrapper itself
+/// runs `lf op pr` — the dispatcher's structural guarantee, independent of
+/// the worker's prompt remembering to. `no_pr` opts a deliberately PR-less
+/// dispatch out.
+pub(crate) fn worker_exit_tail(no_pr: bool) -> String {
+    if no_pr {
+        return TMUX_EXIT_TAIL.to_string();
+    }
+    format!(
+        r#"if [ "$EXIT_CODE" -eq 0 ]; then {lf} op pr; fi; {TMUX_EXIT_TAIL}"#,
+        lf = shell_escape(&resolve_lf_binary().to_string_lossy()),
+    )
+}
 
 /// The exit-file shell wrapper every tmux-backed session runs — the single
 /// authoring site of the exit-file wire contract.
@@ -564,20 +561,6 @@ pub(crate) async fn launch_session_in_tmux(session: &Session, tail: &str) -> Res
     Ok(())
 }
 
-pub(crate) fn build_lf_inline_command(
-    prompt: &str,
-    batch: bool,
-    directions: &[String],
-    docs: &[String],
-    wave_name: &str,
-) -> Vec<String> {
-    let mut cmd = vec![resolve_lf_binary().to_string_lossy().to_string()];
-    append_lf_run_options(&mut cmd, batch, directions, docs, wave_name);
-    cmd.push(":".to_string());
-    cmd.push(prompt.to_string());
-    cmd
-}
-
 fn append_lf_run_options(
     cmd: &mut Vec<String>,
     batch: bool,
@@ -599,148 +582,6 @@ fn append_lf_run_options(
     }
     cmd.push("-w".to_string());
     cmd.push(wave_name.to_string());
-}
-
-/// Commit any remaining changes, push, and create a draft PR.
-/// Returns the PR info if successful, None if skipped or failed.
-pub(crate) fn auto_create_pr(
-    worktree: &Path,
-    wave_name: Option<String>,
-) -> Option<crate::lfd::types::PullRequest> {
-    use crate::ops::{commit_workflow, current_pr, CommitOptions, NullProgress};
-
-    let commit_options = CommitOptions {
-        add: true,
-        push: true,
-        create_draft_pr: true,
-        message: Some("lfd: auto-create draft PR".to_string()),
-        ..CommitOptions::for_task("commit")
-    };
-    if let Err(err) = commit_workflow(worktree, &commit_options, &NullProgress) {
-        warn!(worktree = %worktree.display(), error = %err, "auto-create PR: commit/push failed");
-        return None;
-    }
-
-    match current_pr(worktree) {
-        Ok(Some(pr)) => {
-            let title = draft_pr_title(worktree, wave_name.as_deref());
-            if let Some(draft_title) = title.as_deref() {
-                if let Err(err) = set_pr_title(worktree, pr.number, draft_title) {
-                    warn!(
-                        worktree = %worktree.display(),
-                        error = %err,
-                        "auto-create PR: failed to set draft title"
-                    );
-                }
-            }
-
-            Some(crate::lfd::types::PullRequest {
-                url: pr.url,
-                number: Some(pr.number as u32),
-                state: Some(pr.state),
-                branch: Some(pr.branch),
-                title,
-            })
-        }
-        Ok(None) => {
-            debug!(worktree = %worktree.display(), "auto-create PR: no PR found after push");
-            None
-        }
-        Err(err) => {
-            warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to fetch PR info");
-            None
-        }
-    }
-}
-
-fn draft_pr_title(worktree: &Path, wave_name: Option<&str>) -> Option<String> {
-    if let Some(name) = wave_name.map(str::trim).filter(|name| !name.is_empty()) {
-        return Some(format!("{name}: draft"));
-    }
-
-    first_branch_commit_subject(worktree)
-}
-
-fn first_branch_commit_subject(worktree: &Path) -> Option<String> {
-    let default_branch = get_default_branch(worktree).ok()?;
-    let merge_base_output = std::process::Command::new("git")
-        .args(["merge-base", "HEAD", &format!("origin/{default_branch}")])
-        .current_dir(worktree)
-        .output()
-        .ok()?;
-    if !merge_base_output.status.success() {
-        return None;
-    }
-
-    let merge_base = String::from_utf8_lossy(&merge_base_output.stdout)
-        .trim()
-        .to_string();
-    if merge_base.is_empty() {
-        return None;
-    }
-
-    let range = format!("{merge_base}..HEAD");
-    let log_output = std::process::Command::new("git")
-        .args(["log", "--reverse", "--format=%s", &range])
-        .current_dir(worktree)
-        .output()
-        .ok()?;
-    if !log_output.status.success() {
-        return None;
-    }
-
-    String::from_utf8_lossy(&log_output.stdout)
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(ToString::to_string)
-}
-
-fn set_pr_title(worktree: &Path, number: u64, title: &str) -> Result<()> {
-    let output = std::process::Command::new("gh")
-        .arg("pr")
-        .arg("edit")
-        .arg(number.to_string())
-        .arg("--title")
-        .arg(title)
-        .current_dir(worktree)
-        .output()
-        .map_err(|err| anyhow!("failed to run gh pr edit: {err}"))?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "gh pr edit failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(())
-}
-
-/// Create a new branch in the worktree for the next loop iteration.
-pub(crate) fn advance_branch(worktree: &Path, wave_name: &str) -> anyhow::Result<String> {
-    let config = load_config_or_default(Some(worktree));
-    let branch_config = config.branch_names.as_ref();
-    let mut new_branch = format_branch_name(wave_name, branch_config, worktree)
-        .map_err(|e| anyhow!("failed to generate branch name: {e}"))?;
-
-    while branch_exists(worktree, &new_branch)? {
-        new_branch = format!("{new_branch}.{}", generate_word_pair());
-    }
-
-    create_branch(worktree, &new_branch)?;
-    push_with_upstream(worktree, "origin", &new_branch)?;
-    Ok(new_branch)
-}
-
-/// Clean up a run-scoped worktree after the run completes.
-///
-/// Only removes per-run worktrees (`<repo>.<wave>.<short-run-id>`, or the
-/// legacy `-run-` suffix) — never shared wave or human worktrees.
-pub(crate) fn cleanup_run_worktree(worktree: &Path) -> Result<()> {
-    let name = worktree.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if !has_run_suffix(name) && !has_run_id_segment(name) {
-        return Ok(());
-    }
-    super::cleanup_workspace_worktree(worktree)
 }
 
 pub(crate) fn short_hash(value: &str, chars: usize) -> String {
@@ -825,7 +666,8 @@ mod tests {
 
     use super::{
         create_stacked_run_worktree, ensure_wave_worktree, is_ephemeral_worktree_path,
-        tmux_shell_command, worker_dispatch_task, TMUX_EXIT_TAIL, WORKER_REPORT_INSTRUCTION,
+        tmux_shell_command, worker_dispatch_task, worker_exit_tail, TMUX_EXIT_TAIL,
+        WORKER_REPORT_INSTRUCTION,
     };
     use crate::engine::worktrees::worktree_path as wave_worktree_path;
     use crate::lfd::id::LfdId;
@@ -938,6 +780,53 @@ mod tests {
         assert!(wrapper.ends_with(TMUX_EXIT_TAIL));
     }
 
+    /// The auto-PR analog, pinned at the wrapper string: a dispatched worker's
+    /// tmux wrapper runs `lf op pr` after a clean flow exit — deterministic,
+    /// prompt-independent — and `--no-pr` removes it entirely.
+    #[test]
+    fn worker_exit_tail_runs_op_pr_on_clean_exit_unless_opted_out() {
+        let tail = worker_exit_tail(false);
+        assert!(
+            tail.starts_with(r#"if [ "$EXIT_CODE" -eq 0 ]; then "#),
+            "the PR step is gated on a clean exit: {tail}"
+        );
+        assert!(tail.contains(" op pr; fi; "), "runs lf op pr: {tail}");
+        assert!(
+            tail.ends_with(TMUX_EXIT_TAIL),
+            "still propagates the exit code"
+        );
+
+        assert_eq!(worker_exit_tail(true), TMUX_EXIT_TAIL);
+
+        // End to end through the shared wrapper: the launch line carries the
+        // gated `op pr` between the exit-file write and the final exit.
+        let session_id = LfdId::new();
+        let session = Session {
+            id: session_id.clone(),
+            wave_id: LfdId::new(),
+            run_id: None,
+            parent_session_id: None,
+            session_use: SessionUse::Worker,
+            step: "dispatch:implement".to_string(),
+            agent: "lf".to_string(),
+            cwd: "/tmp/repo.wave.a1b2c3d4".to_string(),
+            argv: vec!["lf".to_string(), "implement".to_string()],
+            env: BTreeMap::new(),
+            source: TMUX_TERMINAL_SOURCE.to_string(),
+            tmux_name: "lf-test".to_string(),
+            status: SessionStatus::Pending,
+            attached_at: None,
+            started_at: None,
+            completed_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+        };
+        let wrapper = tmux_shell_command(&session, &worker_exit_tail(false));
+        assert!(wrapper.contains(&format!("{session_id}.exit")));
+        assert!(wrapper.contains(" op pr; fi; "));
+        assert!(wrapper.ends_with(TMUX_EXIT_TAIL));
+    }
+
     #[test]
     fn worker_dispatch_task_appends_the_report_pointer_once() {
         let task = worker_dispatch_task("Add the thing.");
@@ -1045,43 +934,6 @@ mod tests {
         // Non-hex or wrong-length final segments.
         assert!(!is_ephemeral_worktree_path("/tmp/repo.wave.release"));
         assert!(!is_ephemeral_worktree_path("/tmp/repo.wave.a1b2"));
-    }
-
-    #[test]
-    fn cleanup_run_worktree_removes_worker_tree_and_spares_named_trees() {
-        let (_temp, main_repo, _origin) = setup_repo_with_remote();
-        let parent = main_repo.parent().expect("main repo parent");
-
-        let worker = parent.join("main.wave.a1b2c3d4");
-        run_git(
-            &main_repo,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                "worker-branch",
-                worker.to_str().unwrap(),
-                "main",
-            ],
-        );
-        let human = parent.join("main.feature");
-        run_git(
-            &main_repo,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                "feature-branch",
-                human.to_str().unwrap(),
-                "main",
-            ],
-        );
-
-        super::cleanup_run_worktree(&worker).expect("remove worker tree");
-        super::cleanup_run_worktree(&human).expect("no-op on human tree");
-
-        assert!(!worker.exists(), "worker worktree should be removed");
-        assert!(human.exists(), "human worktree must be left alone");
     }
 
     #[test]

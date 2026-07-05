@@ -13,8 +13,8 @@ use crate::lfd::http::dto::ErrorResponse;
 use crate::lfd::http::routes::{build_wave_dto, build_wave_dtos};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::id::LfdId;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::Event;
+use crate::lfdb::SharedStore;
 
 pub async fn ws_handler(
     State(state): State<HttpState>,
@@ -214,11 +214,7 @@ async fn enrich_event(
         | Event::WaveUpdated { wave_id, .. }
         | Event::WaveStarted { wave_id, .. }
         | Event::WaveStopped { wave_id, .. }
-        | Event::WaveWaiting { wave_id, .. }
-        | Event::CiFailure { wave_id, .. }
-        | Event::ActivationQueued { wave_id, .. }
-        | Event::ActivationCoalesced { wave_id, .. }
-        | Event::ActivationDropped { wave_id, .. } => wave_id.clone(),
+        | Event::WaveWaiting { wave_id, .. } => wave_id.clone(),
         _ => return None,
     };
 

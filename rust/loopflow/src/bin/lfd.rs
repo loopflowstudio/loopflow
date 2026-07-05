@@ -4,7 +4,6 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use secrecy::ExposeSecret;
 use tokio::signal;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -14,10 +13,9 @@ use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
 use loopflow::lfd::output::OutputHub;
-use loopflow::lfd::provider_auth::ProviderAuthService;
-use loopflow::lfd::scheduler::Scheduler;
 use loopflow::lfd::security::path_within_root_planned;
-use loopflow::lfd::store::{migrate_store, open_store, SharedStore, StorageConfig};
+use loopflow::lfdb::{migrate_store, open_store, SharedStore, StorageConfig};
+use loopflow::provider_auth::ProviderAuthService;
 
 fn env_flag(name: &str) -> bool {
     std::env::var(name)
@@ -102,11 +100,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()?;
     let storage_config = storage_config_from_config(&lfd_config)?;
 
-    let max_slots = std::env::var("LFD_MAX_SLOTS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or_else(loopflow::lfd::default_max_slots);
-
     let cancel = CancellationToken::new();
 
     if !allow_insecure_bind && !http_addr.ip().is_loopback() && lfd_config.auth.token.is_none() {
@@ -140,7 +133,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    let scheduler = Arc::new(Scheduler::new(max_slots));
     let output_dir = loopflow::lfd::default_output_dir();
     let max_age =
         std::time::Duration::from_secs(u64::from(lfd_config.output_log_retention_days) * 86400);
@@ -148,43 +140,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = OutputHub::new(2048, output_dir.clone());
     let event_hub = EventHub::new(1024);
     let ci_failure_cache = Arc::new(Mutex::new(std::collections::HashSet::new()));
-    let executor = WaveExecutor::new(
-        store.clone(),
-        scheduler.clone(),
-        output.clone(),
-        event_hub.clone(),
-        lfd_config.executor.clone(),
-        lfd_config.github.clone(),
-    )?;
+    let executor = WaveExecutor::new(store.clone(), event_hub.clone());
 
-    match executor.recover_startup().await {
-        Ok(recovery) => {
-            if recovery.orphaned_runs_failed > 0 {
-                tracing::info!(
-                    count = recovery.orphaned_runs_failed,
-                    "cleaned up orphaned runs from previous lfd"
-                );
-            }
-            if recovery.rehydrated_agents > 0 {
-                tracing::info!(
-                    count = recovery.rehydrated_agents,
-                    "reattached running docker agents after restart"
-                );
-            }
-            if recovery.lost_agents_failed > 0 {
-                tracing::warn!(
-                    count = recovery.lost_agents_failed,
-                    "marked running agents failed because containers were missing"
-                );
-            }
-            if recovery.orphaned_containers_removed > 0 {
-                tracing::info!(
-                    count = recovery.orphaned_containers_removed,
-                    "removed orphaned managed docker containers on startup"
-                );
-            }
+    // Boot registry hygiene: runs left mid-flight by a dead daemon are
+    // failed, and terminal sessions whose tmux sessions exited while lfd was
+    // down are closed.
+    match store.fail_orphaned_runs().await {
+        Ok(count) if count > 0 => {
+            tracing::info!(count, "cleaned up orphaned runs from previous lfd");
         }
-        Err(err) => tracing::warn!(error = %err, "startup recovery failed"),
+        Ok(_) => {}
+        Err(err) => tracing::warn!(error = %err, "orphaned run cleanup failed"),
     }
 
     match executor.reconcile_sessions().await {
@@ -198,15 +164,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => tracing::warn!(error = %err, "terminal session reconcile failed"),
     }
 
-    let loop_handles = scheduler.clone().start_loops(
+    // The one surviving background loop besides the push bridge: provider
+    // token refresh. Activation/watch/cron/recovery organs died in the
+    // collapse — webhooks exec `lf`, and cron lives in the wave's mind.
+    let token_refresh_handle = loopflow::lfd::triggers::spawn_token_refresh(
         store.clone(),
-        executor.clone(),
         event_hub.clone(),
-        lfd_config.github.clone(),
         cancel.clone(),
     );
     let journal_handle =
         loopflow::lfd::journal::spawn(store.clone(), event_hub.clone(), cancel.clone());
+
+    // The push bridge: mutations happen in other processes now (lf wave
+    // registers store-direct, lf q writes runs, lf op writes attention) —
+    // poll the store and relay their effects to /ws subscribers.
+    {
+        let bridge = loopflow::lfd::bridge::StoreBridge::new(store.clone(), event_hub.clone());
+        let bridge_cancel = cancel.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = bridge_cancel.cancelled() => {}
+                _ = bridge.run(loopflow::lfd::bridge::POLL_CADENCE) => {}
+            }
+        });
+    }
 
     // Hourly output log pruning.
     {
@@ -251,24 +232,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if let Some(token) = lfd_config.github.token.clone() {
-        if let Err(err) = loopflow::lfd::http::routes::hooks::poll_all_waves_ci(
-            &store,
-            &event_hub,
-            token.expose_secret(),
-            &ci_failure_cache,
-        )
-        .await
-        {
-            tracing::warn!(error = %err, "startup CI poll failed");
-        }
-    } else {
-        tracing::warn!("LFD_GITHUB_TOKEN not set; skipping startup CI poll");
-    }
-
     let http_state = HttpState {
         store: store.clone(),
-        scheduler: scheduler.clone(),
         executor: Arc::new(executor),
         event_hub,
         output_hub: output,
@@ -282,6 +247,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let http_router = loopflow::lfd::http::router(http_state);
 
+    tracing::info!("gatekeeper: reads, push, webhook ingress; mutations exec lf");
     let http_task = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(http_addr).await?;
         tracing::info!(addr = %http_addr, "listening");
@@ -302,9 +268,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     cancel.cancel();
-    for handle in loop_handles {
-        let _ = handle.await;
-    }
+    let _ = token_refresh_handle.await;
     let _ = journal_handle.await;
 
     Ok(())

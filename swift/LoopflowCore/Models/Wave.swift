@@ -3,7 +3,9 @@
 import Foundation
 import SwiftUI
 
-/// Determines when a wave fires. Stored in the triggers table — existence means active.
+/// Legacy trigger model. The daemon's trigger machinery is gone (webhooks now
+/// speak `lf chat` into the wave's thread); this parses leniently to empty and
+/// stays only for the retained UI paths.
 public struct Trigger: Sendable, Hashable, Codable, Identifiable {
     public enum Signal: String, Sendable, Codable, CaseIterable {
         case repo

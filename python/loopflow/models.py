@@ -6,22 +6,6 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
-class Trigger(BaseModel):
-    id: Optional[str] = None
-    signal: str
-    source_wave_id: Optional[str] = None
-    flow: Optional[str] = None
-    max_iterations: Optional[int] = None
-
-
-class WaveCron(BaseModel):
-    id: Optional[str] = None
-    flow: str
-    schedule: str
-    last_triggered_at: Optional[int] = None
-    created_at: Optional[datetime] = None
-
-
 class PullRequest(BaseModel):
     url: str
     number: Optional[int] = None
@@ -108,8 +92,6 @@ class Wave(BaseModel):
     workers: int
     direction: list[str]
     area: list[str]
-    triggers: list[Trigger]
-    crons: list[WaveCron]
     status: str
     repos: list[RepoWork]
     flow_steps: list[FlowStep]

@@ -6,7 +6,6 @@ pub mod hooks;
 pub mod providers;
 pub mod repos;
 pub mod runs;
-pub mod secrets;
 pub mod session_controls;
 pub mod system;
 pub mod usage;
@@ -20,14 +19,13 @@ pub(crate) mod test_helpers;
 
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::http::dto::{
-    format_datetime, run_dto, trigger_dto, wave_cron_dto, CommitEntryDto, ErrorResponse,
-    PullRequestDto, RepoWorkDto, WaveDto,
+    format_datetime, run_dto, CommitEntryDto, ErrorResponse, PullRequestDto, RepoWorkDto, WaveDto,
 };
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
 use crate::lfd::queue::{project_queue_views, QueueRunView};
-use crate::lfd::store::{SharedStore, StoreError};
 use crate::lfd::types::{Run, Wave};
+use crate::lfdb::{SharedStore, StoreError};
 use axum::http::StatusCode;
 use axum::Json;
 use std::collections::HashMap;
@@ -161,13 +159,6 @@ pub async fn build_wave_dto(
         });
     }
 
-    let triggers_list = store
-        .list_triggers(Some(wave.id()))
-        .await
-        .unwrap_or_default();
-    let triggers = triggers_list.into_iter().map(trigger_dto).collect();
-    let crons_list = store.list_wave_crons(wave.id()).await.unwrap_or_default();
-    let crons = crons_list.into_iter().map(wave_cron_dto).collect();
     let wave_config = wave_config::read_wave_config(std::path::Path::new(wave.repo()), wave.name());
 
     Ok(WaveDto {
@@ -187,8 +178,6 @@ pub async fn build_wave_dto(
         flow_steps,
         has_stale_pr_state,
         workers: wave.workers(),
-        triggers,
-        crons,
         repos,
         parent_wave_id: wave.parent_wave_id().map(|id| id.to_string()),
     })
@@ -441,11 +430,11 @@ fn git_diff_stat(worktree: &std::path::Path, diff_ref: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::SharedStore;
     use crate::lfd::types::{
         LivePrState, LivePullRequestState, PullRequest, RepoWork, Run, RunStackStatus, RunStatus,
         Wave, WaveMode, WaveStatus,
     };
+    use crate::lfdb::SharedStore;
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
     use time::OffsetDateTime;
@@ -469,7 +458,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             execution_cursor: None,
-            activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: 0,
@@ -490,9 +478,9 @@ mod tests {
 
     async fn sqlite_store() -> SharedStore {
         let db_path = std::env::temp_dir().join(format!("lfd-routes-test-{}.db", LfdId::new()));
-        let config = crate::lfd::store::StorageConfig::sqlite(db_path);
+        let config = crate::lfdb::StorageConfig::sqlite(db_path);
         Arc::new(
-            crate::lfd::store::open_store(&config)
+            crate::lfdb::open_store(&config)
                 .await
                 .expect("sqlite store should initialize"),
         )
@@ -506,7 +494,6 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            crons: Vec::new(),
             repos: vec![RepoWork {
                 repo: repo.to_string(),
                 worktree: String::new(),
@@ -544,7 +531,6 @@ mod tests {
             error: None,
             flow_parents: Vec::new(),
             execution_cursor: None,
-            activation_log_id: None,
             parent_run_id: None,
             parent_pr_number: None,
             stack_position: pr_number,

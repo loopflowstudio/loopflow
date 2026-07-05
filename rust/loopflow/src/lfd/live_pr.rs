@@ -6,8 +6,8 @@ use time::OffsetDateTime;
 
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::github;
-use crate::lfd::store::{SharedStore, StoreError};
 use crate::lfd::types::{LivePrState, LivePullRequestState, Run};
+use crate::lfdb::{SharedStore, StoreError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LivePrKey {

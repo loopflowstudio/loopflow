@@ -13,8 +13,8 @@ use crate::lfd::http::dto::{format_datetime, ListResponse, RepoDto};
 use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
-use crate::lfd::store::StoreError;
 use crate::lfd::types::{Repo, RepoEdge, RepoId, Wave};
+use crate::lfdb::StoreError;
 
 #[derive(Debug, Deserialize)]
 pub struct RepoPathRequest {
@@ -319,7 +319,11 @@ fn is_repo_id_conflict(err: &StoreError) -> bool {
     }
 }
 
-fn would_create_cycle(edges: &[RepoEdge], new_parent: &RepoId, new_child: &RepoId) -> bool {
+pub(crate) fn would_create_cycle(
+    edges: &[RepoEdge],
+    new_parent: &RepoId,
+    new_child: &RepoId,
+) -> bool {
     let mut visited = std::collections::HashSet::new();
     let mut stack = vec![new_child.clone()];
 
@@ -387,7 +391,7 @@ fn is_git_repo(path: &Path) -> bool {
     git_entry.is_dir() || git_entry.is_file()
 }
 
-fn repo_name_from_path(path: &Path) -> String {
+pub(crate) fn repo_name_from_path(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
@@ -406,15 +410,14 @@ fn path_to_string(path: &Path) -> Result<String, ApiError> {
 mod tests {
     use super::*;
     use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
-    use crate::lfd::config::{ExecutorConfig, GitHubConfig, HttpSecurityConfig};
+    use crate::lfd::config::{GitHubConfig, HttpSecurityConfig};
     use crate::lfd::events::EventHub;
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::id::LfdId;
     use crate::lfd::output::OutputHub;
-    use crate::lfd::provider_auth::ProviderAuthService;
-    use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{RepoId, RepoWork, WaveMode, WaveStatus};
+    use crate::lfdb::{open_store, SharedStore, StorageConfig};
+    use crate::provider_auth::ProviderAuthService;
     use std::process::Command;
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -428,26 +431,14 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let scheduler = Arc::new(Scheduler::new(1));
         let output_hub = OutputHub::new(128, tmp.path().join("output"));
         let event_hub = EventHub::new(128);
-        let executor = Arc::new(
-            WaveExecutor::new(
-                store.clone(),
-                scheduler.clone(),
-                output_hub.clone(),
-                event_hub.clone(),
-                ExecutorConfig::default(),
-                GitHubConfig::default(),
-            )
-            .expect("build executor"),
-        );
+        let executor = Arc::new(WaveExecutor::new(store.clone(), event_hub.clone()));
 
         let provider_auth = ProviderAuthService::new(store.clone());
 
         HttpState {
             store,
-            scheduler,
             executor,
             event_hub,
             output_hub,
@@ -471,7 +462,6 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            crons: Vec::new(),
             repos: vec![RepoWork {
                 repo,
                 worktree: String::new(),

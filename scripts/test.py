@@ -10,8 +10,8 @@ matrix every pass. Stdlib only.
     uv run python scripts/test.py --list     # print the plan, run nothing
 
 Suites mirror the jobs in .github/workflows/ci.yml. Slow suites (concerto,
-e2e, docker) stay off in changed-mode unless forced with --all or their own
-flag, since they dominate wall-clock time.
+e2e) stay off in changed-mode unless forced with --all or their own flag,
+since they dominate wall-clock time.
 """
 
 from __future__ import annotations
@@ -186,28 +186,6 @@ def _concerto_commands(_changed: list[str]) -> list[Command]:
 def _e2e_commands(_changed: list[str]) -> list[Command]:
     return [
         Command(["tests/e2e/test_smoke.sh"], REPO_ROOT, "e2e-smoke"),
-        Command(
-            [
-                "uv",
-                "run",
-                "pytest",
-                "tests/e2e/test_api_smoke.py",
-                "tests/e2e/test_concurrent_clients.py",
-                "-v",
-            ],
-            REPO_ROOT,
-            "api-smoke",
-        ),
-    ]
-
-
-def _docker_commands(_changed: list[str]) -> list[Command]:
-    return [
-        Command(
-            ["cargo", "test", "-p", "loopflow", "docker_", "--", "--nocapture"],
-            REPO_ROOT,
-            "docker",
-        )
     ]
 
 
@@ -245,22 +223,13 @@ SUITES: list[Suite] = [
         build=_swift_commands,
     ),
     Suite(
-        name="docker",
-        slow=True,
-        trigger_desc="docker/ or lfd docker executor",
-        match=lambda c: _touches(
-            c, "docker/", "rust/loopflow/src/lfd/executor/docker/"
-        ),
-        build=_docker_commands,
-    ),
-    Suite(
         name="e2e",
         slow=True,
-        trigger_desc="lfd http/store or tests/e2e/",
+        trigger_desc="lfd http or lfdb or tests/e2e/",
         match=lambda c: _touches(
             c,
             "rust/loopflow/src/lfd/http",
-            "rust/loopflow/src/lfd/store",
+            "rust/loopflow/src/lfdb",
             "tests/e2e/",
         ),
         build=_e2e_commands,

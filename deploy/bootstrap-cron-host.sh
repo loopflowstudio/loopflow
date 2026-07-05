@@ -229,22 +229,19 @@ wait_for_health() {
 }
 
 create_root_wave() {
-    if ! command -v lfq >/dev/null 2>&1; then
-        echo "lfq not found; skipping root wave creation" >&2
+    # A wave is its markdown: wave/root/GOAL.md in the repo. lfd derives the
+    # rest at boot; nothing to POST.
+    local wave_dir="$repo/wave/root"
+    if [[ -f "$wave_dir/GOAL.md" ]]; then
+        echo "root wave already authored at $wave_dir/GOAL.md"
         return 0
     fi
-
-    run_with_secrets bash -c '
-        set -euo pipefail
-        export LFD_URL="${LFD_URL:-https://${LF_DOMAIN}}"
-        export LFD_TOKEN="$LFD_AUTH_TOKEN"
-        if lfq show root >/dev/null 2>&1; then
-            lfq show root
-        else
-            lfq create root "$1"
-            lfq show root
-        fi
-    ' bash "$repo"
+    mkdir -p "$wave_dir"
+    cat > "$wave_dir/GOAL.md" <<'GOAL'
+Drive this repo's roadmap.
+GOAL
+    : > "$wave_dir/MEMORY.md"
+    echo "authored root wave at $wave_dir/GOAL.md"
 }
 
 preflight_bootstrap_env

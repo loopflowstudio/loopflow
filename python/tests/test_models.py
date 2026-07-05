@@ -31,8 +31,6 @@ class TestWaveModel:
     def test_minimal_payload(self):
         wave = Wave.model_validate(WAVE_MINIMAL)
         assert wave.name == "reduce"
-        assert wave.triggers == []
-        assert wave.crons == []
         assert wave.created_at is None
         assert wave.flow_steps == []
         assert wave.workers == 1
@@ -46,9 +44,6 @@ class TestWaveModel:
 
     def test_full_payload(self):
         wave = Wave.model_validate(WAVE_FULL)
-        assert wave.triggers[0].signal == "repo"
-        assert wave.crons[0].flow == "wave-polish"
-        assert wave.crons[0].schedule == "0 0 * * 1"
         assert wave.created_at is not None
         repo = wave.repos[0]
         assert repo.active_run.status == "running"

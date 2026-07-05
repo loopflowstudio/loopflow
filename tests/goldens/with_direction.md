@@ -39,9 +39,9 @@ lf q worker run <wave> --flow <flow> --task "<task>"
 ```
 
 This spawns the child as its own attachable tmux session — not an inline
-shell-out — so it's independently monitorable and steerable. Watch it with
-`lfq sessions` (live sessions, needs-input flagged) and drop into one with
-`lfq attach <id>` to answer an interactive step.
+shell-out — so it's independently monitorable and steerable. List live
+sessions with `tmux ls` and drop into one with `tmux attach -t <name>` to
+answer an interactive step.
 
 Inline edits are only for trivial fixes smaller than the cost of dispatching.
 When you do one, say why. Keep the coordinating session about decisions,
@@ -59,6 +59,9 @@ text. Everything proactive goes through `lf`:
   thread; the post wakes the wave's mind like any message. One short
   paragraph: what landed, links, anything surprising. Pipe stdin for longer.
 - `lf chat --parent "<report>"` - escalate to the parent wave.
+- `lf sub` - listen to your wave: follow its live events (turns, mind state,
+  memory) until killed. Workers may run it in a background terminal to
+  receive steering mid-task. Outside a wave it exits silently.
 - `lf memory add "<fact>"` - record a durable learning. `lf memory update`
   rewrites the whole file from stdin.
 - `wave/<name>/MEMORY.md` is server-owned - never edit the file directly.

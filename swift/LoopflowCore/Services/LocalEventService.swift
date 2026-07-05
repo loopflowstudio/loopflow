@@ -131,7 +131,6 @@ public enum LFDEvent: Sendable {
     case attention(AttentionEvent)
     case terminalSession(SessionEvent)
     case auth(AuthEvent)
-    case secrets(SecretsEvent)
 }
 
 public actor EventService {
@@ -582,16 +581,6 @@ public actor EventService {
                 return nil
             }
             return .auth(authEvent)
-        case "secrets.connected", "secrets.synced", "secrets.disconnected":
-            guard let eventType = SecretsEvent.EventType(rawValue: type) else {
-                return nil
-            }
-            let provider = json["provider"] as? String
-            return .secrets(SecretsEvent(
-                type: eventType,
-                provider: provider,
-                timestamp: parseTimestamp(json["timestamp"])
-            ))
         default:
             return nil
         }

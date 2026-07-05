@@ -10,8 +10,8 @@ use tracing::debug;
 
 use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::id::LfdId;
-use crate::lfd::store::sqlite::SqliteStore;
-use crate::lfd::store::RunEventRow;
+use crate::lfdb::sqlite::SqliteStore;
+use crate::lfdb::RunEventRow;
 
 const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
@@ -319,7 +319,7 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
 }
 
 /// Open the local ledger store, creating and migrating it if needed.
-pub fn open_ledger() -> Result<SqliteStore, crate::lfd::store::StoreError> {
+pub fn open_ledger() -> Result<SqliteStore, crate::lfdb::StoreError> {
     SqliteStore::new(&ledger_db_path())
 }
 

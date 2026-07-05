@@ -99,7 +99,7 @@ def print_checklist() -> None:
     print()
     print("2. CROSS-CLIENT ACTION CLEARING")
     print("   a. On iPhone, open a wave with suggested action buttons")
-    print("   b. From another client (macOS Concerto or lfq), send a message")
+    print("   b. From another client (macOS Concerto), send a message")
     print("   c. This starts a new turn on the server")
     print("   [ ] Action buttons on iPhone disappear when turnStarted arrives")
     print()

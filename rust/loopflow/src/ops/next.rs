@@ -118,6 +118,24 @@ pub fn next_branch(
     Ok(NextResult { new_branch })
 }
 
+/// Rotate a recurring wave onto a fresh schema-named branch: generate the
+/// next branch name (de-colliding with word pairs), create it in the
+/// worktree, push it with upstream. Returns the new branch name.
+pub fn advance_branch(worktree: &Path, wave_name: &str) -> OpsResult<String> {
+    let config = load_config_or_default(Some(worktree));
+    let branch_config = config.branch_names.as_ref();
+    let mut new_branch = format_branch_name(wave_name, branch_config, worktree)
+        .map_err(|e| OpsError::Message(format!("failed to generate branch name: {e}")))?;
+
+    while branch_exists(worktree, &new_branch)? {
+        new_branch = format!("{new_branch}.{}", generate_word_pair());
+    }
+
+    create_branch(worktree, &new_branch)?;
+    push_with_upstream(worktree, "origin", &new_branch)?;
+    Ok(new_branch)
+}
+
 fn current_pr_number(repo: &Path) -> OpsResult<Option<u64>> {
     let output = Command::new("gh")
         .arg("pr")
@@ -178,4 +196,76 @@ fn reset_to_main(repo: &Path, base_branch: &str) -> OpsResult<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    use tempfile::TempDir;
+
+    use super::advance_branch;
+    use crate::engine::git::current_branch;
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("git should run");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn repo_with_origin() -> (TempDir, PathBuf) {
+        let temp = TempDir::new().expect("temp dir");
+        let origin = temp.path().join("origin.git");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).expect("create repo dir");
+        run_git(temp.path(), &["init", "--bare", "-b", "main", "origin.git"]);
+        run_git(&repo, &["init", "-b", "main"]);
+        run_git(&repo, &["config", "user.email", "test@example.com"]);
+        run_git(&repo, &["config", "user.name", "Test User"]);
+        std::fs::write(repo.join("README.md"), "seed\n").expect("seed file");
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "init"]);
+        run_git(
+            &repo,
+            &["remote", "add", "origin", origin.to_str().expect("origin")],
+        );
+        run_git(&repo, &["push", "-u", "origin", "main"]);
+        (temp, repo)
+    }
+
+    #[test]
+    fn advance_branch_rotates_onto_fresh_pushed_branch() {
+        let (_temp, repo) = repo_with_origin();
+
+        let first = advance_branch(&repo, "goals").expect("first rotation");
+        assert!(
+            first.contains("goals"),
+            "schema name carries the wave: {first}"
+        );
+        assert_eq!(current_branch(&repo).expect("branch"), Some(first.clone()));
+
+        // The rotation pushed with upstream: the branch exists on origin.
+        let remote = Command::new("git")
+            .args(["ls-remote", "--heads", "origin", &first])
+            .current_dir(&repo)
+            .output()
+            .expect("ls-remote");
+        assert!(
+            String::from_utf8_lossy(&remote.stdout).contains(&first),
+            "rotated branch is pushed to origin"
+        );
+
+        // A second rotation de-collides instead of failing.
+        let second = advance_branch(&repo, "goals").expect("second rotation");
+        assert_ne!(first, second);
+    }
 }

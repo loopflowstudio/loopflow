@@ -48,37 +48,10 @@ struct ContractTests {
         #expect(wave.repos.first?.remoteBranch == "engbot/build-3")
         #expect(wave.repos.first?.commits.count == 1)
 
-        #expect(wave.triggers.count == 2)
-        #expect(wave.triggers[0].signal == .repo)
-        #expect(wave.triggers[0].flow == "integrate")
-        #expect(wave.triggers[1].signal == .ciFailure)
-        #expect(wave.crons.count == 1)
-        #expect(wave.crons[0].flow == "wave-polish")
-        #expect(wave.crons[0].schedule == "0 0 * * 1")
-        #expect(wave.crons[0].lastTriggeredAt != nil)
-    }
-
-    @Test("trigger.json decodes signal and optional fields")
-    func triggerFixtureParses() throws {
-        let json = try fixtureJSON("trigger.json")
-        guard let id = json["id"] as? String,
-              let signalStr = json["signal"] as? String,
-              let signal = Trigger.Signal(rawValue: signalStr) else {
-            Issue.record("trigger fixture missing required fields")
-            return
-        }
-
-        let trigger = Trigger(
-            id: id,
-            signal: signal,
-            flow: json["flow"] as? String,
-            sourceWaveId: json["source_wave_id"] as? String
-        )
-
-        #expect(trigger.id == "trig_abc123")
-        #expect(trigger.signal == .wave)
-        #expect(trigger.flow == "build")
-        #expect(trigger.sourceWaveId == "wave_upstream")
+        // Triggers and crons left the wire in the collapse's organ cut:
+        // absent keys parse as empty.
+        #expect(wave.triggers.isEmpty)
+        #expect(wave.crons.isEmpty)
     }
 
     @Test("chat_turn.json decodes through the wave chat models")
@@ -188,6 +161,32 @@ struct ContractTests {
         #expect(bareInterrupt.turn == nil)
     }
 
+    @Test("channel_tagged_turn.json decodes through FrameChannelTag + ChatTurn")
+    func channelTaggedTurnFixtureParses() throws {
+        // A work-line channel's `turn` SSE frame: the ChatTurn JSON plus one
+        // extra top-level `channel` key. Pinned against Rust's dto_fixtures —
+        // WaveChatConnection peels the tag with FrameChannelTag, then decodes
+        // the same bytes as the turn.
+        let data = try fixtureData("dto/channel_tagged_turn.json")
+        let tag = try JSONDecoder().decode(FrameChannelTag.self, from: data)
+        #expect(tag.channel == "ship.148e0e02")
+
+        let turn = try JSONDecoder().decode(ChatTurn.self, from: data)
+        #expect(turn.id == "turn-7")
+        #expect(turn.role == .assistant)
+        #expect(turn.status == .completed)
+        #expect(turn.from == "worker")
+
+        // Untagged frame (the primary channel): absent key decodes as nil.
+        var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json.removeValue(forKey: "channel")
+        let untagged = try JSONDecoder().decode(
+            FrameChannelTag.self,
+            from: JSONSerialization.data(withJSONObject: json)
+        )
+        #expect(untagged.channel == nil, "absent channel = the wave's own channel")
+    }
+
     @Test("wave_mind_states.json pins the shared SSE state vocabulary")
     func mindStateVocabularyPinned() throws {
         // The same fixture Rust's dto_fixtures checks against MindState::name;
@@ -197,16 +196,6 @@ struct ContractTests {
         let json = try fixtureJSON("dto/wave_mind_states.json")
         let names = try #require(json["states"] as? [String])
         #expect(names.map { WaveMindState(rawValue: $0) } == [.idle, .turning, .interrupting, .failed])
-    }
-
-    @Test("activation_log.json has expected shape")
-    func activationLogFixtureShape() throws {
-        let json = try fixtureJSON("activation_log.json")
-
-        #expect(json["object"] as? String == "activation_log")
-        #expect(json["wave_id"] as? String == "wave_abc123")
-        #expect(json["trigger_id"] as? String == "trig_001")
-        #expect(json["outcome"] as? String == "started")
     }
 }
 

@@ -1,0 +1,1514 @@
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+use rusqlite::{params, Connection, OptionalExtension, ToSql};
+
+use crate::lfd::attention::{queue_block_attention_item, queue_block_from_attention};
+use crate::lfd::id::LfdId;
+use crate::lfd::types::{
+    AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
+    LivePullRequestState, QueueBlock, QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run,
+    RunStatus, Session, SessionStatus, SessionUse, Summary, Wave, WaveStatus,
+};
+use crate::lfdb::catalog::{list_runs_query, list_waves_query, sql, Query, SqlDialect};
+use crate::lfdb::rows::{
+    map_chat_memory_block_row, map_chat_message_row, map_fork_run_row, map_live_pr_state_row,
+    map_repo_edge_row, map_repo_provider_usage_row, map_repo_row, map_run_row, map_summary_row,
+    map_wave_provider_usage_row, map_wave_repo_row, map_wave_row, now_unix, serialize_pr,
+};
+use crate::lfdb::token_crypto;
+use crate::lfdb::{
+    ForkRun, ForkRunStatus, RunEventRow, RunTokenUsage, StoreError, StoreResult, TokenUsageReport,
+};
+
+#[derive(Debug, Clone)]
+pub struct SqliteStore {
+    conn: Arc<Mutex<Connection>>,
+}
+
+fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {
+    let mut scan = conn.prepare(
+        "SELECT provider, access_token, refresh_token
+         FROM provider_tokens
+         WHERE encrypted = 0",
+    )?;
+    let rows = scan.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+
+    let mut pending = Vec::new();
+    for row in rows {
+        pending.push(row?);
+    }
+    drop(scan);
+
+    if pending.is_empty() {
+        return Ok(());
+    }
+
+    let tx = conn.transaction()?;
+    for (provider, access_token, refresh_token) in pending {
+        let encrypted_access = token_crypto::encrypt_token(&access_token).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to encrypt existing access token for provider '{provider}': {error}"
+            ))
+        })?;
+        let encrypted_refresh =
+            token_crypto::encrypt_optional(refresh_token.as_deref()).map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "failed to encrypt existing refresh token for provider '{provider}': {error}"
+                ))
+            })?;
+        tx.execute(
+            "UPDATE provider_tokens
+             SET access_token = ?1,
+                 refresh_token = ?2,
+                 encrypted = 1
+             WHERE provider = ?3",
+            params![encrypted_access, encrypted_refresh, provider],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+type TokenRow = (
+    String,
+    String,
+    Option<String>,
+    Option<i64>,
+    Option<String>,
+    i64,
+    String,
+    bool,
+);
+
+fn read_token_row(row: &rusqlite::Row) -> rusqlite::Result<TokenRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+    ))
+}
+
+fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
+    let (provider, access_token, refresh_token, expires_at, login, updated_at, ct, encrypted) = row;
+    let access_token =
+        token_crypto::decrypt_if_needed(&access_token, encrypted).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to decrypt access token for provider '{provider}': {error}"
+            ))
+        })?;
+    let refresh_token = refresh_token
+        .as_deref()
+        .map(|token| token_crypto::decrypt_if_needed(token, encrypted))
+        .transpose()
+        .map_err(|error| {
+            StoreError::InvalidData(format!(
+                "failed to decrypt refresh token for provider '{provider}': {error}"
+            ))
+        })?;
+    Ok(super::ProviderToken {
+        provider,
+        access_token,
+        refresh_token,
+        expires_at,
+        login,
+        updated_at,
+        credential_type: super::CredentialType::from_db(&ct),
+    })
+}
+
+impl SqliteStore {
+    fn sql(query: Query) -> &'static str {
+        sql(query, SqlDialect::Sqlite)
+    }
+
+    pub fn new(path: &Path) -> StoreResult<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| {
+                StoreError::InvalidData(format!("failed to create db dir: {err}"))
+            })?;
+        }
+
+        let mut conn = Connection::open(path)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;",
+        )?;
+
+        super::migrations::apply_sqlite(&conn)?;
+        migrate_plaintext_provider_tokens(&mut conn)?;
+
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
+    fn read_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let query = Self::sql(list_waves_query(repo.is_some()));
+        let params: Vec<Box<dyn ToSql>> = if let Some(repo) = repo {
+            vec![Box::new(repo.to_string())]
+        } else {
+            vec![]
+        };
+        let mut stmt = conn.prepare(query)?;
+        let params_iter = params.iter().map(|v| v.as_ref() as &dyn ToSql);
+        let rows = stmt.query_map(rusqlite::params_from_iter(params_iter), |row| {
+            Ok(map_wave_row(row))
+        })?;
+
+        let mut waves = Vec::new();
+        for wave in rows {
+            waves.push(wave??);
+        }
+        Ok(waves)
+    }
+
+    fn read_wave_repos<P>(&self, query: Query, params: P) -> StoreResult<Vec<RepoWork>>
+    where
+        P: rusqlite::Params,
+    {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(query))?;
+        let rows = stmt.query_map(params, |row| Ok(map_wave_repo_row(row)))?;
+        let mut repos = Vec::new();
+        for repo in rows {
+            repos.push(repo??);
+        }
+        Ok(repos)
+    }
+
+    fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let direction_json = serde_json::to_string(wave.direction())?;
+        let area_json = serde_json::to_string(wave.area())?;
+        let metrics_json = serde_json::to_string(wave.metrics())?;
+        let created_at = wave
+            .created_at()
+            .map(|dt| dt.unix_timestamp())
+            .unwrap_or_else(now_unix);
+
+        conn.execute(
+            Self::sql(Query::UpsertWave),
+            params![
+                wave.id(),
+                wave.name(),
+                direction_json,
+                area_json,
+                if wave.status() == WaveStatus::Paused {
+                    1i64
+                } else {
+                    0i64
+                },
+                created_at,
+                wave.workers as i64,
+                wave.mode().as_str(),
+                wave.primary_flow(),
+                wave.goal(),
+                metrics_json,
+                wave.parent_wave_id(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn map_control_session_row(row: &rusqlite::Row<'_>) -> Result<Session, rusqlite::Error> {
+        let argv_text: String = row.get(8)?;
+        let env_text: String = row.get(9)?;
+        let argv: Vec<String> = serde_json::from_str(&argv_text).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(err))
+        })?;
+        let env = serde_json::from_str(&env_text).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(9, rusqlite::types::Type::Text, Box::new(err))
+        })?;
+        let session_use_text: String = row.get(4)?;
+        let session_use = SessionUse::try_from(session_use_text.as_str()).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(err))
+        })?;
+        Ok(Session {
+            id: row.get(0)?,
+            wave_id: row.get(1)?,
+            run_id: row.get(2)?,
+            parent_session_id: row.get(3)?,
+            session_use,
+            step: row.get(5)?,
+            agent: row.get(6)?,
+            cwd: row.get(7)?,
+            argv,
+            env,
+            source: row.get(10)?,
+            tmux_name: row.get(11)?,
+            status: SessionStatus::from_i32(row.get::<_, i64>(12)? as i32),
+            completion_token: row.get(13)?,
+            created_at: crate::lfdb::rows::unix_to_datetime(row.get(14)?),
+            attached_at: row
+                .get::<_, Option<i64>>(15)?
+                .map(crate::lfdb::rows::unix_to_datetime),
+            started_at: row
+                .get::<_, Option<i64>>(16)?
+                .map(crate::lfdb::rows::unix_to_datetime),
+            completed_at: row
+                .get::<_, Option<i64>>(17)?
+                .map(crate::lfdb::rows::unix_to_datetime),
+        })
+    }
+}
+
+impl SqliteStore {
+    pub fn health_check(&self) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(Self::sql(Query::HealthCheck), [], |_| Ok(()))?;
+        Ok(())
+    }
+
+    pub fn schema_version(&self) -> StoreResult<String> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        super::migrations::latest_version_sqlite(&conn)
+    }
+
+    // -- Provider tokens -------------------------------------------------------
+
+    pub fn get_provider_token(&self, provider: &str) -> StoreResult<Option<super::ProviderToken>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted
+             FROM provider_tokens WHERE provider = ?1",
+        )?;
+        let row = stmt
+            .query_row(params![provider], read_token_row)
+            .optional()?;
+
+        row.map(decrypt_token_row).transpose()
+    }
+
+    pub fn upsert_provider_token(&self, token: &super::ProviderToken) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let encrypted_access =
+            token_crypto::encrypt_token(&token.access_token).map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "failed to encrypt access token for provider '{}': {error}",
+                    token.provider
+                ))
+            })?;
+        let encrypted_refresh = token_crypto::encrypt_optional(token.refresh_token.as_deref())
+            .map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "failed to encrypt refresh token for provider '{}': {error}",
+                    token.provider
+                ))
+            })?;
+        conn.execute(
+            "INSERT INTO provider_tokens (provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)
+             ON CONFLICT(provider) DO UPDATE SET
+                access_token = excluded.access_token,
+                refresh_token = excluded.refresh_token,
+                expires_at = excluded.expires_at,
+                login = excluded.login,
+                updated_at = excluded.updated_at,
+                credential_type = excluded.credential_type,
+                encrypted = excluded.encrypted",
+            params![
+                token.provider,
+                encrypted_access,
+                encrypted_refresh,
+                token.expires_at,
+                token.login,
+                token.updated_at,
+                token.credential_type.as_str(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_provider_token(&self, provider: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "DELETE FROM provider_tokens WHERE provider = ?1",
+            params![provider],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_provider_tokens(&self) -> StoreResult<Vec<super::ProviderToken>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted
+             FROM provider_tokens ORDER BY provider",
+        )?;
+        let rows = stmt.query_map([], read_token_row)?;
+        let mut tokens = Vec::new();
+        for row in rows {
+            tokens.push(decrypt_token_row(row?)?);
+        }
+        Ok(tokens)
+    }
+
+    // -- Repos -----------------------------------------------------------------
+
+    pub fn list_repos(&self) -> StoreResult<Vec<Repo>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt =
+            conn.prepare("SELECT path, repo_id, name, added_at FROM repos ORDER BY path ASC")?;
+        let rows = stmt.query_map([], |row| Ok(map_repo_row(row)))?;
+
+        let mut repos = Vec::new();
+        for row in rows {
+            repos.push(row??);
+        }
+        Ok(repos)
+    }
+
+    pub fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn
+            .prepare("SELECT path, repo_id, name, added_at FROM repos WHERE path = ?1 LIMIT 1")?;
+        let row = stmt
+            .query_row(params![path], |row| Ok(map_repo_row(row)))
+            .optional()?;
+        row.transpose()
+    }
+
+    pub fn get_repo_by_repo_id(&self, repo_id: &RepoId) -> StoreResult<Option<Repo>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT path, repo_id, name, added_at FROM repos WHERE repo_id = ?1 LIMIT 1",
+        )?;
+        let row = stmt
+            .query_row(params![repo_id.as_str()], |row| Ok(map_repo_row(row)))
+            .optional()?;
+        row.transpose()
+    }
+
+    pub fn upsert_repo(&self, repo: &Repo) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO repos (path, repo_id, name, added_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(path) DO UPDATE SET repo_id = excluded.repo_id, name = excluded.name, added_at = excluded.added_at",
+            params![
+                repo.path,
+                repo.repo_id.as_str(),
+                repo.name,
+                repo.added_at.unix_timestamp()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_repo(&self, path: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute("DELETE FROM repos WHERE path = ?1", params![path])?;
+        Ok(())
+    }
+
+    pub fn list_edges(&self) -> StoreResult<Vec<RepoEdge>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT parent_repo_id, child_repo_id FROM repo_edges ORDER BY parent_repo_id, child_repo_id",
+        )?;
+        let rows = stmt.query_map([], |row| Ok(map_repo_edge_row(row)))?;
+
+        let mut edges = Vec::new();
+        for row in rows {
+            edges.push(row??);
+        }
+        Ok(edges)
+    }
+
+    pub fn add_edge(&self, edge: &RepoEdge) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT OR IGNORE INTO repo_edges (parent_repo_id, child_repo_id) VALUES (?1, ?2)",
+            params![edge.parent_repo_id.as_str(), edge.child_repo_id.as_str()],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "DELETE FROM repo_edges WHERE parent_repo_id = ?1 AND child_repo_id = ?2",
+            params![parent_id.as_str(), child_id.as_str()],
+        )?;
+        Ok(())
+    }
+
+    pub fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT repos.path, repos.repo_id, repos.name, repos.added_at
+             FROM repo_edges
+             INNER JOIN repos ON repos.repo_id = repo_edges.child_repo_id
+             WHERE repo_edges.parent_repo_id = ?1
+             ORDER BY repos.path ASC",
+        )?;
+        let rows = stmt.query_map(params![repo_id.as_str()], |row| Ok(map_repo_row(row)))?;
+        let mut repos = Vec::new();
+        for row in rows {
+            repos.push(row??);
+        }
+        Ok(repos)
+    }
+
+    pub fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT repos.path, repos.repo_id, repos.name, repos.added_at
+             FROM repo_edges
+             INNER JOIN repos ON repos.repo_id = repo_edges.parent_repo_id
+             WHERE repo_edges.child_repo_id = ?1
+             ORDER BY repos.path ASC",
+        )?;
+        let rows = stmt.query_map(params![repo_id.as_str()], |row| Ok(map_repo_row(row)))?;
+        let mut repos = Vec::new();
+        for row in rows {
+            repos.push(row??);
+        }
+        Ok(repos)
+    }
+
+    const TERMINAL_SESSION_COLS: &str =
+        "id, wave_id, run_id, parent_session_id, session_use, step, agent, cwd, argv, env, source, tmux_name, status, \
+         completion_token, created_at, attached_at, started_at, completed_at";
+
+    pub fn create_control_session(&self, session: &Session) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            &format!(
+                "INSERT INTO terminal_sessions ({}) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                Self::TERMINAL_SESSION_COLS
+            ),
+            params![
+                session.id,
+                session.wave_id,
+                session.run_id,
+                session.parent_session_id,
+                session.session_use.as_str(),
+                session.step,
+                session.agent,
+                session.cwd,
+                serde_json::to_string(&session.argv)?,
+                serde_json::to_string(&session.env)?,
+                session.source,
+                session.tmux_name,
+                session.status.as_i32() as i64,
+                session.completion_token,
+                session.created_at.unix_timestamp(),
+                session.attached_at.map(|dt| dt.unix_timestamp()),
+                session.started_at.map(|dt| dt.unix_timestamp()),
+                session.completed_at.map(|dt| dt.unix_timestamp()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_control_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {} FROM terminal_sessions WHERE id = ?1",
+            Self::TERMINAL_SESSION_COLS
+        ))?;
+        let row = stmt
+            .query_row(params![session_id], Self::map_control_session_row)
+            .optional()?;
+        Ok(row)
+    }
+
+    pub fn list_control_sessions(
+        &self,
+        wave_id: Option<&LfdId>,
+        statuses: Option<&[SessionStatus]>,
+    ) -> StoreResult<Vec<Session>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut sql = format!(
+            "SELECT {} FROM terminal_sessions",
+            Self::TERMINAL_SESSION_COLS
+        );
+        let mut predicates = Vec::new();
+        let mut params: Vec<Box<dyn ToSql>> = Vec::new();
+
+        if let Some(wave_id) = wave_id {
+            predicates.push(format!("wave_id = ?{}", params.len() + 1));
+            params.push(Box::new(wave_id.clone()));
+        }
+        if let Some(statuses) = statuses {
+            let placeholders = statuses
+                .iter()
+                .enumerate()
+                .map(|(index, _)| format!("?{}", params.len() + index + 1))
+                .collect::<Vec<_>>();
+            predicates.push(format!("status IN ({})", placeholders.join(", ")));
+            params.extend(
+                statuses
+                    .iter()
+                    .map(|status| Box::new(status.as_i32() as i64) as Box<dyn ToSql>),
+            );
+        }
+        if !predicates.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&predicates.join(" AND "));
+        }
+        sql.push_str(" ORDER BY created_at ASC");
+
+        let mut stmt = conn.prepare(&sql)?;
+        let param_refs: Vec<&dyn ToSql> = params.iter().map(|value| value.as_ref()).collect();
+        let mut rows = stmt.query(param_refs.as_slice())?;
+        let mut sessions = Vec::new();
+        while let Some(row) = rows.next()? {
+            sessions.push(Self::map_control_session_row(row)?);
+        }
+        Ok(sessions)
+    }
+
+    /// Live sessions plus sessions completed at or after `completed_since`
+    /// (unix seconds) — bounded however much terminal history accumulates.
+    pub fn list_recent_control_sessions(
+        &self,
+        wave_id: &LfdId,
+        completed_since: i64,
+    ) -> StoreResult<Vec<Session>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {} FROM terminal_sessions \
+             WHERE wave_id = ?1 AND (status IN (?2, ?3, ?4) OR completed_at >= ?5) \
+             ORDER BY created_at ASC",
+            Self::TERMINAL_SESSION_COLS
+        ))?;
+        let mut rows = stmt.query(params![
+            wave_id,
+            SessionStatus::Pending.as_i32() as i64,
+            SessionStatus::Attached.as_i32() as i64,
+            SessionStatus::Running.as_i32() as i64,
+            completed_since,
+        ])?;
+        let mut sessions = Vec::new();
+        while let Some(row) = rows.next()? {
+            sessions.push(Self::map_control_session_row(row)?);
+        }
+        Ok(sessions)
+    }
+
+    pub fn get_active_control_session_for_run(
+        &self,
+        run_id: &LfdId,
+    ) -> StoreResult<Option<Session>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {} FROM terminal_sessions \
+             WHERE run_id = ?1 AND status IN (?2, ?3, ?4) \
+             ORDER BY created_at DESC LIMIT 1",
+            Self::TERMINAL_SESSION_COLS
+        ))?;
+        let row = stmt
+            .query_row(
+                params![
+                    run_id,
+                    SessionStatus::Pending.as_i32() as i64,
+                    SessionStatus::Attached.as_i32() as i64,
+                    SessionStatus::Running.as_i32() as i64,
+                ],
+                Self::map_control_session_row,
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    pub fn update_control_session(&self, session: &Session) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE terminal_sessions
+             SET wave_id = ?2,
+                 run_id = ?3,
+                 parent_session_id = ?4,
+                 session_use = ?5,
+                 step = ?6,
+                 agent = ?7,
+                 cwd = ?8,
+                 argv = ?9,
+                 env = ?10,
+                 source = ?11,
+                 tmux_name = ?12,
+                 status = ?13,
+                 completion_token = ?14,
+                 created_at = ?15,
+                 attached_at = ?16,
+                 started_at = ?17,
+                 completed_at = ?18
+             WHERE id = ?1",
+            params![
+                session.id,
+                session.wave_id,
+                session.run_id,
+                session.parent_session_id,
+                session.session_use.as_str(),
+                session.step,
+                session.agent,
+                session.cwd,
+                serde_json::to_string(&session.argv)?,
+                serde_json::to_string(&session.env)?,
+                session.source,
+                session.tmux_name,
+                session.status.as_i32() as i64,
+                session.completion_token,
+                session.created_at.unix_timestamp(),
+                session.attached_at.map(|dt| dt.unix_timestamp()),
+                session.started_at.map(|dt| dt.unix_timestamp()),
+                session.completed_at.map(|dt| dt.unix_timestamp()),
+            ],
+        )?;
+        if updated == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
+        self.read_waves(repo)
+    }
+
+    pub fn list_child_waves(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::ListChildWaves))?;
+        let rows = stmt.query_map(params![parent], |row| Ok(map_wave_row(row)))?;
+        let mut waves = Vec::new();
+        for wave in rows {
+            waves.push(wave??);
+        }
+        Ok(waves)
+    }
+
+    pub fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::GetWaveById))?;
+        let wave = stmt
+            .query_row(params![wave_id], |row| Ok(map_wave_row(row)))
+            .optional()?;
+        wave.transpose()
+    }
+
+    pub fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::GetWaveByName))?;
+        let wave = stmt
+            .query_row(params![name], |row| Ok(map_wave_row(row)))
+            .optional()?;
+        wave.transpose()
+    }
+
+    pub fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
+        self.upsert_wave(wave)
+    }
+
+    pub fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
+        self.upsert_wave(wave)
+    }
+
+    pub fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // attention_items and terminal_sessions reference waves without
+        // ON DELETE CASCADE; delete them explicitly or the wave row is
+        // undeletable once either exists.
+        conn.execute(
+            "DELETE FROM attention_items WHERE wave_id = ?1",
+            params![wave_id],
+        )?;
+        conn.execute(
+            "DELETE FROM terminal_sessions WHERE wave_id = ?1",
+            params![wave_id],
+        )?;
+        conn.execute(Self::sql(Query::DeleteWaveById), params![wave_id])?;
+        Ok(())
+    }
+
+    pub fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>> {
+        self.read_wave_repos(Query::ListWaveRepos, params![wave_id])
+    }
+
+    pub fn upsert_wave_repo(&self, wave_id: &LfdId, repo: &RepoWork) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            Self::sql(Query::UpsertWaveRepo),
+            params![
+                wave_id.as_str(),
+                repo.repo,
+                repo.worktree,
+                repo.branch,
+                repo.status.as_i32(),
+                repo.iteration as i64,
+                repo.cycle_start_iteration as i64,
+                repo.position as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_wave_repos(&self, wave_id: &LfdId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(Self::sql(Query::DeleteWaveReposByWave), params![wave_id])?;
+        Ok(())
+    }
+
+    pub fn list_runs(&self, wave_id: Option<&LfdId>, limit: Option<u32>) -> StoreResult<Vec<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let query = Self::sql(list_runs_query(wave_id.is_some(), limit.is_some()));
+        let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
+        if let Some(wave_id) = wave_id {
+            params_vec.push(Box::new(wave_id.clone()));
+        }
+        if let Some(limit) = limit {
+            params_vec.push(Box::new(limit as i64));
+        }
+
+        let mut stmt = conn.prepare(query)?;
+        let params_iter = params_vec.iter().map(|v| v.as_ref() as &dyn ToSql);
+        let rows = stmt.query_map(rusqlite::params_from_iter(params_iter), |row| {
+            Ok(map_run_row(row))
+        })?;
+
+        let mut runs = Vec::new();
+        for run in rows {
+            runs.push(run??);
+        }
+        Ok(runs)
+    }
+
+    /// Non-terminal runs plus runs that ended at or after `ended_since` —
+    /// the push bridge's working set (see `Query::ListRunsActiveOrEndedSince`).
+    pub fn list_runs_active_or_ended_since(
+        &self,
+        ended_since: time::OffsetDateTime,
+    ) -> StoreResult<Vec<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::ListRunsActiveOrEndedSince))?;
+        let rows = stmt.query_map(
+            params![
+                RunStatus::Completed.as_i32() as i64,
+                RunStatus::Failed.as_i32() as i64,
+                ended_since.unix_timestamp(),
+            ],
+            |row| Ok(map_run_row(row)),
+        )?;
+        let mut runs = Vec::new();
+        for run in rows {
+            runs.push(run??);
+        }
+        Ok(runs)
+    }
+
+    pub fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::GetRunById))?;
+        let run = stmt
+            .query_row(params![run_id], |row| Ok(map_run_row(row)))
+            .optional()?;
+        run.transpose()
+    }
+
+    pub fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::GetActiveRun))?;
+        let run = stmt
+            .query_row(
+                params![
+                    wave_id,
+                    RunStatus::Pending.as_i32() as i64,
+                    RunStatus::Running.as_i32() as i64,
+                    RunStatus::Waiting.as_i32() as i64,
+                ],
+                |row| Ok(map_run_row(row)),
+            )
+            .optional()?;
+        run.transpose()
+    }
+
+    pub fn count_active_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::CountActiveRuns))?;
+        let count = stmt.query_row(
+            params![
+                wave_id,
+                RunStatus::Pending.as_i32() as i64,
+                RunStatus::Running.as_i32() as i64,
+                RunStatus::Waiting.as_i32() as i64,
+            ],
+            |row| row.get::<_, i64>(0),
+        )?;
+        Ok(count.max(0) as u32)
+    }
+
+    pub fn get_latest_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::GetLatestRun))?;
+        let run = stmt
+            .query_row(params![wave_id], |row| Ok(map_run_row(row)))
+            .optional()?;
+        run.transpose()
+    }
+
+    pub fn create_run(&self, run: &Run) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let started_at = run
+            .started_at
+            .map(|dt| dt.unix_timestamp())
+            .unwrap_or_else(now_unix);
+        let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
+        let execution_cursor = run.execution_cursor.clone();
+        conn.execute(
+            Self::sql(Query::InsertRun),
+            params![
+                run.id,
+                run.wave_id,
+                run.iteration as i64,
+                run.step_index as i64,
+                run.status.as_i32() as i64,
+                run.worktree,
+                run.branch,
+                started_at,
+                run.ended_at.map(|dt| dt.unix_timestamp()),
+                run.error,
+                run.repo,
+                run.flow,
+                run.task,
+                serde_json::to_string(&run.direction)?,
+                serde_json::to_string(&run.area)?,
+                serialize_pr(&run.pr)?,
+                flow_parents_json,
+                execution_cursor,
+                run.parent_run_id.as_ref(),
+                run.parent_pr_number.map(|value| value as i64),
+                run.stack_position as i64,
+                run.stack_group_id,
+                run.stack_status.as_i32() as i64,
+                if run.lineage_inferred { 1i64 } else { 0i64 },
+                run.target_branch,
+                run.repair_of.as_ref(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_run(&self, run: &Run) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
+        let execution_cursor = run.execution_cursor.clone();
+        let updated = conn.execute(
+            Self::sql(Query::UpdateRun),
+            params![
+                run.iteration as i64,
+                run.step_index as i64,
+                run.status.as_i32() as i64,
+                run.worktree,
+                run.branch,
+                run.started_at.map(|dt| dt.unix_timestamp()),
+                run.ended_at.map(|dt| dt.unix_timestamp()),
+                run.error,
+                run.repo,
+                run.flow,
+                run.task,
+                serde_json::to_string(&run.direction)?,
+                serde_json::to_string(&run.area)?,
+                serialize_pr(&run.pr)?,
+                flow_parents_json,
+                execution_cursor,
+                run.parent_run_id.as_ref(),
+                run.parent_pr_number.map(|value| value as i64),
+                run.stack_position as i64,
+                run.stack_group_id,
+                run.stack_status.as_i32() as i64,
+                if run.lineage_inferred { 1i64 } else { 0i64 },
+                run.target_branch,
+                run.repair_of.as_ref(),
+                run.id,
+            ],
+        )?;
+        if updated == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::ListStackRuns))?;
+        let rows = stmt.query_map(params![wave_id], |row| Ok(map_run_row(row)))?;
+
+        let mut runs = Vec::new();
+        for run in rows {
+            runs.push(run??);
+        }
+        Ok(runs)
+    }
+
+    pub fn get_live_pr_state(
+        &self,
+        repo_id: &str,
+        pr_number: u32,
+    ) -> StoreResult<Option<LivePullRequestState>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::GetLivePrState))?;
+        let state = stmt
+            .query_row(params![repo_id, pr_number as i64], |row| {
+                Ok(map_live_pr_state_row(row))
+            })
+            .optional()?;
+        state.transpose()
+    }
+
+    pub fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            Self::sql(Query::UpsertLivePrState),
+            params![
+                state.repo_id,
+                state.pr_number as i64,
+                state.state.as_i32() as i64,
+                if state.is_draft { 1i64 } else { 0i64 },
+                state.head_ref,
+                state.head_sha,
+                state.base_ref,
+                state.updated_at.unix_timestamp(),
+                state.merged_at.map(|value| value.unix_timestamp()),
+                state.synced_at.unix_timestamp(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn map_attention_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttentionItem> {
+        let kind_raw: String = row.get(3)?;
+        let status_raw: String = row.get(4)?;
+        let context_raw: String = row.get(7)?;
+        let kind = kind_raw.parse::<AttentionKind>().map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                Box::new(StoreError::InvalidData(err)),
+            )
+        })?;
+        let status = status_raw.parse::<AttentionStatus>().map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                4,
+                rusqlite::types::Type::Text,
+                Box::new(StoreError::InvalidData(err)),
+            )
+        })?;
+
+        Ok(AttentionItem {
+            id: LfdId::from_raw(row.get::<_, String>(0)?),
+            wave_id: LfdId::from_raw(row.get::<_, String>(1)?),
+            run_id: row.get::<_, Option<String>>(2)?.map(LfdId::from_raw),
+            kind,
+            status,
+            title: row.get(5)?,
+            summary: row.get(6)?,
+            context: serde_json::from_str(&context_raw)
+                .unwrap_or(serde_json::Value::Object(Default::default())),
+            surfaced_at: crate::lfdb::rows::unix_to_datetime(row.get(8)?),
+            viewed_at: row
+                .get::<_, Option<i64>>(9)?
+                .map(crate::lfdb::rows::unix_to_datetime),
+            resolved_at: row
+                .get::<_, Option<i64>>(10)?
+                .map(crate::lfdb::rows::unix_to_datetime),
+        })
+    }
+
+    pub fn list_attention_items(
+        &self,
+        status: Option<AttentionStatus>,
+        kind: Option<AttentionKind>,
+    ) -> StoreResult<Vec<AttentionItem>> {
+        let mut sql = String::from(
+            "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at\n             FROM attention_items",
+        );
+        let mut params: Vec<String> = Vec::new();
+        let mut clauses: Vec<String> = Vec::new();
+        if let Some(status) = status {
+            clauses.push("status = ?".to_string());
+            params.push(status.as_str().to_string());
+        }
+        if let Some(kind) = kind {
+            clauses.push("kind = ?".to_string());
+            params.push(kind.as_str().to_string());
+        }
+        if !clauses.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&clauses.join(" AND "));
+        }
+        sql.push_str(" ORDER BY surfaced_at DESC");
+
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(params.iter()),
+            Self::map_attention_item_row,
+        )?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StoreError::from)
+    }
+
+    pub fn get_attention_item(&self, attention_id: &LfdId) -> StoreResult<Option<AttentionItem>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at\n             FROM attention_items WHERE id = ?1",
+        )?;
+        stmt.query_row(
+            rusqlite::params![attention_id],
+            Self::map_attention_item_row,
+        )
+        .optional()
+        .map_err(StoreError::from)
+    }
+
+    pub fn find_attention_item_for_run(
+        &self,
+        run_id: &LfdId,
+        kind: AttentionKind,
+    ) -> StoreResult<Option<AttentionItem>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at
+             FROM attention_items
+             WHERE run_id = ?1 AND kind = ?2 AND status != ?3
+             ORDER BY surfaced_at DESC
+             LIMIT 1",
+        )?;
+        stmt.query_row(
+            rusqlite::params![run_id, kind.as_str(), AttentionStatus::Resolved.as_str()],
+            Self::map_attention_item_row,
+        )
+        .optional()
+        .map_err(StoreError::from)
+    }
+
+    pub fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO attention_items (id, wave_id, run_id, kind, status, title, summary, context, surfaced_at, viewed_at, resolved_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(id) DO UPDATE SET
+                wave_id = excluded.wave_id,
+                run_id = excluded.run_id,
+                kind = excluded.kind,
+                status = excluded.status,
+                title = excluded.title,
+                summary = excluded.summary,
+                context = excluded.context,
+                surfaced_at = excluded.surfaced_at,
+                viewed_at = excluded.viewed_at,
+                resolved_at = excluded.resolved_at",
+            rusqlite::params![
+                &item.id,
+                &item.wave_id,
+                &item.run_id,
+                &item.kind.as_str(),
+                &item.status.as_str(),
+                &item.title,
+                &item.summary,
+                &serde_json::to_string(&item.context)?,
+                &item.surfaced_at.unix_timestamp(),
+                &item.viewed_at.map(|value: time::OffsetDateTime| value.unix_timestamp()),
+                &item.resolved_at.map(|value: time::OffsetDateTime| value.unix_timestamp()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let deleted = conn.execute(
+            "DELETE FROM attention_items WHERE id = ?1",
+            rusqlite::params![attention_id],
+        )?;
+        Ok(deleted as u32)
+    }
+
+    pub fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
+        let blocks = self
+            .list_attention_items(
+                Some(AttentionStatus::Surfaced),
+                Some(AttentionKind::Algedonic),
+            )?
+            .into_iter()
+            .filter(|item| &item.wave_id == wave_id)
+            .filter_map(|item| queue_block_from_attention(&item).ok().flatten())
+            .collect();
+        Ok(blocks)
+    }
+
+    pub fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
+        self.upsert_attention_item(&queue_block_attention_item(block))
+    }
+
+    pub fn delete_queue_block(&self, _wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
+        let id = crate::lfd::attention::attention_id_for_queue_block(run_id);
+        let Some(mut item) = self.get_attention_item(&id)? else {
+            return Ok(0);
+        };
+        item.status = AttentionStatus::Resolved;
+        item.resolved_at = Some(time::OffsetDateTime::now_utc());
+        self.upsert_attention_item(&item)?;
+        Ok(1)
+    }
+
+    pub fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let inserted = conn.execute(
+            "INSERT INTO wave_pr_merge_events (wave_id, pr_number, merged_at, processed_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(wave_id, pr_number, merged_at) DO NOTHING",
+            params![
+                event.wave_id,
+                event.pr_number as i64,
+                event.merged_at.unix_timestamp(),
+                event.processed_at.unix_timestamp(),
+            ],
+        )?;
+        Ok(inserted > 0)
+    }
+
+    pub fn fail_orphaned_runs(&self) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            Self::sql(Query::FailOrphanedRuns),
+            params![
+                RunStatus::Failed.as_i32() as i64,
+                "orphaned: lfd restarted",
+                now_unix(),
+                RunStatus::Pending.as_i32() as i64,
+                RunStatus::Running.as_i32() as i64,
+                RunStatus::Waiting.as_i32() as i64,
+            ],
+        )?;
+        // Runs that were in flight are now Failed; the repos that owned them
+        // would otherwise stay stuck in Running/Waiting and the rolled-up wave
+        // status would keep their action buttons disabled. Reset them to Idle.
+        conn.execute(
+            Self::sql(Query::ResetStaleActiveRepos),
+            params![
+                WaveStatus::Idle.as_i32() as i64,
+                WaveStatus::Running.as_i32() as i64,
+                WaveStatus::Waiting.as_i32() as i64,
+            ],
+        )?;
+        Ok(updated as u32)
+    }
+
+    pub fn list_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::ListForkRuns))?;
+        let rows = stmt.query_map(params![run_id, step_index as i64], |row| {
+            Ok(map_fork_run_row(row))
+        })?;
+        let mut runs = Vec::new();
+        for run in rows {
+            runs.push(run??);
+        }
+        Ok(runs)
+    }
+
+    pub fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT fr.id, fr.run_id, fr.step_index, fr.branch_index, fr.status, fr.worktree
+             FROM fork_runs fr
+             LEFT JOIN runs wr ON wr.id = fr.run_id
+             WHERE fr.status IN (?1, ?2)
+               AND (
+                 wr.id IS NULL
+                 OR wr.status NOT IN (?3, ?4, ?5)
+                 OR fr.step_index != wr.step_index
+               )
+             ORDER BY fr.run_id ASC, fr.step_index ASC, fr.branch_index ASC",
+        )?;
+        let rows = stmt.query_map(
+            params![
+                ForkRunStatus::Pending as i32 as i64,
+                ForkRunStatus::Running as i32 as i64,
+                RunStatus::Pending.as_i32() as i64,
+                RunStatus::Running.as_i32() as i64,
+                RunStatus::Waiting.as_i32() as i64
+            ],
+            |row| Ok(map_fork_run_row(row)),
+        )?;
+        let mut runs = Vec::new();
+        for run in rows {
+            runs.push(run??);
+        }
+        Ok(runs)
+    }
+
+    pub fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            Self::sql(Query::UpsertForkRun),
+            params![
+                fork_run.id,
+                fork_run.run_id,
+                fork_run.step_index as i64,
+                fork_run.branch_index as i64,
+                fork_run.status as i32 as i64,
+                fork_run.worktree,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let deleted = conn.execute(
+            Self::sql(Query::DeleteForkRuns),
+            params![run_id, step_index as i64],
+        )?;
+        Ok(deleted as u32)
+    }
+
+    pub fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::GetSummaryByWave))?;
+        let summary = stmt
+            .query_row(params![wave_id], |row| Ok(map_summary_row(row)))
+            .optional()?;
+        summary.transpose()
+    }
+
+    pub fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let created_at = summary
+            .created_at
+            .map(|dt| dt.unix_timestamp())
+            .unwrap_or_else(now_unix);
+
+        conn.execute(
+            Self::sql(Query::UpsertSummary),
+            params![
+                summary.id,
+                summary.wave_id,
+                summary.content,
+                summary.source_hash,
+                summary.token_budget as i64,
+                summary.agent,
+                created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(Self::sql(Query::ListChatMemoryBlocks))?;
+        let rows = stmt.query_map(params![wave_id], |row| Ok(map_chat_memory_block_row(row)))?;
+        let mut blocks = Vec::new();
+        for row in rows {
+            blocks.push(row??);
+        }
+        Ok(blocks)
+    }
+
+    pub fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated_at = block
+            .updated_at
+            .map(|dt| dt.unix_timestamp())
+            .unwrap_or_else(now_unix);
+        conn.execute(
+            Self::sql(Query::UpsertChatMemoryBlock),
+            params![
+                block.wave_id,
+                block.name,
+                block.content,
+                block.position as i64,
+                updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            Self::sql(Query::DeleteChatMemoryBlock),
+            params![wave_id, name],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_chat_messages(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMessage>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, wave_id, role, content, created_at
+             FROM chat_messages
+             WHERE wave_id = ?1
+             ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![wave_id], |row| Ok(map_chat_message_row(row)))?;
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(row??);
+        }
+        Ok(messages)
+    }
+
+    pub fn create_chat_message(&self, message: &ChatMessage) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO chat_messages (id, wave_id, role, content, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                message.id,
+                message.wave_id,
+                message.role,
+                message.content,
+                message.created_at.unix_timestamp(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_run_usage(&self, usage: &RunTokenUsage) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            Self::sql(Query::RecordRunTokenUsage),
+            params![
+                usage.run_id,
+                usage.wave,
+                usage.provider,
+                usage.model,
+                usage.input_tokens as i64,
+                usage.output_tokens as i64,
+                usage.cache_read_tokens as i64,
+                usage.recorded_at,
+                usage.repo,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn aggregate_token_usage(&self) -> StoreResult<TokenUsageReport> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+
+        let mut repo_stmt = conn.prepare(Self::sql(Query::AggregateTokenUsageByRepoProvider))?;
+        let repo_rows = repo_stmt.query_map([], |row| Ok(map_repo_provider_usage_row(row)))?;
+        let mut by_repo_provider = Vec::new();
+        for row in repo_rows {
+            by_repo_provider.push(row??);
+        }
+
+        let mut wave_stmt = conn.prepare(Self::sql(Query::AggregateTokenUsageByWaveProvider))?;
+        let wave_rows = wave_stmt.query_map([], |row| Ok(map_wave_provider_usage_row(row)))?;
+        let mut by_wave_provider = Vec::new();
+        for row in wave_rows {
+            by_wave_provider.push(row??);
+        }
+
+        Ok(TokenUsageReport::from_grouped(
+            by_repo_provider,
+            by_wave_provider,
+        ))
+    }
+
+    // Run ledger (`run_events`): the machine-grain, append-only record of
+    // every run written directly by `lf`. Read by `lf runs` / `lf trace`.
+
+    pub fn insert_run_event(&self, row: &RunEventRow) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO run_events (
+                run_id, seq, ts, repo, worktree, wave, node, event, command,
+                flow, step, step_index, error, input_tokens, output_tokens,
+                cache_read_tokens, cost_usd, duration_secs
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            params![
+                row.run_id,
+                row.seq,
+                row.ts,
+                row.repo,
+                row.worktree,
+                row.wave,
+                row.node,
+                row.event,
+                row.command,
+                row.flow,
+                row.step,
+                row.step_index,
+                row.error,
+                row.input_tokens,
+                row.output_tokens,
+                row.cache_read_tokens,
+                row.cost_usd,
+                row.duration_secs,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_run_events_since(&self, since_unix: i64) -> StoreResult<Vec<RunEventRow>> {
+        self.query_run_events(
+            "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
+                    flow, step, step_index, error, input_tokens, output_tokens,
+                    cache_read_tokens, cost_usd, duration_secs
+             FROM run_events WHERE ts >= ?1 ORDER BY ts, run_id, seq",
+            params![since_unix],
+        )
+    }
+
+    /// Events for one run; `run_id` may be a unique prefix.
+    pub fn run_events_matching(&self, run_id: &str) -> StoreResult<Vec<RunEventRow>> {
+        let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
+        self.query_run_events(
+            "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
+                    flow, step, step_index, error, input_tokens, output_tokens,
+                    cache_read_tokens, cost_usd, duration_secs
+             FROM run_events WHERE run_id LIKE ?1 ORDER BY ts, seq",
+            params![prefix],
+        )
+    }
+
+    fn query_run_events(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+    ) -> StoreResult<Vec<RunEventRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map(params, |row| {
+            Ok(RunEventRow {
+                run_id: row.get(0)?,
+                seq: row.get(1)?,
+                ts: row.get(2)?,
+                repo: row.get(3)?,
+                worktree: row.get(4)?,
+                wave: row.get(5)?,
+                node: row.get(6)?,
+                event: row.get(7)?,
+                command: row.get(8)?,
+                flow: row.get(9)?,
+                step: row.get(10)?,
+                step_index: row.get(11)?,
+                error: row.get(12)?,
+                input_tokens: row.get(13)?,
+                output_tokens: row.get(14)?,
+                cache_read_tokens: row.get(15)?,
+                cost_usd: row.get(16)?,
+                duration_secs: row.get(17)?,
+            })
+        })?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
+    }
+}

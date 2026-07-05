@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# demo_wave.sh — guided live demo of the wave server (`lf wave`).
+# demo_wave.sh — guided live demo of the wave (`lf wave`), two processes:
+# the LISTENER (journal pens, doors, supervisor — vendor-free) and the
+# RESIDENT it spawns (`lf wave --mind-only` — the mind, codex app-server,
+# running in the wave's own worktree).
 #
-# Walks the whole surface against a throwaway repo: boot + discovery, chat,
-# steer, interrupt, worker dispatch (real `lf q worker run`), attributed
-# worker reports arriving in the thread, memory curation, restart with the
-# thread intact, clean teardown.
+# Walks the whole surface against a throwaway repo: boot + discovery (both
+# processes from one command), chat, steer, interrupt, worker dispatch (real
+# `lf q worker run`), attributed worker reports arriving in the thread,
+# memory curation, restart with the thread intact, clean teardown.
 #
 # COSTS: every mind turn burns a real codex subscription turn (acts 2-6).
 # REQUIRES: codex CLI authed (`codex login`), tmux, jq, curl.
@@ -69,7 +72,7 @@ thread() {
 }
 
 last_turn_status() { curl -sf "http://$ADDR/conversation" | jq -r '.turns[-1].status'; }
-mind_state()       { curl -sf "http://$ADDR/health" | jq -r '.status'; }
+mind_state()       { curl -sf "http://$ADDR/health" | jq -r '.mind'; }
 
 journal_types() {
     jq -r '.kind.type' "$JOURNAL" 2>/dev/null | sort | uniq -c | sed 's/^/  /'
@@ -160,6 +163,8 @@ pause
 
 hr "launch · lf wave $WAVE (detached tmux: $TMUX_SESSION)"
 tmux new-session -d -s "$TMUX_SESSION" -c "$DEMO_REPO" "$LF_BIN wave $WAVE"
+say "one command, two processes: the listener boots, then spawns the resident"
+say "(lf wave $WAVE --mind-only) — both narrate into the same pane."
 say "watch it live in another terminal:  tmux attach -t $TMUX_SESSION"
 poll "endpoint published ($ENDPOINT_FILE)" 90 test -s "$ENDPOINT_FILE" || {
     warn "server never published its endpoint; last tmux output:"
@@ -173,11 +178,16 @@ pause
 # ---------- act 1: health + journal ---------------------------------------
 
 hr "act 1 · health and the journal spine"
+say "health.mind is null until the resident attaches, then the mind's state:"
+poll "resident attached (mind reported)" 90 sh -c \
+    "curl -sf http://$ADDR/health | jq -e '.mind != null'" || true
 curl -sf "http://$ADDR/health" | jq . | sed 's/^/  /'
-say "journal (truth; the server state is a fold of it):"
+say "journal (truth; the LISTENER holds the pen — the resident publishes"
+say "turn deltas through the token-gated /resident door):"
 poll "first journal rows" 30 test -s "$JOURNAL" || true
 journal_types
-say "look for: thread_started (the vendor thread id — the mind's first durable act)"
+say "look for: server_started (this boot) and thread_started (the vendor"
+say "thread id — reported over the wire, the mind's first durable act)"
 pause
 
 if [[ $SMOKE -eq 1 ]]; then
@@ -192,7 +202,7 @@ curl -sf -X POST "http://$ADDR/messages" -H 'content-type: application/json' \
     -d '{"op":"message","text":"Introduce yourself in two sentences, then list what is on TODO.md."}' |
     jq -c '{state}' | sed 's/^/  /'
 say "polling the thread until the turn finalizes (SSE is the live view:"
-say "  curl -N http://$ADDR/conversation/stream )"
+say "  curl -N http://$ADDR/events )"
 poll "assistant turn finalized" 180 sh -c \
     "curl -sf http://$ADDR/conversation | jq -e '.turns[-1] | .role == \"assistant\" and .status != \"running\" and .status != \"pending\"'" || true
 thread
@@ -226,7 +236,7 @@ sleep 4
 say 'POST {"op":"interrupt","text":""} — cooperative cancel, 10s force deadline'
 curl -sf -X POST "http://$ADDR/messages" -H 'content-type: application/json' \
     -d '{"op":"interrupt","text":""}' | jq -c '{state}' | sed 's/^/  /'
-poll "mind back to idle" 30 sh -c "[ \"\$(curl -sf http://$ADDR/health | jq -r .status)\" = idle ]" || true
+poll "mind back to idle" 30 sh -c "[ \"\$(curl -sf http://$ADDR/health | jq -r .mind)\" = idle ]" || true
 say "last turn (look for status=interrupted; if the turn beat the interrupt,"
 say "an idle interrupt is a documented no-op):"
 thread | tail -3
@@ -241,9 +251,9 @@ hr "act 5 · the mind dispatches a worker (lf q worker run)"
 say "asking the mind to delegate — orchestration lives in the prompt, loopflow is the toolset"
 curl -sf -X POST "http://$ADDR/messages" -H 'content-type: application/json' \
     -d '{"op":"message","text":"Dispatch one worker via lf q worker run to make the next TODO.md improvement. Do not do the work inline. After dispatching, reply with the run id."}' >/dev/null
-poll "worker_dispatched journaled (mind turn + dispatch; model-dependent)" 300 journal_has worker_dispatched || true
-if journal_has worker_dispatched; then
-    jq -c 'select(.kind.type == "worker_dispatched") | .kind' "$JOURNAL" | sed 's/^/  /'
+poll "run_observed journaled (mind turn + dispatch; model-dependent)" 300 journal_has run_observed || true
+if journal_has run_observed; then
+    jq -c 'select(.kind.type == "run_observed") | .kind' "$JOURNAL" | sed 's/^/  /'
     say "the worker is a real detached tmux session:"
     tmux list-sessions 2>/dev/null | grep -v "^$TMUX_SESSION" | sed 's/^/  /' || true
     say "and a real sibling worktree — <repo>.<wave>.<id> (three segments = wave worker):"
@@ -262,7 +272,7 @@ say "the mind curates what it learned (lf memory add)."
 poll "a from-attributed worker report in the thread (workers take minutes)" 600 sh -c \
     "curl -sf http://$ADDR/conversation | jq -e '.turns[] | select(.from == \"worker\")'" || true
 thread | tail -6
-poll "worker_finished journaled" 120 journal_has worker_finished || true
+poll "run_completed journaled" 120 journal_has run_completed || true
 if journal_has memory_updated; then
     ok "memory_updated journaled — the mind curated MEMORY.md unprompted:"
     curl -sf "http://$ADDR/memory" | jq -r .content | sed 's/^/  /'
@@ -288,7 +298,8 @@ else
     warn "turn count dropped: $TURNS_BEFORE -> $TURNS_AFTER"
 fi
 say "the vendor thread cold-starts (journaled as a fresh thread_started); the"
-say "visible conversation survives because the journal is truth."
+say "visible conversation survives because the journal is truth. The restarted"
+say "listener spawned a fresh resident — the old one exited when its keeper died."
 pause
 
 fi  # SMOKE
@@ -304,6 +315,11 @@ if [[ -z "$ORPHANS" ]]; then
     ok "no orphaned codex processes (the interrupt hook kills the app-server group)"
 else
     warn "orphaned codex pids: $ORPHANS"
+fi
+if ! pgrep -f "lf wave $WAVE --mind-only" >/dev/null 2>&1; then
+    ok "no orphaned resident (the listener SIGTERMs its tenant on shutdown)"
+else
+    warn "resident still running: $(pgrep -f "lf wave $WAVE --mind-only")"
 fi
 journal_types
 say "demo repo kept for inspection: $DEMO_REPO"

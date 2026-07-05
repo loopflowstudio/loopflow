@@ -131,16 +131,14 @@ Use `LF_TLS_MODE=internal` for a Tailscale-only hostname; the deploy script moun
 
 ## Enable repo crons manually
 
-The bootstrap script does this when `lfq` is installed. To do it by hand from the host or a trusted client:
+The bootstrap script authors the wave file directly. To do it by hand on the host:
 
 ```bash
-export LFD_URL=https://lfd.example.com
-export LFD_TOKEN="$LFD_AUTH_TOKEN"
-lfq create root /opt/loopflow
-lfq show root
+mkdir -p /opt/loopflow/wave/root
+echo "Drive this repo's roadmap." > /opt/loopflow/wave/root/GOAL.md
 ```
 
-Wave YAML carries the cron schedule. For this repo, `wave/root/root.yaml` is the conductor cron; once the wave is created, `lfd` owns the scheduled runs.
+The wave is its markdown; `lfd` derives the rest at boot. Wave YAML carries the cron schedule — for this repo, `wave/root/root.yaml` is the conductor cron.
 
 ## Verify
 
@@ -149,7 +147,7 @@ curl -f https://lfd.example.com/health
 curl -H "Authorization: Bearer $LFD_AUTH_TOKEN" https://lfd.example.com/status
 ```
 
-Point Concerto or `lfq` at the host and use the bearer token from `LFD_AUTH_TOKEN`. There is no studio discovery path; each repo owns its deployment.
+Point Concerto at the host and use the bearer token from `LFD_AUTH_TOKEN`. There is no studio discovery path; each repo owns its deployment.
 
 ## Troubleshoot
 
@@ -159,7 +157,7 @@ deploy/loopflow-server.sh logs
 curl -f http://127.0.0.1:${LFD_PORT:-2486}/health
 ```
 
-Need agent credentials inside execution containers? Set `LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh` in Doppler or `.env` instead of editing compose volume lines.
+Need credentials inside the daemon container? Set `LFD_EXECUTOR_CREDENTIALS_MOUNTS=claude,codex,ssh` in Doppler or `.env` instead of editing compose volume lines.
 
 Common failures:
 

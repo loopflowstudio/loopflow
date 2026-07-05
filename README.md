@@ -25,14 +25,6 @@ Keep the design system coherent. Each loop: read the roadmap, pick the next
 design task, dispatch a worker to build it, and fold what changed into memory.
 ```
 
-Run the wave agent, then watch its work:
-
-```bash
-lfq wave run designer        # start (or attach to) the wave agent
-lfq sessions                 # every live session — the wave agent and its workers
-lfq attach <session-id>      # jump into one over tmux
-```
-
 Run the wave in your terminal:
 
 ```bash
@@ -41,15 +33,20 @@ lf chat "ship the button audit first"     # speak into its thread (any process c
 lf memory add "buttons: variants unified" # curate what it knows
 ```
 
-`lf wave <name>` starts a long-lived server in the wave's own worktree: one
-persistent codex thread handles progress and chat as a single conversation —
-messages queue mid-turn, steer redirects a live turn, interrupt finalizes a
-partial one. Truth is an append-only journal, so a restart keeps the whole
-thread. `lf chat` and `lf memory` are the speech surface — the same doors for
-minds, workers, humans, and scripts; worker reports arrive attributed in the
-thread. Outside any wave a publish drops silently (exit 0) — the verbs are
-safe in every prompt. See `rust/loopflow/src/lfd/wave/README.md` for the wire
-contract, and `scripts/demo_wave.sh` for the guided demo.
+Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
+`tmux attach -t <name>` to jump into one.
+
+`lf wave <name>` starts a long-lived server at the repo's main checkout (the
+wave's journal and endpoint live at the origin); the resident mind — one
+persistent codex thread — enters the wave's worktree to work. Progress and
+chat are a single conversation: human speech steers a live turn by default,
+attributed speech (workers, scripts) queues for the next one, interrupt
+finalizes a partial turn. Truth is an append-only journal, so a restart keeps
+the whole thread. `lf chat` and `lf memory` are the speech surface — the same
+doors for minds, workers, humans, and scripts; worker reports arrive
+attributed in the thread. Outside any wave a publish drops silently (exit 0)
+— the verbs are safe in every prompt. See `rust/loopflow/src/wave/README.md`
+for the wire contract, and `scripts/demo_wave.sh` for the guided demo.
 
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 
@@ -76,31 +73,28 @@ The wave's `mode` controls its execution pattern.
 
 ### Crons
 
-Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. `workers: 0` is valid for a cron-only wave.
+Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. They live in `GOAL.md` frontmatter; the wave's resident mind fires each due schedule as a system turn. `workers: 0` is valid for a cron-only wave.
 
-```python
-import loopflow.api as loopflow
-
-# workers handle the primary flow; crons sweep maintenance
-loopflow.create_wave("designer", repo=".", flow="build", workers=2,
-                     crons=[{"flow": "sync", "schedule": "0 0 1 * *"}])
-
-# cron-only governance wave — no workers, all work comes from schedules
-loopflow.create_wave("governance", repo=".", flow="garden", workers=0,
-                     crons=[{"flow": "govern-identity", "schedule": "0 0 * * 0"}])
+```markdown
+<!-- wave/governance/GOAL.md -->
+---
+primary_flow: garden
+workers: 0
+crons:
+  - flow: govern-identity
+    schedule: "0 0 0 * * Sun *"
+---
 ```
 
-### Triggers
+### GitHub webhooks
 
-A trigger pairs a signal (what changed) with a flow (what to run). Triggers are a list — multiple triggers of the same signal are fine.
+External signals arrive as speech, not machinery. `lfd` verifies each GitHub webhook and speaks it inward as an `lf` exec:
 
-| Signal | What changed | Default flow |
-|--------|--------------|--------------|
-| **repo** | Paths changed on main | `integrate` |
-| **wave** | Another wave completed | `build` |
-| **ci_failure** | CI failed on a wave PR | `ci-fix` |
-
-Every new wave ships with two default triggers: `repo` (whole repo → integrate) and `ci_failure` → `ci-fix`.
+| Event | What lfd runs |
+|-------|---------------|
+| CI fails on a wave's PR | `lf chat --wave <name> "CI failed: …"` — the mind decides how to fix (usually a `ci-fix` worker) |
+| PR merged | `lf op queue reconcile --wave <name>` |
+| Push to main | `lf chat --wave <name> "main moved: …"` — the mind decides whether to rebase or integrate |
 
 ## Steps
 
@@ -154,7 +148,7 @@ Manual work — you invoke these, often interactively.
 
 ### Govern steps (`govern/`)
 
-Autonomous coordination — crons, triggers, and waves-watching-waves drive these.
+Autonomous coordination — crons and waves-watching-waves drive these.
 
 | Step | What it does |
 |------|--------------|
@@ -298,19 +292,7 @@ If no `router:` is specified, a generic routing agent picks a path based on scra
 Once you're chaining steps into flows, you're ready to ride a wave. Write its `wave/<name>/GOAL.md`, then run the agent:
 
 ```bash
-lfq wave run engbot        # start (or attach to) the wave agent
-lfq list                   # see every wave
-```
-
-Or drive it from Python:
-
-```bash
-python - <<'PY'
-import loopflow.api as loopflow
-
-loopflow.create_wave("engbot", repo=".", flow="build")
-loopflow.run_wave("engbot")
-PY
+lf wave engbot             # start the wave agent
 ```
 
 Directions compose extra nuance into any step or flow the wave dispatches.
@@ -348,31 +330,27 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf --bin lf
 ```
 Install the Rust binaries directly with cargo.
 
-## Query lfd (lfq)
+## Dispatch and Observe
 
 ```bash
-uv tool install loopflow
-lfq                  # status overview
-lfq list             # list waves
-lfq show engbot      # show wave details
-lfq wave run engbot  # start or attach the Wave-agent session
-lfq worker run engbot --flow implement --task "Add the endpoint"
-lfq whoami           # show current lfd agent identity
-lfq sessions         # list live terminal sessions
-lfq attach <id>      # attach to one over tmux
-lfq logs engbot      # tail agent output
-lfq stop engbot      # stop a running wave
-lfq delete engbot    # remove wave and history
-lfq providers        # list providers with auth status and models
-lf op auth status   # local provider auth for lf steps and ops
-lf op auth asana    # connect Asana locally for `lf op` / step integrations
-lfq auth status      # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana)
-lfq auth github      # connect GitHub in your browser
-lfq auth claude      # connect Claude in your browser
-lfq auth codex       # connect Codex in your browser
-lfq auth zen         # connect OpenCode Zen in your browser
-lfq auth asana       # connect Asana with OAuth
-lfq auth disconnect github
+lf wave engbot       # start the wave agent (Ctrl-C to stop)
+lf q worker run engbot --flow implement --task "Add the endpoint"
+tmux ls              # list live sessions — the wave agent and its workers
+tmux attach -t <name>  # attach to one
+```
+
+Read `wave/engbot/GOAL.md` and `wave/engbot/MEMORY.md` for a wave's state, or
+watch it in Concerto. To remove a wave, delete `wave/engbot/` and its worktree
+(`lf op wt remove engbot`).
+
+```bash
+lf op auth status    # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana)
+lf op auth github    # connect GitHub in your browser
+lf op auth claude    # connect Claude in your browser
+lf op auth codex     # connect Codex in your browser
+lf op auth zen       # connect OpenCode Zen in your browser
+lf op auth asana     # connect Asana with OAuth
+lf op auth disconnect github
 ```
 
 The roadmap lives in Asana. Pin a wave to its Asana project in `wave/<name>/GOAL.md` frontmatter — `lf op pm init` writes this for you:
@@ -395,33 +373,8 @@ lf op pm status                              # show linked waves
 
 `lf op pm` reads and edits the roadmap directly in Asana — there is no local mirror and nothing to sync. Task notes preserve basic markdown formatting: Loopflow writes rich text through `html_notes` and falls back to plaintext `notes` when a task has none yet.
 
-`uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  
+The `loopflow` Python package is a library only (wire models).  
 Use the install script or cargo to install `lf` and `lfd`.
-
-## Python API
-
-```bash
-uv pip install loopflow
-```
-
-```python
-import loopflow.api as loopflow
-
-loopflow.waves()
-loopflow.create_wave("engbot", repo=".", flow="build")
-loopflow.create_wave("ux", repo=".", flow="build")
-loopflow.create_wave("infra", repo=".", flow="govern-control")
-loopflow.add_trigger("ux", signal="wave", source_wave_id="infra")
-loopflow.run_wave("ux")
-```
-
-```python
-import loopflow.api as loopflow
-
-loopflow.create_wave("conductor", repo=".")
-conductor = loopflow.wave("conductor")
-print(conductor.primary_flow)
-```
 
 [Documentation →](docs/index.md)
 
@@ -461,7 +414,7 @@ Keybindings start with `prefix+l`:
 
 Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3 worktree workers).
 
-Works without `lf` or `lfq` installed — status shows placeholder, keybindings display clear messages.
+Works without `lf` installed — status shows placeholder, keybindings display clear messages.
 
 
 ## License

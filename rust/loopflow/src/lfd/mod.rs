@@ -1,42 +1,35 @@
-pub mod address;
 pub mod attention;
 pub mod auth;
-pub mod client;
+pub mod bridge;
+pub(crate) mod client;
 pub mod config;
 pub mod conversations;
-pub mod credential_socket;
 pub mod events;
 pub mod executor;
 pub mod github;
 pub mod http;
-pub mod http_client;
+pub(crate) mod http_client;
 pub mod id;
 pub mod journal;
 pub mod live_pr;
-pub mod machine_id;
 pub mod obs;
 pub mod output;
 pub mod pm;
-pub mod provider_auth;
 pub mod providers;
 pub mod queue;
-pub mod redaction;
-pub mod scheduler;
-pub mod secrets;
+pub(crate) mod redaction;
 pub mod security;
 pub mod service;
-pub mod session_token;
-pub mod store;
+pub(crate) mod session_token;
 pub mod triggers;
 pub mod types;
-pub mod wave;
 
 use std::path::{Path, PathBuf};
 
 use self::auth::AuthProvider;
 use self::config::{AuthConfig, LfdConfig};
-use self::store::StorageConfig;
 use crate::lfd::security::path_within_root_planned;
+use crate::lfdb::StorageConfig;
 use secrecy::ExposeSecret;
 
 /// Set up bearer-token auth for local and self-hosted remote clients.
@@ -136,12 +129,6 @@ pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
 
 pub fn default_output_dir() -> PathBuf {
     lf_home_dir().join("output")
-}
-
-pub fn default_max_slots() -> usize {
-    std::thread::available_parallelism()
-        .map(|count| std::cmp::max(1, count.get() / 2))
-        .unwrap_or(1)
 }
 
 #[cfg(test)]

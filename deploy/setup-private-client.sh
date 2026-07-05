@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Configure this Mac to use a private self-hosted lfd over Tailscale.
-# Stores the lfq environment in ~/.lf/private-host.env and seeds Concerto's remote
+# Stores the client environment in ~/.lf/private-host.env and seeds Concerto's remote
 # connection + Keychain token for the same host.
 
 set -euo pipefail
@@ -18,7 +18,7 @@ Options:
   --token-file PATH  Read bearer token from PATH.
   --env-file PATH    Write shell exports here (default: ~/.lf/private-host.env)
   --no-concerto      Do not seed Concerto UserDefaults/Keychain.
-  --verify           Run lfq list after writing local config.
+  --verify           Probe the host (authed /v0/waves) after writing local config.
   -h, --help         Show this help.
 
 The env file contains secrets and is written with 0600 permissions.
@@ -143,7 +143,7 @@ url="$scheme://$host:$port"
 mkdir -p "$(dirname "$env_file")"
 tmp="$(mktemp)"
 cat > "$tmp" <<EOF_ENV
-# Source this file to point lfq and other loopflow clients at the private lfd host.
+# Source this file to point loopflow clients at the private lfd host.
 export LFD_HOST=$host
 export LFD_SSH_USER=$ssh_user
 alias lfdhost='ssh \$LFD_SSH_USER@\$LFD_HOST'
@@ -189,7 +189,7 @@ fi
 if [[ "$verify" -eq 1 ]]; then
     # shellcheck disable=SC1090
     source "$env_file"
-    lfq list >/dev/null
+    curl -fsS -H "Authorization: Bearer $LFD_TOKEN" "$LFD_URL/v0/waves" >/dev/null
     curl -fsS -H "Authorization: Bearer $LFD_TOKEN" "$LFD_URL/status" >/dev/null
     echo "verified private lfd connection"
 fi

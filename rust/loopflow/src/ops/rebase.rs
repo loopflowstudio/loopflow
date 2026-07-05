@@ -293,7 +293,11 @@ fn count_unique_commits(repo: &Path, base_ref: &str) -> OpsResult<usize> {
 }
 
 fn diff_names(repo: &Path, base_ref: &str) -> OpsResult<Vec<PathBuf>> {
-    let stdout = git(repo, &["diff", "--name-only", &format!("{base_ref}..HEAD")])?;
+    // Three-dot: diff from the merge-base, so we see only what this branch
+    // authored — not files the base advanced past us. A stale branch (the whole
+    // reason to rebase) would otherwise report the base's new files as its own,
+    // misclassifying a scratch-only branch as clean_authored.
+    let stdout = git(repo, &["diff", "--name-only", &format!("{base_ref}...HEAD")])?;
     Ok(stdout
         .lines()
         .filter(|line| !line.trim().is_empty())

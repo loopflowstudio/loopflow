@@ -176,6 +176,27 @@ fn plan_rebase_classifies_dirty_scratch_only_branch_as_reset() {
 }
 
 #[test]
+fn plan_rebase_ignores_upstream_changes_when_branch_is_only_behind() {
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.checkout("main");
+    repo.create_file("main.txt", "main");
+    repo.stage_all();
+    repo.commit("main change");
+    repo.checkout("feature");
+    repo.create_file("scratch/design.md", "notes");
+
+    let plan = plan_rebase(repo.path(), Some("main")).expect("plan rebase");
+
+    assert_eq!(plan.class, RebaseClass::ScratchOnly);
+    assert_eq!(plan.strategy, RebaseStrategy::ResetToBase);
+    assert!(plan
+        .changed_files
+        .iter()
+        .all(|path| path.starts_with("scratch")));
+}
+
+#[test]
 fn plan_rebase_classifies_wave_changes_as_protected() {
     let repo = TestRepo::new();
     repo.create_branch("feature");

@@ -183,13 +183,24 @@ Verifies that required tools are installed and working.
 
 ## lf op rebase
 
-Rebase current branch onto main.
+Plan or update the current branch against the right base.
 
 ```bash
-lf op rebase
+lf op rebase        # update the branch
+lf op rebase --plan # show the strategy without changing git
 ```
 
-Fetches main and rebases. On conflicts, exits with conflict details for manual resolution.
+Classifies the branch before mutating git. Disposable branches can reset to
+their base, stack children rebase onto their parent, and authored work uses a
+normal rebase path. If `scratch/` needs to survive a reset, Loopflow stashes it
+under `.lf/scratch-stash/` and restores it afterward.
+
+Use an explicit target when needed:
+
+```bash
+lf op rebase origin/main
+lf op rebase --plan parent.branch
+```
 
 ## lf op sync
 
@@ -211,23 +222,30 @@ Worktree helper commands.
 
 ### lf op wt create
 
-Create worktree with schema-based branch name.
+Create or select a worktree from a placement plan.
 
 ```bash
-lf op wt create my-feature            # creates ../loopflow.my-feature
-lf op wt create my-feature -b develop # from develop instead of main
-lf op wt create feature-B --stack     # stack on current branch
+lf op wt create my-feature              # root from main, or child from current branch
+lf op wt create my-feature --main       # force a root branch from main
+lf op wt create child --stack parent    # create parent.child
+lf op wt create child --stack           # stack on the current branch
+lf op wt create child --fork            # root branch from the review base
+lf op wt create my-feature --plan       # print the plan without creating anything
 lf op wt create jack-heart.mobile.20260225_1122  # checks out origin branch in ../loopflow.mobile
 ```
 
 | Flag | Description |
 |------|-------------|
-| `-b, --base` | Base branch (default: main) |
-| `-s, --stack` | Stack on current branch (branch from it, PR targets it) |
+| `-b, --base` | Parent branch for a stacked placement |
+| `-s, --stack [PARENT]` | Stack on `PARENT`, or on the current branch when omitted |
+| `--main` | Force a root branch from the default branch |
+| `--fork` | Create an independent root branch from the review base |
+| `--plan` | Print the placement plan without mutating git |
 
-When using `--stack`, the new worktree branches from the current branch instead of main.
+Dots are reserved for stack ancestry. Use `api-v2` as a worktree segment, not
+`api.v2`; create ancestry with `--stack`.
 
-If the input matches an existing `origin/<branch>` name, `lf` checks out that branch instead of creating a new one. Worktree directory names always use the wave component (`{name}`), not the full branch metadata.
+If the input matches an existing `origin/<branch>` name, `lf` checks out that branch instead of creating a new one. Root branch names follow the configured branch schema. Stacked children append the new segment to the parent branch with a dot.
 
 ### lf op wt switch
 
@@ -299,7 +317,7 @@ Installs a wrapper that sources shell directives after `lf` commands (auto-cd in
 ## Typical Workflow
 
 ```bash
-lf op wt create my-feature       # create worktree (../my-feature)
+lf op wt create my-feature       # create or select a placed worktree
 lf op wt switch my-feature       # switch to worktree from another
 # ... work on feature ...
 lf op commit                     # commit with generated message

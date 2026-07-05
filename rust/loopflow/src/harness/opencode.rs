@@ -14,8 +14,9 @@ use crate::conversation::types::{ConversationEvent, Lifecycle};
 use crate::engine::agent::AgentConfig;
 use crate::engine::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::harness::{opencode_mapping, ApprovalPolicy, Capabilities, Harness, HarnessError};
-use crate::lfd::conversations::opencode_runtime;
+use crate::harness::{
+    opencode_mapping, opencode_runtime, ApprovalPolicy, Capabilities, Harness, HarnessError,
+};
 
 const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
@@ -219,7 +220,7 @@ impl OpenCodeHarness {
             );
         });
 
-        let stderr_task = spawn_stderr_logger(stderr, "lfd::conversations::opencode");
+        let stderr_task = spawn_stderr_logger(stderr, "harness::opencode");
 
         let opencode_pid = child.id();
         if let Some(pid) = opencode_pid {

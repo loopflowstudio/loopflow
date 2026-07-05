@@ -735,7 +735,7 @@ impl CodexHarness {
             }
         });
 
-        let stderr_task = spawn_stderr_logger(stderr, "lfd::conversations::codex");
+        let stderr_task = spawn_stderr_logger(stderr, "harness::codex");
 
         self.child = Some(child);
         self.outbound_tx = Some(outbound_tx);

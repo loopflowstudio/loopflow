@@ -8,6 +8,7 @@ mod conformance_tests;
 mod lf_tag;
 pub mod opencode;
 mod opencode_mapping;
+pub mod opencode_runtime;
 
 use anyhow::Result;
 use async_trait::async_trait;

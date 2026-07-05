@@ -3,7 +3,6 @@ pub mod auth;
 pub mod bridge;
 pub(crate) mod client;
 pub mod config;
-pub mod conversations;
 pub mod events;
 pub mod executor;
 pub mod github;

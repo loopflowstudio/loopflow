@@ -233,13 +233,17 @@ def run_worker(
     name_or_id: str,
     flow: str,
     task: str,
+    placement: str,
     parent_session_id: Optional[str] = None,
+    parent_run_id: Optional[str] = None,
 ) -> Session:
     return _client().run_worker(
         name_or_id,
         flow,
         task,
+        placement,
         parent_session_id=parent_session_id,
+        parent_run_id=parent_run_id,
     )
 
 

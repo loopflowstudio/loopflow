@@ -35,7 +35,7 @@ bloat the transcript with work that belongs in a child.
 Inside a Wave loop, dispatch with:
 
 ```bash
-lfq worker run <wave> --flow <flow> --task "<task>"
+lf q worker run <wave> --flow <flow> --task "<task>"
 ```
 
 This spawns the child as its own attachable tmux session — not an inline
@@ -46,6 +46,26 @@ shell-out — so it's independently monitorable and steerable. Watch it with
 Inline edits are only for trivial fixes smaller than the cost of dispatching.
 When you do one, say why. Keep the coordinating session about decisions,
 sequencing, and reading results back.
+
+## Speak
+
+You already hear the wave: its curated memory and recent thread ride this
+prompt as `<lf:wave-memory>` and `<lf:wave-chat-recent>`, snapshotted at
+launch - there is no live feed to poll mid-run. Answers return on the channel
+they came in: when a human's message reaches you, reply in your own turn
+text. Everything proactive goes through `lf`:
+
+- `lf chat "<note>"` - report outcomes, FYIs, and blockers to the wave's
+  thread; the post wakes the wave's mind like any message. One short
+  paragraph: what landed, links, anything surprising. Pipe stdin for longer.
+- `lf chat --parent "<report>"` - escalate to the parent wave.
+- `lf memory add "<fact>"` - record a durable learning. `lf memory update`
+  rewrites the whole file from stdin.
+- `wave/<name>/MEMORY.md` is server-owned - never edit the file directly.
+
+Use these unconditionally. Outside any wave they drop silently (exit 0) -
+publish-to-no-subscriber is correct pubsub, never a blocker. A wave whose
+server is down errors instead; note it and move on.
 
 ## The Roadmap Lives in Asana
 
@@ -71,7 +91,8 @@ roadmap files or a roadmap table in `GOAL.md` — that mirror is gone.
 
 - `scratch/<branch>.md` - design doc for the current work
 - `scratch/questions.md` - open questions, blockers, assumptions
-- `wave/<name>/MEMORY.md` - durable wave learnings (roadmap goes to Asana, above)
+- `lf memory add "<fact>"` - durable wave learnings; `wave/<name>/MEMORY.md` is
+  server-owned, never edited directly (roadmap goes to Asana, above)
 - Code - the actual work
 
 ## Checkpoint And Proceed
@@ -112,7 +133,8 @@ Wave context is included in docs below.
 
 ## Wave memory
 
-Persistent memory at wave/rust/MEMORY.md. Read it before every iteration.
+Persistent memory at wave/rust/MEMORY.md. Read it before every iteration; its current
+contents, when any, ride this prompt's wave-memory section.
 Keep it compact enough to include every iteration: correct stale entries,
 add durable observations, and delete session-specific notes.
 
@@ -127,17 +149,17 @@ What belongs elsewhere:
 - session-specific notes → nowhere (let them die)
 
 How to update:
-- Edit within sections. Don't rewrite the whole file.
+- Through the server: `lf memory add "<fact>"` for one entry, `lf memory update`
+(stdin) to rewrite — never edit the file directly.
 - Correct or remove entries that are wrong or stale.
 - Use absolute dates, not "today" or "recently".
 - When a section grows large, promote stable entries to wave docs or explicit docs and trim.
+</lf:wave>
 
-<lf:memory path="wave/rust/MEMORY.md">
+<lf:wave-memory>
 - Keep prompts concise and concrete.
 - Prefer behavior-focused tests over mock wiring.
-
-</lf:memory>
-</lf:wave>
+</lf:wave-memory>
 
 Scratch design artifacts and working notes.
 

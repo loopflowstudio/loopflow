@@ -647,6 +647,35 @@ impl PostgresStore {
         .await
     }
 
+    /// Live sessions plus sessions completed at or after `completed_since`
+    /// (unix seconds) — bounded however much terminal history accumulates.
+    pub async fn list_recent_control_sessions(
+        &self,
+        wave_id: &LfdId,
+        completed_since: i64,
+    ) -> StoreResult<Vec<Session>> {
+        let cols = Self::TERMINAL_SESSION_COLS;
+        let live_statuses = vec![
+            SessionStatus::Pending.as_i32(),
+            SessionStatus::Attached.as_i32(),
+            SessionStatus::Running.as_i32(),
+        ];
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    &format!(
+                        "SELECT {cols} FROM terminal_sessions \
+                         WHERE wave_id = $1 AND (status = ANY($2) OR completed_at >= $3) \
+                         ORDER BY created_at ASC"
+                    ),
+                    &[&wave_id, &live_statuses, &completed_since],
+                )
+                .await?;
+            rows.iter().map(Self::map_control_session_row).collect()
+        })
+        .await
+    }
+
     pub async fn get_active_control_session_for_run(
         &self,
         run_id: &LfdId,

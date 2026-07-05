@@ -2,6 +2,64 @@
 
 Steers Loopflow toward persistent Goal-driven Waves: goals as the authored loop prompt, Asana as the live roadmap, and Concerto as the session surface.
 
+## The wave agent + waves outward (2026-07-04)
+
+**Governing principle (Jack): "waves outward" — radically zero centralized
+control.** The wave is the unit of sovereignty; nothing sits above the waves.
+The wave process is the LISTENER unifying sovereign `lf` runs (PUBLISHERS)
+by subscription; coordination is shared fact (the store IS the registry) and
+notification, never command. Concerto is a viewer; `lfd serve`'s only future
+is relay listener + access gate (it execs lf — constitutional clause). Test
+every feature: "does this create a center?"
+
+**Shipped (branch `jack-heart.goals.20260703_1511`, PR #796 — the full
+demo):** `lf wave <name>` = a sovereign per-wave server: persistent codex
+app-server mind (0.142.5, live-proven), append-only journal as runtime truth
+(thread/state/queue are folds; restart-safe), steer/interrupt with an
+anti-wedge deadline, open-turn streaming, store-direct registration +
+one-brain, `lf q worker run` (placement fresh/pool/stack;
+`<repo>.<wave>.<id>` worktrees), `lf chat`/`lf memory` (emissions are
+messages with bylines; server holds MEMORY.md's pen at the origin), ambient
+context (`<lf:wave-chat-recent>` + `<lf:wave-memory>` in every lf run; empty
+when waveless). Demo performed live: mind dispatched a worker; the worker
+sent four attributed `lf chat` reports mid-run; the mind reacted and ran
+`lf memory add` unprompted; observation journaled dispatch/finish; thread
+survived restart. `lf goal` deleted; the old loop_ticker path stands down
+for served waves.
+
+**Hard-won learnings:**
+- **Schema-drift class:** the ontology collapse renamed tables/columns by
+  editing historical CREATE migrations in place — fresh dbs fine, recorded
+  dbs stranded (`wave_run_id`, `wave_runs`, `agents/fork_runs.wave_run_id`).
+  Healed by rename migrations 048/049 + a rename-convergence tolerance
+  list, and `open_existing_store` now migrates on direct open. When code
+  and a live db disagree, diff a fresh-migrated schema against the live one
+  before whacking single moles. NEVER edit an applied migration.
+- **Vendor drift discipline:** conformance traces catch mapping bugs; only a
+  live smoke catches protocol drift (codex 0.142.5: app-server subcommand,
+  clientInfo required, client-sent `initialized`, `turn/start {threadId,
+  input:[...]}`, steer carries `expectedTurnId`, usage via
+  `thread/tokenUsage/updated`) and process-tree bugs (nvm shim makes the
+  real binary a grandchild — process-group kill; reader/writer shutdown
+  deadlock; tmux kill-session sends SIGHUP which bypassed SIGINT-only
+  cleanup hooks).
+- **The emission vocabulary is exec, one door:** `lf chat`/`lf memory`/`lf q`
+  — the only door every process on the machine has; worker reports ride it,
+  which solved report thinness for free. Speak locally, escalate
+  deliberately (`--parent` walks store ancestry to the parent's registered
+  endpoint).
+- **Free-energy brief** (scratch/research/softmax-free-energy.md, in git
+  history): the design has the tradition's structure, not its dynamics —
+  and "unattended iterations" as a metric rewards the dark-room failure
+  mode; pair it with a progress setpoint. Roadmap item "Wave dynamics"
+  carries the adopt-nows.
+
+**Roadmap consolidated in Asana (2026-07-04):** 11 open → 8, priorities on
+the custom field (Urgent: demo PR; High: lf language, Concerto viewer; Med:
+dynamics, spend cap, prove-the-language; Low: backends a/b), every item
+reframed for waves-outward (spend-cap enforcement moved out of the daemon;
+backend b = sovereign waves behind the gate, not a hosted daemon).
+
 ## Shipped (runtime model foundation)
 
 - **Two-file wave surface** — `wave/<name>/` is `GOAL.md` (intent) + `MEMORY.md` (this file). Both are injected into the wave loop's assembled context, so the agent reads its intent and memory each iteration.
@@ -10,39 +68,30 @@ Steers Loopflow toward persistent Goal-driven Waves: goals as the authored loop 
 - **lfq as the runtime surface** — `lfq wave run` ensures a wave-agent `Session`; `lfq worker run` creates a `Run` + linked worker `Session` and spawns the work; `lfq sessions` / `lfq attach <id>` list and attach live sessions over tmux. This replaces the old `/dispatch` route and `lf op dispatch`.
 - **Goal primitive** — `goal` is the third prompt primitive (step/flow/**goal**). The durable `Wave` carries a required `goal: String` (default `ship-roadmap`) alongside `primary_flow`. `load_goal` resolves `.lf/goals/<name>.md` repo→home→builtin (legacy singular `.lf/goal/` and repo-root `goal/` do not resolve); the wave loop body (`lfd/executor/wave/mod.rs`) runs `wave.goal` as its iteration prompt via `render_goal`, which exposes available flows, a roadmap handle, metrics, memory, and in-flight dispatches — so the goal prompt decides its next move and dispatches inner work through `lfq worker run`.
 - **Demo** — `scripts/demo_waveagent.sh` renders the goals wave prompt and shows MEMORY.md reaching context.
-- **`lf wave <name>` — progress arm shipped.** Foreground, non-terminating command (`rust/loopflow/src/lf/commands/loop.rs`, `loop` is an alias) that runs a wave's outer loop deterministically in Rust: each pass is one bounded `lf -b goal <wave> --once`, and it fires the next pass the instant the last exits — no timer, gated only on the inner pass finishing. Stops on Ctrl-C or `wave/<wave>/STOP`. Failed passes get a 3s cooldown so a broken inner run can't hot-spin. Inherits the terminal (`Command::status()`) — the earlier stdout/stderr tee to `wave/*/streams/` was cut as dead capture (nothing read it; inner `lf -b goal` already writes durable logs under the agent log dir). Re-add stream capture *with* the monitor consumer that needs it. `lf goal -b` now launches through the shared headless `launch_agent` runner instead of an interactive session.
 
-## lf wave runtime — the design ahead (loopflow owns the outer loop)
+## Vocabulary decision (2026-07-03, Jack)
 
-The shipped progress arm is the crudest slice of a larger runtime. The vision: `lf wave` is the **one place loopflow owns a custom harness** — the deterministic outer loop — while every agent pass underneath is a bounded vendor-harness run. It fixes the "model owns the loop → gets stuck (declares victory early, spins, loses the thread)" failure by reclaiming the *outer* loop. **lfd is an absorb-target, not a dependency**: `lf wave` hosts the whole runtime in-process; today's `lfd/triggers/{loop_ticker,cron}.rs` + the dormant mailbox migrate *into* it, they aren't called across a process boundary. "Detached" = the same process with no terminal (what lfd used to be). `lf goal` / `/goal` stays untouched — `lf wave` is additive and dispatches `/goal --once` as its inner unit.
+Drop the **"chord"** concept. A parent wave with child waves is just a **wave tree** — parent / child / sibling, that's the whole model. There is no separate chord entity, no "member" wave. #781 already built exactly this (a `parent_wave_id` tree, no `wave_type`/`Chord`), so the code is right; the cleanup is vocabulary. Goals-wave docs use "wave tree" now. The govern/garden surface still says "chord-wave"/"member wave" (`flow.rs:2771`, `govern/step/scan.md`, etc.) — a separate reframe owned by the root/govern surface. `naming.rs`'s "chord" is the musical wordlist, keep it.
 
-**Four arms, three shapes, all coordinating only through `MEMORY.md`** (no arm calls another):
-- **Pass launcher** — progress + crons are the *same mechanism*, differ only in trigger policy: repeat-on-finish (progress, shipped) vs scheduled cron expr (maintenance: orient-daily · scan-changes · rebase). Each worker gets a tmux handle (human attach/steer) **and** a tee'd out/err stream (monitor input) — the two are independent.
-- **Monitor** — reads workers' clean batch-mode stream logs (never parses dirty tmux scrollback), runs a summarizer/judge that distills what's *relevant*, forwards it + a standing summary into chat. Distinct from the killed `evaluate`: that judged loop control (cut — the loop just repeats); this judges output relevance for a human. **Open crux: its cadence** (tick every N sec vs on stream-append) and cost — it's an LLM pass per tick, needs a cheap trigger not a hot spin.
-- **Chat API** — in-process HTTP/WS + mailbox, the one arm that returns a reply. Answers from the monitor's standing summary + MEMORY (skips heavy orientation), dispatches a solution thread if the ask needs work, drops steering into the mailbox for the next progress pass. Dispatch-and-return, never holds a long session. The dormant mailbox is its data layer: `ChatMessage`/`ChatMemoryBlock` DTOs, migrations 007/008, WS-inbound scaffolding all exist with zero routes — revival, not greenfield.
+## High-priority tier — research outcomes (2026-07-03)
 
-**Two-tier memory:** rolling window (volatile recent chat + run summaries — felt continuity; **v1 = full window, no eviction**) + `MEMORY.md` (durable, distilled — the source of truth). **Invariant: correctness never depends on the window** — it's a hot cache so the agent doesn't re-read MEMORY cold each pass; eviction (token/time) is a pure performance add, safe to defer and dumb. Roll is mechanical; distilling into MEMORY is part of what the single `lf` pass is asked to do (cheapest place — it already has the window).
+The four `priority: high` Asana items (01–04) were assessed/designed this loop. Docs in `scratch/2-*.md`.
 
-**Inner-loop prompt doctrine** — conductor, not player: orient (mostly cached in MEMORY, refresh only what's stale) → act. Spine is a value chain: **clarify → real user wins → what blocks them → ruthlessly prioritize** the single highest-leverage blocker, dispatch through the `lf` API, scale breadth to budget. The *only* inversion vs today's `LOOPFLOW_OPERATING_PROMPT`: "do one orient-to-action pass and stop" (loopflow owns loop) instead of "keep dispatching until done" (model owns loop). Clarify gate: attached → ask and block; headless → assume + log to `scratch/questions.md`. Never declare done to escape a hard step — report `blocked`. Old `LOOPFLOW_OPERATING_PROMPT` (flow.rs) + the removed LOOPFLOW.md converge into this one doctrine. Each pass closes with a light `<lf:pass-result>` summary (integrated/dispatched/blocker/next/metric) inside its own stream — not a beacon; the monitor reads it like any other stream text.
+- **01 Asana live roadmap — essentially shipped.** No local mirror (removed `c113ef04b`); the loop reads Asana live each iteration via `lf op pm show` → `AsanaClient::list_items`; dispatches work; moves tasks to Done. Only gap was the "with a PR link" clause: `AsanaClient::comment()` existed but was never exposed to the CLI. Closed by adding `--pr <url>` to `lf op pm update` (posts PR link as a comment; with `--status done` closes in one call). **PR #780**, branch `jack-heart.asana-roadmap`. Close the tracking task once it lands.
+- **03 Wave ancestry — BUILT, PR #781** (branch `jack-heart.wave-ancestry`). Migration `044_wave_parent.sql` (new — see stale premise below), `parent_wave_id: Option<LfdId>` on `Wave` with `with_parent` builder, `children_of()` store query, `child_waves` populated in the tree route, DTO mirrored Rust/Python/Swift with `tests/fixtures/wave.json`. All runnable tests green (833 Rust lib + integration, 95 pytest, Swift ContractTests). Follow-on not in PR: end-to-end executor test looping a wave tree (one live WaveAgent session per repo) and any production code that actually *constructs* child waves via `with_parent` — nothing builds trees yet. **Item premise was STALE.** The item says "the store already has the column"; it does not. Migration `013_remove_chord_tree.sql` dropped `parent_wave_id`/`wave_type`/`position`; `028` dropped the fallback tables. Fix = *add* a migration (~044) + one `parent_wave_id: Option<LfdId>` on `Wave` (`types/wave.rs:229`) + `children_of()` store query + populate `child_waves` (currently hardcoded `Vec::new()` at `routes/waves.rs:837`). Recommend deriving chord-ness from "has children" rather than reviving `wave_type`/`position`. Touches all five wave query templates in `catalog.rs` + DTO mirror + `tests/fixtures/wave.json`.
+- **04 Wave budget — open question resolved at enforcement authority.** Core owns a hard floor (`spend_cap` field, per-run cost accrual, at-cap pause + block→human, parent/child rollup); user-land owns policy below the ceiling via an exposed cost signal + the existing pause/block primitive. Cost is already parsed then discarded (`stream.rs:278` drops Codex usage; Claude/OpenCode cost printed to stderr only); dormant `CostRates`/`lookup_cost_rates` in `lfd/providers.rs`. Enforcement slots beside the max-iterations valve at `loop_ticker.rs:90`. Parent/child (wave-tree) rollup is gated on 03 (ancestry); single-wave cap ships independently. Needs a `Money` cents newtype + `tests/fixtures/dto/wave.json`.
+- **02 Cloud backend — recommend A2 (lfd scaffolds; vendor owns the loop).** Vendor research is decisive: Claude **Routines** are the only true server-side schedule (machine-off), but there's **no create-routine API** — created only via web/Desktop/`/schedule` CLI; `/fire` only triggers an existing one. Codex has cloud task launch (`codex cloud exec`) but **no server-side schedule** and no public REST task API. So A1 (lfd registers a recurring trigger via API) is impossible uniformly today. A2 design reuses `render_goal` + `sync_skills` + `lf op`, behind a new `lf op cloud <vendor>`; the one net-new piece is a `.mcp.json` Asana emitter (a fresh cloud clone has no `lf`/local OAuth, so roadmap access goes over MCP). Deep-link back = persist `cloud_session_url` on the Wave, Concerto opens it.
 
-**v1 write discipline (deferred to its own task):** single writer — only the progress pass writes MEMORY; chat and crons append to a mailbox the progress pass drains. No locks. Revisit only if it bites.
+**Cross-item dependency:** 03 (ancestry) unblocks the parent/child rollup in 04 and the whole wave-tree/cross-repo model. It's the leading edge.
 
 ## Open regression
 
-- **Wave ancestry dropped.** The reduction removed the parent-wave field from the durable `Wave` type, so `WaveAgentTree.child_waves` is always empty and the chord structure is invisible. The store still has `parent_wave_id` columns. Reintroduce ancestry before chords/child-waves can appear in the tree — this blocks the goals-as-chord model. See item `2-wave-ancestry`.
+- **Wave ancestry dropped.** The reduction removed the parent-wave field from the durable `Wave` type, so `WaveAgentTree.child_waves` is always empty and the wave-tree structure is invisible. Reintroduce ancestry before child waves can appear in the tree — this blocks the goals-as-wave-tree model. **RESOLVED by #781** (see research outcomes above).
 
 ## Next (not yet built)
 
-- **lf wave — remaining three arms.** Progress shipped; monitor, cron, chat still open (revival + rewiring, not greenfield — see the runtime section above). Monitor's summarizer cadence/cost is the real crux. Re-add worker stream capture together with the monitor that consumes it. Supersedes/absorbs "canonical always-on wave-agent session" below.
-- **Wave one level out** — split singular wave *identity* (GOAL/MEMORY/agent) from per-repo *execution* (`repos: [RepoWork]`); repo becomes a filter, not a container (item `3-wave-repo-split`). Forks with the chord-spanning cross-repo model in `2-wave-ancestry`.
-- **`lf goal` thin-call cleanup** — the local `lf goal` command still renders (`render_goal`) and launches the session locally; reduce it to a thin call into the lfd-backed wave-agent session API (`lfq wave run`) so the runtime owns rendering/launch. Minor.
-- **`launch_agent` dedup** — `goal.rs::launch_goal_batch` duplicates the headless-launch sequence in `run.rs` (check_cli → write prompt/context logs → `StreamFormat::Human` → `launch_agent` → exit-code hint). Collapse into a shared `engine::agent` helper once a third caller appears.
+- **Wave one level out** — split singular wave *identity* (GOAL/MEMORY/agent) from per-repo *execution* (`repos: [RepoWork]`); repo becomes a filter, not a container (item `3-wave-repo-split`). Forks with the tree-spanning cross-repo model in `2-wave-ancestry`.
 - Close-the-loop: feed in-flight worker runs + PR state into re-measure.
 - Attention as the loop's human-escalation channel for parked interactive steps.
+- The canonical always-on wave-agent session; supervisor + heartbeat.
 - Fan-out branch/PR isolation before lifting `workers > 1`.
-
-## Roadmap reconciliation owed (Asana)
-
-The roadmap lives in Asana (project `1216257471889000`, adopted from main during rebase; branch's duplicate `1216272792262792` was abandoned). This branch could **not** reconcile it — the stored Asana token was expired in a headless run (`lf op auth asana` needed). When a human can re-auth, via `lf op pm update`:
-- **File the lf wave follow-ons** — the three remaining arms (monitor, cron, chat). The branch-added local `wave/goals/*lf-loop*.md` roadmap files were removed at gate (Asana is source of truth); those items were never registered in the canonical project, so they must be filed fresh.
-- **Close** whatever the shipped `lf wave` progress arm satisfies.

@@ -708,6 +708,64 @@ impl Store {
         ControlSessionStore::list_sessions(self, wave_id, statuses).await
     }
 
+    /// This wave's live sessions plus sessions completed at or after
+    /// `completed_since` (unix seconds) — a poller's working set, bounded
+    /// regardless of how much terminal history the wave accumulates.
+    pub async fn list_recent_control_sessions(
+        &self,
+        wave_id: &LfdId,
+        completed_since: i64,
+    ) -> StoreResult<Vec<Session>> {
+        ControlSessionStore::list_recent_sessions(self, wave_id, completed_since).await
+    }
+
+    /// The wave's live brain, if any: a non-terminal `WaveAgent` session —
+    /// either lfd-launched (`POST /waves/{id}/run`) or a self-registered
+    /// `lf wave` server. One-brain enforcement (run_wave idempotency, the
+    /// loop-ticker skip, wave-server registration conflicts) keys on this
+    /// single fact.
+    pub async fn live_wave_agent_session(&self, wave_id: &LfdId) -> StoreResult<Option<Session>> {
+        let sessions = self
+            .list_control_sessions(
+                Some(wave_id),
+                Some(crate::lfd::types::LIVE_SESSION_STATUSES),
+            )
+            .await?;
+        Ok(sessions
+            .into_iter()
+            .find(|session| session.session_use == crate::lfd::types::SessionUse::WaveAgent))
+    }
+
+    /// Record a session in the run registry. The db IS the registry: `lf`
+    /// writes its own row here directly — self-registered flow runs, the
+    /// `lf wave` server's WaveAgent row, `lf q worker run` dispatches — no
+    /// daemon in the path. The writer later marks the row terminal via
+    /// [`Store::update_control_session`].
+    pub async fn register_session(&self, session: &Session) -> StoreResult<()> {
+        ControlSessionStore::create_session(self, session).await
+    }
+
+    /// Live sessions grouped under one worktree, keyed by the worktree
+    /// directory's basename (`<repo>.<wave>`, `<repo>.<wave>.<id>`, ...):
+    /// everything currently running in that tree, whoever launched it.
+    pub async fn active_sessions_by_worktree(
+        &self,
+        worktree_name: &str,
+    ) -> StoreResult<Vec<Session>> {
+        let sessions = self
+            .list_control_sessions(None, Some(crate::lfd::types::LIVE_SESSION_STATUSES))
+            .await?;
+        Ok(sessions
+            .into_iter()
+            .filter(|session| {
+                std::path::Path::new(&session.cwd)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    == Some(worktree_name)
+            })
+            .collect())
+    }
+
     pub async fn get_active_control_session_for_run(
         &self,
         run_id: &LfdId,
@@ -925,6 +983,11 @@ pub trait ControlSessionStore: Send + Sync {
         &self,
         wave_id: Option<&LfdId>,
         statuses: Option<&[SessionStatus]>,
+    ) -> StoreResult<Vec<Session>>;
+    async fn list_recent_sessions(
+        &self,
+        wave_id: &LfdId,
+        completed_since: i64,
     ) -> StoreResult<Vec<Session>>;
     async fn get_active_session_for_run(&self, run_id: &LfdId) -> StoreResult<Option<Session>>;
     async fn update_session(&self, session: &Session) -> StoreResult<()>;
@@ -2050,6 +2113,27 @@ impl ControlSessionStore for Store {
         }
     }
 
+    async fn list_recent_sessions(
+        &self,
+        wave_id: &LfdId,
+        completed_since: i64,
+    ) -> StoreResult<Vec<Session>> {
+        match &self.backend {
+            StoreBackend::Sqlite(store) => {
+                let wave_id = wave_id.clone();
+                run_sqlite(store, move |store| {
+                    store.list_recent_control_sessions(&wave_id, completed_since)
+                })
+                .await
+            }
+            StoreBackend::Postgres(store) => {
+                store
+                    .list_recent_control_sessions(wave_id, completed_since)
+                    .await
+            }
+        }
+    }
+
     async fn get_active_session_for_run(&self, run_id: &LfdId) -> StoreResult<Option<Session>> {
         match &self.backend {
             StoreBackend::Sqlite(store) => {
@@ -2185,6 +2269,32 @@ pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
             ),
         }),
     }
+}
+
+/// Open the machine's shared registry store only if one already exists —
+/// a sqlite db file on disk, or a configured postgres. `None` means this
+/// machine has no registry yet; callers that instrument best-effort (lf
+/// self-registration, the wave server) treat that as "not instrumented" and
+/// stay silent rather than conjuring an empty db.
+pub async fn open_existing_store() -> Option<Store> {
+    let cfg = crate::lfd::storage_config_from_env().ok()?;
+    if let StorageConfig::Sqlite { path } = &cfg {
+        if !path.exists() {
+            return None;
+        }
+        // lf-direct openers can meet a db created by an older lfd (the daemon
+        // migrates only at its own boot). Apply pending migrations here so a
+        // direct writer never hits schema drift; versioned migrations make a
+        // concurrent second applier a no-op, and sqlite locking serializes
+        // them. A failed migration means the db is unusable for us: warn and
+        // report "not instrumented" rather than limping on a wrong schema.
+        let conn = rusqlite::Connection::open(path).ok()?;
+        if let Err(err) = migrations::apply_sqlite(&conn) {
+            tracing::warn!(?path, %err, "registry store migration failed; running uninstrumented");
+            return None;
+        }
+    }
+    open_store(&cfg).await.ok()
 }
 
 pub async fn migrate_store(cfg: &StorageConfig, status_only: bool) -> StoreResult<String> {

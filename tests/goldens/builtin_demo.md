@@ -35,7 +35,7 @@ bloat the transcript with work that belongs in a child.
 Inside a Wave loop, dispatch with:
 
 ```bash
-lfq worker run <wave> --flow <flow> --task "<task>"
+lf q worker run <wave> --flow <flow> --task "<task>"
 ```
 
 This spawns the child as its own attachable tmux session — not an inline
@@ -46,6 +46,26 @@ shell-out — so it's independently monitorable and steerable. Watch it with
 Inline edits are only for trivial fixes smaller than the cost of dispatching.
 When you do one, say why. Keep the coordinating session about decisions,
 sequencing, and reading results back.
+
+## Speak
+
+You already hear the wave: its curated memory and recent thread ride this
+prompt as `<lf:wave-memory>` and `<lf:wave-chat-recent>`, snapshotted at
+launch - there is no live feed to poll mid-run. Answers return on the channel
+they came in: when a human's message reaches you, reply in your own turn
+text. Everything proactive goes through `lf`:
+
+- `lf chat "<note>"` - report outcomes, FYIs, and blockers to the wave's
+  thread; the post wakes the wave's mind like any message. One short
+  paragraph: what landed, links, anything surprising. Pipe stdin for longer.
+- `lf chat --parent "<report>"` - escalate to the parent wave.
+- `lf memory add "<fact>"` - record a durable learning. `lf memory update`
+  rewrites the whole file from stdin.
+- `wave/<name>/MEMORY.md` is server-owned - never edit the file directly.
+
+Use these unconditionally. Outside any wave they drop silently (exit 0) -
+publish-to-no-subscriber is correct pubsub, never a blocker. A wave whose
+server is down errors instead; note it and move on.
 
 ## The Roadmap Lives in Asana
 
@@ -71,7 +91,8 @@ roadmap files or a roadmap table in `GOAL.md` — that mirror is gone.
 
 - `scratch/<branch>.md` - design doc for the current work
 - `scratch/questions.md` - open questions, blockers, assumptions
-- `wave/<name>/MEMORY.md` - durable wave learnings (roadmap goes to Asana, above)
+- `lf memory add "<fact>"` - durable wave learnings; `wave/<name>/MEMORY.md` is
+  server-owned, never edited directly (roadmap goes to Asana, above)
 - Code - the actual work
 
 ## Checkpoint And Proceed

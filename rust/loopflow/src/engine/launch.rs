@@ -170,32 +170,6 @@ pub fn prepare_launch_prompt(
     })
 }
 
-/// Build a launch prompt for a Wave's looping goal agent: operate mode on,
-/// interactive surface, and the rendered goal as the task message.
-pub fn prepare_goal_launch(
-    config: &Config,
-    repo_root: PathBuf,
-    goal_message: String,
-    agent: Option<String>,
-    surface: Surface,
-    yolo_mode: bool,
-) -> Result<PreparedLaunchPrompt, CoreError> {
-    prepare_launch_prompt(
-        config,
-        LaunchPromptInput {
-            repo_root: repo_root.clone(),
-            surface,
-            no_loopflow: false,
-            message: Some(goal_message),
-            agent,
-            cwd: Some(repo_root),
-            yolo_mode,
-            include_config_directions: true,
-            ..LaunchPromptInput::default()
-        },
-    )
-}
-
 fn validate_agent_policy(agent: &str) -> Result<(), CoreError> {
     let (harness, variant) = parse_agent(agent);
     if harness != "opencode" {
@@ -331,7 +305,7 @@ Test step body.
         .expect("prepare prompt");
         assert!(prepared.prompt.contains("<lf:loopflow>"));
         assert!(prepared.config.system_prompt.contains("lf op commit"));
-        assert!(prepared.config.system_prompt.contains("lfq worker run"));
+        assert!(prepared.config.system_prompt.contains("lf q worker run"));
         assert!(prepared.config.system_prompt.contains("lfq attach"));
     }
 

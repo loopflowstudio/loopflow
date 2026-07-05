@@ -1,6 +1,6 @@
 // The exposed main window: a burgundy repo rail (left) filtering a burgundy wave
-// list (center), with a "+" new-wave launcher, and a terminal detail (right) that
-// attaches the selected wave's /goal agent in an embedded tmux session.
+// list (center), with a "+" new-wave launcher, and a WaveChat detail (right) that
+// streams the selected wave's live conversation from its `lf wave` chat server.
 //
 // Reshaped from the battle-tested PortfolioWindow: keeps its connection / daemon /
 // EventService plumbing, swaps the multi-repo card grid for the sidebar+list+terminal
@@ -128,7 +128,7 @@ struct WavesView: View {
 
             Divider()
 
-            terminalDetail
+            waveDetail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(palette.background)
         }
@@ -335,26 +335,26 @@ struct WavesView: View {
         .padding()
     }
 
-    // MARK: - Terminal detail
+    // MARK: - Wave detail (WaveChat)
 
     @ViewBuilder
-    private var terminalDetail: some View {
-        if let wave = selectedWave, let state = repoState(for: wave) {
-            WaveAgentTerminalPane(
+    private var waveDetail: some View {
+        if let wave = selectedWave {
+            WaveDetailPane(
                 wave: wave,
-                attach: { _ in try await launchOrAttach(wave: wave, state: state) },
+                repoPath: waveRepoPath(for: wave),
                 onClose: { selectedWaveId = nil }
             )
             .id(wave.id)
         } else {
             VStack(spacing: Spacing.md) {
-                Image(systemName: "terminal")
+                Image(systemName: "bubble.left.and.bubble.right")
                     .font(Typography.heroTitle(28))
                     .foregroundStyle(palette.textSecondary.opacity(0.5))
                 Text("Select a wave")
                     .font(Typography.sectionTitle())
                     .foregroundStyle(palette.text)
-                Text("Its /goal agent opens here in an embedded terminal.")
+                Text("Its live conversation opens here.")
                     .font(Typography.caption())
                     .foregroundStyle(palette.textSecondary)
             }
@@ -362,12 +362,13 @@ struct WavesView: View {
         }
     }
 
-    /// Attach the wave's /goal agent through local `lf goal --tmux`. The returned
-    /// tmux handle is enough for Ghostty to attach; no lfd run/attach route needed.
-    private func launchOrAttach(wave: WaveViewModel, state: PortfolioRepoState) async throws -> SessionConnectionInfo {
-        let connection = try await state.attachWaveAgent(waveName: wave.name)
-        await refreshAuthoredWaves()
-        return connection
+    /// On-disk repo root for the wave's state, where its
+    /// `wave/<name>/.wave-endpoint` discovery pointer lives. Wave state is
+    /// published at the ORIGIN repo, so a worktree rail path resolves here
+    /// (memoized) — chat discovery, the launcher, and the tmux-attach hint all
+    /// inherit the same origin path.
+    private func waveRepoPath(for wave: WaveViewModel) -> String {
+        WaveOrigin.resolve(repoState(for: wave)?.repo.path ?? wave.repo)
     }
 
     private func repoState(for wave: WaveViewModel) -> PortfolioRepoState? {
@@ -647,87 +648,6 @@ struct WavesView: View {
     }
 }
 
-/// Embedded terminal for a wave's /goal agent: ensures the agent is running,
-/// resolves its tmux session, and attaches via GhosttyTerminalView. Mirrors the
-/// proven attach flow in TerminalWorkspaceView's SessionTerminalSurface.
-private struct WaveAgentTerminalPane: View {
-    let wave: WaveViewModel
-    let attach: (String) async throws -> SessionConnectionInfo
-    let onClose: () -> Void
-
-    @Environment(\.palette) private var palette
-    @ObservedObject private var ghosttyManager = GhosttyManager.shared
-    @State private var connectionInfo: SessionConnectionInfo?
-    @State private var errorMessage: String?
-
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            terminal
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(LoopflowPalette.dark.background)
-        }
-        .task(id: wave.id) {
-            guard connectionInfo == nil else { return }
-            if RepoState.uiTestMode() != nil { return }
-            do {
-                connectionInfo = try await attach(wave.id)
-                errorMessage = nil
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: wave.statusIndicator.icon)
-                .foregroundStyle(wave.statusIndicator.color)
-            Text(wave.displayName)
-                .font(Typography.sectionTitle())
-                .foregroundStyle(palette.text)
-            Text("/goal agent")
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
-            Spacer()
-            Button {
-                onClose()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-            }
-            .buttonStyle(.plain)
-            .help("Close terminal")
-        }
-        .padding(.horizontal, Spacing.xl)
-        .padding(.vertical, Spacing.md)
-    }
-
-    @ViewBuilder
-    private var terminal: some View {
-        if let command = connectionInfo.map(TerminalAttachCommand.init) {
-            GhosttyTerminalView(
-                workingDirectory: command.workingDirectory,
-                argv: command.argv,
-                env: command.env,
-                sessionId: "wave-agent-\(wave.id)",
-                manager: ghosttyManager
-            )
-        } else if let errorMessage {
-            ContentUnavailableView(
-                "Terminal unavailable",
-                systemImage: "exclamationmark.triangle",
-                description: Text(errorMessage)
-            )
-        } else {
-            ProgressView("Starting /goal agent…")
-                .tint(.white)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-}
 
 /// Minimal create-wave flow: pick a target repo, name the wave, submit. Creates
 /// the wave against the repo's lfd via `PortfolioRepoState.createWave`.
@@ -847,45 +767,6 @@ private struct CreateWaveSheet: View {
             }
         }
     }
-}
-
-/// Resolves a session connection into the working directory + argv needed to
-/// attach a terminal, choosing local tmux vs. SSH based on the connection.
-struct TerminalAttachCommand: Equatable {
-    let workingDirectory: String
-    let argv: [String]
-    let env: [String: String]
-
-    init(workingDirectory: String, argv: [String], env: [String: String] = [:]) {
-        self.workingDirectory = workingDirectory
-        self.argv = argv
-        self.env = env
-    }
-
-    init(_ connection: SessionConnectionInfo) {
-        if connection.usesLocalTmux {
-            self.init(
-                workingDirectory: connection.cwd,
-                argv: ["tmux", "attach-session", "-t", connection.sessionName]
-            )
-            return
-        }
-
-        self.init(
-            workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
-            argv: [
-                "ssh",
-                "-t",
-                connection.host,
-                "tmux attach-session -t \(shellEscape(connection.sessionName))",
-            ]
-        )
-    }
-}
-
-private func shellEscape(_ value: String) -> String {
-    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
-    return "'\(escaped)'"
 }
 
 #Preview {

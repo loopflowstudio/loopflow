@@ -14,6 +14,7 @@ use crate::engine::error::CoreError;
 use crate::engine::flow::{expand_direction_names, load_direction, load_step, Direction, Step};
 use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::types::RepoId;
+use crate::lfd::wave::memory::Memory;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -258,6 +259,9 @@ pub struct PromptComponents {
     pub summaries: Vec<Document>,
     pub wave_memory: Option<Document>,
     pub wave: Option<String>,
+    /// Ambient wave context: compact rendering of the wave's recent thread.
+    /// `None` when no wave resolves or the wave has no conversation yet.
+    pub wave_chat: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
     /// User message (positional args after step/flow name)
@@ -434,6 +438,9 @@ pub fn measure_context(components: &PromptComponents) -> ContextBreakdown {
     if let Some(tokens) = wave_memory_tokens {
         breakdown.add_source_tokens(DocumentSource::WaveMemory, tokens);
     }
+    if let Some(ref chat) = components.wave_chat {
+        breakdown.add_source_tokens(DocumentSource::Wave, count_tokens(chat));
+    }
     for (doc, tokens) in components.docs.iter().zip(doc_tokens.iter().copied()) {
         breakdown.add_source_tokens(doc.source, tokens);
     }
@@ -562,6 +569,29 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         "read clipboard"
     );
 
+    // Ambient wave context: every run born inside a wave inherits the wave's
+    // recent chat and memory. Explicit --wave wins; else env/worktree. No
+    // wave (or no wave state) → both stay empty and the prompt gains nothing.
+    let ambient_start = Instant::now();
+    let ambient_wave = opts
+        .wave
+        .clone()
+        .or_else(|| crate::engine::wave_context::resolve_ambient_wave_name(repo_root));
+    let wave_chat = ambient_wave
+        .as_deref()
+        .and_then(|wave| crate::engine::wave_context::gather_wave_chat(repo_root, wave));
+    if wave_memory.is_none() {
+        if let Some(wave) = ambient_wave.as_deref() {
+            wave_memory = gather_wave_memory_doc(repo_root, Some(wave))?;
+        }
+    }
+    debug!(
+        elapsed_ms = ambient_start.elapsed().as_millis(),
+        wave = ambient_wave.as_deref(),
+        has_chat = wave_chat.is_some(),
+        "gathered ambient wave context"
+    );
+
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(GatheredContext(PromptComponents {
         surface: opts.surface,
@@ -575,6 +605,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         summaries,
         wave_memory,
         wave: opts.wave.clone(),
+        wave_chat,
         operate: opts.operate,
         message: opts.message.clone(),
         diff_tier,
@@ -685,18 +716,17 @@ fn gather_wave_memory_doc(
         return Ok(None);
     };
 
-    let memory_path = repo_root.join("wave").join(wave_name).join("MEMORY.md");
-    if !memory_path.is_file() {
+    // Memory lives under the ORIGIN repo: the wave server holds its pen
+    // there, and a worktree's committed copy can lag it.
+    let origin = crate::engine::wave_context::wave_origin(repo_root);
+    let memory = Memory::for_wave(&origin, wave_name);
+    if !memory.path().is_file() {
         return Ok(None);
     }
 
-    let Ok(content) = fs::read_to_string(&memory_path) else {
-        return Ok(None);
-    };
-
     Ok(Some(Document {
         path: format!("wave/{wave_name}/MEMORY.md"),
-        content,
+        content: memory.read(),
         source: DocumentSource::WaveMemory,
     }))
 }
@@ -1618,15 +1648,60 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
     if components.operate {
-        parts.push(format!(
-            "<lf:loopflow>\n{}\n</lf:loopflow>",
-            crate::engine::builtins::LOOPFLOW_DOC
-        ));
+        parts.push(loopflow_section());
     }
 
     let instructions = components.surface.instructions();
     if !instructions.is_empty() {
         parts.push(instructions.to_string());
+    }
+
+    parts
+}
+
+/// The one loopflow operating document (including the Speak vocabulary) as a
+/// prompt section. Emitted exactly once per prompt: assembled prompts get it
+/// from [`format_system_sections`]; the wave mind's prompt bypasses assembly
+/// and appends the same section itself.
+pub fn loopflow_section() -> String {
+    format!(
+        "<lf:loopflow>\n{}\n</lf:loopflow>",
+        crate::engine::builtins::LOOPFLOW_DOC
+    )
+}
+
+/// The two ambient wave sections — `<lf:wave-memory>` and
+/// `<lf:wave-chat-recent>` — the context every run born inside a wave
+/// inherits, whatever the launch surface (assembled prompts and vendor-skill
+/// seeds alike). Emitted ONLY when non-empty: no wave, no headers, no tokens.
+///
+/// Memory goes through the one injector
+/// ([`crate::engine::flow::wave_memory_section`], shared with the wave
+/// agent's `render_goal`) and is skipped when the task message already
+/// carries the tag — a wave-agent seed embeds its own memory, and injecting
+/// it twice would double the context.
+pub fn format_wave_context_sections(components: &PromptComponents) -> Vec<String> {
+    let mut parts = Vec::new();
+
+    let message_carries_memory = components
+        .message
+        .as_deref()
+        .is_some_and(|message| message.contains("<lf:wave-memory>"));
+    if !message_carries_memory {
+        if let Some(section) = components
+            .wave_memory
+            .as_ref()
+            .and_then(|doc| crate::engine::flow::wave_memory_section(&doc.content))
+        {
+            parts.push(section);
+        }
+    }
+
+    if let Some(ref chat) = components.wave_chat {
+        parts.push(format!(
+            "The wave's recent conversation — the thread this run is part of.\n\n\
+             <lf:wave-chat-recent>\n{chat}\n</lf:wave-chat-recent>"
+        ));
     }
 
     parts
@@ -1642,28 +1717,14 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
     // Wave context
     if let Some(ref wave) = components.wave {
         let memory_path = format!("wave/{wave}/MEMORY.md");
-        let memory_content = components
-            .wave_memory
-            .as_ref()
-            .map(|doc| {
-                format!(
-                    "<lf:memory path=\"{}\">\n{}\n</lf:memory>",
-                    memory_path, doc.content
-                )
-            })
-            .unwrap_or_else(|| {
-                format!(
-                    "<lf:memory path=\"{}\">\n(no memory yet)\n</lf:memory>",
-                    memory_path
-                )
-            });
 
         parts.push(format!(
             "<lf:wave name=\"{}\">\n\
              You are building toward the {} program of work.\n\
              Wave context is included in docs below.\n\n\
              ## Wave memory\n\n\
-             Persistent memory at {}. Read it before every iteration.\n\
+             Persistent memory at {}. Read it before every iteration; its current\n\
+             contents, when any, ride this prompt's wave-memory section.\n\
              Keep it compact enough to include every iteration: correct stale entries,\n\
              add durable observations, and delete session-specific notes.\n\n\
              Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.\n\
@@ -1675,15 +1736,20 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
              - design rationale → scratch/ or wave plan\n\
              - session-specific notes → nowhere (let them die)\n\n\
              How to update:\n\
-             - Edit within sections. Don't rewrite the whole file.\n\
+             - Through the server: `lf memory add \"<fact>\"` for one entry, `lf memory update`\n\
+             (stdin) to rewrite — never edit the file directly.\n\
              - Correct or remove entries that are wrong or stale.\n\
              - Use absolute dates, not \"today\" or \"recently\".\n\
-             - When a section grows large, promote stable entries to wave docs or explicit docs and trim.\n\n\
-             {}\n\
+             - When a section grows large, promote stable entries to wave docs or explicit docs and trim.\n\
              </lf:wave>",
-            wave, wave, memory_path, memory_content
+            wave, wave, memory_path
         ));
     }
+
+    // Ambient wave context: the wave's memory and recent conversation flow
+    // into every run born inside the wave. Both sections cost zero tokens
+    // when absent.
+    parts.extend(format_wave_context_sections(components));
 
     let scratch_docs: Vec<Document> = components
         .docs
@@ -2133,7 +2199,8 @@ mod tests {
 
         assert!(prompt.contains("<lf:file path=\"doc.md\">"));
         assert!(prompt.contains("<lf:summary path=\"summary.md\">"));
-        assert!(prompt.contains("<lf:memory path=\"wave/living/MEMORY.md\">"));
+        assert!(prompt.contains("<lf:wave-memory>"));
+        assert!(prompt.contains("Wave memory content"));
     }
 
     // ==========================================================================
@@ -2178,6 +2245,24 @@ mod tests {
         let prompt = render_full_prompt(components);
         assert!(!prompt.contains("<lf:loopflow>"));
         assert!(!prompt.contains("lf op commit"));
+        assert!(!prompt.contains("lf chat"));
+    }
+
+    /// A bare flow/step run's assembled prompt carries the one loopflow
+    /// operating document, including the speech vocabulary.
+    #[test]
+    fn assembled_prompt_carries_loopflow_document_once() {
+        let components = PromptComponents {
+            operate: true,
+            step: Some(Step::named("implement")),
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
+        assert!(prompt.contains("lf chat --parent"));
+        assert!(prompt.contains("lf memory add"));
+        assert!(prompt.contains("server-owned"));
     }
 
     #[test]
@@ -2227,8 +2312,123 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Persistent memory at wave/living/MEMORY.md"));
-        assert!(prompt.contains("<lf:memory path=\"wave/living/MEMORY.md\">"));
+        assert!(prompt.contains("<lf:wave-memory>"));
         assert!(prompt.contains("prefer focused tests"));
+    }
+
+    #[test]
+    fn ambient_wave_sections_render_without_an_explicit_wave() {
+        let components = PromptComponents {
+            wave_memory: Some(Document {
+                path: "wave/goals/MEMORY.md".to_string(),
+                content: "- land real product code".to_string(),
+                source: DocumentSource::WaveMemory,
+            }),
+            wave_chat: Some("user: status?\nwave: two PRs open".to_string()),
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert!(
+            !prompt.contains("<lf:wave name="),
+            "no wave block ambiently"
+        );
+        assert!(prompt.contains("<lf:wave-memory>\n- land real product code\n</lf:wave-memory>"));
+        assert!(prompt.contains(
+            "<lf:wave-chat-recent>\nuser: status?\nwave: two PRs open\n</lf:wave-chat-recent>"
+        ));
+    }
+
+    #[test]
+    fn no_wave_context_renders_no_wave_sections() {
+        let prompt = render_full_prompt(PromptComponents::default());
+        assert!(!prompt.contains("<lf:wave-memory>"));
+        assert!(!prompt.contains("<lf:wave-chat-recent>"));
+        assert!(!prompt.contains("<lf:wave"));
+    }
+
+    #[test]
+    fn empty_wave_memory_renders_no_section() {
+        let components = PromptComponents {
+            wave_memory: Some(Document {
+                path: "wave/goals/MEMORY.md".to_string(),
+                content: "   \n".to_string(),
+                source: DocumentSource::WaveMemory,
+            }),
+            ..Default::default()
+        };
+        let prompt = render_full_prompt(components);
+        assert!(!prompt.contains("<lf:wave-memory>"));
+    }
+
+    #[test]
+    fn wave_agent_seed_does_not_double_inject_memory() {
+        // The wave agent's inline run: render_goal already embedded the
+        // memory in the task message; assembly must not inject it again.
+        let goal = crate::engine::flow::Goal {
+            prompt: "Ship the roadmap.".to_string(),
+        };
+        let seed = crate::engine::flow::render_goal(
+            &goal,
+            &crate::engine::flow::GoalRenderContext {
+                flows: vec![],
+                roadmap: "wave/goals".to_string(),
+                memory: "- one source of truth".to_string(),
+                metrics: vec![],
+                in_flight: vec![],
+            },
+        );
+        let components = PromptComponents {
+            wave: Some("goals".to_string()),
+            wave_memory: Some(Document {
+                path: "wave/goals/MEMORY.md".to_string(),
+                content: "- one source of truth".to_string(),
+                source: DocumentSource::WaveMemory,
+            }),
+            message: Some(seed),
+            ..Default::default()
+        };
+
+        let prompt = render_full_prompt(components);
+        assert_eq!(
+            prompt.matches("<lf:wave-memory>").count(),
+            1,
+            "memory appears exactly once (inside the seed message)"
+        );
+        assert_eq!(prompt.matches("- one source of truth").count(), 1);
+    }
+
+    /// The wave agent's inline run: the render_goal seed rides as the task
+    /// message of an assembled prompt (operate on), and the loopflow document
+    /// lands exactly once — from assembly, not the seed.
+    #[test]
+    fn wave_agent_seed_carries_loopflow_document_once() {
+        let goal = crate::engine::flow::Goal {
+            prompt: "Ship the roadmap.".to_string(),
+        };
+        let seed = crate::engine::flow::render_goal(
+            &goal,
+            &crate::engine::flow::GoalRenderContext {
+                flows: vec![],
+                roadmap: "wave/goals".to_string(),
+                memory: String::new(),
+                metrics: vec![],
+                in_flight: vec![],
+            },
+        );
+        assert!(
+            !seed.contains("<lf:loopflow>"),
+            "the seed itself carries no loopflow section"
+        );
+
+        let components = PromptComponents {
+            operate: true,
+            wave: Some("goals".to_string()),
+            message: Some(seed),
+            ..Default::default()
+        };
+        let prompt = render_full_prompt(components);
+        assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
     }
 
     #[test]

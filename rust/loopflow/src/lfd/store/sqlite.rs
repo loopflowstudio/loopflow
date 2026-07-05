@@ -648,6 +648,34 @@ impl SqliteStore {
         Ok(sessions)
     }
 
+    /// Live sessions plus sessions completed at or after `completed_since`
+    /// (unix seconds) — bounded however much terminal history accumulates.
+    pub fn list_recent_control_sessions(
+        &self,
+        wave_id: &LfdId,
+        completed_since: i64,
+    ) -> StoreResult<Vec<Session>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {} FROM terminal_sessions \
+             WHERE wave_id = ?1 AND (status IN (?2, ?3, ?4) OR completed_at >= ?5) \
+             ORDER BY created_at ASC",
+            Self::TERMINAL_SESSION_COLS
+        ))?;
+        let mut rows = stmt.query(params![
+            wave_id,
+            SessionStatus::Pending.as_i32() as i64,
+            SessionStatus::Attached.as_i32() as i64,
+            SessionStatus::Running.as_i32() as i64,
+            completed_since,
+        ])?;
+        let mut sessions = Vec::new();
+        while let Some(row) = rows.next()? {
+            sessions.push(Self::map_control_session_row(row)?);
+        }
+        Ok(sessions)
+    }
+
     pub fn get_active_control_session_for_run(
         &self,
         run_id: &LfdId,

@@ -28,6 +28,15 @@ lfq worker run shipper --flow build --task "add retry to token refresh"
 
 A worker runs the flow in its own worktree, opens a PR, and reports back. It inherits the wave's `GOAL.md` and `MEMORY.md`, so it builds with the wave's intent in view.
 
+By default each worker gets a fresh sibling worktree — `<repo>.<wave>.<run-id>` — off the default branch, with its own branch and PR. Placement flags change that:
+
+```bash
+lfq worker run shipper --flow build --task "…" --pool           # run in the wave's shared worktree
+lfq worker run shipper --flow build --task "…" --stack <run-id> # fork from that run's branch
+```
+
+`--pool` runs in the wave's shared `<repo>.<wave>` worktree: pooled workers share one branch, so concurrent pooled dispatches can collide — use it only when workers must see each other's edits live. `--stack` starts dependent work on top of an unlanded run's branch; the new run targets the parent's branch instead of main.
+
 Waves are independent by default. Add a `wave` trigger when one wave should react to another.
 
 ## Modes

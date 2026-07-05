@@ -5,7 +5,13 @@
 
 use std::path::PathBuf;
 
-use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, UsageReportDto, WaveDto};
+use loopflow::lfd::conversations::turns::{ChatRole, ChatTurn};
+use loopflow::lfd::conversations::types::{ConversationItem, Lifecycle};
+use loopflow::lfd::http::dto::{
+    CreateSessionRequestDto, RunWorkerRequestDto, SessionDto, UsageReportDto, WaveDto,
+    WorkerPlacementDto,
+};
+use loopflow::lfd::wave::state::MindState;
 use serde_json::Value;
 
 fn load_fixture(name: &str) -> Value {
@@ -71,6 +77,52 @@ fn session_fixture_pins_palette_shape() {
 }
 
 #[test]
+fn chat_turn_fixture_pins_wave_chat_shape() {
+    // The same fixture Concerto's ContractTests decodes; if the wire shape drifts
+    // between Rust and Swift, one of the two fails.
+    let turn: ChatTurn =
+        serde_json::from_value(load_fixture("chat_turn.json")).expect("chat turn should parse");
+
+    assert_eq!(turn.id, "turn-3");
+    assert_eq!(turn.role, ChatRole::Assistant);
+    assert_eq!(turn.status, Lifecycle::Running);
+    assert_eq!(turn.from.as_deref(), Some("worker"));
+    assert_eq!(turn.items.len(), 6);
+    assert!(matches!(turn.items[0], ConversationItem::Command { .. }));
+    assert!(matches!(turn.items[1], ConversationItem::File { .. }));
+    assert!(matches!(turn.items[2], ConversationItem::Message { .. }));
+    assert!(matches!(turn.items[3], ConversationItem::Thought { .. }));
+    assert!(matches!(turn.items[4], ConversationItem::Tool { .. }));
+
+    // The interrupted state and explicit-null optionals are pinned on the wire.
+    assert!(matches!(
+        turn.items[5],
+        ConversationItem::Command {
+            status: Lifecycle::Interrupted,
+            output: None,
+            exit_code: None,
+            duration_ms: None,
+            ..
+        }
+    ));
+
+    // Absent optionals serialize as explicit null, not omitted keys.
+    let value = serde_json::to_value(&turn).expect("serialize chat turn");
+    assert!(value["items"][5]["output"].is_null());
+    assert!(value["items"][5]
+        .as_object()
+        .expect("object")
+        .contains_key("output"));
+
+    // `from` is explicitly Optional: a fixture without the key decodes as
+    // None — no default masking (mirrored in Swift's ContractTests).
+    let mut without_from = load_fixture("chat_turn.json");
+    without_from.as_object_mut().expect("object").remove("from");
+    let turn: ChatTurn = serde_json::from_value(without_from).expect("absent from parses");
+    assert_eq!(turn.from, None);
+}
+
+#[test]
 fn create_session_request_fixture_pins_required_fields() {
     let request: CreateSessionRequestDto =
         serde_json::from_value(load_fixture("create_session_request.json"))
@@ -78,6 +130,49 @@ fn create_session_request_fixture_pins_required_fields() {
     assert_eq!(request.flow, "ship");
     assert_eq!(request.worktree, "/tmp/repo.Desktop");
     assert_eq!(request.agent, "codex");
+}
+
+#[test]
+fn run_worker_request_fixture_pins_placement_shape() {
+    let request: RunWorkerRequestDto =
+        serde_json::from_value(load_fixture("run_worker_request.json"))
+            .expect("run worker request fixture should parse");
+    assert_eq!(request.flow, "implement");
+    assert_eq!(request.task, "Add the workers endpoint.");
+    assert_eq!(
+        request.parent_session_id.as_deref(),
+        Some("lfdsession_01HNX7XYZ0AZ1B2C3D4E5F6G7H")
+    );
+    assert_eq!(
+        request.placement,
+        WorkerPlacementDto::Stack {
+            parent_run_id: "8f14e45f-ceea-467f-a34e-b5a1c3d4e5f6".to_string(),
+        }
+    );
+
+    // Round-trip keeps `stack` as a flat field pair: placement + parent_run_id.
+    let value = serde_json::to_value(&request).expect("serialize request");
+    assert_eq!(value["placement"], "stack");
+    assert_eq!(
+        value["parent_run_id"],
+        "8f14e45f-ceea-467f-a34e-b5a1c3d4e5f6"
+    );
+
+    // Unit placements are the bare tag; the field is required, never defaulted.
+    let fresh: RunWorkerRequestDto = serde_json::from_value(serde_json::json!({
+        "flow": "implement",
+        "task": "t",
+        "parent_session_id": null,
+        "placement": "fresh",
+    }))
+    .expect("fresh placement should parse");
+    assert_eq!(fresh.placement, WorkerPlacementDto::Fresh);
+
+    let missing = serde_json::from_value::<RunWorkerRequestDto>(serde_json::json!({
+        "flow": "implement",
+        "task": "t",
+    }));
+    assert!(missing.is_err(), "placement is required on the wire");
 }
 
 #[test]
@@ -119,4 +214,65 @@ fn usage_report_fixture_pins_repo_provider_shape() {
         .expect("array")
         .iter()
         .any(|row| row["repo"].is_null()));
+}
+
+/// `POST /messages` response — `{turn, state}` (wave/server.rs
+/// `PostMessageResponse`). The same fixture Concerto's ContractTests decodes;
+/// `turn` must parse as a `ChatTurn` and `state` must be a mind-state name.
+#[test]
+fn post_message_response_fixture_pins_wave_chat_reply() {
+    let value = load_fixture("post_message_response.json");
+    let turn: ChatTurn =
+        serde_json::from_value(value["turn"].clone()).expect("turn should parse as ChatTurn");
+    assert_eq!(turn.id, "turn-4");
+    assert_eq!(turn.role, ChatRole::User);
+    assert_eq!(turn.status, Lifecycle::Completed);
+    assert_eq!(turn.from, None);
+
+    // Round-trip: the reply's turn serializes back to the fixture shape.
+    assert_eq!(
+        serde_json::to_value(&turn).expect("serialize turn"),
+        value["turn"]
+    );
+
+    // `state` carries the mind-state name at acceptance; it must be a name
+    // MindState actually produces (renaming a state fails here AND in Swift).
+    let state = value["state"].as_str().expect("state is a string");
+    assert_eq!(
+        state,
+        MindState::Turning {
+            turn_id: turn.id.clone(),
+        }
+        .name()
+    );
+}
+
+/// The SSE `state` vocabulary (`idle | turning | interrupting | failed`)
+/// crosses the boundary as bare names. The fixture pins the shared list:
+/// renaming a `MindState` variant fails here, and Swift's ContractTests pin
+/// the same file against `WaveMindState`.
+#[test]
+fn wave_mind_states_fixture_pins_the_state_vocabulary() {
+    let value = load_fixture("wave_mind_states.json");
+    let fixture_names: Vec<&str> = value["states"]
+        .as_array()
+        .expect("states array")
+        .iter()
+        .map(|name| name.as_str().expect("state name is a string"))
+        .collect();
+
+    let variants = [
+        MindState::Idle,
+        MindState::Turning {
+            turn_id: "turn-1".to_string(),
+        },
+        MindState::Interrupting {
+            turn_id: "turn-1".to_string(),
+        },
+        MindState::Failed {
+            reason: "dead".to_string(),
+        },
+    ];
+    let names: Vec<&str> = variants.iter().map(MindState::name).collect();
+    assert_eq!(fixture_names, names);
 }

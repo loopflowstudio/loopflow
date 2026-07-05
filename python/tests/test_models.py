@@ -53,7 +53,7 @@ class TestWaveModel:
         repo = wave.repos[0]
         assert repo.active_run.status == "running"
         assert repo.active_run.pr.number == 1
-        assert repo.remote_branch == "wave/reduce"
+        assert repo.remote_branch == "wave/architecture"
         assert repo.pr.number == 1
         assert len(repo.commits) == 2
         assert repo.commits[0].sha == "a1b2c3d"

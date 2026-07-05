@@ -77,16 +77,17 @@ def _is_whole_file_platform_gate(path: str) -> bool:
         return False
 
     raw_lines = file_path.read_text(encoding="utf-8").splitlines()
-    non_empty = [line.strip() for line in raw_lines if line.strip()]
-    if len(non_empty) < 2:
+    # A file-header comment block may precede the gate and a trailing comment may
+    # follow #endif; neither changes that the file is wholly platform-gated.
+    code = [
+        stripped
+        for line in raw_lines
+        if (stripped := line.strip()) and not stripped.startswith("//")
+    ]
+    if len(code) < 2:
         return False
 
-    if not non_empty[0].startswith("#if "):
-        return False
-    if non_empty[-1] != "#endif":
-        return False
-
-    return True
+    return code[0].startswith("#if ") and code[-1] == "#endif"
 
 
 def _check_loopflowcore_imports() -> list[str]:
@@ -106,6 +107,35 @@ def _check_loopflowcore_imports() -> list[str]:
     return violations
 
 
+def _platform_if_has_fallback(path: str, if_line: str) -> bool:
+    """A shared-code `#if os(...)` is multiplatform-safe when balanced by an
+    `#else`, so both platforms compile. Locate the block opened by `if_line` and
+    report whether it carries an `#else` at the same nesting depth. A fallback-
+    less split (the real hazard: a symbol undefined off-platform) returns False.
+    """
+    file_path = REPO_ROOT / path
+    if not file_path.exists():
+        return False
+
+    target = if_line.strip()
+    depth = 0
+    for line in file_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if depth == 0:
+            if stripped == target:
+                depth = 1
+            continue
+        if stripped.startswith("#if"):
+            depth += 1
+        elif stripped.startswith("#endif"):
+            depth -= 1
+            if depth == 0:
+                return False
+        elif stripped.startswith("#else") and depth == 1:
+            return True
+    return False
+
+
 def _check_new_if_boundaries() -> list[str]:
     violations: list[str] = []
     diff_text = _run_git_diff("swift")
@@ -118,8 +148,15 @@ def _check_new_if_boundaries() -> list[str]:
 
         if file_path.startswith("swift/LoopflowCore/"):
             # canImport is a capability check, not a platform split — allow it.
-            if not re.match(r"\s*#if\s+canImport\(", line):
-                violations.append(f"{file_path}: new `#if` in LoopflowCore shared code")
+            if re.match(r"\s*#if\s+canImport\(", line):
+                continue
+            # A platform split with an `#else` fallback stays buildable on every
+            # target; only fallback-less splits break the shared build.
+            if re.match(r"\s*#if\s+!?os\(", line) and _platform_if_has_fallback(
+                file_path, line
+            ):
+                continue
+            violations.append(f"{file_path}: new `#if` in LoopflowCore shared code")
             continue
         if file_path in APP_WIRING_FILES:
             continue

@@ -14,6 +14,7 @@ use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Trigger, Wave, WaveStatus};
+use crate::lfd::wave::registry::live_brain_after_probe;
 
 pub fn spawn_loop_ticker(
     scheduler: Arc<Scheduler>,
@@ -58,6 +59,28 @@ async fn tick_loop_waves(
         }
         if scheduler.has_active_session(wave.id().as_str()) {
             continue;
+        }
+
+        // One brain per wave: a live WaveAgent session — lfd-launched or a
+        // self-registered `lf wave` server — IS the wave's brain; the ticker
+        // must not double-drive it. Same fact `run_wave_handler` checks.
+        // The probing form closes ghost rows on the spot (a SIGKILL'd
+        // `lf wave` server whose pid is dead), so a crashed brain cannot
+        // silently stall the loop until the next lfd boot.
+        match live_brain_after_probe(store, wave.id()).await {
+            Ok(Some(session)) => {
+                tracing::debug!(
+                    wave = %wave.name(),
+                    session_id = %session.id,
+                    "wave has a live wave-agent session; loop tick skipped"
+                );
+                continue;
+            }
+            Ok(None) => {}
+            Err(err) => {
+                tracing::error!(wave_id = %wave.id(), error = %err, "failed to check wave-agent session");
+                continue;
+            }
         }
 
         let active_runs = match store.count_active_runs(wave.id()).await {
@@ -154,9 +177,20 @@ fn should_pause_for_max_iterations(trigger: &Trigger, wave: &Wave) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::should_pause_for_max_iterations;
+    use super::{should_pause_for_max_iterations, tick_loop_waves};
+    use crate::lfd::events::EventHub;
+    use crate::lfd::executor::{AgentExecutor, ExecutionContext, WaveExecutor};
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{RepoWork, Signal, Trigger, Wave, WaveMode, WaveStatus};
+    use crate::lfd::output::OutputHub;
+    use crate::lfd::scheduler::Scheduler;
+    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
+    use crate::lfd::types::{
+        RepoWork, Session, SessionStatus, SessionUse, Signal, Trigger, Wave, WaveMode, WaveStatus,
+        WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
+    };
+    use std::collections::BTreeMap;
+    use std::path::Path;
+    use std::sync::Arc;
     use time::OffsetDateTime;
 
     fn make_trigger(max_iterations: Option<u32>) -> Trigger {
@@ -225,5 +259,180 @@ mod tests {
         let trigger = make_trigger(Some(5));
         let wave = make_wave(7, 5);
         assert!(!should_pause_for_max_iterations(&trigger, &wave));
+    }
+
+    struct NoopRunner;
+
+    #[async_trait::async_trait]
+    impl AgentExecutor for NoopRunner {
+        async fn run(
+            &self,
+            _cmd: Vec<String>,
+            _cwd: &Path,
+            _context: ExecutionContext,
+        ) -> anyhow::Result<i32> {
+            Ok(0)
+        }
+
+        async fn terminate(&self, _agent_id: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct Ticker {
+        store: SharedStore,
+        scheduler: Arc<Scheduler>,
+        executor: WaveExecutor,
+        event_hub: EventHub,
+        _tmp: tempfile::TempDir,
+    }
+
+    impl Ticker {
+        async fn tick(&self) {
+            tick_loop_waves(
+                &self.scheduler,
+                &self.executor,
+                &self.store,
+                &self.event_hub,
+            )
+            .await;
+        }
+    }
+
+    async fn ticker() -> Ticker {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store: SharedStore = Arc::new(
+            open_store(&StorageConfig::sqlite(tmp.path().join("lfd.db")))
+                .await
+                .expect("open sqlite store"),
+        );
+        let scheduler = Arc::new(Scheduler::new(1));
+        let output_hub = OutputHub::new(128, tmp.path().join("output"));
+        let event_hub = EventHub::new(128);
+        let executor = WaveExecutor::with_runner(
+            store.clone(),
+            scheduler.clone(),
+            output_hub,
+            event_hub.clone(),
+            Arc::new(NoopRunner),
+        );
+        Ticker {
+            store,
+            scheduler,
+            executor,
+            event_hub,
+            _tmp: tmp,
+        }
+    }
+
+    fn loop_wave() -> Wave {
+        make_wave(0, 0)
+    }
+
+    /// A `lf wave` server's self-registered WaveAgent session, recording
+    /// `pid` as the running server (the ticker's brain check probes it).
+    fn registered_server_session(wave: &Wave, pid: u32) -> Session {
+        Session {
+            id: LfdId::new(),
+            wave_id: wave.id().clone(),
+            run_id: None,
+            parent_session_id: None,
+            session_use: SessionUse::WaveAgent,
+            step: "mind".to_string(),
+            agent: "lf".to_string(),
+            cwd: "/tmp/repo".to_string(),
+            argv: vec!["lf".to_string(), "wave".to_string(), wave.name().clone()],
+            env: BTreeMap::from([(WAVE_SERVER_PID_ENV.to_string(), pid.to_string())]),
+            source: WAVE_SERVER_SOURCE.to_string(),
+            tmux_name: String::new(),
+            status: SessionStatus::Running,
+            attached_at: None,
+            started_at: Some(OffsetDateTime::now_utc()),
+            completed_at: None,
+            created_at: OffsetDateTime::now_utc(),
+            completion_token: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn tick_skips_wave_with_live_registered_wave_server() {
+        let ticker = ticker().await;
+        let wave = loop_wave();
+        ticker.store.create_wave(&wave).await.expect("create wave");
+        // A live server: its recorded pid is this test process — alive.
+        let session = registered_server_session(&wave, std::process::id());
+        ticker
+            .store
+            .create_control_session(&session)
+            .await
+            .expect("register server session");
+
+        ticker.tick().await;
+        let pending = ticker
+            .store
+            .list_pending_activations(wave.id())
+            .await
+            .expect("list pending");
+        assert!(
+            pending.is_empty(),
+            "loop ticker must not double-drive a wave with a live registered brain"
+        );
+
+        // The server deregisters (session goes terminal) → the ticker resumes.
+        let mut ended = session;
+        assert!(ended.complete(0));
+        ticker
+            .store
+            .update_control_session(&ended)
+            .await
+            .expect("end session");
+        ticker.tick().await;
+        let pending = ticker
+            .store
+            .list_pending_activations(wave.id())
+            .await
+            .expect("list pending");
+        assert_eq!(pending.len(), 1, "no live brain → the loop drives again");
+    }
+
+    /// A SIGKILL'd `lf wave` server leaves a Running WaveAgent row behind.
+    /// The ticker's probe must close the ghost on the spot and keep looping —
+    /// not trust the row and silently stall the wave until the next lfd boot.
+    #[tokio::test]
+    async fn tick_closes_dead_wave_server_row_and_keeps_looping() {
+        let ticker = ticker().await;
+        let wave = loop_wave();
+        ticker.store.create_wave(&wave).await.expect("create wave");
+        // A crashed server: the recorded pid is long dead.
+        let ghost = registered_server_session(&wave, 4_000_000);
+        ticker
+            .store
+            .create_control_session(&ghost)
+            .await
+            .expect("register ghost session");
+
+        ticker.tick().await;
+
+        let closed = ticker
+            .store
+            .get_control_session(&ghost.id)
+            .await
+            .expect("lookup")
+            .expect("row kept");
+        assert_eq!(
+            closed.status,
+            SessionStatus::Failed,
+            "the dead brain's row is closed by the probe"
+        );
+        let pending = ticker
+            .store
+            .list_pending_activations(wave.id())
+            .await
+            .expect("list pending");
+        assert_eq!(
+            pending.len(),
+            1,
+            "a dead brain must not stall the loop while lfd runs"
+        );
     }
 }

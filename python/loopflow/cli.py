@@ -616,8 +616,24 @@ def worker_run(
     wave: Optional[str] = typer.Argument(None),
     flow: str = typer.Option(..., "--flow", "-f"),
     task: str = typer.Option(..., "--task", "-t"),
+    pool: bool = typer.Option(
+        False,
+        "--pool",
+        help="Run in the wave's shared worktree. Pooled runs share one branch;"
+        " concurrent pooled workers can collide.",
+    ),
+    stack: Optional[str] = typer.Option(
+        None,
+        "--stack",
+        metavar="RUN_ID",
+        help="Fork a new worktree from this run's branch (dependent series).",
+    ),
     json_output: bool = typer.Option(False, "--json", "-j"),
 ) -> None:
+    if pool and stack:
+        typer.echo("--pool and --stack are mutually exclusive", err=True)
+        raise typer.Exit(code=2)
+    placement = "pool" if pool else "stack" if stack else "fresh"
     has_env_identity = any(
         os.environ.get(name)
         for name in ("LFD_SESSION_ID", "LFD_WAVE_ID", "LFD_RUN_ID", "LFD_AGENT_ROLE")
@@ -636,7 +652,9 @@ def worker_run(
             target_wave,
             flow,
             task,
+            placement,
             parent_session_id=caller.id if caller else None,
+            parent_run_id=stack,
         )
     except LoopflowError as exc:
         typer.echo(str(exc), err=True)

@@ -1,9 +1,10 @@
 pub mod auth;
+pub mod chat;
 pub mod flow;
-pub mod goal;
 pub mod list;
-pub mod r#loop;
+pub mod memory;
 pub mod ops;
+pub mod q;
 pub mod run;
 pub mod runs;
 pub mod usage;

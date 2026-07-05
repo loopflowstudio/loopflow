@@ -16,12 +16,14 @@ use crate::engine::naming::sanitize_for_branch;
 use crate::engine::platform::kill_process;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, worktree_path};
-use crate::lfd::executor::ensure_wave_worktree;
+use crate::lfd::executor::create_run_for_placement;
+use crate::lfd::executor::{ensure_wave_worktree, Placement};
 use crate::lfd::http::dto::{
     activation_log_dto, session_connection_info_dto, session_dto, trigger_dto, wave_cron_dto,
     ActivationLogDto, CombineResponse, CombineResponseResult, DeletedResourceResponse,
     ErrorResponse, LandWaveResponse, ListResponse, NextWaveResponse, RestartStepResponse,
-    SessionDto, StopWaveResponse, WaveAgentTreeDto, WaveAgentTreeSessionDto, WaveCronDto, WaveDto,
+    RunWorkerRequestDto, SessionDto, StopWaveResponse, WaveAgentTreeDto, WaveAgentTreeSessionDto,
+    WaveCronDto, WaveDto, WorkerPlacementDto,
 };
 #[cfg(test)]
 use crate::lfd::http::routes::wave_config::TriggerDef;
@@ -32,7 +34,6 @@ use crate::lfd::http::routes::{build_wave_dto, hooks, resolve_wave_id, ApiError}
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::triggers::activation::create_run;
 use crate::lfd::triggers::{
     spawn_immediate_activation, spawn_run_task_with_session, spawn_run_task_with_slot,
     ActivationEnvelope, ImmediateActivation,
@@ -41,6 +42,8 @@ use crate::lfd::types::{
     Event, ExecutionProcessStatus, RepoWork, Run, RunStatus, Session, SessionUse, Signal, Trigger,
     Wave, WaveCron, WaveMode, WaveStatus, LIVE_SESSION_STATUSES,
 };
+#[cfg(test)]
+use crate::lfd::types::{WAVE_SERVER_ENDPOINT_ENV, WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE};
 
 #[derive(Debug, Deserialize)]
 pub struct ListWavesQuery {
@@ -117,13 +120,6 @@ pub struct CreateWaveRequest {
     run: bool,
     #[serde(default)]
     serialized: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RunWorkerRequest {
-    flow: String,
-    task: String,
-    parent_session_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -853,22 +849,33 @@ pub async fn run_worker_handler(
     State(state): State<HttpState>,
     _headers: HeaderMap,
     Path(wave_id): Path<String>,
-    Json(payload): Json<RunWorkerRequest>,
+    Json(payload): Json<RunWorkerRequestDto>,
 ) -> ApiResult<SessionDto> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    assert_parent_can_launch_worker(&state, payload.parent_session_id.as_deref()).await?;
+    assert_parent_can_launch_worker(&state, &wave_id, payload.parent_session_id.as_deref()).await?;
     let wave = state
         .store
         .get_wave(&wave_id)
         .await
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+    let placement = match payload.placement {
+        WorkerPlacementDto::Fresh => Placement::Fresh,
+        WorkerPlacementDto::Pool => Placement::Pool,
+        WorkerPlacementDto::Stack { parent_run_id } => Placement::Stack {
+            parent_run_id: crate::lfd::http::routes::parse_lfd_id(
+                &parent_run_id,
+                "invalid parent run id",
+            )?,
+        },
+    };
     let (_run, session) = launch_worker_run(
         &state,
         &wave,
         payload.flow,
         payload.task,
         payload.parent_session_id.as_deref(),
+        placement,
     )
     .await?;
     Ok(Json(session_dto(session)))
@@ -882,15 +889,6 @@ async fn apply_run_wave_overrides(
     if let Some(overrides) = overrides {
         if let Some(flow) = trimmed_non_empty(overrides.flow.as_deref()) {
             wave.primary_flow = flow;
-        }
-        if let Some(roadmap_item) = trimmed_non_empty(overrides.roadmap_item.as_deref()) {
-            let roadmap_path = FsPath::new(wave.repo())
-                .join("wave")
-                .join(wave.name())
-                .join(&roadmap_item);
-            if !roadmap_path.is_file() {
-                return Err(api_error(StatusCode::BAD_REQUEST, "roadmap item not found"));
-            }
         }
         if let Some(goal) = trimmed_non_empty(overrides.goal.as_deref()) {
             wave.goal = goal;
@@ -919,12 +917,28 @@ async fn apply_run_wave_overrides(
     Ok(())
 }
 
+/// DIVERGENCE — two dispatch worlds still exist (the other is `lf q worker
+/// run`, `dispatch` in lf/commands/q.rs):
+///
+///   HTTP worker route (here)          | `lf q worker run`
+///   ----------------------------------|----------------------------------
+///   scheduler.acquire_guard           | no scheduler slot
+///   executor watcher / completion_token | worker completes its own row
+///   Event::session_created/updated    | no lfd events
+///
+/// Both decorate the task via `helpers::worker_dispatch_task` (applied in
+/// `build_run_command` on this path, so HTTP-dispatched workers get the
+/// report-back pointer too) and launch through the shared tmux wrapper.
+/// Full convergence — this route exec'ing `lf q`, or one shared dispatch
+/// core behind both doors — is the architecture wave's hard cut, not this
+/// branch's.
 async fn launch_worker_run(
     state: &HttpState,
     wave: &Wave,
     flow: String,
     task: String,
     parent_session_id: Option<&str>,
+    placement: Placement,
 ) -> Result<(Run, Session), ApiError> {
     let flow = flow.trim();
     if flow.is_empty() {
@@ -959,11 +973,9 @@ async fn launch_worker_run(
             )
         })?;
 
-    // Select the worktree strategy the same way activation does: a shared
-    // per-wave worktree only for the strictly-serial workers==1 case, and an
-    // isolated per-run worktree otherwise — so concurrent dispatches (workers>=2
-    // or workers==0) never collide in the shared worktree.
-    let mut run = create_run(&state.store, wave, &run_id, false, None)
+    // Worktree strategy is the dispatcher's explicit placement: fresh per-run
+    // tree, the wave's shared pool tree, or a stack forked from a parent run.
+    let mut run = create_run_for_placement(&state.store, wave, &run_id, &placement, None)
         .await
         .map_err(|err| {
             api_error(
@@ -1011,6 +1023,7 @@ async fn launch_worker_run(
 
 async fn assert_parent_can_launch_worker(
     state: &HttpState,
+    wave_id: &LfdId,
     parent_session_id: Option<&str>,
 ) -> Result<(), ApiError> {
     let Some(parent_session_id) = parent_session_id else {
@@ -1026,6 +1039,12 @@ async fn assert_parent_can_launch_worker(
     else {
         return Err(api_error(StatusCode::NOT_FOUND, "parent session not found"));
     };
+    if session.wave_id != *wave_id {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "parent session belongs to another wave",
+        ));
+    }
     if session.session_use == SessionUse::Worker {
         return Err(api_error(
             StatusCode::FORBIDDEN,
@@ -1039,14 +1058,11 @@ async fn active_wave_agent_session(
     state: &HttpState,
     wave_id: &LfdId,
 ) -> Result<Option<Session>, ApiError> {
-    let sessions = state
+    state
         .store
-        .list_control_sessions(Some(wave_id), Some(LIVE_SESSION_STATUSES))
+        .live_wave_agent_session(wave_id)
         .await
-        .map_err(map_store_error)?;
-    Ok(sessions
-        .into_iter()
-        .find(|session| session.session_use == SessionUse::WaveAgent))
+        .map_err(map_store_error)
 }
 
 async fn start_run(
@@ -2310,10 +2326,11 @@ mod tests {
             State(state.clone()),
             HeaderMap::new(),
             Path(wave.id().to_string()),
-            Json(RunWorkerRequest {
+            Json(RunWorkerRequestDto {
                 flow: "implement".to_string(),
                 task: "Add the worker endpoint.".to_string(),
                 parent_session_id: Some(caller.id.to_string()),
+                placement: WorkerPlacementDto::Fresh,
             }),
         )
         .await
@@ -2322,12 +2339,36 @@ mod tests {
         assert_eq!(response.object, "session");
         assert_eq!(response.session_use, "worker");
         assert!(response.run_id.is_some());
+
+        // Fresh placement: sibling worktree named <repo>.<wave>.<short-run-id>.
+        let run_id: LfdId = response.run_id.as_deref().expect("run id").parse().unwrap();
+        let run = state
+            .store
+            .get_run(&run_id)
+            .await
+            .expect("load run")
+            .expect("run exists");
+        let repo_name = repo.path().file_name().unwrap().to_string_lossy();
+        let expected_suffix: String = run_id.as_str().chars().take(8).collect();
+        let worktree_name = std::path::Path::new(&run.worktree)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(
+            worktree_name,
+            format!("{repo_name}.worker-wave.{expected_suffix}")
+        );
+        assert_ne!(run.branch, "main");
         assert_eq!(
             response.parent_session_id.as_deref(),
             Some(caller.id.as_str())
         );
         assert_eq!(response.session_use, "worker");
-        assert!(!response.tmux_name.is_empty());
+        assert!(
+            response.tmux_name.contains(&response.id),
+            "worker tmux names must include the session id so pooled workers sharing a branch do not collide"
+        );
 
         let response_session_id = LfdId::from_raw(response.id.clone());
         let mut stored_session = state
@@ -2360,6 +2401,17 @@ mod tests {
             .find(|session| session.id == response_session_id)
             .expect("launched session should be stored");
         assert_eq!(child.parent_session_id.as_ref(), Some(&caller.id));
+
+        // HTTP-dispatched workers get the same report-back pointer as
+        // `lf q worker run` dispatches: the command's task arg carries the
+        // `lf chat` instruction while the Run row keeps the raw task.
+        let prompt = child.argv.last().expect("task arg");
+        assert!(prompt.starts_with("Add the worker endpoint."));
+        assert!(
+            prompt.contains("lf chat"),
+            "HTTP-path worker prompt must close the reporting loop: {prompt}"
+        );
+        assert_eq!(run.task.as_deref(), Some("Add the worker endpoint."));
     }
 
     #[tokio::test]
@@ -2380,16 +2432,54 @@ mod tests {
             State(state.clone()),
             HeaderMap::new(),
             Path(wave.id().to_string()),
-            Json(RunWorkerRequest {
+            Json(RunWorkerRequestDto {
                 flow: "implement".to_string(),
                 task: "Add the worker endpoint.".to_string(),
                 parent_session_id: Some(caller.id.to_string()),
+                placement: WorkerPlacementDto::Fresh,
             }),
         )
         .await;
 
         let err = result.expect_err("worker caller should be rejected");
         assert_eq!(err.0, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn run_worker_handler_rejects_parent_session_from_another_wave() {
+        let state = test_http_state_with_runner().await;
+        let repo = tempdir().expect("tempdir");
+        init_git_repo(repo.path());
+        let wave = make_wave(&repo.path().to_string_lossy(), "worker-wave");
+        let other_wave = make_wave(&repo.path().to_string_lossy(), "other-wave");
+        state.store.create_wave(&wave).await.expect("seed wave");
+        state
+            .store
+            .create_wave(&other_wave)
+            .await
+            .expect("seed other wave");
+        let caller = make_session(&other_wave, SessionUse::WaveAgent, repo.path());
+        state
+            .store
+            .create_control_session(&caller)
+            .await
+            .expect("seed caller session");
+
+        let result = run_worker_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Path(wave.id().to_string()),
+            Json(RunWorkerRequestDto {
+                flow: "implement".to_string(),
+                task: "Add the worker endpoint.".to_string(),
+                parent_session_id: Some(caller.id.to_string()),
+                placement: WorkerPlacementDto::Fresh,
+            }),
+        )
+        .await;
+
+        let err = result.expect_err("cross-wave parent should be rejected");
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -2931,6 +3021,61 @@ mod tests {
         )
         .await;
         assert!(matches!(missing, Err((StatusCode::NOT_FOUND, _))));
+    }
+
+    /// A self-registered `lf wave` server (a `wave_server` WaveAgent row in
+    /// the store — written store-direct by `lfd::wave::registry`) is the
+    /// wave's one brain: `run_wave` is idempotent against it, returning the
+    /// live session instead of launching a second brain.
+    #[tokio::test]
+    async fn run_wave_returns_the_registered_wave_server_session() {
+        let state = test_http_state().await;
+        let wave = make_wave("/tmp/repo", "served-wave");
+        state.store.create_wave(&wave).await.expect("seed wave");
+
+        let session_id = LfdId::new();
+        let now = OffsetDateTime::now_utc();
+        let server_session = Session {
+            id: session_id.clone(),
+            wave_id: wave.id().clone(),
+            run_id: None,
+            parent_session_id: None,
+            session_use: SessionUse::WaveAgent,
+            step: "mind".to_string(),
+            agent: "lf".to_string(),
+            cwd: "/tmp/repo.served-wave".to_string(),
+            argv: vec!["lf".to_string(), "wave".to_string(), wave.name().clone()],
+            env: std::collections::BTreeMap::from([
+                (
+                    WAVE_SERVER_ENDPOINT_ENV.to_string(),
+                    "127.0.0.1:4242".to_string(),
+                ),
+                (WAVE_SERVER_PID_ENV.to_string(), "4242".to_string()),
+            ]),
+            source: WAVE_SERVER_SOURCE.to_string(),
+            tmux_name: String::new(),
+            status: SessionStatus::Running,
+            attached_at: None,
+            started_at: Some(now),
+            completed_at: None,
+            created_at: now,
+            completion_token: None,
+        };
+        state
+            .store
+            .register_session(&server_session)
+            .await
+            .expect("seed wave server session");
+
+        let Json(run_response) = run_wave_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Path(wave.id().to_string()),
+            None,
+        )
+        .await
+        .expect("run wave");
+        assert_eq!(run_response.id, session_id.to_string());
     }
 
     #[tokio::test]

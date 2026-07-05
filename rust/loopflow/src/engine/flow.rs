@@ -167,7 +167,7 @@ set of Metrics. Each iteration:
    advances the goal.
 2. Capture, then dispatch — never solve substantial work yourself. If the move is
    a real subproject, first write it to the roadmap as an Asana task, then run
-   `lfq worker run <this-wave> --flow <flow> --task "<task>"`. Small,
+   `lf q worker run <this-wave> --flow <flow> --task "<task>"`. Small,
    atomic fixes can dispatch directly. Either way the work runs as its own
    attachable tmux session — watch it with `lfq sessions`, join one with
    `lfq attach <id>`; read the result back when it lands.
@@ -175,7 +175,7 @@ set of Metrics. Each iteration:
 4. Repeat until the metrics say done, or record a blocker if no safe move remains.
 
 Three powers:
-- Dispatch flows/steps via `lfq worker run` — your default hand; the inner work
+- Dispatch flows/steps via `lf q worker run` — your default hand; the inner work
   pipeline you run each iteration.
 - Fan out — when the budget allows and the roadmap holds well-scoped, independent
   tasks, launch parallel subagents instead of advancing one move at a time: one
@@ -318,6 +318,21 @@ pub fn load_goal(name: &str, repo: &Path) -> Result<Goal, LoadError> {
     Err(LoadError::GoalNotFound(name.to_string()))
 }
 
+/// The one wave-memory injector. Both the wave agent's goal seed
+/// ([`render_goal`]) and ambient context assembly
+/// ([`crate::engine::prompt::format_content_sections`]) emit memory through
+/// this, so it appears under one tag — and at most once per prompt (assembly
+/// skips it when the task message already carries the tag).
+///
+/// `None` when the memory is empty: an absent section costs zero tokens.
+pub fn wave_memory_section(memory: &str) -> Option<String> {
+    let trimmed = memory.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(format!("<lf:wave-memory>\n{trimmed}\n</lf:wave-memory>"))
+}
+
 pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
     let flows = if ctx.flows.is_empty() {
         "No flows are available.".to_string()
@@ -337,11 +352,9 @@ pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let memory = if ctx.memory.trim().is_empty() {
-        "No wave memory is recorded.".to_string()
-    } else {
-        ctx.memory.trim().to_string()
-    };
+    let memory = wave_memory_section(&ctx.memory).unwrap_or_else(|| {
+        "<lf:wave-memory>\nNo wave memory is recorded.\n</lf:wave-memory>".to_string()
+    });
     let in_flight = if ctx.in_flight.is_empty() {
         "No work is in flight.".to_string()
     } else {
@@ -362,7 +375,7 @@ pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
     };
 
     format!(
-        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n<lf:wave-memory>\n{}\n</lf:wave-memory>\n\n<lf:in-flight>\n{}\n</lf:in-flight>\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n\nMetrics:\n{}\n</lf:goal-context>",
+        "<lf:loopflow-operating-prompt>\n{}\n</lf:loopflow-operating-prompt>\n\n{}\n\n{}\n\n<lf:in-flight>\n{}\n</lf:in-flight>\n\n<lf:goal-context>\nAvailable flows:\n{}\n\nRoadmap handle:\n{}\n\nMetrics:\n{}\n</lf:goal-context>",
         LOOPFLOW_OPERATING_PROMPT,
         goal.prompt.trim(),
         memory,
@@ -1708,7 +1721,7 @@ mod tests {
         assert!(rendered.contains("Last loop found the docs drift."));
         assert!(rendered.contains("an orchestrator, not an implementer."));
         assert!(rendered.contains("never solve substantial work yourself"));
-        assert!(rendered.contains("lfq worker run"));
+        assert!(rendered.contains("lf q worker run"));
         assert!(rendered.contains("lfq sessions"));
         assert!(rendered.contains("lfq attach"));
         assert!(rendered.contains("- build"));

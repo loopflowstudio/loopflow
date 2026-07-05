@@ -30,40 +30,6 @@ struct GhosttyTerminalViewTests {
         #expect(buildGhosttyShellCommand(argv: [], env: ["LF_WAVE": "1"]) == nil)
     }
 
-    @Test("builds a local tmux attach command from connection info")
-    func buildsLocalTmuxAttachCommand() {
-        let command = TerminalAttachCommand(
-            SessionConnectionInfo(
-                kind: "tmux",
-                sessionName: "lfd-session-1",
-                host: "localhost",
-                cwd: "/tmp/repo",
-                status: .running
-            )
-        )
-
-        #expect(command.workingDirectory == "/tmp/repo")
-        #expect(command.argv == ["tmux", "attach-session", "-t", "lfd-session-1"])
-        #expect(command.env.isEmpty)
-    }
-
-    @Test("builds an ssh tmux attach command for remote hosts")
-    func buildsRemoteTmuxAttachCommand() {
-        let command = TerminalAttachCommand(
-            SessionConnectionInfo(
-                kind: "tmux",
-                sessionName: "lfd-session-1",
-                host: "lfd.example.com",
-                cwd: "/remote/repo",
-                status: .running
-            )
-        )
-
-        #expect(command.workingDirectory == FileManager.default.homeDirectoryForCurrentUser.path)
-        #expect(command.argv == ["ssh", "-t", "lfd.example.com", "tmux attach-session -t 'lfd-session-1'"])
-        #expect(command.env.isEmpty)
-    }
-
     @Test("localhost detection normalizes common local host spellings")
     func localhostDetectionNormalizesCommonValues() {
         #expect(

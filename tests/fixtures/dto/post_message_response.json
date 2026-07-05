@@ -1,0 +1,12 @@
+{
+  "turn": {
+    "id": "turn-4",
+    "role": "user",
+    "text": "Focus on the failing test first.",
+    "status": "completed",
+    "items": [],
+    "created_at": "2026-07-04T12:00:00Z",
+    "from": null
+  },
+  "state": "turning"
+}

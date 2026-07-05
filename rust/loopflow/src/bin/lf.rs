@@ -1,59 +1,75 @@
-use clap::Parser;
+use std::collections::HashSet;
+use std::sync::OnceLock;
+
+use clap::{CommandFactory, Parser};
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
 use loopflow::lf::{Cli, Commands};
 
-/// Flags that take a value (next arg is the value).
-const VALUE_FLAGS: &[&str] = &[
-    "-d",
-    "--direction",
-    "--docs",
-    "-m",
-    "--model",
-    "-w",
-    "--wave",
-];
+/// What `reorder_args` needs to know about the CLI, derived from the clap
+/// definition so it can never drift from it (the old hand-maintained lists
+/// were missing the uppercase short aliases `-D`/`-C`/`-M`/`-I`/`-B`/`-W`,
+/// misrouting e.g. `lf debug -M codex`).
+struct ArgTables {
+    /// Top-level subcommand names and aliases — never reordered.
+    commands: HashSet<String>,
+    /// Top-level flags that take a value (the next arg belongs to them).
+    value_flags: HashSet<String>,
+    /// Top-level boolean flags (no value).
+    bool_flags: HashSet<String>,
+}
 
-/// Flags that are boolean (no value).
-const BOOL_FLAGS: &[&str] = &[
-    "-l",
-    "--list",
-    "-c",
-    "--clipboard",
-    "--no-direction",
-    "--yolo",
-    "-i",
-    "--interactive",
-    "-b",
-    "--batch",
-    "--tui",
-    "--ide",
-    "--chrome",
-    "--no-chrome",
-    "--diff-files",
-    "--no-diff-files",
-    "--diff",
-    "--no-diff",
-    "--no-loopflow",
-    "-h",
-    "--help",
-    "-V",
-    "--version",
-];
+fn arg_tables() -> &'static ArgTables {
+    static TABLES: OnceLock<ArgTables> = OnceLock::new();
+    TABLES.get_or_init(|| {
+        let mut cli = Cli::command();
+        // Materialize the built-ins (help subcommand, -h/--help, -V/--version).
+        cli.build();
 
-/// Known subcommands that should not be treated as step names.
-const KNOWN_COMMANDS: &[&str] = &[
-    ":", "op", "goal", "wave", "loop", "usage", "runs", "trace", "help",
-];
+        let mut commands = HashSet::new();
+        for sub in cli.get_subcommands() {
+            commands.insert(sub.get_name().to_string());
+            commands.extend(sub.get_all_aliases().map(String::from));
+        }
+
+        let mut value_flags = HashSet::new();
+        let mut bool_flags = HashSet::new();
+        for arg in cli.get_arguments() {
+            let flags = if arg.get_action().takes_values() {
+                &mut value_flags
+            } else {
+                &mut bool_flags
+            };
+            if let Some(short) = arg.get_short() {
+                flags.insert(format!("-{short}"));
+            }
+            for alias in arg.get_all_short_aliases().into_iter().flatten() {
+                flags.insert(format!("-{alias}"));
+            }
+            if let Some(long) = arg.get_long() {
+                flags.insert(format!("--{long}"));
+            }
+            for alias in arg.get_all_aliases().into_iter().flatten() {
+                flags.insert(format!("--{alias}"));
+            }
+        }
+
+        ArgTables {
+            commands,
+            value_flags,
+            bool_flags,
+        }
+    })
+}
 
 fn is_value_flag(arg: &str) -> bool {
-    VALUE_FLAGS.contains(&arg)
+    arg_tables().value_flags.contains(arg)
 }
 
 fn is_known_flag(arg: &str) -> bool {
-    BOOL_FLAGS.contains(&arg) || is_value_flag(arg)
+    arg_tables().bool_flags.contains(arg) || is_value_flag(arg)
 }
 
 /// Reorder args so flags come before the step/flow name.
@@ -68,7 +84,7 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
 
     // If first arg is a known command, don't reorder
     if let Some(first) = rest.first() {
-        if KNOWN_COMMANDS.contains(&first.as_str()) {
+        if arg_tables().commands.contains(first.as_str()) {
             return args;
         }
     }
@@ -261,8 +277,12 @@ fn main() -> anyhow::Result<()> {
     // Ensure Ctrl+C terminates lf and the child agent. Without this,
     // child.wait() retries on EINTR and hangs while the agent catches
     // SIGINT and keeps running. SIGTERM the agent first so it doesn't
-    // survive as an orphan.
+    // survive as an orphan. The `termination` feature extends the handler
+    // to SIGTERM and SIGHUP: `tmux kill-session` delivers SIGHUP, which
+    // otherwise bypasses every cleanup (observed live: it orphaned the wave
+    // mind's codex app-server pair and left a stale .wave-endpoint).
     ctrlc::set_handler(|| {
+        loopflow::engine::agent::run_interrupt_cleanups();
         loopflow::engine::agent::kill_child_if_running();
         std::process::exit(130);
     })
@@ -279,49 +299,177 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     // Reorder args so flags can appear after the step name
-    let args: Vec<String> = std::env::args().collect();
-    let args = reorder_args(args);
+    let raw_args: Vec<String> = std::env::args().collect();
+    let args = reorder_args(raw_args.clone());
 
     let cli = Cli::parse_from(args.clone());
     debug!(?cli, "parsed CLI arguments");
 
-    if cli.list {
-        return in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all());
-    }
+    // Inside a wave context, agent-launching runs register themselves as lfd
+    // sessions; every other command still flips LFD_SESSION_ID to "inherited"
+    // for its children (see lf::session for the env contract).
+    let registration = match run_label(&cli) {
+        Some(step) => loopflow::lf::session::register_run(
+            &step,
+            cli.model.as_deref().unwrap_or("lf"),
+            &raw_args,
+        ),
+        None => {
+            loopflow::lf::session::mark_child_sessions_inherited();
+            None
+        }
+    };
 
+    let result = if cli.list {
+        in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
+    } else {
+        match &cli.command {
+            Some(Commands::Inline { prompt }) => {
+                let text = prompt.join(" ");
+                in_repo_runtime(&args, |_| {
+                    loopflow::lf::commands::run::run(None, Some(&text), &cli)
+                })
+            }
+            Some(Commands::Op { op }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run(op, cli.model.as_deref())
+            }),
+            Some(Commands::Wave { name, force }) => {
+                in_repo_runtime(&args, |_| loopflow::lfd::wave::run(name, *force))
+            }
+            Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
+            Some(Commands::Runs) => loopflow::lf::commands::runs::list(),
+            Some(Commands::Trace { run_id }) => loopflow::lf::commands::runs::trace(run_id),
+            Some(Commands::Q { cmd }) => loopflow::lf::commands::q::run(cmd),
+            Some(Commands::Chat { text, target }) => {
+                loopflow::lf::commands::chat::run(text, target)
+            }
+            Some(Commands::Memory { cmd, target }) => {
+                loopflow::lf::commands::memory::run(cmd.as_ref(), target)
+            }
+            Some(Commands::External(external_args)) => {
+                match loopflow::lf::commands::run::split_step_args(external_args) {
+                    Ok((name, step_args)) => {
+                        let message = join_args(&step_args);
+                        run_target(&name, message.as_deref(), &cli, &args)
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            None => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::run::run(None, None, &cli)
+            }),
+        }
+    };
+
+    if let Some(registration) = registration {
+        registration.complete(if result.is_ok() { 0 } else { 1 });
+    }
+    result
+}
+
+/// Session label for agent-launching invocations; `None` for utility commands
+/// (`lf op`, `lf q`, `lf usage`, `lf chat`, `lf memory`, `lf -l`) and
+/// `lf wave`, which never self-register (`lf q` creates the worker's row
+/// itself; `lf wave` registers as the wave's agent session; chat/memory are
+/// one-shot POSTs attributed via the env they inherit).
+fn run_label(cli: &Cli) -> Option<String> {
+    if cli.list {
+        return None;
+    }
     match &cli.command {
-        Some(Commands::Inline { prompt }) => {
-            let text = prompt.join(" ");
-            in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::run::run(None, Some(&text), &cli)
-            })
-        }
-        Some(Commands::Op { op }) => in_repo_runtime(&args, |_| {
-            loopflow::lf::commands::ops::run(op, cli.model.as_deref())
-        }),
-        Some(Commands::Goal { name, once, tmux }) => in_repo_runtime(&args, |_| {
-            loopflow::lf::commands::goal::run(name, *once, *tmux, &cli)
-        }),
-        Some(Commands::Wave { name }) => {
-            in_repo_runtime(&args, |_| loopflow::lf::commands::r#loop::run(name))
-        }
-        Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
-        Some(Commands::Runs) => loopflow::lf::commands::runs::list(),
-        Some(Commands::Trace { run_id }) => loopflow::lf::commands::runs::trace(run_id),
-        Some(Commands::External(external_args)) => {
-            let (name, step_args) = loopflow::lf::commands::run::split_step_args(external_args)?;
-            let message = join_args(&step_args);
-            run_target(&name, message.as_deref(), &cli, &args)
-        }
-        None => in_repo_runtime(&args, |_| {
-            loopflow::lf::commands::run::run(None, None, &cli)
-        }),
+        Some(Commands::Inline { .. }) => Some("inline".to_string()),
+        Some(Commands::External(args)) => args
+            .first()
+            .map(|step| step.trim_end_matches(':').to_string()),
+        None => Some("interactive".to_string()),
+        Some(Commands::Op { .. })
+        | Some(Commands::Wave { .. })
+        | Some(Commands::Usage)
+        | Some(Commands::Runs)
+        | Some(Commands::Trace { .. })
+        | Some(Commands::Q { .. })
+        | Some(Commands::Chat { .. })
+        | Some(Commands::Memory { .. }) => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::reorder_args;
+    use super::{arg_tables, reorder_args};
+
+    /// The derived tables cover everything the old hand lists carried, plus
+    /// the uppercase short aliases those lists had drifted away from.
+    #[test]
+    fn derived_tables_cover_commands_flags_and_aliases() {
+        let tables = arg_tables();
+        for command in [
+            ":", "op", "q", "wave", "loop", "chat", "memory", "usage", "runs", "trace", "help",
+        ] {
+            assert!(tables.commands.contains(command), "command {command}");
+        }
+        for flag in [
+            "-d",
+            "-D",
+            "--direction",
+            "--docs",
+            "-m",
+            "-M",
+            "--model",
+            "-w",
+            "-W",
+            "--wave",
+        ] {
+            assert!(tables.value_flags.contains(flag), "value flag {flag}");
+        }
+        for flag in [
+            "-l",
+            "--list",
+            "-c",
+            "-C",
+            "--clipboard",
+            "--no-direction",
+            "--yolo",
+            "-i",
+            "-I",
+            "-b",
+            "-B",
+            "--tui",
+            "--ide",
+            "--chrome",
+            "--no-chrome",
+            "--diff-files",
+            "--no-diff-files",
+            "--diff",
+            "--no-diff",
+            "--no-loopflow",
+            "-h",
+            "--help",
+            "-V",
+            "--version",
+        ] {
+            assert!(tables.bool_flags.contains(flag), "bool flag {flag}");
+        }
+    }
+
+    /// Uppercase short aliases reorder exactly like their lowercase forms —
+    /// the drift the hand-maintained lists had (`lf debug -M codex` used to
+    /// treat `codex` as a step arg).
+    #[test]
+    fn reorder_args_uppercase_value_alias_after_step() {
+        let args = vec![
+            "lf".to_string(),
+            "debug".to_string(),
+            "-M".to_string(),
+            "codex".to_string(),
+        ];
+        assert_eq!(reorder_args(args), vec!["lf", "-M", "codex", "debug"]);
+    }
+
+    #[test]
+    fn reorder_args_uppercase_bool_alias_after_step() {
+        let args = vec!["lf".to_string(), "debug".to_string(), "-C".to_string()];
+        assert_eq!(reorder_args(args), vec!["lf", "-C", "debug"]);
+    }
 
     #[test]
     fn reorder_args_flag_after_step() {
@@ -423,6 +571,27 @@ mod tests {
         let result = reorder_args(args);
         // Known commands should not be reordered
         assert_eq!(result, vec!["lf", "op", "commit", "-m", "msg"]);
+    }
+
+    /// `lf chat --wave X text` must reach the chat subcommand untouched —
+    /// hoisting `--wave` to the top level silently retargets the publish.
+    #[test]
+    fn reorder_args_leaves_chat_and_memory_targeting_alone() {
+        let args: Vec<String> = ["lf", "chat", "--wave", "systems", "shipped it"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            reorder_args(args),
+            vec!["lf", "chat", "--wave", "systems", "shipped it"]
+        );
+
+        let args: Vec<String> = ["lf", "memory", "add", "fact", "--wave", "systems"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            reorder_args(args),
+            vec!["lf", "memory", "add", "fact", "--wave", "systems"]
+        );
     }
 
     #[test]

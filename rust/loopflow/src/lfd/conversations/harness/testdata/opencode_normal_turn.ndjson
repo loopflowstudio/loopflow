@@ -1,0 +1,4 @@
+{"id":"sess_opencode_normal"}
+{"type":"session.status","properties":{"sessionID":"sess_opencode_normal","status":"active"}}
+{"type":"message.part.updated","properties":{"sessionID":"sess_opencode_normal","part":{"id":"part_text_1","type":"TextPart","delta":"Hello from OpenCode"}}}
+{"type":"session.status","properties":{"sessionID":"sess_opencode_normal","status":"idle"}}

@@ -105,7 +105,7 @@ def test_wave_table_uses_active_run_paths_when_available() -> None:
     rendered = _render_table(wave)
 
     assert "/tmp/wt" in rendered
-    assert "wave/reduce" in rendered
+    assert "wave/architecture" in rendered
 
 
 def test_wave_table_falls_back_to_repo_branch() -> None:
@@ -216,10 +216,20 @@ def test_whoami_renders_current_session(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_worker_run_dispatches_and_prints_session(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "loopflow.cli.api.run_worker",
-        lambda wave, flow, task, parent_session_id=None: _worker_launch_response(flow),
-    )
+    received: dict[str, object] = {}
+
+    def run_worker(
+        wave: str,
+        flow: str,
+        task: str,
+        placement: str,
+        parent_session_id: str | None = None,
+        parent_run_id: str | None = None,
+    ) -> Session:
+        received.update({"placement": placement, "parent_run_id": parent_run_id})
+        return _worker_launch_response(flow)
+
+    monkeypatch.setattr("loopflow.cli.api.run_worker", run_worker)
 
     result = CliRunner().invoke(
         app,
@@ -230,12 +240,66 @@ def test_worker_run_dispatches_and_prints_session(monkeypatch: pytest.MonkeyPatc
     assert "worker_run terminal-session-child" in result.stdout
     assert "run     run-1" in result.stdout
     assert "lfq attach terminal-session-child" in result.stdout
+    # No flag: the CLI supplies the fresh default.
+    assert received == {"placement": "fresh", "parent_run_id": None}
+
+
+def test_worker_run_pool_and_stack_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    received: dict[str, object] = {}
+
+    def run_worker(
+        wave: str,
+        flow: str,
+        task: str,
+        placement: str,
+        parent_session_id: str | None = None,
+        parent_run_id: str | None = None,
+    ) -> Session:
+        received.update({"placement": placement, "parent_run_id": parent_run_id})
+        return _worker_launch_response(flow)
+
+    monkeypatch.setattr("loopflow.cli.api.run_worker", run_worker)
+    base = ["worker", "run", "reduce", "--flow", "implement", "--task", "Do it"]
+
+    result = CliRunner().invoke(app, [*base, "--pool"])
+    assert result.exit_code == 0
+    assert received == {"placement": "pool", "parent_run_id": None}
+
+    result = CliRunner().invoke(app, [*base, "--stack", "run-9"])
+    assert result.exit_code == 0
+    assert received == {"placement": "stack", "parent_run_id": "run-9"}
+
+
+def test_worker_run_rejects_pool_with_stack(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "loopflow.cli.api.run_worker",
+        lambda *args, **kwargs: pytest.fail("must not dispatch"),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "worker",
+            "run",
+            "reduce",
+            "--flow",
+            "implement",
+            "--task",
+            "Do it",
+            "--pool",
+            "--stack",
+            "run-9",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "mutually exclusive" in result.stderr
 
 
 def test_worker_run_json_includes_session_connection(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "loopflow.cli.api.run_worker",
-        lambda _wave, flow, task, parent_session_id=None: _worker_launch_response(flow),
+        lambda _wave, flow, task, placement, **kwargs: _worker_launch_response(flow),
     )
 
     result = CliRunner().invoke(
@@ -271,13 +335,16 @@ def test_worker_run_infers_wave_from_current_session(monkeypatch: pytest.MonkeyP
         wave: str,
         flow: str,
         task: str,
+        placement: str,
         parent_session_id: str | None = None,
+        parent_run_id: str | None = None,
     ) -> Session:
         received.update(
             {
                 "wave": wave,
                 "flow": flow,
                 "task": task,
+                "placement": placement,
                 "parent_session_id": parent_session_id,
             }
         )
@@ -295,6 +362,7 @@ def test_worker_run_infers_wave_from_current_session(monkeypatch: pytest.MonkeyP
         "wave": "abc-123",
         "flow": "implement",
         "task": "Add the endpoint",
+        "placement": "fresh",
         "parent_session_id": "terminal-session-agent",
     }
 

@@ -33,10 +33,10 @@ public enum SessionItemType: Equatable {
 public struct TranscriptItemCard: Equatable {
     public let type: SessionItemType
     public let label: String
-    public let status: ItemStatus?
+    public let status: Lifecycle?
     public let detail: String?
 
-    public init(type: SessionItemType, label: String, status: ItemStatus?, detail: String?) {
+    public init(type: SessionItemType, label: String, status: Lifecycle?, detail: String?) {
         self.type = type
         self.label = label
         self.status = status
@@ -152,7 +152,6 @@ public final class SessionState {
 
     private var sessionId: String?
 
-    private var messageEntryIdByItemId: [String: UUID] = [:]
     private var transcriptIndexById: [UUID: Int] = [:]
 
     public init(
@@ -217,10 +216,7 @@ public final class SessionState {
     public func seedInitialUserMessage(_ rawText: String) {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        _ = upsertMessageBubble(
-            item: .message(MessageItem(id: "msg_seed_user_prompt", text: text, phase: "user")),
-            isCompletion: true
-        )
+        appendMessage(role: .user, content: text)
     }
 
     public func onDisappear() {
@@ -390,7 +386,6 @@ public final class SessionState {
     }
 
     private func resetSessionCaches() {
-        messageEntryIdByItemId.removeAll()
         transcriptIndexById.removeAll()
         clearSuggestedActions()
         contextSnapshot = nil
@@ -398,55 +393,6 @@ public final class SessionState {
 
     private func appendMessage(role: MessageRole, content: String) {
         appendTranscriptEntry(.message(SessionMessage(role: role, content: content)))
-    }
-
-    private func upsertMessageBubble(item: SessionItem, isCompletion: Bool) -> Bool {
-        guard case .message(let message) = item else { return false }
-        guard let role = roleForMessagePhase(message.phase) else { return false }
-
-        let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return true }
-
-        if let itemId = normalizedItemId(message.id) {
-            if let entryId = messageEntryIdByItemId[itemId],
-               let index = transcriptIndexById[entryId],
-               case .message(let existing) = transcript[index] {
-                updateTranscriptEntry(id: entryId) { _ in
-                    .message(
-                        SessionMessage(
-                            id: existing.id,
-                            role: role,
-                            content: text,
-                            timestamp: existing.timestamp
-                        )
-                    )
-                }
-                return true
-            }
-
-            let messageEntry = SessionMessage(role: role, content: text)
-            appendTranscriptEntry(.message(messageEntry))
-            messageEntryIdByItemId[itemId] = messageEntry.id
-            return true
-        }
-
-        guard isCompletion else { return true }
-        appendTranscriptEntry(.message(SessionMessage(role: role, content: text)))
-        return true
-    }
-
-    private func roleForMessagePhase(_ phase: String?) -> MessageRole? {
-        guard let phase else { return nil }
-        let normalized = phase.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if normalized == "user" || normalized == "input" || normalized == "prompt" {
-            return .user
-        }
-        return nil
-    }
-
-    private func normalizedItemId(_ rawId: String) -> String? {
-        let trimmed = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func clearSuggestedActions() {

@@ -6,7 +6,7 @@ use loopflow::engine::config::BranchNameConfig;
 use loopflow::engine::git::{branch_rename, current_branch, worktree_move};
 use loopflow::engine::naming::sanitize_for_branch;
 use loopflow::engine::worktrees::{branch_exists, create_with_schema, worktree_path};
-use loopflow::lfd::executor::{create_run_with_id, ensure_wave_worktree};
+use loopflow::lfd::executor::{create_run_for_placement, ensure_wave_worktree, Placement};
 use loopflow::lfd::id::LfdId;
 use loopflow::lfd::store::{open_store, SharedStore, StorageConfig};
 use loopflow::lfd::types::{RepoWork, Wave, WaveMode, WaveStatus};
@@ -83,7 +83,7 @@ async fn run_creates_worktree() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_run_with_id(&store, &wave, &run_id, None)
+    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Pool, None)
         .await
         .unwrap();
 
@@ -104,7 +104,7 @@ async fn run_creates_branch() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_run_with_id(&store, &wave, &run_id, None)
+    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Pool, None)
         .await
         .unwrap();
 
@@ -128,7 +128,7 @@ async fn run_worktree_follows_naming_convention() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_run_with_id(&store, &wave, &run_id, None)
+    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Pool, None)
         .await
         .unwrap();
 
@@ -148,13 +148,13 @@ async fn run_reuses_existing_worktree() {
     store.create_wave(&wave).await.unwrap();
 
     // First run creates the worktree
-    let run1 = create_run_with_id(&store, &wave, &LfdId::new(), None)
+    let run1 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Pool, None)
         .await
         .unwrap();
     let wt_path = run1.worktree.clone();
 
     // Second run reuses the existing worktree
-    let run2 = create_run_with_id(&store, &wave, &LfdId::new(), None)
+    let run2 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Pool, None)
         .await
         .unwrap();
     assert_eq!(run2.worktree, wt_path, "should reuse existing worktree");
@@ -168,10 +168,10 @@ async fn run_records_parent_lineage() {
     let wave = make_wave(&repo.path().to_string_lossy(), "lineage");
     store.create_wave(&wave).await.unwrap();
 
-    let run1 = create_run_with_id(&store, &wave, &LfdId::new(), None)
+    let run1 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Pool, None)
         .await
         .unwrap();
-    let run2 = create_run_with_id(&store, &wave, &LfdId::new(), None)
+    let run2 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Pool, None)
         .await
         .unwrap();
 
@@ -179,6 +179,125 @@ async fn run_records_parent_lineage() {
     assert_eq!(run2.stack_position, 1);
     assert_eq!(run2.parent_run_id, Some(run1.id.clone()));
     assert_eq!(run2.parent_pr_number, None);
+}
+
+#[tokio::test]
+async fn fresh_placement_creates_run_scoped_worktree_off_default_branch() {
+    let repo = TestRepo::new();
+    let store = make_store().await;
+    let wave = make_wave(&repo.path().to_string_lossy(), "grind");
+    store.create_wave(&wave).await.unwrap();
+
+    let run_id = LfdId::new();
+    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh, None)
+        .await
+        .unwrap();
+
+    // Name carries ownership: <repo>.<wave>.<short-run-id>.
+    let repo_name = repo.path().file_name().unwrap().to_string_lossy();
+    let short_id: String = run_id.as_str().chars().take(8).collect();
+    let worktree_name = Path::new(&run.worktree)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    assert_eq!(worktree_name, format!("{repo_name}.grind.{short_id}"));
+    assert!(PathBuf::from(&run.worktree).exists());
+
+    // Own branch, forked from the default branch tip.
+    assert_ne!(run.branch, "main");
+    assert_eq!(run.target_branch, "main");
+    let head_branch = run_git_output(
+        Path::new(&run.worktree),
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+    );
+    assert_eq!(head_branch, run.branch);
+    let fork_point = run_git_output(Path::new(&run.worktree), &["merge-base", "HEAD", "main"]);
+    let main_tip = run_git_output(repo.path(), &["rev-parse", "main"]);
+    assert_eq!(fork_point, main_tip);
+}
+
+#[tokio::test]
+async fn fresh_placements_do_not_collide() {
+    let repo = TestRepo::new();
+    let store = make_store().await;
+    let wave = make_wave(&repo.path().to_string_lossy(), "swarm");
+    store.create_wave(&wave).await.unwrap();
+
+    let run1 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh, None)
+        .await
+        .unwrap();
+    let run2 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh, None)
+        .await
+        .unwrap();
+
+    assert_ne!(run1.worktree, run2.worktree);
+    assert_ne!(run1.branch, run2.branch);
+}
+
+#[tokio::test]
+async fn stack_placement_forks_from_parent_branch_with_lineage() {
+    let repo = TestRepo::new();
+    let store = make_store().await;
+    let wave = make_wave(&repo.path().to_string_lossy(), "tower");
+    store.create_wave(&wave).await.unwrap();
+
+    let parent = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh, None)
+        .await
+        .unwrap();
+
+    // Unlanded work on the parent branch. The Fresh run's background upstream
+    // sync (schedule_upstream_sync) owns pushing this branch to origin; a manual
+    // push here would race that thread and hit "reference already exists". The
+    // stacked child forks from the parent's local tip, so it sees this commit
+    // without any push.
+    let parent_wt = Path::new(&parent.worktree);
+    std::fs::write(parent_wt.join("stacked.txt"), "level 0").unwrap();
+    run_git_ok(parent_wt, &["add", "."]);
+    run_git_ok(parent_wt, &["commit", "-m", "parent work"]);
+
+    let child_id = LfdId::new();
+    let placement = Placement::Stack {
+        parent_run_id: parent.id.clone(),
+    };
+    let child = create_run_for_placement(&store, &wave, &child_id, &placement, None)
+        .await
+        .unwrap();
+
+    // Lineage lands in the existing stack columns, from the named parent.
+    assert_eq!(child.parent_run_id, Some(parent.id.clone()));
+    assert_eq!(child.stack_position, parent.stack_position + 1);
+    assert_eq!(child.stack_group_id, parent.stack_group_id);
+    assert_eq!(child.target_branch, parent.branch);
+    assert_ne!(child.branch, parent.branch);
+
+    // The child's branch forks from the parent branch tip: it sees the
+    // parent's unlanded commit.
+    let child_wt = Path::new(&child.worktree);
+    assert!(child_wt.join("stacked.txt").exists());
+
+    // And the worktree still follows the worker naming scheme.
+    let short_id: String = child_id.as_str().chars().take(8).collect();
+    let worktree_name = child_wt.file_name().unwrap().to_string_lossy().to_string();
+    let repo_name = repo.path().file_name().unwrap().to_string_lossy();
+    assert_eq!(worktree_name, format!("{repo_name}.tower.{short_id}"));
+}
+
+#[tokio::test]
+async fn stack_placement_rejects_unknown_parent() {
+    let repo = TestRepo::new();
+    let store = make_store().await;
+    let wave = make_wave(&repo.path().to_string_lossy(), "orphan");
+    store.create_wave(&wave).await.unwrap();
+
+    let placement = Placement::Stack {
+        parent_run_id: LfdId::new(),
+    };
+    let result = create_run_for_placement(&store, &wave, &LfdId::new(), &placement, None).await;
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("stack parent run not found"));
 }
 
 #[test]

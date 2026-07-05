@@ -1,25 +1,24 @@
 ---
 primary_flow: ship-roadmap
-mode: manual
-workers: 0
-metrics:
-  - A wave is authored in one file (GOAL.md) — no yaml, no local roadmap mirror
-  - The roadmap is live in Asana, read and written by the loop
-  - Concerto can launch a looping session and show it running
-  - The clients and the server can be built from goals with zero step authoring
+pm:
+  provider: asana
+  asana_project: '1216257471889000'
 ---
 
-Run one loop iteration for the Goals wave.
+Turn a Wave from a ticker spawning cold, stateless runs into a persistent Looping
+Agent running against a Goal, steered by a live Asana roadmap — until writing goals
+is a good way to compute, with clients and servers built from goals and zero step
+authoring.
 
-You make loopflow able to run persistent, Goal-driven Waves. A Wave *is* a
-looping agent steered by a goal prompt and a live roadmap — the reincarnation of
-`direction` in its measurable, looping form, and the product developer's primary
-authoring surface. The bar: builtin steps and flows are expressive enough to
-build the clients and the server from goals with *zero* step authoring.
+**Metrics to improve**
+- Reference builds from goals, zero step authoring: 3 (mobile client, CLI client, server) reaching demoable. Target 3/3.
+- Product-dev step-authoring rate on those builds. Target 0.
+- Unattended loop iterations without human intervention. Target ≥ 20 consecutive.
+- Asana round-trip: items the loop both reads and writes status back to. Target 100%.
+- Concerto can launch and show looping sessions per repo.
 
-Read the goals roadmap, judge the framework against the metrics, and pick the
-next useful move: collapse a wave's authored surface toward one GOAL.md, wire the
-live Asana roadmap read/write-back, close a vocabulary gap that still forces step
-authoring, or surface looping sessions in Concerto. Dispatch the appropriate flow
-against it. The north: a developer writes one GOAL.md and the wave runs itself.
-If no safe move remains, record the blocker instead of inventing work.
+**Milestones**
+- Goal primitive superseding `direction`, with the `.lf/` override model.
+- Asana as the live roadmap; Looping Agent on codex/claude cloud (backend a); first-class wave spend budget.
+- Concerto per-repo looping sessions; vocabulary completeness; simplified wave-tree data model (parent/child waves; no separate "chord" concept).
+- Looping Agent on hosted lfd + Ghostty (backend b).

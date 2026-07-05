@@ -68,6 +68,28 @@ impl ChatTurn {
             from: None,
         }
     }
+
+    /// The one turn-growth rule every projection shares: `Message` prose
+    /// joins into `text` (newline-separated), every other item appends to
+    /// `items`. The live snapshot (`TurnSink`), the journal fold
+    /// (`fold_thread`), and the harness adapter (`EventAdapter`) all grow
+    /// turns through this — a second copy is the live-vs-replay split-brain
+    /// the journal exists to kill.
+    pub fn absorb_item(&mut self, item: ConversationItem) {
+        if let ConversationItem::Message { text, .. } = &item {
+            self.push_text(text);
+        } else {
+            self.items.push(item);
+        }
+    }
+
+    /// Join a prose fragment into the turn text, newline-separated.
+    pub fn push_text(&mut self, fragment: &str) {
+        if !self.text.is_empty() {
+            self.text.push('\n');
+        }
+        self.text.push_str(fragment);
+    }
 }
 
 /// Incremental outcome of one step of turn assembly.
@@ -125,5 +147,30 @@ mod tests {
         value.as_object_mut().expect("object").remove("from");
         let decoded: ChatTurn = serde_json::from_value(value).expect("deserialize");
         assert_eq!(decoded.from, None);
+    }
+
+    #[test]
+    fn absorb_item_joins_prose_and_appends_the_rest() {
+        let mut turn = ChatTurn::user("turn-3".into(), String::new());
+        turn.absorb_item(ConversationItem::Message {
+            id: "m-1".into(),
+            text: "first".into(),
+            phase: None,
+        });
+        turn.absorb_item(ConversationItem::Tool {
+            id: "t-1".into(),
+            name: "Bash".into(),
+            status: Lifecycle::Completed,
+            input: None,
+            output: None,
+        });
+        turn.absorb_item(ConversationItem::Message {
+            id: "m-2".into(),
+            text: "second".into(),
+            phase: None,
+        });
+
+        assert_eq!(turn.text, "first\nsecond");
+        assert_eq!(turn.items.len(), 1, "prose joins text, tools append");
     }
 }

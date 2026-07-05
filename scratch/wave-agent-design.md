@@ -360,8 +360,12 @@ Turning with dead child → finalize failed → Idle). One screen, on purpose.
 ```rust
 enum MessageOp {
     Message,     // append; queued; next turn answers it
-    Steer,       // inject into the current turn (app-server pending_input);
-                 //   falls back to Message when idle
+    Steer,       // inject into the current turn (codex `turn/steer` RPC with
+                 //   expectedTurnId — optimistic concurrency built in);
+                 //   falls back to Message when idle or the harness can't steer.
+                 //   Consumption survives the send/close boundary race: the
+                 //   marker lands against the just-closed turn if the turn
+                 //   finished during the send.
     Interrupt,   // cancel current turn, finalize as `interrupted`;
                  //   non-empty text → becomes the next turn ("interrupt & send")
 }
@@ -409,8 +413,9 @@ From the five reviews — each item is a review finding, not speculation.
 **Restructure (the MVP core):**
 - `runtime.rs`: `Mutex<Vec<ChatTurn>>` → event log + folds (~5 call sites).
 - `subagent.rs`/`progress.rs`: one-shot exec → harness-driven persistent
-  thread; supervisor grows cancel tokens + parent links or shrinks to
-  `JoinSet` (currently ceremony).
+  thread; the supervisor did neither grow nor shrink — dispatch went
+  daemonless (`lf q worker run`, workers are their own tmux sessions) and
+  the supervisor was deleted; `/health.workers` reports the store fold.
 - `compose_reply` template → gone; chat goes through the mind.
 - Status enums: five → one item lifecycle
   (`pending|running|completed|failed|interrupted`) + turn status gaining

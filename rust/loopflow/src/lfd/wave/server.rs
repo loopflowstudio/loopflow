@@ -7,8 +7,9 @@
 //! nothing else.
 //!
 //! Wire contract (snake_case, stable — a Concerto worker builds against it):
-//! - `GET /health` → `{status, wave, turns, subagents, uptime_seconds}`;
-//!   `status` is the mind state (`idle | turning | interrupting | failed`).
+//! - `GET /health` → `{status, wave, turns, workers, uptime_seconds}`;
+//!   `status` is the mind state (`idle | turning | interrupting | failed`);
+//!   `workers` counts this wave's observed in-flight worker runs.
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
 //!   `running`), if one is in progress, after the finalized thread.
 //! - `GET /conversation/stream` → SSE, two event names and no more:
@@ -71,7 +72,9 @@ struct HealthBody {
     status: String,
     wave: String,
     turns: usize,
-    subagents: usize,
+    /// Workers observed in flight for this wave (dispatch is daemonless —
+    /// `lf q worker run` — so the store fold, not a task registry, is truth).
+    workers: usize,
     uptime_seconds: i64,
 }
 
@@ -155,7 +158,7 @@ async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
         status: state.runtime.mind_state().name().to_string(),
         wave: state.runtime.name().to_string(),
         turns: state.runtime.thread_snapshot().len(),
-        subagents: state.runtime.supervisor().reap(),
+        workers: state.runtime.in_flight_workers().len(),
         uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
     })
 }

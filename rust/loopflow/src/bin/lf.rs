@@ -365,7 +365,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         Some(Commands::External(args)) => args
             .first()
             .map(|step| step.trim_end_matches(':').to_string()),
-        None => Some("chat".to_string()),
+        None => Some("interactive".to_string()),
         Some(Commands::Op { .. })
         | Some(Commands::Wave { .. })
         | Some(Commands::Usage)

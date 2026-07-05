@@ -317,15 +317,11 @@ impl EventAdapter {
                     tracing::warn!("harness item outside a turn; dropped");
                     return deltas;
                 };
+                open.absorb_item(item.clone());
                 if let ConversationItem::Message { text, .. } = item {
                     self.saw_message_item = true;
-                    if !open.text.is_empty() {
-                        open.text.push('\n');
-                    }
-                    open.text.push_str(text);
                     deltas.push(TurnDelta::Text(text.clone()));
                 } else {
-                    open.items.push(item.clone());
                     deltas.push(TurnDelta::Item(item.clone()));
                 }
             }
@@ -386,10 +382,7 @@ impl EventAdapter {
             self.buffered_text_delta.clear();
             return;
         };
-        if !open.text.is_empty() {
-            open.text.push('\n');
-        }
-        open.text.push_str(&self.buffered_text_delta);
+        open.push_text(&self.buffered_text_delta);
         deltas.push(TurnDelta::Text(std::mem::take(
             &mut self.buffered_text_delta,
         )));
@@ -587,10 +580,15 @@ impl Mind {
         }
         match self.harness.send_input(&message.text).await {
             Ok(()) => {
+                // The vendor accepted the text; consumption lands against the
+                // live turn, or the just-closed one when the turn finished
+                // during the send (the boundary race — see journal_steered).
                 if !self.runtime.journal_steered(vec![message.id.clone()]) {
-                    // The turn closed between the check and the send; the
-                    // message reached the vendor as the next turn's input.
-                    tracing::warn!("steer landed at a turn boundary; consumption not marked");
+                    // No turn exists at all to consume against; keep the
+                    // message queued so the next boundary answers it instead
+                    // of orphaning it as pending-forever.
+                    tracing::warn!("steer accepted but no turn to consume against; re-queued");
+                    self.queue.push(message);
                 }
             }
             Err(err) => {

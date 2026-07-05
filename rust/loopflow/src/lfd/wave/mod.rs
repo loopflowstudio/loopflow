@@ -35,7 +35,6 @@ pub mod registry;
 pub mod runtime;
 pub mod server;
 pub mod state;
-pub mod supervisor;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -283,9 +282,9 @@ async fn serve(
         .with_graceful_shutdown(shutdown)
         .await;
 
-    // Shutdown: stop the mind (its harness child dies with it — kill_on_drop)
-    // and every live subagent, mark the registry row terminal, drop the
-    // pointer.
+    // Shutdown: stop the mind (its harness child dies with it — kill_on_drop),
+    // mark the registry row terminal, drop the pointer. Workers are their own
+    // tmux sessions — nothing here owns them.
     mind.abort();
     if let Some(task) = observer_task {
         task.abort();
@@ -293,7 +292,6 @@ async fn serve(
     if let Some(registration) = registration {
         registration.deregister().await;
     }
-    runtime.supervisor().shutdown_all();
     server::remove_endpoint(&repo_root, &wave, &own_addr);
 
     result.map_err(|err| anyhow!("wave server error: {err}"))

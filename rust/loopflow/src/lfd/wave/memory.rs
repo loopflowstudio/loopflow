@@ -48,33 +48,11 @@ impl Memory {
         }
         std::fs::write(&self.path, content)
     }
-
-    /// A short head of memory for chat context — the first `max_lines`
-    /// non-empty lines. MEMORY can grow large; chat only needs the gist.
-    pub fn head(&self, max_lines: usize) -> String {
-        self.read()
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .take(max_lines)
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn head_returns_leading_nonempty_lines() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let dir = tmp.path().join("wave/ship");
-        std::fs::create_dir_all(&dir).expect("dir");
-        std::fs::write(dir.join("MEMORY.md"), "one\n\ntwo\nthree\n").expect("seed");
-
-        let memory = Memory::for_wave(tmp.path(), "ship");
-        assert_eq!(memory.head(2), "one\ntwo");
-    }
 
     #[test]
     fn read_missing_file_is_empty() {

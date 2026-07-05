@@ -102,7 +102,7 @@ wave/<name>/.wave-endpoint   →   127.0.0.1:<port>     (address only; removed o
 
 | Method + path             | Behavior |
 |---------------------------|----------|
-| `GET /health`             | `{status, wave, turns, subagents, uptime_seconds}`; `status` is the mind state: `idle \| turning \| interrupting \| failed` |
+| `GET /health`             | `{status, wave, turns, workers, uptime_seconds}`; `status` is the mind state: `idle \| turning \| interrupting \| failed`; `workers` counts observed in-flight worker runs |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread |
 | `GET /conversation/stream`| SSE, two event names: `state` (`data:` the mind-state name, sent on subscribe and on every transition — the composer keys its verb off it) and `turn` (`data:` a `Turn` JSON; the thread replays on connect, then streams live; turn ids repeat — each frame replaces the client's previous state for that id). |
 | `POST /messages {op, text, from?}` | `op` required: `message` (queued; the next turn answers it), `steer` (into the live turn when supported), `interrupt` (cancel the open turn; non-empty text becomes the next turn), or `say` (an attributed emission — `lf chat`; `from {session_id?, label}` required for `say`, rejected otherwise). Returns `{turn, state}`. |

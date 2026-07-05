@@ -39,7 +39,6 @@ pub(crate) struct WaveConfig {
     pub triggers: Option<TriggerDef>,
     pub direction: Option<Vec<String>>,
     pub metrics: Option<Vec<String>>,
-    pub roadmap: Option<String>,
     pub agent: Option<String>,
     pub step_agents: Option<HashMap<String, String>>,
     pub pm: Option<WavePmConfig>,

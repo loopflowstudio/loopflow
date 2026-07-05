@@ -169,7 +169,6 @@ fn adopt_own_session() -> Option<RunSession> {
         inner: Arc::new(SessionHandle {
             store,
             session,
-            adopted: true,
             completed: AtomicBool::new(false),
         }),
     };
@@ -216,42 +215,31 @@ impl Drop for RunSession {
 struct SessionHandle {
     store: SharedStore,
     session: Session,
-    /// Dispatcher-created row this process owns (OwnSession), as opposed to
-    /// a row this process registered itself. Adopted rows are re-read before
-    /// the completion write: a running lfd (or a cancel) may have closed the
-    /// row already, and `update_control_session` overwrites unconditionally —
-    /// a terminal row must never be flipped.
-    adopted: bool,
     completed: AtomicBool,
 }
 
 impl SessionHandle {
     /// Mark the row terminal, exactly once, best-effort and silent — a run
-    /// must never fail because its registry write did.
+    /// must never fail because its registry write did. The row is re-read
+    /// before the write, adopted and self-registered alike: a running lfd's
+    /// reconciler (or a cancel) may have closed it already, and
+    /// `update_control_session` overwrites unconditionally — a terminal row
+    /// must never be flipped.
     fn complete(&self, exit_code: i32) {
         if self.completed.swap(true, Ordering::SeqCst) {
             return;
         }
-        if self.adopted {
-            let store = self.store.clone();
-            let id = self.session.id.clone();
-            let _ = block_on(async move {
-                let Some(mut row) = store.get_control_session(&id).await.ok().flatten() else {
-                    return;
-                };
-                if !row.complete(exit_code) {
-                    return;
-                }
-                let _ = store.update_control_session(&row).await;
-            });
-            return;
-        }
-        let mut session = self.session.clone();
-        if !session.complete(exit_code) {
-            return;
-        }
         let store = self.store.clone();
-        let _ = block_on(async move { store.update_control_session(&session).await });
+        let id = self.session.id.clone();
+        let _ = block_on(async move {
+            let Some(mut row) = store.get_control_session(&id).await.ok().flatten() else {
+                return;
+            };
+            if !row.complete(exit_code) {
+                return;
+            }
+            let _ = store.update_control_session(&row).await;
+        });
     }
 }
 
@@ -275,7 +263,6 @@ async fn register_session(mut session: Session) -> Option<RunSession> {
         inner: Arc::new(SessionHandle {
             store,
             session,
-            adopted: false,
             completed: AtomicBool::new(false),
         }),
     })

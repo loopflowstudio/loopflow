@@ -720,14 +720,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     );
                     continue;
                 };
-                if let ConversationItem::Message { text, .. } = item {
-                    if !turn.text.is_empty() {
-                        turn.text.push('\n');
-                    }
-                    turn.text.push_str(text);
-                } else {
-                    turn.items.push(item.clone());
-                }
+                turn.absorb_item(item.clone());
             }
             EventKind::TurnFinished {
                 turn_id, status, ..

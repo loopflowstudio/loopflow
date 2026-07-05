@@ -35,7 +35,6 @@ use crate::lfd::wave::journal::{
 };
 use crate::lfd::wave::memory::Memory;
 use crate::lfd::wave::state::{can_transition, MindState};
-use crate::lfd::wave::supervisor::Supervisor;
 
 /// Capacity of the live turn broadcast. SSE clients that fall this far behind
 /// get a lag error and resync from `/conversation`; the journal is the source
@@ -120,8 +119,6 @@ pub struct WaveRuntime {
     memory: Memory,
     /// In-process user-message inbox (a channel, not a file).
     inbox_tx: mpsc::UnboundedSender<InboxItem>,
-    /// Tracks all live subagent runs (the worker-dispatch phase spawns here).
-    supervisor: Arc<Supervisor>,
 }
 
 impl WaveRuntime {
@@ -184,7 +181,6 @@ impl WaveRuntime {
             state_tx,
             memory,
             inbox_tx,
-            supervisor: Supervisor::new(),
         });
         Ok((runtime, inbox_rx))
     }
@@ -199,10 +195,6 @@ impl WaveRuntime {
 
     pub fn memory(&self) -> &Memory {
         &self.memory
-    }
-
-    pub fn supervisor(&self) -> &Arc<Supervisor> {
-        &self.supervisor
     }
 
     fn inner(&self) -> MutexGuard<'_, Inner> {
@@ -428,10 +420,22 @@ impl WaveRuntime {
     /// (`TurnSteered.answers` — see [`crate::lfd::wave::journal`]). Returns
     /// whether the marker was appended — false when no turn is turning, in
     /// which case the caller should have queued instead of steered.
+    /// Journal steer consumption for `answers`. Normally the live turn
+    /// consumed the message; when the turn closed between the harness
+    /// accepting the input and this call (the send/journal race), consumption
+    /// is journaled against the just-closed turn — the vendor heard the text
+    /// either way, and an unmarked message would stay pending forever and be
+    /// re-sent as a fresh turn on every restart. Returns `false` only when
+    /// there is no turn at all to consume against (nothing journaled — the
+    /// caller keeps the message queued).
     pub fn journal_steered(&self, answers: Vec<MessageId>) -> bool {
         let mut inner = self.inner();
-        let MindState::Turning { turn_id } = inner.state.clone() else {
-            return false;
+        let turn_id = match inner.state.clone() {
+            MindState::Turning { turn_id } | MindState::Interrupting { turn_id } => turn_id,
+            _ => match inner.thread.last() {
+                Some(turn) => turn.id.clone(),
+                None => return false,
+            },
         };
         inner
             .journal
@@ -597,20 +601,13 @@ impl WaveRuntime {
             turn_id: turn_id.to_string(),
             item: item.clone(),
         });
-        // Grow the open-turn snapshot exactly as the fold does (`Message`
-        // items join into text, the rest append to items) and re-broadcast it
-        // so live subscribers watch the turn in progress.
+        // Grow the open-turn snapshot through the one shared rule
+        // (`ChatTurn::absorb_item` — the same call the journal fold makes)
+        // and re-broadcast it so live subscribers watch the turn in progress.
         let Some(open) = inner.open_turn.as_mut() else {
             return;
         };
-        if let ConversationItem::Message { text, .. } = &item {
-            if !open.text.is_empty() {
-                open.text.push('\n');
-            }
-            open.text.push_str(text);
-        } else {
-            open.items.push(item);
-        }
+        open.absorb_item(item);
         let _ = self.turn_tx.send(open.clone());
     }
 
@@ -1211,22 +1208,51 @@ mod tests {
     }
 
     #[test]
-    fn journal_steered_marks_consumption_only_while_turning() {
+    fn journal_steered_consumes_against_live_or_just_closed_turn() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let (rt, _rx) = open_runtime(tmp.path());
         assert!(
-            !rt.journal_steered(vec![MessageId("msg-1".into())]),
-            "no turn to steer into while idle"
+            !rt.journal_steered(vec![MessageId("msg-0".into())]),
+            "no turn anywhere: nothing to consume against"
         );
 
+        // Two real queued messages, ids from the journal fold.
+        rt.deliver_user_message("steer me".into(), MessageOp::Message);
+        rt.deliver_user_message("me too".into(), MessageOp::Message);
+        let pending_ids: Vec<MessageId> = {
+            let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+            fold_thread(&events)
+                .pending_messages
+                .into_iter()
+                .map(|pending| pending.id)
+                .collect()
+        };
+        assert_eq!(pending_ids.len(), 2);
+
+        // First consumed mid-turn, the normal steer path.
         let mut sink = TurnSink::new(rt.clone());
         let mut adapter = EventAdapter::new();
         feed(&mut adapter, &mut sink, ev_started());
-        assert!(rt.journal_steered(vec![MessageId("msg-1".into())]));
+        assert!(rt.journal_steered(vec![pending_ids[0].clone()]));
         feed(&mut adapter, &mut sink, ev_completed(Lifecycle::Completed));
         feed(&mut adapter, &mut sink, ev_usage(1, 1));
 
+        // The send/journal boundary race: the turn closed between the harness
+        // accepting the input and the consumption write. The marker must
+        // still land (against the just-closed turn) or the message stays
+        // pending forever and is re-sent on every restart.
+        assert!(
+            rt.journal_steered(vec![pending_ids[1].clone()]),
+            "boundary race consumes against the just-closed turn"
+        );
+
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+        let assistant_turn = rt
+            .thread_snapshot()
+            .iter()
+            .find(|turn| turn.role == ChatRole::Assistant)
+            .map(|turn| turn.id.clone())
+            .expect("assistant turn");
         let steered: Vec<_> = events
             .iter()
             .filter_map(|e| match &e.kind {
@@ -1236,10 +1262,21 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(steered.len(), 1);
-        assert_eq!(steered[0].1, vec![MessageId("msg-1".into())]);
-        // The marker names the turn that was open when the steer landed.
-        let open_turn_id = rt.thread_snapshot()[0].id.clone();
-        assert_eq!(steered[0].0, open_turn_id);
+        assert_eq!(
+            steered,
+            vec![
+                (assistant_turn.clone(), vec![pending_ids[0].clone()]),
+                (assistant_turn, vec![pending_ids[1].clone()]),
+            ],
+            "both markers name the turn that heard the text"
+        );
+
+        // And the fold agrees: neither message re-sends after a restart.
+        let fold = fold_thread(&events);
+        assert!(
+            fold.pending_messages.is_empty(),
+            "consumed messages never re-send: {:?}",
+            fold.pending_messages
+        );
     }
 }

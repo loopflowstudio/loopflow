@@ -29,11 +29,12 @@ pub fn is_turn_in_progress(err: &anyhow::Error) -> bool {
     )
 }
 
+/// A stream error that means the harness session itself is dead (not just the
+/// turn). Claude has no such code by construction: it runs one subprocess per
+/// turn, so a crash fails the turn (`TurnCompleted { Failed }`) and the next
+/// turn spawns fresh via `--resume`.
 pub fn is_terminal_harness_error(code: &str) -> bool {
-    matches!(
-        code,
-        "codex_disconnected" | "claude_harness_crashed" | "opencode_disconnected"
-    )
+    matches!(code, "codex_disconnected" | "opencode_disconnected")
 }
 
 /// What a driver can honestly do, reported per instance so callers degrade
@@ -165,9 +166,12 @@ mod tests {
     }
 
     #[test]
-    fn terminal_harness_error_recognizes_opencode_disconnect() {
+    fn terminal_harness_error_recognizes_disconnects_only() {
         assert!(is_terminal_harness_error("opencode_disconnected"));
+        assert!(is_terminal_harness_error("codex_disconnected"));
         assert!(!is_terminal_harness_error("opencode_error"));
+        // Claude has no session-terminal code: per-turn subprocess.
+        assert!(!is_terminal_harness_error("claude_harness_crashed"));
     }
 
     #[tokio::test]

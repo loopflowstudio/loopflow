@@ -297,7 +297,10 @@ fn diff_names(repo: &Path, base_ref: &str) -> OpsResult<Vec<PathBuf>> {
     // authored — not files the base advanced past us. A stale branch (the whole
     // reason to rebase) would otherwise report the base's new files as its own,
     // misclassifying a scratch-only branch as clean_authored.
-    let stdout = git(repo, &["diff", "--name-only", &format!("{base_ref}...HEAD")])?;
+    let stdout = git(
+        repo,
+        &["diff", "--name-only", &format!("{base_ref}...HEAD")],
+    )?;
     Ok(stdout
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -306,7 +309,22 @@ fn diff_names(repo: &Path, base_ref: &str) -> OpsResult<Vec<PathBuf>> {
 }
 
 fn dirty_paths(repo: &Path) -> OpsResult<Vec<PathBuf>> {
-    let stdout = git(repo, &["status", "--porcelain"])?;
+    // Read raw stdout: porcelain lines carry a leading status column (e.g.
+    // " M path" for a working-tree-only change), and the shared git() helper
+    // would trim the first line's leading space, shifting the fixed 3-char
+    // path offset and dropping the first character of that path.
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["status", "--porcelain"])
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::Git(crate::engine::GitError::CommandFailed {
+            command: "git status --porcelain".to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        }));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(stdout
         .lines()
         .filter_map(|line| {

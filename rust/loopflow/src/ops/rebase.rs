@@ -23,9 +23,7 @@ pub enum RebaseClass {
     GeneratedOnly,
     CleanAuthored,
     StackParentOpen,
-    StackParentLanded,
     Protected,
-    ConflictLikely,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,8 +32,6 @@ pub enum RebaseStrategy {
     ResetToBase,
     DirectRebase,
     RebaseOntoParent,
-    SkipParentRebaseOntoMain,
-    AgentRebase,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -353,9 +349,7 @@ pub fn rebase_class_name(class: &RebaseClass) -> &'static str {
         RebaseClass::GeneratedOnly => "generated_only",
         RebaseClass::CleanAuthored => "clean_authored",
         RebaseClass::StackParentOpen => "stack_parent_open",
-        RebaseClass::StackParentLanded => "stack_parent_landed",
         RebaseClass::Protected => "protected",
-        RebaseClass::ConflictLikely => "conflict_likely",
     }
 }
 
@@ -365,7 +359,5 @@ pub fn rebase_strategy_name(strategy: &RebaseStrategy) -> &'static str {
         RebaseStrategy::ResetToBase => "reset_to_base",
         RebaseStrategy::DirectRebase => "direct_rebase",
         RebaseStrategy::RebaseOntoParent => "rebase_onto_parent",
-        RebaseStrategy::SkipParentRebaseOntoMain => "skip_parent_rebase_onto_main",
-        RebaseStrategy::AgentRebase => "agent_rebase",
     }
 }

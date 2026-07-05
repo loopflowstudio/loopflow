@@ -96,9 +96,6 @@ pub enum PlacementRequest {
     Fork {
         segment: WorktreeSegment,
     },
-    Dispatch {
-        segment: Option<WorktreeSegment>,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -635,11 +632,6 @@ pub fn plan_placement(
                 .unwrap_or_else(|| format!("{parent}.{}", segment.as_str()));
             let depth = parent_stack.map(|stack| stack.depth() + 1).unwrap_or(2);
             (branch, base_ref, Some(parent), segment, depth)
-        }
-        PlacementRequest::Dispatch { segment } => {
-            let segment = segment.unwrap_or_else(|| WorktreeSegment("dispatch".to_string()));
-            let branch = planned_root_branch(repo, segment.as_str(), branch_config)?;
-            (branch, default_branch.clone(), None, segment, 1)
         }
     };
 

@@ -777,7 +777,7 @@ fn wt_create(
             .map(|branch| branch == default_branch)
             .unwrap_or(true),
         PlacementRequest::Main { .. } | PlacementRequest::Fork { .. } => true,
-        PlacementRequest::Stack { .. } | PlacementRequest::Dispatch { .. } => false,
+        PlacementRequest::Stack { .. } => false,
     };
     if sync_default_base {
         let _ = sync_main(&main_repo, &default_branch);

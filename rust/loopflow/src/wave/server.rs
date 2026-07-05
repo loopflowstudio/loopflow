@@ -62,9 +62,9 @@ use time::OffsetDateTime;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::lfd::conversations::turns::ChatTurn;
-use crate::lfd::wave::journal::{Attribution, MessageOp};
-use crate::lfd::wave::runtime::WaveRuntime;
-use crate::lfd::wave::state::MindState;
+use crate::wave::journal::{Attribution, MessageOp};
+use crate::wave::runtime::WaveRuntime;
+use crate::wave::state::MindState;
 
 /// Basename of the discovery pointer under `wave/<name>/`.
 pub const ENDPOINT_FILE: &str = ".wave-endpoint";

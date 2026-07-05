@@ -334,7 +334,7 @@ fn main() -> anyhow::Result<()> {
                 loopflow::lf::commands::ops::run(op, cli.model.as_deref())
             }),
             Some(Commands::Wave { name, force }) => {
-                in_repo_runtime(&args, |_| loopflow::lfd::wave::run(name, *force))
+                in_repo_runtime(&args, |_| loopflow::wave::run(name, *force))
             }
             Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
             Some(Commands::Runs) => loopflow::lf::commands::runs::list(),

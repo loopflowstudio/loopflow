@@ -17,7 +17,7 @@ use loopflow::lfd::output::OutputHub;
 use loopflow::lfd::provider_auth::ProviderAuthService;
 use loopflow::lfd::scheduler::Scheduler;
 use loopflow::lfd::security::path_within_root_planned;
-use loopflow::lfd::store::{migrate_store, open_store, SharedStore, StorageConfig};
+use loopflow::lfdb::{migrate_store, open_store, SharedStore, StorageConfig};
 
 fn env_flag(name: &str) -> bool {
     std::env::var(name)

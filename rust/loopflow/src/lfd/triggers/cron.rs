@@ -11,7 +11,7 @@ use super::{spawn_immediate_activation, ActivationEnvelope, ImmediateActivation}
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::store::SharedStore;
+use crate::lfdb::SharedStore;
 
 pub fn spawn_cron_poller(
     store: SharedStore,

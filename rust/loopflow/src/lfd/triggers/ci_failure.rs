@@ -11,8 +11,8 @@ use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Event, Signal, Trigger, CI_FIX_FLOW};
+use crate::lfdb::SharedStore;
 use time::OffsetDateTime;
 
 #[derive(Debug)]
@@ -175,8 +175,8 @@ async fn resolve_ci_failure_trigger(
 mod tests {
     use super::*;
     use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{RepoWork, Run, RunStatus, Wave, WaveMode, WaveStatus};
+    use crate::lfdb::{open_store, StorageConfig};
     use std::sync::Arc;
 
     async fn create_store() -> SharedStore {

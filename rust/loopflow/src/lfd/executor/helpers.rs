@@ -20,11 +20,11 @@ use crate::engine::worktrees::{
 };
 
 use crate::lfd::id::LfdId;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
     ExecutionProcess, ExecutionProcessStatus, Run, RunStackStatus, RunStatus, Session, Wave,
     WaveStatus,
 };
+use crate::lfdb::SharedStore;
 use crate::ops::{rebase_with_recovery, Progress, RebaseOptions};
 
 /// Where a dispatched run's work happens on disk.

@@ -12,9 +12,9 @@ use crate::engine::worktrees::worktree_path;
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Trigger, Wave, WaveStatus};
-use crate::lfd::wave::registry::live_brain_after_probe;
+use crate::lfdb::SharedStore;
+use crate::wave::registry::live_brain_after_probe;
 
 pub fn spawn_loop_ticker(
     scheduler: Arc<Scheduler>,
@@ -183,11 +183,11 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::output::OutputHub;
     use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{
         RepoWork, Session, SessionStatus, SessionUse, Signal, Trigger, Wave, WaveMode, WaveStatus,
         WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
     };
+    use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use std::collections::BTreeMap;
     use std::path::Path;
     use std::sync::Arc;

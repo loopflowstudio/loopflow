@@ -6,8 +6,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::engine::platform::kill_process;
 use crate::lfd::executor::WaveExecutor;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::{ExecutionProcessStatus, RunStatus, WaveStatus};
+use crate::lfdb::SharedStore;
 
 pub fn spawn_recovery_loop(
     store: SharedStore,
@@ -78,8 +78,8 @@ async fn recover_stuck_runs(store: &SharedStore, executor: &WaveExecutor) {
 #[cfg(test)]
 mod tests {
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{ExecutionProcess, ExecutionProcessStatus};
+    use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::{Duration, OffsetDateTime};

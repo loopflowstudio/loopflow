@@ -10,10 +10,10 @@ use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, Event, PendingActivation, Run, Wave, WaveStatus,
 };
+use crate::lfdb::SharedStore;
 
 pub const DEFAULT_ACTIVATION_QUEUE_LIMIT: usize = 20;
 
@@ -539,8 +539,8 @@ async fn record_activation_log(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{RepoWork, Signal, Trigger, Wave, WaveMode};
+    use crate::lfdb::{open_store, StorageConfig};
     use time::OffsetDateTime;
 
     async fn create_store() -> SharedStore {

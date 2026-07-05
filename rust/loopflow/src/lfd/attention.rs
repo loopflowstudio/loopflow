@@ -1,9 +1,9 @@
 use crate::lfd::id::LfdId;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
     AttentionItem, AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason, Run, RunStatus,
     Wave,
 };
+use crate::lfdb::SharedStore;
 use serde_json::json;
 use time::OffsetDateTime;
 
@@ -270,10 +270,10 @@ mod tests {
         queue_block_from_attention, resolve_attention_item,
     };
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{
         AttentionItem, AttentionKind, AttentionStatus, QueueBlock, QueueBlockReason,
     };
+    use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use std::sync::Arc;
     use time::OffsetDateTime;
 

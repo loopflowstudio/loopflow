@@ -6,7 +6,7 @@ use crate::lfd::http::state::HttpState;
 use crate::lfd::output::OutputHub;
 use crate::lfd::provider_auth::ProviderAuthService;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::store::{open_store, StorageConfig};
+use crate::lfdb::{open_store, StorageConfig};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ use tokio::sync::Mutex;
 pub async fn test_http_state() -> HttpState {
     let tmp = tempdir().expect("tempdir");
     let db_path = tmp.path().join("lfd.db");
-    let store: crate::lfd::store::SharedStore = Arc::new(
+    let store: crate::lfdb::SharedStore = Arc::new(
         open_store(&StorageConfig::sqlite(db_path))
             .await
             .expect("open sqlite store"),

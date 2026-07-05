@@ -7,8 +7,8 @@ use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
 use crate::lfd::secrets::{self, DopplerConfig, DopplerProject, SecretsProviderStatus};
-use crate::lfd::store::SecretsProviderConfig;
 use crate::lfd::types::Event;
+use crate::lfdb::SecretsProviderConfig;
 
 pub async fn secrets_status_handler(
     State(state): State<HttpState>,
@@ -55,7 +55,7 @@ pub async fn select_secrets_handler(
         provider: "doppler".to_string(),
         project: Some(body.project),
         config: Some(body.config),
-        updated_at: crate::lfd::store::rows::now_unix(),
+        updated_at: crate::lfdb::rows::now_unix(),
     };
 
     state

@@ -16,7 +16,7 @@ use anyhow::{anyhow, Result};
 
 use crate::lf::commands::chat::{get_json, post_json, resolve_target, CliContext, ResolvedWave};
 use crate::lf::{MemoryCommand, WaveTargetArgs};
-use crate::lfd::wave::memory::Memory;
+use crate::wave::memory::Memory;
 
 pub fn run(cmd: Option<&MemoryCommand>, default_target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
@@ -126,9 +126,9 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
-    use crate::lfd::wave::journal::{journal_path, EventKind, Journal};
-    use crate::lfd::wave::runtime::WaveRuntime;
-    use crate::lfd::wave::server;
+    use crate::wave::journal::{journal_path, EventKind, Journal};
+    use crate::wave::runtime::WaveRuntime;
+    use crate::wave::server;
 
     fn resolved(name: &str, endpoint: Option<String>, root: Option<&Path>) -> ResolvedWave {
         ResolvedWave {

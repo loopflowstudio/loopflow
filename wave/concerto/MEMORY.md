@@ -66,7 +66,7 @@
   `"palette"` (`PALETTE_TERMINAL_SOURCE`). `TerminalSession::is_tmux_backed()`
   treats both as attachable.
 - **TerminalSession persistence has SQLite and Postgres mirrors.** Rows map in
-  `lfd/store/sqlite.rs` and `lfd/store/postgres.rs`; both use explicit column
+  `lfdb/sqlite.rs` and `lfdb/postgres.rs`; both use explicit column
   lists. New columns still require schema/mirror work, but new `source` values
   do not.
 - **Attach contract remains the shared path.** `POST

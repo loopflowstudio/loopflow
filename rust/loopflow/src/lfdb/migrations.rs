@@ -1,4 +1,4 @@
-use crate::lfd::store::StoreResult;
+use crate::lfdb::StoreResult;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
@@ -397,7 +397,7 @@ pub async fn latest_version_postgres_pool(pool: &deadpool_postgres::Pool) -> Sto
     let client = pool
         .get()
         .await
-        .map_err(|e| crate::lfd::store::StoreError::InvalidData(format!("pool error: {e}")))?;
+        .map_err(|e| crate::lfdb::StoreError::InvalidData(format!("pool error: {e}")))?;
     latest_version_postgres_query(&**client).await
 }
 

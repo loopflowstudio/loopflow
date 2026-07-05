@@ -816,7 +816,7 @@ fn wave_memory_is_loaded_separately_from_wave_docs() {
 
 #[test]
 fn run_in_wave_context_assembles_chat_and_memory_sections() {
-    use loopflow::lfd::wave::journal::{journal_path, EventKind, Journal, MessageId, MessageOp};
+    use loopflow::wave::journal::{journal_path, EventKind, Journal, MessageId, MessageOp};
 
     let temp = TempDir::new().unwrap();
     let repo = temp.path();

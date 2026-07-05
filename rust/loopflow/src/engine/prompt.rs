@@ -14,7 +14,7 @@ use crate::engine::error::CoreError;
 use crate::engine::flow::{expand_direction_names, load_direction, load_step, Direction, Step};
 use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::types::RepoId;
-use crate::lfd::wave::memory::Memory;
+use crate::wave::memory::Memory;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};

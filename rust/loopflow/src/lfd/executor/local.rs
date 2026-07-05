@@ -11,8 +11,8 @@ use tokio::sync::Mutex;
 use crate::engine::platform::kill_process;
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::{ExecutionProcessStatus, Wave};
+use crate::lfdb::SharedStore;
 
 use super::{read_stream, AgentExecutor, ExecutionContext, OutputContext, StartupRecovery};
 
@@ -159,7 +159,7 @@ impl AgentExecutor for LocalProcessExecutor {
 mod tests {
     use super::*;
     use crate::lfd::output::OutputHub;
-    use crate::lfd::store::{open_store, StorageConfig};
+    use crate::lfdb::{open_store, StorageConfig};
     use std::sync::Arc;
     use tempfile::tempdir;
 

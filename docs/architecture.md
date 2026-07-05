@@ -82,7 +82,7 @@ Important paths:
 
 - `rust/loopflow/src/bin/lfd.rs`
 - `rust/loopflow/src/lfd/http/`
-- `rust/loopflow/src/lfd/store/`
+- `rust/loopflow/src/lfdb/`
 - `rust/loopflow/src/lfd/scheduler.rs`
 - `rust/loopflow/src/lfd/triggers/`
 - `rust/loopflow/src/lfd/executor/`

@@ -29,12 +29,12 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn, TurnDelta};
 use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
-use crate::lfd::wave::journal::{
+use crate::wave::journal::{
     fold_thread, fold_workers, journal_path, Attribution, Event, EventKind, Journal, MessageId,
     MessageOp, PendingMessage, Usage, WorkerOutcome, WorkerRecord,
 };
-use crate::lfd::wave::memory::Memory;
-use crate::lfd::wave::state::{can_transition, MindState};
+use crate::wave::memory::Memory;
+use crate::wave::state::{can_transition, MindState};
 
 /// Capacity of the live turn broadcast. SSE clients that fall this far behind
 /// get a lag error and resync from `/conversation`; the journal is the source
@@ -415,7 +415,7 @@ impl WaveRuntime {
     }
 
     /// Journal steer consumption for `answers` (`TurnSteered.answers` — see
-    /// [`crate::lfd::wave::journal`]). Normally the live turn consumed the
+    /// [`crate::wave::journal`]). Normally the live turn consumed the
     /// message; when the turn closed between the harness accepting the input
     /// and this call (the send/journal race), consumption is journaled
     /// against the last assistant turn — the vendor heard the text either
@@ -754,7 +754,7 @@ fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
 mod tests {
     use super::*;
     use crate::lfd::conversations::types::{ConversationEvent, Lifecycle, TurnUsage};
-    use crate::lfd::wave::mind::EventAdapter;
+    use crate::wave::mind::EventAdapter;
 
     /// Parse the sequence out of a `"turn-<n>"` id; panics on a malformed one
     /// (ids are always minted from journal seqs).
@@ -1150,7 +1150,7 @@ mod tests {
 
         // The journal is closed: a replay agrees, no open turn survives.
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-        let fold = crate::lfd::wave::journal::fold_thread(&events);
+        let fold = crate::wave::journal::fold_thread(&events);
         assert!(fold.open.is_empty());
         assert_eq!(fold.turns.last().unwrap().status, Lifecycle::Interrupted);
 

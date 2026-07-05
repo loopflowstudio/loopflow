@@ -108,7 +108,7 @@ you'll already know.
 
 | Layer | Where | The question to hold |
 |---|---|---|
-| 1. Wave server core | `rust/loopflow/src/lfd/wave/` | Is the journal really the only truth? |
+| 1. Wave server core | `rust/loopflow/src/wave/` | Is the journal really the only truth? |
 | 2. Harness | `rust/loopflow/src/lfd/conversations/` | Where does vendor drift bite? |
 | 3. lf surface | `lf/session.rs`, `commands/{chat,q,memory}.rs`, `engine/wave_context.rs` | Do the doors degrade correctly? |
 | 4. Concerto | `swift/` WaveChat stack | Does the viewer ever participate? |

@@ -3,7 +3,7 @@
 //!
 //! The wave's mind runs on a persistent harness session
 //! ([`crate::lfd::conversations::harness`]); its `ConversationEvent` stream is
-//! adapted into `TurnDelta`s (see [`crate::lfd::wave::mind::EventAdapter`])
+//! adapted into `TurnDelta`s (see [`crate::wave::mind::EventAdapter`])
 //! and folded by the wave runtime's `TurnSink` into journaled, broadcast
 //! turns.
 //!

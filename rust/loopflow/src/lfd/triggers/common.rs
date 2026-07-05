@@ -8,8 +8,8 @@ use crate::lfd::executor::wave::classify_repair_flow;
 use crate::lfd::executor::WaveExecutor;
 pub use crate::lfd::executor::{create_run_for_placement, Placement};
 use crate::lfd::scheduler::SchedulerSlotGuard;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Event, Run, RunStatus, WaveStatus};
+use crate::lfdb::SharedStore;
 
 /// Fixed backoff delays between repair attempts, indexed by chain depth.
 /// The array length defines the maximum number of repair attempts before
@@ -230,8 +230,8 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{RepoWork, Run, RunStackStatus, Wave, WaveMode, WaveStatus};
+    use crate::lfdb::{open_store, SharedStore, StorageConfig};
 
     async fn test_store() -> SharedStore {
         let db_path = std::env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));

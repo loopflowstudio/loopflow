@@ -42,13 +42,13 @@ use tokio::process::Command;
 
 use crate::lfd::http::routes::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
-use crate::lfd::store::{SharedStore, StoreResult};
 use crate::lfd::types::{
     Run, Session, SessionStatus, SessionUse, Wave, LIVE_SESSION_STATUSES, WAVE_SERVER_ENDPOINT_ENV,
     WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
 };
-use crate::lfd::wave::journal::WorkerOutcome;
-use crate::lfd::wave::runtime::WaveRuntime;
+use crate::lfdb::{SharedStore, StoreResult};
+use crate::wave::journal::WorkerOutcome;
+use crate::wave::runtime::WaveRuntime;
 
 /// How often the observer re-reads the store between turns. Modest by
 /// design: the mind also refreshes right before every turn it takes.
@@ -594,12 +594,12 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{
         PullRequest, RepoWork, RunStackStatus, RunStatus, WaveMode, WaveStatus,
         TMUX_TERMINAL_SOURCE,
     };
-    use crate::lfd::wave::journal::{journal_path, EventKind, Journal};
+    use crate::lfdb::{open_store, StorageConfig};
+    use crate::wave::journal::{journal_path, EventKind, Journal};
 
     async fn temp_store(tmp: &std::path::Path) -> SharedStore {
         Arc::new(

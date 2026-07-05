@@ -17,7 +17,7 @@
 //! 1. live server: `GET /conversation` at the `wave/<name>/.wave-endpoint`
 //!    discovery pointer (the same file `lf wave` publishes);
 //! 2. no live server: a read-only fold over the wave's journal
-//!    ([`crate::lfd::wave::journal::read_events`] — never truncates, never
+//!    ([`crate::wave::journal::read_events`] — never truncates, never
 //!    creates);
 //! 3. nothing: empty.
 //!
@@ -33,8 +33,8 @@ use serde::Deserialize;
 
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
 use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
-use crate::lfd::wave::journal::{fold_thread, journal_path, read_events};
-use crate::lfd::wave::server::endpoint_path;
+use crate::wave::journal::{fold_thread, journal_path, read_events};
+use crate::wave::server::endpoint_path;
 
 /// Turns included in `<lf:wave-chat-recent>` (the newest are kept).
 pub const WAVE_CHAT_RECENT_TURNS: usize = 12;
@@ -167,7 +167,7 @@ fn wave_name_for_id(id: &str) -> Option<String> {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().ok()?;
         rt.block_on(async {
-            let store = crate::lfd::store::open_existing_store().await?;
+            let store = crate::lfdb::open_existing_store().await?;
             store.get_wave(&id).await.ok().flatten()
         })
     })
@@ -327,7 +327,7 @@ fn truncate_on_char_boundary(value: &mut String, mut max: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::wave::journal::{EventKind, Journal, MessageId, MessageOp, Usage};
+    use crate::wave::journal::{EventKind, Journal, MessageId, MessageOp, Usage};
     use std::io::{Read, Write};
 
     /// The one rule the three ambient call sites (context assembly, `lf chat`
@@ -556,7 +556,7 @@ mod tests {
         seed_journal(tmp.path(), "goals", "from the journal");
 
         let addr = spawn_canned_conversation("from the live server");
-        crate::lfd::wave::server::write_endpoint(tmp.path(), "goals", addr).expect("endpoint");
+        crate::wave::server::write_endpoint(tmp.path(), "goals", addr).expect("endpoint");
 
         let chat = gather_wave_chat(tmp.path(), "goals").expect("live chat");
         assert!(chat.contains("from the live server"));
@@ -572,7 +572,7 @@ mod tests {
         let dead = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let dead_addr = dead.local_addr().expect("addr");
         drop(dead);
-        crate::lfd::wave::server::write_endpoint(tmp.path(), "goals", dead_addr).expect("endpoint");
+        crate::wave::server::write_endpoint(tmp.path(), "goals", dead_addr).expect("endpoint");
 
         let chat = gather_wave_chat(tmp.path(), "goals").expect("journal fallback");
         assert!(chat.contains("from the journal"));

@@ -761,7 +761,7 @@ Key operational facts:
 
 ## Store Layer
 
-Source: `rust/loopflow/src/lfd/store/mod.rs`
+Source: `rust/loopflow/src/lfdb/mod.rs`
 
 Storage abstraction:
 

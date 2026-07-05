@@ -7,7 +7,7 @@ use crate::lfd::attention::reconcile_attention_items;
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::events::EventHub;
 use crate::lfd::queue::{reconcile_wave_queue_with_events, QueueTrigger};
-use crate::lfd::store::SharedStore;
+use crate::lfdb::SharedStore;
 
 pub fn spawn_queue_reconciler(
     store: SharedStore,

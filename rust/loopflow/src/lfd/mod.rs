@@ -26,17 +26,15 @@ pub mod secrets;
 pub mod security;
 pub mod service;
 pub mod session_token;
-pub mod store;
 pub mod triggers;
 pub mod types;
-pub mod wave;
 
 use std::path::{Path, PathBuf};
 
 use self::auth::AuthProvider;
 use self::config::{AuthConfig, LfdConfig};
-use self::store::StorageConfig;
 use crate::lfd::security::path_within_root_planned;
+use crate::lfdb::StorageConfig;
 use secrecy::ExposeSecret;
 
 /// Set up bearer-token auth for local and self-hosted remote clients.

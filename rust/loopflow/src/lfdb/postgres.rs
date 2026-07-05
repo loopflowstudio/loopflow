@@ -6,26 +6,26 @@ use tokio_postgres::NoTls;
 
 use crate::lfd::attention::{queue_block_attention_item, queue_block_from_attention};
 use crate::lfd::id::LfdId;
-use crate::lfd::store::catalog::{
+use crate::lfd::types::{
+    ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
+    ExecutionProcess, ExecutionProcessStatus, LivePullRequestState, PendingActivation, QueueBlock,
+    QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run, RunStatus, Session, SessionStatus,
+    SessionUse, Summary, Trigger, Wave, WaveCron, WaveStatus,
+};
+use crate::lfdb::catalog::{
     list_agent_history_query, list_runs_query, list_triggers_query, list_waves_query, sql, Query,
     SqlDialect,
 };
-use crate::lfd::store::rows::{
+use crate::lfdb::rows::{
     map_activation_log_row, map_agent_row, map_chat_memory_block_row, map_chat_message_row,
     map_fork_run_row, map_live_pr_state_row, map_pending_activation_row, map_repo_edge_row,
     map_repo_provider_usage_row, map_repo_row, map_run_row, map_summary_row, map_trigger_row,
     map_wave_cron_row, map_wave_provider_usage_row, map_wave_repo_row, map_wave_row, now_unix,
     serialize_pr,
 };
-use crate::lfd::store::token_crypto;
-use crate::lfd::store::{
+use crate::lfdb::token_crypto;
+use crate::lfdb::{
     ForkRun, ForkRunStatus, RunTokenUsage, StoreError, StoreResult, TokenUsageReport,
-};
-use crate::lfd::types::{
-    ActivationLog, AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
-    ExecutionProcess, ExecutionProcessStatus, LivePullRequestState, PendingActivation, QueueBlock,
-    QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run, RunStatus, Session, SessionStatus,
-    SessionUse, Summary, Trigger, Wave, WaveCron, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -97,13 +97,13 @@ impl PostgresStore {
             summary: row.try_get(6)?,
             context: serde_json::from_str(&row.try_get::<_, String>(7)?)
                 .unwrap_or(serde_json::Value::Object(Default::default())),
-            surfaced_at: crate::lfd::store::rows::unix_to_datetime(row.try_get(8)?),
+            surfaced_at: crate::lfdb::rows::unix_to_datetime(row.try_get(8)?),
             viewed_at: row
                 .try_get::<_, Option<i64>>(9)?
-                .map(crate::lfd::store::rows::unix_to_datetime),
+                .map(crate::lfdb::rows::unix_to_datetime),
             resolved_at: row
                 .try_get::<_, Option<i64>>(10)?
-                .map(crate::lfd::store::rows::unix_to_datetime),
+                .map(crate::lfdb::rows::unix_to_datetime),
         })
     }
 
@@ -273,16 +273,16 @@ impl PostgresStore {
             tmux_name: row.get(11),
             status: SessionStatus::from_i32(row.get::<_, i32>(12)),
             completion_token: row.get(13),
-            created_at: crate::lfd::store::rows::unix_to_datetime(row.get(14)),
+            created_at: crate::lfdb::rows::unix_to_datetime(row.get(14)),
             attached_at: row
                 .get::<_, Option<i64>>(15)
-                .map(crate::lfd::store::rows::unix_to_datetime),
+                .map(crate::lfdb::rows::unix_to_datetime),
             started_at: row
                 .get::<_, Option<i64>>(16)
-                .map(crate::lfd::store::rows::unix_to_datetime),
+                .map(crate::lfdb::rows::unix_to_datetime),
             completed_at: row
                 .get::<_, Option<i64>>(17)
-                .map(crate::lfd::store::rows::unix_to_datetime),
+                .map(crate::lfdb::rows::unix_to_datetime),
         })
     }
 }

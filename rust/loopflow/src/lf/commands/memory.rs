@@ -63,12 +63,16 @@ fn drop_note() {
     eprintln!("no wave here; memory write dropped");
 }
 
+/// Memory is wave-level (MEMORY.md is wave identity; work lines have no
+/// memory — their notes are files), so this resolves the FAMILY HEAD even
+/// inside a work-line worktree and ignores the channel arm entirely.
 async fn resolve(context: &CliContext, target: &WaveTargetArgs) -> Result<Option<ResolvedWave>> {
     resolve_target(
         target,
         context.store.as_ref(),
         context.repo.as_deref(),
         context.env_wave_id.as_deref(),
+        context.env_channel.as_deref(),
     )
     .await
 }
@@ -136,6 +140,7 @@ mod tests {
             endpoint,
             repo_root: root.map(Path::to_path_buf),
             own_name: None,
+            channel: None,
         }
     }
 
@@ -245,6 +250,7 @@ mod tests {
             store: None,
             repo: Some(tmp.path().to_path_buf()),
             env_wave_id: None,
+            env_channel: None,
         };
         run_with_context(
             &context,
@@ -266,6 +272,7 @@ mod tests {
             store: None,
             repo: Some(tmp.path().to_path_buf()),
             env_wave_id: None,
+            env_channel: None,
         };
         let err = run_with_context(&context, None, &WaveTargetArgs::default())
             .await

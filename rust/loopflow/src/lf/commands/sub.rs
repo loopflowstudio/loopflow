@@ -1,11 +1,18 @@
-//! `lf sub` — follow a wave's unified `/events` stream until killed.
+//! `lf sub` — follow a channel family's unified `/events` stream until killed.
 //!
 //! Subscription as a verb: the read half of the speech surface (`lf chat` is
 //! the write half). Targeting and endpoint resolution are `lf chat`'s
-//! ([`super::chat::resolve_target`]) — the shared ambient rule (`LFD_WAVE_ID`
-//! env, else the worktree name) with an explicit NAME override; the endpoint
-//! comes off the live WaveAgent registry row, falling back to the
-//! `wave/<name>/.wave-endpoint` discovery file.
+//! ([`super::chat::resolve_target`]) — the shared ambient rule (`LFD_CHANNEL`
+//! env, else `LFD_WAVE_ID`, else the worktree name) with an explicit NAME
+//! override; the endpoint is always the FAMILY HEAD's, off the live
+//! WaveAgent registry row, falling back to the `wave/<name>/.wave-endpoint`
+//! discovery file.
+//!
+//! Scope by name: `lf sub goals` follows the whole family (the wave channel
+//! plus every work-line channel, `?prefix` semantics — the server's
+//! default); `lf sub goals.148e0e02` follows exactly that channel
+//! (`?channel=`). No NAME follows the ambient channel — the family at the
+//! wave home, the work line's own channel inside its worktree.
 //!
 //! The stream is followed until the process is killed: on disconnect (or a
 //! wave with no live server yet) it reconnects on a backoff ladder,
@@ -15,9 +22,11 @@
 //!
 //! Output renders from the WIRE frames (never journal internals): human
 //! lines by default (the Narrator's console flavor — chat bylines, turn
-//! open/items/close, state transitions, memory curation), or raw frames as
-//! NDJSON with `--json` (`{"event": ..., "data": ...}` per line; `turn` data
-//! stays JSON, `state`/`memory` data are strings).
+//! open/items/close, state transitions, memory curation; child-channel
+//! frames prefixed `[<channel>]`, progress keyed per (channel, id)), or raw
+//! frames as NDJSON with `--json` (`{"event": ..., "data": ...}` per line;
+//! `turn` data stays JSON — tagged frames keep their `channel` key —
+//! `state`/`memory` data are strings).
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -63,6 +72,7 @@ async fn follow(wave: Option<&str>, json: bool) -> Result<()> {
             context.store.as_ref(),
             context.repo.as_deref(),
             context.env_wave_id.as_deref(),
+            context.env_channel.as_deref(),
         )
         .await?;
         let Some(resolved) = resolved else {
@@ -71,8 +81,14 @@ async fn follow(wave: Option<&str>, json: bool) -> Result<()> {
             eprintln!("no wave here; nothing to subscribe to");
             return Ok(());
         };
+        // A child channel narrows the subscription; the wave name follows
+        // the whole family (the server's default scope).
+        let query = match &resolved.channel {
+            Some(channel) => format!("?channel={channel}"),
+            None => String::new(),
+        };
         if let Some(endpoint) = &resolved.endpoint {
-            match stream_events(endpoint, &mut |frame| renderer.render(frame)).await {
+            match stream_events(endpoint, &query, &mut |frame| renderer.render(frame)).await {
                 Ok(()) => {
                     // The server closed the stream (restart, shutdown).
                     backoff = BACKOFF_FLOOR;
@@ -152,11 +168,17 @@ impl SseFrameParser {
 }
 
 /// Follow one `/events` connection until it ends, handing every frame to
-/// `on_frame`. Connection failure and non-2xx are errors (the caller retries).
-async fn stream_events(endpoint: &str, on_frame: &mut impl FnMut(Frame)) -> Result<()> {
+/// `on_frame`. `query` scopes the subscription (`""` = the whole family,
+/// `"?channel=<name>"` = one channel). Connection failure and non-2xx are
+/// errors (the caller retries).
+async fn stream_events(
+    endpoint: &str,
+    query: &str,
+    on_frame: &mut impl FnMut(Frame),
+) -> Result<()> {
     let client = reqwest::Client::new();
     let response = client
-        .get(format!("http://{endpoint}/events"))
+        .get(format!("http://{endpoint}/events{query}"))
         .header("Accept", "text/event-stream")
         .send()
         .await?
@@ -183,12 +205,21 @@ struct TurnProgress {
     finished: bool,
 }
 
+/// The optional channel tag on a `turn` frame's data: present on
+/// child-channel frames of a family subscription, absent on the primary
+/// channel's (absent = the wave's own channel).
+#[derive(Debug, serde::Deserialize)]
+struct ChannelTag {
+    channel: Option<String>,
+}
+
 /// Renders wire frames as output lines. Stdout is written here; the pure
-/// half (`lines_for`) is what tests pin.
+/// half (`lines_for`) is what tests pin. Turn progress is keyed per
+/// (channel, id): turn ids repeat across a family's channels.
 #[derive(Debug)]
 struct Renderer {
     json: bool,
-    turns: HashMap<String, TurnProgress>,
+    turns: HashMap<(Option<String>, String), TurnProgress>,
 }
 
 impl Renderer {
@@ -206,7 +237,8 @@ impl Renderer {
     }
 
     /// The output lines for one frame — NDJSON raw, or the human console
-    /// flavor (chat bylines, turn open/items/close, state, memory).
+    /// flavor (chat bylines, turn open/items/close, state, memory;
+    /// child-channel frames prefixed with their channel name).
     fn lines_for(&mut self, frame: &Frame) -> Vec<String> {
         if self.json {
             let data: serde_json::Value = serde_json::from_str(&frame.data)
@@ -223,14 +255,26 @@ impl Renderer {
                         ellipsize(&frame.data, 80)
                     )];
                 };
-                self.turn_lines(&turn)
+                // The tag rides beside the Turn fields; ChatTurn's decode
+                // ignores it (additive by design).
+                let channel = serde_json::from_str::<ChannelTag>(&frame.data)
+                    .ok()
+                    .and_then(|tag| tag.channel);
+                let prefix = channel
+                    .as_deref()
+                    .map(|name| format!("[{name}] "))
+                    .unwrap_or_default();
+                self.turn_lines(channel, &turn)
+                    .into_iter()
+                    .map(|line| format!("{prefix}{line}"))
+                    .collect()
             }
             _ => Vec::new(),
         }
     }
 
-    fn turn_lines(&mut self, turn: &ChatTurn) -> Vec<String> {
-        let progress = self.turns.entry(turn.id.clone()).or_default();
+    fn turn_lines(&mut self, channel: Option<String>, turn: &ChatTurn) -> Vec<String> {
+        let progress = self.turns.entry((channel, turn.id.clone())).or_default();
         if progress.finished {
             // Reconnect replay of a turn already rendered whole: quiet.
             return Vec::new();
@@ -486,6 +530,55 @@ mod tests {
             .is_empty());
     }
 
+    /// Channel-tagged frames (a family subscription): the tag prefixes the
+    /// human lines, progress is keyed per (channel, id) so repeating turn ids
+    /// across channels never collide, and `--json` passes the tag through.
+    #[test]
+    fn channel_tagged_frames_render_prefixed_and_keyed_per_channel() {
+        let mut renderer = Renderer::new(false);
+        let tagged = |channel: &str, text: &str| {
+            format!(
+                "{{\"id\":\"turn-1\",\"role\":\"user\",\"text\":\"{text}\",\"status\":\"completed\",\
+                 \"items\":[],\"created_at\":\"2026-07-04T00:00:00Z\",\"from\":null,\
+                 \"channel\":\"{channel}\"}}"
+            )
+        };
+
+        // The same turn id on two channels: both render, each once.
+        let lines = renderer.lines_for(&Frame {
+            event: "turn".into(),
+            data: tagged("ship.a", "from a"),
+        });
+        assert_eq!(lines, vec!["[ship.a] chat ← \"from a\" (turn-1)"]);
+        let lines = renderer.lines_for(&Frame {
+            event: "turn".into(),
+            data: tagged("ship.b", "from b"),
+        });
+        assert_eq!(lines, vec!["[ship.b] chat ← \"from b\" (turn-1)"]);
+        // An untagged turn-1 (the primary channel) is yet another stream.
+        let lines = renderer.lines_for(&Frame {
+            event: "turn".into(),
+            data: turn_json("turn-1", "user", "from the wave", "completed", "[]"),
+        });
+        assert_eq!(lines, vec!["chat ← \"from the wave\" (turn-1)"]);
+        // Replays of any of them stay quiet.
+        assert!(renderer
+            .lines_for(&Frame {
+                event: "turn".into(),
+                data: tagged("ship.a", "from a"),
+            })
+            .is_empty());
+
+        // --json passes the tag through untouched.
+        let mut json_renderer = Renderer::new(true);
+        let lines = json_renderer.lines_for(&Frame {
+            event: "turn".into(),
+            data: tagged("ship.a", "from a"),
+        });
+        let parsed: serde_json::Value = serde_json::from_str(&lines[0]).expect("valid NDJSON");
+        assert_eq!(parsed["data"]["channel"], "ship.a");
+    }
+
     /// End to end against a live server: subscribe, watch replay + live
     /// frames arrive as parsed SSE frames.
     #[tokio::test]
@@ -511,7 +604,7 @@ mod tests {
         let endpoint = addr.to_string();
         let task = tokio::spawn(async move {
             let mut on_frame = |frame: Frame| sink.lock().unwrap().push(frame);
-            let _ = stream_events(&endpoint, &mut on_frame).await;
+            let _ = stream_events(&endpoint, "", &mut on_frame).await;
         });
 
         // Live event after subscribe: a memory curation.

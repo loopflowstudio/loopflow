@@ -1,8 +1,10 @@
 //! The wave's append-only event log — runtime truth for the live agent.
 //!
-//! One JSONL file per wave at `.lf/journal/waves/<name>/journal.jsonl`
+//! One JSONL file per CHANNEL at `.lf/journal/waves/<name>/journal.jsonl`
 //! (already covered by the repo's `.lf/journal/` gitignore entry — the log is
-//! per-machine, never committed). Every projection is a fold over it: the
+//! per-machine, never committed): the wave channel's under the origin repo,
+//! a work-line channel's inside its own worktree (see
+//! [`crate::wave::channel`]). Every projection is a fold over it: the
 //! thread is the conversation events, the mind state is the last `MindState`
 //! event, the message queue is `UserMessage`s not yet named in any
 //! `TurnStarted.answers` or `TurnSteered.answers`. Store is truth; the SSE
@@ -233,6 +235,19 @@ pub enum EventKind {
         outcome: WorkerOutcome,
         summary: String,
     },
+    // -- channels --
+    /// A work-line channel opened under this wave (dispatch minted the
+    /// worktree and its journal; see `lf q worker run`). Journaled on the
+    /// PARENT channel — the fold materializes a thread-visible turn
+    /// ([`channel_opened_turn`]) so the wave's thread shows the opening.
+    /// `run_id` is the idempotence key: one dispatch, one opening, however
+    /// often the door is knocked.
+    ChannelOpened {
+        /// The child channel's name — exactly the worktree basename minus
+        /// the repo prefix (`goals.148e0e02`).
+        name: String,
+        run_id: String,
+    },
     // -- memory --
     MemoryUpdated {
         summary: String,
@@ -453,6 +468,9 @@ impl Narrator {
                 outcome.name(),
                 ellipsize(summary, 60)
             )),
+            EventKind::ChannelOpened { name, run_id } => {
+                info(format!("channel {name} opened · run {}", short_id(run_id)))
+            }
             EventKind::MemoryUpdated { summary } => {
                 info(format!("memory curated: {}", ellipsize(summary, 70)))
             }
@@ -685,6 +703,23 @@ pub struct ThreadFold {
     /// User messages not named by any `TurnStarted.answers` or
     /// `TurnSteered.answers`; this seeds the scheduler queue on restart.
     pub pending_messages: Vec<PendingMessage>,
+    /// Run ids of `ChannelOpened` events — the idempotence guard for the
+    /// dispatch-notification door (one dispatch, one opening).
+    pub opened_channel_runs: HashSet<String>,
+}
+
+/// The thread-visible turn a `ChannelOpened` event materializes: a bylined
+/// statement, never queued for the mind (only `UserMessage` rows feed the
+/// pending queue). Shared by the fold and the live append so replay and the
+/// live thread agree byte for byte.
+pub fn channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
+    let mut turn = ChatTurn::user(
+        format!("turn-{}", event.seq),
+        format!("work line {name} opened"),
+    );
+    turn.created_at = event.at_rfc3339();
+    turn.from = Some("dispatch".to_string());
+    turn
 }
 
 /// Fold journal events into the thread — the pure function the in-memory
@@ -701,6 +736,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut thread_id: Option<String> = None;
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
     let mut consumed_messages: HashSet<MessageId> = HashSet::new();
+    let mut opened_channel_runs: HashSet<String> = HashSet::new();
 
     for event in events {
         match &event.kind {
@@ -767,6 +803,10 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             EventKind::TurnSteered { answers, .. } => {
                 mark_consumed(&mut pending_messages, &mut consumed_messages, answers);
             }
+            EventKind::ChannelOpened { name, run_id } => {
+                opened_channel_runs.insert(run_id.clone());
+                turns.push(channel_opened_turn(event, name));
+            }
             // Steer consumption affects the queue fold, not the thread: the
             // steered text is already a user turn via its `UserMessage` row.
             EventKind::RunObserved { .. }
@@ -782,6 +822,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         state,
         thread_id,
         pending_messages,
+        opened_channel_runs,
     }
 }
 
@@ -994,6 +1035,10 @@ mod tests {
                 outcome: WorkerOutcome::Completed,
                 summary: "landed".into(),
             },
+            EventKind::ChannelOpened {
+                name: "ship.148e0e02".into(),
+                run_id: "run-1".into(),
+            },
             EventKind::MemoryUpdated {
                 summary: "learned the fold".into(),
             },
@@ -1174,6 +1219,10 @@ mod tests {
                 run_id: "run-1".into(),
                 outcome: WorkerOutcome::Completed,
                 summary: "landed".into(),
+            },
+            EventKind::ChannelOpened {
+                name: "ship.148e0e02".into(),
+                run_id: "run-1".into(),
             },
             EventKind::MemoryUpdated {
                 summary: "learned the fold".into(),
@@ -1368,6 +1417,37 @@ mod tests {
             endpoint: "127.0.0.1:50123".into(),
         });
         assert_eq!(n.line, "server started · pid 4242 · 127.0.0.1:50123");
+
+        let n = render(EventKind::ChannelOpened {
+            name: "ship.148e0e02".into(),
+            run_id: "run-8c1d2e3f4a".into(),
+        });
+        assert_eq!(n.line, "channel ship.148e0e02 opened · run run-8c1d");
+    }
+
+    /// `ChannelOpened` folds into a thread-visible bylined turn (never queued
+    /// for the mind) and its run id lands in the idempotence guard.
+    #[test]
+    fn fold_materializes_channel_opened_as_a_dispatch_turn() {
+        let events = vec![Event {
+            v: FORMAT_VERSION,
+            seq: 1,
+            at: OffsetDateTime::now_utc(),
+            kind: EventKind::ChannelOpened {
+                name: "ship.148e0e02".into(),
+                run_id: "run-7".into(),
+            },
+        }];
+        let fold = fold_thread(&events);
+        assert_eq!(fold.turns.len(), 1);
+        assert_eq!(fold.turns[0].text, "work line ship.148e0e02 opened");
+        assert_eq!(fold.turns[0].from.as_deref(), Some("dispatch"));
+        assert_eq!(fold.turns[0].id, "turn-1");
+        assert!(
+            fold.pending_messages.is_empty(),
+            "a channel opening never queues for the mind"
+        );
+        assert!(fold.opened_channel_runs.contains("run-7"));
     }
 
     /// Long text is flattened and cut; a fresh turn resets the prose gist.

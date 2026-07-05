@@ -6,11 +6,26 @@
 //! branch forked from an unlanded run), write the Run + Session rows to the
 //! shared store, and launch `lf <flow>: <task>` in a detached tmux session.
 //!
+//! # The work line's channel
+//!
+//! Dispatch mints the work line's CHANNEL alongside its worktree: the channel
+//! name is exactly the worktree basename minus the repo prefix
+//! (`goals.148e0e02`), its journal is initialized IN the worktree
+//! (`.lf/journal/waves/<channel>/journal.jsonl` — it travels with the branch
+//! and dies with it), and the parent wave's live server is knocked
+//! (`POST /channels`) so the wave's thread shows "work line <name> opened".
+//! The knock is best-effort — dispatch stays daemonless; with no live
+//! listener the opening simply isn't narrated (the observer still journals
+//! `RunObserved` when a server next looks). Pool placement shares the wave's
+//! own worktree, so its channel IS the wave channel — nothing minted.
+//!
 //! # Env contract (matches the lfd executor byte for byte)
 //!
 //! The worker's tmux environment carries `LFD_WAVE_ID`, `LFD_RUN_ID`,
-//! `LF_RUN_ID`, `LFD_SESSION_ID` (the session row created here) and
-//! `LFD_AGENT_ROLE=worker`. `LFD_SESSION_INHERITED` is deliberately absent:
+//! `LF_RUN_ID`, `LFD_SESSION_ID` (the session row created here),
+//! `LFD_AGENT_ROLE=worker`, and `LFD_CHANNEL` (the work line's channel — a
+//! bare `lf chat` inside the worker speaks on its own channel).
+//! `LFD_SESSION_INHERITED` is deliberately absent:
 //! a session id without the marker means "this very process owns the row"
 //! (see `lf::session`), so the child does NOT self-register a second row.
 //! The shared tmux wrapper (`helpers::tmux_shell_command`) explicitly
@@ -21,11 +36,14 @@
 //! mind dispatches) becomes the worker session's `parent_session_id`.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use time::OffsetDateTime;
 
+use crate::engine::wave_context::read_endpoint_pointer;
+use crate::engine::worktrees::wave_name_from_worktree_and_main;
 use crate::lf::{QCommand, WorkerCommand};
 use crate::lfd::executor::helpers::{
     build_lf_dispatch_command, launch_session_in_tmux, worker_dispatch_task, TMUX_EXIT_TAIL,
@@ -74,21 +92,30 @@ fn worker_run(wave: &str, flow: &str, task: &str, pool: bool, stack: Option<&str
         })?);
         let dispatched = dispatch(&store, wave, flow, task, placement, parent_session_id).await?;
         launch_worker_tmux(&store, dispatched.session.clone()).await?;
+        // Tell the parent listener a work line opened — best effort, the
+        // dispatch itself is daemonless.
+        if dispatched.channel != wave {
+            notify_channel_opened(&store, &dispatched).await;
+        }
         println!("dispatched {flow} worker for wave '{wave}'");
         println!("  run       {}", dispatched.run.id);
         println!("  session   {}", dispatched.session.id);
+        println!("  channel   {}", dispatched.channel);
         println!("  tmux      {}", dispatched.session.tmux_name);
         println!("  worktree  {}", dispatched.run.worktree);
         Ok(())
     })
 }
 
-/// A recorded dispatch: the Run row (placement resolved, worktree created)
-/// and the Session row the worker will own.
+/// A recorded dispatch: the Run row (placement resolved, worktree created),
+/// the Session row the worker will own, the wave row it belongs to, and the
+/// work line's channel name (the wave's own name for pool placement).
 #[derive(Debug)]
 pub(crate) struct Dispatch {
     pub run: Run,
     pub session: Session,
+    pub wave: crate::lfd::types::Wave,
+    pub channel: String,
 }
 
 /// Write the dispatch into the registry: resolve placement into a worktree +
@@ -165,6 +192,21 @@ pub(crate) async fn dispatch(
     run.task = Some(task.to_string());
     store.update_run(&run).await?;
 
+    // The work line's channel: exactly the worktree basename minus the repo
+    // prefix (pool placement shares the wave worktree — its channel IS the
+    // wave channel). A fresh channel's journal is initialized HERE, in the
+    // worktree, before anyone else knows the name — no pen race; the family
+    // head's server materializes its pen on first delivery or subscription.
+    let channel =
+        wave_name_from_worktree_and_main(Path::new(&run.worktree), Path::new(wave.repo()))
+            .unwrap_or_else(|| wave.name().clone());
+    if channel != *wave.name() {
+        let journal = crate::wave::journal::journal_path(Path::new(&run.worktree), &channel);
+        if let Err(err) = crate::wave::journal::Journal::open(&journal) {
+            tracing::warn!(channel, error = %err, "work-line channel journal init failed");
+        }
+    }
+
     // The worker's prompt closes the reporting loop through the one door
     // every process has — exec: it finishes by posting an `lf chat` report
     // into the wave's thread (attributed via LFD_SESSION_ID from its env).
@@ -177,6 +219,7 @@ pub(crate) async fn dispatch(
         ("LFD_RUN_ID".to_string(), run.id.to_string()),
         ("LF_RUN_ID".to_string(), run.id.to_string()),
         ("LFD_SESSION_ID".to_string(), session_id.to_string()),
+        (crate::lf::session::CHANNEL_ENV.to_string(), channel.clone()),
         (
             "LFD_AGENT_ROLE".to_string(),
             SessionUse::Worker.as_str().to_string(),
@@ -211,7 +254,50 @@ pub(crate) async fn dispatch(
         completion_token: None,
     };
     store.register_session(&session).await?;
-    Ok(Dispatch { run, session })
+    Ok(Dispatch {
+        run,
+        session,
+        wave,
+        channel,
+    })
+}
+
+/// Knock on the parent wave's live server so its thread shows the work line
+/// opening (`POST /channels {name, run_id}`, journaled as `ChannelOpened`,
+/// idempotent). Best-effort by design: no live listener → one stderr note,
+/// dispatch already succeeded.
+async fn notify_channel_opened(store: &SharedStore, dispatched: &Dispatch) {
+    let wave = &dispatched.wave;
+    let mut endpoint = None;
+    if let Ok(Some(session)) = store.live_wave_agent_session(wave.id()).await {
+        endpoint = session
+            .env
+            .get(crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+    }
+    if endpoint.is_none() {
+        endpoint = read_endpoint_pointer(Path::new(wave.repo()), wave.name());
+    }
+    let Some(endpoint) = endpoint else {
+        eprintln!(
+            "note: wave '{}' has no live server; channel '{}' opens unannounced",
+            wave.name(),
+            dispatched.channel
+        );
+        return;
+    };
+    let body = serde_json::json!({
+        "name": dispatched.channel,
+        "run_id": dispatched.run.id.to_string(),
+    });
+    if let Err(err) = crate::lf::commands::chat::post_json(&endpoint, "/channels", &body).await {
+        eprintln!(
+            "note: could not announce channel '{}' to wave '{}': {err}",
+            dispatched.channel,
+            wave.name()
+        );
+    }
 }
 
 /// Launch the worker in a detached tmux session through the shared wrapper
@@ -386,6 +472,92 @@ mod tests {
             .expect("worktree lookup");
         assert_eq!(grouped.len(), 1);
         assert_eq!(grouped[0].id, session.id);
+
+        // Dispatch minted the work line's CHANNEL: the ownership name (the
+        // worktree basename minus the repo prefix), its journal initialized
+        // IN the worktree, and the name in the worker's env so `lf chat`
+        // with no args speaks locally.
+        assert_eq!(
+            dispatched.channel,
+            worktree_name.trim_start_matches(&format!("{repo_name}."))
+        );
+        assert!(dispatched.channel.starts_with("ship."));
+        let journal =
+            crate::wave::journal::journal_path(Path::new(&run.worktree), &dispatched.channel);
+        assert!(
+            journal.is_file(),
+            "child channel journal initialized in the worktree"
+        );
+        assert_eq!(
+            session.env.get("LFD_CHANNEL").map(String::as_str),
+            Some(dispatched.channel.as_str())
+        );
+    }
+
+    /// Dispatch announces the work line to the parent's live server: the
+    /// wave's thread shows "work line <name> opened" (journaled as
+    /// `ChannelOpened` — idempotent, so a retry knocks harmlessly).
+    #[tokio::test]
+    async fn dispatch_notifies_the_parent_channel_when_a_listener_is_up() {
+        let repo = TestRepo::new();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let wave = make_wave(repo.path(), "ship", 2);
+        store.create_wave(&wave).await.expect("seed wave");
+
+        // A live listener at the wave home (discovery-file resolution).
+        let (runtime, _inbox) =
+            crate::wave::runtime::WaveRuntime::open("ship".into(), repo.path().to_path_buf())
+                .expect("open runtime");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = crate::wave::server::router(runtime.clone());
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        crate::wave::server::write_endpoint(repo.path(), "ship", addr).expect("pointer");
+
+        let dispatched = dispatch(
+            &store,
+            "ship",
+            "implement",
+            "Wire it.",
+            Placement::Fresh,
+            None,
+        )
+        .await
+        .expect("dispatch");
+        notify_channel_opened(&store, &dispatched).await;
+        notify_channel_opened(&store, &dispatched).await; // idempotent knock
+
+        let thread = runtime.thread_snapshot();
+        assert_eq!(thread.len(), 1);
+        assert_eq!(
+            thread[0].text,
+            format!("work line {} opened", dispatched.channel)
+        );
+        assert_eq!(thread[0].from.as_deref(), Some("dispatch"));
+    }
+
+    /// No listener anywhere: the announcement is skipped, dispatch stands.
+    #[tokio::test]
+    async fn dispatch_notification_is_best_effort_without_a_listener() {
+        let repo = TestRepo::new();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let wave = make_wave(repo.path(), "ship", 2);
+        store.create_wave(&wave).await.expect("seed wave");
+        let dispatched = dispatch(
+            &store,
+            "ship",
+            "implement",
+            "Wire it.",
+            Placement::Fresh,
+            None,
+        )
+        .await
+        .expect("dispatch");
+        notify_channel_opened(&store, &dispatched).await; // must not error/panic
     }
 
     /// The wrapper `lf q` launches workers with, pinned end to end: built
@@ -453,6 +625,22 @@ mod tests {
             worktree_name,
             format!("{repo_name}.ship"),
             "pool placement shares the wave's two-segment worktree"
+        );
+        // Pool shares the wave worktree, so its channel IS the wave channel:
+        // nothing minted in the worktree, env still names the channel.
+        assert_eq!(dispatched.channel, "ship");
+        assert!(
+            !crate::wave::journal::journal_path(Path::new(&dispatched.run.worktree), "ship")
+                .exists(),
+            "no channel journal minted in the pool worktree (the wave's lives at the origin)"
+        );
+        assert_eq!(
+            dispatched
+                .session
+                .env
+                .get("LFD_CHANNEL")
+                .map(String::as_str),
+            Some("ship")
         );
     }
 

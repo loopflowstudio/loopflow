@@ -33,6 +33,7 @@
 //! which fold into the mind's `<in_flight>` heartbeat context. No registry
 //! store on the machine → warn once, fully functional anyway.
 
+pub mod channel;
 pub mod journal;
 pub mod memory;
 pub mod mind;
@@ -1029,6 +1030,239 @@ mod tests {
             frames.iter().all(|t| t.status != Lifecycle::Running),
             "no stale running turn in replay"
         );
+    }
+
+    /// Boot the HTTP surface over a family: origin repo nested in the
+    /// tempdir so child worktrees (siblings of the origin) stay inside it.
+    async fn boot_family(
+        children: &[&str],
+    ) -> (String, std::sync::Arc<WaveRuntime>, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let origin = tmp.path().join("repo");
+        std::fs::create_dir_all(origin.join("wave/ship")).expect("wave dir");
+        for child in children {
+            std::fs::create_dir_all(crate::wave::channel::child_worktree_path(&origin, child))
+                .expect("child worktree");
+        }
+        let (runtime, _inbox_rx) = WaveRuntime::open("ship".into(), origin).expect("open runtime");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = server::router(runtime.clone());
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        (format!("http://{addr}"), runtime, tmp)
+    }
+
+    /// Name-addressed chat: a message POSTed with a channel lands in THAT
+    /// channel's journal (in its worktree), never the wave's; the wave
+    /// channel stays byte-identical for unaddressed posts. Foreign and
+    /// vanished channels 404.
+    #[tokio::test]
+    async fn posted_message_with_channel_lands_in_that_journal() {
+        let (base, runtime, _tmp) = boot_family(&["ship.148e"]).await;
+        let client = reqwest::Client::new();
+
+        let body: serde_json::Value = client
+            .post(format!("{base}/messages"))
+            .json(&serde_json::json!({
+                "op": "say",
+                "text": "landed the parser",
+                "from": { "session_id": null, "label": "worker" },
+                "channel": "ship.148e",
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(body["turn"]["text"], "landed the parser");
+
+        // The child journal (in its worktree) has the row; the wave's doesn't.
+        let child_journal =
+            crate::wave::channel::child_journal_path(runtime.repo_root(), "ship.148e");
+        let events = journal::read_events(&child_journal);
+        assert_eq!(events.len(), 1);
+        assert!(
+            runtime.thread_snapshot().is_empty(),
+            "wave thread untouched"
+        );
+        assert_eq!(
+            journal::read_events(&journal::journal_path(runtime.repo_root(), "ship"))
+                .iter()
+                .filter(|e| matches!(e.kind, journal::EventKind::UserMessage { .. }))
+                .count(),
+            0,
+            "wave journal untouched"
+        );
+
+        // Addressing the wave channel by name = the unaddressed path.
+        client
+            .post(format!("{base}/messages"))
+            .json(&serde_json::json!({ "op": "message", "text": "to the wave", "channel": "ship" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(runtime.thread_snapshot().len(), 1);
+
+        // Outside the family, or a work line with no worktree: 404.
+        for channel in ["concerto", "ship.ghost"] {
+            let refused = client
+                .post(format!("{base}/messages"))
+                .json(&serde_json::json!({ "op": "message", "text": "?", "channel": channel }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                refused.status(),
+                reqwest::StatusCode::NOT_FOUND,
+                "channel '{channel}' bounces"
+            );
+        }
+    }
+
+    /// `POST /channels` (the dispatch knock): the wave's thread shows the
+    /// opening, idempotent on run id; foreign names 404.
+    #[tokio::test]
+    async fn channels_door_journals_the_opening_once() {
+        let (base, runtime, _tmp) = boot_family(&[]).await;
+        let client = reqwest::Client::new();
+
+        let body: serde_json::Value = client
+            .post(format!("{base}/channels"))
+            .json(&serde_json::json!({ "name": "ship.148e", "run_id": "run-1" }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(body["turn"]["text"], "work line ship.148e opened");
+        assert_eq!(body["turn"]["from"], "dispatch");
+
+        let again: serde_json::Value = client
+            .post(format!("{base}/channels"))
+            .json(&serde_json::json!({ "name": "ship.148e", "run_id": "run-1" }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(again["turn"].is_null(), "repeated knock appends nothing");
+        assert_eq!(runtime.thread_snapshot().len(), 1);
+
+        let foreign = client
+            .post(format!("{base}/channels"))
+            .json(&serde_json::json!({ "name": "concerto.x", "run_id": "run-2" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(foreign.status(), reqwest::StatusCode::NOT_FOUND);
+    }
+
+    /// The family subscription: the default `/events` replays the primary
+    /// (untagged) plus every child (tagged with its channel) and streams
+    /// live frames from all of them; `?channel=` narrows to one; a foreign
+    /// name 404s.
+    #[tokio::test]
+    async fn events_family_subscription_carries_channel_tagged_frames() {
+        let (base, runtime, _tmp) = boot_family(&["ship.a", "ship.b"]).await;
+        narrate(&runtime, "wave turn");
+        runtime
+            .deliver_to_channel(
+                "ship.a",
+                journal::MessageOp::Message,
+                "a replay".into(),
+                None,
+            )
+            .unwrap();
+
+        let host = base.strip_prefix("http://").unwrap().to_string();
+        let mut stream = tokio::net::TcpStream::connect(&host).await.unwrap();
+        stream
+            .write_all(b"GET /events HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n")
+            .await
+            .unwrap();
+
+        // Live frames after connect, from both children.
+        runtime
+            .deliver_to_channel("ship.b", journal::MessageOp::Message, "b live".into(), None)
+            .unwrap();
+        let mut acc = String::new();
+        let mut buf = [0u8; 4096];
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let read = tokio::time::timeout_at(deadline, stream.read(&mut buf)).await;
+            match read {
+                Ok(Ok(0)) | Err(_) => break,
+                Ok(Ok(n)) => {
+                    acc.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    if acc.contains("wave turn")
+                        && acc.contains("a replay")
+                        && acc.contains("b live")
+                    {
+                        break;
+                    }
+                }
+                Ok(Err(_)) => break,
+            }
+        }
+        assert!(acc.contains("a replay"), "child replay arrives: {acc}");
+        assert!(acc.contains("b live"), "child live frame arrives");
+        assert!(
+            acc.contains(r#""channel":"ship.a""#) && acc.contains(r#""channel":"ship.b""#),
+            "child frames carry their channel tag"
+        );
+        // The primary's frames stay untagged (family-of-one wire, unchanged).
+        let wave_frame = acc
+            .lines()
+            .find(|line| line.contains("wave turn"))
+            .expect("wave frame");
+        assert!(
+            !wave_frame.contains(r#""channel""#),
+            "primary frames are untagged: {wave_frame}"
+        );
+
+        // ?channel=ship.a serves only that channel — no wave turn, no b.
+        let mut one = tokio::net::TcpStream::connect(&host).await.unwrap();
+        one.write_all(
+            b"GET /events?channel=ship.a HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n",
+        )
+        .await
+        .unwrap();
+        let mut acc_one = String::new();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let read = tokio::time::timeout_at(deadline, one.read(&mut buf)).await;
+            match read {
+                Ok(Ok(0)) | Err(_) => break,
+                Ok(Ok(n)) => {
+                    acc_one.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    if acc_one.contains("a replay") {
+                        break;
+                    }
+                }
+                Ok(Err(_)) => break,
+            }
+        }
+        assert!(acc_one.contains("a replay"));
+        assert!(!acc_one.contains("wave turn"), "no primary frames");
+        assert!(
+            !acc_one.contains("event: state"),
+            "no mind on a child channel"
+        );
+
+        // A name outside the family is a 404.
+        let refused = reqwest::get(format!("{base}/events?channel=concerto"))
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), reqwest::StatusCode::NOT_FOUND);
+        let both = reqwest::get(format!("{base}/events?channel=ship&prefix=ship"))
+            .await
+            .unwrap();
+        assert_eq!(both.status(), reqwest::StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

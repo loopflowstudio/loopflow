@@ -6,6 +6,11 @@
 //! a transport: `wave/<name>/.wave-endpoint` holds `127.0.0.1:<port>` and
 //! nothing else.
 //!
+//! The server serves the wave's CHANNEL FAMILY (see [`crate::wave::channel`]):
+//! the primary channel is the wave's name; work-line channels are addressed
+//! by their ownership names (`goals.148e0e02`). It holds the pen for every
+//! child journal; doors are name-addressed.
+//!
 //! Wire contract (snake_case, stable — a Concerto worker builds against it):
 //! - `GET /health` → `{status, mind, wave, turns, workers, uptime_seconds}`;
 //!   `status` is CHANNEL liveness — always `serving` while this process
@@ -17,34 +22,57 @@
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
 //!   `running`), if one is in progress, after the finalized thread. Optional
 //!   `?limit=N` tails the last N turns (open turn included) — `wave_context`
-//!   passes 12; absent means the whole thread.
-//! - `GET /events` → SSE, the wave's one unified stream. Three event names:
+//!   passes 12; absent means the whole thread. Primary channel only.
+//! - `GET /events` → SSE, the family's one unified stream. Scope by query:
+//!   `?channel=<name>` (exactly one channel), `?prefix=<name>` (that subtree),
+//!   default = the whole family. A name outside this wave's family is a 404.
+//!   Three event names:
 //!   - `state`: data is the mind-state name (`idle | turning | interrupting |
 //!     failed`), sent once on subscribe (before the turn replay) and again on
-//!     every transition — the composer keys its verb off it.
+//!     every transition — the composer keys its verb off it. Primary channel
+//!     only — child channels have no mind, so a child-only subscription
+//!     carries no `state` frames.
 //!   - `turn`: data is a `Turn` JSON; the thread replays on connect
-//!     (including the open turn), then streams live. Turn ids repeat: an
-//!     in-progress turn is re-sent whole as it grows and finalization sends
-//!     the terminal turn under the same id — each frame replaces the client's
-//!     previous state for that id (upsert, never append-if-seen).
+//!     (including the open turn), then streams live. A turn from a CHILD
+//!     channel carries one extra key, `"channel": "<name>"`; the primary
+//!     channel's turns ride untagged (absent `channel` = the wave's own
+//!     channel), so a family of one is byte-identical to the pre-family wire.
+//!     Turn ids repeat — and repeat across channels: an in-progress turn is
+//!     re-sent whole as it grows and finalization sends the terminal turn
+//!     under the same id — each frame replaces the client's previous state
+//!     for that (channel, id) pair (upsert, never append-if-seen).
 //!   - `memory`: data is the `MemoryUpdated` summary string, fired on every
-//!     curation. Live-only, no replay — MEMORY.md itself is the durable state.
-//! - `POST /messages {op, text, from?}` → `{turn, state}`. `op` is required —
-//!   `"message"` (queued; the next turn answers it), `"steer"` (into the live
-//!   turn when the harness supports it, else degrades to a queued message),
-//!   `"interrupt"` (cancel the open turn; non-empty text becomes the next
-//!   turn — "interrupt & send"; while idle, an interrupt is a no-op success),
-//!   or `"say"` (an attributed emission — `lf chat`: a worker report,
-//!   child-wave escalation, or CLI FYI; lands in the thread with its byline
-//!   AND queues for the mind like a message). `text` may be empty only for
-//!   `interrupt` (400 otherwise). `from {session_id?, label}` is required for
-//!   `say` and rejected for every other op (400) — human turns are
-//!   unattributed by convention. `turn` is the appended user `Turn`, or null
-//!   for a bare interrupt (nothing was said); `state` is the mind-state name
-//!   when the request was accepted — ops are applied by the mind
-//!   asynchronously, so watch the stream's `state` events for the outcome.
+//!     curation. Live-only, no replay — MEMORY.md itself is the durable
+//!     state. Primary channel only (memory is wave identity; work lines have
+//!     none).
+//! - `POST /messages {op, text, from?, channel?}` → `{turn, state}`. `op` is
+//!   required — `"message"` (queued; the next turn answers it), `"steer"`
+//!   (into the live turn when the harness supports it, else degrades to a
+//!   queued message), `"interrupt"` (cancel the open turn; non-empty text
+//!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
+//!   a no-op success), or `"say"` (an attributed emission — `lf chat`: a
+//!   worker report, child-wave escalation, or CLI FYI; lands in the thread
+//!   with its byline AND queues for the mind like a message). `text` may be
+//!   empty only for `interrupt` (400 otherwise). `from {session_id?, label}`
+//!   is required for `say` and rejected for every other op (400) — human
+//!   turns are unattributed by convention. `channel` is explicitly Optional:
+//!   null targets the wave channel (unchanged); a child name lands the
+//!   message in THAT channel's journal (404 outside the family or when the
+//!   work line's worktree is gone). On a child channel there is no resident:
+//!   steer degrades to a plain message, a bare interrupt is a no-op. `turn`
+//!   is the appended user `Turn`, or null for a bare interrupt (nothing was
+//!   said); `state` is the mind-state name when the request was accepted —
+//!   ops are applied by the mind asynchronously, so watch the stream's
+//!   `state` events for the outcome.
+//! - `POST /channels {name, run_id}` → `{turn}` — the dispatch notification
+//!   door: `lf q worker run` minted a work-line worktree and its channel
+//!   journal, and knocks here so the PARENT channel's thread shows
+//!   "work line <name> opened" (journaled as `ChannelOpened`, idempotent on
+//!   `run_id` — a repeated knock returns `{turn: null}`). 404 outside the
+//!   family.
 //! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
-//!   origin repo.
+//!   origin repo. Wave-level only: memory is wave identity, channels don't
+//!   have it.
 //! - `POST /memory {op, content, summary}` → `{summary}`. `op` is `"update"`
 //!   (full replacement) or `"add"` (append one curated bullet; `content` must
 //!   be non-empty). `summary` is explicitly Optional — null falls back to the
@@ -106,12 +134,38 @@ struct ConversationQuery {
 
 /// `POST /messages` request body. `op` is required — explicit, never inferred
 /// (no serde default; an op-less body is a 422). `from` is explicitly
-/// Optional: required for `say`, rejected otherwise.
+/// Optional: required for `say`, rejected otherwise. `channel` is explicitly
+/// Optional: null = the wave channel; a child name addresses that channel's
+/// journal (404 outside the family).
 #[derive(Debug, Deserialize)]
 struct PostMessage {
     op: MessageOp,
     text: String,
     from: Option<Attribution>,
+    channel: Option<String>,
+}
+
+/// `POST /channels` request body — the dispatch notification (see module
+/// doc). Both fields required.
+#[derive(Debug, Deserialize)]
+struct PostChannel {
+    name: String,
+    run_id: String,
+}
+
+/// `POST /channels` response: the thread-visible opening turn, or null when
+/// the run's opening was already journaled (idempotent knock).
+#[derive(Debug, Serialize)]
+struct PostChannelResponse {
+    turn: Option<ChatTurn>,
+}
+
+/// `GET /events` scope query. Both explicitly Optional; setting both is a
+/// 400. Absent = the whole family.
+#[derive(Debug, Deserialize)]
+struct EventsQuery {
+    channel: Option<String>,
+    prefix: Option<String>,
 }
 
 /// `GET /memory` response.
@@ -170,6 +224,7 @@ pub fn router(runtime: Arc<WaveRuntime>) -> Router {
         .route("/conversation", get(conversation_handler))
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
+        .route("/channels", post(channels_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
         .with_state(state)
 }
@@ -226,11 +281,50 @@ async fn messages_handler(
             "text is required for every op but interrupt".to_string(),
         ));
     }
-    let turn = state.runtime.deliver(body.op, body.text, body.from);
+    let channel = body
+        .channel
+        .unwrap_or_else(|| state.runtime.name().to_string());
+    if !state.runtime.in_family(&channel) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!(
+                "channel '{channel}' is not in wave '{}''s family",
+                state.runtime.name()
+            ),
+        ));
+    }
+    let turn = state
+        .runtime
+        .deliver_to_channel(&channel, body.op, body.text, body.from)
+        .map_err(|err| (StatusCode::NOT_FOUND, err.to_string()))?;
     Ok(Json(PostMessageResponse {
         turn,
         state: state.runtime.mind_state().name().to_string(),
     }))
+}
+
+/// The dispatch notification door: journal `ChannelOpened` on the primary
+/// channel (idempotent on run id) so the wave's thread shows the work line
+/// opening. The child channel itself materializes lazily on first delivery
+/// or subscription — the journal file was already minted by the dispatcher.
+async fn channels_handler(
+    State(state): State<ServerState>,
+    Json(body): Json<PostChannel>,
+) -> Result<Json<PostChannelResponse>, (StatusCode, String)> {
+    if body.name == state.runtime.name() || !state.runtime.in_family(&body.name) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!(
+                "'{}' is not a child channel of wave '{}'",
+                body.name,
+                state.runtime.name()
+            ),
+        ));
+    }
+    let turn = state
+        .runtime
+        .journal_channel_opened(&body.name, &body.run_id);
+    Ok(Json(PostChannelResponse { turn }))
 }
 
 async fn memory_handler(State(state): State<ServerState>) -> Json<MemoryBody> {
@@ -278,56 +372,183 @@ fn first_line(content: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The unified `/events` SSE: send the mind state, replay the thread on
-/// connect (open turn included, status `running`), then stream live frames
-/// as-is — `state` on every transition, `turn` ids repeating by design
-/// (every frame replaces the client's state for that id, so an in-progress
-/// turn updates in place and its terminal frame lands under the same id),
-/// `memory` on every curation (live-only; the file is the durable state).
-/// Snapshot and subscription are atomic in the runtime (broadcasts share the
-/// append lock), so no live frame is ever older than the replayed snapshot.
+/// The unified `/events` SSE, scoped to one channel, a subtree, or (default)
+/// the whole family.
+///
+/// The primary channel's replay-then-live shape is unchanged: the mind state,
+/// the thread on connect (open turn included, status `running`), then live
+/// frames — `state` on every transition, `turn` ids repeating by design
+/// (every frame replaces the client's state for that (channel, id), so an
+/// in-progress turn updates in place and its terminal frame lands under the
+/// same id), `memory` on every curation (live-only; the file is the durable
+/// state). Snapshot and subscription are atomic in the runtime (broadcasts
+/// share the append lock), so no primary live frame is ever older than the
+/// replayed snapshot.
+///
+/// Child channels replay their folded threads (turn frames tagged with
+/// `channel`) and stream live off the family bus, subscribed BEFORE the
+/// snapshots — a frame can repeat across the boundary, never go missing.
+/// A subscription that names a child channel with no journal yet just waits:
+/// the channel may open later.
 async fn events_handler(
     State(state): State<ServerState>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let sub = state.runtime.subscribe_with_snapshot();
+    Query(query): Query<EventsQuery>,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    let wave = state.runtime.name().to_string();
+    let (scope, primary) = match (query.channel, query.prefix) {
+        (Some(_), Some(_)) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "pass channel or prefix, not both".to_string(),
+            ));
+        }
+        (Some(channel), None) => {
+            let primary = channel == wave;
+            (Scope::Channel(channel), primary)
+        }
+        (None, Some(prefix)) => {
+            let primary = prefix == wave;
+            (Scope::Prefix(prefix), primary)
+        }
+        (None, None) => (Scope::Prefix(wave.clone()), true),
+    };
+    let name = scope.name();
+    if !state.runtime.in_family(name) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("'{name}' is not in wave '{wave}''s family"),
+        ));
+    }
 
-    let replay = stream::iter(
-        std::iter::once(Ok(state_event(&sub.state)))
-            .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t)))),
-    );
-    let live_turns = BroadcastStream::new(sub.turn_rx).filter_map(move |res| {
-        let out = match res {
-            Ok(turn) => Some(Ok(turn_event(&turn))),
-            // Lagged: the client fell behind. Skip; it resyncs from /conversation.
-            Err(_) => None,
-        };
-        async move { out }
-    });
-    let live_states = BroadcastStream::new(sub.state_rx).filter_map(move |res| {
-        let out = match res {
-            Ok(mind_state) => Some(Ok(state_event(&mind_state))),
-            // Lagged: fine — the next transition carries the current state.
-            Err(_) => None,
-        };
-        async move { out }
-    });
-    let live_memory = BroadcastStream::new(sub.memory_rx).filter_map(move |res| {
-        let out = match res {
-            Ok(summary) => Some(Ok(memory_event(&summary))),
-            // Lagged: fine — MEMORY.md itself is the durable state.
-            Err(_) => None,
-        };
-        async move { out }
+    // Child channels: live bus first, snapshots second (see method doc).
+    let (child_snapshots, family_rx) = match &scope {
+        Scope::Channel(channel) if channel == &wave => (Vec::new(), None),
+        Scope::Channel(channel) => {
+            let (snapshots, rx) = state.runtime.subscribe_children(channel);
+            (snapshots, Some(rx))
+        }
+        Scope::Prefix(prefix) => {
+            let (snapshots, rx) = state.runtime.subscribe_children(prefix);
+            (snapshots, Some(rx))
+        }
+    };
+    let child_replay = stream::iter(child_snapshots.into_iter().flat_map(|(channel, turns)| {
+        turns
+            .into_iter()
+            .map(move |turn| Ok(tagged_turn_event(&channel, &turn)))
+            .collect::<Vec<_>>()
+    }));
+    let live_children = family_rx.map(|rx| {
+        let scope = scope.clone();
+        BroadcastStream::new(rx).filter_map(move |res| {
+            let out = match res {
+                Ok(frame) if scope.matches(&frame.channel) => {
+                    Some(Ok(tagged_turn_event(&frame.channel, &frame.turn)))
+                }
+                // Out of scope, or lagged (the journal has it; a client
+                // that fell behind resyncs on reconnect).
+                _ => None,
+            };
+            async move { out }
+        })
     });
 
-    let live = stream::select(live_turns, stream::select(live_states, live_memory));
-    Sse::new(replay.chain(live)).keep_alive(KeepAlive::default())
+    let mut streams: Vec<BoxedEventStream> = Vec::new();
+    if primary {
+        let sub = state.runtime.subscribe_with_snapshot();
+        let replay = stream::iter(
+            std::iter::once(Ok(state_event(&sub.state)))
+                .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t)))),
+        );
+        let live_turns = BroadcastStream::new(sub.turn_rx).filter_map(move |res| {
+            let out = match res {
+                Ok(turn) => Some(Ok(turn_event(&turn))),
+                // Lagged: the client fell behind. Skip; it resyncs from /conversation.
+                Err(_) => None,
+            };
+            async move { out }
+        });
+        let live_states = BroadcastStream::new(sub.state_rx).filter_map(move |res| {
+            let out = match res {
+                Ok(mind_state) => Some(Ok(state_event(&mind_state))),
+                // Lagged: fine — the next transition carries the current state.
+                Err(_) => None,
+            };
+            async move { out }
+        });
+        let live_memory = BroadcastStream::new(sub.memory_rx).filter_map(move |res| {
+            let out = match res {
+                Ok(summary) => Some(Ok(memory_event(&summary))),
+                // Lagged: fine — MEMORY.md itself is the durable state.
+                Err(_) => None,
+            };
+            async move { out }
+        });
+        let live = stream::select(live_turns, stream::select(live_states, live_memory));
+        streams.push(Box::pin(replay.chain(live)));
+    }
+    match live_children {
+        Some(live) => streams.push(Box::pin(child_replay.chain(live))),
+        None => streams.push(Box::pin(child_replay)),
+    }
+    let merged: BoxedEventStream = match streams.len() {
+        1 => streams.pop().expect("one stream"),
+        _ => {
+            let children = streams.pop().expect("child stream");
+            let primary = streams.pop().expect("primary stream");
+            Box::pin(stream::select(primary, children))
+        }
+    };
+    Ok(axum::response::IntoResponse::into_response(
+        Sse::new(merged).keep_alive(KeepAlive::default()),
+    ))
+}
+
+type BoxedEventStream =
+    std::pin::Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send + 'static>>;
+
+/// The scope one `/events` subscription covers.
+#[derive(Debug, Clone)]
+enum Scope {
+    /// Exactly one channel.
+    Channel(String),
+    /// A subtree: the named channel and every dot-descendant.
+    Prefix(String),
+}
+
+impl Scope {
+    fn name(&self) -> &str {
+        match self {
+            Self::Channel(name) | Self::Prefix(name) => name,
+        }
+    }
+
+    fn matches(&self, channel: &str) -> bool {
+        match self {
+            Self::Channel(name) => channel == name,
+            Self::Prefix(prefix) => crate::wave::channel::matches_prefix(channel, prefix),
+        }
+    }
 }
 
 fn turn_event(turn: &ChatTurn) -> Event {
     Event::default()
         .event("turn")
         .data(serde_json::to_string(turn).unwrap_or_default())
+}
+
+/// A child channel's turn frame: the `Turn` JSON plus one extra key,
+/// `"channel"`. Additive — the primary channel's frames stay untagged, so a
+/// family of one is byte-identical to the pre-family wire.
+fn tagged_turn_event(channel: &str, turn: &ChatTurn) -> Event {
+    let mut value = serde_json::to_value(turn).unwrap_or(serde_json::Value::Null);
+    if let serde_json::Value::Object(map) = &mut value {
+        map.insert(
+            "channel".to_string(),
+            serde_json::Value::String(channel.to_string()),
+        );
+    }
+    Event::default().event("turn").data(value.to_string())
 }
 
 fn state_event(state: &MindState) -> Event {

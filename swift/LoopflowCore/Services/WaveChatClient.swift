@@ -151,6 +151,13 @@ struct PostMessageResponse: Decodable {
     let state: String
 }
 
+/// The optional channel tag beside a `turn` frame's fields: present on
+/// work-line channel frames of a family subscription, absent on the wave's
+/// own (absent = the primary channel).
+struct FrameChannelTag: Decodable {
+    let channel: String?
+}
+
 /// Observable connection to one wave's chat server: the live thread plus a phase
 /// the UI renders (not running / connecting / live).
 @MainActor
@@ -295,8 +302,12 @@ public final class WaveChatConnection {
     /// then a terminal frame at finalization, every frame replacing the
     /// previous state of its id; `memory` carries a MEMORY.md curation
     /// summary (live-only, parsed and exposed, no UI yet). Unknown events
-    /// drop. A turn payload that fails to decode is a hole in the transcript:
-    /// logged always, asserted in debug — never silent. Internal for tests.
+    /// drop. A turn from a work-line CHANNEL carries an extra `channel` key
+    /// (the wave's own turns ride untagged) — WaveChat renders the PRIMARY
+    /// channel only for now, so tagged frames for other channels are
+    /// skipped, not errors (family UI is later). A turn payload that fails
+    /// to decode is a hole in the transcript: logged always, asserted in
+    /// debug — never silent. Internal for tests.
     func handle(event: String, data: String) {
         if event == "state" {
             guard let state = WaveMindState(rawValue: data) else { return }
@@ -308,6 +319,10 @@ public final class WaveChatConnection {
             return
         }
         guard event.isEmpty || event == "turn", let json = data.data(using: .utf8) else { return }
+        if let tag = try? decoder.decode(FrameChannelTag.self, from: json),
+           let channel = tag.channel, channel != waveName {
+            return
+        }
         do {
             upsert(try decoder.decode(ChatTurn.self, from: json))
         } catch {

@@ -1,12 +1,13 @@
-use crate::engine::config::BranchNameConfig;
+use crate::engine::config::{load_config, BranchNameConfig};
 use crate::engine::error::GitError;
 use crate::engine::git::{
-    get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
+    current_branch, get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
     is_squash_merged, rev_parse, sync_main, worktree_add, worktree_move, WorktreeBranch,
 };
 use crate::engine::naming::{format_branch_name, generate_timestamp, wave_name_from_branch};
 use crate::lfd::security::sanitize_fs_component;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -149,6 +150,12 @@ pub struct CreateWorktreeResult {
     pub base_commit: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeLease {
+    pub path: PathBuf,
+    pub branch: String,
+}
+
 pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
     let output = Command::new("git")
         .arg("-C")
@@ -176,6 +183,55 @@ pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
 
 pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
     worktree_path_with_config(repo, name, None)
+}
+
+/// Create a worktree for this wave, or reuse the existing one.
+pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result<WorktreeLease> {
+    let path = worktree_path(main_repo, wave_name);
+    if path.exists() && path.join(".git").exists() {
+        let branch = current_branch(&path)?.unwrap_or_default();
+        return Ok(WorktreeLease { path, branch });
+    }
+
+    let config = load_config(Some(main_repo)).ok().flatten();
+    let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
+    let result = create_with_schema_synced(main_repo, wave_name, None, branch_config)?;
+    Ok(WorktreeLease {
+        path: result.path,
+        branch: result.branch,
+    })
+}
+
+/// Short run id: the leading 8 hex chars of the run's UUID, tying the
+/// worktree directory to its Run row.
+pub fn short_run_id(run_id: &str) -> String {
+    let hex: String = run_id
+        .chars()
+        .filter(|ch| ch.is_ascii_hexdigit())
+        .take(8)
+        .collect();
+    if hex.len() == 8 {
+        hex
+    } else {
+        short_hash(run_id, 8)
+    }
+}
+
+/// Sibling worktree for a wave-dispatched worker: `<repo>.<wave>.<short-run-id>`.
+pub fn run_worktree_path(main_repo: &Path, wave_name: &str, run_id: &str) -> PathBuf {
+    let base_wt = worktree_path(main_repo, wave_name);
+    let base_name = base_wt
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("wave");
+    base_wt.with_file_name(format!("{base_name}.{}", short_run_id(run_id)))
+}
+
+fn short_hash(value: &str, chars: usize) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    let mut hash = hex::encode(digest);
+    hash.truncate(chars);
+    hash
 }
 
 pub fn worktree_path_with_config(

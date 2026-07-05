@@ -25,14 +25,14 @@ use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
+use crate::conversation::types::{ConversationEvent, ConversationItem, TurnUsage};
 use crate::engine::agent::{
     build_codex_thread_start_params, system_prompt_with_structured_replies, AgentConfig,
 };
-use crate::lfd::conversations::harness::codex_mapping::ItemPhase;
-use crate::lfd::conversations::harness::common::spawn_stderr_logger;
-use crate::lfd::conversations::harness::lf_tag::LfTagParser;
-use crate::lfd::conversations::harness::{codex_mapping, ApprovalPolicy, Capabilities, Harness};
-use crate::lfd::conversations::types::{ConversationEvent, ConversationItem, TurnUsage};
+use crate::harness::codex_mapping::ItemPhase;
+use crate::harness::common::spawn_stderr_logger;
+use crate::harness::lf_tag::LfTagParser;
+use crate::harness::{codex_mapping, ApprovalPolicy, Capabilities, Harness};
 
 /// SIGKILL an entire process group. Killing only the direct child orphans
 /// the real app-server when `codex` on PATH is an npm shim that spawns it as
@@ -891,7 +891,7 @@ mod tests {
         assert!(matches!(
             events[1],
             ConversationEvent::TurnCompleted {
-                status: crate::lfd::conversations::types::Lifecycle::Interrupted,
+                status: crate::conversation::types::Lifecycle::Interrupted,
                 ..
             }
         ));

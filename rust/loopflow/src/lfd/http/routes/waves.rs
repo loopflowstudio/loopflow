@@ -12,15 +12,14 @@ use tracing::warn;
 use super::session_controls::connection_host;
 use crate::engine::git::{branch_rename, current_branch, delete_remote_branch, push_with_upstream};
 use crate::engine::naming::sanitize_for_branch;
+use crate::engine::wave_config::update_wave_agent_config;
 use crate::engine::worktree::remove_worktree;
-use crate::engine::worktrees::{branch_exists, worktree_path};
-use crate::lfd::executor::ensure_wave_worktree;
+use crate::engine::worktrees::{branch_exists, ensure_wave_worktree, worktree_path};
 use crate::lfd::http::dto::{
     session_connection_info_dto, session_dto, CombineResponse, CombineResponseResult,
     DeletedResourceResponse, LandWaveResponse, ListResponse, NextWaveResponse, StopWaveResponse,
     WaveAgentTreeDto, WaveAgentTreeSessionDto, WaveDto,
 };
-use crate::lfd::http::routes::wave_config::update_wave_agent_config;
 use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
@@ -748,9 +747,9 @@ fn resolve_wave_work_dir(
         );
     }
 
-    let (worktree, _) =
+    let lease =
         ensure_wave_worktree(FsPath::new(repo_path), wave_name).map_err(|err| err.to_string())?;
-    Ok(worktree)
+    Ok(lease.path.to_string_lossy().to_string())
 }
 
 /// Move a wave's worktree and rename its branch to match the new name.

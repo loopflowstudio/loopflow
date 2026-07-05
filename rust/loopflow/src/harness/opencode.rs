@@ -10,14 +10,12 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::conversation::types::{ConversationEvent, Lifecycle};
 use crate::engine::agent::AgentConfig;
 use crate::engine::config::parse_agent;
-use crate::lfd::conversations::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::lfd::conversations::harness::{
-    opencode_mapping, ApprovalPolicy, Capabilities, Harness, HarnessError,
-};
+use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
+use crate::harness::{opencode_mapping, ApprovalPolicy, Capabilities, Harness, HarnessError};
 use crate::lfd::conversations::opencode_runtime;
-use crate::lfd::conversations::types::{ConversationEvent, Lifecycle};
 
 const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 

@@ -13,8 +13,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
+use crate::conversation::types::ConversationEvent;
 use crate::engine::agent::AgentConfig;
-use crate::lfd::conversations::types::ConversationEvent;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HarnessError {

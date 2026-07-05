@@ -9,10 +9,10 @@
 
 use std::time::Duration;
 
+use loopflow::conversation::types::{ConversationEvent, ConversationItem, Lifecycle};
 use loopflow::engine::agent::AgentConfig;
-use loopflow::lfd::conversations::harness::codex::CodexHarness;
-use loopflow::lfd::conversations::harness::{ApprovalPolicy, Harness};
-use loopflow::lfd::conversations::types::{ConversationEvent, ConversationItem, Lifecycle};
+use loopflow::harness::codex::CodexHarness;
+use loopflow::harness::{ApprovalPolicy, Harness};
 use tokio::sync::mpsc;
 
 #[tokio::test]

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::lfd::conversations::types::{
+use crate::conversation::types::{
     ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage,
 };
 

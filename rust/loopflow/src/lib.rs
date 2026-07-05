@@ -1,4 +1,6 @@
+pub mod conversation;
 pub mod engine;
+pub mod harness;
 pub mod journal;
 pub mod lf;
 pub mod lfd;

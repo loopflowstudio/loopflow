@@ -1,4 +1,4 @@
-use crate::lfd::conversations::types::{ConversationEvent, SuggestedActionPayload};
+use crate::conversation::types::{ConversationEvent, SuggestedActionPayload};
 
 const SUGGEST_ACTIONS_OPEN: &str = "<lf:suggest_actions>";
 const SUGGEST_ACTIONS_CLOSE: &str = "</lf:suggest_actions>";

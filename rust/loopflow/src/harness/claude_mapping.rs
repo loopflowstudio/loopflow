@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::lfd::conversations::harness::lf_tag::LfTagParser;
-use crate::lfd::conversations::types::{
+use crate::conversation::types::{
     ConversationEvent, ConversationItem, FileEdit, Lifecycle, TurnUsage,
 };
+use crate::harness::lf_tag::LfTagParser;
 
 /// Reader-local state for tracking in-flight content blocks.
 #[derive(Debug, Default)]

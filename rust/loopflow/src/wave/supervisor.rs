@@ -34,8 +34,8 @@ use tokio::process::Child;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::Instant;
 
-use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
-use crate::lfd::conversations::types::Lifecycle;
+use crate::conversation::turns::{ChatRole, ChatTurn};
+use crate::conversation::types::Lifecycle;
 use crate::wave::journal::MessageOp;
 use crate::wave::registry::process_alive;
 use crate::wave::runtime::{InboxItem, TurnFrame, WaveRuntime};

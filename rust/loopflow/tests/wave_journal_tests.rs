@@ -5,10 +5,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use loopflow::lfd::conversations::turns::ChatRole;
-use loopflow::lfd::conversations::types::{
-    ConversationEvent, ConversationItem, Lifecycle, TurnUsage,
-};
+use loopflow::conversation::turns::ChatRole;
+use loopflow::conversation::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
 use loopflow::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
 use loopflow::wave::mind::EventAdapter;
 use loopflow::wave::runtime::WaveRuntime;

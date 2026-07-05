@@ -24,7 +24,7 @@ use std::sync::Mutex;
 
 use tokio::sync::broadcast;
 
-use crate::lfd::conversations::turns::ChatTurn;
+use crate::conversation::turns::ChatTurn;
 use crate::wave::journal::{
     fold_thread, journal_path, Attribution, EventKind, Journal, MessageId, MessageOp,
 };

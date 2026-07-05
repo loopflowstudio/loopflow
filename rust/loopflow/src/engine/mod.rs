@@ -14,9 +14,11 @@ pub mod launch;
 pub mod naming;
 pub mod platform;
 pub mod prompt;
+pub mod repo;
 pub mod skills;
 pub mod stream;
 pub mod structured_reply;
+pub mod wave_config;
 pub mod wave_context;
 pub mod worktree;
 pub mod worktrees;
@@ -52,6 +54,7 @@ pub use prompt::{
     DiffTier, Document, DocumentSource, GatherContextOpts, GatherSpec, GatheredContext,
     PromptComponents, PromptFormatMode, RenderedPrompt, Surface,
 };
+pub use repo::find_repo_root;
 pub use skills::{sync_skills, SkillSyncOptions, SkillSyncReport};
 pub use stream::{
     format_event, render_event, ParseResult, ResultSubtype, StreamEvent, StreamFormat, StreamParser,

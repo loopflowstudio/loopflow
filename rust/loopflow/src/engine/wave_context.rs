@@ -31,8 +31,8 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
-use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
+use crate::conversation::turns::{ChatRole, ChatTurn};
+use crate::conversation::types::{ConversationItem, Lifecycle};
 use crate::wave::journal::{fold_thread, journal_path, read_events};
 use crate::wave::server::endpoint_path;
 

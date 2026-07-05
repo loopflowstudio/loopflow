@@ -34,8 +34,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
-use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
+use crate::conversation::turns::{ChatRole, ChatTurn};
+use crate::conversation::types::{ConversationItem, Lifecycle};
 use crate::wave::state::MindState;
 
 /// Current journal format version, stamped on every line.

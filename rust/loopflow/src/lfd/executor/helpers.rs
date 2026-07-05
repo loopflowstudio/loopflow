@@ -2,20 +2,18 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
-use sha2::{Digest, Sha256};
 use tracing::{error, info, warn};
 
 use time::OffsetDateTime;
 
-use crate::engine::config::{load_config, load_config_or_default};
+use crate::engine::config::load_config_or_default;
 use crate::engine::git::{
-    current_branch, fetch, get_default_branch, is_ancestor, rev_parse, sync_main, worktree_add,
-    WorktreeBranch,
+    fetch, get_default_branch, is_ancestor, rev_parse, sync_main, worktree_add, WorktreeBranch,
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::worktrees::{
-    branch_exists, create_with_schema_synced, schedule_upstream_sync,
-    worktree_path as wave_worktree_path,
+    branch_exists, ensure_wave_worktree as ensure_wave_worktree_lease, run_worktree_path,
+    schedule_upstream_sync, short_run_id,
 };
 
 use crate::lfd::id::LfdId;
@@ -165,44 +163,8 @@ pub async fn create_run_for_placement(
 
 /// Create a worktree for this wave, or reuse the existing one.
 pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result<(String, String)> {
-    let wt = wave_worktree_path(main_repo, wave_name);
-    if wt.exists() && wt.join(".git").exists() {
-        let branch = current_branch(&wt)?.unwrap_or_default();
-        return Ok((wt.to_string_lossy().to_string(), branch));
-    }
-
-    let config = load_config(Some(main_repo)).ok().flatten();
-    let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
-    let result = create_with_schema_synced(main_repo, wave_name, None, branch_config)?;
-    Ok((result.path.to_string_lossy().to_string(), result.branch))
-}
-
-/// Short run id: the leading 8 hex chars of the run's UUID, tying the
-/// worktree directory to its Run row.
-pub(crate) fn short_run_id(run_id: &str) -> String {
-    let hex: String = run_id
-        .chars()
-        .filter(|ch| ch.is_ascii_hexdigit())
-        .take(8)
-        .collect();
-    if hex.len() == 8 {
-        hex
-    } else {
-        short_hash(run_id, 8)
-    }
-}
-
-/// Sibling worktree for a wave-dispatched worker: `<repo>.<wave>.<short-run-id>`.
-///
-/// Segment count carries ownership: two segments (`<repo>.<name>`) is a human
-/// or wave worktree, three is a dispatched worker tied to a Run row.
-pub(crate) fn run_worktree_path(main_repo: &Path, wave_name: &str, run_id: &str) -> PathBuf {
-    let base_wt = wave_worktree_path(main_repo, wave_name);
-    let base_name = base_wt
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("wave");
-    base_wt.with_file_name(format!("{base_name}.{}", short_run_id(run_id)))
+    let lease = ensure_wave_worktree_lease(main_repo, wave_name)?;
+    Ok((lease.path.to_string_lossy().to_string(), lease.branch))
 }
 
 /// Generate a schema-formatted branch for the wave, de-colliding with word pairs.
@@ -584,13 +546,6 @@ fn append_lf_run_options(
     }
     cmd.push("-w".to_string());
     cmd.push(wave_name.to_string());
-}
-
-pub(crate) fn short_hash(value: &str, chars: usize) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    let mut hash = hex::encode(digest);
-    hash.truncate(chars);
-    hash
 }
 
 fn sync_existing_worktree(main_repo: &Path, worktree: &Path, branch: &str) -> anyhow::Result<()> {

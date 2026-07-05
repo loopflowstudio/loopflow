@@ -31,21 +31,18 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use tokio::sync::mpsc;
 
-use crate::engine::worktrees::main_repo_root;
-use crate::lf::commands::sub::stream_events;
-use crate::lf::commands::util::find_repo_root;
-use crate::lfd::conversations::harness::{
-    canonical_harness, default_create_harness, ApprovalPolicy, Harness,
-};
-use crate::lfd::conversations::types::ConversationEvent;
-use crate::lfd::executor::ensure_wave_worktree;
-use crate::lfd::http::routes::wave_config::read_wave_config;
+use crate::conversation::types::ConversationEvent;
+use crate::engine::repo::find_repo_root;
+use crate::engine::wave_config::read_wave_config;
+use crate::engine::worktrees::{ensure_wave_worktree, main_repo_root};
+use crate::harness::{canonical_harness, default_create_harness, ApprovalPolicy, Harness};
 use crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV;
 use crate::ops::util::resolve_wave_name;
 use crate::wave::journal::{MessageId, PendingMessage};
 use crate::wave::mind::{path_for_children, run_mind, MindConfig};
 use crate::wave::runtime::InboxItem;
 use crate::wave::server;
+use crate::wave::subscription::stream_events;
 use crate::wave::wire::{
     AttachRequest, AttachResponse, ContextResponse, InboxFrame, PostDeltasRequest, ResidentDelta,
     RESIDENT_TOKEN_ENV, RESIDENT_TOKEN_HEADER,
@@ -146,8 +143,7 @@ pub async fn drive(
 /// The wave's own worktree — `<repo>.<wave>`, a sibling of the main repo —
 /// created on first boot, reused after.
 fn wave_worktree(main_repo: &Path, wave: &str) -> Result<PathBuf> {
-    let (path, _branch) = ensure_wave_worktree(main_repo, wave)?;
-    Ok(PathBuf::from(path))
+    Ok(ensure_wave_worktree(main_repo, wave)?.path)
 }
 
 /// Where the listener is and how to prove we belong at its resident door:

@@ -40,8 +40,7 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use tokio::process::Command;
 
-use crate::lfd::executor::helpers::{is_active_run_status, tmux_session_exists};
-use crate::lfd::http::routes::wave_config::read_wave_config;
+use crate::engine::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     Run, RunStatus, Session, SessionStatus, SessionUse, Wave, WaveStatus, LIVE_SESSION_STATUSES,
@@ -50,6 +49,22 @@ use crate::lfd::types::{
 use crate::lfdb::{SharedStore, StoreResult};
 use crate::wave::journal::WorkerOutcome;
 use crate::wave::runtime::WaveRuntime;
+
+fn is_active_run_status(status: RunStatus) -> bool {
+    matches!(
+        status,
+        RunStatus::Pending | RunStatus::Running | RunStatus::Waiting
+    )
+}
+
+async fn tmux_session_exists(session_name: &str) -> anyhow::Result<bool> {
+    let status = Command::new("tmux")
+        .args(["has-session", "-t", session_name])
+        .status()
+        .await
+        .map_err(|err| anyhow::anyhow!("tmux session probe failed: {err}"))?;
+    Ok(status.success())
+}
 
 /// How often the observer re-reads the store between turns. Modest by
 /// design: the mind also refreshes right before every turn it takes.

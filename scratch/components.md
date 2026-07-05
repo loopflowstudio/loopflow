@@ -78,9 +78,14 @@ tree doesn't match this map; the conversion makes it match.
 - **IO**: its HTTP socket, store reads, `lf` execs. Never git, never gh,
   never tmux-kill, never vendor processes.
 
-### `lfdb` — transitional store (scheduled deletion)
-- **Role**: rows until the file-substrate move; then the gatekeeper's
-  in-memory index. No component may ADD dependencies on it.
+### `lfdb` — the machine scratchpad (REVISED 2026-07-05: sqlite STAYS)
+- **Role**: machine-local operational index, written directly by any lf —
+  a FILE, not a center (Jack: postgres was the center; sqlite got swept up
+  in the radicalism; corrected). Owns: runs/sessions registry, run_events
+  ledger, repos root-list, tokens. NOT: wave identity (markdown),
+  conversation (journals), queue truth (git/gh).
+- **M2 becomes**: delete postgres + the dual-backend/dialect machinery
+  (~2,500 lines); narrow sqlite to this charter; journals own conversation.
 
 ### `lfq` — the proxy (python, reborn)
 - **Role**: lf-through-HTTP: mirrors lf's ARGV to a gatekeeper, executing

@@ -6,7 +6,9 @@ produces: the post-M2 architecture — one picture, checked against the doctrine
 
 Substrate: the filesystem is the database. Per-channel journals (origin +
 worktrees), GOAL.md/MEMORY.md as identity/knowledge, endpoint+token files,
-git/gh as PR truth, keychain tokens. NO database engines anywhere.
+git/gh as PR truth, keychain tokens. One engine: machine-local sqlite (WAL, any-lf-writes, no owner daemon)
+as the operational scratchpad — runs/sessions/ledger/repos/tokens.
+Postgres and the dual-backend machinery are gone; teams = federation.
 
 Processes: LISTENER (lf wave; the only pens; hear/check/fold/tell) —
 RESIDENT (lf wave --mind-only; owns the harness crate; spawned by, wired to,

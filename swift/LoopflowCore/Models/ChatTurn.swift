@@ -24,7 +24,7 @@ public enum ConversationItem: Codable, Sendable, Hashable, Identifiable {
     case file(id: String, changes: [FileEdit], status: Lifecycle)
     case message(id: String, text: String, phase: String?)
     case thought(id: String, text: String)
-    case tool(id: String, name: String, status: Lifecycle, input: String?, output: String?)
+    case tool(id: String, name: String, status: Lifecycle, input: JSONValue?, output: String?)
     case unknown(id: String, type: String)
 
     public var id: String {
@@ -79,7 +79,7 @@ public enum ConversationItem: Codable, Sendable, Hashable, Identifiable {
                 id: id,
                 name: try c.decode(String.self, forKey: .name),
                 status: try c.decode(Lifecycle.self, forKey: .status),
-                input: try Self.decodeLooseString(c, forKey: .input),
+                input: try c.decodeIfPresent(JSONValue.self, forKey: .input),
                 output: try c.decodeIfPresent(String.self, forKey: .output)
             )
         default:
@@ -119,15 +119,6 @@ public enum ConversationItem: Codable, Sendable, Hashable, Identifiable {
         case let .unknown(_, type):
             try c.encode(type, forKey: .type)
         }
-    }
-
-    /// `tool.input` is arbitrary JSON on the wire. Render it as a string: pass a
-    /// JSON string through, pretty-print an object/array, or stringify a scalar.
-    private static func decodeLooseString(_ c: KeyedDecodingContainer<CodingKeys>, forKey key: CodingKeys) throws -> String? {
-        if let s = try? c.decodeIfPresent(String.self, forKey: key) { return s }
-        guard c.contains(key) else { return nil }
-        if let obj = try? c.decode(JSONValue.self, forKey: key) { return obj.displayString }
-        return nil
     }
 }
 
@@ -184,31 +175,4 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
-}
-
-// `tool.input` is arbitrary JSON on the wire. Decode it into the shared
-// `JSONValue` (AgentSession.swift) and flatten to a display string.
-extension JSONValue: Decodable {
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        if c.decodeNil() { self = .null }
-        else if let b = try? c.decode(Bool.self) { self = .bool(b) }
-        else if let n = try? c.decode(Double.self) { self = .number(n) }
-        else if let s = try? c.decode(String.self) { self = .string(s) }
-        else if let a = try? c.decode([JSONValue].self) { self = .array(a) }
-        else if let o = try? c.decode([String: JSONValue].self) { self = .object(o) }
-        else { self = .null }
-    }
-
-    var displayString: String {
-        switch self {
-        case let .string(s): return s
-        case let .number(n): return n == n.rounded() ? String(Int(n)) : String(n)
-        case let .bool(b): return String(b)
-        case .null: return "null"
-        case let .array(a): return "[" + a.map(\.displayString).joined(separator: ", ") + "]"
-        case let .object(o):
-            return "{" + o.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.displayString)" }.joined(separator: ", ") + "}"
-        }
-    }
 }

@@ -207,7 +207,7 @@ struct ConversationItemCard: View {
         case let .command(_, _, cwd, _, output, _, _):
             monospaceDetail(output ?? "", subtitle: cwd.isEmpty ? nil : cwd)
         case let .tool(_, _, _, input, output):
-            monospaceDetail([input, output].compactMap { $0 }.joined(separator: "\n\n"))
+            monospaceDetail([input?.displayString, output].compactMap { $0 }.joined(separator: "\n\n"))
         default:
             EmptyView()
         }
@@ -243,7 +243,7 @@ struct ConversationItemCard: View {
         case let .command(_, _, _, _, output, _, _):
             return output?.isEmpty == false
         case let .tool(_, _, _, input, output):
-            return input?.isEmpty == false || output?.isEmpty == false
+            return input != nil || output?.isEmpty == false
         default:
             return false
         }

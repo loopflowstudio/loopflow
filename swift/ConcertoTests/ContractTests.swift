@@ -133,7 +133,7 @@ struct ContractTests {
             return
         }
         #expect(name == "Grep")
-        #expect(input == "TODO")
+        #expect(input == .string("TODO"))
         #expect(toolOutput == "3 matches")
 
         // Interrupted state with explicit-null optionals decodes as nils.

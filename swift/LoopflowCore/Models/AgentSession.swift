@@ -1,6 +1,6 @@
 import Foundation
 
-public enum JSONValue: Sendable, Hashable {
+public enum JSONValue: Sendable, Hashable, Codable {
     case object([String: JSONValue])
     case array([JSONValue])
     case string(String)
@@ -20,6 +20,71 @@ public enum JSONValue: Sendable, Hashable {
             return value
         }
         return nil
+    }
+
+    public var displayString: String {
+        switch self {
+        case let .string(value):
+            return value
+        case let .number(value):
+            if value.isFinite,
+               value == value.rounded(),
+               value >= Double(Int.min),
+               value <= Double(Int.max) {
+                return String(Int(value))
+            }
+            return String(value)
+        case let .bool(value):
+            return String(value)
+        case .null:
+            return "null"
+        case let .array(value):
+            return "[" + value.map(\.displayString).joined(separator: ", ") + "]"
+        case let .object(value):
+            return "{" + value.sorted { $0.key < $1.key }
+                .map { "\($0.key): \($0.value.displayString)" }
+                .joined(separator: ", ") + "}"
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([JSONValue].self) {
+            self = .array(value)
+        } else if let value = try? container.decode([String: JSONValue].self) {
+            self = .object(value)
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unsupported JSON value"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case let .object(value):
+            try container.encode(value)
+        case let .array(value):
+            try container.encode(value)
+        case let .string(value):
+            try container.encode(value)
+        case let .number(value):
+            try container.encode(value)
+        case let .bool(value):
+            try container.encode(value)
+        case .null:
+            try container.encodeNil()
+        }
     }
 }
 
@@ -43,126 +108,6 @@ public struct FileEdit: Sendable, Hashable, Codable {
         self.kind = kind
         self.diff = diff
     }
-}
-
-public struct CommandItem: Sendable, Hashable {
-    public let id: String
-    public let command: [String]
-    public let cwd: String
-    public let status: Lifecycle
-    public let output: String?
-    public let exitCode: Int?
-    public let durationMs: UInt64?
-
-    public init(
-        id: String,
-        command: [String] = [],
-        cwd: String = "",
-        status: Lifecycle,
-        output: String? = nil,
-        exitCode: Int? = nil,
-        durationMs: UInt64? = nil
-    ) {
-        self.id = id
-        self.command = command
-        self.cwd = cwd
-        self.status = status
-        self.output = output
-        self.exitCode = exitCode
-        self.durationMs = durationMs
-    }
-}
-
-public struct FileItem: Sendable, Hashable {
-    public let id: String
-    public let changes: [FileEdit]
-    public let status: Lifecycle
-
-    public init(id: String, changes: [FileEdit] = [], status: Lifecycle) {
-        self.id = id
-        self.changes = changes
-        self.status = status
-    }
-}
-
-public struct MessageItem: Sendable, Hashable {
-    public let id: String
-    public let text: String
-    public let phase: String?
-
-    public init(id: String, text: String = "", phase: String? = nil) {
-        self.id = id
-        self.text = text
-        self.phase = phase
-    }
-}
-
-public struct ThoughtItem: Sendable, Hashable {
-    public let id: String
-    public let text: String
-
-    public init(id: String, text: String = "") {
-        self.id = id
-        self.text = text
-    }
-}
-
-public struct ToolItem: Sendable, Hashable {
-    public let id: String
-    public let name: String
-    public let status: Lifecycle
-    public let input: JSONValue?
-    public let output: String?
-
-    public init(
-        id: String,
-        name: String,
-        status: Lifecycle,
-        input: JSONValue? = nil,
-        output: String? = nil
-    ) {
-        self.id = id
-        self.name = name
-        self.status = status
-        self.input = input
-        self.output = output
-    }
-}
-
-public enum SessionItem: Sendable, Hashable {
-    case command(CommandItem)
-    case file(FileItem)
-    case message(MessageItem)
-    case thought(ThoughtItem)
-    case tool(ToolItem)
-    case unknown(type: String, payload: JSONValue)
-
-    public var id: String? {
-        switch self {
-        case .command(let item): return item.id
-        case .file(let item): return item.id
-        case .message(let item): return item.id
-        case .thought(let item): return item.id
-        case .tool(let item): return item.id
-        case .unknown: return nil
-        }
-    }
-
-    public var status: Lifecycle? {
-        switch self {
-        case .command(let item): return item.status
-        case .file(let item): return item.status
-        case .tool(let item): return item.status
-        case .message, .thought, .unknown:
-            return nil
-        }
-    }
-}
-
-public enum ItemDelta: Sendable, Hashable {
-    case output(content: String)
-    case planText(content: String)
-    case unknown(type: String, payload: JSONValue)
 }
 
 public struct AgentSessionConfig: Sendable, Hashable {

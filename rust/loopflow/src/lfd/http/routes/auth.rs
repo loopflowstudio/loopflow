@@ -10,7 +10,7 @@ use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::provider_auth::{AuthError, AuthFlowResponse, Provider, ProviderAuthSnapshot};
-use crate::lfd::store::CredentialType;
+use crate::lfdb::CredentialType;
 
 #[derive(Debug, Serialize)]
 pub struct AuthProvidersResponse {
@@ -149,13 +149,13 @@ pub async fn configure_credential_handler(
         return Err(api_error(StatusCode::BAD_REQUEST, message));
     }
 
-    let token = crate::lfd::store::ProviderToken {
+    let token = crate::lfdb::ProviderToken {
         provider: provider.as_str().to_string(),
         access_token: body.api_key,
         refresh_token: None,
         expires_at: None,
         login: None,
-        updated_at: crate::lfd::store::rows::now_unix(),
+        updated_at: crate::lfdb::rows::now_unix(),
         credential_type: CredentialType::ApiKey,
     };
     state
@@ -297,7 +297,7 @@ mod tests {
             },
             expires_at: Some(1_893_456_000),
             next_refresh_at: Some(1_893_454_800),
-            credential_type: Some(crate::lfd::store::CredentialType::OAuth),
+            credential_type: Some(crate::lfdb::CredentialType::OAuth),
         });
 
         assert_eq!(dto.provider, "github");

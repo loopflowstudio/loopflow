@@ -12,8 +12,8 @@ use tracing::info;
 
 use crate::lfd::events::EventHub;
 use crate::lfd::provider_auth::Provider;
-use crate::lfd::store::{CredentialType, ProviderToken, SecretsProviderConfig, SharedStore};
 use crate::lfd::types::Event;
+use crate::lfdb::{CredentialType, ProviderToken, SecretsProviderConfig, SharedStore};
 
 // Key mappings: env var name → provider that consumes it.
 const KEY_MAPPINGS: &[(&str, Provider)] = &[
@@ -213,7 +213,7 @@ pub async fn sync_secrets(
                 refresh_token: None,
                 expires_at: None,
                 login: Some("via doppler".to_string()),
-                updated_at: crate::lfd::store::rows::now_unix(),
+                updated_at: crate::lfdb::rows::now_unix(),
                 credential_type: CredentialType::ApiKey,
             };
             if let Err(err) = store.upsert_provider_token(&provider_token).await {
@@ -325,14 +325,14 @@ pub async fn secrets_status(store: &SharedStore) -> SecretsProviderStatus {
 mod tests {
     use super::*;
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::StorageConfig;
+    use crate::lfdb::StorageConfig;
     use std::sync::Arc;
 
     async fn test_store() -> SharedStore {
         let db_path = std::env::temp_dir().join(format!("lfd-secrets-test-{}.db", LfdId::new()));
         let config = StorageConfig::sqlite(db_path);
         Arc::new(
-            crate::lfd::store::open_store(&config)
+            crate::lfdb::open_store(&config)
                 .await
                 .expect("sqlite store should initialize"),
         )

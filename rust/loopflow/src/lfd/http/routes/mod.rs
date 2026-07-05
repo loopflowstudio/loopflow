@@ -26,8 +26,8 @@ use crate::lfd::http::dto::{
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
 use crate::lfd::queue::{project_queue_views, QueueRunView};
-use crate::lfd::store::{SharedStore, StoreError};
 use crate::lfd::types::{Run, Wave};
+use crate::lfdb::{SharedStore, StoreError};
 use axum::http::StatusCode;
 use axum::Json;
 use std::collections::HashMap;
@@ -441,11 +441,11 @@ fn git_diff_stat(worktree: &std::path::Path, diff_ref: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::SharedStore;
     use crate::lfd::types::{
         LivePrState, LivePullRequestState, PullRequest, RepoWork, Run, RunStackStatus, RunStatus,
         Wave, WaveMode, WaveStatus,
     };
+    use crate::lfdb::SharedStore;
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
     use time::OffsetDateTime;
@@ -490,9 +490,9 @@ mod tests {
 
     async fn sqlite_store() -> SharedStore {
         let db_path = std::env::temp_dir().join(format!("lfd-routes-test-{}.db", LfdId::new()));
-        let config = crate::lfd::store::StorageConfig::sqlite(db_path);
+        let config = crate::lfdb::StorageConfig::sqlite(db_path);
         Arc::new(
-            crate::lfd::store::open_store(&config)
+            crate::lfdb::open_store(&config)
                 .await
                 .expect("sqlite store should initialize"),
         )

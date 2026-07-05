@@ -498,7 +498,7 @@ fn update_wave_workers(
 
 #[cfg(test)]
 async fn resolve_wave_source_wave_id(
-    store: &crate::lfd::store::SharedStore,
+    store: &crate::lfdb::SharedStore,
     repo: &str,
     wave_name: &str,
     parsed: Option<&ParsedTrigger>,
@@ -527,7 +527,7 @@ async fn resolve_wave_source_wave_id(
 
 #[cfg(test)]
 async fn resolve_wave_id_in_repo(
-    store: &crate::lfd::store::SharedStore,
+    store: &crate::lfdb::SharedStore,
     repo: &str,
     name: &str,
 ) -> Result<LfdId, (StatusCode, Json<ErrorResponse>)> {
@@ -559,10 +559,7 @@ async fn resolve_wave_id_in_repo(
         })
 }
 
-async fn wave_name_exists(
-    state: &HttpState,
-    name: &str,
-) -> Result<bool, crate::lfd::store::StoreError> {
+async fn wave_name_exists(state: &HttpState, name: &str) -> Result<bool, crate::lfdb::StoreError> {
     let waves = state.store.list_waves(None).await?;
     Ok(waves.into_iter().any(|wave| wave.name() == name))
 }
@@ -1885,10 +1882,10 @@ mod tests {
     use crate::lfd::output::OutputHub;
     use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{
         Session, SessionStatus, SessionUse, Signal, Wave, WaveMode, WaveStatus,
     };
+    use crate::lfdb::{open_store, StorageConfig};
     use anyhow::Result;
     use async_trait::async_trait;
     use std::path::Path;
@@ -1919,7 +1916,7 @@ mod tests {
     async fn test_http_state_with_runner() -> HttpState {
         let tmp = tempdir().expect("tempdir");
         let db_path = tmp.path().join("lfd.db");
-        let store: crate::lfd::store::SharedStore = Arc::new(
+        let store: crate::lfdb::SharedStore = Arc::new(
             open_store(&StorageConfig::sqlite(db_path))
                 .await
                 .expect("open sqlite store"),
@@ -3024,7 +3021,7 @@ mod tests {
     }
 
     /// A self-registered `lf wave` server (a `wave_server` WaveAgent row in
-    /// the store — written store-direct by `lfd::wave::registry`) is the
+    /// the store — written store-direct by `crate::wave::registry`) is the
     /// wave's one brain: `run_wave` is idempotent against it, returning the
     /// live session instead of launching a second brain.
     #[tokio::test]

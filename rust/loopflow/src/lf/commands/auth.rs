@@ -10,7 +10,7 @@ use crate::engine::platform::open_url;
 use crate::lf::AuthCommand;
 use crate::lfd::events::EventHub;
 use crate::lfd::provider_auth::{AuthStatus, Provider, ProviderAuthService, ProviderAuthSnapshot};
-use crate::lfd::store::{open_store, CredentialType, ProviderToken, SharedStore};
+use crate::lfdb::{open_store, CredentialType, ProviderToken, SharedStore};
 
 const AUTH_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(180);
 const AUTH_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);

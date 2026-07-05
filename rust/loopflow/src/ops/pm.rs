@@ -12,7 +12,7 @@ use crate::lfd::http::routes::wave_config::{read_wave_config, update_wave_goal_c
 use crate::lfd::pm::asana::AsanaClient;
 use crate::lfd::pm::{PmError, PmItem, PmItemCreate, PmItemUpdate};
 use crate::lfd::provider_auth::{refresh_pm_oauth_token, Provider};
-use crate::lfd::store::open_store;
+use crate::lfdb::open_store;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::resolve_wave_name;
@@ -164,7 +164,7 @@ async fn resolve_asana_token() -> OpsResult<String> {
     ))
 }
 
-fn storage_config_from_env() -> OpsResult<crate::lfd::store::StorageConfig> {
+fn storage_config_from_env() -> OpsResult<crate::lfdb::StorageConfig> {
     crate::lfd::storage_config_from_env()
         .map_err(|err| OpsError::Message(format!("failed to resolve lfd credential store: {err}")))
 }

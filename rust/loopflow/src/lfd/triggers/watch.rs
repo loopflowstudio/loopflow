@@ -11,8 +11,8 @@ use super::{
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::{Signal, Trigger, Wave, WaveStatus};
+use crate::lfdb::SharedStore;
 
 pub fn spawn_watch_poller(
     store: SharedStore,

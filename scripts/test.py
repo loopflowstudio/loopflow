@@ -256,11 +256,11 @@ SUITES: list[Suite] = [
     Suite(
         name="e2e",
         slow=True,
-        trigger_desc="lfd http/store or tests/e2e/",
+        trigger_desc="lfd http or lfdb or tests/e2e/",
         match=lambda c: _touches(
             c,
             "rust/loopflow/src/lfd/http",
-            "rust/loopflow/src/lfd/store",
+            "rust/loopflow/src/lfdb",
             "tests/e2e/",
         ),
         build=_e2e_commands,

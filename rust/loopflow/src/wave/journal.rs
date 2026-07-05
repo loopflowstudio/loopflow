@@ -15,7 +15,7 @@
 //! migrated.
 //!
 //! `WorkerDispatched`/`WorkerFinished` are produced by the registry observer
-//! ([`crate::lfd::wave::registry::StoreObserver`]): the server polls the
+//! ([`crate::wave::registry::StoreObserver`]): the server polls the
 //! shared store — these are confirmed facts, not commands — and the in-flight
 //! view is their fold ([`fold_workers`]). `MemoryUpdated` is produced by the
 //! server's memory routes (`lf memory update`/`add` — the server holds
@@ -32,7 +32,7 @@ use time::OffsetDateTime;
 
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
 use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
-use crate::lfd::wave::state::MindState;
+use crate::wave::state::MindState;
 
 /// Current journal format version, stamped on every line.
 const FORMAT_VERSION: u32 = 1;

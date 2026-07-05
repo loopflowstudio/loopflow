@@ -13,8 +13,8 @@ use crate::lfd::http::dto::{format_datetime, ListResponse, RepoDto};
 use crate::lfd::http::routes::ApiError;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiResult};
-use crate::lfd::store::StoreError;
 use crate::lfd::types::{Repo, RepoEdge, RepoId, Wave};
+use crate::lfdb::StoreError;
 
 #[derive(Debug, Deserialize)]
 pub struct RepoPathRequest {
@@ -413,8 +413,8 @@ mod tests {
     use crate::lfd::output::OutputHub;
     use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{RepoId, RepoWork, WaveMode, WaveStatus};
+    use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use std::process::Command;
     use std::sync::Arc;
     use tempfile::tempdir;

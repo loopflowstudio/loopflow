@@ -13,10 +13,10 @@
 //! - [`turns`]: the turn vocabulary — [`turns::ChatTurn`] (the wire type the
 //!   wave server streams to Concerto) and [`turns::TurnDelta`]. The mind's
 //!   [`types::ConversationEvent`] stream is adapted into `TurnDelta`s (see
-//!   [`crate::lfd::wave::mind::EventAdapter`]) and folded by the wave
+//!   [`crate::wave::mind::EventAdapter`]) and folded by the wave
 //!   runtime's `TurnSink` into journaled, broadcast turns.
 //!
-//! The reactive server that hosts these lives in [`crate::lfd::wave`]. (The old
+//! The reactive server that hosts these lives in [`crate::wave`]. (The old
 //! file-based `server.rs` — `MAILBOX.md` + NDJSON sink — was rejected and is not
 //! carried over.)
 

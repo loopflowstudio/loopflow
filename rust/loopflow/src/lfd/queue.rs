@@ -16,11 +16,11 @@ use crate::lfd::config::GitHubConfig;
 use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, run_live_pr_key, LivePrSnapshot};
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::{
     AttentionStatus, Event, LivePrState, LivePullRequestState, QueueBlock, QueueBlockReason,
     QueueMergeEvent, Run, RunStackStatus,
 };
+use crate::lfdb::SharedStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueTrigger {
@@ -705,9 +705,9 @@ mod tests {
 
     async fn sqlite_store() -> SharedStore {
         let db_path = std::env::temp_dir().join(format!("lfd-queue-test-{}.db", LfdId::new()));
-        let config = crate::lfd::store::StorageConfig::sqlite(db_path);
+        let config = crate::lfdb::StorageConfig::sqlite(db_path);
         Arc::new(
-            crate::lfd::store::open_store(&config)
+            crate::lfdb::open_store(&config)
                 .await
                 .expect("sqlite store should initialize"),
         )

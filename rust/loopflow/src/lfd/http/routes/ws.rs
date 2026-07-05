@@ -13,8 +13,8 @@ use crate::lfd::http::dto::ErrorResponse;
 use crate::lfd::http::routes::{build_wave_dto, build_wave_dtos};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::id::LfdId;
-use crate::lfd::store::SharedStore;
 use crate::lfd::types::Event;
+use crate::lfdb::SharedStore;
 
 pub async fn ws_handler(
     State(state): State<HttpState>,

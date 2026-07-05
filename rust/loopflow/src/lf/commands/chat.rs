@@ -42,9 +42,9 @@ use crate::engine::wave_context::{
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::WaveTargetArgs;
-use crate::lfd::store::{open_existing_store, SharedStore};
 use crate::lfd::types::{Wave, WAVE_SERVER_ENDPOINT_ENV};
-use crate::lfd::wave::journal::Attribution;
+use crate::lfdb::{open_existing_store, SharedStore};
+use crate::wave::journal::Attribution;
 
 pub fn run(text_args: &[String], target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
@@ -328,14 +328,14 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{
         RepoWork, Session, SessionStatus, SessionUse, WaveMode, WaveStatus, WAVE_SERVER_PID_ENV,
         WAVE_SERVER_SOURCE,
     };
-    use crate::lfd::wave::journal::{EventKind, MessageOp};
-    use crate::lfd::wave::runtime::{InboxItem, WaveRuntime};
-    use crate::lfd::wave::server;
+    use crate::lfdb::{open_store, StorageConfig};
+    use crate::wave::journal::{EventKind, MessageOp};
+    use crate::wave::runtime::{InboxItem, WaveRuntime};
+    use crate::wave::server;
 
     async fn temp_store(dir: &Path) -> SharedStore {
         Arc::new(
@@ -373,7 +373,7 @@ mod tests {
     }
 
     /// A live wave_server WaveAgent row carrying `endpoint` in its env — the
-    /// shape `lf wave` registers (see lfd::wave::registry).
+    /// shape `lf wave` registers (see crate::wave::registry).
     fn live_server_session(wave: &Wave, endpoint: &str) -> Session {
         let now = OffsetDateTime::now_utc();
         Session {
@@ -571,9 +571,9 @@ mod tests {
             Some("wave concerto")
         );
         // …and the journal row records the attribution durably.
-        let (_, events) = crate::lfd::wave::journal::Journal::open(
-            &crate::lfd::wave::journal::journal_path(&origin, "goals"),
-        )
+        let (_, events) = crate::wave::journal::Journal::open(&crate::wave::journal::journal_path(
+            &origin, "goals",
+        ))
         .expect("journal");
         assert!(matches!(
             &events[0].kind,

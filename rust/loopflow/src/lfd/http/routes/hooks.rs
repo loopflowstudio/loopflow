@@ -18,9 +18,9 @@ use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::security::canonicalize_existing_path;
-use crate::lfd::store::SharedStore;
 use crate::lfd::triggers::{enqueue_pending_activation, ActivationEnvelope};
 use crate::lfd::types::{Event, Run, Signal, Trigger, Wave, WaveStatus, CI_FIX_FLOW};
+use crate::lfdb::SharedStore;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -657,10 +657,10 @@ mod tests {
     use crate::lfd::output::OutputHub;
     use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
     use crate::lfd::types::{
         PullRequest, RepoWork, RunStatus, Signal, Trigger, Wave, WaveMode, WaveStatus,
     };
+    use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;

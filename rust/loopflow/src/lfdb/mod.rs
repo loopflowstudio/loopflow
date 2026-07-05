@@ -1,3 +1,11 @@
+//! Persistence as shared infrastructure: the machine's registry, written and
+//! read by `lf` directly — `lfd` is one more client, not the owner. This
+//! module owns the storage backends (sqlite, postgres), the schema
+//! migrations, and the registry API ([`Store`] and its per-domain traits).
+//!
+//! The persisted domain types still live in `crate::lfd::types` for now; the
+//! type split is a later, non-mechanical step.
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

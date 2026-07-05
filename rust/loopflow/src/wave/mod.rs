@@ -1,5 +1,10 @@
 //! `lf wave <name>` — the wave runtime as a long-lived REACTIVE SERVER.
 //!
+//! This is `lf`'s implementation: a sovereign process the user starts, not
+//! part of the daemon. Its old home under the daemon's module tree implied
+//! lfd owned it; it doesn't — the server only takes a best-effort seat in
+//! the shared registry ([`crate::lfdb`]), where lfd is one more client.
+//!
 //! A wave is not a loop. `lf wave <name>` starts a server that stays up until
 //! stopped. Its brain is THE MIND ([`mind`]): one persistent vendor thread
 //! (codex app-server, driven through the conversations [`Harness`]) that
@@ -48,10 +53,10 @@ use crate::lf::commands::util::find_repo_root;
 use crate::lfd::conversations::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::lfd::conversations::types::ConversationEvent;
 use crate::lfd::executor::ensure_wave_worktree;
-use crate::lfd::store::{open_existing_store, SharedStore};
-use crate::lfd::wave::mind::MindConfig;
-use crate::lfd::wave::runtime::WaveRuntime;
+use crate::lfdb::{open_existing_store, SharedStore};
 use crate::ops::util::resolve_wave_name;
+use crate::wave::mind::MindConfig;
+use crate::wave::runtime::WaveRuntime;
 
 /// Start the reactive wave server for `name` and block until it is stopped
 /// (Ctrl-C). Bootstraps into the wave's worktree (`<repo>.<wave>` sibling —
@@ -312,8 +317,8 @@ mod tests {
     use crate::lfd::conversations::harness::Capabilities;
     use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
     use crate::lfd::conversations::types::{ConversationItem, Lifecycle, TurnUsage};
-    use crate::lfd::wave::mind::EventAdapter;
-    use crate::lfd::wave::runtime::TurnSink;
+    use crate::wave::mind::EventAdapter;
+    use crate::wave::runtime::TurnSink;
 
     /// A harness that never speaks: `serve` tests exercise the HTTP shell,
     /// not a vendor process.
@@ -1213,8 +1218,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
         let repo = tmp.path().to_path_buf();
-        let store: crate::lfd::store::SharedStore = Arc::new(
-            crate::lfd::store::open_store(&crate::lfd::store::StorageConfig::sqlite(
+        let store: crate::lfdb::SharedStore = Arc::new(
+            crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(
                 tmp.path().join("lfd.db"),
             ))
             .await
@@ -1288,8 +1293,8 @@ mod tests {
         let _env = crate::lf::session::test_env_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
-        let store: crate::lfd::store::SharedStore = Arc::new(
-            crate::lfd::store::open_store(&crate::lfd::store::StorageConfig::sqlite(
+        let store: crate::lfdb::SharedStore = Arc::new(
+            crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(
                 tmp.path().join("lfd.db"),
             ))
             .await

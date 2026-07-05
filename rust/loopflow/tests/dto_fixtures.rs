@@ -11,7 +11,7 @@ use loopflow::lfd::http::dto::{
     CreateSessionRequestDto, RunWorkerRequestDto, SessionDto, UsageReportDto, WaveDto,
     WorkerPlacementDto,
 };
-use loopflow::lfd::wave::state::MindState;
+use loopflow::wave::state::MindState;
 use serde_json::Value;
 
 fn load_fixture(name: &str) -> Value {

@@ -24,8 +24,6 @@ use crate::lfd::http::routes::{infer_wave_git_state_for_worktree, is_open_pr_sta
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::store::RunTokenUsage;
-use crate::lfd::store::SharedStore;
 #[cfg(test)]
 use crate::lfd::triggers::spawn_run_task_with_slot;
 use crate::lfd::triggers::{
@@ -40,6 +38,8 @@ use crate::lfd::types::{
 };
 #[cfg(test)]
 use crate::lfd::types::{AttentionItem, AttentionKind, AttentionStatus};
+use crate::lfdb::RunTokenUsage;
+use crate::lfdb::SharedStore;
 
 use super::docker::DockerExecutor;
 use super::helpers::{
@@ -1410,8 +1410,8 @@ pub(crate) fn classify_repair_flow(failed_run: &Run) -> String {
 mod tests {
     use super::*;
     use crate::engine::flow::Step;
-    use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{PullRequest, RepoWork, Signal, Trigger};
+    use crate::lfdb::{open_store, StorageConfig};
     use async_trait::async_trait;
     use loopflow_test_support::TestRepo;
     use std::sync::Mutex;

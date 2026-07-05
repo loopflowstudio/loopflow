@@ -127,7 +127,7 @@ unspecified|waiting|running|completed|failed
 Representative files:
 
 - `rust/loopflow/src/lfd/types/execution.rs`
-- `rust/loopflow/src/lfd/store/`
+- `rust/loopflow/src/lfdb/`
 
 ### Conversation (removed)
 

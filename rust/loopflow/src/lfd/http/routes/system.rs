@@ -97,7 +97,7 @@ mod tests {
     use crate::lfd::output::OutputHub;
     use crate::lfd::provider_auth::ProviderAuthService;
     use crate::lfd::scheduler::Scheduler;
-    use crate::lfd::store::{open_store, SharedStore, StorageConfig};
+    use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use std::sync::Arc;
     use tempfile::tempdir;
     use tokio::sync::Mutex;

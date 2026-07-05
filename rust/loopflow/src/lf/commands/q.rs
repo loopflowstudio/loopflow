@@ -32,10 +32,10 @@ use crate::lfd::executor::helpers::{
 };
 use crate::lfd::executor::{create_run_for_placement, Placement};
 use crate::lfd::id::LfdId;
-use crate::lfd::store::{open_existing_store, SharedStore};
 use crate::lfd::types::{
     tmux_session_name, Run, Session, SessionStatus, SessionUse, TMUX_TERMINAL_SOURCE,
 };
+use crate::lfdb::{open_existing_store, SharedStore};
 
 pub fn run(cmd: &QCommand) -> Result<()> {
     match cmd {
@@ -244,8 +244,8 @@ mod tests {
 
     use crate::lf::session::classify_run_context;
     use crate::lfd::executor::helpers::tmux_shell_command;
-    use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{RepoWork, RunStatus, Wave, WaveMode, WaveStatus};
+    use crate::lfdb::{open_store, StorageConfig};
 
     async fn temp_store(tmp: &Path) -> SharedStore {
         Arc::new(

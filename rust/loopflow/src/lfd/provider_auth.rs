@@ -27,8 +27,8 @@ use crate::lfd::credential_socket::{
     AuthStartResponse, CredentialSocketClient, CredentialSocketError,
 };
 use crate::lfd::events::EventHub;
-use crate::lfd::store::{CredentialType, ProviderToken, SharedStore};
 use crate::lfd::types::Event;
+use crate::lfdb::{CredentialType, ProviderToken, SharedStore};
 
 const AUTH_URL_TIMEOUT: Duration = Duration::from_secs(20);
 const AUTH_URL_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -1340,7 +1340,7 @@ async fn extract_doppler_token() -> Option<ProviderToken> {
         refresh_token: None,
         expires_at: None,
         login: None,
-        updated_at: crate::lfd::store::rows::now_unix(),
+        updated_at: crate::lfdb::rows::now_unix(),
         credential_type: CredentialType::OAuth,
     })
 }
@@ -2304,7 +2304,7 @@ pub fn env_var_for_token(token: &ProviderToken) -> Option<(String, String)> {
 /// Build env vars for all stored provider tokens. Used by executors to inject
 /// credentials into agent processes. The env var chosen depends on the token's
 /// credential_type (oauth vs apikey).
-pub async fn provider_env_vars(store: &crate::lfd::store::Store) -> Vec<(String, String)> {
+pub async fn provider_env_vars(store: &crate::lfdb::Store) -> Vec<(String, String)> {
     let tokens = match store.list_provider_tokens().await {
         Ok(tokens) => tokens,
         Err(_) => return Vec::new(),
@@ -2897,7 +2897,7 @@ mod tests {
     #[tokio::test]
     async fn provider_env_vars_includes_opencode_zen_token_for_opencode_harness() {
         let tmp = tempdir().expect("tempdir");
-        let store = crate::lfd::store::open_store(&crate::lfd::store::StorageConfig::sqlite(
+        let store = crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(
             tmp.path().join("lfd.db"),
         ))
         .await
@@ -3059,7 +3059,7 @@ mod tests {
     #[tokio::test]
     async fn provider_env_vars_returns_correct_vars_for_mixed_credential_types() {
         let tmp = tempdir().expect("tempdir");
-        let store = crate::lfd::store::open_store(&crate::lfd::store::StorageConfig::sqlite(
+        let store = crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(
             tmp.path().join("lfd.db"),
         ))
         .await

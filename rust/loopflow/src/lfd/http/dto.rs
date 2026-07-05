@@ -3,11 +3,11 @@ use std::collections::{BTreeMap, HashMap};
 use time::OffsetDateTime;
 
 use crate::lfd::queue::QueueRunView;
-use crate::lfd::store::TokenUsageReport;
 use crate::lfd::types::{
     ActivationLog, AttentionItem, ChatMemoryBlock, ChatMessage, LivePullRequestState, Run,
     RunStatus, Session, Trigger, WaveCron,
 };
+use crate::lfdb::TokenUsageReport;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {

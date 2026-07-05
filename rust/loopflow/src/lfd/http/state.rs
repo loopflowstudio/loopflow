@@ -10,7 +10,7 @@ use crate::lfd::executor::WaveExecutor;
 use crate::lfd::output::OutputHub;
 use crate::lfd::provider_auth::ProviderAuthService;
 use crate::lfd::scheduler::Scheduler;
-use crate::lfd::store::SharedStore;
+use crate::lfdb::SharedStore;
 
 #[derive(Clone)]
 pub struct HttpState {

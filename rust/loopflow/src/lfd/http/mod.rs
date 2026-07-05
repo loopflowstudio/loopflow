@@ -18,7 +18,7 @@ use crate::lfd::http::routes::{
     session_controls, system, usage, waves, worktrees, ws,
 };
 use crate::lfd::redaction::sanitize_operator_message;
-use crate::lfd::store::StoreError;
+use crate::lfdb::StoreError;
 
 pub use state::HttpState;
 

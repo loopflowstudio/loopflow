@@ -41,8 +41,8 @@ use time::OffsetDateTime;
 
 use crate::engine::wave_context::{resolve_ambient_wave, AmbientWaveRef};
 use crate::lfd::id::LfdId;
-use crate::lfd::store::{open_existing_store, SharedStore};
 use crate::lfd::types::{Session, SessionStatus, SessionUse, LF_CLI_SOURCE};
+use crate::lfdb::{open_existing_store, SharedStore};
 
 pub const WAVE_ID_ENV: &str = "LFD_WAVE_ID";
 pub const SESSION_ID_ENV: &str = "LFD_SESSION_ID";
@@ -361,10 +361,10 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::lfd::id::LfdId;
-    use crate::lfd::store::{open_store, StorageConfig};
     use crate::lfd::types::{
         RepoWork, Session, SessionStatus, Wave, WaveMode, WaveStatus, TMUX_TERMINAL_SOURCE,
     };
+    use crate::lfdb::{open_store, StorageConfig};
 
     use crate::engine::wave_context::AmbientWaveRef;
 

@@ -8,8 +8,8 @@ use tokio_util::sync::CancellationToken;
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
-use crate::lfd::store::SharedStore;
 use crate::lfd::triggers;
+use crate::lfdb::SharedStore;
 
 #[derive(Debug)]
 pub struct SchedulerSlotGuard {

@@ -8,11 +8,11 @@ use loopflow::lfd::conversations::turns::ChatRole;
 use loopflow::lfd::conversations::types::{
     ConversationEvent, ConversationItem, Lifecycle, TurnUsage,
 };
-use loopflow::lfd::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
-use loopflow::lfd::wave::mind::EventAdapter;
-use loopflow::lfd::wave::runtime::{TurnSink, WaveRuntime};
-use loopflow::lfd::wave::server;
-use loopflow::lfd::wave::state::MindState;
+use loopflow::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
+use loopflow::wave::mind::EventAdapter;
+use loopflow::wave::runtime::{TurnSink, WaveRuntime};
+use loopflow::wave::server;
+use loopflow::wave::state::MindState;
 
 /// One complete harness turn, as the codex driver would emit it: a command
 /// item, the final agent message, the turn completion, then trailing usage.
@@ -144,7 +144,7 @@ async fn crashed_open_turn_is_finalized_failed_on_reboot() {
     // A server that dies mid-turn leaves started/item events with no finish.
     {
         let (mut journal, _) = Journal::open(&journal_path(tmp.path(), "ship")).expect("open");
-        use loopflow::lfd::wave::journal::EventKind;
+        use loopflow::wave::journal::EventKind;
         journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers: vec![],

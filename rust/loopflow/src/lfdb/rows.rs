@@ -1,12 +1,12 @@
 use crate::lfd::id::LfdId;
-use crate::lfd::store::{
-    ForkRun, ForkRunStatus, RepoProviderUsage, StoreError, StoreResult, WaveProviderUsage,
-};
 use crate::lfd::types::{
     ActivationLog, ActivationOutcome, ChatMemoryBlock, ChatMessage, ExecutionProcess,
     ExecutionProcessStatus, LivePrState, LivePullRequestState, PendingActivation, PullRequest,
     Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus, RunStatus, Signal, Summary, Trigger,
     Wave, WaveCron, WaveMode, WaveStatus,
+};
+use crate::lfdb::{
+    ForkRun, ForkRunStatus, RepoProviderUsage, StoreError, StoreResult, WaveProviderUsage,
 };
 
 // -- Row adapter trait -------------------------------------------------------

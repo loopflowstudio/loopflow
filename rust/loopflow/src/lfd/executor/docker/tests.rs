@@ -14,10 +14,10 @@ use time::OffsetDateTime;
 use crate::lfd::config::{CredentialMount, ExecutorConfig, ExecutorLimitsConfig, ExecutorType};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputHub;
-use crate::lfd::store::{open_store, SharedStore, StorageConfig};
 use crate::lfd::types::{
     ExecutionProcess, ExecutionProcessStatus, RepoWork, Run, RunStatus, Wave, WaveMode, WaveStatus,
 };
+use crate::lfdb::{open_store, SharedStore, StorageConfig};
 
 use super::{
     container_host_config, normalize_repo_url, DockerCredentialMount, DockerExecutor,

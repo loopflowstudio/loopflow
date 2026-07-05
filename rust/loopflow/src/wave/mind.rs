@@ -83,10 +83,10 @@ use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRend
 use crate::lfd::conversations::harness::{is_terminal_harness_error, Harness};
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn, TurnDelta};
 use crate::lfd::conversations::types::{ConversationEvent, ConversationItem, Lifecycle};
-use crate::lfd::wave::journal::{ellipsize, MessageId, MessageOp, PendingMessage};
-use crate::lfd::wave::memory::Memory;
-use crate::lfd::wave::runtime::{InboxItem, TurnSink, WaveRuntime};
-use crate::lfd::wave::state::MindState;
+use crate::wave::journal::{ellipsize, MessageId, MessageOp, PendingMessage};
+use crate::wave::memory::Memory;
+use crate::wave::runtime::{InboxItem, TurnSink, WaveRuntime};
+use crate::wave::state::MindState;
 
 /// How long the mind sits idle (empty queue, no turn) before a heartbeat
 /// turn. Each heartbeat burns a subscription turn on the vendor plan, so the
@@ -445,7 +445,7 @@ pub async fn run_mind(
     mut events_rx: mpsc::UnboundedReceiver<ConversationEvent>,
     cwd: PathBuf,
     config: MindConfig,
-    observer: Option<Arc<crate::lfd::wave::registry::StoreObserver>>,
+    observer: Option<Arc<crate::wave::registry::StoreObserver>>,
 ) {
     let pending_messages = runtime.pending_messages();
     let mut mind = Mind {
@@ -528,7 +528,7 @@ struct Mind {
     config: MindConfig,
     /// Registry poller, when this server is registered: refreshed once
     /// before every turn so the `<in_flight>` fold is current.
-    observer: Option<Arc<crate::lfd::wave::registry::StoreObserver>>,
+    observer: Option<Arc<crate::wave::registry::StoreObserver>>,
     /// Messages awaiting a turn. The journal's fold is the durable queue
     /// (`UserMessage`s not named in any `TurnStarted.answers`); this is the
     /// scheduler's working copy.
@@ -912,7 +912,7 @@ mod tests {
 
     use crate::lfd::conversations::harness::Capabilities;
     use crate::lfd::conversations::types::TurnUsage;
-    use crate::lfd::wave::journal::{journal_path, EventKind, Journal};
+    use crate::wave::journal::{journal_path, EventKind, Journal};
 
     /// Scriptless mock: records `send_input`/`interrupt`/
     /// `set_provider_session_id`; the TEST drives the event stream directly
@@ -1279,7 +1279,7 @@ mod tests {
         let mind = boot(Duration::from_secs(600));
         let turn = mind.runtime.deliver_say(
             "implement run-1 finished: PR #7, one surprise".into(),
-            crate::lfd::wave::journal::Attribution {
+            crate::wave::journal::Attribution {
                 session_id: Some("sess-1".into()),
                 label: "worker".into(),
             },
@@ -1432,7 +1432,7 @@ mod tests {
             ));
             assert!(runtime.journal_worker_finished(
                 "run-8",
-                crate::lfd::wave::journal::WorkerOutcome::Completed,
+                crate::wave::journal::WorkerOutcome::Completed,
                 "landed",
             ));
         }

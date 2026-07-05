@@ -190,11 +190,7 @@ def test_stage_binaries_errors_on_missing_cargo_output(
 def test_sync_skills_runs_fresh_lf_with_global_yes(tmp_path: Path) -> None:
     log = tmp_path / "sync.log"
     lf = tmp_path / "lf"
-    lf.write_text(
-        "#!/usr/bin/env bash\n"
-        f"printf '%s\\n' \"$*\" > {log}\n"
-        "printf 'synced\\n'\n"
-    )
+    lf.write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > {log}\nprintf 'synced\\n'\n")
     lf.chmod(0o755)
 
     install._sync_skills(lf)

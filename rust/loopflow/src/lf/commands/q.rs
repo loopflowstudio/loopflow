@@ -262,14 +262,10 @@ pub(crate) async fn dispatch(
 /// dispatch already succeeded.
 async fn notify_channel_opened(store: &SharedStore, dispatched: &Dispatch) {
     let wave = &dispatched.wave;
-    let mut endpoint = None;
-    if let Ok(Some(session)) = store.live_wave_agent_session(wave.id()).await {
-        endpoint = session
-            .env
-            .get(crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV)
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-    }
+    let mut endpoint = crate::lf::commands::chat::wave_server_endpoint(store, wave.id())
+        .await
+        .ok()
+        .flatten();
     if endpoint.is_none() {
         endpoint = read_endpoint_pointer(Path::new(wave.repo()), wave.name());
     }

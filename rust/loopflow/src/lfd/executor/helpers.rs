@@ -459,6 +459,18 @@ pub(crate) fn shell_escape(value: &str) -> String {
     format!("'{escaped}'")
 }
 
+/// Whether a tmux session with this name exists (`tmux has-session` probe).
+/// Shared by the executor's session reconciliation and the wave registry's
+/// worker-liveness observer.
+pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
+    let status = tokio::process::Command::new("tmux")
+        .args(["has-session", "-t", session_name])
+        .status()
+        .await
+        .map_err(|err| anyhow!("tmux session probe failed: {err}"))?;
+    Ok(status.success())
+}
+
 /// Where a tmux-wrapped session records its exit code (read by whoever
 /// reconciles the session — the lfd executor's watcher today).
 pub(crate) fn tmux_exit_file(cwd: &Path, session_id: &LfdId) -> PathBuf {

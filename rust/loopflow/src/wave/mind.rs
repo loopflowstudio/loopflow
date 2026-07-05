@@ -14,8 +14,14 @@
 //! - **Message while idle** → a turn starts now; the `TurnOpened` delta's
 //!   `answers` names the message plus anything already queued — the RESIDENT
 //!   decides what a turn answers; the listener validates and journals.
-//! - **Message while turning** → queued (append-and-coalesce, never
-//!   rejected); at the turn boundary one turn drains the whole queue.
+//! - **Message while turning** → HUMAN speech steers by default: an
+//!   unattributed message (no byline) rides the explicit-steer path —
+//!   injected into the live turn now, consumption declared with a
+//!   `TurnSteered` delta — when the harness can steer. Attributed messages
+//!   (worker reports, child-wave escalations) always queue
+//!   (append-and-coalesce, never rejected): colleagues interrupt you;
+//!   status reports wait. At the turn boundary one turn drains the whole
+//!   queue.
 //! - **Steer while turning**, on a steer-capable harness → injected into the
 //!   live turn (`send_input` mid-turn); consumption declared with a
 //!   `TurnSteered` delta. On a non-capable harness, while interrupting, or
@@ -680,8 +686,15 @@ impl Mind {
                     return;
                 }
                 match message.op {
-                    // A say emission (worker report, child-wave escalation)
-                    // wakes the mind exactly like a message.
+                    // Human speech steers by default: an unattributed message
+                    // (no byline — the human) takes the steer path, reaching
+                    // the live turn when the harness can. Attributed
+                    // emissions (worker reports, child-wave escalations)
+                    // always wait for the boundary — colleagues interrupt
+                    // you; status reports don't.
+                    MessageOp::Message | MessageOp::Say if message.from.is_none() => {
+                        self.on_steer(message).await
+                    }
                     MessageOp::Message | MessageOp::Say => self.on_message(message).await,
                     MessageOp::Steer => self.on_steer(message).await,
                     MessageOp::Interrupt => self.on_interrupt(Some(message)).await,
@@ -704,6 +717,8 @@ impl Mind {
     /// the listener journals it against the live turn, or the last assistant
     /// turn when the boundary raced the send). Otherwise — idle,
     /// interrupting, non-capable harness — degrade to a queued message.
+    /// Serves explicit `steer` ops AND human-authored plain messages (human
+    /// speech steers by default; see [`Mind::on_inbox`]).
     async fn on_steer(&mut self, message: PendingMessage) {
         let steerable = self.in_flight
             && self.interrupt_deadline.is_none()
@@ -1463,9 +1478,18 @@ mod tests {
         );
     }
 
+    /// Human messages mid-turn on a NON-steer harness: queued, never
+    /// rejected, and one boundary turn answers them all (the pre-steer
+    /// default, still the rule when the harness can't steer).
     #[tokio::test]
     async fn messages_while_turning_coalesce_into_one_boundary_turn() {
-        let mind = boot(Duration::from_secs(600)).await;
+        let mind = boot_with(
+            tempfile::tempdir().expect("tempdir"),
+            Duration::from_secs(600),
+            INTERRUPT_DEADLINE,
+            false, // supports_steer = false: human speech falls back to the queue
+        )
+        .await;
         mind.runtime
             .deliver_user_message("first".into(), MessageOp::Message);
         wait_for("turn 1 sent", || mind.input_count() == 1).await;
@@ -1932,6 +1956,107 @@ mod tests {
         // Consumption is the normal boundary marker, not TurnSteered.
         let answers = started_answers(&mind.journal_events());
         assert_eq!(answers[1], vec![message_id(&steer)]);
+        assert!(steered_answers(&mind.journal_events()).is_empty());
+    }
+
+    /// Human speech steers by default: a plain `message` op with no byline,
+    /// arriving mid-turn on a steer-capable harness, is injected into the
+    /// live turn (consumption via `TurnSteered`) — no boundary queue entry.
+    #[tokio::test]
+    async fn human_message_mid_turn_steers_the_live_turn() {
+        let mind = boot(Duration::from_secs(600)).await;
+        mind.runtime
+            .deliver_user_message("start".into(), MessageOp::Message);
+        wait_for("turn sent", || mind.input_count() == 1).await;
+        mind.emit(ConversationEvent::TurnStarted {
+            turn_id: "vt".into(),
+        });
+        wait_for("turning", || mind.runtime.mind_state().name() == "turning").await;
+
+        // A HUMAN message mid-turn: injected now, exactly like a steer.
+        let message = mind
+            .runtime
+            .deliver_user_message("also check the tests".into(), MessageOp::Message);
+        wait_for("message injected", || mind.input_count() == 2).await;
+        assert_eq!(mind.inputs.lock().unwrap()[1], "also check the tests");
+
+        // Consumption: the CURRENT turn answers it, via TurnSteered.
+        wait_for("TurnSteered journaled", || {
+            !steered_answers(&mind.journal_events()).is_empty()
+        })
+        .await;
+        assert_eq!(
+            steered_answers(&mind.journal_events())[0].1,
+            vec![message_id(&message)]
+        );
+
+        // The boundary drains nothing: the message was consumed mid-turn.
+        mind.emit(ConversationEvent::TurnCompleted {
+            turn_id: "vt".into(),
+            status: Lifecycle::Completed,
+        });
+        mind.emit(ConversationEvent::TurnUsage {
+            turn_id: "vt".into(),
+            usage: TurnUsage::default(),
+        });
+        wait_for("back to idle", || {
+            mind.runtime.mind_state() == MindState::Idle
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            mind.input_count(),
+            2,
+            "no boundary turn for a steered human message"
+        );
+    }
+
+    /// The discrimination is the point: an ATTRIBUTED emission (a worker's
+    /// say) arriving mid-turn on the same steer-capable harness still waits
+    /// for the boundary — colleagues interrupt you; status reports don't.
+    #[tokio::test]
+    async fn worker_say_mid_turn_still_queues_for_the_boundary() {
+        let mind = boot(Duration::from_secs(600)).await;
+        mind.runtime
+            .deliver_user_message("start".into(), MessageOp::Message);
+        wait_for("turn sent", || mind.input_count() == 1).await;
+        mind.emit(ConversationEvent::TurnStarted {
+            turn_id: "vt".into(),
+        });
+        wait_for("turning", || mind.runtime.mind_state().name() == "turning").await;
+
+        let say = mind.runtime.deliver_say(
+            "run-1 finished: PR #7".into(),
+            crate::wave::journal::Attribution {
+                session_id: Some("sess-1".into()),
+                label: "worker".into(),
+            },
+        );
+        // Queued, not injected: no send until the boundary.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(mind.input_count(), 1, "worker say waits for the boundary");
+
+        mind.emit(ConversationEvent::TurnCompleted {
+            turn_id: "vt".into(),
+            status: Lifecycle::Completed,
+        });
+        mind.emit(ConversationEvent::TurnUsage {
+            turn_id: "vt".into(),
+            usage: TurnUsage::default(),
+        });
+        wait_for("boundary turn sent", || mind.input_count() == 2).await;
+        assert_eq!(
+            mind.inputs.lock().unwrap()[1],
+            "[worker] run-1 finished: PR #7"
+        );
+        mind.emit_turn("noted", Lifecycle::Completed);
+        wait_for("boundary turn journaled", || {
+            started_answers(&mind.journal_events()).len() == 2
+        })
+        .await;
+        // Consumption is the boundary marker, never TurnSteered.
+        let answers = started_answers(&mind.journal_events());
+        assert_eq!(answers[1], vec![message_id(&say)]);
         assert!(steered_answers(&mind.journal_events()).is_empty());
     }
 

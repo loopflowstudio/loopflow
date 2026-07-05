@@ -40,6 +40,7 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use tokio::process::Command;
 
+use crate::lfd::executor::helpers::tmux_session_exists;
 use crate::lfd::http::routes::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
@@ -296,16 +297,6 @@ pub(crate) async fn process_alive(pid: u32) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// Whether a tmux-backed session's process is still running
-/// (`tmux has-session` probe, same as the lfd executor's reconciliation).
-async fn tmux_session_alive(tmux_name: &str) -> bool {
-    Command::new("tmux")
-        .args(["has-session", "-t", tmux_name])
-        .status()
-        .await
-        .is_ok_and(|status| status.success())
-}
-
 /// Run a registry future from a synchronous context (the Ctrl-C hook's
 /// plain thread); hops to a fresh thread if a runtime is already current.
 fn block_on(future: impl Future<Output = ()> + Send + 'static) {
@@ -423,7 +414,9 @@ impl StoreObserver {
         {
             return probe(session);
         }
-        tmux_session_alive(&session.tmux_name).await
+        tmux_session_exists(&session.tmux_name)
+            .await
+            .unwrap_or(false)
     }
 
     #[cfg(test)]

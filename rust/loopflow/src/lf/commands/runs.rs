@@ -12,6 +12,7 @@ use anyhow::{anyhow, Result};
 use crate::journal::open_ledger;
 use crate::lf::output::Colors;
 use crate::lfdb::RunEventRow;
+use crate::wave::journal::short_id;
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
@@ -370,10 +371,6 @@ fn format_tokens(value: i64) -> String {
     } else {
         String::new()
     }
-}
-
-fn short_id(run_id: &str) -> String {
-    run_id.chars().take(8).collect()
 }
 
 fn truncate(value: &str, width: usize) -> String {

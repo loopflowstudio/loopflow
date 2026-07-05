@@ -7,7 +7,6 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
-use tokio::process::Command;
 use tokio::time::Duration;
 use tracing::{info, warn};
 
@@ -24,8 +23,9 @@ use crate::lfdb::SharedStore;
 
 use super::helpers::{
     build_lf_step_command, is_active_run_status, is_ephemeral_worktree_path,
-    launch_session_in_tmux, tmux_exit_file, TMUX_EXIT_TAIL,
+    launch_session_in_tmux, tmux_exit_file, tmux_session_exists, TMUX_EXIT_TAIL,
 };
+use crate::wave::registry::process_alive;
 use super::JanitorReport;
 
 fn tmux_available() -> bool {
@@ -33,24 +33,6 @@ fn tmux_available() -> bool {
         .arg("-V")
         .output()
         .is_ok_and(|output| output.status.success())
-}
-
-async fn tmux_session_exists(session_name: &str) -> Result<bool> {
-    let status = Command::new("tmux")
-        .args(["has-session", "-t", session_name])
-        .status()
-        .await
-        .map_err(|err| anyhow!("tmux session probe failed: {err}"))?;
-    Ok(status.success())
-}
-
-/// Whether a process with `pid` is running on this host (`kill -0` probe).
-async fn process_alive(pid: u32) -> bool {
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .status()
-        .await
-        .is_ok_and(|status| status.success())
 }
 
 async fn read_tmux_exit_code(exit_file: PathBuf) -> Result<Option<i32>> {
@@ -88,7 +70,6 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
 pub struct WaveExecutor {
     store: SharedStore,
     event_hub: EventHub,
-    disable_tmux: bool,
 }
 
 impl std::fmt::Debug for WaveExecutor {
@@ -99,11 +80,7 @@ impl std::fmt::Debug for WaveExecutor {
 
 impl WaveExecutor {
     pub fn new(store: SharedStore, event_hub: EventHub) -> Self {
-        Self {
-            store,
-            event_hub,
-            disable_tmux: false,
-        }
+        Self { store, event_hub }
     }
 
     pub async fn launch_palette_session(
@@ -113,7 +90,7 @@ impl WaveExecutor {
         worktree: &str,
         agent: &str,
     ) -> Result<Session> {
-        if self.disable_tmux || !tmux_available() {
+        if !tmux_available() {
             return Err(anyhow!("tmux is required for palette terminal sessions"));
         }
         let wave = self

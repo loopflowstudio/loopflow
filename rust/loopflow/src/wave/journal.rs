@@ -563,7 +563,8 @@ fn usage_segment(usage: &Usage) -> String {
 }
 
 /// A run id shortened for the console (ids correlate by prefix).
-fn short_id(run_id: &str) -> String {
+/// Shared with `lf runs`' ledger timeline.
+pub(crate) fn short_id(run_id: &str) -> String {
     run_id.chars().take(8).collect()
 }
 

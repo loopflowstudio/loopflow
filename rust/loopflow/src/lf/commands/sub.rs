@@ -38,6 +38,7 @@ use crate::lf::commands::chat::{resolve_target, CliContext};
 use crate::lf::WaveTargetArgs;
 use crate::lfd::conversations::turns::{ChatRole, ChatTurn};
 use crate::lfd::conversations::types::{ConversationItem, Lifecycle};
+use crate::wave::journal::ellipsize;
 
 pub fn run(wave: Option<&str>, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
@@ -370,18 +371,6 @@ fn lifecycle_name(status: Lifecycle) -> &'static str {
         Lifecycle::Failed => "failed",
         Lifecycle::Interrupted => "interrupted",
     }
-}
-
-/// Flatten whitespace and cap at `max` chars (ellipsis when cut) — the
-/// console keeps one event per line.
-fn ellipsize(text: &str, max: usize) -> String {
-    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if flat.chars().count() <= max {
-        return flat;
-    }
-    let mut cut: String = flat.chars().take(max).collect();
-    cut.push('…');
-    cut
 }
 
 #[cfg(test)]

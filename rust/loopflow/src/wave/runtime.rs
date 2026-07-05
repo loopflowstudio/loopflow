@@ -1782,7 +1782,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(crate::wave::channel::child_worktree_path(
-            &origin, "ship.148e",
+            &origin,
+            "ship.148e",
         ))
         .unwrap();
         let rt = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
@@ -1812,7 +1813,10 @@ mod tests {
         };
         assert_eq!(msg.op, MessageOp::Say);
         assert_eq!(msg.text, "landed PR #42");
-        assert_eq!(msg.from.as_ref().map(|f| f.label.as_str()), Some("ship.148e"));
+        assert_eq!(
+            msg.from.as_ref().map(|f| f.label.as_str()),
+            Some("ship.148e")
+        );
         assert_eq!(
             msg.from.as_ref().and_then(|f| f.session_id.as_deref()),
             Some("sess-9")
@@ -1867,7 +1871,11 @@ mod tests {
             "session failed; error: boom"
         ));
         let turn = &rt.thread_snapshot()[0];
-        assert!(turn.text.contains("run run-abcd"), "short id: {}", turn.text);
+        assert!(
+            turn.text.contains("run run-abcd"),
+            "short id: {}",
+            turn.text
+        );
         assert!(turn.text.contains("failed"));
         assert!(turn.text.contains("boom"), "failure summary on the turn");
         assert_eq!(turn.from.as_deref(), Some("observer"));
@@ -1962,7 +1970,11 @@ mod tests {
         rt.apply_resident_delta(ResidentDelta::MessagesRequeued {
             ids: vec![msg_id(&m)],
         });
-        assert_eq!(rt.pending_messages().len(), 1, "undone claim back to pending");
+        assert_eq!(
+            rt.pending_messages().len(),
+            1,
+            "undone claim back to pending"
+        );
         // The turn then finishes failed: the already-undone claim is not
         // requeued a second time (still exactly one pending).
         rt.apply_resident_delta(d_finished(Lifecycle::Failed));
@@ -1991,7 +2003,9 @@ mod tests {
         rt.apply_resident_delta(d_finished(Lifecycle::Completed));
         // No assistant turn committed; the message is still queued.
         assert!(
-            rt.thread_snapshot().iter().all(|t| t.role == ChatRole::User),
+            rt.thread_snapshot()
+                .iter()
+                .all(|t| t.role == ChatRole::User),
             "paused: no assistant turn started"
         );
         assert_eq!(rt.pending_messages().len(), 1, "the message waits");
@@ -2005,7 +2019,10 @@ mod tests {
         assert!(!rt.paused());
         rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
         rt.apply_resident_delta(d_finished(Lifecycle::Completed));
-        assert!(rt.pending_messages().is_empty(), "unpaused turn answered it");
+        assert!(
+            rt.pending_messages().is_empty(),
+            "unpaused turn answered it"
+        );
     }
 
     #[test]
@@ -2197,7 +2214,10 @@ mod tests {
         let wave = rt.thread_snapshot();
         assert_eq!(wave.len(), 2);
         assert_eq!(wave[0].text, "to the wave");
-        assert_eq!(wave[1].text, "to a", "the say folded up; the message did not");
+        assert_eq!(
+            wave[1].text, "to a",
+            "the say folded up; the message did not"
+        );
         let a = rt.child_channel("ship.a").unwrap().expect("a live");
         let b = rt.child_channel("ship.b").unwrap().expect("b live");
         assert_eq!(a.thread_snapshot().len(), 1);
@@ -2234,10 +2254,17 @@ mod tests {
         // `message` to ship.b, which never folds up.
         let rt2 = WaveRuntime::open("ship".into(), origin.clone()).expect("reopen");
         let pending = rt2.pending_messages();
-        assert_eq!(pending.len(), 2, "the wave message and the forwarded report");
+        assert_eq!(
+            pending.len(),
+            2,
+            "the wave message and the forwarded report"
+        );
         let texts: Vec<_> = pending.iter().map(|m| m.text.as_str()).collect();
         assert!(texts.contains(&"to the wave") && texts.contains(&"to a"));
-        assert!(!texts.contains(&"to b"), "the child message never folded up");
+        assert!(
+            !texts.contains(&"to b"),
+            "the child message never folded up"
+        );
 
         // Family membership is enforced; a foreign name is refused.
         assert!(rt2

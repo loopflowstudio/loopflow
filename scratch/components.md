@@ -68,9 +68,14 @@ tree doesn't match this map; the conversion makes it match.
   machinery down (stream client → wave, find_repo_root → engine).
 - **API**: argv. That's the point (the gate mirrors it).
 
-### `lfd` — the gatekeeper
-- **Role**: the machine's face: read routes, `/ws` push (bridge), webhook
-  ingress → **exec lf**, boot hygiene. Loses its remaining in-process
+### `lfd` — the gatekeeper: ear-and-voice (Jack, 2026-07-05)
+- **Role**: the machine's face — an ear AND a voice, both directions,
+  never a hand. Listens inward (scan/index/bridge over files+sqlite);
+  listens outward (webhooks, remote clients at the door); speaks outward
+  (read routes, /ws push, event relay); speaks inward (**exec lf** —
+  attributed speech through the same public doors as anyone: webhook →
+  `lf chat --from github`, remote argv → exec under client identity).
+  The hand-ban is the constraint: no pens, no git, no tmux, no vendors. Loses its remaining in-process
   mutations (land/next/combine/stop/rename → exec lf under client
   authority). Loses `wave_config` (→ engine).
 - **Data**: wire DTOs, the push `Event` vocabulary, the bridge snapshot

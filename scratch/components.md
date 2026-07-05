@@ -118,6 +118,12 @@ tree doesn't match this map; the conversion makes it match.
   (from x.y, --dispatch z mints x.y.z); `lf q` retires; the explicit
   grammar (lf step/lf flow) joins the conversion as its own worktree.
 - **Python reborn** as `lfq` the proxy + `loopflow` the viewer library.
+- **`lf op` stays** — the deterministic local sibling of prompted work.
+- **`step` renames to `skill`** (the ecosystem's word; sync_skills already
+  emits SKILL.md): local invocation = `lf skill <name>` | `lf flow <name>`
+  | `lf op <verb>` | `lf : "text"`, with `--dispatch [z]` as remote-ness.
+  The rename sweeps engine dirs (.lf/steps→.lf/skills), prompts, docs —
+  rides the grammar conversion worktree.
 
 ## Sequencing
 1. **Fix wave first, this branch** — the review's confirmed behavior bugs

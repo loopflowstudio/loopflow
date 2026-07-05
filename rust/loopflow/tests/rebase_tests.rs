@@ -1,4 +1,7 @@
-use loopflow::ops::{rebase_with_recovery, NullProgress, OpsError, RebaseOptions};
+use loopflow::ops::{
+    plan_rebase, rebase_with_recovery, NullProgress, OpsError, RebaseClass, RebaseOptions,
+    RebaseStrategy,
+};
 use loopflow_test_support::TestRepo;
 use std::process::Command;
 
@@ -152,4 +155,105 @@ fn rebase_stacked_branch_after_squash_merge() {
     );
     // HEAD should have changed (rebased onto new main).
     assert_ne!(repo.head_sha(), b_head, "HEAD should differ after rebase");
+}
+
+#[test]
+fn plan_rebase_classifies_dirty_scratch_only_branch_as_reset() {
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("scratch/design.md", "notes");
+
+    let plan = plan_rebase(repo.path(), None).expect("plan rebase");
+
+    assert_eq!(plan.class, RebaseClass::ScratchOnly);
+    assert_eq!(plan.strategy, RebaseStrategy::ResetToBase);
+    assert_eq!(plan.unique_commits, 0);
+    assert!(!plan.protected);
+    assert!(plan
+        .changed_files
+        .iter()
+        .all(|path| path.starts_with("scratch")));
+}
+
+#[test]
+fn plan_rebase_handles_modified_scratch_file_with_leading_status() {
+    // Regression: a working-tree-modified (unstaged) file produces a porcelain
+    // line with a leading status column (" M scratch/notes.md"). Trimming the
+    // first line's leading space shifts the fixed path offset and drops the
+    // path's first character ("cratch/notes.md"), which no longer starts with
+    // "scratch" — misclassifying the branch as clean_authored → direct_rebase.
+    let repo = TestRepo::new();
+    repo.create_file("scratch/notes.md", "original\n");
+    repo.stage_all();
+    repo.commit("add scratch notes");
+    repo.push();
+
+    repo.create_branch("feature");
+    // Modify the tracked scratch file WITHOUT staging -> " M" porcelain status.
+    repo.create_file("scratch/notes.md", "evolved working notes\n");
+
+    let plan = plan_rebase(repo.path(), None).expect("plan rebase");
+
+    assert_eq!(plan.class, RebaseClass::ScratchOnly);
+    assert_eq!(plan.strategy, RebaseStrategy::ResetToBase);
+    assert!(
+        plan.changed_files
+            .iter()
+            .all(|path| path.starts_with("scratch")),
+        "changed_files should all be under scratch/, got: {:?}",
+        plan.changed_files
+    );
+}
+
+#[test]
+fn plan_rebase_ignores_upstream_changes_when_branch_is_only_behind() {
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.checkout("main");
+    repo.create_file("main.txt", "main");
+    repo.stage_all();
+    repo.commit("main change");
+    repo.checkout("feature");
+    repo.create_file("scratch/design.md", "notes");
+
+    let plan = plan_rebase(repo.path(), Some("main")).expect("plan rebase");
+
+    assert_eq!(plan.class, RebaseClass::ScratchOnly);
+    assert_eq!(plan.strategy, RebaseStrategy::ResetToBase);
+    assert!(plan
+        .changed_files
+        .iter()
+        .all(|path| path.starts_with("scratch")));
+}
+
+#[test]
+fn plan_rebase_classifies_wave_changes_as_protected() {
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("wave/goals/MEMORY.md", "state");
+    repo.stage_all();
+    repo.commit("update wave memory");
+
+    let plan = plan_rebase(repo.path(), None).expect("plan rebase");
+
+    assert_eq!(plan.class, RebaseClass::Protected);
+    assert_eq!(plan.strategy, RebaseStrategy::DirectRebase);
+    assert!(plan.protected);
+}
+
+#[test]
+fn plan_rebase_uses_open_stack_parent() {
+    let repo = TestRepo::new();
+    repo.create_branch("a");
+    repo.create_file("a.txt", "a");
+    repo.stage_all();
+    repo.commit("a");
+    repo.create_branch("a.b");
+
+    let plan = plan_rebase(repo.path(), None).expect("plan rebase");
+
+    assert_eq!(plan.stack_parent.as_deref(), Some("a"));
+    assert_eq!(plan.base_ref, "a");
+    assert_eq!(plan.class, RebaseClass::StackParentOpen);
+    assert_eq!(plan.strategy, RebaseStrategy::RebaseOntoParent);
 }

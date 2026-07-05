@@ -286,6 +286,9 @@ pub enum OpsCommand {
     Doctor,
     /// Rebase current branch onto target (default: main)
     Rebase {
+        /// Print the planned rebase strategy without mutating git
+        #[arg(long)]
+        plan: bool,
         /// Branch to rebase onto
         onto: Option<String>,
     },
@@ -581,8 +584,18 @@ pub enum WtCommand {
         name: String,
         #[arg(short = 'b', long = "base")]
         base: Option<String>,
-        #[arg(short = 's', long = "stack")]
-        stack: bool,
+        /// Stack under a parent branch (defaults to current branch when no value is passed)
+        #[arg(short = 's', long = "stack", value_name = "PARENT", num_args = 0..=1, default_missing_value = "__current__")]
+        stack: Option<String>,
+        /// Force a root branch from the default branch
+        #[arg(long = "main", conflicts_with_all = ["base", "stack", "fork"])]
+        main: bool,
+        /// Create an independent root branch from the review base
+        #[arg(long, conflicts_with_all = ["base", "stack", "main"])]
+        fork: bool,
+        /// Print the placement plan without creating a worktree
+        #[arg(long)]
+        plan: bool,
     },
     /// Switch to a worktree
     Switch {

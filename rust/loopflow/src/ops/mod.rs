@@ -28,7 +28,10 @@ pub use land::{land, mark_ready, LandOptions, LandResult, RotationResult};
 pub use next::{advance_branch, next_branch, NextOptions, NextResult};
 pub use pr::{create_or_update_pr, current_pr, update_pr, PrInfo, PrOptions, PrResult};
 pub use progress::{NullProgress, Progress};
-pub use rebase::{rebase_with_recovery, RebaseOptions};
+pub use rebase::{
+    plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, RebaseClass,
+    RebaseOptions, RebasePlan, RebaseStrategy,
+};
 pub use release::{
     bump_version, generate_release, release_bump, release_check, release_notes, release_run,
     release_status, release_tag, MergedPr, ReleaseRunResult, ReleaseStatusResult,

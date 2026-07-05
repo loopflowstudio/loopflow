@@ -13,9 +13,12 @@ Use `lf op` for mechanical git and GitHub operations.
 lf op commit -m "message" -p     # commit and push
 lf op pr --title "..."           # create/update PR
 lf op land                       # submit to merge queue
-lf op rebase                     # rebase onto main
+lf op rebase --plan              # show reset/rebase strategy
+lf op rebase                     # apply the planned update
 lf op next                       # preserve worktree, fresh branch
-lf op wt create my-feature       # sibling worktree ../<repo>.my-feature
+lf op wt create my-feature       # create/select placed worktree
+lf op wt create --main my-feature # force root branch from main
+lf op wt create --stack parent child # stack child under parent
 lf op wt switch my-feature       # cd to existing worktree
 lf op wt prune                   # clean up merged worktrees
 ```

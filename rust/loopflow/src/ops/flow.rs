@@ -59,7 +59,10 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             )?;
             Ok(())
         }
-        OpsCommand::Rebase { onto } => {
+        OpsCommand::Rebase { plan, onto } => {
+            if *plan {
+                return Ok(());
+            }
             let base = get_default_branch(repo)?;
             let onto_ref = onto
                 .as_ref()

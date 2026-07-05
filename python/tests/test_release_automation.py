@@ -73,6 +73,12 @@ def test_bump_patch_version_groups_long_commit_lists_without_dropping_commits(tm
     subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    # The 60-commit loop below crosses git's loose-object threshold and would
+    # otherwise trigger a background `gc --auto` that races with the next
+    # commit's object read (`fatal: unable to read <sha>`). Disable it so the
+    # setup is deterministic on loaded CI runners.
+    subprocess.run(["git", "config", "gc.auto", "0"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "maintenance.auto", "false"], cwd=repo, check=True)
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(
         ["git", "commit", "-m", "release: v1.2.3"],

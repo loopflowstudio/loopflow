@@ -57,11 +57,15 @@ launch_palette_session only if Concerto terminals return (no live caller —
 cut with the rest, revive from git if needed); wave_config.rs moves out of
 http/routes (misfiled; registry + ops/pm depend on it).
 
-## The five calls
+## The seven calls
 
 1. **Webhooks become speech.** check_run → doorman execs
    `lf chat --wave X "CI failed on PR #N: …"` — the mind dispatches ci-fix.
-   PR-merged → execs `lf op queue reconcile`. push → speech or nothing.
+   PR-merged → execs `lf op queue reconcile`. push → speech too (Jack):
+   "main moved: <sha>" to each affected wave — the mind decides to
+   rebase/integrate with judgment, replacing the watch trigger's blanket
+   activation. The trigger MACHINERY dies; watch/cron/ci-failure as
+   CAPABILITIES all re-home (mind clock, webhook speech).
 2. **Cron moves into the mind**: a third deadline in the select loop, read
    from the wave's cron rows in lfdb; fires a system turn ("cron due:
    <flow>"). The poller dies. External cron calling `lf chat` stays legal.
@@ -74,6 +78,13 @@ http/routes (misfiled; registry + ops/pm depend on it).
 5. **Concerto live mutations**: createWave + addRepo → exec-lf; auth OAuth
    flows port to lf (doorman keeps read status); iOS agent-session chat
    migrates to the wave server's door (remote rides the relay later).
+6. **Auto-PR gets a structural analog (Jack).** A worker's PR must not
+   depend on its prompt remembering `lf op pr`: the dispatch wrapper runs
+   `lf op pr` itself on clean flow exit (opt-out flag for deliberately
+   PR-less runs) — the executor's guarantee, daemon-free.
+7. **advance_branch survives as a verb (Jack)**: `lf op advance` (or folded
+   into `lf op next` semantics) — recurring-wave branch rotation invoked by
+   a human or the mind, not an executor side effect.
 
 ## Sequence (hazard-ordered, from the map)
 

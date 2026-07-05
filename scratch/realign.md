@@ -43,6 +43,14 @@ an lf process whose input is its subscription (lf sub's second customer)
 and whose home is <repo>.<wave> (worktree bootstrap moves to the resident);
 auto-revive = process respawn; registry rows split server/mind. Server =
 hear / check / fold / tell, ~4k lines, vendor-free.
+**Spawning (Jack, 2026-07-05): `lf wave` spawns the mind — keeper spawns
+tenant, one command.** Vendor choice moves to wave config (`mind:` in
+GOAL.md frontmatter); `--no-mind` = pure listener. The resident's own
+command is NOT `lf mind` (instinct: wrong name) — lean for Wave C: the same
+verb with a role flag (`lf wave <name> --mind-only`, a resident attaching
+to an existing listener — also the human-as-mind / respawn affordance);
+name it differently only if that reads wrong in the build. Resident
+authentication at the door: flagged, mine.
 
 Then: compress, 8-angle review, fix wave — same pipeline as the wave-agent
 branch. Cron-into-the-mind is collapse wave 3's item (ordering guard:

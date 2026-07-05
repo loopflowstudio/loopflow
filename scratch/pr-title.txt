@@ -1,0 +1,1 @@
+lfd: move wave plumbing out of daemon ownership

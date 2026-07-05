@@ -21,7 +21,7 @@ Commands:
     logs            Tail the app logs
     lfd             Stop installed lfd and run from this branch (native/sqlite)
     lfd -k          Aggressive preflight kill before starting lfd
-    lfd --docker    Run lfd with Docker executor (postgres in container)
+    lfd --docker    Run legacy Docker executor path (postgres in container)
     agent-image     Build the Docker agent image
 
     screenshots     Generate app screenshots
@@ -633,7 +633,7 @@ def _stop_installed_lfd() -> None:
 
 
 def _lfd_docker() -> int:
-    """Start postgres in a container, run lfd natively with Docker executor.
+    """Start the legacy postgres-backed Docker executor path.
 
     lfd needs host filesystem access to resolve repo paths and build agent
     images, so it runs on the host. Only postgres is containerized.
@@ -709,7 +709,9 @@ def _lfd_docker() -> int:
     if result.returncode != 0:
         return result.returncode
 
-    # Run lfd natively in container mode
+    # Legacy Docker executor path. Container mode is staging debt scheduled for
+    # M2 removal; keep this only so old Concerto dev flows do not break before
+    # the native replacement is fully proven.
     env = os.environ.copy()
     env["LFD_MODE"] = "container"
     env["LFD_DATABASE_URL"] = "postgres://lfd:lfd@127.0.0.1:5432/lfd"
@@ -718,7 +720,7 @@ def _lfd_docker() -> int:
 
     lfd_bin = str(REPO_ROOT / "target" / "debug" / "lfd")
     print(f"Stream log: {LFD_STREAM_LOG}")
-    print("Starting lfd (container mode, debug logging)...")
+    print("Starting lfd (legacy container mode, debug logging)...")
     return stream_with_log([lfd_bin, "serve"], env=env, log_path=LFD_STREAM_LOG)
 
 
@@ -1251,7 +1253,11 @@ def main() -> int:
     for name, (func, help_text) in COMMANDS.items():
         sub = subparsers.add_parser(name, help=help_text)
         if name == "lfd":
-            sub.add_argument("--docker", action="store_true", help="Use Docker executor")
+            sub.add_argument(
+                "--docker",
+                action="store_true",
+                help="Use legacy Docker executor path",
+            )
             sub.add_argument(
                 "-k",
                 "--kill",

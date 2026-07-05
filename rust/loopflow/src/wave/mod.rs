@@ -68,6 +68,8 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 
 use crate::engine::worktrees::main_repo_root;
+// TODO(M1): move find_repo_root into engine/repo utilities so wave does not
+// import from lf::commands.
 use crate::lf::commands::util::find_repo_root;
 use crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV;
 use crate::lfdb::{open_existing_store, SharedStore};
@@ -159,6 +161,9 @@ async fn resolve_registry(
 /// same executable, endpoint + token + wave-session context in env. The
 /// resident's stdout/stderr inherit — one `lf wave` terminal shows both
 /// halves, today's UX.
+// TODO(M1): keep this shutdown contract in the wave/supervisor owner: stand
+// the respawn ladder down before terminating the resident, honor interrupt
+// cleanup, and keep SIGKILL deadlines in the supervisor path.
 fn resident_spawner(
     wave: String,
     repo_root: PathBuf,

@@ -1,3 +1,5 @@
+// TODO(M1): move wave config/frontmatter parsing into engine. It is used by
+// wave, ops, resident, and lfd; routes should not own this shared contract.
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::{Mapping, Value};
 use std::collections::HashMap;

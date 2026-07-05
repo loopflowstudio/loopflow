@@ -182,6 +182,8 @@ impl SseFrameParser {
 /// scope). Connection failure and non-2xx are errors (the caller retries —
 /// except the resident, whose one connection IS its tenancy). Shared with
 /// [`crate::wave::resident`], the subscription's second customer.
+// TODO(M1): move this SSE client into wave so resident and lf sub share a
+// component API instead of importing command code.
 pub(crate) async fn stream_events(
     endpoint: &str,
     query: &str,

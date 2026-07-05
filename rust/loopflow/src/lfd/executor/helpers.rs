@@ -23,6 +23,8 @@ use crate::lfd::types::{Run, RunStackStatus, RunStatus, Session, Wave, WaveStatu
 use crate::lfdb::SharedStore;
 use crate::ops::{rebase_with_recovery, Progress, RebaseOptions};
 
+// TODO(M1): extract dispatch into crate::dispatch. lfd/executor should not own
+// placement, worktree creation, tmux launch wiring, or the run env contract.
 /// Where a dispatched run's work happens on disk.
 ///
 /// Every dispatch names its placement explicitly — there is no implicit

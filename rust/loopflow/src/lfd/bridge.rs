@@ -30,6 +30,9 @@
 //! trigger a refetch; session/attention events are upserts or ignored), so a
 //! repeated event converges to the same UI state.
 
+// TODO(M1/M2): preserve these event-projection mechanics when the shared query
+// plane owns them: silent boot seed, fingerprint diffs, bounded scans for
+// growing tables, and duplicate-tolerant state replacement.
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Mutex;

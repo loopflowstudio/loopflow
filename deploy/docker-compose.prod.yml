@@ -1,7 +1,9 @@
-# Production override for remote deployment.
+# Legacy production override for remote deployment.
 # Usage: docker compose -f docker/docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
 #
 # Adds Caddy for TLS termination on top of the self-hosted container stack.
+# Container mode and postgres-backed hosting are staging debt scheduled for the
+# M2 substrate cut; prefer native lfd plus SSH-first operations.
 
 services:
   caddy:

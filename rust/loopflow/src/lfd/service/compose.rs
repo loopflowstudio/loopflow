@@ -5,6 +5,9 @@ use std::process::{Command, Output};
 
 use crate::lfd::config::{CredentialMount, ExecutorType, LfdConfig, StorageType};
 
+// TODO(M2): delete managed compose/container mode with postgres. Extract any
+// still-useful deploy hardening (named mounts, env validation, health checks)
+// before removing the module.
 const POSTGRES_DATABASE_URL: &str = "postgres://lfd:lfd@postgres:5432/lfd";
 const POSTGRES_IMAGE: &str = "postgres:16-alpine";
 

@@ -27,6 +27,9 @@ use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{Event, Run, RunStatus, Wave, WaveStatus, LIVE_SESSION_STATUSES};
 
+// TODO(M1): convert the mutating wave routes in this file to exec lf argv or
+// remove them. lfd is the local face, not a hand: no direct git, worktree, tmux,
+// or ops calls from route handlers.
 #[derive(Debug, Deserialize)]
 pub struct ListWavesQuery {
     repo: Option<String>,

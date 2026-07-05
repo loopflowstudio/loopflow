@@ -7,6 +7,9 @@
 //! is `lf q worker run`'s job now, and every worker is a tmux-wrapped `lf`
 //! process that registers its own session row.
 
+// TODO(M1): move the remaining session reconciliation and worktree janitor
+// mechanisms to the session/worktree owners; keep cleanup idempotent for both
+// git worktrees and plain directories.
 pub(crate) mod helpers;
 pub(crate) mod wave;
 

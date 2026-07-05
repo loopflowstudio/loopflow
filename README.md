@@ -29,7 +29,7 @@ Run the wave in your terminal:
 
 ```bash
 lf wave designer             # the wave's server: one persistent mind, until Ctrl-C
-lf chat "ship the button audit first"     # speak into its thread (any process can)
+lf chat "ship the button audit first"     # post into its thread (any process can)
 lf memory add "buttons: variants unified" # curate what it knows
 ```
 
@@ -39,14 +39,14 @@ Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
 `lf wave <name>` starts a long-lived server at the repo's main checkout (the
 wave's journal and endpoint live at the origin); the resident mind — one
 persistent codex thread — enters the wave's worktree to work. Progress and
-chat are a single conversation: human speech steers a live turn by default,
-attributed speech (workers, scripts) queues for the next one, interrupt
+chat are a single conversation: human messages steer a live turn by default,
+attributed messages (workers, scripts) queue for the next one, and interrupt
 finalizes a partial turn. Truth is an append-only journal, so a restart keeps
-the whole thread. `lf chat` and `lf memory` are the speech surface — the same
-doors for minds, workers, humans, and scripts; worker reports arrive
-attributed in the thread. Outside any wave a publish drops silently (exit 0)
-— the verbs are safe in every prompt. See `rust/loopflow/src/wave/README.md`
-for the wire contract, and `scripts/demo_wave.sh` for the guided demo.
+the whole thread. `lf chat` and `lf memory` are the message doors for minds,
+workers, humans, and scripts; worker reports arrive attributed in the thread.
+Outside any wave a publish drops silently (exit 0) — the verbs are safe in
+every prompt. See `rust/loopflow/src/wave/README.md` for the wire contract,
+and `scripts/demo_wave.sh` for the guided demo.
 
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 
@@ -88,7 +88,10 @@ crons:
 
 ### GitHub webhooks
 
-External signals arrive as speech, not machinery. `lfd` verifies each GitHub webhook and speaks it inward as an `lf` exec:
+`lfd` verifies each GitHub webhook and translates it inward as an `lf` exec.
+For the current demo path, CI failures and main pushes arrive as attributed
+chat notifications; the architecture direction is durable facts plus explicit
+commands for long-term coordination.
 
 | Event | What lfd runs |
 |-------|---------------|
@@ -373,7 +376,7 @@ lf op pm status                              # show linked waves
 
 `lf op pm` reads and edits the roadmap directly in Asana — there is no local mirror and nothing to sync. Task notes preserve basic markdown formatting: Loopflow writes rich text through `html_notes` and falls back to plaintext `notes` when a task has none yet.
 
-The `loopflow` Python package is a library only (wire models).  
+The `loopflow` Python package is a library only (wire models).
 Use the install script or cargo to install `lf` and `lfd`.
 
 [Documentation →](docs/index.md)

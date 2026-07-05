@@ -37,7 +37,7 @@ lf q worker run shipper --flow build --task "…" --stack <run-id> # fork from t
 
 `--pool` runs in the wave's shared `<repo>.<wave>` worktree: pooled workers share one branch, so concurrent pooled dispatches can collide — use it only when workers must see each other's edits live. `--stack` starts dependent work on top of an unlanded run's branch; the new run targets the parent's branch instead of main.
 
-Waves are independent by default. When one wave should react to another, speak into its thread — `lf chat --wave <name> "…"` works from any process, including another wave's mind.
+Waves are independent by default. When one process needs to report into a wave, post into its thread — `lf chat --wave <name> "…"` works from any process, including another wave's mind.
 
 ## Modes
 

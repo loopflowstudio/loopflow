@@ -21,6 +21,9 @@
 //! file-based `server.rs` — `MAILBOX.md` + NDJSON sink — was rejected and is not
 //! carried over.)
 
+// TODO(M1): split this module by charter: harness moves to crate::harness,
+// turn/wire vocabulary moves beside wave or shared DTOs, and lfd stops owning
+// resident dependencies.
 pub mod harness;
 pub mod opencode_runtime;
 pub mod turns;

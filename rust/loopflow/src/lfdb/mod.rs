@@ -8,8 +8,8 @@
 //!
 //! Seam note: a handful of registry methods lost their last caller in the
 //! collapse (chat memory/messages, merge events, fork-run cleanup, a few
-//! attention/session lookups). They ride along untouched — this crate is
-//! scheduled for whole deletion when the filesystem becomes the database.
+//! attention/session lookups). They ride along untouched until M2 narrows this
+//! module to sqlite-only machine scratchpad.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,6 +23,8 @@ use crate::lfd::types::{
 
 pub mod catalog;
 pub mod migrations;
+// TODO(M2): delete postgres and the dual-backend dispatch. sqlite stays as the
+// many-writer machine scratchpad; postgres is the center that dies.
 pub mod postgres;
 pub mod rows;
 pub mod sqlite;
@@ -196,6 +198,7 @@ pub type StoreResult<T> = Result<T, StoreError>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageConfig {
     Sqlite { path: PathBuf },
+    // TODO(M2): remove this variant with postgres.rs and LFD_DATABASE_URL.
     Postgres { database_url: String },
 }
 

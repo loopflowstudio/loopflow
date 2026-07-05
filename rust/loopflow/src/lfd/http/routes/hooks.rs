@@ -1,7 +1,10 @@
-//! GitHub webhook ingress — the gatekeeper's ears, speaking inward as `lf`.
+//! GitHub webhook ingress — the gatekeeper's ears, translating inward to `lf`.
 //!
 //! Webhooks no longer feed the trigger/activation machinery. Each surviving
-//! event execs the `lf` surface (collapse call #1):
+//! event execs the `lf` surface (collapse call #1). In M0, CI failures and
+//! main pushes still use attributed `lf chat` as a compatibility notification
+//! path so the demo keeps working; M1 should move coordination to durable
+//! facts plus explicit `lf` commands where that is the real contract.
 //!
 //! - **check_run failure** → `lf chat --wave <wave> "CI failed: …"` — the
 //!   wave's mind decides whether and how to dispatch a fix.
@@ -15,6 +18,9 @@
 //! recorded, so the next delivery of that wave+sha replays instead of
 //! vanishing. No wave resolved → log-and-drop.
 
+// TODO(M1/M3): preserve these ingress reliability mechanisms under the
+// gatekeeper/argv owner: signature verification, plan-then-exec tests,
+// bounced-chat replay, and CI dedupe only after delivery succeeds.
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -42,7 +48,7 @@ struct WaveCiTarget {
     pr_number: u32,
 }
 
-// -- Outward speech --------------------------------------------------------
+// -- Planned lf execs ------------------------------------------------------
 
 /// One `lf` invocation the gatekeeper will spawn — argv after the binary.
 /// Planners return these so tests assert on the exact command line without
@@ -134,9 +140,9 @@ async fn settle_exec(lf: &std::path::Path, exec: LfExec, cache: &Arc<Mutex<HashS
     }
 }
 
-/// Push-to-main → `lf chat` for every wave living in the pushed repo.
+/// Push-to-main → an attributed notification for every wave in the pushed repo.
 /// Non-main refs plan nothing.
-async fn plan_push_speech(
+async fn plan_push_notifications(
     store: &SharedStore,
     repo_full_name: &str,
     git_ref: &str,
@@ -166,12 +172,12 @@ fn main_moved_text(before: &str, after: &str) -> String {
     }
 }
 
-/// Failed check_run → `lf chat` to each wave owning an open PR the check ran
-/// against. Deduped per wave+commit through the shared CI-failure cache so a
-/// red matrix speaks once — but the key is only RECORDED once the spawned
+/// Failed check_run → an attributed notification to each wave owning an open
+/// PR the check ran against. Deduped per wave+commit through the shared
+/// CI-failure cache so a red matrix reports once — but the key is only RECORDED once the spawned
 /// exec exits 0 (see [`settle_exec`]); planning just reads the cache, so a
 /// bounced chat replays. No wave resolved → empty (the caller drops).
-async fn plan_check_run_speech(
+async fn plan_check_run_notifications(
     store: &SharedStore,
     cache: &Arc<Mutex<HashSet<String>>>,
     event: &GitHubCheckRunEvent,
@@ -289,7 +295,7 @@ pub async fn github_webhook_handler(
                 )
             })?;
 
-            let execs = plan_push_speech(
+            let execs = plan_push_notifications(
                 &state.store,
                 &event.repository.full_name,
                 &event.git_ref,
@@ -333,7 +339,7 @@ pub async fn github_webhook_handler(
                 ));
             }
 
-            let execs = plan_check_run_speech(&state.store, &state.ci_failure_cache, &event)
+            let execs = plan_check_run_notifications(&state.store, &state.ci_failure_cache, &event)
                 .await
                 .map_err(|err| {
                     api_error(
@@ -354,7 +360,7 @@ pub async fn github_webhook_handler(
                     commit_sha = %event.check_run.head_sha,
                     check_name = %event.check_run.name,
                     matched,
-                    "CI failure spoken to waves via lf chat"
+                    "CI failure notification delivered to waves via lf chat"
                 );
             }
             spawn_lf_execs(&state.ci_failure_cache, execs);
@@ -636,7 +642,7 @@ mod tests {
         }
     }
 
-    /// Push to main speaks to every wave in the repo — and only those.
+    /// Push to main notifies every wave in the repo — and only those.
     #[tokio::test]
     async fn push_to_main_plans_chat_for_each_wave_in_repo() {
         let tmp = tempdir().expect("tempdir");
@@ -656,7 +662,7 @@ mod tests {
             .await
             .expect("wave elsewhere");
 
-        let execs = plan_push_speech(
+        let execs = plan_push_notifications(
             &store,
             "loopflowstudio/loopflow",
             "refs/heads/main",
@@ -701,7 +707,7 @@ mod tests {
             .await
             .expect("wave");
 
-        let execs = plan_push_speech(
+        let execs = plan_push_notifications(
             &store,
             "loopflowstudio/loopflow",
             "refs/heads/feature",
@@ -730,7 +736,7 @@ mod tests {
         let cache = Arc::new(Mutex::new(HashSet::new()));
         let event = check_run_event("loopflowstudio/loopflow", "feature", 1);
 
-        let execs = plan_check_run_speech(&store, &cache, &event)
+        let execs = plan_check_run_notifications(&store, &cache, &event)
             .await
             .expect("plan");
         let expected_key = format!("{}:abc123", wave.id());
@@ -749,7 +755,7 @@ mod tests {
 
         // Unknown repo: no wave resolves, dropped.
         let unknown = check_run_event("loopflowstudio/ghost", "feature", 1);
-        let dropped = plan_check_run_speech(&store, &cache, &unknown)
+        let dropped = plan_check_run_notifications(&store, &cache, &unknown)
             .await
             .expect("plan unknown");
         assert!(dropped.is_empty(), "no wave resolved → drop");
@@ -774,7 +780,7 @@ mod tests {
         let event = check_run_event("loopflowstudio/loopflow", "feature", 1);
 
         // First delivery bounces (wave server down → exit ≠ 0).
-        let execs = plan_check_run_speech(&store, &cache, &event)
+        let execs = plan_check_run_notifications(&store, &cache, &event)
             .await
             .expect("plan");
         assert_eq!(execs.len(), 1);
@@ -787,7 +793,7 @@ mod tests {
         assert!(cache.lock().await.is_empty(), "bounce records nothing");
 
         // Replay: the same wave+sha plans again…
-        let replay = plan_check_run_speech(&store, &cache, &event)
+        let replay = plan_check_run_notifications(&store, &cache, &event)
             .await
             .expect("plan replay");
         assert_eq!(replay.len(), 1, "bounced wave+sha replays");
@@ -799,10 +805,10 @@ mod tests {
             &cache,
         )
         .await;
-        let deduped = plan_check_run_speech(&store, &cache, &event)
+        let deduped = plan_check_run_notifications(&store, &cache, &event)
             .await
             .expect("plan deduped");
-        assert!(deduped.is_empty(), "delivered wave+sha never speaks twice");
+        assert!(deduped.is_empty(), "delivered wave+sha never reports twice");
     }
 
     /// PR merged plans the queue-reconcile verb for the owning wave.

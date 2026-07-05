@@ -23,6 +23,8 @@ use crate::lfdb::StoreError;
 pub use state::HttpState;
 
 pub type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ErrorResponse>)>;
+// TODO(M1): preserve this transport hygiene in the gatekeeper HTTP shell:
+// reject credentials in query params before route handlers or tracing see them.
 const QUERY_TOKEN_ERROR: &str = "authentication credentials must not appear in query parameters";
 const AUTH_LIKE_QUERY_KEYS: [&str; 8] = [
     "token",

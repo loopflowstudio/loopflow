@@ -43,6 +43,11 @@ pub struct LfdConfig {
     pub output_log_retention_days: u32,
 }
 
+// TODO(M2): remove Mode::Container, StorageType::Postgres, and the container
+// service profile. Preserve the useful mechanisms from this path (env
+// allowlisting, named credential mounts, service-file secret hygiene, health
+// checks) in the SSH/native deploy story only if they still apply.
+
 impl Default for LfdConfig {
     fn default() -> Self {
         Self {

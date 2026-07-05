@@ -1,6 +1,9 @@
 # AWS self-hosted loopflow server
 
-Provision an EC2 Docker host for the self-hosted loopflow cron server.
+Provision an EC2 Docker host for the legacy self-hosted loopflow cron server.
+Container mode and postgres-backed hosting are staging debt scheduled for the M2
+substrate cut. Prefer the native Tailscale host in `deploy/PRIVATE_HOST.md` for
+maintained SSH-first operations.
 
 ```bash
 cd deploy/terraform/aws

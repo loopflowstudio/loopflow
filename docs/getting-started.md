@@ -24,7 +24,7 @@ Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en
 | Run autonomous waves | `lf init` → `lfd install` |
 | Use the visual app (macOS) | Download Concerto (handles the rest) |
 | Connect from iPhone | Concerto iOS → discovers your lfd |
-| Set up remote dev server | `mode: container` in `~/.lf/lfd.yaml`, then `lfd install` |
+| Set up remote dev server | SSH into the host and run native `lf`/`lfd` there |
 
 ---
 
@@ -156,7 +156,7 @@ Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter
 lf wave shipper
 ```
 
-The wave agent coordinates; it dispatches a **worker** per task (`lf q worker run shipper --flow build --task "…"`) and folds each shipped PR into memory. External signals arrive as speech — CI failures and pushes to main land in the wave's thread via `lf chat`, and the mind decides how to react.
+The wave agent coordinates; it dispatches a **worker** per task (`lf q worker run shipper --flow build --task "…"`) and folds each shipped PR into memory. Today CI failures and pushes to main land in the wave's thread as attributed `lf chat` notifications, so the demo path stays live while webhook coordination moves toward durable facts plus explicit commands.
 
 **Concerto** (macOS) is the native wave experience — monitor progress, browse flows, review PRs. Requires `lfd`.
 
@@ -185,17 +185,19 @@ You can draft wave content with `lf design` locally, or write it by hand. Once `
 
 ## Go Remote
 
-Run agents while you sleep. Install `lfd` on a server and your waves run 24/7.
+Run agents while you sleep. SSH into a server, install Loopflow, and run native
+`lf`/`lfd` there.
 
 ```bash
 mkdir -p ~/.lf
 cat > ~/.lf/lfd.yaml <<'YAML'
-mode: container
+mode: native
 YAML
 lfd install
 ```
 
-Concerto mobile connects to remote `lfd` — monitor and manage waves from your phone. See `deploy/README.md` for the Docker + TLS recipe.
+Remote Concerto/Cadenza is future work; for now, use SSH as the remote control
+surface.
 
 Auth connects your providers:
 

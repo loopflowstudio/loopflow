@@ -56,4 +56,3 @@ class TestDTOFixtures:
             "worktree": "/tmp/repo.Desktop",
             "agent": "codex",
         }
-

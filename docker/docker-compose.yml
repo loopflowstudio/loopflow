@@ -1,3 +1,8 @@
+#
+# Legacy staging stack. Container mode and postgres-backed hosting are scheduled
+# for the M2 substrate cut; keep this working while it exists, but do not expand
+# it as a product deployment path.
+#
 services:
   lfd:
     build:

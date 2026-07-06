@@ -1474,7 +1474,11 @@ mod tests {
         let sub = rt.subscribe_with_snapshot();
         assert_eq!(
             sub.memory_adds,
-            vec!["first".to_string(), "second".to_string(), "third".to_string()],
+            vec![
+                "first".to_string(),
+                "second".to_string(),
+                "third".to_string()
+            ],
             "the replay buffer rebuilds every add this journal from disk"
         );
     }

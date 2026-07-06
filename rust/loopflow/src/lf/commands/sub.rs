@@ -536,7 +536,9 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        runtime.append_memory("a fact published after subscribe").unwrap();
+        runtime
+            .append_memory("a fact published after subscribe")
+            .unwrap();
         for _ in 0..200 {
             if seen
                 .lock()

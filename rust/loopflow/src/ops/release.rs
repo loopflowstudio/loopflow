@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::engine::command::run_command;
+use crate::engine::command::{run_command, CommandError};
 use crate::engine::config::{load_config_or_default, Config, ReleaseTargetConfig};
 use crate::engine::git::{delete_local_branch, get_default_branch, worktree_remove};
 use crate::engine::worktrees::{create_with_schema_synced, main_repo_root};
@@ -468,10 +468,28 @@ fn run_release_notes_step(
         .arg("release-notes")
         .current_dir(repo)
         .env("LF_RELEASE_NOTES_CONTEXT", &context_path);
-    run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
-        command: err.command_line(),
-        stderr: err.stderr,
-    })?;
+    match run_command(&mut cmd) {
+        Ok(_) => {}
+        Err(err) if is_missing_release_notes_agent_cli(&err) => {
+            eprintln!(
+                "release-notes agent unavailable; writing deterministic fallback release notes"
+            );
+            let notes = generate_release_notes(
+                merged_prs,
+                version,
+                prev_tag,
+                target,
+                context.decisions.as_deref(),
+            )?;
+            write_release_notes(repo, &notes, version)?;
+        }
+        Err(err) => {
+            return Err(OpsError::CommandFailed {
+                command: err.command_line(),
+                stderr: err.stderr,
+            });
+        }
+    }
 
     if !repo.join("RELEASE_NOTES.md").exists() {
         return Err(OpsError::Message(
@@ -481,6 +499,23 @@ fn run_release_notes_step(
 
     archive_release_notes(repo, version)?;
     Ok(())
+}
+
+fn is_missing_release_notes_agent_cli(err: &CommandError) -> bool {
+    let stderr = err.stderr.to_lowercase();
+    let message = err.message.to_lowercase();
+    let combined = format!("{stderr}\n{message}");
+    let mentions_agent_cli = combined.contains("claude")
+        || combined.contains("codex")
+        || combined.contains("opencode")
+        || combined.contains("agent");
+    let missing_binary = combined.contains("cli not found")
+        || combined.contains("binary not found")
+        || combined.contains("not found on path")
+        || combined.contains("no such file or directory")
+        || combined.contains("failed to spawn");
+
+    mentions_agent_cli && missing_binary
 }
 
 /// Read `release/unreleased/DECISIONS.md` if it exists.
@@ -694,7 +729,7 @@ fn generate_release_with_target(
     let prs = merged_prs_since(repo, &prev_tag, target)?;
 
     progress.status("Generating release notes...");
-    let notes = generate_release_notes(&prs, &version, &prev_tag, target)?;
+    let notes = generate_release_notes(&prs, &version, &prev_tag, target, None)?;
 
     progress.status("Writing RELEASE_NOTES.md...");
     write_release_notes(repo, &notes, &version)?;
@@ -1162,6 +1197,7 @@ fn generate_release_notes(
     version: &str,
     prev_tag: &str,
     target: &ReleaseTarget,
+    decisions: Option<&str>,
 ) -> OpsResult<String> {
     let mut lines = vec![
         format!("## Changes since {prev_tag}"),
@@ -1170,9 +1206,17 @@ fn generate_release_notes(
         format!("- Tag prefix: {}", display_tag_prefix(target)),
         format!("- Area scope: {}", display_area_scope(target)),
         String::new(),
-        "## Merged PRs".to_string(),
-        String::new(),
     ];
+
+    if let Some(decisions) = decisions.map(str::trim).filter(|d| !d.is_empty()) {
+        lines.push("## Release decisions".to_string());
+        lines.push(String::new());
+        lines.push(decisions.to_string());
+        lines.push(String::new());
+    }
+
+    lines.push("## Merged PRs".to_string());
+    lines.push(String::new());
 
     if prs.is_empty() {
         lines.push("- No merged PRs found in this window.".to_string());

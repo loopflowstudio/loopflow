@@ -20,7 +20,10 @@ lf op rebase                     # apply the planned update
 lf op next                       # preserve worktree, fresh branch
 lf op wt create my-feature       # sibling worktree, root branch from main (default)
 lf op wt create thing --child parent # stack a child under parent
-lf op wt switch my-feature       # cd to existing worktree
+lf op wt switch my-feature       # cd to a worktree (wave name, leaf, or branch)
+lf op wt up                      # cd to the parent worktree in the stack
+lf op wt down                    # cd to a child worktree in the stack
+lf op wt list                    # the worktree stack as a tree
 lf op wt prune                   # clean up merged worktrees
 ```
 

@@ -276,20 +276,39 @@ If the input matches an existing `origin/<branch>` name, `lf` checks out that br
 
 ### lf op wt switch
 
-Switch to a worktree by its short directory name or full branch name.
+Switch to a worktree by wave name, chain leaf, or full branch.
 
 ```bash
-lf op wt switch my-feature       # switches to ../loopflow.my-feature
-lf op wt switch jack.my-feature.20260316_1856  # resolves that exact branch's worktree
+lf op wt switch bugs             # the bugs wave worktree
+lf op wt switch fix-auth         # the …bugs.fix-auth… worktree, by leaf
+lf op wt switch jack/bugs.fix-auth.20260316_1856  # exact branch
+```
+
+### lf op wt up / down
+
+Move through the stack — `up` toward main, `down` away from it.
+
+```bash
+lf op wt up              # to the parent worktree
+lf op wt down            # to the only child (else lists them)
+lf op wt down fix-auth   # to a specific child by leaf
 ```
 
 ### lf op wt list
 
-List worktrees with prunable metadata.
+Worktrees as a tree: children indent under their parent, workers show their
+timestamp, main leads.
 
 ```bash
 lf op wt list
 lf op wt list --format json
+```
+
+```
+* main                      active
+  bugs                      active
+    fix-auth                active
+      retry                 active
 ```
 
 ### lf op wt ci

@@ -672,10 +672,17 @@ pub enum WtCommand {
         #[arg(long)]
         plan: bool,
     },
-    /// Switch to a worktree
+    /// Switch to a worktree by wave name, leaf name, or full branch
     Switch {
         /// Worktree name or full branch name to switch to
         name: String,
+    },
+    /// Switch to the parent worktree in the stack (toward main)
+    Up,
+    /// Switch to a child worktree in the stack (away from main)
+    Down {
+        /// Which child to descend into, when there is more than one
+        name: Option<String>,
     },
     /// List worktrees
     List {

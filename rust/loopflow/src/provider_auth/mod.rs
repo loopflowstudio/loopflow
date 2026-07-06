@@ -1747,13 +1747,28 @@ fn extract_github_token(home_dir: &Path) -> Option<ProviderToken> {
     })
 }
 
-fn extract_claude_token(home_dir: &Path) -> Option<ProviderToken> {
+pub(crate) fn extract_claude_token(home_dir: &Path) -> Option<ProviderToken> {
     let cred_path = home_dir.join(".claude/.credentials.json");
-    let content = fs::read_to_string(cred_path).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    let token = json.get("accessToken")?.as_str()?;
+    if let Ok(content) = fs::read_to_string(cred_path) {
+        if let Some(token) = claude_token_from_credentials_json(&content) {
+            return Some(token);
+        }
+    }
+    // The file is absent on machines where Claude Code stashed its OAuth blob in
+    // the macOS keychain (service "Claude Code-credentials", JSON under
+    // `.claudeAiOauth`). Fall back to reading it there.
+    read_claude_keychain_token()
+}
+
+/// Parse a `.claude/.credentials.json` payload. The access token sits at the top
+/// level (`accessToken`); the keychain blob nests it under `claudeAiOauth`, so
+/// accept either shape.
+fn claude_token_from_credentials_json(content: &str) -> Option<ProviderToken> {
+    let json: serde_json::Value = serde_json::from_str(content).ok()?;
+    let node = json.get("claudeAiOauth").unwrap_or(&json);
+    let token = node.get("accessToken")?.as_str()?;
     let expires_at = read_json_expires_at(
-        &json,
+        node,
         &[
             "expiresAt",
             "expires_at",
@@ -1770,6 +1785,29 @@ fn extract_claude_token(home_dir: &Path) -> Option<ProviderToken> {
         updated_at: now_unix(),
         credential_type: CredentialType::OAuth,
     })
+}
+
+#[cfg(target_os = "macos")]
+fn read_claude_keychain_token() -> Option<ProviderToken> {
+    let output = std::process::Command::new("security")
+        .args([
+            "find-generic-password",
+            "-s",
+            "Claude Code-credentials",
+            "-w",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let blob = String::from_utf8(output.stdout).ok()?;
+    claude_token_from_credentials_json(blob.trim())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_claude_keychain_token() -> Option<ProviderToken> {
+    None
 }
 
 fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {

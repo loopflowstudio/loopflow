@@ -41,29 +41,6 @@ struct PortfolioRepoStateTests {
         #expect(state.waves.map(\.id) == ["mine"])
     }
 
-    @Test("multi-repo waves match non-primary repo state")
-    func multiRepoWaveMatchesNonPrimaryRepoState() {
-        let repoURL = URL(fileURLWithPath: "/tmp/portfolio-secondary")
-        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
-        let wave = Wave(
-            id: "multi",
-            name: "multi",
-            repos: [
-                RepoWork(repo: "/tmp/portfolio-primary", status: .running),
-                RepoWork(repo: repo.path, status: .waiting),
-            ],
-            flow: "build",
-            direction: [],
-            area: ["."],
-            status: .running
-        )
-
-        state.applyConnectedWaves([wave])
-
-        #expect(state.waves.map(\.id) == ["multi"])
-    }
-
     @Test("wave agent session name mirrors lf tmux handle")
     func waveAgentSessionNameMirrorsLfTmuxHandle() {
         let name = PortfolioRepoState.waveAgentSessionName(

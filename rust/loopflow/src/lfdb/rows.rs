@@ -1,7 +1,7 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PullRequest, Repo, RepoEdge,
-    RepoId, RepoWork, Run, RunStackStatus, RunStatus, Summary, Wave, WaveStatus,
+    RepoId, Run, RunStackStatus, RunStatus, Summary, Wave, WaveStatus,
 };
 use crate::lfdb::{
     ForkRun, ForkRunStatus, RepoProviderUsage, StoreError, StoreResult, WaveProviderUsage,
@@ -62,7 +62,8 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 // -- Shared row mappers ------------------------------------------------------
 
 /// SELECT id, name, direction, area, paused, created_at, workers,
-///        primary_flow, goal, metrics, parent_wave_id
+///        primary_flow, goal, metrics, parent_wave_id,
+///        repo, worktree, branch, status, iteration, cycle_start_iteration
 pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
     let direction = parse_json_vec(&text(row, 2)?)?;
     let area = parse_json_vec(&text(row, 3)?)?;
@@ -82,27 +83,18 @@ pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
         primary_flow,
         goal,
         metrics,
-        repos: Vec::new(),
+        repo: text(row, 11)?,
+        worktree: text(row, 12)?,
+        branch: text(row, 13)?,
+        status: WaveStatus::from_i32(int(row, 14)?),
+        iteration: int(row, 15)? as u32,
+        cycle_start_iteration: int(row, 16)? as u32,
         direction,
         area,
         paused,
         created_at: Some(created_at),
         workers,
         parent_wave_id,
-    })
-}
-
-/// SELECT wave_id, repo, worktree, branch, status, iteration,
-///        cycle_start_iteration, position
-pub fn map_wave_repo_row(row: &rusqlite::Row<'_>) -> StoreResult<RepoWork> {
-    Ok(RepoWork {
-        repo: text(row, 1)?,
-        worktree: text(row, 2)?,
-        branch: text(row, 3)?,
-        status: WaveStatus::from_i32(int(row, 4)?),
-        iteration: int(row, 5)? as u32,
-        cycle_start_iteration: int(row, 6)? as u32,
-        position: int(row, 7)? as u32,
     })
 }
 

@@ -514,7 +514,7 @@ fn wave_ci_target(wave_id: &LfdId, run: &Run) -> Option<WaveCiTarget> {
 mod tests {
     use super::*;
     use crate::lfd::github::{CheckRun, CheckRunPR, CheckRunRef, GitHubRepository};
-    use crate::lfd::types::{PullRequest, RepoWork, RunStackStatus, RunStatus, WaveStatus};
+    use crate::lfd::types::{PullRequest, RunStackStatus, RunStatus, WaveStatus};
     use crate::lfdb::{open_store, StorageConfig};
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -560,15 +560,12 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            repos: vec![RepoWork {
-                repo: repo.to_string_lossy().to_string(),
-                worktree: String::new(),
-                branch: String::new(),
-                status: WaveStatus::Idle,
-                iteration: 0,
-                cycle_start_iteration: 0,
-                position: 0,
-            }],
+            repo: repo.to_string_lossy().to_string(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
             direction: Vec::new(),
             area: Vec::new(),
             paused: false,

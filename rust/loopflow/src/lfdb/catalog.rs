@@ -37,10 +37,7 @@ pub(crate) enum Query {
     ListChatMemoryBlocks,
     UpsertChatMemoryBlock,
     DeleteChatMemoryBlock,
-    ListWaveRepos,
-    UpsertWaveRepo,
-    DeleteWaveReposByWave,
-    ResetStaleActiveRepos,
+    ResetStaleActiveWaves,
     ListChildWaves,
     RecordRunTokenUsage,
     AggregateTokenUsageByWaveProvider,
@@ -79,10 +76,7 @@ impl Query {
         Self::ListChatMemoryBlocks,
         Self::UpsertChatMemoryBlock,
         Self::DeleteChatMemoryBlock,
-        Self::ListWaveRepos,
-        Self::UpsertWaveRepo,
-        Self::DeleteWaveReposByWave,
-        Self::ResetStaleActiveRepos,
+        Self::ResetStaleActiveWaves,
         Self::ListChildWaves,
         Self::RecordRunTokenUsage,
         Self::AggregateTokenUsageByWaveProvider,
@@ -105,23 +99,23 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         sqlite_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id,\n                    repo, worktree, branch, status, iteration, cycle_start_iteration\n             FROM waves\n             ORDER BY created_at DESC",
         sqlite_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves\n             WHERE EXISTS (SELECT 1 FROM wave_repos wr WHERE wr.wave_id = waves.id AND wr.repo = {p1})\n             ORDER BY created_at DESC",
+        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id,\n                    repo, worktree, branch, status, iteration, cycle_start_iteration\n             FROM waves\n             WHERE repo = {p1}\n             ORDER BY created_at DESC",
         sqlite_override: None,
     },
     QueryDef {
-        template: "INSERT INTO waves (\n                id, name, direction, area, paused, created_at, workers, primary_flow, goal, metrics, parent_wave_id\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                created_at = excluded.created_at,\n                workers = excluded.workers,\n                primary_flow = excluded.primary_flow,\n                goal = excluded.goal,\n                metrics = excluded.metrics,\n                parent_wave_id = excluded.parent_wave_id",
+        template: "INSERT INTO waves (\n                id, name, direction, area, paused, created_at, workers, primary_flow, goal, metrics, parent_wave_id,\n                repo, worktree, branch, status, iteration, cycle_start_iteration\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9}, {p10}, {p11}, {p12}, {p13}, {p14}, {p15}, {p16}, {p17})\n            ON CONFLICT(id) DO UPDATE SET\n                name = excluded.name,\n                direction = excluded.direction,\n                area = excluded.area,\n                paused = excluded.paused,\n                created_at = excluded.created_at,\n                workers = excluded.workers,\n                primary_flow = excluded.primary_flow,\n                goal = excluded.goal,\n                metrics = excluded.metrics,\n                parent_wave_id = excluded.parent_wave_id,\n                repo = excluded.repo,\n                worktree = excluded.worktree,\n                branch = excluded.branch,\n                status = excluded.status,\n                iteration = excluded.iteration,\n                cycle_start_iteration = excluded.cycle_start_iteration",
         sqlite_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves WHERE id = {p1}",
+        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id,\n                    repo, worktree, branch, status, iteration, cycle_start_iteration\n             FROM waves WHERE id = {p1}",
         sqlite_override: None,
     },
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves\n             WHERE name = {p1}",
+        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id,\n                    repo, worktree, branch, status, iteration, cycle_start_iteration\n             FROM waves\n             WHERE name = {p1}",
         sqlite_override: None,
     },
     QueryDef {
@@ -217,30 +211,15 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
         template: "DELETE FROM chat_memory_blocks WHERE wave_id = {p1} AND name = {p2}",
         sqlite_override: None,
     },
-    // ListWaveRepos
+    // ResetStaleActiveWaves — after an lfd restart, waves stuck in Running/Waiting
+    // (their runs failed as orphans) get reset to Idle so their buttons re-enable.
     QueryDef {
-        template: "SELECT wave_id, repo, worktree, branch, status, iteration, cycle_start_iteration, position\n             FROM wave_repos WHERE wave_id = {p1}\n             ORDER BY position ASC",
-        sqlite_override: None,
-    },
-    // UpsertWaveRepo
-    QueryDef {
-        template: "INSERT INTO wave_repos (wave_id, repo, worktree, branch, status, iteration, cycle_start_iteration, position)\n             VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8})\n             ON CONFLICT(wave_id, repo) DO UPDATE SET\n                 worktree = excluded.worktree,\n                 branch = excluded.branch,\n                 status = excluded.status,\n                 iteration = excluded.iteration,\n                 cycle_start_iteration = excluded.cycle_start_iteration,\n                 position = excluded.position",
-        sqlite_override: None,
-    },
-    // DeleteWaveReposByWave
-    QueryDef {
-        template: "DELETE FROM wave_repos WHERE wave_id = {p1}",
-        sqlite_override: None,
-    },
-    // ResetStaleActiveRepos — mirror ResetStaleActiveWaves onto per-repo rows so
-    // the rolled-up wave status un-sticks after an lfd restart.
-    QueryDef {
-        template: "UPDATE wave_repos SET status = {p1}\n             WHERE status IN ({p2}, {p3})",
+        template: "UPDATE waves SET status = {p1}\n             WHERE status IN ({p2}, {p3})",
         sqlite_override: None,
     },
     // ListChildWaves — a chord's contents are its children, ordered by creation.
     QueryDef {
-        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id\n             FROM waves\n             WHERE parent_wave_id = {p1}\n             ORDER BY created_at ASC",
+        template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    primary_flow, goal, metrics, parent_wave_id,\n                    repo, worktree, branch, status, iteration, cycle_start_iteration\n             FROM waves\n             WHERE parent_wave_id = {p1}\n             ORDER BY created_at ASC",
         sqlite_override: None,
     },
     // RecordRunTokenUsage — one row per run, replaced if re-recorded.

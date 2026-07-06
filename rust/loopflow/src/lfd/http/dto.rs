@@ -86,19 +86,10 @@ pub struct WaveDto {
     pub flow_steps: Vec<String>,
     pub has_stale_pr_state: bool,
     pub workers: u32,
-    /// Per-repo execution state, one entry per repo the wave runs in.
-    pub repos: Vec<RepoWorkDto>,
-    /// Parent wave in the chord tree. `null` for a root wave. Always emitted
-    /// (no `skip_serializing_if`) so the Python/Swift mirrors stay in lockstep.
-    pub parent_wave_id: Option<String>,
-}
-
-/// Per-repo execution surface for a wave: status/iteration plus the live git
-/// (worktree/branch) and PR snapshot derived at DTO-build time for one repo.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RepoWorkDto {
+    /// The single repo this wave targets (wave = 1 repo). The remaining
+    /// execution fields below describe that repo's live git + PR state, inferred
+    /// at DTO-build time.
     pub repo: String,
-    pub status: String,
     pub iteration: u32,
     /// Live worktree path inferred from git at build time.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,6 +106,9 @@ pub struct RepoWorkDto {
     pub active_run: Option<RunDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr: Option<PullRequestDto>,
+    /// Parent wave in the chord tree. `null` for a root wave. Always emitted
+    /// (no `skip_serializing_if`) so the Python/Swift mirrors stay in lockstep.
+    pub parent_wave_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -539,14 +533,23 @@ mod contract_tests {
             created_at: None,
             flow_steps: Vec::new(),
             has_stale_pr_state: false,
-            repos: Vec::new(),
+            repo: "/home/user/project".to_string(),
+            iteration: 0,
+            local_worktree: None,
+            remote_branch: None,
+            commits: Vec::new(),
+            diff_stat: None,
+            open_pr_count: 0,
+            stack_count: 0,
+            active_run: None,
+            pr: None,
             parent_wave_id: None,
         };
 
         let json = serde_json::to_value(&wave).unwrap();
         assert_eq!(json["goal"], "ship-roadmap");
         assert_eq!(json["metrics"], serde_json::json!([]));
-        assert_eq!(json["repos"], serde_json::json!([]));
+        assert_eq!(json["repo"], "/home/user/project");
     }
 
     #[test]
@@ -572,13 +575,13 @@ mod contract_tests {
     }
 
     #[test]
-    fn wave_repos_is_required() {
+    fn wave_repo_is_required() {
         let mut json = wave_fixture();
         json.as_object_mut()
             .expect("wave payload should be an object")
-            .remove("repos");
+            .remove("repo");
 
         let err = serde_json::from_value::<WaveDto>(json).unwrap_err();
-        assert!(err.to_string().contains("missing field `repos`"));
+        assert!(err.to_string().contains("missing field `repo`"));
     }
 }

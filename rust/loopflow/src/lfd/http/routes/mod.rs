@@ -18,7 +18,7 @@ pub(crate) mod test_helpers;
 
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::http::dto::{
-    format_datetime, run_dto, CommitEntryDto, ErrorResponse, PullRequestDto, RepoWorkDto, WaveDto,
+    format_datetime, run_dto, CommitEntryDto, ErrorResponse, PullRequestDto, WaveDto,
 };
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
@@ -89,74 +89,59 @@ pub async fn build_wave_dto(
     .await
     .unwrap_or_default();
 
-    // Per-repo execution surface: infer git state + live-PR snapshot per repo.
-    let mut repos = Vec::with_capacity(wave.repos.len());
-    let mut has_stale_pr_state = false;
-    for repo_work in &wave.repos {
-        let repo_runs: Vec<Run> = stack_runs
-            .iter()
-            .filter(|run| run.repo == repo_work.repo)
-            .cloned()
-            .collect();
-        let snapshot = build_live_pr_snapshot(store, github_config, &repo_runs).await?;
-        has_stale_pr_state |= snapshot.has_stale_pr_state();
-        let queue_views = project_queue_views(
-            &repo_runs,
-            |run| snapshot.state_for_run(run).cloned(),
-            &blocks_by_run,
-        );
+    // Execution surface for the wave's single repo: infer git state + live-PR
+    // snapshot for the runs that touched it.
+    let repo_runs: Vec<Run> = stack_runs
+        .iter()
+        .filter(|run| run.repo == wave.repo)
+        .cloned()
+        .collect();
+    let snapshot = build_live_pr_snapshot(store, github_config, &repo_runs).await?;
+    let has_stale_pr_state = snapshot.has_stale_pr_state();
+    let queue_views = project_queue_views(
+        &repo_runs,
+        |run| snapshot.state_for_run(run).cloned(),
+        &blocks_by_run,
+    );
 
-        let repo = repo_work.repo.clone();
-        let name = wave.name().clone();
-        let git_state = tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
-            .await
-            .ok()
-            .flatten();
-        let (local_worktree, remote_branch, commits, diff_stat) = match git_state {
-            Some(state) => (
-                Some(state.worktree),
-                state.branch,
-                state.commits,
-                state.diff_stat,
-            ),
-            None => (None, None, Vec::new(), None),
-        };
+    let repo = wave.repo.clone();
+    let name = wave.name().clone();
+    let git_state = tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
+        .await
+        .ok()
+        .flatten();
+    let (local_worktree, remote_branch, commits, diff_stat) = match git_state {
+        Some(state) => (
+            Some(state.worktree),
+            state.branch,
+            state.commits,
+            state.diff_stat,
+        ),
+        None => (None, None, Vec::new(), None),
+    };
 
-        let latest_for_repo = repo_runs.iter().max_by_key(|run| run.started_at);
-        let pr = latest_for_repo.and_then(|run| {
-            run.pr.as_ref().map(|pr| PullRequestDto {
-                url: pr.url.clone(),
-                number: pr.number,
-                state: pr.state.clone(),
-                title: pr.title.clone(),
-                branch: pr.branch.clone(),
-            })
-        });
-        let active_run = if include_active_run {
-            latest_for_repo.map(|run| {
-                let live_pr_state = snapshot.state_for_run(run);
-                let pr_state_stale = snapshot.stale_for_run(run);
-                let queue_view = queue_views.get(&run.id);
-                run_dto(run.clone(), live_pr_state, pr_state_stale, queue_view)
-            })
-        } else {
-            None
-        };
-
-        repos.push(RepoWorkDto {
-            repo: repo_work.repo.clone(),
-            status: repo_work.status.as_str().to_string(),
-            iteration: repo_work.iteration,
-            local_worktree,
-            remote_branch,
-            commits,
-            diff_stat,
-            open_pr_count: snapshot.open_pr_count(),
-            stack_count: repo_runs.len() as u32,
-            active_run,
-            pr,
-        });
-    }
+    let latest_for_repo = repo_runs.iter().max_by_key(|run| run.started_at);
+    let pr = latest_for_repo.and_then(|run| {
+        run.pr.as_ref().map(|pr| PullRequestDto {
+            url: pr.url.clone(),
+            number: pr.number,
+            state: pr.state.clone(),
+            title: pr.title.clone(),
+            branch: pr.branch.clone(),
+        })
+    });
+    let active_run = if include_active_run {
+        latest_for_repo.map(|run| {
+            let live_pr_state = snapshot.state_for_run(run);
+            let pr_state_stale = snapshot.stale_for_run(run);
+            let queue_view = queue_views.get(&run.id);
+            run_dto(run.clone(), live_pr_state, pr_state_stale, queue_view)
+        })
+    } else {
+        None
+    };
+    let open_pr_count = snapshot.open_pr_count();
+    let stack_count = repo_runs.len() as u32;
 
     let wave_config = crate::engine::wave_config::read_wave_config(
         std::path::Path::new(wave.repo()),
@@ -179,7 +164,16 @@ pub async fn build_wave_dto(
         flow_steps,
         has_stale_pr_state,
         workers: wave.workers(),
-        repos,
+        repo: wave.repo.clone(),
+        iteration: wave.iteration(),
+        local_worktree,
+        remote_branch,
+        commits,
+        diff_stat,
+        open_pr_count,
+        stack_count,
+        active_run,
+        pr,
         parent_wave_id: wave.parent_wave_id().map(|id| id.to_string()),
     })
 }
@@ -432,8 +426,8 @@ mod tests {
     use super::*;
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        LivePrState, LivePullRequestState, PullRequest, RepoWork, Run, RunStackStatus, RunStatus,
-        Wave, WaveStatus,
+        LivePrState, LivePullRequestState, PullRequest, Run, RunStackStatus, RunStatus, Wave,
+        WaveStatus,
     };
     use crate::lfdb::SharedStore;
     use std::collections::{HashMap, HashSet};
@@ -494,15 +488,12 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            repos: vec![RepoWork {
-                repo: repo.to_string(),
-                worktree: String::new(),
-                branch: String::new(),
-                status: WaveStatus::Idle,
-                iteration: 0,
-                cycle_start_iteration: 0,
-                position: 0,
-            }],
+            repo: repo.to_string(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
             direction: vec![],
             area: vec![],
             paused: false,
@@ -655,53 +646,41 @@ mod tests {
         .await
         .expect("wave dto should be built");
 
-        assert_eq!(dto.repos.len(), 1);
         assert_eq!(
-            dto.repos[0].open_pr_count, 0,
+            dto.open_pr_count, 0,
             "closed live PRs should not count as open even if snapshot says open"
         );
-        assert_eq!(dto.repos[0].stack_count, 1);
+        assert_eq!(dto.stack_count, 1);
         assert!(dto.has_stale_pr_state);
     }
 
     #[tokio::test]
-    async fn build_wave_dto_selects_latest_run_per_repo() {
+    async fn build_wave_dto_selects_latest_run_for_repo() {
         let store = sqlite_store().await;
-        let repo_a = tempfile::tempdir().expect("repo a");
-        let repo_b = tempfile::tempdir().expect("repo b");
-        let repo_a_path = repo_a.path().to_str().expect("repo a path").to_string();
-        let repo_b_path = repo_b.path().to_str().expect("repo b path").to_string();
+        let repo = tempfile::tempdir().expect("repo");
+        let repo_path = repo.path().to_str().expect("repo path").to_string();
         let started = OffsetDateTime::now_utc();
 
-        let mut wave = make_wave(&repo_a_path);
-        wave.repos.push(RepoWork {
-            repo: repo_b_path.clone(),
-            worktree: String::new(),
-            branch: String::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            position: 1,
-        });
+        let wave = make_wave(&repo_path);
         store
             .create_wave(&wave)
             .await
             .expect("wave should be created in store");
 
-        let mut run_a = make_run(&wave, 11);
-        run_a.repo = repo_a_path.clone();
-        run_a.started_at = Some(started);
-        let mut run_b = make_run(&wave, 22);
-        run_b.repo = repo_b_path;
-        run_b.started_at = Some(started + time::Duration::seconds(1));
+        let mut run_old = make_run(&wave, 11);
+        run_old.repo = repo_path.clone();
+        run_old.started_at = Some(started);
+        let mut run_new = make_run(&wave, 22);
+        run_new.repo = repo_path;
+        run_new.started_at = Some(started + time::Duration::seconds(1));
         store
-            .create_run(&run_a)
+            .create_run(&run_old)
             .await
-            .expect("repo a run should be created");
+            .expect("old run should be created");
         store
-            .create_run(&run_b)
+            .create_run(&run_new)
             .await
-            .expect("repo b run should be created");
+            .expect("new run should be created");
 
         let dto = build_wave_dto(
             &store,
@@ -712,22 +691,13 @@ mod tests {
         .await
         .expect("wave dto should be built");
 
-        assert_eq!(dto.repos.len(), 2);
         assert_eq!(
-            dto.repos[0]
-                .active_run
+            dto.active_run
                 .as_ref()
                 .and_then(|run| run.pr.as_ref())
                 .and_then(|pr| pr.number),
-            Some(11)
-        );
-        assert_eq!(
-            dto.repos[1]
-                .active_run
-                .as_ref()
-                .and_then(|run| run.pr.as_ref())
-                .and_then(|pr| pr.number),
-            Some(22)
+            Some(22),
+            "the latest run by start time wins"
         );
     }
 

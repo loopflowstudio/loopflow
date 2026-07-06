@@ -58,6 +58,8 @@
 //!     `run.completed`, `run.errored`). Live-only, no replay — history is a
 //!     `lf runs` query, the durable ledger the frame mirrors. Primary channel
 //!     only (workers are the wave's, not a child channel's).
+//!   - `memory-add`: data is the full added fact. Replays on connect for the
+//!     facts since the last curation, then streams live. Primary channel only.
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
 //!     is an [`InboxFrame`] — a resident-directed op. The pending queue
 //!     (journaled messages not yet named in any `answers`) replays on
@@ -103,11 +105,14 @@
 //! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
 //!   origin repo. Wave-level only: memory is wave identity, channels don't
 //!   have it.
+//! - `GET /memory/log` → `{facts}` — add-stream facts since the last
+//!   curation, oldest first. Wave-level only.
 //! - `POST /memory {op, content, summary}` → `{summary}`. `op` is `"update"`
-//!   (full replacement) or `"add"` (append one curated bullet; `content` must
-//!   be non-empty). `summary` is explicitly Optional — null falls back to the
+//!   (full replacement) or `"add"` (publish one fact; `content` must be
+//!   non-empty). `summary` is explicitly Optional — null falls back to the
 //!   content's first non-empty line. The server is the sole writer of the
-//!   origin repo's `wave/<name>/MEMORY.md` and journals `MemoryUpdated`.
+//!   origin repo's `wave/<name>/MEMORY.md` and journals `MemoryUpdated`;
+//!   add-only facts journal `MemoryAdded` and broadcast `memory-add`.
 //!
 //! `Turn` is [`crate::chat::turns::ChatTurn`].
 
@@ -362,7 +367,13 @@ struct MemoryBody {
     content: String,
 }
 
-/// `POST /memory` op — full replacement or one appended bullet.
+/// `GET /memory/log` response.
+#[derive(Debug, Serialize)]
+struct MemoryLogBody {
+    facts: Vec<String>,
+}
+
+/// `POST /memory` op — full replacement or one published fact.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum MemoryOp {
@@ -439,6 +450,7 @@ pub fn router(
         .route("/channels", post(channels_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
         .route("/v0/exec", post(exec_handler))
+        .route("/memory/log", get(memory_log_handler))
         .route("/resident/attach", post(resident_attach_handler))
         .route("/resident/deltas", post(resident_deltas_handler))
         .route("/resident/context", get(resident_context_handler))
@@ -625,6 +637,10 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
             }
         }
         Some(Commands::Wave { .. }) => ExecVerdict::Deny("wave".to_string()),
+        // `lf ssh` forwards the local credential bundle to a remote host and
+        // runs an arbitrary command there — the exact power a leaked token
+        // must not reach.
+        Some(Commands::Ssh { .. }) => ExecVerdict::Deny("ssh".to_string()),
         // Bare `lf` (interactive launch) has no verb the door can run.
         None => ExecVerdict::Deny("lf".to_string()),
     }
@@ -767,6 +783,12 @@ async fn memory_handler(State(state): State<ServerState>) -> Json<MemoryBody> {
     })
 }
 
+async fn memory_log_handler(State(state): State<ServerState>) -> Json<MemoryLogBody> {
+    Json(MemoryLogBody {
+        facts: state.runtime.memory_adds(),
+    })
+}
+
 async fn memory_write_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostMemory>,
@@ -786,7 +808,7 @@ async fn memory_write_handler(
                     "content is required for the add op".to_string(),
                 ));
             }
-            state.runtime.append_memory(fact, &summary)
+            state.runtime.append_memory(fact)
         }
     };
     match result {
@@ -815,9 +837,9 @@ fn first_line(content: &str) -> Option<String> {
 /// (every frame replaces the client's state for that (channel, id), so an
 /// in-progress turn updates in place and its terminal frame lands under the
 /// same id), `memory` on every curation (live-only; the file is the durable
-/// state). Snapshot and subscription are atomic in the runtime (broadcasts
-/// share the append lock), so no primary live frame is ever older than the
-/// replayed snapshot.
+/// state), and `memory-add` for replayable facts. Snapshot and subscription
+/// are atomic in the runtime (broadcasts share the append lock), so no primary
+/// live frame is ever older than the replayed snapshot.
 ///
 /// Child channels replay their folded threads (turn frames tagged with
 /// `channel`) and stream live off the family bus, subscribed BEFORE the
@@ -917,6 +939,11 @@ async fn events_handler(
         let replay = stream::iter(
             std::iter::once(Ok(state_event(&sub.state)))
                 .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t))))
+                .chain(
+                    sub.memory_adds
+                        .into_iter()
+                        .map(|fact| Ok(memory_add_event(&fact))),
+                )
                 .chain(inbox_replay),
         );
         let live_turns = BroadcastStream::new(sub.turn_rx).filter_map(move |res| {
@@ -932,6 +959,14 @@ async fn events_handler(
             let out = match res {
                 Ok(mind_state) => Some(Ok(state_event(&mind_state))),
                 // Lagged: fine — the next transition carries the current state.
+                Err(_) => None,
+            };
+            async move { out }
+        });
+        let live_memory_adds = BroadcastStream::new(sub.memory_add_rx).filter_map(move |res| {
+            let out = match res {
+                Ok(fact) => Some(Ok(memory_add_event(&fact))),
+                // Lagged: reconnect gets a fresh add snapshot.
                 Err(_) => None,
             };
             async move { out }
@@ -955,7 +990,7 @@ async fn events_handler(
         });
         let mut live: BoxedEventStream = Box::pin(stream::select(
             stream::select(live_turns, live_ops),
-            stream::select(live_states, live_memory),
+            stream::select(live_states, stream::select(live_memory, live_memory_adds)),
         ));
         if include_inbox {
             let live_inbox = BroadcastStream::new(sub.inbox_rx).filter_map(move |res| {
@@ -1043,6 +1078,10 @@ fn op_event(frame: &OpFrame) -> Event {
     Event::default()
         .event("op")
         .data(serde_json::to_string(frame).unwrap_or_default())
+}
+
+fn memory_add_event(fact: &str) -> Event {
+    Event::default().event("memory-add").data(fact)
 }
 
 fn inbox_event(frame: &InboxFrame) -> Event {

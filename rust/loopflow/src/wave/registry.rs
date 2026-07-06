@@ -651,11 +651,11 @@ impl StoreObserver {
                 return;
             }
         }
-        // No active runs → the wave is idle again. Reset every repo still
-        // stamped Running (the status create_run_for_placement set on
-        // dispatch); leave Paused and already-Idle repos alone.
+        // No active runs → the wave is idle again. Reset it if still stamped
+        // Running (the status create_run_for_placement set on dispatch); leave
+        // Paused and already-Idle waves alone.
         match self.store.count_active_runs(&self.wave_id).await {
-            Ok(0) => self.reset_wave_repos_to_idle().await,
+            Ok(0) => self.reset_wave_to_idle().await,
             Ok(_) => {}
             Err(err) => {
                 tracing::debug!(error = %err, "active-run count failed; wave status unchanged");
@@ -663,20 +663,14 @@ impl StoreObserver {
         }
     }
 
-    async fn reset_wave_repos_to_idle(&self) {
+    async fn reset_wave_to_idle(&self) {
         let Ok(Some(mut wave)) = self.store.get_wave(&self.wave_id).await else {
             return;
         };
-        let mut changed = false;
-        for repo in &mut wave.repos {
-            if repo.status == WaveStatus::Running {
-                repo.status = WaveStatus::Idle;
-                changed = true;
-            }
-        }
-        if !changed {
+        if wave.status != WaveStatus::Running {
             return;
         }
+        wave.status = WaveStatus::Idle;
         if let Err(err) = self.store.update_wave(&wave).await {
             tracing::debug!(wave_id = %self.wave_id, error = %err, "failed to reset wave status to idle");
         }
@@ -689,7 +683,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::lfd::types::{
-        PullRequest, RepoWork, RunStackStatus, RunStatus, WaveStatus, TMUX_TERMINAL_SOURCE,
+        PullRequest, RunStackStatus, RunStatus, WaveStatus, TMUX_TERMINAL_SOURCE,
     };
     use crate::lfdb::{open_store, StorageConfig};
     use crate::wave::journal::{journal_path, EventKind, Journal};
@@ -709,15 +703,12 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            repos: vec![RepoWork {
-                repo: "/tmp/repo".to_string(),
-                worktree: String::new(),
-                branch: String::new(),
-                status: WaveStatus::Idle,
-                iteration: 0,
-                cycle_start_iteration: 0,
-                position: 0,
-            }],
+            repo: "/tmp/repo".to_string(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
             direction: Vec::new(),
             area: Vec::new(),
             paused: false,

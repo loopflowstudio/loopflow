@@ -19,10 +19,10 @@
 //! `RunObserved`/`RunCompleted` are produced by the registry observer
 //! ([`crate::wave::registry::StoreObserver`]): the server polls the
 //! shared store — these are confirmed facts, not commands — and the in-flight
-//! view is their fold ([`fold_workers`]). `MemoryUpdated` is produced by the
-//! server's memory routes (`lf memory update`/`add` — the server holds
-//! MEMORY.md's pen). `ThreadStarted` is produced by the mind: the vendor
-//! thread id is its first durable act, journaled before the first turn.
+//! view is their fold ([`fold_workers`]). `MemoryUpdated` and `MemoryAdded`
+//! are produced by the server's memory routes (`lf memory update`/`add` — the
+//! server holds MEMORY.md's pen). `ThreadStarted` is produced by the mind: the
+//! vendor thread id is its first durable act, journaled before the first turn.
 //! `ServerStarted` is appended once per boot, after replay — restarts are
 //! forensically visible in the record.
 
@@ -227,17 +227,12 @@ pub enum EventKind {
         reason: String,
     },
     // -- orchestration (observations, not commands) --
-    // The serde aliases keep yesterday's journals replayable: these kinds
-    // were written as `worker_dispatched`/`worker_finished` before the
-    // rename. New writes always carry the new names.
-    #[serde(alias = "worker_dispatched")]
     RunObserved {
         run_id: String,
         session_id: String,
         flow: String,
         task: String,
     },
-    #[serde(alias = "worker_finished")]
     RunCompleted {
         run_id: String,
         outcome: WorkerOutcome,
@@ -257,8 +252,15 @@ pub enum EventKind {
         run_id: String,
     },
     // -- memory --
+    /// A compiled memory checkpoint was written to `MEMORY.md`. Clears the
+    /// replayable add delta because the checkpoint is now the seed.
     MemoryUpdated {
         summary: String,
+    },
+    /// A fact published to the stream (`lf memory add`). Accumulates into the
+    /// replayable delta until the next `MemoryUpdated`.
+    MemoryAdded {
+        fact: String,
     },
     // -- server lifecycle --
     /// One boot of the wave server, appended after replay. Folds ignore it;
@@ -485,6 +487,9 @@ impl Narrator {
             }
             EventKind::MemoryUpdated { summary } => {
                 info(format!("memory curated: {}", ellipsize(summary, 70)))
+            }
+            EventKind::MemoryAdded { fact } => {
+                info(format!("memory added: {}", ellipsize(fact, 70)))
             }
             EventKind::ServerStarted { pid, endpoint } => {
                 info(format!("server started · pid {pid} · {endpoint}"))
@@ -727,6 +732,9 @@ pub struct ThreadFold {
     /// Run ids of `ChannelOpened` events — the idempotence guard for the
     /// dispatch-notification door (one dispatch, one opening).
     pub opened_channel_runs: HashSet<String>,
+    /// Memory facts added this server life — the replayable stream a fresh
+    /// subscriber gets before going live. Rebuilt from the journal on restart.
+    pub memory_adds: Vec<String>,
 }
 
 /// The thread-visible turn a `ChannelOpened` event materializes: a bylined
@@ -809,6 +817,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     // exported so the boot janitor can requeue it.
     let mut claims_by_open_turn: HashMap<String, Vec<MessageId>> = HashMap::new();
     let mut opened_channel_runs: HashSet<String> = HashSet::new();
+    let mut memory_adds: Vec<String> = Vec::new();
 
     for event in events {
         match &event.kind {
@@ -902,9 +911,13 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             } => {
                 turns.push(run_completed_turn(event, run_id, *outcome, summary));
             }
-            EventKind::RunObserved { .. }
-            | EventKind::MemoryUpdated { .. }
-            | EventKind::ServerStarted { .. } => {}
+            EventKind::MemoryAdded { fact } => {
+                memory_adds.push(fact.clone());
+            }
+            EventKind::MemoryUpdated { .. } => {
+                memory_adds.clear();
+            }
+            EventKind::RunObserved { .. } | EventKind::ServerStarted { .. } => {}
         }
     }
 
@@ -924,6 +937,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         messages,
         open_claims,
         opened_channel_runs,
+        memory_adds,
     }
 }
 
@@ -1069,7 +1083,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
             &path,
-            "{\"v\":2,\"seq\":1,\"at\":\"2026-07-04T00:00:00Z\",\"kind\":{\"type\":\"memory_updated\",\"summary\":\"x\"}}\n",
+            "{\"v\":2,\"seq\":1,\"at\":\"2026-07-04T00:00:00Z\",\"kind\":{\"type\":\"memory_added\",\"fact\":\"x\"}}\n",
         )
         .unwrap();
         assert!(Journal::open(&path).is_err());
@@ -1143,6 +1157,9 @@ mod tests {
             EventKind::MemoryUpdated {
                 summary: "learned the fold".into(),
             },
+            EventKind::MemoryAdded {
+                fact: "learned a fact".into(),
+            },
             EventKind::ServerStarted {
                 pid: 4242,
                 endpoint: "127.0.0.1:50123".into(),
@@ -1161,67 +1178,14 @@ mod tests {
         }
     }
 
-    /// Yesterday's journals carry the pre-rename kind names
-    /// (`worker_dispatched`/`worker_finished`); the serde aliases must keep
-    /// them decoding — and folding — exactly as the new names do, while new
-    /// writes always carry the new names.
+    /// New appends carry the post-rename kind names on disk — a run completion
+    /// serializes as `run_completed`, never the retired `worker_finished`.
     #[test]
-    fn old_worker_kind_names_still_replay_and_fold_identically() {
+    fn new_appends_carry_the_renamed_kind_names() {
         let (_tmp, path) = open_tmp();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let old_lines = concat!(
-            "{\"v\":1,\"seq\":1,\"at\":\"2026-07-03T00:00:00Z\",\"kind\":{\"type\":\"worker_dispatched\",\"run_id\":\"run-1\",\"session_id\":\"sess-1\",\"flow\":\"implement\",\"task\":\"wire it\"}}\n",
-            "{\"v\":1,\"seq\":2,\"at\":\"2026-07-03T00:01:00Z\",\"kind\":{\"type\":\"worker_dispatched\",\"run_id\":\"run-2\",\"session_id\":\"sess-2\",\"flow\":\"design\",\"task\":\"sketch it\"}}\n",
-            "{\"v\":1,\"seq\":3,\"at\":\"2026-07-03T00:02:00Z\",\"kind\":{\"type\":\"worker_finished\",\"run_id\":\"run-1\",\"outcome\":\"completed\",\"summary\":\"pr landed\"}}\n",
-        );
-        std::fs::write(&path, old_lines).unwrap();
+        let (mut journal, _events) = Journal::open(&path).expect("journal opens");
 
-        let (mut journal, old_events) = Journal::open(&path).expect("old journal replays");
-        assert_eq!(old_events.len(), 3, "every old line decoded");
-        let old_fold = fold_workers(&old_events);
-
-        // The same facts written by this build, under the new names.
-        let new_events = vec![
-            Event {
-                v: FORMAT_VERSION,
-                seq: 1,
-                at: OffsetDateTime::now_utc(),
-                kind: EventKind::RunObserved {
-                    run_id: "run-1".into(),
-                    session_id: "sess-1".into(),
-                    flow: "implement".into(),
-                    task: "wire it".into(),
-                },
-            },
-            Event {
-                v: FORMAT_VERSION,
-                seq: 2,
-                at: OffsetDateTime::now_utc(),
-                kind: EventKind::RunObserved {
-                    run_id: "run-2".into(),
-                    session_id: "sess-2".into(),
-                    flow: "design".into(),
-                    task: "sketch it".into(),
-                },
-            },
-            Event {
-                v: FORMAT_VERSION,
-                seq: 3,
-                at: OffsetDateTime::now_utc(),
-                kind: EventKind::RunCompleted {
-                    run_id: "run-1".into(),
-                    outcome: WorkerOutcome::Completed,
-                    summary: "pr landed".into(),
-                },
-            },
-        ];
-        assert_eq!(
-            old_fold,
-            fold_workers(&new_events),
-            "old names fold identically to new names"
-        );
-
-        // New appends carry the new names on disk, never the aliases.
         journal.append(|_| EventKind::RunCompleted {
             run_id: "run-2".into(),
             outcome: WorkerOutcome::Failed,
@@ -1324,9 +1288,6 @@ mod tests {
             EventKind::ChannelOpened {
                 name: "ship.148e0e02".into(),
                 run_id: "run-1".into(),
-            },
-            EventKind::MemoryUpdated {
-                summary: "learned the fold".into(),
             },
             EventKind::ServerStarted {
                 pid: 4242,
@@ -1503,6 +1464,14 @@ mod tests {
         assert_eq!(
             n.line,
             "observed run run-8c1d completed · narration tap landed, suite green"
+        );
+
+        let n = render(EventKind::MemoryAdded {
+            fact: "workers report through the memory stream".into(),
+        });
+        assert_eq!(
+            n.line,
+            "memory added: workers report through the memory stream"
         );
 
         let n = render(EventKind::MemoryUpdated {

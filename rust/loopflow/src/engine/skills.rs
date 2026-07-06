@@ -11,7 +11,6 @@ const LOOPFLOW_MARKER: &str = "loopflow: true";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillSyncOptions {
-    pub include_global: bool,
     pub prune: bool,
     pub global_home: Option<PathBuf>,
 }
@@ -19,7 +18,6 @@ pub struct SkillSyncOptions {
 impl Default for SkillSyncOptions {
     fn default() -> Self {
         Self {
-            include_global: false,
             prune: true,
             global_home: None,
         }
@@ -44,87 +42,39 @@ struct StepSource {
     content: String,
 }
 
-pub fn sync_skills(
-    repo_root: &Path,
-    options: &SkillSyncOptions,
-) -> Result<SkillSyncReport, LoadError> {
-    let repo_steps = collect_repo_steps(repo_root)?;
-    let home = options.global_home.clone().or_else(dirs::home_dir);
-    let global_steps = home
-        .as_deref()
-        .map(collect_global_steps)
-        .transpose()?
-        .unwrap_or_default();
+/// Compile loopflow steps (builtins + `~/.lf/`) into the user's personal home
+/// agent skill directories (`~/.claude/skills`, `~/.agents/skills`). Skills
+/// never land inside a working repo — the home dirs are the sole target.
+pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadError> {
+    let home = options
+        .global_home
+        .clone()
+        .or_else(dirs::home_dir)
+        .ok_or_else(|| LoadError::InvalidStep("home directory not found".to_string()))?;
 
-    let mut global_resolved = collect_builtin_steps();
-    global_resolved.extend(global_steps);
-
-    let mut repo_resolved = global_resolved.clone();
-    repo_resolved.extend(repo_steps);
-    ensure_repo_skill_excludes(repo_root)?;
+    let global_steps = collect_global_steps(&home)?;
+    let mut resolved = collect_builtin_steps();
+    resolved.extend(global_steps);
 
     let mut report = SkillSyncReport::default();
     write_targets(
-        &repo_resolved,
-        &repo_root.join(".claude/skills"),
+        &resolved,
+        &home.join(".claude/skills"),
         Vendor::Claude,
         options.prune,
         &mut report,
     )?;
     write_targets(
-        &repo_resolved,
-        &repo_root.join(".agents/skills"),
+        &resolved,
+        &home.join(".agents/skills"),
         Vendor::Codex,
         options.prune,
         &mut report,
     )?;
 
-    if options.include_global {
-        let home =
-            home.ok_or_else(|| LoadError::InvalidStep("home directory not found".to_string()))?;
-        write_targets(
-            &global_resolved,
-            &home.join(".claude/skills"),
-            Vendor::Claude,
-            options.prune,
-            &mut report,
-        )?;
-        write_targets(
-            &global_resolved,
-            &home.join(".agents/skills"),
-            Vendor::Codex,
-            options.prune,
-            &mut report,
-        )?;
-    }
-
     report.written.sort();
     report.pruned.sort();
     Ok(report)
-}
-
-fn ensure_repo_skill_excludes(repo_root: &Path) -> Result<(), LoadError> {
-    let exclude_path = repo_root.join(".git/info/exclude");
-    if !exclude_path.exists() {
-        return Ok(());
-    }
-
-    let mut content = fs::read_to_string(&exclude_path)?;
-    let mut changed = false;
-    for line in [".claude/skills/", ".agents/skills/"] {
-        if !content.lines().any(|existing| existing.trim() == line) {
-            if !content.ends_with('\n') {
-                content.push('\n');
-            }
-            content.push_str(line);
-            content.push('\n');
-            changed = true;
-        }
-    }
-    if changed {
-        fs::write(exclude_path, content)?;
-    }
-    Ok(())
 }
 
 fn collect_builtin_steps() -> BTreeMap<String, StepSource> {
@@ -142,13 +92,6 @@ fn collect_builtin_steps() -> BTreeMap<String, StepSource> {
             })
         })
         .collect()
-}
-
-fn collect_repo_steps(repo_root: &Path) -> Result<BTreeMap<String, StepSource>, LoadError> {
-    let mut steps = BTreeMap::new();
-    collect_step_dir(&repo_root.join(".lf/steps"), &mut steps)?;
-    collect_step_dir(&repo_root.join(".claude/commands"), &mut steps)?;
-    Ok(steps)
 }
 
 fn collect_global_steps(home: &Path) -> Result<BTreeMap<String, StepSource>, LoadError> {
@@ -396,10 +339,17 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn options_for(home: &TempDir) -> SkillSyncOptions {
+        SkillSyncOptions {
+            prune: true,
+            global_home: Some(home.path().to_path_buf()),
+        }
+    }
+
     #[test]
-    fn sync_skills_writes_repo_targets_with_marker() {
-        let repo = TempDir::new().unwrap();
-        let steps = repo.path().join(".lf/steps");
+    fn sync_skills_writes_home_targets_with_marker() {
+        let home = TempDir::new().unwrap();
+        let steps = home.path().join(".lf/steps");
         fs::create_dir_all(&steps).unwrap();
         fs::write(
             steps.join("local.md"),
@@ -407,7 +357,7 @@ mod tests {
         )
         .unwrap();
 
-        let report = sync_skills(repo.path(), &SkillSyncOptions::default()).unwrap();
+        let report = sync_skills(&options_for(&home)).unwrap();
         assert!(report
             .written
             .iter()
@@ -417,7 +367,7 @@ mod tests {
             .iter()
             .any(|path| path.ends_with(".agents/skills/local/SKILL.md")));
 
-        let claude = fs::read_to_string(repo.path().join(".claude/skills/local/SKILL.md")).unwrap();
+        let claude = fs::read_to_string(home.path().join(".claude/skills/local/SKILL.md")).unwrap();
         assert!(claude.contains("description: Local step summary."));
         assert!(claude.contains("loopflow: true"));
         assert!(claude.contains("loopflow-step: local"));
@@ -425,21 +375,55 @@ mod tests {
         assert!(!claude.contains("agent: codex:o3"));
         assert!(claude.contains("Do it."));
 
-        let codex = fs::read_to_string(repo.path().join(".agents/skills/local/SKILL.md")).unwrap();
+        let codex = fs::read_to_string(home.path().join(".agents/skills/local/SKILL.md")).unwrap();
         assert!(!codex.contains("disable-model-invocation"));
     }
 
     #[test]
+    fn sync_skills_compiles_builtin_steps() {
+        let home = TempDir::new().unwrap();
+
+        let report = sync_skills(&options_for(&home)).unwrap();
+
+        // Builtin steps are always compiled, even with an empty home.
+        assert!(!report.written.is_empty());
+        assert!(report
+            .written
+            .iter()
+            .all(|path| path.starts_with(home.path())));
+    }
+
+    #[test]
+    fn sync_skills_never_writes_under_a_repo() {
+        let home = TempDir::new().unwrap();
+        let steps = home.path().join(".lf/steps");
+        fs::create_dir_all(&steps).unwrap();
+        fs::write(steps.join("global-only.md"), "Global only.\n").unwrap();
+
+        let report = sync_skills(&options_for(&home)).unwrap();
+
+        // Everything lands under home; nothing outside it.
+        assert!(report
+            .written
+            .iter()
+            .all(|path| path.starts_with(home.path())));
+        assert!(home
+            .path()
+            .join(".agents/skills/global-only/SKILL.md")
+            .exists());
+    }
+
+    #[test]
     fn sync_skills_prunes_only_generated_skills() {
-        let repo = TempDir::new().unwrap();
-        let stale_dir = repo.path().join(".agents/skills/stale");
+        let home = TempDir::new().unwrap();
+        let stale_dir = home.path().join(".agents/skills/stale");
         fs::create_dir_all(&stale_dir).unwrap();
         fs::write(
             stale_dir.join(SKILL_FILE_NAME),
             "---\nname: stale\nloopflow: true\n---\nold\n",
         )
         .unwrap();
-        let user_dir = repo.path().join(".agents/skills/user");
+        let user_dir = home.path().join(".agents/skills/user");
         fs::create_dir_all(&user_dir).unwrap();
         fs::write(
             user_dir.join(SKILL_FILE_NAME),
@@ -447,70 +431,12 @@ mod tests {
         )
         .unwrap();
 
-        let report = sync_skills(repo.path(), &SkillSyncOptions::default()).unwrap();
+        let report = sync_skills(&options_for(&home)).unwrap();
         assert!(report
             .pruned
             .iter()
             .any(|path| path.ends_with(".agents/skills/stale/SKILL.md")));
         assert!(!stale_dir.join(SKILL_FILE_NAME).exists());
         assert!(user_dir.join(SKILL_FILE_NAME).exists());
-    }
-
-    #[test]
-    fn sync_skills_excludes_repo_targets_from_git() {
-        let repo = TempDir::new().unwrap();
-        let exclude = repo.path().join(".git/info/exclude");
-        fs::create_dir_all(exclude.parent().unwrap()).unwrap();
-        fs::write(
-            &exclude,
-            "# local excludes
-",
-        )
-        .unwrap();
-
-        sync_skills(repo.path(), &SkillSyncOptions::default()).unwrap();
-
-        let content = fs::read_to_string(exclude).unwrap();
-        assert!(content.contains(".claude/skills/"));
-        assert!(content.contains(".agents/skills/"));
-    }
-
-    #[test]
-    fn sync_skills_writes_global_without_repo_local_steps() {
-        let repo = TempDir::new().unwrap();
-        let home = TempDir::new().unwrap();
-        let repo_steps = repo.path().join(".lf/steps");
-        fs::create_dir_all(&repo_steps).unwrap();
-        fs::write(repo_steps.join("repo-only.md"), "Repo only.\n").unwrap();
-        let global_steps = home.path().join(".lf/steps");
-        fs::create_dir_all(&global_steps).unwrap();
-        fs::write(global_steps.join("global-only.md"), "Global only.\n").unwrap();
-
-        sync_skills(
-            repo.path(),
-            &SkillSyncOptions {
-                include_global: true,
-                prune: true,
-                global_home: Some(home.path().to_path_buf()),
-            },
-        )
-        .unwrap();
-
-        assert!(home
-            .path()
-            .join(".agents/skills/global-only/SKILL.md")
-            .exists());
-        assert!(!home
-            .path()
-            .join(".agents/skills/repo-only/SKILL.md")
-            .exists());
-        assert!(repo
-            .path()
-            .join(".agents/skills/repo-only/SKILL.md")
-            .exists());
-        assert!(repo
-            .path()
-            .join(".agents/skills/global-only/SKILL.md")
-            .exists());
     }
 }

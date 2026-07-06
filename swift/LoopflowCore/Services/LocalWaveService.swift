@@ -789,52 +789,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         }
         let status = WaveStatus(rawValue: normalizedStatus) ?? .idle
 
-        let repos: [RepoWork]
-        if let reposData = json["repos"] as? [[String: Any]] {
-            repos = reposData.map { Self.parseRepoWorkFromJSON($0) }
-        } else {
-            repos = []
-        }
-
-        let flowSteps = json["flow_steps"] as? [String] ?? []
-        let stepAgents = (json["step_agents"] as? [String: Any])?.reduce(into: [String: String]()) { partial, entry in
-            if let value = entry.value as? String {
-                partial[entry.key] = value
-            }
-        }
-
-        return Wave(
-            id: json["id"] as? String ?? UUID().uuidString,
-            name: json["name"] as? String ?? "",
-            repos: repos,
-            flow: json["primary_flow"] as? String ?? "",
-            goal: json["goal"] as! String,
-            metrics: json["metrics"] as! [String],
-            direction: normalizeStringList(json["direction"]),
-            area: normalizeStringList(json["area"]),
-            agent: json["agent"] as? String,
-            stepAgents: stepAgents,
-            triggers: triggers,
-            crons: crons,
-            status: status,
-            flowSteps: flowSteps,
-            createdAt: createdAt,
-            parentWaveId: json["parent_wave_id"] as? String
-        )
-    }
-
-    /// Parse one entry of a wave's nested `repos` array into a `RepoWork`,
-    /// mirroring `RepoWorkDto`.
-    static func parseRepoWorkFromJSON(_ json: [String: Any]) -> RepoWork {
-        let statusValue = json["status"] as? String ?? "idle"
-        let normalizedStatus: String
-        switch statusValue {
-        case "error": normalizedStatus = "failed"
-        case "completed": normalizedStatus = "idle"
-        default: normalizedStatus = statusValue
-        }
-        let status = WaveStatus(rawValue: normalizedStatus) ?? .idle
-
         let commits: [CommitEntry]
         if let commitsData = json["commits"] as? [[String: Any]] {
             commits = commitsData.compactMap { entry in
@@ -865,18 +819,39 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             pr = nil
         }
 
-        return RepoWork(
+        let flowSteps = json["flow_steps"] as? [String] ?? []
+        let stepAgents = (json["step_agents"] as? [String: Any])?.reduce(into: [String: String]()) { partial, entry in
+            if let value = entry.value as? String {
+                partial[entry.key] = value
+            }
+        }
+
+        return Wave(
+            id: json["id"] as? String ?? UUID().uuidString,
+            name: json["name"] as? String ?? "",
             repo: json["repo"] as? String ?? "",
+            flow: json["primary_flow"] as? String ?? "",
+            goal: json["goal"] as! String,
+            metrics: json["metrics"] as! [String],
+            direction: normalizeStringList(json["direction"]),
+            area: normalizeStringList(json["area"]),
+            agent: json["agent"] as? String,
+            stepAgents: stepAgents,
+            triggers: triggers,
+            crons: crons,
             status: status,
             iteration: normalizeInt(json["iteration"]),
             localWorktree: json["local_worktree"] as? String,
             remoteBranch: json["remote_branch"] as? String,
             commits: commits,
             diffStat: json["diff_stat"] as? String,
+            flowSteps: flowSteps,
             openPRCount: normalizeInt(json["open_pr_count"]),
             stackCount: normalizeInt(json["stack_count"]),
             activeRun: activeRun,
-            pr: pr
+            pr: pr,
+            createdAt: createdAt,
+            parentWaveId: json["parent_wave_id"] as? String
         )
     }
 

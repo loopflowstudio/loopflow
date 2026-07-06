@@ -315,9 +315,52 @@ pub fn stage_all(repo: &Path) -> Result<(), GitError> {
     Ok(())
 }
 
+/// Committer identity used when the environment configures none.
+///
+/// Headless hosts (GitHub Actions runners, the self-hosted cron Mac) have no
+/// `user.name`/`user.email`, so `git commit` refuses with "empty ident name".
+/// Automated commits are correctly attributed to loopflow rather than a person.
+const FALLBACK_COMMITTER_NAME: &str = "loopflow";
+const FALLBACK_COMMITTER_EMAIL: &str = "loopflow@users.noreply.github.com";
+
+/// Return true if the repo has both a `user.name` and `user.email` configured.
+///
+/// A developer's local commits keep their own identity; only a truly absent
+/// identity (empty output or non-zero exit) is treated as missing.
+fn has_git_identity(repo: &Path) -> bool {
+    let configured = |key: &str| -> bool {
+        run_git(repo, &["config", key])
+            .map(|out| {
+                out.status.success() && !String::from_utf8_lossy(&out.stdout).trim().is_empty()
+            })
+            .unwrap_or(false)
+    };
+    configured("user.name") && configured("user.email")
+}
+
 /// Commit with message.
+///
+/// When the environment has no git identity configured, supplies a fallback
+/// committer via `-c user.name/-c user.email` so headless commits (e.g. the
+/// release version bump on a CI runner) succeed. A configured identity is
+/// never overridden.
 pub fn commit(repo: &Path, message: &str) -> Result<(), GitError> {
-    git_stdout(repo, &["commit", "-m", message])?;
+    if has_git_identity(repo) {
+        git_stdout(repo, &["commit", "-m", message])?;
+    } else {
+        git_stdout(
+            repo,
+            &[
+                "-c",
+                &format!("user.name={FALLBACK_COMMITTER_NAME}"),
+                "-c",
+                &format!("user.email={FALLBACK_COMMITTER_EMAIL}"),
+                "commit",
+                "-m",
+                message,
+            ],
+        )?;
+    }
     Ok(())
 }
 
@@ -862,6 +905,33 @@ mod tests {
         fs::write(&path, content).expect("write file");
         git_stdout(repo, &["add", name]).expect("git add");
         git_stdout(repo, &["commit", "-m", &format!("add {}", name)]).expect("git commit");
+    }
+
+    #[test]
+    fn commit_supplies_fallback_identity_when_none_configured() {
+        // Isolate from the developer's global/system git identity so the
+        // no-identity path (as on a CI runner) is exercised deterministically.
+        std::env::set_var("GIT_CONFIG_GLOBAL", "/dev/null");
+        std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
+
+        let dir = tempfile::tempdir().expect("create temp dir");
+        git_stdout(dir.path(), &["init", "-b", "main"]).expect("git init");
+        assert!(
+            !has_git_identity(dir.path()),
+            "test repo should start with no identity"
+        );
+
+        fs::write(dir.path().join("README.md"), "hello").expect("write file");
+        stage_all(dir.path()).expect("stage");
+        commit(dir.path(), "add readme")
+            .expect("commit should succeed without configured identity");
+
+        let email =
+            git_stdout(dir.path(), &["log", "-1", "--format=%ae"]).expect("read author email");
+        assert_eq!(email.trim(), FALLBACK_COMMITTER_EMAIL);
+        let name =
+            git_stdout(dir.path(), &["log", "-1", "--format=%an"]).expect("read author name");
+        assert_eq!(name.trim(), FALLBACK_COMMITTER_NAME);
     }
 
     #[test]

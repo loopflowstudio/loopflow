@@ -4,7 +4,7 @@ use std::fs;
 use std::process::{Command, Stdio};
 
 use loopflow::engine::worktrees::create_with_schema;
-use loopflow::ops::{land, LandOptions, NullProgress, OpsError};
+use loopflow::ops::{land, submit, LandOptions, NullProgress, OpsError};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
 
@@ -332,6 +332,91 @@ fn land_uses_cached_pr_copy_when_available() {
     let log = fs::read_to_string(log_path).expect("read gh log");
     assert!(log.contains("--title cached title"));
     assert!(log.contains("--body cached body"));
+}
+
+#[test]
+fn submit_assigns_reviewer_and_skips_auto_merge() {
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    push_branch(&repo, "feature");
+
+    let log_path = repo.path().join("gh.log");
+    let script = gh_land_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
+
+    let result = submit(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: true,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("test title".to_string()),
+            pr_body: Some("test body".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("submit");
+
+    // submit prepares but never merges — that click is the human's.
+    assert!(!result.merged);
+    assert!(result.rotation.is_none());
+
+    let log = fs::read_to_string(log_path).expect("read gh log");
+    // Assigns the PR to the current user for a required, manual merge.
+    assert!(log.contains("pr edit --add-assignee @me"));
+    // Marks the PR ready, but does NOT arm auto-merge.
+    assert!(log.contains("pr ready"));
+    assert!(!log.contains("merge --auto"));
+}
+
+#[test]
+fn submit_does_not_rotate_worktree() {
+    let repo = TestRepo::new();
+    let log_path = repo.path().join("gh.log");
+    let script = gh_land_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
+
+    let worktree = create_with_schema(repo.path(), "sub", None, None).expect("create worktree");
+    fs::write(worktree.path.join("feature.txt"), "feature").expect("write feature file");
+    let status = Command::new("git")
+        .args(["add", "."])
+        .current_dir(&worktree.path)
+        .status()
+        .expect("git add");
+    assert!(status.success(), "git add should succeed");
+    let status = Command::new("git")
+        .args(["commit", "-m", "feature work"])
+        .current_dir(&worktree.path)
+        .status()
+        .expect("git commit");
+    assert!(status.success(), "git commit should succeed");
+    push_branch(&repo, &worktree.branch);
+
+    let result = submit(
+        &worktree.path,
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: true,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("test title".to_string()),
+            pr_body: Some("test body".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("submit from worktree");
+
+    // The worktree stays put — no preserve, no next-item rotation.
+    assert!(result.rotation.is_none());
+    assert!(worktree.path.exists());
 }
 
 #[test]

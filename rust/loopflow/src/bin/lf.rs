@@ -535,6 +535,15 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Memory { cmd, target }) => {
                 loopflow::lf::commands::memory::run(cmd.as_ref(), target)
             }
+            Some(Commands::Ssh {
+                host,
+                repo,
+                secret,
+                forward_agent,
+                cmd,
+            }) => {
+                loopflow::lf::commands::ssh::run(host, repo.as_deref(), secret, *forward_agent, cmd)
+            }
             Some(Commands::External(external_args)) => {
                 match loopflow::lf::commands::run::split_step_args(external_args) {
                     Ok((name, step_args)) => {
@@ -583,7 +592,8 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Trace { .. })
         | Some(Commands::Chat { .. })
         | Some(Commands::Sub { .. })
-        | Some(Commands::Memory { .. }) => None,
+        | Some(Commands::Memory { .. })
+        | Some(Commands::Ssh { .. }) => None,
     }
 }
 

@@ -25,7 +25,7 @@ struct RegistryQueryTests {
         #expect(waves.map(\.id) == ["goals"])
         #expect(waves[0].status == .running)
         #expect(waves[0].flow == "ship-roadmap")
-        #expect(waves[0].repos.first?.repo == "/tmp/repo-a")
+        #expect(waves[0].repo == "/tmp/repo-a")
     }
 
     @Test("lf status maps runs and attention onto the wave")

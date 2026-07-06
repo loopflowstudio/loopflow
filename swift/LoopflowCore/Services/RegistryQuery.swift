@@ -117,16 +117,11 @@ struct WaveSnapshot: Decodable {
         Wave(
             id: id,
             name: name,
-            repos: [
-                RepoWork(
-                    repo: repo,
-                    status: WaveStatus(rawValue: status) ?? .idle,
-                    iteration: iteration
-                )
-            ],
+            repo: repo,
             flow: primaryFlow,
             goal: goal,
             status: WaveStatus(rawValue: status) ?? .idle,
+            iteration: iteration,
             createdAt: RegistrySnapshotDate.parse(createdAt),
             parentWaveId: parentWaveId
         )

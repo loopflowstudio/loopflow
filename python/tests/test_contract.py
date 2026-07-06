@@ -28,13 +28,10 @@ def test_wave_fixture_parses():
     assert wave.area == ["src/"]
     assert wave.parent_wave_id == "wave_parent999"
 
-    assert len(wave.repos) == 1
-    repo = wave.repos[0]
-    assert repo.repo == "/home/user/project"
-    assert repo.status == "running"
-    assert repo.iteration == 3
-    assert repo.open_pr_count == 1
-    assert repo.local_worktree == "/home/user/project/.claude/worktrees/engbot"
-    assert repo.remote_branch == "engbot/build-3"
-    assert len(repo.commits) == 1
-    assert repo.commits[0].sha == "abc1234"
+    assert wave.repo == "/home/user/project"
+    assert wave.iteration == 3
+    assert wave.open_pr_count == 1
+    assert wave.local_worktree == "/home/user/project/.claude/worktrees/engbot"
+    assert wave.remote_branch == "engbot/build-3"
+    assert len(wave.commits) == 1
+    assert wave.commits[0].sha == "abc1234"

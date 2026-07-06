@@ -13,19 +13,14 @@
   "has_stale_pr_state": false,
   "workers": 1,
   "parent_wave_id": "wave_parent999",
-  "repos": [
-    {
-      "repo": "/home/user/project",
-      "status": "running",
-      "iteration": 3,
-      "local_worktree": "/home/user/project/.claude/worktrees/engbot",
-      "remote_branch": "engbot/build-3",
-      "commits": [
-        {"sha": "abc1234", "message": "implement: add user auth"}
-      ],
-      "diff_stat": " 3 files changed, 42 insertions(+), 7 deletions(-)",
-      "open_pr_count": 1,
-      "stack_count": 0
-    }
-  ]
+  "repo": "/home/user/project",
+  "iteration": 3,
+  "local_worktree": "/home/user/project/.claude/worktrees/engbot",
+  "remote_branch": "engbot/build-3",
+  "commits": [
+    {"sha": "abc1234", "message": "implement: add user auth"}
+  ],
+  "diff_stat": " 3 files changed, 42 insertions(+), 7 deletions(-)",
+  "open_pr_count": 1,
+  "stack_count": 0
 }

@@ -224,6 +224,30 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
+    /// Run a command on a remote host carrying your local credentials.
+    ///
+    /// Resolves the local credential bundle (GitHub, Claude, PM) and forwards it
+    /// over the ssh channel per-invocation; nothing persists on the remote. The
+    /// Doppler token is never forwarded — name specific secrets with `--secret`
+    /// to resolve them locally. Example: `lf ssh mini-heart -- lf op pr`.
+    Ssh {
+        /// Remote host (ssh alias or user@host)
+        host: String,
+        /// Repository path on the remote, relative to $HOME
+        #[arg(long = "repo")]
+        repo: Option<String>,
+        /// Doppler secret to resolve locally and forward as an env var
+        /// (repeatable). The Doppler token itself is never forwarded.
+        #[arg(long = "secret")]
+        secret: Vec<String>,
+        /// Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the
+        /// forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk.
+        #[arg(long = "forward-agent")]
+        forward_agent: bool,
+        /// Command to run on the remote (after `--`)
+        #[arg(last = true)]
+        cmd: Vec<String>,
+    },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -248,6 +272,11 @@ pub enum MemoryCommand {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
+    /// Print memory facts added since the last update
+    Log {
+        #[command(flatten)]
+        target: WaveTargetArgs,
+    },
     /// Replace MEMORY.md from stdin (written by the live server, journaled)
     Update {
         /// One-line summary journaled with the update (default: first line)
@@ -256,9 +285,9 @@ pub enum MemoryCommand {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
-    /// Append one curated fact as a bullet
+    /// Publish one fact to the replayable memory stream
     Add {
-        /// The fact to append
+        /// The fact to publish
         fact: String,
         #[command(flatten)]
         target: WaveTargetArgs,
@@ -276,7 +305,11 @@ pub enum OpsCommand {
         paths: Vec<String>,
     },
     /// Check loopflow dependencies
-    Doctor,
+    Doctor {
+        /// Print the generated Brewfile (from the declared dependency list) and exit
+        #[arg(long, hide = true)]
+        brewfile: bool,
+    },
     /// Rebase current branch onto target (default: main)
     Rebase {
         /// Print the planned rebase strategy without mutating git
@@ -290,12 +323,30 @@ pub enum OpsCommand {
         #[arg(long)]
         force: bool,
     },
-    /// Submit PR to merge queue
+    /// Land a PR hands-off: rebase, clear scratch, arm auto-merge, and rotate
+    /// the worktree. For a human-gated merge instead, use `lf op submit`.
     Land {
         #[arg(long)]
         strict: bool,
         #[arg(long)]
         local: bool,
+        #[arg(short = 'c', long = "create-pr")]
+        create_pr: bool,
+        #[arg(short = 'w', long = "worktree")]
+        worktree: Option<String>,
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        #[arg(long = "title")]
+        title: Option<String>,
+        #[arg(long = "body")]
+        body: Option<String>,
+    },
+    /// Prepare a PR to land: rebase, clear scratch, mark ready, and assign it
+    /// to you. Nothing merges until you click merge on GitHub — the one
+    /// required gate. Does not arm auto-merge or rotate the worktree.
+    Submit {
+        #[arg(long)]
+        strict: bool,
         #[arg(short = 'c', long = "create-pr")]
         create_pr: bool,
         #[arg(short = 'w', long = "worktree")]
@@ -318,13 +369,10 @@ pub enum OpsCommand {
     },
     /// Update local main to match origin
     Sync,
-    /// Sync loopflow steps into vendor Skills directories
+    /// Compile loopflow steps into your home vendor Skills directories
     #[command(name = "sync-skills")]
     SyncSkills {
-        /// Also write global vendor skill directories under ~/
-        #[arg(long = "global")]
-        global: bool,
-        /// Confirm global writes without prompting
+        /// Confirm writes under ~/ without prompting
         #[arg(short = 'y', long = "yes")]
         yes: bool,
         /// Keep stale loopflow-generated skills

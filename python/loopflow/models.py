@@ -60,28 +60,12 @@ class FlowStep(BaseModel):
         raise TypeError(f"Unsupported flow step value: {value!r}")
 
 
-class RepoWork(BaseModel):
-    """Per-repo execution surface for a wave. Wire type — no defaults on the
-    fields the server always emits; optional fields mirror Rust's
-    skip_serializing_if (absent → None)."""
-
-    repo: str
-    status: str
-    iteration: int
-    commits: list[CommitEntry]
-    open_pr_count: int
-    stack_count: int
-    local_worktree: Optional[str] = None
-    remote_branch: Optional[str] = None
-    diff_stat: Optional[str] = None
-    active_run: Optional[Run] = None
-    pr: Optional[PullRequest] = None
-
-
 class Wave(BaseModel):
-    """Wave wire type. No field defaults — every field the server always emits
-    is required, mirroring Rust's `WaveDto` (absent → parse error). Optional
-    fields carry `None` for absent, never a value default."""
+    """Wave wire type. A wave targets exactly one repo, so its execution surface
+    (repo/iteration plus the git + PR snapshot) is carried inline. No field
+    defaults — every field the server always emits is required, mirroring Rust's
+    `WaveDto` (absent → parse error). Optional fields carry `None` for absent,
+    never a value default."""
 
     id: str
     name: str
@@ -92,9 +76,18 @@ class Wave(BaseModel):
     direction: list[str]
     area: list[str]
     status: str
-    repos: list[RepoWork]
+    repo: str
+    iteration: int
+    commits: list[CommitEntry]
+    open_pr_count: int
+    stack_count: int
     flow_steps: list[FlowStep]
     parent_wave_id: Optional[str]
+    local_worktree: Optional[str] = None
+    remote_branch: Optional[str] = None
+    diff_stat: Optional[str] = None
+    active_run: Optional[Run] = None
+    pr: Optional[PullRequest] = None
     created_at: Optional[datetime] = None
 
     @field_validator("flow_steps", mode="before")

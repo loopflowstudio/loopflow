@@ -640,9 +640,10 @@ mod tests {
         assert_eq!(stray_from.status(), reqwest::StatusCode::BAD_REQUEST);
     }
 
-    /// The memory routes: GET serves the origin file; POST update/add write
-    /// it and journal `MemoryUpdated` (covered in depth by the runtime and
-    /// `lf memory` tests — this pins the HTTP shape).
+    /// The memory routes: GET serves the origin file; POST update writes it,
+    /// and POST add publishes one replayable fact without mutating the compiled
+    /// file (covered in depth by the runtime and `lf memory` tests — this pins
+    /// the HTTP shape).
     #[tokio::test]
     async fn memory_routes_read_and_write_through_the_server() {
         let (base, runtime, _tmp) = boot().await;
@@ -655,6 +656,7 @@ mod tests {
         assert_eq!(body["content"], "Goal: ship the reactive server.\n");
 
         let client = reqwest::Client::new();
+
         let body: serde_json::Value = client
             .post(format!("{base}/memory"))
             .json(&serde_json::json!({
@@ -671,7 +673,7 @@ mod tests {
         assert_eq!(body["summary"], "Rewritten.");
         assert_eq!(runtime.memory().read(), "Rewritten.\n");
 
-        // An empty add is refused; a real one appends a bullet.
+        // An empty add is refused; a real one echoes and leaves MEMORY.md alone.
         let empty = client
             .post(format!("{base}/memory"))
             .json(&serde_json::json!({ "op": "add", "content": "  ", "summary": null }))
@@ -679,13 +681,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(empty.status(), reqwest::StatusCode::BAD_REQUEST);
-        client
+
+        let body: serde_json::Value = client
             .post(format!("{base}/memory"))
             .json(&serde_json::json!({ "op": "add", "content": "one fact", "summary": null }))
             .send()
             .await
+            .unwrap()
+            .json()
+            .await
             .unwrap();
-        assert_eq!(runtime.memory().read(), "Rewritten.\n- one fact\n");
+        assert_eq!(body["summary"], "one fact");
+        assert_eq!(runtime.memory().read(), "Rewritten.\n");
     }
 
     #[tokio::test]
@@ -1645,22 +1652,19 @@ mod tests {
     }
 
     fn make_wave_row(name: &str) -> crate::lfd::types::Wave {
-        use crate::lfd::types::{RepoWork, WaveStatus};
+        use crate::lfd::types::WaveStatus;
         crate::lfd::types::Wave {
             id: crate::lfd::id::LfdId::new(),
             name: name.to_string(),
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            repos: vec![RepoWork {
-                repo: "/tmp/repo".to_string(),
-                worktree: String::new(),
-                branch: String::new(),
-                status: WaveStatus::Idle,
-                iteration: 0,
-                cycle_start_iteration: 0,
-                position: 0,
-            }],
+            repo: "/tmp/repo".to_string(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
             direction: Vec::new(),
             area: Vec::new(),
             paused: false,

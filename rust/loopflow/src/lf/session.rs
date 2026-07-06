@@ -365,9 +365,7 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{
-        RepoWork, Session, SessionStatus, Wave, WaveStatus, TMUX_TERMINAL_SOURCE,
-    };
+    use crate::lfd::types::{Session, SessionStatus, Wave, WaveStatus, TMUX_TERMINAL_SOURCE};
     use crate::lfdb::{open_store, StorageConfig};
 
     use crate::engine::wave_context::AmbientWaveRef;
@@ -443,15 +441,12 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            repos: vec![RepoWork {
-                repo: repo.to_string(),
-                worktree: String::new(),
-                branch: String::new(),
-                status: WaveStatus::Idle,
-                iteration: 0,
-                cycle_start_iteration: 0,
-                position: 0,
-            }],
+            repo: repo.to_string(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
             direction: Vec::new(),
             area: Vec::new(),
             paused: false,

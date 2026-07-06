@@ -192,15 +192,21 @@ pub struct Wave {
     pub primary_flow: String,
     pub goal: String,
     pub metrics: Vec<String>,
-    /// Per-repo execution state (worktree/branch/status/iteration), stitched from
-    /// `wave_repos` on read. Execution state lives here; the wave carries only
-    /// identity plus the wave-level `paused` flag.
-    #[serde(default)]
-    pub repos: Vec<RepoWork>,
+    /// The single repo this wave targets. A wave = exactly one repo.
+    pub repo: String,
+    /// Worktree path for the wave's repo, `""` when none.
+    pub worktree: String,
+    /// Branch name for the wave's repo, `""` when none.
+    pub branch: String,
+    /// Execution status of the wave's repo. Rolled into `status()` together with
+    /// the wave-level `paused` flag.
+    pub status: WaveStatus,
+    pub iteration: u32,
+    pub cycle_start_iteration: u32,
     pub direction: Vec<String>,
     pub area: Vec<String>,
     /// Wave-level pause flag. Rolled into `status()` (a paused wave reports
-    /// `Paused` regardless of per-repo state).
+    /// `Paused` regardless of the repo's execution state).
     pub paused: bool,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
@@ -222,15 +228,12 @@ impl Wave {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            repos: vec![RepoWork {
-                repo,
-                worktree: String::new(),
-                branch: String::new(),
-                status: WaveStatus::Idle,
-                iteration: 0,
-                cycle_start_iteration: 0,
-                position: 0,
-            }],
+            repo,
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
             direction: Vec::new(),
             area: Vec::new(),
             paused: false,
@@ -259,10 +262,9 @@ impl Wave {
         &self.name
     }
 
-    /// Primary repo path — the first `RepoWork`'s repo, `""` when a wave carries
-    /// no repos (shouldn't happen outside construction).
+    /// The repo this wave targets.
     pub fn repo(&self) -> &str {
-        self.repos.first().map(|r| r.repo.as_str()).unwrap_or("")
+        &self.repo
     }
 
     pub fn primary_flow(&self) -> &String {
@@ -285,55 +287,28 @@ impl Wave {
         &self.area
     }
 
-    /// Wave-level status, rolled up over `repos`. `Paused` is a wave-level flag;
-    /// otherwise the status is derived from the per-repo execution state: any
-    /// running wins, then failed, then waiting, else idle.
+    /// Wave-level status. `Paused` is a wave-level flag; otherwise the status is
+    /// the repo's execution status.
     pub fn status(&self) -> WaveStatus {
         if self.paused {
             return WaveStatus::Paused;
         }
-        if self.repos.iter().any(|r| r.status == WaveStatus::Running) {
-            WaveStatus::Running
-        } else if self.repos.iter().any(|r| r.status == WaveStatus::Failed) {
-            WaveStatus::Failed
-        } else if self.repos.iter().any(|r| r.status == WaveStatus::Waiting) {
-            WaveStatus::Waiting
-        } else {
-            WaveStatus::Idle
-        }
+        self.status
     }
 
-    /// Max iteration across `repos`.
     pub fn iteration(&self) -> u32 {
-        self.repos.iter().map(|r| r.iteration).max().unwrap_or(0)
+        self.iteration
     }
 
     pub fn cycle_start_iteration(&self) -> u32 {
-        self.repos
-            .iter()
-            .map(|r| r.cycle_start_iteration)
-            .max()
-            .unwrap_or(0)
+        self.cycle_start_iteration
     }
 
     /// Set the wave's execution status. Toggles the wave-level `paused` flag and
-    /// writes the status onto every `RepoWork`, so reads through `status()` and
-    /// per-repo readers agree.
+    /// writes the execution status, so reads through `status()` agree.
     pub fn set_status(&mut self, status: WaveStatus) {
         self.paused = status == WaveStatus::Paused;
-        for repo in &mut self.repos {
-            repo.status = status;
-        }
-    }
-
-    /// Mutable access to the `RepoWork` for `repo`, falling back to the primary
-    /// repo when there's no exact match. Used by the executor to record per-repo
-    /// status/iteration after dispatching a run.
-    pub fn repo_work_mut(&mut self, repo: &str) -> Option<&mut RepoWork> {
-        if let Some(pos) = self.repos.iter().position(|r| r.repo == repo) {
-            return self.repos.get_mut(pos);
-        }
-        self.repos.first_mut()
+        self.status = status;
     }
 
     pub fn created_at(&self) -> Option<OffsetDateTime> {
@@ -343,21 +318,6 @@ impl Wave {
     pub fn workers(&self) -> u32 {
         self.workers
     }
-}
-
-/// Per-repo execution state for a wave. Waves own identity; each `RepoWork`
-/// carries the worktree/branch/status/iteration for one repo the wave runs in.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RepoWork {
-    pub repo: String,
-    /// Worktree path, `""` when none.
-    pub worktree: String,
-    /// Branch name, `""` when none.
-    pub branch: String,
-    pub status: WaveStatus,
-    pub iteration: u32,
-    pub cycle_start_iteration: u32,
-    pub position: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -410,7 +410,7 @@ mod tests {
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::id::LfdId;
     use crate::lfd::output::OutputHub;
-    use crate::lfd::types::{RepoId, RepoWork, WaveStatus};
+    use crate::lfd::types::{RepoId, WaveStatus};
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use crate::provider_auth::ProviderAuthService;
     use std::process::Command;
@@ -456,15 +456,12 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            repos: vec![RepoWork {
-                repo,
-                worktree: String::new(),
-                branch: String::new(),
-                status: WaveStatus::Idle,
-                iteration: 0,
-                cycle_start_iteration: 0,
-                position: 0,
-            }],
+            repo,
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
             direction: Vec::new(),
             area: Vec::new(),
             paused: false,

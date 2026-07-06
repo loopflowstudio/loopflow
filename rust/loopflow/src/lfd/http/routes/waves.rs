@@ -807,7 +807,7 @@ fn rename_wave_worktree(
 mod tests {
     use super::*;
     use crate::lfd::http::routes::test_helpers::{init_git_repo, test_http_state};
-    use crate::lfd::types::{RepoWork, Session, SessionStatus, SessionUse, Wave};
+    use crate::lfd::types::{Session, SessionStatus, SessionUse, Wave};
     use std::path::Path;
     use tempfile::tempdir;
     use time::OffsetDateTime;
@@ -819,15 +819,12 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            repos: vec![RepoWork {
-                repo: repo.to_string(),
-                worktree: String::new(),
-                branch: String::new(),
-                status: WaveStatus::Idle,
-                iteration: 0,
-                cycle_start_iteration: 0,
-                position: 0,
-            }],
+            repo: repo.to_string(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
             direction: Vec::new(),
             area: Vec::new(),
             paused: false,
@@ -959,7 +956,7 @@ mod tests {
         let repos: Vec<&str> = response
             .child_waves
             .iter()
-            .flat_map(|w| w.repos.iter().map(|r| r.repo.as_str()))
+            .map(|w| w.repo.as_str())
             .collect();
         assert!(repos.contains(&repo_a.path().to_string_lossy().as_ref()));
         assert!(repos.contains(&repo_b.path().to_string_lossy().as_ref()));
@@ -1085,7 +1082,7 @@ mod tests {
         .expect("list waves");
 
         assert_eq!(listed.data.len(), 1);
-        assert_eq!(listed.data[0].repos[0].repo, repo_a);
+        assert_eq!(listed.data[0].repo, repo_a);
         assert_eq!(listed.data[0].name, "wave-a");
     }
 

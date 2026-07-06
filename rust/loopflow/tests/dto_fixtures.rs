@@ -36,7 +36,7 @@ fn load_top_fixture(name: &str) -> Value {
 }
 
 #[test]
-fn wave_fixture_nests_repo_work() {
+fn wave_fixture_carries_single_repo() {
     let wave: WaveDto =
         serde_json::from_value(load_top_fixture("wave.json")).expect("wave fixture should parse");
 
@@ -46,19 +46,16 @@ fn wave_fixture_nests_repo_work() {
     assert_eq!(wave.status, "running");
     assert_eq!(wave.parent_wave_id.as_deref(), Some("wave_parent999"));
 
-    assert_eq!(wave.repos.len(), 1);
-    let repo = &wave.repos[0];
-    assert_eq!(repo.repo, "/home/user/project");
-    assert_eq!(repo.status, "running");
-    assert_eq!(repo.iteration, 3);
+    assert_eq!(wave.repo, "/home/user/project");
+    assert_eq!(wave.iteration, 3);
     assert_eq!(
-        repo.local_worktree.as_deref(),
+        wave.local_worktree.as_deref(),
         Some("/home/user/project/.claude/worktrees/engbot")
     );
-    assert_eq!(repo.remote_branch.as_deref(), Some("engbot/build-3"));
-    assert_eq!(repo.open_pr_count, 1);
-    assert_eq!(repo.commits.len(), 1);
-    assert_eq!(repo.commits[0].sha, "abc1234");
+    assert_eq!(wave.remote_branch.as_deref(), Some("engbot/build-3"));
+    assert_eq!(wave.open_pr_count, 1);
+    assert_eq!(wave.commits.len(), 1);
+    assert_eq!(wave.commits[0].sha, "abc1234");
 }
 
 #[test]

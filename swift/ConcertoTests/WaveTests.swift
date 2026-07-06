@@ -599,36 +599,31 @@ struct ParseWaveFromJSONTests {
             "area": ["."],
             "status": "running",
             "flow_steps": ["ingest", "kickoff"],
-            "repos": [
-                [
-                    "repo": "/tmp/repo",
-                    "status": "running",
-                    "iteration": 0,
-                    "open_pr_count": 3,
-                    "commits": [],
-                    "stack_count": 0,
-                    "active_run": [
-                        "id": "run-1",
-                        "wave_id": "wave-1",
-                        "flow": "start",
-                        "repo": "/tmp/repo",
-                        "direction": ["ux"],
-                        "area": ["."],
-                        "iteration": 0,
-                        "step_index": 1,
-                        "status": "running",
-                        "local_worktree": "/tmp/wt",
-                        "remote_branch": "jack/ux"
-                    ] as [String: Any]
-                ] as [String: Any]
-            ]
+            "repo": "/tmp/repo",
+            "iteration": 0,
+            "open_pr_count": 3,
+            "commits": [],
+            "stack_count": 0,
+            "active_run": [
+                "id": "run-1",
+                "wave_id": "wave-1",
+                "flow": "start",
+                "repo": "/tmp/repo",
+                "direction": ["ux"],
+                "area": ["."],
+                "iteration": 0,
+                "step_index": 1,
+                "status": "running",
+                "local_worktree": "/tmp/wt",
+                "remote_branch": "jack/ux"
+            ] as [String: Any]
         ]
 
         let wave = WaveService.parseWaveFromJSON(json)
 
         #expect(wave.flowSteps == ["ingest", "kickoff"])
-        #expect(wave.repos.first?.openPRCount == 3)
-        #expect(wave.repos.first?.activeRun?.stepIndex == 1)
+        #expect(wave.openPRCount == 3)
+        #expect(wave.activeRun?.stepIndex == 1)
 
         let vm = WaveViewModel(api: wave)
         #expect(vm.stepIndex == 1)
@@ -644,23 +639,18 @@ struct ParseWaveFromJSONTests {
             "metrics": [],
             "status": "idle",
             "flow_steps": ["ingest", "kickoff"],
-            "repos": [
-                [
-                    "repo": "/tmp/repo",
-                    "status": "idle",
-                    "iteration": 0,
-                    "open_pr_count": 0,
-                    "commits": [],
-                    "stack_count": 0
-                ] as [String: Any]
-            ]
+            "repo": "/tmp/repo",
+            "iteration": 0,
+            "open_pr_count": 0,
+            "commits": [],
+            "stack_count": 0
         ]
 
         let wave = WaveService.parseWaveFromJSON(json)
         let vm = WaveViewModel(api: wave)
 
         #expect(vm.stepIndex == 0)
-        #expect(wave.repos.first?.activeRun == nil)
+        #expect(wave.activeRun == nil)
     }
 }
 

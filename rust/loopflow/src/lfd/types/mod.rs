@@ -27,6 +27,6 @@ pub use session::{
 };
 pub use summary::Summary;
 pub use wave::{
-    LivePrState, LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, RepoWork, Run,
+    LivePrState, LivePullRequestState, PullRequest, QueueBlock, QueueBlockReason, Run,
     RunStackStatus, RunStatus, Wave, WaveStatus,
 };

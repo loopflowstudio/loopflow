@@ -7,14 +7,14 @@ use crate::lfd::attention::{queue_block_attention_item, queue_block_from_attenti
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
-    LivePullRequestState, QueueBlock, Repo, RepoEdge, RepoId, RepoWork, Run, RunStatus, Session,
+    LivePullRequestState, QueueBlock, Repo, RepoEdge, RepoId, Run, RunStatus, Session,
     SessionStatus, SessionUse, Summary, Wave, WaveStatus,
 };
 use crate::lfdb::catalog::{list_runs_query, list_waves_query, sql, Query, SqlDialect};
 use crate::lfdb::rows::{
     map_chat_memory_block_row, map_chat_message_row, map_fork_run_row, map_live_pr_state_row,
     map_repo_edge_row, map_repo_provider_usage_row, map_repo_row, map_run_row, map_summary_row,
-    map_wave_provider_usage_row, map_wave_repo_row, map_wave_row, now_unix, serialize_pr,
+    map_wave_provider_usage_row, map_wave_row, now_unix, serialize_pr,
 };
 use crate::lfdb::token_crypto;
 use crate::lfdb::{
@@ -174,20 +174,6 @@ impl SqliteStore {
         Ok(waves)
     }
 
-    fn read_wave_repos<P>(&self, query: Query, params: P) -> StoreResult<Vec<RepoWork>>
-    where
-        P: rusqlite::Params,
-    {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(query))?;
-        let rows = stmt.query_map(params, |row| Ok(map_wave_repo_row(row)))?;
-        let mut repos = Vec::new();
-        for repo in rows {
-            repos.push(repo??);
-        }
-        Ok(repos)
-    }
-
     fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let direction_json = serde_json::to_string(wave.direction())?;
@@ -216,6 +202,12 @@ impl SqliteStore {
                 wave.goal(),
                 metrics_json,
                 wave.parent_wave_id(),
+                wave.repo,
+                wave.worktree,
+                wave.branch,
+                wave.status.as_i32() as i64,
+                wave.iteration as i64,
+                wave.cycle_start_iteration as i64,
             ],
         )?;
         Ok(())
@@ -731,34 +723,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>> {
-        self.read_wave_repos(Query::ListWaveRepos, params![wave_id])
-    }
-
-    pub fn upsert_wave_repo(&self, wave_id: &LfdId, repo: &RepoWork) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            Self::sql(Query::UpsertWaveRepo),
-            params![
-                wave_id.as_str(),
-                repo.repo,
-                repo.worktree,
-                repo.branch,
-                repo.status.as_i32(),
-                repo.iteration as i64,
-                repo.cycle_start_iteration as i64,
-                repo.position as i64,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn delete_wave_repos(&self, wave_id: &LfdId) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(Self::sql(Query::DeleteWaveReposByWave), params![wave_id])?;
-        Ok(())
-    }
-
     pub fn list_runs(&self, wave_id: Option<&LfdId>, limit: Option<u32>) -> StoreResult<Vec<Run>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = Self::sql(list_runs_query(wave_id.is_some(), limit.is_some()));
@@ -1175,11 +1139,11 @@ impl SqliteStore {
                 RunStatus::Waiting.as_i32() as i64,
             ],
         )?;
-        // Runs that were in flight are now Failed; the repos that owned them
-        // would otherwise stay stuck in Running/Waiting and the rolled-up wave
-        // status would keep their action buttons disabled. Reset them to Idle.
+        // Runs that were in flight are now Failed; the waves that owned them
+        // would otherwise stay stuck in Running/Waiting and keep their action
+        // buttons disabled. Reset them to Idle.
         conn.execute(
-            Self::sql(Query::ResetStaleActiveRepos),
+            Self::sql(Query::ResetStaleActiveWaves),
             params![
                 WaveStatus::Idle.as_i32() as i64,
                 WaveStatus::Running.as_i32() as i64,

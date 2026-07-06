@@ -75,11 +75,7 @@ pub async fn create_run_for_placement(
         .map(|run| run.stack_group_id.clone())
         .unwrap_or_else(|| wave.id().to_string());
 
-    let repo_work = wave
-        .repos
-        .first()
-        .expect("wave always has at least one RepoWork");
-    let main_repo = Path::new(&repo_work.repo);
+    let main_repo = Path::new(&wave.repo);
 
     let ((wt_path, branch), run_target_branch) = match placement {
         Placement::Fresh => (
@@ -105,7 +101,7 @@ pub async fn create_run_for_placement(
     let run = Run {
         id: run_id.clone(),
         wave_id: wave.id().clone(),
-        repo: repo_work.repo.clone(),
+        repo: wave.repo.clone(),
         flow: wave.primary_flow().clone(),
         task: None,
         direction: wave.direction().clone(),
@@ -132,14 +128,12 @@ pub async fn create_run_for_placement(
     };
     store.create_run(&run).await?;
     if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
-        if let Some(rw) = wave.repo_work_mut(&run.repo) {
-            // New cycle: record the starting iteration for max_iterations safety valve.
-            if rw.status == WaveStatus::Idle || rw.status == WaveStatus::Paused {
-                rw.cycle_start_iteration = iteration;
-            }
-            rw.status = WaveStatus::Running;
-            rw.iteration = iteration;
+        // New cycle: record the starting iteration for max_iterations safety valve.
+        if wave.status == WaveStatus::Idle || wave.status == WaveStatus::Paused {
+            wave.cycle_start_iteration = iteration;
         }
+        wave.status = WaveStatus::Running;
+        wave.iteration = iteration;
         if let Err(err) = store.update_wave(&wave).await {
             warn!(wave_id = %wave.id(), error = %err, "failed to set wave status to running");
         }

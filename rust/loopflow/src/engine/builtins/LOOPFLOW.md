@@ -12,7 +12,8 @@ Use `lf op` for mechanical git and GitHub operations.
 ```bash
 lf op commit -m "message" -p     # commit and push
 lf op pr --title "..."           # create/update PR
-lf op land                       # submit to merge queue
+lf op submit                     # prep + mark ready + assign to you; you click merge
+lf op land                       # hands-off: arm auto-merge + rotate worktree
 lf op rebase --plan              # show reset/rebase strategy
 lf op rebase                     # apply the planned update
 lf op next                       # preserve worktree, fresh branch
@@ -22,6 +23,22 @@ lf op wt create --stack parent child # stack child under parent
 lf op wt switch my-feature       # cd to existing worktree
 lf op wt prune                   # clean up merged worktrees
 ```
+
+### `pr` vs `submit` vs `land`
+
+Three commands, three commitment levels — pick by how done the work is and who
+lands it:
+
+- **`lf op pr`** — open or refresh the PR while work is still in flight. Rebases
+  only if behind, writes title/body, leaves the PR up for review. Use it to make
+  work visible mid-stream; nothing is finalized.
+- **`lf op submit`** — the work is done and a **human** lands it. Rebases onto
+  main, clears `scratch/`, marks the PR ready, and assigns it to the reviewer.
+  Stops there: no auto-merge. The reviewer's merge click is the one required
+  gate. Use this as the default finish for anything a person should approve.
+- **`lf op land`** — the work is done and **loopflow** lands it hands-off. Does
+  everything `submit` does, then arms auto-merge and rotates the worktree onto
+  the next wave item. Use it in headless/auto runs where no human is gating.
 
 The sibling naming convention (`<repo>.<name>`) is load-bearing. Worktrees
 created elsewhere will not be recognized and may be corrupted during land

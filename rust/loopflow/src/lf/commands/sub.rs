@@ -509,6 +509,7 @@ mod tests {
         let app = server::router(
             runtime.clone(),
             server::ResidentDoor::new("test-token"),
+            server::SubagentDoor::new(),
             None,
             None,
         );

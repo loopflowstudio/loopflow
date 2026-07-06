@@ -10,7 +10,7 @@ use loopflow::chat::types::{ConversationEvent, ConversationItem, Lifecycle, Turn
 use loopflow::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
 use loopflow::wave::mind::EventAdapter;
 use loopflow::wave::runtime::WaveRuntime;
-use loopflow::wave::server::{self, ResidentDoor};
+use loopflow::wave::server::{self, ResidentDoor, SubagentDoor};
 use loopflow::wave::state::MindState;
 
 /// One complete harness turn, as the codex driver would emit it: a command
@@ -240,7 +240,13 @@ async fn health_reports_channel_liveness_and_the_mind_state() {
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = server::router(rt.clone(), ResidentDoor::new("test-token"), None, None);
+    let app = server::router(
+        rt.clone(),
+        ResidentDoor::new("test-token"),
+        SubagentDoor::new(),
+        None,
+        None,
+    );
     tokio::spawn(async move {
         axum::serve(listener, app).await.ok();
     });

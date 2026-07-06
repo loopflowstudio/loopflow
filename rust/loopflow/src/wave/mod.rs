@@ -168,6 +168,7 @@ fn resident_spawner(
     repo_root: PathBuf,
     endpoint: String,
     token: String,
+    subagent_token: String,
     session_env: Vec<(String, String)>,
 ) -> supervisor::SpawnResident {
     Box::new(move || {
@@ -180,6 +181,11 @@ fn resident_spawner(
             .current_dir(&repo_root)
             .env(WAVE_SERVER_ENDPOINT_ENV, &endpoint)
             .env(wire::RESIDENT_TOKEN_ENV, &token)
+            // The per-subagent exec-door token, inherited by every sandboxed
+            // process the resident spawns: a worker reads it (with the
+            // endpoint above) and runs `lfq exec <lf argv>` back through the
+            // wave's `/v0/exec`, unsandboxed in the outwave.
+            .env(wire::SUBAGENT_TOKEN_ENV, &subagent_token)
             // The resident's children must resolve `lf` to this binary.
             .env("PATH", mind::path_for_children())
             .stdin(std::process::Stdio::null());
@@ -323,6 +329,12 @@ async fn serve(
     let door = server::ResidentDoor::new(token.clone());
     server::write_resident_token(&repo_root, &wave, &token)?;
 
+    // The exec door's authority: a per-subagent capability set. Minted into
+    // when the resident is spawned (below) and validated on `/v0/exec`. In
+    // memory, per boot — no store, no schema. A dormant channel spawns no
+    // resident, so the set stays empty and `/exec` accepts nothing.
+    let subagent_door = server::SubagentDoor::new();
+
     // The keeper's watch: resident liveness, respawn ladder, interrupt
     // janitor. Runs even dormant — the pen-side anti-wedges (janitor, attach
     // probe) never depend on who spawned the resident.
@@ -332,6 +344,7 @@ async fn serve(
             repo_root.clone(),
             addr.to_string(),
             token.clone(),
+            subagent_door.mint(),
             session_env,
         )),
         MindPolicy::Dormant => None,
@@ -379,6 +392,7 @@ async fn serve(
     let app = server::router(
         runtime.clone(),
         door.clone(),
+        subagent_door,
         observer,
         Some(supervisor_handle),
     );
@@ -454,7 +468,13 @@ mod tests {
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(runtime.clone(), ResidentDoor::new("test-token"), None, None);
+        let app = server::router(
+            runtime.clone(),
+            ResidentDoor::new("test-token"),
+            server::SubagentDoor::new(),
+            None,
+            None,
+        );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
@@ -1193,7 +1213,13 @@ mod tests {
         let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("reopen");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(runtime.clone(), ResidentDoor::new("test-token"), None, None);
+        let app = server::router(
+            runtime.clone(),
+            ResidentDoor::new("test-token"),
+            server::SubagentDoor::new(),
+            None,
+            None,
+        );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
@@ -1234,7 +1260,13 @@ mod tests {
         let runtime = WaveRuntime::open("ship".into(), origin).expect("open runtime");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(runtime.clone(), ResidentDoor::new("test-token"), None, None);
+        let app = server::router(
+            runtime.clone(),
+            ResidentDoor::new("test-token"),
+            server::SubagentDoor::new(),
+            None,
+            None,
+        );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
         });

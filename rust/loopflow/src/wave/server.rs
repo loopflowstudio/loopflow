@@ -105,6 +105,7 @@
 //!
 //! `Turn` is [`crate::chat::turns::ChatTurn`].
 
+use std::collections::HashSet;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -120,6 +121,8 @@ use time::OffsetDateTime;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
+use crate::lfd::http::routes::exec::{ExecRequest, ExecResponse};
+use crate::lfd::lf_exec::{exec_lf, validate_lf_argv};
 use crate::wave::channel::tagged_turn_json;
 use crate::wave::journal::{Attribution, MessageOp, PendingMessage};
 use crate::wave::registry::{process_alive, StoreObserver};
@@ -128,7 +131,7 @@ use crate::wave::state::MindState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
     AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, PostDeltasRequest,
-    PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
+    PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER, SUBAGENT_TOKEN_HEADER,
 };
 
 /// Basename of the discovery pointer under `wave/<name>/`.
@@ -193,6 +196,58 @@ pub fn generate_resident_token() -> String {
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     )
+}
+
+/// The exec door's authority: the set of per-subagent capability tokens this
+/// boot accepts on `/v0/exec`. A distinct principal from [`ResidentDoor`] —
+/// `/exec` accepts a minted subagent token and never the resident token, so a
+/// least-privilege subagent (a sandboxed process spawned inside the wave) can
+/// run `lf` unsandboxed in the outwave without holding the resident's pen.
+///
+/// In-memory, per boot — no store, no schema. The listener mints a token when
+/// it spawns the resident (injected into the child env, inherited by every
+/// sandboxed descendant) and validates presented tokens against this set. A
+/// respawn reuses the boot's token, the same trust domain as the resident
+/// token, which is also per-boot.
+#[derive(Debug, Clone, Default)]
+pub struct SubagentDoor {
+    accepted: Arc<Mutex<HashSet<String>>>,
+}
+
+impl SubagentDoor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mint a fresh capability token and register it as accepted.
+    pub fn mint(&self) -> String {
+        let token = generate_resident_token();
+        self.accepted
+            .lock()
+            .expect("subagent token set lock poisoned")
+            .insert(token.clone());
+        token
+    }
+
+    fn authorize(&self, headers: &HeaderMap) -> Result<(), (StatusCode, String)> {
+        let presented = headers
+            .get(SUBAGENT_TOKEN_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        let accepted = !presented.is_empty()
+            && self
+                .accepted
+                .lock()
+                .expect("subagent token set lock poisoned")
+                .contains(presented);
+        if accepted {
+            return Ok(());
+        }
+        Err((
+            StatusCode::UNAUTHORIZED,
+            format!("missing or wrong {SUBAGENT_TOKEN_HEADER}"),
+        ))
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -312,6 +367,7 @@ struct PostMessageResponse {
 struct ServerState {
     runtime: Arc<WaveRuntime>,
     resident: ResidentDoor,
+    subagent: SubagentDoor,
     observer: Option<Arc<StoreObserver>>,
     supervisor: Option<SupervisorHandle>,
     started_at: OffsetDateTime,
@@ -324,12 +380,14 @@ struct ServerState {
 pub fn router(
     runtime: Arc<WaveRuntime>,
     resident: ResidentDoor,
+    subagent: SubagentDoor,
     observer: Option<Arc<StoreObserver>>,
     supervisor: Option<SupervisorHandle>,
 ) -> Router {
     let state = ServerState {
         runtime,
         resident,
+        subagent,
         observer,
         supervisor,
         started_at: OffsetDateTime::now_utc(),
@@ -341,6 +399,7 @@ pub fn router(
         .route("/messages", post(messages_handler))
         .route("/channels", post(channels_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
+        .route("/v0/exec", post(exec_handler))
         .route("/resident/attach", post(resident_attach_handler))
         .route("/resident/deltas", post(resident_deltas_handler))
         .route("/resident/context", get(resident_context_handler))
@@ -446,6 +505,35 @@ async fn resident_context_handler(
     Ok(Json(ContextResponse {
         thread_id: state.runtime.last_thread_id(),
         in_flight,
+    }))
+}
+
+/// `POST /v0/exec` — the wave's exec door: "a wave HAS an lfd" in one route.
+/// A subagent (a sandboxed process spawned inside this wave) presents its
+/// per-subagent token and runs an arbitrary `lf` argv **unsandboxed in the
+/// outwave** (`runtime.repo_root()`), escaping the `.git`-write restriction of
+/// its own worktree so it can commit / dispatch through the wave.
+///
+/// Reuses the state-free [`crate::lfd::lf_exec`] engine verbatim: validate the
+/// argv parses against the `lf` clap tree (garbage → 400, no exec), then exec
+/// and capture. The door pins execution to the outwave, so a client-supplied
+/// `cwd` on the shared [`ExecRequest`] shape is ignored here — the machine
+/// lfd's `/v0/exec` honors it; the wave's does not, by design.
+async fn exec_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<ExecRequest>,
+) -> Result<Json<ExecResponse>, (StatusCode, String)> {
+    state.subagent.authorize(&headers)?;
+    validate_lf_argv(&payload.argv).map_err(|err| (StatusCode::BAD_REQUEST, err))?;
+    let cwd = state.runtime.repo_root().display().to_string();
+    let result = exec_lf(&payload.argv, Some(&cwd), &[])
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    Ok(Json(ExecResponse {
+        exit_code: result.exit_code,
+        stdout: result.stdout,
+        stderr: result.stderr,
     }))
 }
 
@@ -989,6 +1077,85 @@ mod tests {
         );
         remove_resident_token(tmp.path(), "ship", "tok-1");
         assert!(read_resident_token(tmp.path(), "ship").is_none());
+    }
+
+    /// Boot the HTTP surface over a runtime we control, with a subagent door
+    /// we can mint from. Returns the base URL and the minted token.
+    async fn boot_exec() -> (String, String, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("wave/ship");
+        std::fs::create_dir_all(&dir).expect("wave dir");
+        std::fs::write(dir.join("MEMORY.md"), "Goal: exercise /exec.\n").expect("memory");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+
+        let subagent = SubagentDoor::new();
+        let token = subagent.mint();
+        let app = router(runtime, ResidentDoor::new("resident"), subagent, None, None);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        (format!("http://{addr}"), token, tmp)
+    }
+
+    /// The wave's `/v0/exec` door: no token → 401, a minted subagent token
+    /// clears auth (garbage argv then 400s at the validator), and a valid
+    /// argv execs and returns a structured result. Proves the exec door is a
+    /// distinct principal from the resident door.
+    #[tokio::test]
+    async fn exec_door_gates_on_the_subagent_token_and_validates_argv() {
+        let (base, token, _tmp) = boot_exec().await;
+        let client = reqwest::Client::new();
+        let url = format!("{base}/v0/exec");
+
+        // No token: refused before any exec.
+        let no_token = client
+            .post(&url)
+            .json(&serde_json::json!({ "argv": ["op", "doctor"], "cwd": null }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(no_token.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        // The resident token must NOT authorize a subagent exec call.
+        let resident_token = client
+            .post(&url)
+            .header(RESIDENT_TOKEN_HEADER, "resident")
+            .json(&serde_json::json!({ "argv": ["op", "doctor"], "cwd": null }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resident_token.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        // A minted token clears auth; a garbage argv proves we reached the
+        // validator (400, not 401).
+        let bad_argv = client
+            .post(&url)
+            .header(SUBAGENT_TOKEN_HEADER, &token)
+            .json(&serde_json::json!({ "argv": ["op", "next", "--nonesuch"], "cwd": null }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(bad_argv.status(), reqwest::StatusCode::BAD_REQUEST);
+
+        // A valid argv execs and returns a structured result.
+        let ok: serde_json::Value = client
+            .post(&url)
+            .header(SUBAGENT_TOKEN_HEADER, &token)
+            .json(&serde_json::json!({ "argv": ["op", "doctor"], "cwd": null }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(ok.get("exit_code").is_some(), "door returns exit_code");
+        assert!(
+            !ok["stdout"].as_str().unwrap_or_default().is_empty()
+                || !ok["stderr"].as_str().unwrap_or_default().is_empty(),
+            "doctor emits a report"
+        );
     }
 
     /// A pointer to a dead address is stale: the probe says no live server.

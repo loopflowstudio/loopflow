@@ -49,6 +49,16 @@ pub const RESIDENT_TOKEN_ENV: &str = "LF_WAVE_RESIDENT_TOKEN";
 /// Basename of the token file beside `.wave-endpoint` (attached residents).
 pub const RESIDENT_TOKEN_FILE: &str = ".wave-resident-token";
 
+/// Header carrying a per-subagent capability token on the wave's `/v0/exec`
+/// door. A different principal from the resident: `/exec` accepts a minted
+/// subagent token and rejects the resident token, and vice versa for the
+/// `/resident/*` routes.
+pub const SUBAGENT_TOKEN_HEADER: &str = "x-lf-subagent-token";
+
+/// Env var the listener sets on the resident (and thus every sandboxed
+/// process it spawns) so a subagent can reach its wave's exec door via `lfq`.
+pub const SUBAGENT_TOKEN_ENV: &str = "LF_SUBAGENT_TOKEN";
+
 /// One ordered increment from the resident's harness stream, applied by the
 /// listener's fold ([`crate::wave::runtime::WaveRuntime::apply_resident_delta`]).
 ///

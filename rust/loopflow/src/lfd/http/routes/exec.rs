@@ -30,7 +30,7 @@ use crate::lfd::lf_exec::{exec_lf, validate_lf_argv};
 /// binary name (e.g. `["op", "next", "--create-pr"]`). `cwd` is where to run
 /// it — the caller owns resolving the wave worktree, since `lf` verbs infer
 /// the wave from their working directory; omitted means lfd's own cwd.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExecRequest {
     pub argv: Vec<String>,
     pub cwd: Option<String>,
@@ -39,7 +39,7 @@ pub struct ExecRequest {
 /// Result of a door call. A non-zero `exit_code` is a *successful* door call
 /// reporting a failed `lf` run; a refused exec (argv did not parse) never
 /// reaches here — the caller gets a 400 instead.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExecResponse {
     pub exit_code: i32,
     pub stdout: String,

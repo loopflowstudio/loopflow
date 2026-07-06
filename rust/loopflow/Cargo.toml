@@ -20,6 +20,10 @@ name = "lfd"
 path = "src/bin/lfd.rs"
 
 [[bin]]
+name = "lfq"
+path = "src/bin/lfq.rs"
+
+[[bin]]
 name = "lf-prompt"
 path = "src/bin/lf-prompt.rs"
 

@@ -5,6 +5,7 @@ pub mod journal;
 pub mod lf;
 pub mod lfd;
 pub mod lfdb;
+pub mod lfq;
 pub mod ops;
 pub mod provider_auth;
 pub mod wave;

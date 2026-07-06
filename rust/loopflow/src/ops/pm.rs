@@ -746,11 +746,18 @@ mod tests {
 
     #[tokio::test]
     async fn apply_update_creates_when_no_id_is_given() {
-        // With a team already resolved, create_item is a single issueCreate mutation.
-        let (base_url, requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "issueCreate": { "issue": { "id": "new-task" } } } }),
-        )])
+        // With a team already resolved, create_item resolves the active (unstarted)
+        // workflow state, then sends the issueCreate mutation.
+        let (base_url, requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "workflowStates": { "nodes": [{ "id": "state-todo", "position": 1.0 }] } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issueCreate": { "issue": { "id": "new-task" } } } }),
+            ),
+        ])
         .await;
         let ctx = linear_test_ctx(base_url, "project-123");
         let options = PmUpdateOptions {
@@ -769,7 +776,7 @@ mod tests {
         assert_eq!(result.id, "new-task");
         assert!(!result.completed);
         assert!(result.linked_pr.is_none());
-        assert_eq!(requests.lock().await.len(), 1);
+        assert_eq!(requests.lock().await.len(), 2);
     }
 
     #[tokio::test]

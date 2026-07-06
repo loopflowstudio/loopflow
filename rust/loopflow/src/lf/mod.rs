@@ -204,6 +204,30 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
+    /// Run a command on a remote host carrying your local credentials.
+    ///
+    /// Resolves the local credential bundle (GitHub, Claude, PM) and forwards it
+    /// over the ssh channel per-invocation; nothing persists on the remote. The
+    /// Doppler token is never forwarded — name specific secrets with `--secret`
+    /// to resolve them locally. Example: `lf ssh mini-heart -- lf op pr`.
+    Ssh {
+        /// Remote host (ssh alias or user@host)
+        host: String,
+        /// Repository path on the remote, relative to $HOME
+        #[arg(long = "repo")]
+        repo: Option<String>,
+        /// Doppler secret to resolve locally and forward as an env var
+        /// (repeatable). The Doppler token itself is never forwarded.
+        #[arg(long = "secret")]
+        secret: Vec<String>,
+        /// Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the
+        /// forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk.
+        #[arg(long = "forward-agent")]
+        forward_agent: bool,
+        /// Command to run on the remote (after `--`)
+        #[arg(last = true)]
+        cmd: Vec<String>,
+    },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),

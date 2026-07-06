@@ -22,13 +22,13 @@ Steers Loopflow toward boring releases: nightly verification that never deploys,
 
 ## Next
 
-- **Drain current buffer** — keep local `lf`/`lfd`, release scripts, and CI aligned with the latest merged release-infra work. Known drift: `wave/*/items/*.md` and `wave/*/[0-9]-*.md` local roadmap mirrors survived the `asana-only` migration (c113ef04b) that was supposed to drop them — the roadmap now lives only in Asana (`lf op pm show`). Sweep these stale mirrors when a broader wave-hygiene pass runs; this update-wave run left them in place per the skill's "never delete local roadmap files" rule.
+- **Drain current buffer** — keep local `lf`/`lfd`, release scripts, and CI aligned with the latest merged release-infra work. Known drift: `wave/*/items/*.md` and `wave/*/[0-9]-*.md` local roadmap mirrors are stale — the roadmap now lives only in Linear (`lf op pm show`), not in local files. Sweep these stale mirrors when a broader wave-hygiene pass runs; this update-wave run left them in place per the skill's "never delete local roadmap files" rule.
 - **Cadenza release parity** (items/01) — same nightly/weekly cadence, one-command updater, tests, self-hosted assumptions; document any deliberate divergence.
 - **Cron host bootstrap** (items/02) — bring up the first maintained self-hosted `lfd` host (Mac mini + Tailscale default), Doppler configured, root/conductor wave with scheduled checks.
 - **Release feedback loop** (items/03) — failed nightly/weekly runs surface as attention items or focused fix PRs, distinguishing verification vs publish vs host vs stale-local drift.
 - **Replicate intentionally** — apply the skeleton to Manabot/Hootro only when they need it.
 
-### Rebase-efficiency follow-ups (file to Asana once auth restored)
+### Rebase-efficiency follow-ups (file to Linear)
 
 - **Config/naming-schema child** — redesign `branch_names.schema` so branch ancestry and root formatting stop fighting over dots; include migration, config docs, DTO/fixture updates if wire shapes change, and prompt guidance. The parent PR deliberately did *not* solve this; it opens as a stacked child.
 - **Normal `lf` placement flags** — `lf <flow-or-step> --stack|--fork|--dispatch` execution placement, calling the same `engine/worktrees` planner as `lf op wt create` (not a reimplementation). Parent landed only the shared engine + the `wt create` surface.

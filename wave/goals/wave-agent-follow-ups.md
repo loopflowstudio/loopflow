@@ -4,7 +4,7 @@ What the wave-agent branch deliberately did not resolve: the decision
 questions for a next branch, the risks we accepted with eyes open, and the
 reading list for walking the merged code. The branch's `scratch/` review
 artifacts die at land; this survives. When an item is picked up, file it in
-Asana (`lf op pm update`) — this doc is context, not the tracker.
+Linear (`lf op pm update`) — this doc is context, not the tracker.
 
 ## Decision questions
 
@@ -49,7 +49,7 @@ vestigial.
 5. **`roadmap_item` plumbing.** Dead end to end — every internal producer
    passes `None`; it terminates in a debug log ("no local ingest"). Rust
    side plus Swift `LocalWaveService` sender. Contradicts
-   Asana-is-the-roadmap.
+   Linear-is-the-roadmap.
 
 6. **Interrupt has no grace window.** The design's cooperative → grace →
    kill story is aspirational everywhere: codex is cooperative with a

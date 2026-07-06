@@ -1,7 +1,7 @@
 # goals wave memory
 
 Steers Loopflow toward persistent Goal-driven Waves: goals as the authored loop
-prompt, Asana as the live roadmap, Concerto as the session surface. Standing
+prompt, Linear as the live roadmap, Concerto as the session surface. Standing
 campaign: writing goals becomes a way to compute — three reference builds from
 goals (mobile, CLI, server) with zero step authoring.
 
@@ -87,8 +87,8 @@ risks, a reading list for the merged code). Read those for detail. The spine:
 
 ## Landed research (2026-07-03, for the record)
 
-- **01 Asana live roadmap — shipped.** Loop reads Asana live each iteration; no
-  local mirror; `--pr` link on `lf op pm update` (#780 merged).
+- **01 Live roadmap — shipped.** Loop reads the PM provider live each
+  iteration; no local mirror; `--pr` link on `lf op pm update` (#780 merged).
 - **03 Wave ancestry — #781 merged.** `parent_wave_id` tree, `children_of()`
   query, DTO mirrored. Nothing constructs trees yet.
 - **04 Wave spend budget — designed, deferred to M4.** Core hard floor
@@ -96,14 +96,13 @@ risks, a reading list for the merged code). Read those for detail. The spine:
   ceiling. Needs a Money cents newtype.
 - **02 Cloud backend — recommend A2 (lfd scaffolds; vendor owns the loop);
   deferred to M3.** Claude Routines have no create API; Codex has no
-  server-side schedule. Net-new piece is a `.mcp.json` Asana emitter.
+  server-side schedule. Net-new piece is a `.mcp.json` Linear emitter.
 
 ## Next
 
-- **Reconcile the roadmap** (blocked 2026-07-05: Asana token expired): file the
-  M1 conversion work-list and the 10 decision questions from
-  wave-agent-follow-ups.md into Asana; close #780/#781/#796/#801 tasks; file
-  #803.
+- **Reconcile the roadmap:** file the M1 conversion work-list and the 10
+  decision questions from wave-agent-follow-ups.md into Linear; close
+  #780/#781/#796/#801 tasks; file #803.
 - **Prove-the-language:** CLI probe shipped (#799 open — GOAL.md-only Rust CLI
   built and gated `hello, Loopflow` with 0 authored `.lf/steps`); server and
   mobile reference builds remain.

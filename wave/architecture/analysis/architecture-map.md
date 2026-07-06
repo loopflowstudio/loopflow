@@ -29,7 +29,7 @@ The runtime state lives outside that authored layer:
 
 - lfd store - waves, sessions, runs, events, triggers, auth, provider state.
 - tmux/processes/Docker - execution backends.
-- PM provider - Asana mirror and lifecycle state.
+- PM provider - Linear mirror and lifecycle state.
 - release artifacts - decision ledgers and archived notes.
 
 ## Main code boundaries
@@ -89,7 +89,7 @@ authored goal, recurring assessment, delegated execution, and visible state.
 | Wave intent | repo | `wave/<name>/GOAL.md`, `MEMORY.md` |
 | Wave runtime | lfd store | status, sessions, events, triggers |
 | Agent execution | engine/executor | local process, tmux, Docker |
-| PM truth | provider | Asana can arbitrate picks |
+| PM truth | provider | Linear can arbitrate picks |
 | UI state | Swift stores | derived from lfd and local preferences |
 
 ## Current architectural tension

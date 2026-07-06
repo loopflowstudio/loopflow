@@ -81,7 +81,7 @@ Claude coinages and were reshaped in the July 5 design walk.
 2. **C2 — Coordination uses durable facts and explicit commands [R]:**
    speech is a worker-output/reporting primitive, not the universal bus.
    Coordination state should be inspectable: sqlite for operational facts,
-   journals for conversation, git/GitHub for PR truth, Asana for roadmap truth,
+   journals for conversation, git/GitHub for PR truth, Linear for roadmap truth,
    and explicit `lf` commands for action. Private daemon control loops are
    suspect; commands at authority boundaries are real.
 3. **C3 — Execution converges on `lf` invocations [R]:** the ideal execution

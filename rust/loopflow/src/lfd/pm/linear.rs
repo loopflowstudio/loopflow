@@ -87,7 +87,7 @@ const COMPLETE_ITEM_MUTATION: &str = r#"mutation CompleteIssue($id: String!, $st
   }
 }"#;
 
-const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowStates($teamId: String!) {
+const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowStates($teamId: ID!) {
   workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "completed" } }) {
     nodes {
       id
@@ -95,7 +95,7 @@ const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowSta
   }
 }"#;
 
-const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowStates($teamId: String!) {
+const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowStates($teamId: ID!) {
   workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "unstarted" } }) {
     nodes {
       id

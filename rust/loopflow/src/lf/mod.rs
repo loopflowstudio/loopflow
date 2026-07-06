@@ -252,6 +252,11 @@ pub enum MemoryCommand {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
+    /// Print memory facts added since the last update
+    Log {
+        #[command(flatten)]
+        target: WaveTargetArgs,
+    },
     /// Replace MEMORY.md from stdin (written by the live server, journaled)
     Update {
         /// One-line summary journaled with the update (default: first line)

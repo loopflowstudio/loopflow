@@ -98,6 +98,8 @@
 //! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
 //!   origin repo. Wave-level only: memory is wave identity, channels don't
 //!   have it.
+//! - `GET /memory/log` → `{facts}` — add-stream facts since the last
+//!   curation, oldest first. Wave-level only.
 //! - `POST /memory {op, content, summary}` → `{summary}`. `op` is `"update"`
 //!   (full replacement) or `"add"` (publish one fact; `content` must be
 //!   non-empty). `summary` is explicitly Optional — null falls back to the
@@ -275,6 +277,12 @@ struct MemoryBody {
     content: String,
 }
 
+/// `GET /memory/log` response.
+#[derive(Debug, Serialize)]
+struct MemoryLogBody {
+    facts: Vec<String>,
+}
+
 /// `POST /memory` op — full replacement or one published fact.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -343,6 +351,7 @@ pub fn router(
         .route("/messages", post(messages_handler))
         .route("/channels", post(channels_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
+        .route("/memory/log", get(memory_log_handler))
         .route("/resident/attach", post(resident_attach_handler))
         .route("/resident/deltas", post(resident_deltas_handler))
         .route("/resident/context", get(resident_context_handler))
@@ -540,6 +549,12 @@ async fn channels_handler(
 async fn memory_handler(State(state): State<ServerState>) -> Json<MemoryBody> {
     Json(MemoryBody {
         content: state.runtime.memory().read(),
+    })
+}
+
+async fn memory_log_handler(State(state): State<ServerState>) -> Json<MemoryLogBody> {
+    Json(MemoryLogBody {
+        facts: state.runtime.memory_adds(),
     })
 }
 

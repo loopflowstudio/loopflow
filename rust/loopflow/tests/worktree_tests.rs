@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 
 use loopflow::engine::git::{is_clean, worktree_move, worktree_remove};
 use loopflow::engine::worktrees::{
-    create_wave_worktree, list_worktrees, list_worktrees_local, preserve_worktree,
+    create_wave_worktree, list_worktrees, list_worktrees_local,
     wave_name_from_worktree_and_main,
 };
 use loopflow_test_support::TestRepo;
@@ -402,49 +402,6 @@ fn nested_worktree_not_recognized_as_wave() {
     assert_eq!(
         result, None,
         "nested worktree should not produce a wave name"
-    );
-}
-
-#[test]
-fn preserve_worktree_uses_human_readable_timestamp() {
-    let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
-
-    let preserved = preserve_worktree(repo.path(), &result.path, None).expect("preserve");
-    let dir_name = preserved.file_name().unwrap().to_string_lossy().to_string();
-
-    // Should end with .YYYYMMDD_HHMM, not a unix epoch
-    let suffix = dir_name.rsplit_once('.').expect("should have dot").1;
-    assert_eq!(
-        suffix.len(),
-        13,
-        "timestamp should be YYYYMMDD_HHMM (13 chars), got: {suffix}"
-    );
-    let (date, time) = suffix.split_once('_').expect("should have underscore");
-    assert_eq!(date.len(), 8, "date part should be 8 digits: {date}");
-    assert_eq!(time.len(), 4, "time part should be 4 digits: {time}");
-    assert!(
-        date.chars().all(|c| c.is_ascii_digit()),
-        "date should be all digits: {date}"
-    );
-    assert!(
-        time.chars().all(|c| c.is_ascii_digit()),
-        "time should be all digits: {time}"
-    );
-}
-
-#[test]
-fn preserve_worktree_uses_explicit_suffix_when_provided() {
-    let repo = TestRepo::new();
-    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
-
-    let preserved =
-        preserve_worktree(repo.path(), &result.path, Some("20260304_1442")).expect("preserve");
-    let dir_name = preserved.file_name().unwrap().to_string_lossy().to_string();
-
-    assert!(
-        dir_name.ends_with(".20260304_1442"),
-        "should use the provided suffix, got: {dir_name}"
     );
 }
 

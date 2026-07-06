@@ -27,7 +27,7 @@ pub struct Timestamp(String);
 impl Timestamp {
     /// Parse the `YYYYMMDD_HHMM` shape. Returns `None` for anything else, which
     /// is how [`WaveId::parse`] tells a stamp from an ordinary chain segment.
-    pub fn parse(raw: &str) -> Option<Self> {
+    fn parse(raw: &str) -> Option<Self> {
         let (date, time) = raw.split_once('_')?;
         let shaped = date.len() == 8
             && date.bytes().all(|b| b.is_ascii_digit())
@@ -42,7 +42,7 @@ impl Timestamp {
         Self(generate_timestamp())
     }
 
-    pub fn as_str(&self) -> &str {
+    fn as_str(&self) -> &str {
         &self.0
     }
 }

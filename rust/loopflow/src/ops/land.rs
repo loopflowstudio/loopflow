@@ -25,13 +25,6 @@ pub struct LandOptions {
     pub agent: Option<String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct LandResult {
-    pub merged: bool,
-    /// The PR associated with this land, if one was created or already existed.
-    pub pr: Option<PrInfo>,
-}
-
 /// How a prepared PR is handed off once it is rebased, scratch-cleared, and
 /// marked ready.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,23 +37,17 @@ enum Finalize {
     AssignForReview,
 }
 
-/// Result of preparing a PR: committed, rebased onto main, scratch cleared, PR
-/// ready and either auto-merge armed or assigned for review (or merged locally
-/// when `options.local`).
-struct PreparedPr {
-    pr: Option<PrInfo>,
-}
-
 /// Run every land step: commit, rebase onto main, clear scratch, mark the PR
 /// ready, and finalize per `finalize`. `land` arms auto-merge; `submit` assigns
 /// the PR for a human to merge. Neither rotates the worktree — the wave home is
-/// permanent.
+/// permanent. Returns the resulting PR (`None` for a local merge) so callers can
+/// record it against the run.
 fn prepare_pr(
     repo: &Path,
     options: &LandOptions,
     finalize: Finalize,
     progress: &impl Progress,
-) -> OpsResult<PreparedPr> {
+) -> OpsResult<Option<PrInfo>> {
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
@@ -79,43 +66,41 @@ fn prepare_pr(
     let (pr_title, pr_body) = resolve_pr_copy(&repo_root, options, progress)?;
     clear_scratch(&repo_root, progress)?;
 
-    let pr = if options.local {
+    if options.local {
         finalize_local(&repo_root, &main_branch, &feature_branch, progress)?;
-        None
-    } else {
-        ensure_pr(
-            &repo_root,
-            pr_exists,
-            &feature_branch,
-            options.create_pr,
-            pr_title.as_deref(),
-            pr_body.as_deref(),
-            options.agent.as_deref(),
-            progress,
-        )?;
-        finalize_remote(
-            &repo_root,
-            pr_title.as_deref(),
-            pr_body.as_deref(),
-            finalize,
-            progress,
-        )?;
-        crate::ops::pr::current_pr(&repo_root).ok().flatten()
-    };
+        return Ok(None);
+    }
 
-    Ok(PreparedPr { pr })
+    ensure_pr(
+        &repo_root,
+        pr_exists,
+        &feature_branch,
+        options.create_pr,
+        pr_title.as_deref(),
+        pr_body.as_deref(),
+        options.agent.as_deref(),
+        progress,
+    )?;
+    finalize_remote(
+        &repo_root,
+        pr_title.as_deref(),
+        pr_body.as_deref(),
+        finalize,
+        progress,
+    )?;
+    Ok(crate::ops::pr::current_pr(&repo_root).ok().flatten())
 }
 
 /// Land a PR and walk away: commit, rebase, clear scratch, and arm auto-merge so
 /// GitHub merges it once checks pass. The wave home is permanent — a land never
 /// rotates or renames the live worktree; worker worktrees self-prune once their
 /// PR merges.
-pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> OpsResult<LandResult> {
-    let prepared = prepare_pr(repo, options, Finalize::AutoMerge, progress)?;
-    Ok(LandResult {
-        merged: true,
-        pr: prepared.pr,
-    })
+pub fn land(
+    repo: &Path,
+    options: &LandOptions,
+    progress: &impl Progress,
+) -> OpsResult<Option<PrInfo>> {
+    prepare_pr(repo, options, Finalize::AutoMerge, progress)
 }
 
 /// Prepare a PR to land without arming auto-merge: commit, rebase onto main,
@@ -126,12 +111,8 @@ pub fn submit(
     repo: &Path,
     options: &LandOptions,
     progress: &impl Progress,
-) -> OpsResult<LandResult> {
-    let prepared = prepare_pr(repo, options, Finalize::AssignForReview, progress)?;
-    Ok(LandResult {
-        merged: false,
-        pr: prepared.pr,
-    })
+) -> OpsResult<Option<PrInfo>> {
+    prepare_pr(repo, options, Finalize::AssignForReview, progress)
 }
 
 fn resolve_pr_copy(

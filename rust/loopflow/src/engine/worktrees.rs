@@ -1,10 +1,10 @@
 use crate::engine::error::GitError;
 use crate::engine::git::{
     current_branch, get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
-    is_squash_merged, rev_parse, sync_main, worktree_add, worktree_move, WorktreeBranch,
+    is_squash_merged, rev_parse, sync_main, worktree_add, WorktreeBranch,
 };
 use crate::engine::identity::{Timestamp, WaveId};
-use crate::engine::naming::{generate_timestamp, generate_word_pair, git_user};
+use crate::engine::naming::{generate_word_pair, git_user};
 use crate::lfd::security::sanitize_fs_component;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -862,26 +862,6 @@ pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), Gi
         });
     }
     Ok(())
-}
-
-pub fn preserve_worktree(
-    repo: &Path,
-    worktree: &Path,
-    suffix: Option<&str>,
-) -> Result<PathBuf, GitError> {
-    let ts = suffix
-        .map(|s| s.to_string())
-        .unwrap_or_else(generate_timestamp);
-    let name = worktree
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("worktree");
-    let new_path = worktree
-        .parent()
-        .unwrap_or(worktree)
-        .join(format!("{name}.{ts}"));
-    worktree_move(repo, worktree, &new_path)?;
-    Ok(new_path)
 }
 
 #[cfg(test)]

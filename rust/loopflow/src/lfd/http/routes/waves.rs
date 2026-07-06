@@ -526,7 +526,7 @@ pub async fn land_wave_handler(
     .await?;
 
     // Sync PR info back to the run so downstream code (CI webhooks) can find it.
-    if let (Some(mut run), Some(pr_info)) = (latest_run, land_result.pr) {
+    if let (Some(mut run), Some(pr_info)) = (latest_run, land_result) {
         run.pr = Some(crate::lfd::types::PullRequest {
             url: pr_info.url,
             number: Some(pr_info.number as u32),

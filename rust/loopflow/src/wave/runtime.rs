@@ -736,7 +736,7 @@ impl WaveRuntime {
     ///
     /// # Errors
     /// File I/O only.
-    pub fn append_memory(&self, fact: &str, _summary: &str) -> std::io::Result<()> {
+    pub fn append_memory(&self, fact: &str) -> std::io::Result<()> {
         let mut inner = self.inner();
         let mut content = self.memory.read();
         if !content.is_empty() && !content.ends_with('\n') {
@@ -1453,8 +1453,7 @@ mod tests {
             "the ORIGIN repo's file is the one written"
         );
 
-        rt.append_memory("bullets append", "bullets append")
-            .expect("append");
+        rt.append_memory("bullets append").expect("append");
         assert_eq!(
             rt.memory().read(),
             "# Ship\n\n- fold is truth\n- bullets append\n"
@@ -1485,9 +1484,8 @@ mod tests {
         let rt = open_runtime(tmp.path());
         let long_fact = "workers report via lf chat with the full useful detail";
 
-        rt.append_memory(long_fact, "workers report")
-            .expect("append");
-        rt.append_memory("second fact", "second").expect("append");
+        rt.append_memory(long_fact).expect("append");
+        rt.append_memory("second fact").expect("append");
 
         let sub = rt.subscribe_with_snapshot();
         assert_eq!(
@@ -1505,11 +1503,11 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
 
-        rt.append_memory("first", "first").expect("append");
-        rt.append_memory("second", "second").expect("append");
+        rt.append_memory("first").expect("append");
+        rt.append_memory("second").expect("append");
         rt.update_memory("# Ship\n\ncompiled\n", "compiled")
             .expect("update");
-        rt.append_memory("third", "third").expect("append");
+        rt.append_memory("third").expect("append");
 
         let sub = rt.subscribe_with_snapshot();
         assert_eq!(sub.memory_adds, vec!["third".to_string()]);
@@ -1525,11 +1523,11 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         {
             let rt = open_runtime(tmp.path());
-            rt.append_memory("first", "first").expect("append");
-            rt.append_memory("second", "second").expect("append");
+            rt.append_memory("first").expect("append");
+            rt.append_memory("second").expect("append");
             rt.update_memory("# Ship\n\ncompiled\n", "compiled")
                 .expect("update");
-            rt.append_memory("third", "third").expect("append");
+            rt.append_memory("third").expect("append");
         }
 
         let rt = open_runtime(tmp.path());

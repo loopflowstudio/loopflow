@@ -564,7 +564,7 @@ async fn memory_write_handler(
                     "content is required for the add op".to_string(),
                 ));
             }
-            state.runtime.append_memory(fact, &summary)
+            state.runtime.append_memory(fact)
         }
     };
     match result {

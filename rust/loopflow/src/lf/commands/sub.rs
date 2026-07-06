@@ -526,10 +526,7 @@ mod tests {
 
         runtime.deliver_user_message("replayed".into(), crate::wave::journal::MessageOp::Message);
         runtime
-            .append_memory(
-                "workers report via lf chat with full useful detail",
-                "workers report",
-            )
+            .append_memory("workers report via lf chat with full useful detail")
             .unwrap();
 
         let seen: Arc<Mutex<Vec<Frame>>> = Arc::new(Mutex::new(Vec::new()));

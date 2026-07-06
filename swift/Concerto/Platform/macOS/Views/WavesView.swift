@@ -2,10 +2,13 @@
 // list (center), with a "+" new-wave launcher, and a WaveChat detail (right) that
 // streams the selected wave's live conversation from its `lf wave` chat server.
 //
-// Reshaped from the battle-tested PortfolioWindow: keeps its connection / daemon /
-// EventService plumbing, swaps the multi-repo card grid for the sidebar+list+terminal
-// shape sketched by RepoSidebarWindow, and reuses WaveRow + WaveSidebar's burgundy
-// treatment so the style matches the app.
+// Reshaped from the battle-tested PortfolioWindow: keeps its connection / daemon
+// plumbing, swaps the multi-repo card grid for the sidebar+list+terminal shape
+// sketched by RepoSidebarWindow, and reuses WaveRow + WaveSidebar's burgundy
+// treatment so the style matches the app. Discovery is a registry QUERY
+// (`RegistryQuery`/`lf ls`), re-run on a cadence — not a streaming center; a
+// wave's live conversation + run motion is its own per-wave SSE in the detail
+// pane.
 
 import SwiftUI
 import LoopflowCore
@@ -35,7 +38,6 @@ struct WavesView: View {
     @State private var connectionStore = ConnectionStore()
     @State private var authProviderStore = AuthProviderStore()
     @State private var repoStates: [String: PortfolioRepoState] = [:]
-    @State private var eventService: EventService?
 
     /// Repos shown in the rail: a live `~/src` scan of main (non-worktree) repos.
     /// Derived off the main thread in `refreshRepos`.
@@ -154,7 +156,8 @@ struct WavesView: View {
             }
             ensureRepoStates()
             await syncRepoStates()
-            await startEventSubscription()
+            await prepareAuth()
+            await pollRegistry()
         }
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
             Task {
@@ -170,11 +173,6 @@ struct WavesView: View {
             if let id = selectedWaveId, !filteredWaves.contains(where: { $0.id == id }) {
                 selectedWaveId = nil
             }
-        }
-        .onDisappear {
-            guard let service = eventService else { return }
-            Task { await service.disconnect() }
-            eventService = nil
         }
     }
 
@@ -557,7 +555,12 @@ struct WavesView: View {
         let token = connectionStore.token(for: connection)
 
         for repo in repos where repoStates[repo.path] == nil {
-            repoStates[repo.path] = PortfolioRepoState(repo: repo, connection: connection, token: token)
+            repoStates[repo.path] = PortfolioRepoState(
+                repo: repo,
+                connection: connection,
+                token: token,
+                registryQuery: RegistryQueryLocal.shared
+            )
         }
     }
 
@@ -588,62 +591,32 @@ struct WavesView: View {
         }
     }
 
-    private func startEventSubscription() async {
-        guard eventService == nil else { return }
+    /// Provider auth is a poll, not a stream (see `scratch/eventing.md` §5):
+    /// bind the store to a wave service and read the provider list. There is no
+    /// machine-wide auth push in the base model.
+    private func prepareAuth() async {
         if RepoState.uiTestMode() != nil { return }
         if connectionStore.mode == .bundled, SharedDaemon.currentConnection == nil {
             return
         }
-
         let connection = connectionStore.activeConnection
         let token = connectionStore.token(for: connection)
-        let service = EventService(connection: connection, tokenProvider: { token })
-        eventService = service
-
         let waveService = WaveService(connection: connection, tokenProvider: { token })
         authProviderStore.bindService(waveService)
-        Task { await authProviderStore.refresh() }
-
-        await service.subscribe(
-            onEvent: { event in
-                Task { @MainActor in handleEvent(event) }
-            },
-            onConnectionStateChange: { state in
-                Task { @MainActor in
-                    for repoState in repoStates.values {
-                        repoState.updateConnectionState(state)
-                    }
-                    await authProviderStore.handleConnectionState(state)
-                }
-            }
-        )
+        await authProviderStore.refresh()
     }
 
-    private func handleEvent(_ event: LFDEvent) {
-        switch event {
-        case .connected(let connected):
-            for repo in repos {
-                repoStates[repo.path]?.applyConnectedWaves(connected.waves)
-            }
-
-        case .wave(let waveEvent):
-            guard waveEvent.wave != nil else {
-                Task {
-                    for repoState in repoStates.values {
-                        await repoState.refresh()
-                    }
-                }
-                return
-            }
-            for repoState in repoStates.values {
-                repoState.applyWaveEvent(waveEvent)
-            }
-
-        case .auth(let authEvent):
-            authProviderStore.handleEvent(authEvent)
-
-        case .worktree, .agentStarted, .agentEnded, .output, .attention, .terminalSession:
-            break
+    /// Discovery has no stream: re-query the registry on a slow cadence so a
+    /// wave that started, stopped, or advanced since the last read shows up.
+    /// Each wave's live conversation + run motion is its own per-wave SSE,
+    /// opened by the detail pane — not funnelled through a center.
+    private func pollRegistry() async {
+        if RepoState.uiTestMode() != nil { return }
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(5))
+            if Task.isCancelled { return }
+            await syncRepoStates()
+            await refreshAuthoredWaves()
         }
     }
 }

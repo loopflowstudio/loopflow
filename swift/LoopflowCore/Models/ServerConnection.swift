@@ -38,10 +38,6 @@ public struct ServerConnection: Hashable, Sendable {
         makeURL(scheme: useTLS ? "https" : "http")
     }
 
-    public var wsBaseURL: URL {
-        makeURL(scheme: useTLS ? "wss" : "ws", path: "/ws")
-    }
-
     private func makeURL(scheme: String, path: String = "") -> URL {
         var components = URLComponents()
         components.scheme = scheme

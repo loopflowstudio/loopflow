@@ -23,74 +23,22 @@ struct PortfolioRepoStateTests {
         #expect(state.totalDiff.deletions == 9)
     }
 
-    @Test("wave events update and delete local waves")
-    func waveEventsUpdateState() {
-        let repoURL = URL(fileURLWithPath: "/tmp/portfolio-events")
+    @Test("connected waves keep only this repo's rows")
+    func connectedWavesScopedToRepo() {
+        let repoURL = URL(fileURLWithPath: "/tmp/portfolio-scope")
         let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
         let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
 
-        let createdWave = makeWave(id: "wave-1", repoPath: repo.path, status: .running, diffStat: nil)
-        state.applyWaveEvent(
-            WaveEvent(
-                type: .created,
-                waveId: createdWave.id,
-                runId: nil,
-                step: nil,
-                sessionId: nil,
-                initialUserMessage: nil,
-                name: nil,
-                wave: createdWave,
-                timestamp: Date()
-            )
+        let mine = makeWave(id: "mine", repoPath: repo.path, status: .running, diffStat: nil)
+        let other = makeWave(
+            id: "other",
+            repoPath: URL(fileURLWithPath: "/tmp/portfolio-other").normalizedFilePath,
+            status: .running,
+            diffStat: nil
         )
+        state.applyConnectedWaves([mine, other])
 
-        #expect(state.waves.count == 1)
-
-        state.applyWaveEvent(
-            WaveEvent(
-                type: .deleted,
-                waveId: createdWave.id,
-                runId: nil,
-                step: nil,
-                sessionId: nil,
-                initialUserMessage: nil,
-                name: nil,
-                wave: nil,
-                timestamp: Date()
-            )
-        )
-
-        #expect(state.waves.isEmpty)
-    }
-
-    @Test("delete events with another repo do not remove local waves")
-    func deleteEventFromDifferentRepoIsIgnored() {
-        let repoURL = URL(fileURLWithPath: "/tmp/portfolio-events-local")
-        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
-
-        let localWave = makeWave(id: "wave-1", repoPath: repo.path, status: .running, diffStat: nil)
-        state.applyConnectedWaves([localWave])
-
-        let otherRepoPath = URL(fileURLWithPath: "/tmp/portfolio-events-other").normalizedFilePath
-        let remoteWave = makeWave(id: localWave.id, repoPath: otherRepoPath, status: .running, diffStat: nil)
-
-        state.applyWaveEvent(
-            WaveEvent(
-                type: .deleted,
-                waveId: localWave.id,
-                runId: nil,
-                step: nil,
-                sessionId: nil,
-                initialUserMessage: nil,
-                name: nil,
-                wave: remoteWave,
-                timestamp: Date()
-            )
-        )
-
-        #expect(state.waves.count == 1)
-        #expect(state.waves[0].id == localWave.id)
+        #expect(state.waves.map(\.id) == ["mine"])
     }
 
     @Test("multi-repo waves match non-primary repo state")

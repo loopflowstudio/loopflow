@@ -745,6 +745,11 @@ impl WaveRuntime {
         Ok(())
     }
 
+    /// Facts added since the last externalization, oldest to newest.
+    pub fn memory_adds(&self) -> Vec<String> {
+        self.inner().memory_adds.clone()
+    }
+
     /// Journal this boot's `ServerStarted` — once, after replay, when the
     /// listener is bound. Folds ignore it; the record gains a restart marker.
     pub fn journal_server_started(&self, pid: u32, endpoint: &str) {

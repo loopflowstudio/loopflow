@@ -128,6 +128,7 @@ lf sub                                      # follow the wave's live event strea
 lf sub infra --json                         # raw frames as NDJSON
 lf memory                                   # print the wave's MEMORY.md
 lf memory add "buttons: variants unified"   # publish one replayable fact
+lf memory log                               # print facts added since the last update
 lf memory update < MEMORY.md                # replace it from stdin
 ```
 
@@ -135,7 +136,7 @@ lf memory update < MEMORY.md                # replace it from stdin
 |---------|--------------|
 | `lf chat [TEXT]` | Post a message into a wave's thread; reads stdin when TEXT is omitted. Outside any wave the publish drops silently (exit 0), so the verb is safe in every prompt |
 | `lf sub [WAVE] [--json]` | Follow a wave's live events (turns, mind state, memory) until killed; exits 0 with a note when no wave resolves |
-| `lf memory [show\|update\|add]` | Read or curate a wave's memory — `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
+| `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 
 All three default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
 

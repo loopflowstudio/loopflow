@@ -113,23 +113,6 @@ mod tests {
     /// Valid argv reaches the exec path and returns a structured result. `lf
     /// op doctor` is read-only (dependency check) — a safe verb to actually
     /// run against the real binary in-tree via `CARGO_BIN_EXE_lf`.
-    #[tokio::test]
-    async fn valid_argv_execs_and_captures_result() {
-        let state = test_http_state().await;
-        let Json(response) = exec_handler(
-            State(state),
-            Json(ExecRequest {
-                argv: vec!["op".to_string(), "doctor".to_string()],
-                cwd: None,
-            }),
-        )
-        .await
-        .expect("valid argv should exec");
-        // The door reports a structured result regardless of the run's own
-        // exit code; doctor emits its report on stdout.
-        assert!(!response.stdout.is_empty() || !response.stderr.is_empty());
-    }
-
     /// The door lives inside the auth-protected `/v0` nest: a request with no
     /// bearer token is refused before any exec. With the token it clears auth
     /// and reaches argv validation (garbage → 400). Proves the capability

@@ -620,9 +620,10 @@ mod tests {
         assert_eq!(stray_from.status(), reqwest::StatusCode::BAD_REQUEST);
     }
 
-    /// The memory routes: GET serves the origin file; POST adds one fact,
-    /// appending a bullet and journaling `MemoryAdded` (covered in depth by the
-    /// runtime and `lf memory` tests — this pins the HTTP shape).
+    /// The memory routes: GET serves the origin file; POST update writes it,
+    /// and POST add publishes one replayable fact without mutating the compiled
+    /// file (covered in depth by the runtime and `lf memory` tests — this pins
+    /// the HTTP shape).
     #[tokio::test]
     async fn memory_routes_read_and_write_through_the_server() {
         let (base, runtime, _tmp) = boot().await;
@@ -636,10 +637,26 @@ mod tests {
 
         let client = reqwest::Client::new();
 
-        // An empty add is refused; a real one appends a bullet and echoes it.
+        let body: serde_json::Value = client
+            .post(format!("{base}/memory"))
+            .json(&serde_json::json!({
+                "op": "update",
+                "content": "Rewritten.\n",
+                "summary": null,
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(body["summary"], "Rewritten.");
+        assert_eq!(runtime.memory().read(), "Rewritten.\n");
+
+        // An empty add is refused; a real one echoes and leaves MEMORY.md alone.
         let empty = client
             .post(format!("{base}/memory"))
-            .json(&serde_json::json!({ "content": "  " }))
+            .json(&serde_json::json!({ "op": "add", "content": "  ", "summary": null }))
             .send()
             .await
             .unwrap();
@@ -647,18 +664,15 @@ mod tests {
 
         let body: serde_json::Value = client
             .post(format!("{base}/memory"))
-            .json(&serde_json::json!({ "content": "one fact" }))
+            .json(&serde_json::json!({ "op": "add", "content": "one fact", "summary": null }))
             .send()
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        assert_eq!(body["fact"], "one fact");
-        assert_eq!(
-            runtime.memory().read(),
-            "Goal: ship the reactive server.\n- one fact\n"
-        );
+        assert_eq!(body["summary"], "one fact");
+        assert_eq!(runtime.memory().read(), "Rewritten.\n");
     }
 
     #[tokio::test]

@@ -127,7 +127,7 @@ lf chat --parent "blocked on schema change" # escalate to the parent wave
 lf sub                                      # follow the wave's live event stream
 lf sub infra --json                         # raw frames as NDJSON
 lf memory                                   # print the wave's MEMORY.md
-lf memory add "buttons: variants unified"   # append one curated fact
+lf memory add "buttons: variants unified"   # publish one replayable fact
 lf memory update < MEMORY.md                # replace it from stdin
 ```
 
@@ -135,7 +135,7 @@ lf memory update < MEMORY.md                # replace it from stdin
 |---------|--------------|
 | `lf chat [TEXT]` | Post a message into a wave's thread; reads stdin when TEXT is omitted. Outside any wave the publish drops silently (exit 0), so the verb is safe in every prompt |
 | `lf sub [WAVE] [--json]` | Follow a wave's live events (turns, mind state, memory) until killed; exits 0 with a note when no wave resolves |
-| `lf memory [show\|update\|add]` | Read or curate a wave's `MEMORY.md` — written by the live server and journaled; `update --summary "..."` sets the journaled one-liner |
+| `lf memory [show\|update\|add]` | Read or curate a wave's memory — `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 
 All three default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
 

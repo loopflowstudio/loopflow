@@ -48,9 +48,11 @@
 //!     re-sent whole as it grows and finalization sends the terminal turn
 //!     under the same id — each frame replaces the client's previous state
 //!     for that (channel, id) pair (upsert, never append-if-seen).
+//!   - `memory`: data is the `MemoryUpdated` summary string, fired on every
+//!     curation. Live-only, no replay — MEMORY.md itself is the durable state.
+//!     Primary channel only (memory is wave identity; work lines have none).
 //!   - `memory-add`: data is the full added fact. Replays on connect for the
-//!     facts added this server life, then streams live. Primary channel only
-//!     (memory is wave identity; work lines have none).
+//!     facts since the last curation, then streams live. Primary channel only.
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
 //!     is an [`InboxFrame`] — a resident-directed op. The pending queue
 //!     (journaled messages not yet named in any `answers`) replays on
@@ -96,11 +98,12 @@
 //! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
 //!   origin repo. Wave-level only: memory is wave identity, channels don't
 //!   have it.
-//! - `POST /memory {content}` → `{fact}` — append one fact to the stream
-//!   (`content` must be non-empty). Journals `MemoryAdded`, broadcasts
-//!   `memory-add`, and appends a bullet to the origin repo's
-//!   `wave/<name>/MEMORY.md`. There is no whole-file write: compiling MEMORY.md
-//!   is the mind's job, edited old-fashioned.
+//! - `POST /memory {op, content, summary}` → `{summary}`. `op` is `"update"`
+//!   (full replacement) or `"add"` (publish one fact; `content` must be
+//!   non-empty). `summary` is explicitly Optional — null falls back to the
+//!   content's first non-empty line. The server is the sole writer of the
+//!   origin repo's `wave/<name>/MEMORY.md` and journals `MemoryUpdated`;
+//!   add-only facts journal `MemoryAdded` and broadcast `memory-add`.
 //!
 //! `Turn` is [`crate::chat::turns::ChatTurn`].
 
@@ -272,17 +275,27 @@ struct MemoryBody {
     content: String,
 }
 
-/// `POST /memory` request body — one fact to append to the stream. There is no
-/// whole-file write: compiling MEMORY.md is the mind's job, edited old-fashioned.
-#[derive(Debug, Deserialize)]
-struct PostMemory {
-    content: String,
+/// `POST /memory` op — full replacement or one published fact.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MemoryOp {
+    Update,
+    Add,
 }
 
-/// `POST /memory` response: the fact that was journaled.
+/// `POST /memory` request body. `summary` is explicitly Optional — null falls
+/// back to the content's first non-empty line.
+#[derive(Debug, Deserialize)]
+struct PostMemory {
+    op: MemoryOp,
+    content: String,
+    summary: Option<String>,
+}
+
+/// `POST /memory` response: the summary that was journaled.
 #[derive(Debug, Serialize)]
 struct PostMemoryResponse {
-    fact: String,
+    summary: String,
 }
 
 /// `POST /messages` response. `turn` is the appended user turn; null for a
@@ -534,22 +547,39 @@ async fn memory_write_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostMemory>,
 ) -> Result<Json<PostMemoryResponse>, (StatusCode, String)> {
-    let fact = body.content.trim();
-    if fact.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "content is required to add a fact".to_string(),
-        ));
-    }
-    match state.runtime.append_memory(fact) {
-        Ok(()) => Ok(Json(PostMemoryResponse {
-            fact: fact.to_string(),
-        })),
+    let summary = body
+        .summary
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| first_line(&body.content))
+        .unwrap_or_else(|| "memory cleared".to_string());
+    let result = match body.op {
+        MemoryOp::Update => state.runtime.update_memory(&body.content, &summary),
+        MemoryOp::Add => {
+            let fact = body.content.trim();
+            if fact.is_empty() {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "content is required for the add op".to_string(),
+                ));
+            }
+            state.runtime.append_memory(fact)
+        }
+    };
+    match result {
+        Ok(()) => Ok(Json(PostMemoryResponse { summary })),
         Err(err) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("memory write failed: {err}"),
         )),
     }
+}
+
+fn first_line(content: &str) -> Option<String> {
+    content
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
 }
 
 /// The unified `/events` SSE, scoped to one channel, a subtree, or (default)
@@ -560,9 +590,10 @@ async fn memory_write_handler(
 /// frames — `state` on every transition, `turn` ids repeating by design
 /// (every frame replaces the client's state for that (channel, id), so an
 /// in-progress turn updates in place and its terminal frame lands under the
-/// same id), and `memory-add` for replayable facts. Snapshot and
-/// subscription are atomic in the runtime (broadcasts share the append lock),
-/// so no primary live frame is ever older than the replayed snapshot.
+/// same id), `memory` on every curation (live-only; the file is the durable
+/// state), and `memory-add` for replayable facts. Snapshot and subscription
+/// are atomic in the runtime (broadcasts share the append lock), so no primary
+/// live frame is ever older than the replayed snapshot.
 ///
 /// Child channels replay their folded threads (turn frames tagged with
 /// `channel`) and stream live off the family bus, subscribed BEFORE the
@@ -694,9 +725,17 @@ async fn events_handler(
             };
             async move { out }
         });
+        let live_memory = BroadcastStream::new(sub.memory_rx).filter_map(move |res| {
+            let out = match res {
+                Ok(summary) => Some(Ok(memory_event(&summary))),
+                // Lagged: fine — MEMORY.md itself is the durable state.
+                Err(_) => None,
+            };
+            async move { out }
+        });
         let mut live: BoxedEventStream = Box::pin(stream::select(
             live_turns,
-            stream::select(live_states, live_memory_adds),
+            stream::select(live_states, stream::select(live_memory, live_memory_adds)),
         ));
         if include_inbox {
             let live_inbox = BroadcastStream::new(sub.inbox_rx).filter_map(move |res| {
@@ -774,6 +813,10 @@ fn tagged_turn_event(channel: &str, turn: &ChatTurn) -> Event {
 
 fn state_event(state: &MindState) -> Event {
     Event::default().event("state").data(state.name())
+}
+
+fn memory_event(summary: &str) -> Event {
+    Event::default().event("memory").data(summary)
 }
 
 fn memory_add_event(fact: &str) -> Event {

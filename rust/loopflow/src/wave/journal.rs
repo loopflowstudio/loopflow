@@ -19,10 +19,10 @@
 //! `RunObserved`/`RunCompleted` are produced by the registry observer
 //! ([`crate::wave::registry::StoreObserver`]): the server polls the
 //! shared store — these are confirmed facts, not commands — and the in-flight
-//! view is their fold ([`fold_workers`]). `MemoryAdded` is produced by the
-//! server's memory route (`lf memory add` — the server appends the bullet).
-//! `ThreadStarted` is produced by the mind:
-//! the vendor thread id is its first durable act, journaled before the first turn.
+//! view is their fold ([`fold_workers`]). `MemoryUpdated` and `MemoryAdded`
+//! are produced by the server's memory routes (`lf memory update`/`add` — the
+//! server holds MEMORY.md's pen). `ThreadStarted` is produced by the mind: the
+//! vendor thread id is its first durable act, journaled before the first turn.
 //! `ServerStarted` is appended once per boot, after replay — restarts are
 //! forensically visible in the record.
 
@@ -252,8 +252,13 @@ pub enum EventKind {
         run_id: String,
     },
     // -- memory --
+    /// A compiled memory checkpoint was written to `MEMORY.md`. Clears the
+    /// replayable add delta because the checkpoint is now the seed.
+    MemoryUpdated {
+        summary: String,
+    },
     /// A fact published to the stream (`lf memory add`). Accumulates into the
-    /// replayable delta for this server life.
+    /// replayable delta until the next `MemoryUpdated`.
     MemoryAdded {
         fact: String,
     },
@@ -479,6 +484,9 @@ impl Narrator {
             )),
             EventKind::ChannelOpened { name, run_id } => {
                 info(format!("channel {name} opened · run {}", short_id(run_id)))
+            }
+            EventKind::MemoryUpdated { summary } => {
+                info(format!("memory curated: {}", ellipsize(summary, 70)))
             }
             EventKind::MemoryAdded { fact } => {
                 info(format!("memory added: {}", ellipsize(fact, 70)))
@@ -906,6 +914,9 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             EventKind::MemoryAdded { fact } => {
                 memory_adds.push(fact.clone());
             }
+            EventKind::MemoryUpdated { .. } => {
+                memory_adds.clear();
+            }
             EventKind::RunObserved { .. } | EventKind::ServerStarted { .. } => {}
         }
     }
@@ -1142,6 +1153,9 @@ mod tests {
             EventKind::ChannelOpened {
                 name: "ship.148e0e02".into(),
                 run_id: "run-1".into(),
+            },
+            EventKind::MemoryUpdated {
+                summary: "learned the fold".into(),
             },
             EventKind::MemoryAdded {
                 fact: "learned a fact".into(),
@@ -1458,6 +1472,14 @@ mod tests {
         assert_eq!(
             n.line,
             "memory added: workers report through the memory stream"
+        );
+
+        let n = render(EventKind::MemoryUpdated {
+            summary: "journal is the console's source of truth".into(),
+        });
+        assert_eq!(
+            n.line,
+            "memory curated: journal is the console's source of truth"
         );
 
         let n = render(EventKind::ServerStarted {

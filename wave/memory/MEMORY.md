@@ -15,10 +15,8 @@ structure the model proposes.
 - **`add` publishes a full fact to a replayable stream** (shipped, slice 1):
   journals `MemoryAdded { fact }`, pushes to a replay buffer, broadcasts the
   full fact on its own channel. A fresh subscriber replays the adds since the
-  last externalization, then goes live. `add` *still* appends a bullet to
-  `MEMORY.md` today — making it a pure publish (dropping the file write so the
-  file stays *compiled*, not an accreting pile of raw bullets) is slice 2
-  (`adf893b4`).
+  last externalization, then goes live. `add` does not write `MEMORY.md`; the
+  file stays compiled instead of becoming an accreting pile of raw bullets.
 - **The replay buffer is adds-since-last-externalization, not adds-since-boot.**
   Load-bearing: it makes a fresh subscriber's seed exactly `MEMORY.md` (compiled
   checkpoint) + the stream (uncompiled delta), no overlap, no double-count.
@@ -101,14 +99,13 @@ Shipped (slice 1, `memory-stream`):
   (accumulate on add, clear on update).
 - `WaveRuntime` seeds `Inner.memory_adds` from the fold, maintains it under the
   append lock, fans facts out on `memory_add_tx`. `append_memory(&self, fact)`
-  (the summary arg was dropped — the file bullet *is* the fact); `update_memory`
+  journals and broadcasts the fact; `update_memory` writes the checkpoint and
   clears the buffer.
 - `Subscription.memory_adds` (snapshot) + `memory_add_rx` (live), cloned+
   subscribed atomically in `subscribe_with_snapshot`.
 - SSE `memory-add` event: replay chain then live, beside the live-only `memory`
   frame. `lf sub` renders it as the full fact ("memory added: …").
 
-Still greenfield: pure-publish `add` (file write removal, slice 2); typed
-blocks (slice 3); forced externalization at land/compaction (slice 4). No
-cross-machine/branch replay — that boundary is `MEMORY.md`'s; the journal is
-per-machine and gitignored.
+Still greenfield: typed blocks (slice 3); forced externalization at
+land/compaction (slice 4). No cross-machine/branch replay — that boundary is
+`MEMORY.md`'s; the journal is per-machine and gitignored.

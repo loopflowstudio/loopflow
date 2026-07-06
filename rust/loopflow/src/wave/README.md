@@ -96,7 +96,9 @@ extraction — `TurnStarted`/`TurnItem`/`TurnSteered`/`TurnFinished`/
 receipt from the wire. The vendor thread itself cold-starts on codex; the new
 `ThreadStarted` is journaled so the break is explicit. `wave/<name>/MEMORY.md`
 seeds the mind (read from the origin repo), and the live listener holds its
-pen: `lf memory update`/`add` POST to the memory routes.
+pen: `lf memory update` POSTs the compiled checkpoint. `lf memory add`
+publishes a replayable fact to the stream without accreting raw bullets into
+the checkpoint.
 
 ## The resident wire
 
@@ -188,7 +190,7 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 | `POST /messages {op, text, from?, channel?}` | `op` required: `message` (human speech: steers the live turn when one is open and the harness supports it, otherwise queued for the next turn), `steer` (into the live turn when supported), `interrupt` (cancel the open turn; non-empty text becomes the next turn), or `say` (an attributed emission — `lf chat`; `from {session_id?, label}` required for `say`, rejected otherwise). `channel` null = the wave channel; a child name lands in that work line's journal (404 outside the family). Returns `{turn, state}`. |
 | `POST /channels {name, run_id}` | The dispatch knock: journals `ChannelOpened` on the wave channel. Idempotent on `run_id`; 404 outside the family. Returns `{turn}`. |
 | `GET /memory`             | `{content}` — the wave's MEMORY.md (origin repo). |
-| `POST /memory {op, content, summary}` | `op`: `update` or `add`. `summary` null → first non-empty content line. Returns `{summary}`. |
+| `POST /memory {op, content, summary}` | `op`: `update` replaces `MEMORY.md`; `add` publishes one replayable fact. `summary` null → first non-empty content line. Returns `{summary}`. |
 | `POST /resident/attach {pid}` | Resident door (token-gated): register the resident's pid, revive a failed mind. Returns `{wave, thread_id}`. |
 | `POST /resident/deltas {deltas}` | Resident door (token-gated): ordered turn deltas → the journal fold. Returns `{accepted}`. |
 | `GET /resident/context`   | Resident door (token-gated): `{thread_id, in_flight}`; freshens the store observations. |

@@ -1,15 +1,15 @@
-//! `lf memory` — read a wave's MEMORY.md or publish a fact to its stream.
+//! `lf memory` — read or curate a wave's MEMORY.md through its live server.
 //!
-//! `add "fact"` POSTs to the live server, which journals `MemoryAdded {fact}`,
-//! broadcasts it to subscribers, and appends a bullet to the ORIGIN repo's
-//! `wave/<name>/MEMORY.md` (the server holds the pen). There is no manual
-//! whole-file write: compiling MEMORY.md is the mind's job, exported by
-//! machinery, never hand-edited. `show` (the bare default) reads through the
-//! server when one is live and falls back to the origin file otherwise — reads
-//! don't need the pen. Targeting (`--wave`, `--parent`) matches `lf chat`
-//! ([`super::chat`]), including the drop rule: an add with no wave context
-//! anywhere is a publish to no subscriber — exit 0, one stderr note. `show` is
-//! a read, so no wave context stays an error.
+//! The live server holds the pen: `update` (full replacement from stdin) POSTs
+//! the compiled checkpoint and `add "fact"` publishes one replayable fact to
+//! the stream. `show` (the bare default) reads through the server when one is
+//! live and falls back to the origin file otherwise — reads don't need the
+//! pen. Targeting (`--wave`, `--parent`) matches `lf chat` ([`super::chat`]),
+//! including the drop rule: a write with no wave context anywhere is a publish
+//! to no subscriber — exit 0, one stderr note. `show` is a read, so no wave
+//! context stays an error.
+
+use std::io::Read;
 
 use anyhow::{anyhow, Result};
 
@@ -33,13 +33,25 @@ pub(crate) async fn run_with_context(
     match cmd {
         None => show(context, default_target).await,
         Some(MemoryCommand::Show { target }) => show(context, target).await,
+        Some(MemoryCommand::Update { summary, target }) => {
+            // Resolve before touching stdin so a no-wave drop never blocks.
+            let Some(resolved) = resolve(context, target).await? else {
+                drop_note();
+                return Ok(());
+            };
+            let mut content = String::new();
+            std::io::stdin().read_to_string(&mut content)?;
+            let summary = write_memory(&resolved, "update", &content, summary.as_deref()).await?;
+            println!("memory updated for wave '{}': {summary}", resolved.name);
+            Ok(())
+        }
         Some(MemoryCommand::Add { fact, target }) => {
             let Some(resolved) = resolve(context, target).await? else {
                 drop_note();
                 return Ok(());
             };
-            let fact = add_memory(&resolved, fact).await?;
-            println!("memory fact added for wave '{}': {fact}", resolved.name);
+            let summary = write_memory(&resolved, "add", fact, None).await?;
+            println!("memory fact added for wave '{}': {summary}", resolved.name);
             Ok(())
         }
     }
@@ -92,18 +104,23 @@ pub(crate) async fn read_memory(resolved: &ResolvedWave) -> Result<String> {
     Ok(Memory::for_wave(root, &resolved.name).read())
 }
 
-/// Publish one fact to the wave's memory stream through the live server (the
-/// sole holder of MEMORY.md's pen). Returns the fact the server journaled. No
-/// live server is an error — there is deliberately no offline write path.
-pub(crate) async fn add_memory(resolved: &ResolvedWave, fact: &str) -> Result<String> {
+/// Write through the live server (the sole holder of MEMORY.md's pen).
+/// Returns the summary the server journaled. No live server is an error —
+/// there is deliberately no offline write path.
+pub(crate) async fn write_memory(
+    resolved: &ResolvedWave,
+    op: &str,
+    content: &str,
+    summary: Option<&str>,
+) -> Result<String> {
     let endpoint = resolved.require_endpoint()?;
     let body = post_json(
         &endpoint,
         "/memory",
-        &serde_json::json!({ "content": fact }),
+        &serde_json::json!({ "op": op, "content": content, "summary": summary }),
     )
     .await?;
-    Ok(body["fact"].as_str().unwrap_or_default().to_string())
+    Ok(body["summary"].as_str().unwrap_or_default().to_string())
 }
 
 #[cfg(test)]
@@ -143,38 +160,56 @@ mod tests {
         (addr.to_string(), runtime)
     }
 
-    fn memory_adds(origin: &Path, wave: &str) -> Vec<String> {
+    fn memory_events(origin: &Path, wave: &str) -> Vec<EventKind> {
         let (_, events) = Journal::open(&journal_path(origin, wave)).expect("journal");
-        events
-            .into_iter()
-            .filter_map(|event| match event.kind {
-                EventKind::MemoryAdded { fact } => Some(fact),
-                _ => None,
-            })
-            .collect()
+        events.into_iter().map(|event| event.kind).collect()
     }
 
-    /// `add` appends a bullet to the ORIGIN file and journals `MemoryAdded`
-    /// with the full fact.
+    /// `update` replaces the ORIGIN repo's file through the server and
+    /// journals `MemoryUpdated`; `add` publishes a replayable fact without
+    /// mutating the compiled file.
     #[tokio::test]
-    async fn add_writes_the_origin_file_and_journals() {
+    async fn update_writes_the_origin_file_and_add_journals() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path();
         let (addr, _runtime) = boot_server(origin, "ship").await;
         let target = resolved("ship", Some(addr), None);
 
-        let fact = add_memory(&target, "workers report via lf chat")
+        let summary = write_memory(&target, "update", "# Ship\n\nfold is truth\n", None)
             .await
-            .expect("add");
-        assert_eq!(fact, "workers report via lf chat");
+            .expect("update");
+        assert_eq!(summary, "# Ship", "summary defaults to the first line");
         assert_eq!(
             std::fs::read_to_string(origin.join("wave/ship/MEMORY.md")).expect("origin file"),
-            "- workers report via lf chat\n",
-            "add appends a curated bullet"
+            "# Ship\n\nfold is truth\n",
+            "the ORIGIN file is the one replaced"
+        );
+
+        let summary = write_memory(&target, "add", "workers report via lf chat", None)
+            .await
+            .expect("add");
+        assert_eq!(summary, "workers report via lf chat");
+        assert_eq!(
+            std::fs::read_to_string(origin.join("wave/ship/MEMORY.md")).expect("origin file"),
+            "# Ship\n\nfold is truth\n",
+            "add publishes a stream fact without accreting raw bullets"
         );
         assert_eq!(
-            memory_adds(origin, "ship"),
-            vec!["workers report via lf chat".to_string()]
+            memory_events(origin, "ship")
+                .into_iter()
+                .filter(|event| matches!(
+                    event,
+                    EventKind::MemoryUpdated { .. } | EventKind::MemoryAdded { .. }
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                EventKind::MemoryUpdated {
+                    summary: "# Ship".to_string()
+                },
+                EventKind::MemoryAdded {
+                    fact: "workers report via lf chat".to_string()
+                },
+            ]
         );
     }
 
@@ -246,13 +281,18 @@ mod tests {
         assert!(err.to_string().contains("--wave"), "{err}");
     }
 
-    /// Adds have no offline path: no live server is an error.
+    /// Writes have no offline path: no live server is an error.
     #[tokio::test]
-    async fn add_without_a_server_errors() {
+    async fn update_without_a_server_errors() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let err = add_memory(&resolved("ship", None, Some(tmp.path())), "x")
-            .await
-            .expect_err("no server");
+        let err = write_memory(
+            &resolved("ship", None, Some(tmp.path())),
+            "update",
+            "x",
+            None,
+        )
+        .await
+        .expect_err("no server");
         assert!(err.to_string().contains("no live server"), "{err}");
     }
 }

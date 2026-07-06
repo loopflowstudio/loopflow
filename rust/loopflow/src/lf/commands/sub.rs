@@ -22,11 +22,11 @@
 //!
 //! Output renders from the WIRE frames (never journal internals): human
 //! lines by default (the Narrator's console flavor — chat bylines, turn
-//! open/items/close, state transitions, memory adds; child-channel
+//! open/items/close, state transitions, memory curation/adds; child-channel
 //! frames prefixed `[<channel>]`, progress keyed per (channel, id)), or raw
 //! frames as NDJSON with `--json` (`{"event": ..., "data": ...}` per line;
 //! `turn` data stays JSON — tagged frames keep their `channel` key —
-//! `state`/`memory-add` data are strings).
+//! `state`/`memory`/`memory-add` data are strings).
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -161,7 +161,7 @@ impl Renderer {
     }
 
     /// The output lines for one frame — NDJSON raw, or the human console
-    /// flavor (chat bylines, turn open/items/close, state, memory adds;
+    /// flavor (chat bylines, turn open/items/close, state, memory curation/adds;
     /// child-channel frames prefixed with their channel name).
     fn lines_for(&mut self, frame: &Frame) -> Vec<String> {
         if self.json {
@@ -171,6 +171,7 @@ impl Renderer {
         }
         match frame.event.as_str() {
             "state" => vec![format!("state {}", frame.data)],
+            "memory" => vec![format!("memory curated: {}", ellipsize(&frame.data, 70))],
             "memory-add" => vec![format!("memory added: {}", frame.data)],
             "turn" => {
                 let Ok(turn) = serde_json::from_str::<ChatTurn>(&frame.data) else {

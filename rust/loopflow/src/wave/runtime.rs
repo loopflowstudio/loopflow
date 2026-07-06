@@ -141,6 +141,9 @@ pub struct Subscription {
     pub turn_rx: broadcast::Receiver<Arc<TurnFrame>>,
     pub state: MindState,
     pub state_rx: broadcast::Receiver<MindState>,
+    /// Live `MemoryUpdated` summaries — fired on every curation, no replay
+    /// (the file itself is the durable state).
+    pub memory_rx: broadcast::Receiver<String>,
     /// Memory facts added this server life, replayed on
     /// subscribe before the live stream continues.
     pub memory_adds: Vec<String>,
@@ -223,6 +226,8 @@ pub struct WaveRuntime {
     /// Fans mind-state transitions out to live SSE subscribers (the composer
     /// keys its verb off this).
     state_tx: broadcast::Sender<MindState>,
+    /// Fans `MemoryUpdated` summaries out to live SSE subscribers.
+    memory_tx: broadcast::Sender<String>,
     /// Fans `MemoryAdded` facts out to live SSE subscribers.
     memory_add_tx: broadcast::Sender<String>,
     /// Durable shared brain (read-only here; the mind curates it deliberately).
@@ -306,6 +311,7 @@ impl WaveRuntime {
 
         let (turn_tx, _) = broadcast::channel(TURN_BROADCAST_CAPACITY);
         let (state_tx, _) = broadcast::channel(STATE_BROADCAST_CAPACITY);
+        let (memory_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
         let (memory_add_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
         let (family_tx, _) = broadcast::channel(FAMILY_BROADCAST_CAPACITY);
         let (inbox_tx, _) = broadcast::channel(INBOX_BROADCAST_CAPACITY);
@@ -333,6 +339,7 @@ impl WaveRuntime {
             }),
             turn_tx,
             state_tx,
+            memory_tx,
             memory_add_tx,
             memory,
             inbox_tx,
@@ -701,26 +708,35 @@ impl WaveRuntime {
             .retain(|_, channel| channel.alive());
     }
 
-    // -- Memory --
+    // -- Memory (the server holds MEMORY.md's pen) --
     //
-    // `add` appends to the ORIGIN repo's wave/<name>/MEMORY.md (the runtime
-    // opens against the main repo root — the file seeds read) and journals
-    // under the same lock as every other append, so the journal order and the
-    // file's history agree. Compiling MEMORY.md is the mind's job, edited
-    // old-fashioned — there is no server-side whole-file write.
+    // `update` writes the compiled ORIGIN repo's wave/<name>/MEMORY.md; `add`
+    // publishes a raw fact to the replayable delta. Both journal under the
+    // same lock as every other append, so the file checkpoint and the stream
+    // fold agree.
 
-    /// Append one curated fact as a Markdown bullet and journal `MemoryAdded`.
+    /// Replace MEMORY.md wholesale and journal `MemoryUpdated {summary}`.
     ///
     /// # Errors
-    /// File I/O only.
+    /// File I/O only; the journal append is best-effort like every append.
+    pub fn update_memory(&self, content: &str, summary: &str) -> std::io::Result<()> {
+        let mut inner = self.inner();
+        self.memory.write(content)?;
+        inner.journal.append(|_| EventKind::MemoryUpdated {
+            summary: summary.to_string(),
+        });
+        inner.memory_adds.clear();
+        // A send error just means no live subscribers.
+        let _ = self.memory_tx.send(summary.to_string());
+        Ok(())
+    }
+
+    /// Publish one fact to the replayable memory stream and journal `MemoryAdded`.
+    ///
+    /// # Errors
+    /// Journal I/O only.
     pub fn append_memory(&self, fact: &str) -> std::io::Result<()> {
         let mut inner = self.inner();
-        let mut content = self.memory.read();
-        if !content.is_empty() && !content.ends_with('\n') {
-            content.push('\n');
-        }
-        content.push_str(&format!("- {fact}\n"));
-        self.memory.write(&content)?;
         inner.journal.append(|_| EventKind::MemoryAdded {
             fact: fact.to_string(),
         });
@@ -763,6 +779,7 @@ impl WaveRuntime {
             turn_rx: self.turn_tx.subscribe(),
             state: inner.state.clone(),
             state_rx: self.state_tx.subscribe(),
+            memory_rx: self.memory_tx.subscribe(),
             memory_adds: inner.memory_adds.clone(),
             memory_add_rx: self.memory_add_tx.subscribe(),
             pending: inner.pending_messages.clone(),
@@ -1417,19 +1434,28 @@ mod tests {
     }
 
     #[test]
-    fn append_memory_writes_the_origin_file_and_journals() {
+    fn update_memory_writes_the_origin_file_and_add_publishes_delta() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
 
+        rt.update_memory("# Ship\n\n- fold is truth\n", "fold is truth")
+            .expect("update");
         rt.append_memory("fold is truth").expect("append");
         rt.append_memory("bullets append").expect("append");
         assert_eq!(
             rt.memory().read(),
-            "- fold is truth\n- bullets append\n",
-            "adds append bullets to the ORIGIN file"
+            "# Ship\n\n- fold is truth\n",
+            "adds do not accrete raw facts into the compiled ORIGIN file"
         );
 
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+        let summaries: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EventKind::MemoryUpdated { summary } => Some(summary.as_str()),
+                _ => None,
+            })
+            .collect();
         let facts: Vec<&str> = events
             .iter()
             .filter_map(|e| match &e.kind {
@@ -1437,6 +1463,7 @@ mod tests {
                 _ => None,
             })
             .collect();
+        assert_eq!(summaries, vec!["fold is truth"]);
         assert_eq!(facts, vec!["fold is truth", "bullets append"]);
     }
 
@@ -1467,6 +1494,8 @@ mod tests {
             let rt = open_runtime(tmp.path());
             rt.append_memory("first").expect("append");
             rt.append_memory("second").expect("append");
+            rt.update_memory("# Ship\n\ncompiled\n", "compiled")
+                .expect("update");
             rt.append_memory("third").expect("append");
         }
 
@@ -1474,12 +1503,8 @@ mod tests {
         let sub = rt.subscribe_with_snapshot();
         assert_eq!(
             sub.memory_adds,
-            vec![
-                "first".to_string(),
-                "second".to_string(),
-                "third".to_string()
-            ],
-            "the replay buffer rebuilds every add this journal from disk"
+            vec!["third".to_string()],
+            "the replay buffer rebuilds adds since the last externalization"
         );
     }
 

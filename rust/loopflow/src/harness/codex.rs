@@ -820,6 +820,39 @@ mod tests {
         (state, slot)
     }
 
+    fn harness_with_outbound() -> (CodexHarness, mpsc::Receiver<OutboundRpc>) {
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        let (outbound_tx, outbound_rx) = mpsc::channel(8);
+        let harness = CodexHarness {
+            events: event_tx,
+            approval: ApprovalPolicy::AutoApprove,
+            child: None,
+            outbound_tx: Some(outbound_tx),
+            writer_task: None,
+            reader_task: None,
+            stderr_task: None,
+            next_request_id: 1,
+            turn_in_progress: Arc::new(AtomicBool::new(false)),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
+            provider_session_id: Arc::new(Mutex::new(Some("thread_1".to_string()))),
+            current_turn_id: Arc::new(Mutex::new(None)),
+            initialize_request_id: Arc::new(AtomicI64::new(0)),
+            thread_start_request_id: Arc::new(AtomicI64::new(0)),
+            launch: None,
+            should_seed_prompt: false,
+            child_group: Arc::new(AtomicU32::new(0)),
+            interrupt_hook_registered: false,
+        };
+        (harness, outbound_rx)
+    }
+
+    async fn next_request(rx: &mut mpsc::Receiver<OutboundRpc>) -> (i64, String, Value) {
+        match rx.recv().await.expect("request should be sent") {
+            OutboundRpc::Request { id, method, params } => (id, method, params),
+            other => panic!("expected request, got {other:?}"),
+        }
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn kill_process_group_reaches_the_grandchild() {
@@ -895,5 +928,76 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn send_input_without_active_turn_starts_codex_turn() {
+        let (mut harness, mut rx) = harness_with_outbound();
+
+        harness.send_input("hello").await.expect("send input");
+
+        let (id, method, params) = next_request(&mut rx).await;
+        assert_eq!(id, 1);
+        assert_eq!(method, "turn/start");
+        assert_eq!(params["threadId"], "thread_1");
+        assert_eq!(
+            params["input"],
+            json!([{ "type": "text", "text": "hello" }])
+        );
+        assert!(params.get("content").is_none());
+    }
+
+    #[tokio::test]
+    async fn send_input_during_active_turn_steers_codex_turn() {
+        let (mut harness, mut rx) = harness_with_outbound();
+        harness.turn_in_progress.store(true, Ordering::Relaxed);
+        *harness
+            .current_turn_id
+            .lock()
+            .expect("turn id lock should not be poisoned") = Some("turn_1".to_string());
+
+        harness.send_input("steer").await.expect("send input");
+
+        let (_id, method, params) = next_request(&mut rx).await;
+        assert_eq!(method, "turn/steer");
+        assert_eq!(params["threadId"], "thread_1");
+        assert_eq!(params["expectedTurnId"], "turn_1");
+        assert_eq!(
+            params["input"],
+            json!([{ "type": "text", "text": "steer" }])
+        );
+        assert!(params.get("content").is_none());
+        assert!(params.get("turnId").is_none());
+    }
+
+    #[tokio::test]
+    async fn interrupt_sends_codex_turn_interrupt_for_active_turn() {
+        let (mut harness, mut rx) = harness_with_outbound();
+        harness.turn_in_progress.store(true, Ordering::Relaxed);
+        *harness
+            .current_turn_id
+            .lock()
+            .expect("turn id lock should not be poisoned") = Some("turn_1".to_string());
+
+        harness.interrupt().await.expect("interrupt");
+
+        let (_id, method, params) = next_request(&mut rx).await;
+        assert_eq!(method, "turn/interrupt");
+        assert_eq!(
+            params,
+            json!({
+                "threadId": "thread_1",
+                "turnId": "turn_1",
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn interrupt_without_active_turn_is_noop() {
+        let (mut harness, mut rx) = harness_with_outbound();
+
+        harness.interrupt().await.expect("interrupt");
+
+        assert!(rx.try_recv().is_err());
     }
 }

@@ -11,6 +11,18 @@ use super::codex::{process_notification, process_rpc_error, NotificationState};
 use super::opencode_mapping;
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 
+const TRACE_FIXTURES: &[&str] = &[
+    "claude_crash_mid_tool.ndjson",
+    "claude_multi_tool.ndjson",
+    "claude_normal_turn.ndjson",
+    "codex_error.jsonl",
+    "codex_error_will_retry.jsonl",
+    "codex_normal_turn.jsonl",
+    "opencode_error_turn.ndjson",
+    "opencode_normal_turn.ndjson",
+    "opencode_tool_lifecycle.ndjson",
+];
+
 fn read_trace_lines(file_name: &str) -> Vec<String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src/harness/testdata")
@@ -20,6 +32,29 @@ fn read_trace_lines(file_name: &str) -> Vec<String> {
         .lines()
         .map(ToString::to_string)
         .collect()
+}
+
+fn read_testdata_json(file_name: &str) -> Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/harness/testdata")
+        .join(file_name);
+    let text = fs::read_to_string(path).expect("json file should exist");
+    serde_json::from_str(&text).expect("json file should be valid")
+}
+
+fn trace_manifest_files() -> Vec<String> {
+    let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/harness/testdata");
+    let mut manifests: Vec<_> = fs::read_dir(testdata)
+        .expect("testdata dir should exist")
+        .map(|entry| entry.expect("testdata entry should be readable").path())
+        .filter_map(|path| {
+            let name = path.file_name()?.to_str()?;
+            name.ends_with("_trace_manifest.json")
+                .then(|| name.to_string())
+        })
+        .collect();
+    manifests.sort();
+    manifests
 }
 
 fn drain_events(
@@ -136,6 +171,144 @@ fn replay_opencode_trace(file_name: &str) -> Vec<ConversationEvent> {
     }
 
     events
+}
+
+#[test]
+fn trace_manifests_have_explicit_metadata() {
+    for file_name in trace_manifest_files() {
+        let manifest = read_testdata_json(&file_name);
+        assert!(
+            manifest.get("provider").and_then(Value::as_str).is_some(),
+            "{file_name} should name the provider"
+        );
+        assert!(
+            manifest
+                .get("captured_at")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.ends_with('Z') && value != "unknown"),
+            "{file_name} should include an explicit UTC capture timestamp"
+        );
+        let version = manifest
+            .get("provider_version")
+            .expect("manifest should include provider_version metadata");
+        let source = version
+            .get("source")
+            .and_then(Value::as_str)
+            .expect("provider_version.source should be present");
+        match source {
+            "recorded" => assert!(
+                version
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !value.trim().is_empty() && value != "unknown"),
+                "recorded {file_name} traces should pin a concrete provider version"
+            ),
+            "synthetic" => assert!(
+                version
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !value.trim().is_empty()),
+                "synthetic {file_name} traces should explain why no provider version is pinned"
+            ),
+            other => panic!("unsupported provider_version.source for {file_name}: {other}"),
+        }
+        assert!(
+            !manifest.to_string().contains("\"unknown\""),
+            "{file_name} should not hide missing metadata behind \"unknown\""
+        );
+    }
+}
+
+#[test]
+fn every_trace_fixture_is_manifested() {
+    let mut declared = Vec::new();
+    for file_name in trace_manifest_files() {
+        let manifest = read_testdata_json(&file_name);
+        let scenarios = manifest
+            .get("scenarios")
+            .and_then(Value::as_array)
+            .expect("manifest scenarios should be an array");
+        for scenario in scenarios {
+            declared.push(
+                scenario
+                    .get("fixture")
+                    .and_then(Value::as_str)
+                    .expect("scenario should name a fixture")
+                    .to_string(),
+            );
+        }
+    }
+    declared.sort();
+
+    let mut expected: Vec<_> = TRACE_FIXTURES.iter().map(|name| name.to_string()).collect();
+    expected.sort();
+    assert_eq!(declared, expected);
+}
+
+#[test]
+fn codex_trace_methods_are_in_the_supported_surface() {
+    let supported = [
+        "account/rateLimits/updated",
+        "error",
+        "item/agentMessage/delta",
+        "item/completed",
+        "item/started",
+        "thread/started",
+        "thread/status/changed",
+        "thread/tokenUsage/updated",
+        "turn/completed",
+        "turn/started",
+    ];
+
+    for fixture in TRACE_FIXTURES
+        .iter()
+        .copied()
+        .filter(|name| name.starts_with("codex_"))
+    {
+        for line in read_trace_lines(fixture) {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let value: Value = serde_json::from_str(&line).expect("trace line should be json");
+            let Some(method) = value.get("method").and_then(Value::as_str) else {
+                continue;
+            };
+            assert!(
+                supported.contains(&method),
+                "{fixture} contains unsupported codex method {method:?}; add a mapping decision before replaying it"
+            );
+        }
+    }
+}
+
+#[test]
+fn opencode_trace_events_are_in_the_supported_surface() {
+    let supported = ["message.part.updated", "session.error", "session.status"];
+
+    for fixture in TRACE_FIXTURES
+        .iter()
+        .copied()
+        .filter(|name| name.starts_with("opencode_"))
+    {
+        let mut lines = read_trace_lines(fixture).into_iter();
+        let _session_create = lines
+            .next()
+            .expect("opencode trace should create a session");
+        for line in lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let value: Value = serde_json::from_str(&line).expect("trace line should be json");
+            let event_type = value
+                .get("type")
+                .and_then(Value::as_str)
+                .expect("opencode event should include a type");
+            assert!(
+                supported.contains(&event_type),
+                "{fixture} contains unsupported opencode event {event_type:?}; add a mapping decision before replaying it"
+            );
+        }
+    }
 }
 
 #[test]

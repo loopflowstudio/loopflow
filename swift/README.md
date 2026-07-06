@@ -155,10 +155,8 @@ Repo windows open into the first slice of the outward wave model:
 
 The multiplexer workspace remains available in the codebase, but repo windows no longer expose it as the default flow:
 
-- Default panes show a minimal **Roadmap** list, **Roadmap Detail**, and a Ghostty-backed **Terminal**
-- Roadmap rows keep just the title and priority, sort shipped items to the bottom, and reveal an inline play button on hover
-- The selected roadmap item renders its full markdown in **Roadmap Detail**, with an always-visible **Build** action
-- `j`/`k`, `↑`/`↓`, and `Return` work directly in the roadmap list for keyboard-first triage
+- Roadmap state comes from Loopflow's live PM surface, not numbered markdown files under `wave/<name>/`
+- The local wave content parser reads README sections and scratch docs only
 - Wave taglines now come from the opening paragraph of `GOAL.md` when present
 - Local worktrees expose **Open Terminal** and **Open Internally** actions that both attach the same tmux-backed shell
 - Cmd+K switches waves and opens or focuses panes like **README**, **Runs**, and **Launcher**

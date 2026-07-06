@@ -17,7 +17,6 @@ use std::path::Path;
 use anyhow::Result;
 
 pub(crate) use helpers::resolve_lf_binary;
-pub use helpers::{create_run_for_placement, ensure_wave_worktree, Placement};
 pub use wave::WaveExecutor;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

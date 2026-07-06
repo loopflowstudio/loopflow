@@ -95,7 +95,7 @@ Sections only appear when they have agents. Empty sections are hidden.
 
 When an agent is selected:
 - **Header**: Name, status, area/flow/trigger summary
-- **Content Section**: Vision, goals, risks, and roadmap progress parsed from `wave/<name>/README.md` and numbered roadmap files
+- **Content Section**: Vision, goals, risks, and metrics parsed from `wave/<name>/README.md`; roadmap state comes from the live PM surface
 - **Config Section** (idle): Area picker, goal selector, flow picker, run button
 - **Progress Section** (active): Current step, live output
 - **Files Section**: Changed files with diff stats

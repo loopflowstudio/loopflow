@@ -11,7 +11,6 @@ public enum WaveContentParser {
 
         let readmeURL = waveDirectory.appendingPathComponent("README.md", isDirectory: false)
         let readmeSections = parseReadmeSections(at: readmeURL)
-        let roadmapItems = parseRoadmapItems(in: waveDirectory)
         let (scratchDoc, scratchDocPath) = parseScratchDoc(repoRoot: repoRoot, branch: branch)
 
         if readmeSections.vision == nil,
@@ -19,7 +18,6 @@ public enum WaveContentParser {
            readmeSections.goals == nil,
            readmeSections.risks == nil,
            readmeSections.metrics == nil,
-           roadmapItems.isEmpty,
            scratchDoc == nil {
             return nil
         }
@@ -30,7 +28,6 @@ public enum WaveContentParser {
             goals: readmeSections.goals,
             risks: readmeSections.risks,
             metrics: readmeSections.metrics,
-            roadmapItems: roadmapItems,
             scratchDoc: scratchDoc,
             scratchDocPath: scratchDocPath
         )
@@ -157,136 +154,6 @@ public enum WaveContentParser {
         return normalizedSectionText(paragraphLines)
     }
 
-    private static func parseRoadmapItems(in waveDirectory: URL) -> [RoadmapItem] {
-        let fileManager = FileManager.default
-
-        guard let files = try? fileManager.contentsOfDirectory(
-            at: waveDirectory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
-        return files
-            .compactMap(parseRoadmapMetadata)
-            .sorted { lhs, rhs in
-                if lhs.order != rhs.order {
-                    return lhs.order < rhs.order
-                }
-                return lhs.fileName < rhs.fileName
-            }
-            .compactMap(parseRoadmapItem)
-    }
-
-    private static func parseRoadmapItem(_ metadata: RoadmapMetadata) -> RoadmapItem? {
-        guard let text = try? String(contentsOf: metadata.fileURL, encoding: .utf8) else {
-            return RoadmapItem(
-                id: metadata.stem,
-                number: metadata.number,
-                title: metadata.stem,
-                slug: metadata.slug,
-                fileName: metadata.fileName,
-                priority: metadata.priority,
-                isShipped: false,
-                filePath: metadata.fileURL.path
-            )
-        }
-
-        let lines = text.components(separatedBy: .newlines)
-        let title = firstHeading(in: lines) ?? metadata.stem
-        let isShipped = lines.contains {
-            $0.trimmingCharacters(in: .whitespaces) == "## Shipped"
-        }
-
-        let content: String? = isShipped ? nil : extractContent(from: lines)
-
-        return RoadmapItem(
-            id: metadata.stem,
-            number: metadata.number,
-            title: title,
-            slug: metadata.slug,
-            fileName: metadata.fileName,
-            priority: metadata.priority,
-            isShipped: isShipped,
-            content: content,
-            filePath: metadata.fileURL.path
-        )
-    }
-
-    private struct RoadmapMetadata {
-        let fileURL: URL
-        let stem: String
-        let fileName: String
-        let slug: String
-        let number: Int
-        let priority: RoadmapPriority
-        let order: RoadmapOrder
-    }
-
-    private enum RoadmapOrder: Comparable {
-        case bucket(RoadmapPriority)
-        case legacy(Int)
-
-        fileprivate static func < (lhs: RoadmapOrder, rhs: RoadmapOrder) -> Bool {
-            lhs.sortKey < rhs.sortKey
-        }
-
-        private var sortKey: (Int, Int) {
-            switch self {
-            case let .bucket(priority):
-                (0, priority.rawValue)
-            case let .legacy(number):
-                (1, number)
-            }
-        }
-    }
-
-    private static func parseRoadmapMetadata(for fileURL: URL) -> RoadmapMetadata? {
-        guard fileURL.pathExtension.lowercased() == "md" else { return nil }
-        let fileName = fileURL.lastPathComponent
-        let stem = fileURL.deletingPathExtension().lastPathComponent
-        let parts = stem.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
-        guard parts.count == 2 else { return nil }
-
-        let prefix = String(parts[0])
-        let slug = String(parts[1])
-        guard !slug.isEmpty,
-              let parsedPrefix = RoadmapPriority.parseFilenamePrefix(prefix) else {
-            return nil
-        }
-
-        return RoadmapMetadata(
-            fileURL: fileURL,
-            stem: stem,
-            fileName: fileName,
-            slug: slug,
-            number: parsedPrefix.priority.rawValue,
-            priority: parsedPrefix.priority,
-            order: parsedPrefix.isCanonical ? .bucket(parsedPrefix.priority) : .legacy(parsedPrefix.priority.rawValue)
-        )
-    }
-
-    private static func extractContent(from lines: [String]) -> String? {
-        // Drop lines up to and including the first `# ` heading, take up to 20 lines after.
-        var foundHeading = false
-        var contentLines: [String] = []
-
-        for line in lines {
-            if !foundHeading {
-                if line.trimmingCharacters(in: .whitespaces).hasPrefix("# ") {
-                    foundHeading = true
-                }
-                continue
-            }
-            if contentLines.count >= 20 { break }
-            contentLines.append(line)
-        }
-
-        let text = contentLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
-    }
-
     private static func parseScratchDoc(repoRoot: URL, branch: String?) -> (String?, String?) {
         guard let branch, !branch.isEmpty else { return (nil, nil) }
         let scratchURL = repoRoot
@@ -298,28 +165,5 @@ public enum WaveContentParser {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return (nil, nil) }
         return (trimmed, scratchURL.path)
-    }
-
-    private static func firstHeading(in lines: [String]) -> String? {
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("# ") {
-                let title = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-                if !title.isEmpty {
-                    return stripNumberPrefix(title)
-                }
-            }
-        }
-        return nil
-    }
-
-    /// Strip leading `NN:` or `NNx:` prefixes (e.g. "01: Foo" → "Foo", "02b: Bar" → "Bar").
-    /// Priority is already shown visually — no need to repeat it in the title.
-    private static func stripNumberPrefix(_ title: String) -> String {
-        guard let range = title.range(of: #"^\d+[a-z]?:\s*"#, options: .regularExpression) else {
-            return title
-        }
-        let stripped = String(title[range.upperBound...])
-        return stripped.isEmpty ? title : stripped
     }
 }

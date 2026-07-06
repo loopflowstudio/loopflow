@@ -1,7 +1,11 @@
 {
   "provider": "opencode",
   "captured_at": "2026-02-26T00:00:00Z",
-  "opencode_version": "unknown",
+  "provider_version": {
+    "source": "synthetic",
+    "value": null,
+    "reason": "These fixtures are hand-authored OpenCode event fragments, not recordings from a concrete CLI version."
+  },
   "scenarios": [
     {
       "name": "normal_turn",

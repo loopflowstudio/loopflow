@@ -1,0 +1,26 @@
+{
+  "provider": "claude",
+  "captured_at": "2026-02-26T00:00:00Z",
+  "provider_version": {
+    "source": "synthetic",
+    "value": null,
+    "reason": "These fixtures are hand-authored Claude CLI stream fragments, not recordings from a concrete CLI version."
+  },
+  "scenarios": [
+    {
+      "name": "normal_turn",
+      "fixture": "claude_normal_turn.ndjson",
+      "session_id": "sess_claude_normal"
+    },
+    {
+      "name": "multi_tool_lifecycle",
+      "fixture": "claude_multi_tool.ndjson",
+      "session_id": null
+    },
+    {
+      "name": "crash_mid_tool",
+      "fixture": "claude_crash_mid_tool.ndjson",
+      "session_id": null
+    }
+  ]
+}

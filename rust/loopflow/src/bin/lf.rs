@@ -327,13 +327,13 @@ fn run_placed_target(
 ) -> anyhow::Result<()> {
     let wave_name = resolve_placement_wave(repo_root, cli)?;
     let placement = if let Some(parent) = cli.stack.as_deref() {
-        loopflow::lfd::executor::Placement::Stack {
+        loopflow::dispatch::Placement::Stack {
             parent_run_id: parent
                 .parse()
                 .map_err(|_| anyhow::anyhow!("invalid --stack run id: '{parent}'"))?,
         }
     } else {
-        loopflow::lfd::executor::Placement::Fresh
+        loopflow::dispatch::Placement::Fresh
     };
     let target_branch = if cli.dispatch {
         loopflow::engine::git::current_branch(repo_root)?
@@ -356,7 +356,7 @@ fn run_placed_target(
             .await?
             .ok_or_else(|| anyhow::anyhow!("wave '{wave_name}' not found in the registry"))?;
         let run_id = loopflow::lfd::id::LfdId::new();
-        let mut run = loopflow::lfd::executor::create_run_for_placement(
+        let mut run = loopflow::dispatch::create_run_for_placement(
             &store,
             &wave,
             &run_id,

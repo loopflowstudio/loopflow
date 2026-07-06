@@ -4,8 +4,8 @@ import Testing
 
 @Suite("WaveContentParser")
 struct WaveContentParserTests {
-    @Test("parses README sections and roadmap progress")
-    func parsesSectionsAndRoadmap() throws {
+    @Test("parses README sections")
+    func parsesSections() throws {
         let repoRoot = try makeTempRepo()
         defer { try? FileManager.default.removeItem(at: repoRoot) }
 
@@ -27,7 +27,7 @@ struct WaveContentParserTests {
 
         ## Goals
         - Launch design from Concerto
-        - Show roadmap status
+        - Show current wave status
 
         ## Risks
         - Parser drift
@@ -40,22 +40,6 @@ struct WaveContentParserTests {
         """
         try readme.write(to: waveDir.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
 
-        let roadmapOne = """
-        # Design-first entry
-
-        ## Shipped
-        Done.
-        """
-        try roadmapOne.write(to: waveDir.appendingPathComponent("01-design-entry.md"), atomically: true, encoding: .utf8)
-
-        let roadmapTwo = """
-        # Detail panel content
-
-        ## Plan
-        In progress.
-        """
-        try roadmapTwo.write(to: waveDir.appendingPathComponent("02-detail-panel.md"), atomically: true, encoding: .utf8)
-
         let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "demo-wave")
 
         #expect(content?.vision?.contains("Build a delightful onboarding.") == true)
@@ -64,15 +48,6 @@ struct WaveContentParserTests {
         #expect(content?.goals?.contains("Launch design from Concerto") == true)
         #expect(content?.risks == "- Parser drift")
         #expect(content?.metrics == "- Time to first wave")
-
-        #expect(content?.roadmapItems.count == 2)
-        #expect(content?.roadmapItems[0].id == "01-design-entry")
-        #expect(content?.roadmapItems[0].title == "Design-first entry")
-        #expect(content?.roadmapItems[0].priority == .urgent)
-        #expect(content?.roadmapItems[0].isShipped == true)
-        #expect(content?.roadmapItems[1].id == "02-detail-panel")
-        #expect(content?.roadmapItems[1].priority == .high)
-        #expect(content?.roadmapItems[1].isShipped == false)
     }
 
     @Test("uses the first README paragraph as vision when present")
@@ -130,7 +105,7 @@ struct WaveContentParserTests {
         #expect(content.vision == "Agents that remember.\nWork that compounds.")
     }
 
-    @Test("returns nil when wave has no README sections or roadmap")
+    @Test("returns nil when wave has no README sections")
     func returnsNilForEmptyWaveContent() throws {
         let repoRoot = try makeTempRepo()
         defer { try? FileManager.default.removeItem(at: repoRoot) }
@@ -150,8 +125,8 @@ struct WaveContentParserTests {
         #expect(content == nil)
     }
 
-    @Test("parses roadmap item content for non-shipped items")
-    func parsesRoadmapItemContent() throws {
+    @Test("ignores numbered markdown files")
+    func ignoresNumberedMarkdownFiles() throws {
         let repoRoot = try makeTempRepo()
         defer { try? FileManager.default.removeItem(at: repoRoot) }
 
@@ -160,13 +135,13 @@ struct WaveContentParserTests {
             .appendingPathComponent("content-wave", isDirectory: true)
         try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
 
-        try "# Minimal".write(
+        try "# Notes only".write(
             to: waveDir.appendingPathComponent("README.md"),
             atomically: true,
             encoding: .utf8
         )
 
-        let roadmapWithContent = """
+        let numberedFile = """
         # Feature Alpha
 
         This is the first paragraph explaining the feature.
@@ -176,41 +151,14 @@ struct WaveContentParserTests {
         - Step one
         - Step two
         """
-        try roadmapWithContent.write(
+        try numberedFile.write(
             to: waveDir.appendingPathComponent("01-feature-alpha.md"),
             atomically: true,
             encoding: .utf8
         )
 
-        let shippedItem = """
-        # Shipped Feature
-
-        This content should not be included.
-
-        ## Shipped
-        Done.
-        """
-        try shippedItem.write(
-            to: waveDir.appendingPathComponent("02-shipped-feature.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-
         let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "content-wave")
-
-        #expect(content?.roadmapItems.count == 2)
-
-        let first = content?.roadmapItems[0]
-        #expect(first?.title == "Feature Alpha")
-        #expect(first?.slug == "feature-alpha")
-        #expect(first?.fileName == "01-feature-alpha.md")
-        #expect(first?.content?.contains("first paragraph") == true)
-        #expect(first?.filePath != nil)
-
-        let second = content?.roadmapItems[1]
-        #expect(second?.title == "Shipped Feature")
-        #expect(second?.isShipped == true)
-        #expect(second?.content == nil)
+        #expect(content == nil)
     }
 
     @Test("parses scratch doc when branch is provided")
@@ -277,7 +225,7 @@ struct WaveContentParserTests {
             encoding: .utf8
         )
 
-        // Without branch: no roadmap, no sections -> nil
+        // Without branch: no sections -> nil
         let without = WaveContentParser.parse(repoRoot: repoRoot, waveName: "doc-only")
         #expect(without == nil)
 
@@ -285,121 +233,6 @@ struct WaveContentParserTests {
         let with = WaveContentParser.parse(repoRoot: repoRoot, waveName: "doc-only", branch: "my-branch")
         #expect(with != nil)
         #expect(with?.scratchDoc == "Design content")
-    }
-
-    @Test("parses bucketed roadmap filenames and sorts by priority")
-    func parsesBucketedRoadmapItems() throws {
-        let repoRoot = try makeTempRepo()
-        defer { try? FileManager.default.removeItem(at: repoRoot) }
-
-        let waveDir = repoRoot
-            .appendingPathComponent("wave", isDirectory: true)
-            .appendingPathComponent("bucket-wave", isDirectory: true)
-        try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
-
-        try "# Minimal".write(
-            to: waveDir.appendingPathComponent("README.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-
-        try "# Medium".write(
-            to: waveDir.appendingPathComponent("3-medium.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-        try "# Urgent".write(
-            to: waveDir.appendingPathComponent("1-urgent.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-        try "# Legacy".write(
-            to: waveDir.appendingPathComponent("02-legacy.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-
-        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "bucket-wave")
-        let items = try #require(content?.roadmapItems)
-
-        #expect(items.map(\.fileName) == ["1-urgent.md", "3-medium.md", "02-legacy.md"])
-        #expect(items[0].priority == .urgent)
-        #expect(items[1].priority == .medium)
-        #expect(items[2].priority == .high)
-    }
-
-    @Test("sorts canonical priority buckets ahead of legacy numbers in the same rank")
-    func sortsBucketedItemsAheadOfLegacyNumbers() throws {
-        let repoRoot = try makeTempRepo()
-        defer { try? FileManager.default.removeItem(at: repoRoot) }
-
-        let waveDir = repoRoot
-            .appendingPathComponent("wave", isDirectory: true)
-            .appendingPathComponent("mixed-wave", isDirectory: true)
-        try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
-
-        try "# Minimal".write(
-            to: waveDir.appendingPathComponent("README.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-
-        try "# Canonical".write(
-            to: waveDir.appendingPathComponent("2-canonical.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-        try "# Legacy".write(
-            to: waveDir.appendingPathComponent("02-legacy.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-
-        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "mixed-wave")
-        let items = try #require(content?.roadmapItems)
-
-        #expect(items.map(\.fileName) == ["2-canonical.md", "02-legacy.md"])
-        #expect(items.map(\.priority) == [.high, .high])
-    }
-
-    @Test("strips number prefixes from titles since priority is shown visually")
-    func stripsNumberPrefixFromTitles() throws {
-        let repoRoot = try makeTempRepo()
-        defer { try? FileManager.default.removeItem(at: repoRoot) }
-
-        let waveDir = repoRoot
-            .appendingPathComponent("wave", isDirectory: true)
-            .appendingPathComponent("prefix-wave", isDirectory: true)
-        try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
-
-        try "# Minimal".write(
-            to: waveDir.appendingPathComponent("README.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-
-        try "# 01: CLI Contract".write(
-            to: waveDir.appendingPathComponent("1-cli-contract.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-        try "# 02b: Wave Modes".write(
-            to: waveDir.appendingPathComponent("2-wave-modes.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-        try "# No Prefix Here".write(
-            to: waveDir.appendingPathComponent("3-no-prefix.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-
-        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: "prefix-wave")
-        let items = try #require(content?.roadmapItems)
-
-        #expect(items[0].title == "CLI Contract")
-        #expect(items[1].title == "Wave Modes")
-        #expect(items[2].title == "No Prefix Here")
     }
 
     private func makeTempRepo() throws -> URL {

@@ -2,13 +2,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
+use loopflow::dispatch::{create_run_for_placement, ensure_wave_worktree, Placement};
 use loopflow::engine::config::BranchNameConfig;
 use loopflow::engine::git::{branch_rename, current_branch, worktree_move};
 use loopflow::engine::naming::sanitize_for_branch;
 use loopflow::engine::worktrees::{
     branch_exists, create_with_schema, run_worktree_path, worktree_path,
 };
-use loopflow::lfd::executor::{create_run_for_placement, ensure_wave_worktree, Placement};
 use loopflow::lfd::id::LfdId;
 use loopflow::lfd::types::{RepoWork, Wave, WaveStatus};
 use loopflow::lfdb::{open_store, SharedStore, StorageConfig};

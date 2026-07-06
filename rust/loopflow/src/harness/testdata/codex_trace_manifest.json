@@ -1,0 +1,27 @@
+{
+  "provider": "codex",
+  "captured_at": "2026-07-05T00:00:00Z",
+  "provider_version": {
+    "source": "recorded",
+    "value": "0.142.5",
+    "command": "codex app-server generate-json-schema"
+  },
+  "wire_protocol": "codex app-server json-rpc v2",
+  "scenarios": [
+    {
+      "name": "normal_turn",
+      "fixture": "codex_normal_turn.jsonl",
+      "thread_id": "0197f00d-aaaa-7000-8000-000000000001"
+    },
+    {
+      "name": "error_turn",
+      "fixture": "codex_error.jsonl",
+      "thread_id": "0197f00d-aaaa-7000-8000-000000000001"
+    },
+    {
+      "name": "will_retry_error",
+      "fixture": "codex_error_will_retry.jsonl",
+      "thread_id": "0197f00d-aaaa-7000-8000-000000000001"
+    }
+  ]
+}

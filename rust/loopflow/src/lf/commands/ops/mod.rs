@@ -35,7 +35,7 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match op {
         OpsCommand::Cp { paths, exclude } => copy_context(paths, exclude),
-        OpsCommand::Doctor => doctor(),
+        OpsCommand::Doctor { brewfile } => doctor(*brewfile),
         OpsCommand::Rebase { plan, onto } => rebase_current(onto.as_deref(), *plan, &progress),
         OpsCommand::Push { force } => push_current(*force),
         OpsCommand::Land {
@@ -1527,7 +1527,184 @@ fn copy_to_clipboard(text: &str) -> Result<()> {
 // lf op doctor
 // ==========================================================================
 
-fn doctor() -> Result<()> {
+/// How a dependency is installed via Homebrew (macOS).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Brew {
+    /// `brew install <name>` — plain formula (or tap-qualified, e.g. dopplerhq/cli/doppler).
+    Formula(&'static str),
+    /// `brew install --cask <name>` — GUI app.
+    Cask(&'static str),
+}
+
+/// A single declared system dependency. This array is the source of truth for
+/// both `lf op doctor` and the repo-root `Brewfile` (generated via
+/// `lf op doctor --brewfile`).
+#[derive(Debug, Clone, Copy)]
+struct SystemDep {
+    /// Display name. Also the binary probed via `which`, unless `command` differs.
+    name: &'static str,
+    /// Binary probed with `which`; differs from `name` when the tool ships under
+    /// another command (e.g. rust ships `cargo`).
+    command: &'static str,
+    /// Build/run essentials are required; agent CLIs and editors are optional.
+    required: bool,
+    /// GUI apps only distributed for macOS here — skipped on other hosts.
+    macos_only: bool,
+    /// Homebrew package, when installable via brew (feeds the Brewfile).
+    brew: Option<Brew>,
+    /// Install hint for non-macOS hosts (or when there is no brew package).
+    fallback: &'static str,
+}
+
+impl SystemDep {
+    fn is_present(&self) -> bool {
+        which(self.command)
+    }
+
+    /// The install hint shown by the doctor when the dep is missing.
+    fn install_hint(&self, is_macos: bool) -> String {
+        if is_macos {
+            if let Some(brew) = self.brew {
+                return match brew {
+                    Brew::Formula(f) => format!("brew install {f}"),
+                    Brew::Cask(c) => format!("brew install --cask {c}"),
+                };
+            }
+        }
+        self.fallback.to_string()
+    }
+}
+
+/// The declared system dependencies loopflow expects on a working host.
+///
+/// Required deps are the build/run essentials; optional deps are the agent CLIs
+/// and editors. `lf op doctor` loops over this list, and the repo-root Brewfile
+/// is generated from it — do not hand-maintain a second list.
+const SYSTEM_DEPS: &[SystemDep] = &[
+    // Required: build/run essentials.
+    SystemDep {
+        name: "git",
+        command: "git",
+        required: true,
+        macos_only: false,
+        brew: Some(Brew::Formula("git")),
+        fallback: "https://git-scm.com/downloads",
+    },
+    SystemDep {
+        name: "rust",
+        command: "cargo",
+        required: true,
+        macos_only: false,
+        brew: Some(Brew::Formula("rust")),
+        fallback: "https://rustup.rs/",
+    },
+    SystemDep {
+        name: "uv",
+        command: "uv",
+        required: true,
+        macos_only: false,
+        brew: Some(Brew::Formula("uv")),
+        fallback: "https://docs.astral.sh/uv/getting-started/installation/",
+    },
+    SystemDep {
+        name: "tmux",
+        command: "tmux",
+        required: true,
+        macos_only: false,
+        brew: Some(Brew::Formula("tmux")),
+        fallback: "https://github.com/tmux/tmux/wiki/Installing",
+    },
+    SystemDep {
+        name: "gh",
+        command: "gh",
+        required: true,
+        macos_only: false,
+        brew: Some(Brew::Formula("gh")),
+        fallback: "https://cli.github.com/",
+    },
+    SystemDep {
+        name: "doppler",
+        command: "doppler",
+        required: true,
+        macos_only: false,
+        brew: Some(Brew::Formula("dopplerhq/cli/doppler")),
+        fallback: "https://docs.doppler.com/docs/install-cli",
+    },
+    // Optional: agent CLIs and editors.
+    SystemDep {
+        name: "npm",
+        command: "npm",
+        required: false,
+        macos_only: false,
+        brew: Some(Brew::Formula("node")),
+        fallback: "https://nodejs.org/",
+    },
+    SystemDep {
+        name: "claude",
+        command: "claude",
+        required: false,
+        macos_only: false,
+        brew: None,
+        fallback: "lf init",
+    },
+    SystemDep {
+        name: "codex",
+        command: "codex",
+        required: false,
+        macos_only: false,
+        brew: None,
+        fallback: "npm install -g @openai/codex",
+    },
+    SystemDep {
+        name: "gemini",
+        command: "gemini",
+        required: false,
+        macos_only: false,
+        brew: None,
+        fallback: "npm install -g @google/gemini-cli",
+    },
+    SystemDep {
+        name: "warp",
+        command: "warp",
+        required: false,
+        macos_only: true,
+        brew: Some(Brew::Cask("warp")),
+        fallback: "",
+    },
+    SystemDep {
+        name: "cursor",
+        command: "cursor",
+        required: false,
+        macos_only: true,
+        brew: Some(Brew::Cask("cursor")),
+        fallback: "",
+    },
+];
+
+/// Render the repo-root Brewfile from the declared dependency list.
+fn brewfile_contents() -> String {
+    let mut out = String::new();
+    out.push_str("# Generated from the declared SYSTEM_DEPS list in\n");
+    out.push_str("# rust/loopflow/src/lf/commands/ops/mod.rs — do not edit by hand.\n");
+    out.push_str("# Regenerate with: lf op doctor --brewfile > Brewfile\n");
+    out.push_str("# Install everything with: brew bundle\n\n");
+    for dep in SYSTEM_DEPS {
+        let Some(brew) = dep.brew else { continue };
+        let tag = if dep.required { "required" } else { "optional" };
+        match brew {
+            Brew::Formula(f) => out.push_str(&format!("brew \"{f}\"  # {} ({tag})\n", dep.name)),
+            Brew::Cask(c) => out.push_str(&format!("cask \"{c}\"  # {} ({tag})\n", dep.name)),
+        }
+    }
+    out
+}
+
+fn doctor(brewfile: bool) -> Result<()> {
+    if brewfile {
+        print!("{}", brewfile_contents());
+        return Ok(());
+    }
+
     let repo_root = find_repo_root().ok();
 
     // Repo status
@@ -1543,57 +1720,27 @@ fn doctor() -> Result<()> {
     }
 
     let is_macos = cfg!(target_os = "macos");
+    let mut missing_required = 0;
 
-    // Optional: npm
-    if which("npm") {
-        println!("✓ npm");
-    } else if is_macos {
-        println!("- npm: brew install node");
-    } else {
-        println!("- npm: https://nodejs.org/");
-    }
-
-    // Optional: coding agents
-    if check_claude_available() {
-        println!("✓ claude");
-    } else {
-        println!("- claude: lf init");
-    }
-
-    if check_codex_available() {
-        println!("✓ codex");
-    } else {
-        println!("- codex: npm install -g @openai/codex");
-    }
-
-    if check_gemini_available() {
-        println!("✓ gemini");
-    } else {
-        println!("- gemini: npm install -g @google/gemini-cli");
-    }
-
-    // Optional: IDE/terminals (macOS-only apps)
-    if is_macos {
-        if which("warp") {
-            println!("✓ warp");
-        } else {
-            println!("- warp: brew install --cask warp");
+    for dep in SYSTEM_DEPS {
+        if dep.macos_only && !is_macos {
+            continue;
         }
-
-        if which("cursor") {
-            println!("✓ cursor");
+        if dep.is_present() {
+            println!("✓ {}", dep.name);
         } else {
-            println!("- cursor: brew install --cask cursor");
+            let tag = if dep.required { " (required)" } else { "" };
+            println!("- {}: {}{}", dep.name, dep.install_hint(is_macos), tag);
+            if dep.required {
+                missing_required += 1;
+            }
         }
     }
 
-    // Optional: gh for PR creation
-    if which("gh") {
-        println!("✓ gh");
-    } else if is_macos {
-        println!("- gh: brew install gh");
+    if missing_required > 0 {
+        println!("\n{missing_required} required dep(s) missing");
     } else {
-        println!("- gh: https://cli.github.com/");
+        println!("\nall required deps present");
     }
 
     Ok(())
@@ -1607,17 +1754,49 @@ fn which(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn check_claude_available() -> bool {
-    // Check for claude CLI
-    which("claude")
-}
+#[cfg(test)]
+mod doctor_tests {
+    use super::{brewfile_contents, SYSTEM_DEPS};
+    use std::fs;
+    use std::path::Path;
 
-fn check_codex_available() -> bool {
-    // Check for codex CLI
-    which("codex")
-}
+    #[test]
+    fn declared_deps_non_empty_and_well_formed() {
+        assert!(!SYSTEM_DEPS.is_empty());
+        for dep in SYSTEM_DEPS {
+            assert!(!dep.name.is_empty());
+            // Every dep has a check: the `which` target.
+            assert!(
+                !dep.command.is_empty(),
+                "{} needs a check command",
+                dep.name
+            );
+            if dep.required {
+                // Required deps need an install hint on every host: a brew package
+                // (macOS) and a non-empty fallback (elsewhere).
+                assert!(
+                    dep.brew.is_some(),
+                    "{} (required) needs a brew package",
+                    dep.name
+                );
+                assert!(
+                    !dep.fallback.is_empty(),
+                    "{} (required) needs a fallback install hint",
+                    dep.name
+                );
+            }
+        }
+    }
 
-fn check_gemini_available() -> bool {
-    // Check for gemini CLI
-    which("gemini")
+    #[test]
+    fn brewfile_matches_declared_list() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let committed =
+            fs::read_to_string(root.join("Brewfile")).expect("Brewfile exists at repo root");
+        assert_eq!(
+            committed,
+            brewfile_contents(),
+            "Brewfile is stale; regenerate with `lf op doctor --brewfile > Brewfile`"
+        );
+    }
 }

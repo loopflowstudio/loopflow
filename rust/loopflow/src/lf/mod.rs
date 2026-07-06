@@ -236,9 +236,9 @@ pub enum MemoryCommand {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
-    /// Append one curated fact as a bullet
+    /// Publish one fact to the replayable memory stream
     Add {
-        /// The fact to append
+        /// The fact to publish
         fact: String,
         #[command(flatten)]
         target: WaveTargetArgs,

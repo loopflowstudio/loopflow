@@ -144,6 +144,18 @@ pub struct AsanaConfig {
     pub default_team: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct LinearConfig {
+    #[serde(default)]
+    pub team: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct PmConfig {
+    #[serde(default)]
+    pub provider: Option<String>,
+}
+
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -230,6 +242,14 @@ pub struct Config {
     /// Asana configuration for PM integration.
     #[serde(default)]
     pub asana: AsanaConfig,
+
+    /// Linear configuration for PM integration spikes.
+    #[serde(default)]
+    pub linear: LinearConfig,
+
+    /// PM provider selection.
+    #[serde(default)]
+    pub pm: Option<PmConfig>,
 }
 
 fn default_land() -> String {
@@ -264,6 +284,8 @@ impl Default for Config {
             autoprune: AutopruneConfig::default(),
             release: ReleaseConfig::default(),
             asana: AsanaConfig::default(),
+            linear: LinearConfig::default(),
+            pm: None,
         }
     }
 }

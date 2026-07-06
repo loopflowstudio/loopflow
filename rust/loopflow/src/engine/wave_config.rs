@@ -13,11 +13,15 @@ pub struct WaveCronDef {
     pub schedule: String,
 }
 
-/// The Asana project a wave's roadmap lives in, from `pm.asana_project` in GOAL.md.
+/// The PM project a wave's roadmap lives in, from `pm.*` in GOAL.md.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct WavePmConfig {
     #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
     pub asana_project: Option<String>,
+    #[serde(default)]
+    pub linear_project: Option<String>,
 }
 
 /// Intent read from `wave/<name>/GOAL.md` frontmatter during wave creation.
@@ -237,6 +241,23 @@ mod tests {
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         let pm = config.pm.expect("pm config should exist");
         assert_eq!(pm.asana_project.as_deref(), Some("1234567890"));
+    }
+
+    #[test]
+    fn read_wave_config_parses_linear_pm_block() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\npm:\n  provider: linear\n  linear_project: \"lin-123\"\n---\nDrive the work.\n",
+        )
+        .expect("write");
+
+        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
+        let pm = config.pm.expect("pm config should exist");
+        assert_eq!(pm.provider.as_deref(), Some("linear"));
+        assert_eq!(pm.linear_project.as_deref(), Some("lin-123"));
     }
 
     /// Crons live in GOAL.md frontmatter — the resident mind's schedule

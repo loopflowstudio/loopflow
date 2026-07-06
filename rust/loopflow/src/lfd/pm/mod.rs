@@ -1,10 +1,56 @@
 pub mod asana;
 mod asana_html;
+pub mod linear;
 
+use std::str::FromStr;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum PmProviderKind {
+    Asana,
+    Linear,
+}
+
+impl PmProviderKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Asana => "asana",
+            Self::Linear => "linear",
+        }
+    }
+
+    pub fn project_key(self) -> &'static str {
+        match self {
+            Self::Asana => "asana_project",
+            Self::Linear => "linear_project",
+        }
+    }
+}
+
+impl std::fmt::Display for PmProviderKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for PmProviderKind {
+    type Err = PmError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "asana" => Ok(Self::Asana),
+            "linear" => Ok(Self::Linear),
+            other => Err(PmError::Message(format!(
+                "unsupported PM provider {other:?}; expected \"asana\" or \"linear\""
+            ))),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

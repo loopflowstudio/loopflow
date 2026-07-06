@@ -1,16 +1,17 @@
-//! `lf op pm` — read and write a wave's roadmap directly in Asana.
+//! `lf op pm` — read and write a wave's roadmap directly in a PM provider.
 //!
-//! Asana is the single source of truth for a wave's roadmap. There is no local
-//! mirror: every command here talks to the Asana project pinned by
-//! `pm.asana_project` in `wave/<name>/GOAL.md`.
+//! The PM provider is the single source of truth for a wave's roadmap. There is
+//! no local mirror: every command here talks to the project pinned by the wave's
+//! `pm.*_project` frontmatter.
 
 use std::future::Future;
 use std::path::Path;
 
 use crate::engine::config::load_config_or_default;
-use crate::engine::wave_config::{read_wave_config, update_wave_goal_config};
+use crate::engine::wave_config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 use crate::lfd::pm::asana::AsanaClient;
-use crate::lfd::pm::{PmError, PmItem, PmItemCreate, PmItemUpdate};
+use crate::lfd::pm::linear::LinearClient;
+use crate::lfd::pm::{PmError, PmItem, PmItemCreate, PmItemUpdate, PmProviderKind, PmResult};
 use crate::lfdb::open_store;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -39,6 +40,7 @@ pub struct PmShowOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmShowResult {
     pub wave: String,
+    pub provider: PmProviderKind,
     pub project: String,
     pub items: Vec<PmItem>,
 }
@@ -71,6 +73,7 @@ pub struct PmStatusOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmWaveStatus {
     pub wave: String,
+    pub provider: PmProviderKind,
     pub project: String,
     pub open: usize,
     pub total: usize,
@@ -83,47 +86,166 @@ pub struct PmStatusResult {
 
 // ── Client + project resolution ─────────────────────────────────────
 
-/// A wave's Asana client bound to its roadmap project.
+/// A wave's PM client bound to its roadmap project.
 pub(crate) struct PmContext {
-    pub client: AsanaClient,
+    pub client: PmClient,
+    pub provider: PmProviderKind,
     pub project: String,
 }
 
-/// The `pm.asana_project` handle from `wave/<name>/GOAL.md`, if set.
-fn read_asana_project(repo: &Path, wave: &str) -> Option<String> {
-    read_wave_config(repo, wave)
-        .and_then(|config| config.pm)
-        .and_then(|pm| pm.asana_project)
-        .filter(|project| !project.trim().is_empty())
+pub(crate) enum PmClient {
+    Asana(AsanaClient),
+    Linear(LinearClient),
 }
 
-async fn build_asana_client(repo: &Path) -> OpsResult<AsanaClient> {
+impl PmClient {
+    async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
+        match self {
+            Self::Asana(client) => client.create_project(name, description).await,
+            Self::Linear(client) => client.create_project(name, description).await,
+        }
+    }
+
+    async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
+        match self {
+            Self::Asana(client) => client.list_items(project_id).await,
+            Self::Linear(client) => client.list_items(project_id).await,
+        }
+    }
+
+    async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
+        match self {
+            Self::Asana(client) => client.create_item(project_id, item).await,
+            Self::Linear(client) => client.create_item(project_id, item).await,
+        }
+    }
+
+    async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
+        match self {
+            Self::Asana(client) => client.update_item(item_id, update).await,
+            Self::Linear(client) => client.update_item(item_id, update).await,
+        }
+    }
+
+    async fn complete_item(&self, item_id: &str) -> PmResult<()> {
+        match self {
+            Self::Asana(client) => client.complete_item(item_id).await,
+            Self::Linear(client) => client.complete_item(item_id).await,
+        }
+    }
+
+    async fn comment(&self, item_id: &str, body: &str) -> PmResult<()> {
+        match self {
+            Self::Asana(client) => client.comment(item_id, body).await,
+            Self::Linear(client) => client.comment(item_id, body).await,
+        }
+    }
+}
+
+fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
+    read_wave_config(repo, wave).and_then(|config| config.pm)
+}
+
+fn parse_provider(value: &str) -> OpsResult<PmProviderKind> {
+    value.parse::<PmProviderKind>().map_err(pm_to_ops)
+}
+
+fn resolve_provider(repo: &Path, wave: &str) -> OpsResult<PmProviderKind> {
     let config = load_config_or_default(Some(repo));
-    let token = resolve_asana_token().await?;
-    Ok(AsanaClient::new(token, config.asana.clone()))
+    let wave_pm = read_wave_pm_config(repo, wave);
+    if let Some(provider) = wave_pm
+        .as_ref()
+        .and_then(|pm| pm.provider.as_deref())
+        .filter(|provider| !provider.trim().is_empty())
+    {
+        return parse_provider(provider);
+    }
+    if let Some(provider) = config
+        .pm
+        .as_ref()
+        .and_then(|pm| pm.provider.as_deref())
+        .filter(|provider| !provider.trim().is_empty())
+    {
+        return parse_provider(provider);
+    }
+    if wave_pm
+        .as_ref()
+        .and_then(|pm| pm.linear_project.as_ref())
+        .is_some()
+    {
+        return Ok(PmProviderKind::Linear);
+    }
+    Ok(PmProviderKind::Asana)
+}
+
+fn read_project(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<String> {
+    let pm = read_wave_pm_config(repo, wave)?;
+    let project = match provider {
+        PmProviderKind::Asana => pm.asana_project,
+        PmProviderKind::Linear => pm.linear_project,
+    }?;
+    Some(project).filter(|project| !project.trim().is_empty())
+}
+
+/// Whether a wave has a roadmap project pinned for its resolved provider.
+fn wave_has_pm_project(repo: &Path, wave: &str) -> bool {
+    resolve_provider(repo, wave)
+        .ok()
+        .is_some_and(|provider| read_project(repo, wave, provider).is_some())
+}
+
+async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<PmClient> {
+    let config = load_config_or_default(Some(repo));
+    let token = resolve_pm_token(provider).await?;
+    match provider {
+        PmProviderKind::Asana => Ok(PmClient::Asana(AsanaClient::new(
+            token,
+            config.asana.clone(),
+        ))),
+        PmProviderKind::Linear => Ok(PmClient::Linear(LinearClient::new(
+            token,
+            config.linear.team.clone(),
+        ))),
+    }
 }
 
 async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
-    let project = read_asana_project(repo, wave).ok_or_else(|| {
+    let provider = resolve_provider(repo, wave)?;
+    let project = read_project(repo, wave, provider).ok_or_else(|| {
         OpsError::Message(format!(
-            "wave/{wave}/GOAL.md has no `pm.asana_project`. \
-             Run `lf op pm init --wave {wave}` to connect its roadmap."
+            "wave/{wave}/GOAL.md has no `pm.{}`. \
+             Run `lf op pm init --wave {wave}` to connect its roadmap.",
+            provider.project_key()
         ))
     })?;
-    let client = build_asana_client(repo).await?;
-    Ok(PmContext { client, project })
+    let client = build_client(repo, provider).await?;
+    Ok(PmContext {
+        client,
+        provider,
+        project,
+    })
 }
 
-async fn resolve_asana_token() -> OpsResult<String> {
+/// Both Asana and Linear authenticate via OAuth: the access token lives in the
+/// lfdb credential store (keyed by provider), and an expired token is refreshed
+/// in place when it carries a refresh token and the OAuth client creds resolve.
+async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
+    let auth_provider = match provider {
+        PmProviderKind::Asana => Provider::Asana,
+        PmProviderKind::Linear => Provider::Linear,
+    };
+
     let store = open_store(&storage_config_from_env()?)
         .await
         .map_err(|err| OpsError::Message(format!("failed to open lfd credential store: {err}")))?;
     let token = store
-        .get_provider_token("asana")
+        .get_provider_token(provider.as_str())
         .await
-        .map_err(|err| OpsError::Message(format!("failed to load asana token: {err}")))?
+        .map_err(|err| OpsError::Message(format!("failed to load {provider} token: {err}")))?
         .ok_or_else(|| {
-            OpsError::Message("No asana credential found. Run `lf op auth asana`.".to_string())
+            OpsError::Message(format!(
+                "No {provider} credential found. Run `lf op auth {provider}`."
+            ))
         })?;
 
     let expired = token
@@ -134,14 +256,14 @@ async fn resolve_asana_token() -> OpsResult<String> {
     }
 
     // The stored token is expired but may be refreshable: if it carries a refresh
-    // token and the OAuth client creds are in the env, refresh in place rather than
+    // token and the OAuth client creds resolve, refresh in place rather than
     // forcing the user to re-authenticate.
     let refresh_token = token
         .refresh_token
         .as_deref()
         .filter(|value| !value.trim().is_empty());
     if let Some(refresh_token) = refresh_token {
-        if let Ok(mut refreshed) = refresh_pm_oauth_token(Provider::Asana, refresh_token).await {
+        if let Ok(mut refreshed) = refresh_pm_oauth_token(auth_provider, refresh_token).await {
             if refreshed.refresh_token.is_none() {
                 refreshed.refresh_token = token.refresh_token.clone();
             }
@@ -153,15 +275,17 @@ async fn resolve_asana_token() -> OpsResult<String> {
                 .upsert_provider_token(&refreshed)
                 .await
                 .map_err(|err| {
-                    OpsError::Message(format!("failed to persist refreshed asana token: {err}"))
+                    OpsError::Message(format!(
+                        "failed to persist refreshed {provider} token: {err}"
+                    ))
                 })?;
             return Ok(access_token);
         }
     }
 
-    Err(OpsError::Message(
-        "Stored asana token has expired. Run `lf op auth asana` again.".to_string(),
-    ))
+    Err(OpsError::Message(format!(
+        "Stored {provider} token has expired. Run `lf op auth {provider}` again."
+    )))
 }
 
 fn storage_config_from_env() -> OpsResult<crate::lfdb::StorageConfig> {
@@ -193,9 +317,10 @@ async fn pm_init_async(
         )));
     }
 
-    if let Some(existing) = read_asana_project(repo, &wave) {
+    let provider = resolve_provider(repo, &wave)?;
+    if let Some(existing) = read_project(repo, &wave, provider) {
         progress.status(&format!(
-            "wave/{wave} already linked to asana project {existing}"
+            "wave/{wave} already linked to {provider} project {existing}"
         ));
         return Ok(PmInitResult {
             wave,
@@ -204,19 +329,19 @@ async fn pm_init_async(
         });
     }
 
-    let client = build_asana_client(repo).await?;
-    progress.status(&format!("creating asana project for wave/{wave}"));
+    let client = build_client(repo, provider).await?;
+    progress.status(&format!("creating {provider} project for wave/{wave}"));
     let project_id = client
         .create_project(&title_case(&wave), "")
         .await
         .map_err(pm_to_ops)?;
-    write_asana_project_to_goal(repo, &wave, &project_id)?;
+    write_project_to_goal(repo, &wave, provider, &project_id)?;
 
     let _ = crate::ops::commit_workflow(
         repo,
         &crate::ops::CommitOptions {
             add: true,
-            message: Some(format!("lf pm: connect {wave} to asana")),
+            message: Some(format!("lf pm: connect {wave} to {provider}")),
             ..crate::ops::CommitOptions::for_task("pm")
         },
         progress,
@@ -256,8 +381,8 @@ async fn fetch_items(
     progress: &impl Progress,
 ) -> OpsResult<PmShowResult> {
     progress.status(&format!(
-        "fetching asana project {} for wave/{wave}",
-        ctx.project
+        "fetching {} project {} for wave/{wave}",
+        ctx.provider, ctx.project
     ));
     let items = ctx
         .client
@@ -266,6 +391,7 @@ async fn fetch_items(
         .map_err(pm_to_ops)?;
     Ok(PmShowResult {
         wave: wave.to_string(),
+        provider: ctx.provider,
         project: ctx.project.clone(),
         items,
     })
@@ -312,7 +438,7 @@ async fn apply_update(
 
     let (id, created) = match options.id.as_ref() {
         Some(id) => {
-            progress.status(&format!("updating asana task {id}"));
+            progress.status(&format!("updating {} task {id}", ctx.provider));
             ctx.client
                 .update_item(
                     id,
@@ -328,8 +454,8 @@ async fn apply_update(
         }
         None => {
             progress.status(&format!(
-                "creating asana task on project {} for wave/{wave}",
-                ctx.project
+                "creating {} task on project {} for wave/{wave}",
+                ctx.provider, ctx.project
             ));
             let id = ctx
                 .client
@@ -356,7 +482,7 @@ async fn apply_update(
         .filter(|pr| !pr.is_empty())
     {
         Some(pr) => {
-            progress.status(&format!("commenting PR link on asana task {id}"));
+            progress.status(&format!("commenting PR link on {} task {id}", ctx.provider));
             let body = if mark_done {
                 format!("Shipped: {pr}")
             } else {
@@ -422,16 +548,18 @@ async fn pm_status_async(
 
     let mut results = Vec::new();
     for wave in waves {
-        let Some(project) = read_asana_project(repo, &wave) else {
+        let provider = resolve_provider(repo, &wave)?;
+        let Some(project) = read_project(repo, &wave, provider) else {
             continue;
         };
-        let client = build_asana_client(repo).await?;
-        progress.status(&format!("checking asana for wave/{wave}"));
+        let client = build_client(repo, provider).await?;
+        progress.status(&format!("checking {provider} for wave/{wave}"));
         let items = client.list_items(&project).await.map_err(pm_to_ops)?;
         let total = items.len();
         let open = items.iter().filter(|item| !item.completed).count();
         results.push(PmWaveStatus {
             wave,
+            provider,
             project,
             open,
             total,
@@ -455,7 +583,7 @@ pub fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
         let Some(name) = entry.file_name().to_str().map(str::to_string) else {
             continue;
         };
-        if read_asana_project(repo, &name).is_some() {
+        if wave_has_pm_project(repo, &name) {
             waves.push(name);
         }
     }
@@ -465,7 +593,12 @@ pub fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
 
 // ── helpers ─────────────────────────────────────────────────────────
 
-fn write_asana_project_to_goal(repo: &Path, wave: &str, project_id: &str) -> OpsResult<()> {
+fn write_project_to_goal(
+    repo: &Path,
+    wave: &str,
+    provider: PmProviderKind,
+    project_id: &str,
+) -> OpsResult<()> {
     update_wave_goal_config(repo, wave, |map| {
         let pm_key = serde_yaml_ng::Value::String("pm".to_string());
         let mut pm_map = map
@@ -474,7 +607,7 @@ fn write_asana_project_to_goal(repo: &Path, wave: &str, project_id: &str) -> Ops
             .cloned()
             .unwrap_or_default();
         pm_map.insert(
-            serde_yaml_ng::Value::String("asana_project".to_string()),
+            serde_yaml_ng::Value::String(provider.project_key().to_string()),
             serde_yaml_ng::Value::String(project_id.to_string()),
         );
         map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm_map));
@@ -521,13 +654,70 @@ mod tests {
 
     fn test_ctx(base_url: String, project: &str) -> PmContext {
         PmContext {
-            client: AsanaClient::with_base_url(
+            client: PmClient::Asana(AsanaClient::with_base_url(
                 "test-token".to_string(),
                 AsanaConfig::default(),
                 base_url,
-            ),
+            )),
+            provider: PmProviderKind::Asana,
             project: project.to_string(),
         }
+    }
+
+    fn linear_test_ctx(base_url: String, project: &str) -> PmContext {
+        PmContext {
+            client: PmClient::Linear(crate::lfd::pm::linear::LinearClient::with_base_url(
+                "linear-secret".to_string(),
+                Some("team-9".to_string()),
+                base_url,
+            )),
+            provider: PmProviderKind::Linear,
+            project: project.to_string(),
+        }
+    }
+
+    fn write_goal(repo: &Path, wave: &str, frontmatter: &str) {
+        let dir = repo.join("wave").join(wave);
+        std::fs::create_dir_all(&dir).expect("create wave dir");
+        std::fs::write(
+            dir.join("GOAL.md"),
+            format!("---\n{frontmatter}---\nDrive the work.\n"),
+        )
+        .expect("write GOAL.md");
+    }
+
+    #[test]
+    fn resolve_provider_defaults_to_asana() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        write_goal(repo.path(), "goals", "pm:\n  asana_project: \"123\"\n");
+        assert_eq!(
+            resolve_provider(repo.path(), "goals").unwrap(),
+            PmProviderKind::Asana
+        );
+    }
+
+    #[test]
+    fn resolve_provider_selects_linear_from_frontmatter() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        write_goal(
+            repo.path(),
+            "scan",
+            "pm:\n  provider: linear\n  linear_project: \"lin-1\"\n",
+        );
+        assert_eq!(
+            resolve_provider(repo.path(), "scan").unwrap(),
+            PmProviderKind::Linear
+        );
+    }
+
+    #[test]
+    fn resolve_provider_infers_linear_from_project_key() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        write_goal(repo.path(), "scan", "pm:\n  linear_project: \"lin-1\"\n");
+        assert_eq!(
+            resolve_provider(repo.path(), "scan").unwrap(),
+            PmProviderKind::Linear
+        );
     }
 
     #[test]
@@ -578,6 +768,34 @@ mod tests {
         assert_eq!(result.project, "proj-1");
         assert_eq!(result.items.len(), 2);
         assert_eq!(result.items[0].name, "First");
+    }
+
+    #[tokio::test]
+    async fn fetch_items_dispatches_to_linear_provider() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "project": { "issues": {
+                "nodes": [
+                    { "id": "issue-1", "title": "First", "description": "one",
+                      "prioritySortOrder": 0.0, "sortOrder": 0.0,
+                      "state": { "type": "unstarted" } }
+                ],
+                "pageInfo": { "hasNextPage": false, "endCursor": null }
+            } } } }),
+        )])
+        .await;
+        let ctx = linear_test_ctx(base_url, "project-123");
+
+        let result = fetch_items("scan", &ctx, &NullProgress)
+            .await
+            .expect("fetch succeeds");
+        assert_eq!(result.provider, PmProviderKind::Linear);
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].name, "First");
+        assert_eq!(
+            requests.lock().await[0].authorization.as_deref(),
+            Some("Bearer linear-secret")
+        );
     }
 
     #[tokio::test]

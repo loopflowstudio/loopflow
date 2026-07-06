@@ -304,4 +304,42 @@ mod tests {
         assert_eq!(frame.id, None);
         assert_eq!(frame.from, None);
     }
+
+    /// The `op` frame round-trips and holds DTO discipline: `kind`/`run_id`/
+    /// `ts` are required (an absent one is a parse error), while
+    /// `flow`/`task`/`summary` are explicitly Optional (a finish carries a
+    /// summary but no flow; a start the reverse).
+    #[test]
+    fn op_frame_round_trips_and_enforces_required_fields() {
+        let started = OpFrame {
+            kind: "run.started".into(),
+            run_id: "run-1".into(),
+            flow: Some("implement".into()),
+            task: Some("wire it".into()),
+            summary: None,
+            ts: "2026-07-06T00:00:00Z".into(),
+        };
+        let decoded: OpFrame =
+            serde_json::from_value(serde_json::to_value(&started).unwrap()).unwrap();
+        assert_eq!(decoded, started);
+
+        // A required field absent is a parse error, never a silent default.
+        assert!(serde_json::from_value::<OpFrame>(
+            serde_json::json!({ "run_id": "run-1", "ts": "t" })
+        )
+        .is_err());
+
+        // A finish: no flow/task, a summary present. Absent Optionals decode
+        // as None.
+        let finished: OpFrame = serde_json::from_value(serde_json::json!({
+            "kind": "run.errored",
+            "run_id": "run-1",
+            "summary": "session failed",
+            "ts": "t"
+        }))
+        .expect("optionals may be absent");
+        assert_eq!(finished.flow, None);
+        assert_eq!(finished.task, None);
+        assert_eq!(finished.summary.as_deref(), Some("session failed"));
+    }
 }

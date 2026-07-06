@@ -1,5 +1,3 @@
-pub mod asana;
-mod asana_html;
 pub mod linear;
 
 use std::str::FromStr;
@@ -12,21 +10,18 @@ use thiserror::Error;
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum PmProviderKind {
-    Asana,
     Linear,
 }
 
 impl PmProviderKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Asana => "asana",
             Self::Linear => "linear",
         }
     }
 
     pub fn project_key(self) -> &'static str {
         match self {
-            Self::Asana => "asana_project",
             Self::Linear => "linear_project",
         }
     }
@@ -43,64 +38,10 @@ impl FromStr for PmProviderKind {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "asana" => Ok(Self::Asana),
             "linear" => Ok(Self::Linear),
             other => Err(PmError::Message(format!(
-                "unsupported PM provider {other:?}; expected \"asana\" or \"linear\""
+                "unsupported PM provider {other:?}; expected \"linear\""
             ))),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum PriorityBucket {
-    Urgent,
-    High,
-    Medium,
-    Low,
-}
-
-impl PriorityBucket {
-    pub(crate) fn from_semantic_label(label: &str) -> Option<Self> {
-        match label.trim().to_ascii_lowercase().as_str() {
-            "urgent" => Some(Self::Urgent),
-            "high" => Some(Self::High),
-            "medium" => Some(Self::Medium),
-            "low" => Some(Self::Low),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn from_rank(rank: u32) -> Self {
-        match rank {
-            0 => Self::Urgent,
-            1 => Self::High,
-            2 => Self::Medium,
-            _ => Self::Low,
-        }
-    }
-
-    pub(crate) fn order(self) -> u8 {
-        match self {
-            Self::Urgent => 0,
-            Self::High => 1,
-            Self::Medium => 2,
-            Self::Low => 3,
-        }
-    }
-
-    pub(crate) fn rank(self) -> u32 {
-        u32::from(self.order())
-    }
-
-    pub(crate) fn semantic_label(self) -> &'static str {
-        match self {
-            Self::Urgent => "Urgent",
-            Self::High => "High",
-            Self::Medium => "Medium",
-            Self::Low => "Low",
         }
     }
 }
@@ -310,7 +251,7 @@ mod tests {
     #[test]
     fn pm_item_update_text_update_preserves_name_and_description() {
         let update = PmItemUpdate {
-            name: Some("Ship Asana".to_string()),
+            name: Some("Ship roadmap".to_string()),
             description: Some("Build the roadmap client".to_string()),
             rank: Some(1),
         };
@@ -318,7 +259,7 @@ mod tests {
         assert_eq!(
             update.text_update(),
             Some(PmTextUpdate {
-                name: Some("Ship Asana"),
+                name: Some("Ship roadmap"),
                 description: Some("Build the roadmap client"),
             })
         );

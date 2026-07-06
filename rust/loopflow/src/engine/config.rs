@@ -137,14 +137,6 @@ pub struct ReleaseTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct AsanaConfig {
-    #[serde(default)]
-    pub workspace: Option<String>,
-    #[serde(default)]
-    pub default_team: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct LinearConfig {
     #[serde(default)]
     pub team: Option<String>,
@@ -239,10 +231,6 @@ pub struct Config {
     #[serde(default)]
     pub release: ReleaseConfig,
 
-    /// Asana configuration for PM integration.
-    #[serde(default)]
-    pub asana: AsanaConfig,
-
     /// Linear configuration for PM integration spikes.
     #[serde(default)]
     pub linear: LinearConfig,
@@ -283,7 +271,6 @@ impl Default for Config {
             branch_names: None,
             autoprune: AutopruneConfig::default(),
             release: ReleaseConfig::default(),
-            asana: AsanaConfig::default(),
             linear: LinearConfig::default(),
             pm: None,
         }
@@ -474,19 +461,17 @@ mod tests {
     }
 
     #[test]
-    fn config_parses_asana_settings() {
+    fn config_parses_linear_settings() {
         let yaml = r#"
-asana:
-  workspace: "1234567890"
-  default_team: "9876543210"
+linear:
+  team: "9876543210"
 "#;
 
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(
-            config.asana,
-            AsanaConfig {
-                workspace: Some("1234567890".to_string()),
-                default_team: Some("9876543210".to_string()),
+            config.linear,
+            LinearConfig {
+                team: Some("9876543210".to_string()),
             }
         );
     }

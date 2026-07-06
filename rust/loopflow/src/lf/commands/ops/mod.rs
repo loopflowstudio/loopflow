@@ -436,7 +436,7 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                     "already linked"
                 };
                 println!(
-                    "{}: asana project {} ({state})",
+                    "{}: roadmap project {} ({state})",
                     result.wave, result.project_id
                 );
             }
@@ -494,8 +494,8 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
             } else {
                 for wave in result.waves {
                     println!(
-                        "{}: asana project {} — {} open / {} total",
-                        wave.wave, wave.project, wave.open, wave.total
+                        "{}: {} project {} — {} open / {} total",
+                        wave.wave, wave.provider, wave.project, wave.open, wave.total
                     );
                 }
             }

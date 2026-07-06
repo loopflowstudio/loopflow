@@ -149,7 +149,7 @@ Loopflow integrates with:
 
 - Git and worktrees for branch isolation.
 - GitHub for PRs, webhook ingress translated to `lf` execs, and release workflows.
-- Linear, Asana, and Notion for PM-backed wave roadmaps.
+- Linear and Notion for PM-backed wave roadmaps.
 - tmux and local processes for interactive sessions.
 - Swift/macOS services for Concerto and native host behavior.
 

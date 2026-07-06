@@ -1,13 +1,18 @@
-path: demo
+path: done
 
-The fix lives entirely in `scripts/install.py`'s promotion logic
-(`_resolve_applications_dir` / `_promote` / wheel install), but its value is
-not the diff — it's whether the deployed `lf` binary now resolves to 0.10.0
-and reads the Linear roadmap instead of demanding `pm.asana_project`. The
-scratch notes already contain a full before/after transcript (`command lf
---version`, `type -a lf`, `lf op pm show --wave architecture`) showing the
-stale-shadow failure and the fixed behavior. Walking through that experience
-proves the fix; reading the path-resolution code in isolation would not
-demonstrate that the *active* app bundle actually got refreshed. No
-provider-selection or lfd route-contract code changed, so there's no
-algorithmic logic that needs a code walkthrough on its own merits.
+The branch is ship-ready. The reported break ("`lf op pm show --wave
+architecture` demands `asana_project` despite `pm.provider: linear`") was
+diagnosed as operational, not a source bug: HEAD's provider path already honors
+Linear from `GOAL.md`; the error came from a stale `lf 0.9.12` in the active
+`Loopflow.app` bundle shadowing the fresh `~/.local/bin/lf` on PATH.
+
+The scoped fix lives entirely in `scripts/install.py`: `_resolve_applications_dir()`
+promotes `local --use` into the app bundle already on PATH (so a rebuild can't be
+shadowed by a stale bundle), and the obsolete `uv tool install` global-wheel step
+is dropped (the Python wheel has no console entrypoint). Verified: 12/12
+install-script tests pass, ruff clean, and post-fix `lf --version` is 0.10.0 with
+`lf op pm show --wave architecture` listing the Linear roadmap.
+
+No provider-selection code and no lfd hard-cut route-contract code changed, per
+scope. The design review, PR copy, and validation transcript are complete. Ready
+to land.

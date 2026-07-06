@@ -275,6 +275,7 @@ def _resolve_install_dir() -> Path:
 
 
 def _resolve_applications_dir() -> Path:
+    """Promote into the app bundle already on PATH, so it can't shadow the fresh build."""
     existing = shutil.which("lf")
     if existing:
         lf_path = Path(existing).expanduser()

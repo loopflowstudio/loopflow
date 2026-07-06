@@ -55,11 +55,9 @@ enum LocalWaveAgentLauncher {
         let sessionName = PortfolioRepoState.waveAgentSessionName(repoPath: origin, waveName: waveName)
         let exists = sessionExists(repoPath: origin, waveName: waveName)
         // A lingering session with no endpoint is either mid-boot or a ghost;
-        // grace-probe so we don't kill a wave that's still publishing. No
-        // session means a single fast probe is enough.
-        let endpoint = exists
-            ? awaitLiveEndpoint(origin: origin, waveName: waveName)
-            : liveEndpoint(recorded: WaveEndpoint.read(repoPath: origin, waveName: waveName), waveName: waveName)
+        // grace-probe (3 tries) so we don't kill a wave that's still
+        // publishing. No session means one probe is enough.
+        let endpoint = awaitLiveEndpoint(origin: origin, waveName: waveName, attempts: exists ? 3 : 1)
 
         switch launchAction(sessionName: sessionName, sessionExists: exists, endpoint: endpoint) {
         case .blocked(let reason):
@@ -109,7 +107,7 @@ enum LocalWaveAgentLauncher {
     /// Poll for a live server up to `attempts` times, 1s apart — the mid-boot
     /// window where `lf wave` is up but hasn't published `.wave-endpoint` yet.
     /// Returns the endpoint once one answers; nil means the session is a ghost.
-    static func awaitLiveEndpoint(origin: String, waveName: String, attempts: Int = 3) -> String? {
+    static func awaitLiveEndpoint(origin: String, waveName: String, attempts: Int) -> String? {
         for attempt in 0..<attempts {
             if let endpoint = liveEndpoint(
                 recorded: WaveEndpoint.read(repoPath: origin, waveName: waveName),

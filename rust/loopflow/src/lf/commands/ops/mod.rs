@@ -22,8 +22,9 @@ use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, land, list_branch_candidates,
     next_branch, plan_rebase, prune_branches, rebase_class_name, rebase_strategy_name,
     rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
-    release_tag, AbandonOptions, BranchFilterOptions, BranchListOptions, BranchPruneOptions,
-    CommitOptions, LandOptions, NextOptions, PrOptions, Progress, RebaseOptions, RotationResult,
+    release_tag, submit, AbandonOptions, BranchFilterOptions, BranchListOptions,
+    BranchPruneOptions, CommitOptions, LandOptions, NextOptions, PrOptions, Progress,
+    RebaseOptions, RotationResult,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -50,6 +51,26 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
             &LandOptions {
                 strict: *strict,
                 local: *local,
+                create_pr: *create_pr,
+                worktree: worktree.clone(),
+                commit_message: message.clone(),
+                pr_title: title.clone(),
+                pr_body: body.clone(),
+                agent: cli_model.map(str::to_string),
+            },
+            &progress,
+        ),
+        OpsCommand::Submit {
+            strict,
+            create_pr,
+            worktree,
+            message,
+            title,
+            body,
+        } => submit_current(
+            &LandOptions {
+                strict: *strict,
+                local: false,
                 create_pr: *create_pr,
                 worktree: worktree.clone(),
                 commit_message: message.clone(),
@@ -236,6 +257,28 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    match submit(&repo_root, options, progress) {
+        Ok(_) => {
+            progress.status("Ready to land — click merge on the PR once checks pass.");
+            Ok(())
+        }
+        Err(OpsError::RebaseConflict { onto, detail }) => {
+            let context = format!(
+                "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
+            );
+            progress.status("Launching rebase agent to resolve conflicts...");
+            launch_step_agent(&repo_root, "rebase", Some(&context))?;
+            progress.status("Retrying submit after rebase...");
+            submit(&repo_root, options, progress)?;
+            progress.status("Ready to land — click merge on the PR once checks pass.");
+            Ok(())
+        }
+        Err(err) => Err(err.into()),
+    }
 }
 
 fn open_pr(

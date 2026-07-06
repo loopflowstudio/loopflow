@@ -48,7 +48,37 @@ pub enum RotationResult {
     Complete { preserved: PathBuf },
 }
 
-pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> OpsResult<LandResult> {
+/// How a prepared PR is handed off once it is rebased, scratch-cleared, and
+/// marked ready.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Finalize {
+    /// Arm GitHub auto-merge so the PR merges itself once checks pass. Used by
+    /// `land` — the walk-away path.
+    AutoMerge,
+    /// Assign the PR to the current user and leave it for a required, manual
+    /// merge click. Used by `submit` — nothing merges without that one click.
+    AssignForReview,
+}
+
+/// Result of preparing a PR up to (but not including) worktree rotation:
+/// committed, rebased onto main, scratch cleared, PR ready and either
+/// auto-merge armed or assigned for review (or merged locally when
+/// `options.local`).
+struct PreparedPr {
+    repo_root: PathBuf,
+    main_repo: PathBuf,
+    feature_branch: String,
+    pr: Option<PrInfo>,
+}
+
+/// Run every land step except worktree rotation. `land` follows this with a
+/// rotation; `submit` stops here and leaves the PR for a human to merge.
+fn prepare_pr(
+    repo: &Path,
+    options: &LandOptions,
+    finalize: Finalize,
+    progress: &impl Progress,
+) -> OpsResult<PreparedPr> {
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
@@ -85,17 +115,50 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
             &repo_root,
             pr_title.as_deref(),
             pr_body.as_deref(),
+            finalize,
             progress,
         )?;
         // Capture PR info before worktree rotation may invalidate the path.
         crate::ops::pr::current_pr(&repo_root).ok().flatten()
     };
 
-    let rotation = rotate_worktree(&repo_root, &main_repo, &feature_branch, progress)?;
+    Ok(PreparedPr {
+        repo_root,
+        main_repo,
+        feature_branch,
+        pr,
+    })
+}
+
+pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> OpsResult<LandResult> {
+    let prepared = prepare_pr(repo, options, Finalize::AutoMerge, progress)?;
+    let rotation = rotate_worktree(
+        &prepared.repo_root,
+        &prepared.main_repo,
+        &prepared.feature_branch,
+        progress,
+    )?;
     Ok(LandResult {
         merged: true,
         rotation,
-        pr,
+        pr: prepared.pr,
+    })
+}
+
+/// Prepare a PR to land without rotating the worktree or arming auto-merge:
+/// commit, rebase onto main, clear scratch, mark the PR ready, and assign it to
+/// the current user. Nothing merges until that user clicks merge on GitHub —
+/// that one click is the required gate.
+pub fn submit(
+    repo: &Path,
+    options: &LandOptions,
+    progress: &impl Progress,
+) -> OpsResult<LandResult> {
+    let prepared = prepare_pr(repo, options, Finalize::AssignForReview, progress)?;
+    Ok(LandResult {
+        merged: false,
+        rotation: None,
+        pr: prepared.pr,
     })
 }
 
@@ -284,23 +347,50 @@ fn finalize_remote(
     repo_root: &Path,
     pr_title: Option<&str>,
     pr_body: Option<&str>,
+    finalize: Finalize,
     progress: &impl Progress,
 ) -> OpsResult<()> {
     if let Some(title) = pr_title {
         let body = pr_body.unwrap_or("");
         progress.status("Updating PR...");
         update_pr_message(repo_root, title, body)?;
-    } else {
-        progress.status("Enabling auto-merge...");
     }
     mark_ready(repo_root)?;
-    enable_auto_merge(repo_root, pr_title, pr_body)?;
+
+    match finalize {
+        Finalize::AutoMerge => {
+            progress.status("Enabling auto-merge...");
+            enable_auto_merge(repo_root, pr_title, pr_body)?;
+        }
+        Finalize::AssignForReview => {
+            progress.status("Assigning PR for you to merge...");
+            assign_to_me(repo_root)?;
+        }
+    }
 
     if let Some(url) = current_pr_url(repo_root)? {
         progress.status(&format!("\n{url}\n"));
         open_url(&url);
     }
 
+    Ok(())
+}
+
+/// Assign the open PR to the authenticated user so it lands in their review
+/// queue. Nothing merges until they click merge — the required gate.
+fn assign_to_me(repo: &Path) -> OpsResult<()> {
+    let mut cmd = Command::new("gh");
+    cmd.arg("pr")
+        .arg("edit")
+        .arg("--add-assignee")
+        .arg("@me")
+        .current_dir(repo);
+    if let Err(err) = run_command(&mut cmd) {
+        return Err(OpsError::CommandFailed {
+            command: err.command_line(),
+            stderr: err.stderr,
+        });
+    }
     Ok(())
 }
 

@@ -150,6 +150,42 @@ pub struct AttachResponse {
     pub thread_id: Option<String>,
 }
 
+/// `POST /exec` request: run an `lf` command on the wave server, unsandboxed.
+/// The server spawns the `lf` binary with `argv` from `cwd` and streams the
+/// result back as newline-delimited [`ExecFrame`]s. This is the remote door
+/// `lfq run <lf command…>` speaks to — a sandboxed mind (whose harness can't
+/// write the main repo's `.git`) forwards git-mutating commands like
+/// `--dispatch` here, where nothing is sandboxed.
+///
+/// Rust↔Rust only: the `lfq` client and the wave server are the same binary,
+/// so — like the resident wire — only the Rust round-trip test pins it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecRequest {
+    /// The `lf` command line without argv[0] (e.g. `["implement", "add
+    /// endpoint", "--wave", "goals", "--dispatch"]`).
+    pub argv: Vec<String>,
+    /// Directory the server runs `lf` from — the caller's cwd (same machine).
+    pub cwd: String,
+}
+
+/// One newline-delimited frame of a `POST /exec` response stream: a line of
+/// the child's stdout or stderr, then a single terminal `Exit` carrying its
+/// code. `lfq` replays stdout/stderr to its own and exits with `code`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExecFrame {
+    Stdout {
+        data: String,
+    },
+    Stderr {
+        data: String,
+    },
+    /// The child exited. `code` is its status, or 1 if a signal killed it.
+    Exit {
+        code: i32,
+    },
+}
+
 /// `GET /resident/context` response: the pre-turn snapshot the resident folds
 /// into its prompts. Serving it freshens the listener's store observations
 /// (one poll), so the `<in_flight>` view is current rather than one poll
@@ -183,6 +219,39 @@ pub struct InboxFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exec_wire_round_trips() {
+        let request = ExecRequest {
+            argv: vec![
+                "implement".into(),
+                "add endpoint".into(),
+                "--wave".into(),
+                "goals".into(),
+                "--dispatch".into(),
+            ],
+            cwd: "/Users/jack/src/loopflow.goals".into(),
+        };
+        let decoded: ExecRequest =
+            serde_json::from_value(serde_json::to_value(&request).expect("serialize"))
+                .expect("deserialize");
+        assert_eq!(decoded, request);
+
+        for frame in [
+            ExecFrame::Stdout {
+                data: "line".into(),
+            },
+            ExecFrame::Stderr {
+                data: "warn".into(),
+            },
+            ExecFrame::Exit { code: 0 },
+        ] {
+            let decoded: ExecFrame =
+                serde_json::from_value(serde_json::to_value(&frame).expect("serialize"))
+                    .expect("deserialize");
+            assert_eq!(decoded, frame);
+        }
+    }
 
     #[test]
     fn resident_delta_round_trips_every_variant() {

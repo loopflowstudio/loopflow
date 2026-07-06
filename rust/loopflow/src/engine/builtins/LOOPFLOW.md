@@ -45,6 +45,20 @@ shell-out — so it's independently monitorable and steerable. List live
 sessions with `tmux ls` and drop into one with `tmux attach -t <name>` to
 answer an interactive step.
 
+Reach for `lf` first. But `--dispatch` and the git-mutating ops (`lf op
+commit/pr/land`) write the main repo's `.git`, which a sandboxed harness
+can't touch — you'll see a `.git` write restriction. When that happens, run
+the **same command** through `lfq run`; it executes on the wave server,
+unsandboxed:
+
+```bash
+lfq run <flow> "<task>" --wave <wave> --dispatch
+```
+
+`lfq run <cmd>` is `lf <cmd>` run remotely — identical semantics, just off
+the sandbox. It needs a live wave server (`lf wave <wave>`) and errors if
+none is listening.
+
 Inline edits are only for trivial fixes smaller than the cost of dispatching.
 When you do one, say why. Keep the coordinating session about decisions,
 sequencing, and reading results back.

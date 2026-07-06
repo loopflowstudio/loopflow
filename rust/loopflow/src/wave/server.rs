@@ -112,6 +112,7 @@ use std::sync::{Arc, Mutex};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::stream::{self, Stream, StreamExt};
@@ -127,8 +128,8 @@ use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::state::MindState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
-    AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, PostDeltasRequest,
-    PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
+    AttachRequest, AttachResponse, ContextResponse, ExecFrame, ExecRequest, InFlightWorker,
+    InboxFrame, PostDeltasRequest, PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
 };
 
 /// Basename of the discovery pointer under `wave/<name>/`.
@@ -344,6 +345,7 @@ pub fn router(
         .route("/resident/attach", post(resident_attach_handler))
         .route("/resident/deltas", post(resident_deltas_handler))
         .route("/resident/context", get(resident_context_handler))
+        .route("/exec", post(exec_handler))
         .with_state(state)
 }
 
@@ -570,6 +572,82 @@ async fn memory_write_handler(
             format!("memory write failed: {err}"),
         )),
     }
+}
+
+// -- The exec door (token-gated; `lfq run <lf command…>` speaks here) --
+
+/// Run an `lf` command on this (unsandboxed) server on behalf of a sandboxed
+/// caller, streaming stdout/stderr/exit back as newline-delimited
+/// [`ExecFrame`]s.
+///
+/// Security: this is a localhost RCE door by construction — the wave server
+/// binds `127.0.0.1:<port>` and nothing else, and every call must present the
+/// resident token. The command is the `lf` binary run with an argv vector
+/// (never a shell), so the forwarded args are data, not script.
+async fn exec_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<ExecRequest>,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    state.resident.authorize(&headers)?;
+    if body.argv.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "argv is empty".to_string()));
+    }
+
+    // Resolve `lf` to the binary running this server, exactly as the mind
+    // resolves `lf` for its children — never whatever the PATH happens to find.
+    let mut child = tokio::process::Command::new("lf")
+        .args(&body.argv)
+        .current_dir(&body.cwd)
+        .env("PATH", crate::wave::mind::path_for_children())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to spawn lf in {}: {err}", body.cwd),
+            )
+        })?;
+
+    let stdout = child.stdout.take().expect("stdout piped");
+    let stderr = child.stderr.take().expect("stderr piped");
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<bytes::Bytes, Infallible>>();
+
+    let out_tx = tx.clone();
+    let out = tokio::spawn(async move {
+        use tokio::io::AsyncBufReadExt;
+        let mut lines = tokio::io::BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let _ = out_tx.send(Ok(exec_frame_line(&ExecFrame::Stdout { data: line })));
+        }
+    });
+    let err_tx = tx.clone();
+    let err = tokio::spawn(async move {
+        use tokio::io::AsyncBufReadExt;
+        let mut lines = tokio::io::BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let _ = err_tx.send(Ok(exec_frame_line(&ExecFrame::Stderr { data: line })));
+        }
+    });
+    tokio::spawn(async move {
+        // Drain both pipes to EOF (the child closed them), then reap for the code.
+        let _ = out.await;
+        let _ = err.await;
+        let code = child.wait().await.ok().and_then(|s| s.code()).unwrap_or(1);
+        let _ = tx.send(Ok(exec_frame_line(&ExecFrame::Exit { code })));
+    });
+
+    let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
+    Ok(axum::body::Body::from_stream(stream).into_response())
+}
+
+/// One [`ExecFrame`] as a newline-terminated JSON line.
+fn exec_frame_line(frame: &ExecFrame) -> bytes::Bytes {
+    let mut line = serde_json::to_vec(frame).expect("ExecFrame serializes");
+    line.push(b'\n');
+    bytes::Bytes::from(line)
 }
 
 fn first_line(content: &str) -> Option<String> {

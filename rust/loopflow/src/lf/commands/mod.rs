@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod chat;
 pub mod flow;
+pub mod lfq;
 pub mod list;
 pub mod memory;
 pub mod ops;

@@ -16,6 +16,10 @@ name = "lf"
 path = "src/bin/lf.rs"
 
 [[bin]]
+name = "lfq"
+path = "src/bin/lfq.rs"
+
+[[bin]]
 name = "lfd"
 path = "src/bin/lfd.rs"
 

@@ -40,8 +40,11 @@ enum LocalWaveAgentLauncher {
     }
 
     /// Start `lf wave <name>` in a detached tmux session so it outlives Concerto.
-    /// Refuses when the wave already has a tmux session or a live endpoint —
-    /// the server enforces one brain per wave; we just avoid the doomed spawn.
+    /// A live server is the one hard block (one brain per wave). A tmux session
+    /// that exists with no live server is a ghost — a crashed `lf wave` whose
+    /// session lingered — and it is reclaimed (killed) so the Start button
+    /// isn't dead forever. To avoid reclaiming a wave that's still coming up,
+    /// the ghost verdict is taken only after a short grace probe.
     ///
     /// Wave state lives at the wave's ORIGIN repo (`WaveOrigin`), so a worktree
     /// `repoPath` resolves once up front and that one path feeds everything:
@@ -50,16 +53,23 @@ enum LocalWaveAgentLauncher {
     static func launchWave(repoPath: String, waveName: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
         let sessionName = PortfolioRepoState.waveAgentSessionName(repoPath: origin, waveName: waveName)
-        if let reason = launchBlockReason(
-            sessionName: sessionName,
-            sessionExists: sessionExists(repoPath: origin, waveName: waveName),
-            endpoint: liveEndpoint(
-                recorded: WaveEndpoint.read(repoPath: origin, waveName: waveName),
-                waveName: waveName
-            )
-        ) {
+        let exists = sessionExists(repoPath: origin, waveName: waveName)
+        // A lingering session with no endpoint is either mid-boot or a ghost;
+        // grace-probe so we don't kill a wave that's still publishing. No
+        // session means a single fast probe is enough.
+        let endpoint = exists
+            ? awaitLiveEndpoint(origin: origin, waveName: waveName)
+            : liveEndpoint(recorded: WaveEndpoint.read(repoPath: origin, waveName: waveName), waveName: waveName)
+
+        switch launchAction(sessionName: sessionName, sessionExists: exists, endpoint: endpoint) {
+        case .blocked(let reason):
             throw WaveLaunchError.alreadyRunning(reason)
+        case .reclaim(let staleSession):
+            reclaimStaleSession(sessionName: staleSession)
+        case .launch:
+            break
         }
+
         let lfPath = try resolveWaveCapableLf(originRepo: origin)
         let args = waveLaunchCommand(
             lfPath: lfPath,
@@ -70,18 +80,55 @@ enum LocalWaveAgentLauncher {
         try runChecked(args, cwd: origin)
     }
 
-    /// Why a launch must not happen, or nil when the way is clear. `endpoint`
-    /// must be a PROBED address (`liveEndpoint`), never the raw pointer file:
-    /// a SIGKILL or power loss leaves the file behind, and blocking on its
-    /// mere existence would refuse the Start button forever.
-    static func launchBlockReason(sessionName: String, sessionExists: Bool, endpoint: String?) -> String? {
+    enum LaunchAction: Equatable {
+        /// A live server owns this wave — refuse the second brain.
+        case blocked(String)
+        /// A ghost session with no live server — kill this name, then launch.
+        case reclaim(String)
+        /// Nothing in the way — launch.
+        case launch
+    }
+
+    /// What to do given whether a tmux session exists and a PROBED live
+    /// endpoint (`awaitLiveEndpoint`/`liveEndpoint`), never the raw pointer
+    /// file. A live endpoint is the only hard block: a SIGKILL leaves the
+    /// pointer behind, and a dead `lf wave` leaves the tmux session behind, so
+    /// neither the file nor the session may block on mere existence. The
+    /// server's own boot floor is the real one-brain guarantee — reclaiming a
+    /// ghost here only clears the name for it.
+    static func launchAction(sessionName: String, sessionExists: Bool, endpoint: String?) -> LaunchAction {
         if let endpoint {
-            return "Wave already has a live server at \(endpoint)."
+            return .blocked("Wave already has a live server at \(endpoint).")
         }
         if sessionExists {
-            return "tmux session '\(sessionName)' already exists — the wave may still be starting."
+            return .reclaim(sessionName)
+        }
+        return .launch
+    }
+
+    /// Poll for a live server up to `attempts` times, 1s apart — the mid-boot
+    /// window where `lf wave` is up but hasn't published `.wave-endpoint` yet.
+    /// Returns the endpoint once one answers; nil means the session is a ghost.
+    static func awaitLiveEndpoint(origin: String, waveName: String, attempts: Int = 3) -> String? {
+        for attempt in 0..<attempts {
+            if let endpoint = liveEndpoint(
+                recorded: WaveEndpoint.read(repoPath: origin, waveName: waveName),
+                waveName: waveName
+            ) {
+                return endpoint
+            }
+            if attempt < attempts - 1 {
+                Thread.sleep(forTimeInterval: 1)
+            }
         }
         return nil
+    }
+
+    /// Kill a ghost wave-agent tmux session so a fresh `lf wave` can claim the
+    /// deterministic name. Safe once no server answers: the name is one-per-wave.
+    static func reclaimStaleSession(sessionName: String) {
+        _ = runCommandSync(["tmux", "kill-session", "-t", sessionName], logFailure: false)
+        LoggingService.lfd("reclaimed stale wave session '\(sessionName)'")
     }
 
     /// The recorded endpoint, but only when a live wave server for `waveName`

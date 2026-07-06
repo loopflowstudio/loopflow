@@ -26,7 +26,7 @@
 //! frames prefixed `[<channel>]`, progress keyed per (channel, id)), or raw
 //! frames as NDJSON with `--json` (`{"event": ..., "data": ...}` per line;
 //! `turn` data stays JSON — tagged frames keep their `channel` key —
-//! `state`/`memory` data are strings).
+//! `state`/`memory`/`memory-add` data are strings).
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -172,6 +172,7 @@ impl Renderer {
         match frame.event.as_str() {
             "state" => vec![format!("state {}", frame.data)],
             "memory" => vec![format!("memory curated: {}", ellipsize(&frame.data, 70))],
+            "memory-add" => vec![format!("memory added: {}", frame.data)],
             "turn" => {
                 let Ok(turn) = serde_json::from_str::<ChatTurn>(&frame.data) else {
                     return vec![format!(
@@ -385,6 +386,13 @@ mod tests {
             }),
             vec!["memory curated: fold is truth"]
         );
+        assert_eq!(
+            renderer.lines_for(&Frame {
+                event: "memory-add".into(),
+                data: "workers report via lf chat with full detail".into()
+            }),
+            vec!["memory added: workers report via lf chat with full detail"]
+        );
         let user = turn_json("turn-1", "user", "how goes it?", "completed", "[]");
         assert_eq!(
             renderer.lines_for(&Frame {
@@ -517,6 +525,12 @@ mod tests {
         });
 
         runtime.deliver_user_message("replayed".into(), crate::wave::journal::MessageOp::Message);
+        runtime
+            .append_memory(
+                "workers report via lf chat with full useful detail",
+                "workers report",
+            )
+            .unwrap();
 
         let seen: Arc<Mutex<Vec<Frame>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
@@ -549,6 +563,13 @@ mod tests {
                 .iter()
                 .any(|f| f.event == "turn" && f.data.contains("replayed")),
             "replayed turn arrives: {frames:?}"
+        );
+        assert!(
+            frames.iter().any(|f| {
+                f.event == "memory-add"
+                    && f.data == "workers report via lf chat with full useful detail"
+            }),
+            "replayed memory-add frame arrives with the full fact: {frames:?}"
         );
         assert!(
             frames

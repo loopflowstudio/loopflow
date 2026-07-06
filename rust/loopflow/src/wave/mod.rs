@@ -621,8 +621,8 @@ mod tests {
     }
 
     /// The memory routes: GET serves the origin file; POST update/add write
-    /// it and journal `MemoryUpdated` (covered in depth by the runtime and
-    /// `lf memory` tests — this pins the HTTP shape).
+    /// it and journal their distinct memory events (covered in depth by the
+    /// runtime and `lf memory` tests — this pins the HTTP shape).
     #[tokio::test]
     async fn memory_routes_read_and_write_through_the_server() {
         let (base, runtime, _tmp) = boot().await;

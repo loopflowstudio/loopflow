@@ -2,10 +2,11 @@
 //!
 //! The live server holds the pen: `update` (full replacement from stdin) and
 //! `add "fact"` (append one curated bullet) POST to the wave server, which is
-//! the sole writer of the ORIGIN repo's `wave/<name>/MEMORY.md` and journals
-//! `MemoryUpdated {summary}`. `show` (the bare default) reads through the
-//! server when one is live and falls back to the origin file otherwise —
-//! reads don't need the pen. Targeting (`--wave`, `--parent`) matches
+//! the sole writer of the ORIGIN repo's `wave/<name>/MEMORY.md`. Updates
+//! journal `MemoryUpdated {summary}`; adds journal `MemoryAdded {fact}`.
+//! `show` (the bare default) reads through the server when one is live and
+//! falls back to the origin file otherwise — reads don't need the pen.
+//! Targeting (`--wave`, `--parent`) matches
 //! `lf chat` ([`super::chat`]), including the drop rule: a write with no wave
 //! context anywhere is a publish to no subscriber — exit 0, one stderr note.
 //! `show` is a read, so no wave context stays an error.
@@ -172,9 +173,20 @@ mod tests {
             .collect()
     }
 
+    fn memory_adds(origin: &Path, wave: &str) -> Vec<String> {
+        let (_, events) = Journal::open(&journal_path(origin, wave)).expect("journal");
+        events
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                EventKind::MemoryAdded { fact } => Some(fact),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// `update` replaces the ORIGIN repo's file through the server and
     /// journals `MemoryUpdated` (summary = first line, or the --summary flag);
-    /// `add` appends a bullet.
+    /// `add` appends a bullet and journals `MemoryAdded` with the full fact.
     #[tokio::test]
     async fn update_and_add_write_the_origin_file_and_journal() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -209,11 +221,11 @@ mod tests {
 
         assert_eq!(
             memory_summaries(origin, "ship"),
-            vec![
-                "# Ship".to_string(),
-                "rewrote the plan".to_string(),
-                "workers report via lf chat".to_string(),
-            ]
+            vec!["# Ship".to_string(), "rewrote the plan".to_string()]
+        );
+        assert_eq!(
+            memory_adds(origin, "ship"),
+            vec!["workers report via lf chat".to_string()]
         );
     }
 

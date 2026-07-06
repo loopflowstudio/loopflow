@@ -252,6 +252,9 @@ pub enum EventKind {
         run_id: String,
     },
     // -- memory --
+    MemoryAdded {
+        fact: String,
+    },
     MemoryUpdated {
         summary: String,
     },
@@ -477,6 +480,9 @@ impl Narrator {
             )),
             EventKind::ChannelOpened { name, run_id } => {
                 info(format!("channel {name} opened · run {}", short_id(run_id)))
+            }
+            EventKind::MemoryAdded { fact } => {
+                info(format!("memory added: {}", ellipsize(fact, 70)))
             }
             EventKind::MemoryUpdated { summary } => {
                 info(format!("memory curated: {}", ellipsize(summary, 70)))
@@ -722,6 +728,9 @@ pub struct ThreadFold {
     /// Run ids of `ChannelOpened` events — the idempotence guard for the
     /// dispatch-notification door (one dispatch, one opening).
     pub opened_channel_runs: HashSet<String>,
+    /// Memory facts added since the last externalization. `MEMORY.md` is the
+    /// compiled checkpoint; these are the replayable delta after it.
+    pub memory_adds: Vec<String>,
 }
 
 /// The thread-visible turn a `ChannelOpened` event materializes: a bylined
@@ -804,6 +813,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     // exported so the boot janitor can requeue it.
     let mut claims_by_open_turn: HashMap<String, Vec<MessageId>> = HashMap::new();
     let mut opened_channel_runs: HashSet<String> = HashSet::new();
+    let mut memory_adds: Vec<String> = Vec::new();
 
     for event in events {
         match &event.kind {
@@ -897,9 +907,13 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             } => {
                 turns.push(run_completed_turn(event, run_id, *outcome, summary));
             }
-            EventKind::RunObserved { .. }
-            | EventKind::MemoryUpdated { .. }
-            | EventKind::ServerStarted { .. } => {}
+            EventKind::MemoryAdded { fact } => {
+                memory_adds.push(fact.clone());
+            }
+            EventKind::MemoryUpdated { .. } => {
+                memory_adds.clear();
+            }
+            EventKind::RunObserved { .. } | EventKind::ServerStarted { .. } => {}
         }
     }
 
@@ -919,6 +933,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         messages,
         open_claims,
         opened_channel_runs,
+        memory_adds,
     }
 }
 
@@ -1134,6 +1149,9 @@ mod tests {
             EventKind::ChannelOpened {
                 name: "ship.148e0e02".into(),
                 run_id: "run-1".into(),
+            },
+            EventKind::MemoryAdded {
+                fact: "learned a fact".into(),
             },
             EventKind::MemoryUpdated {
                 summary: "learned the fold".into(),
@@ -1453,6 +1471,14 @@ mod tests {
         assert_eq!(
             n.line,
             "memory curated: journal is the console's source of truth"
+        );
+
+        let n = render(EventKind::MemoryAdded {
+            fact: "workers report through the memory stream".into(),
+        });
+        assert_eq!(
+            n.line,
+            "memory added: workers report through the memory stream"
         );
 
         let n = render(EventKind::ServerStarted {

@@ -144,6 +144,10 @@ pub struct Subscription {
     /// Live `MemoryUpdated` summaries — fired on every curation, no replay
     /// (the file itself is the durable state).
     pub memory_rx: broadcast::Receiver<String>,
+    /// Memory facts added since the last externalization, replayed on
+    /// subscribe before the live stream continues.
+    pub memory_adds: Vec<String>,
+    pub memory_add_rx: broadcast::Receiver<String>,
     /// The pending queue as of the snapshot: journaled user messages not yet
     /// named in any `answers` — the resident's boot replay.
     pub pending: Vec<PendingMessage>,
@@ -197,6 +201,9 @@ struct Inner {
     /// Run ids whose `ChannelOpened` is already journaled — the dispatch
     /// notification door's idempotence guard, folded from the journal.
     opened_channel_runs: HashSet<String>,
+    /// Memory facts added since the last externalization. The compiled
+    /// checkpoint lives in MEMORY.md; this is the replayable delta after it.
+    memory_adds: Vec<String>,
 }
 
 /// The whole live state of one running wave server.
@@ -221,6 +228,8 @@ pub struct WaveRuntime {
     state_tx: broadcast::Sender<MindState>,
     /// Fans `MemoryUpdated` summaries out to live SSE subscribers.
     memory_tx: broadcast::Sender<String>,
+    /// Fans `MemoryAdded` facts out to live SSE subscribers.
+    memory_add_tx: broadcast::Sender<String>,
     /// Durable shared brain (read-only here; the mind curates it deliberately).
     memory: Memory,
     /// Fans resident-directed ops out to the resident's `/events?inbox=true`
@@ -303,6 +312,7 @@ impl WaveRuntime {
         let (turn_tx, _) = broadcast::channel(TURN_BROADCAST_CAPACITY);
         let (state_tx, _) = broadcast::channel(STATE_BROADCAST_CAPACITY);
         let (memory_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
+        let (memory_add_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
         let (family_tx, _) = broadcast::channel(FAMILY_BROADCAST_CAPACITY);
         let (inbox_tx, _) = broadcast::channel(INBOX_BROADCAST_CAPACITY);
         let memory = Memory::for_wave(&repo_root, &name);
@@ -325,10 +335,12 @@ impl WaveRuntime {
                 messages: fold.messages,
                 open_turn_claims: Vec::new(),
                 opened_channel_runs: fold.opened_channel_runs,
+                memory_adds: fold.memory_adds,
             }),
             turn_tx,
             state_tx,
             memory_tx,
+            memory_add_tx,
             memory,
             inbox_tx,
             resident_expected: AtomicBool::new(false),
@@ -700,9 +712,9 @@ impl WaveRuntime {
     //
     // Both writes go to the ORIGIN repo's wave/<name>/MEMORY.md (the runtime
     // opens against the main repo root — the file seeds read) and journal
-    // `MemoryUpdated` under the same lock as every other append, so the
-    // journal order and the file's history agree. Nothing else writes the
-    // file while a server is live.
+    // under the same lock as every other append, so the journal order and the
+    // file's history agree. Nothing else writes the file while a server is
+    // live.
 
     /// Replace MEMORY.md wholesale and journal `MemoryUpdated {summary}`.
     ///
@@ -714,16 +726,17 @@ impl WaveRuntime {
         inner.journal.append(|_| EventKind::MemoryUpdated {
             summary: summary.to_string(),
         });
+        inner.memory_adds.clear();
         // A send error just means no live subscribers.
         let _ = self.memory_tx.send(summary.to_string());
         Ok(())
     }
 
-    /// Append one curated fact as a Markdown bullet and journal it.
+    /// Append one curated fact as a Markdown bullet and journal `MemoryAdded`.
     ///
     /// # Errors
     /// File I/O only.
-    pub fn append_memory(&self, fact: &str, summary: &str) -> std::io::Result<()> {
+    pub fn append_memory(&self, fact: &str, _summary: &str) -> std::io::Result<()> {
         let mut inner = self.inner();
         let mut content = self.memory.read();
         if !content.is_empty() && !content.ends_with('\n') {
@@ -731,10 +744,11 @@ impl WaveRuntime {
         }
         content.push_str(&format!("- {fact}\n"));
         self.memory.write(&content)?;
-        inner.journal.append(|_| EventKind::MemoryUpdated {
-            summary: summary.to_string(),
+        inner.journal.append(|_| EventKind::MemoryAdded {
+            fact: fact.to_string(),
         });
-        let _ = self.memory_tx.send(summary.to_string());
+        inner.memory_adds.push(fact.to_string());
+        let _ = self.memory_add_tx.send(fact.to_string());
         Ok(())
     }
 
@@ -773,6 +787,8 @@ impl WaveRuntime {
             state: inner.state.clone(),
             state_rx: self.state_tx.subscribe(),
             memory_rx: self.memory_tx.subscribe(),
+            memory_adds: inner.memory_adds.clone(),
+            memory_add_rx: self.memory_add_tx.subscribe(),
             pending: inner.pending_messages.clone(),
             inbox_rx: self.inbox_tx.subscribe(),
         }
@@ -1452,7 +1468,73 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(summaries, vec!["fold is truth", "bullets append"]);
+        assert_eq!(summaries, vec!["fold is truth"]);
+        let facts: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EventKind::MemoryAdded { fact } => Some(fact.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(facts, vec!["bullets append"]);
+    }
+
+    #[test]
+    fn subscription_replays_full_memory_facts_in_order() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let long_fact = "workers report via lf chat with the full useful detail";
+
+        rt.append_memory(long_fact, "workers report")
+            .expect("append");
+        rt.append_memory("second fact", "second").expect("append");
+
+        let sub = rt.subscribe_with_snapshot();
+        assert_eq!(
+            sub.memory_adds,
+            vec![long_fact.to_string(), "second fact".to_string()]
+        );
+        assert!(
+            sub.memory_add_rx.is_empty(),
+            "snapshot facts do not replay live"
+        );
+    }
+
+    #[test]
+    fn memory_externalization_resets_add_replay_buffer() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+
+        rt.append_memory("first", "first").expect("append");
+        rt.append_memory("second", "second").expect("append");
+        rt.update_memory("# Ship\n\ncompiled\n", "compiled")
+            .expect("update");
+        rt.append_memory("third", "third").expect("append");
+
+        let sub = rt.subscribe_with_snapshot();
+        assert_eq!(sub.memory_adds, vec!["third".to_string()]);
+        assert_eq!(
+            rt.memory().read(),
+            "# Ship\n\ncompiled\n- third\n",
+            "the compiled checkpoint still carries the file state"
+        );
+    }
+
+    #[test]
+    fn memory_add_replay_buffer_rebuilds_from_journal() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        {
+            let rt = open_runtime(tmp.path());
+            rt.append_memory("first", "first").expect("append");
+            rt.append_memory("second", "second").expect("append");
+            rt.update_memory("# Ship\n\ncompiled\n", "compiled")
+                .expect("update");
+            rt.append_memory("third", "third").expect("append");
+        }
+
+        let rt = open_runtime(tmp.path());
+        let sub = rt.subscribe_with_snapshot();
+        assert_eq!(sub.memory_adds, vec!["third".to_string()]);
     }
 
     #[test]

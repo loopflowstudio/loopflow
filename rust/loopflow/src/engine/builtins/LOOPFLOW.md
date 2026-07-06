@@ -41,12 +41,14 @@ lands it:
   the gate is the merge click, not a review approval.) Use this as the default
   finish for anything a person should land by hand.
 - **`lf op land`** — the work is done and **loopflow** lands it hands-off. Does
-  everything `submit` does, then arms auto-merge and rotates the worktree onto
-  the next wave item. Use it in headless/auto runs where no human is gating.
+  everything `submit` does, then arms auto-merge so it merges when checks pass.
+  Use it in headless/auto runs where no human is gating. The wave home stays put
+  — landing never moves your worktree; a merged worker's tree is pruned when its
+  branch is deleted.
 
-The sibling naming convention (`<repo>.<name>`) is load-bearing. Worktrees
-created elsewhere will not be recognized and may be corrupted during land
-rotation.
+The sibling naming convention (`<repo>.<name>`) is load-bearing: worktrees
+created elsewhere aren't recognized by `lf op wt` (list, switch, up/down, prune)
+or by land.
 
 ## Delegate Work
 

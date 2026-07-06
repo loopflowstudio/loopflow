@@ -21,7 +21,7 @@ re-derive what these already record.
 
 ## API
 
-`lf op submit` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, marking it ready, and assigning it to the human who will merge. It does **not** arm auto-merge or rotate the worktree.
+`lf op submit` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, marking it ready, and assigning it to the human who will merge. It does **not** arm auto-merge.
 
 ```
 lf op submit [--create-pr] [-m "commit message"] [--title "..."] [--body "..."]

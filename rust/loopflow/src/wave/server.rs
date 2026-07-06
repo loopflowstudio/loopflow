@@ -116,7 +116,7 @@ use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{Query, State};
+use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
@@ -384,6 +384,11 @@ struct ServerState {
 /// poller when this server is registered — `GET /resident/context` freshens
 /// it before serving. `supervisor` lets the attach door stand the respawn
 /// ladder down (`None` in tests without a supervisor).
+/// Request-body ceiling for the wave routes — parity with the machine lfd's
+/// `http_security.max_json_body_bytes` default (1 MiB). Loopback + token gate
+/// this, but an unbounded body is a needless same-user allocation.
+const MAX_BODY_BYTES: usize = 1_048_576;
+
 pub fn router(
     runtime: Arc<WaveRuntime>,
     resident: ResidentDoor,
@@ -410,6 +415,7 @@ pub fn router(
         .route("/resident/attach", post(resident_attach_handler))
         .route("/resident/deltas", post(resident_deltas_handler))
         .route("/resident/context", get(resident_context_handler))
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
 }
 
@@ -536,7 +542,12 @@ async fn exec_handler(
     let cwd = state.runtime.repo_root().display().to_string();
     let result = exec_lf(&payload.argv, Some(&cwd), &[])
         .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                crate::lfd::redaction::sanitize_operator_message(&err),
+            )
+        })?;
     Ok(Json(ExecResponse {
         exit_code: result.exit_code,
         stdout: result.stdout,

@@ -1,6 +1,6 @@
 pub mod asana;
-pub mod linear;
 mod asana_html;
+pub mod linear;
 
 use std::str::FromStr;
 use std::time::Duration;

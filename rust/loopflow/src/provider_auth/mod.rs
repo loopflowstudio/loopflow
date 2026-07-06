@@ -55,6 +55,7 @@ const ASANA_CLIENT_ID_ENV: &str = "ASANA_CLIENT_ID";
 const ASANA_CLIENT_SECRET_ENV: &str = "ASANA_CLIENT_SECRET";
 const ASANA_OAUTH_SCOPE_ENV: &str = "ASANA_OAUTH_SCOPE";
 const ASANA_OAUTH_DEFAULT_SCOPE: &str = "default";
+const LINEAR_API_KEY_ENV: &str = "LINEAR_API_KEY";
 const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
 
 static USER_CODE_RE: Lazy<Regex> =
@@ -1927,6 +1928,16 @@ where
         return Some(value);
     }
     fetch_secret(name).await
+}
+
+/// Resolve a Linear personal API key: environment first, then Doppler.
+///
+/// A Linear API key is a static bearer token used directly as the GraphQL
+/// Authorization header, so there is no OAuth exchange or refresh — this just
+/// locates the secret. The value is never printed; Doppler is consumed inline.
+pub async fn resolve_linear_api_key() -> Option<String> {
+    let mut fetch_secret = fetch_doppler_secret;
+    read_oauth_client_credential(LINEAR_API_KEY_ENV, &mut fetch_secret).await
 }
 
 async fn fetch_doppler_secret(name: &'static str) -> Option<String> {

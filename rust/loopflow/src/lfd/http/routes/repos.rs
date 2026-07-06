@@ -406,10 +406,8 @@ mod tests {
     use super::*;
     use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
     use crate::lfd::config::{GitHubConfig, HttpSecurityConfig};
-    use crate::lfd::events::EventHub;
     use crate::lfd::executor::WaveExecutor;
     use crate::lfd::id::LfdId;
-    use crate::lfd::output::OutputHub;
     use crate::lfd::types::{RepoId, RepoWork, WaveStatus};
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use crate::provider_auth::ProviderAuthService;
@@ -426,17 +424,13 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let output_hub = OutputHub::new(128, tmp.path().join("output"));
-        let event_hub = EventHub::new(128);
-        let executor = Arc::new(WaveExecutor::new(store.clone(), event_hub.clone()));
+        let executor = Arc::new(WaveExecutor::new(store.clone()));
 
         let provider_auth = ProviderAuthService::new(store.clone());
 
         HttpState {
             store,
             executor,
-            event_hub,
-            output_hub,
             provider_auth,
             auth: AuthProvider::Bearer {
                 session_token: secrecy::SecretString::from("test-token".to_string()),

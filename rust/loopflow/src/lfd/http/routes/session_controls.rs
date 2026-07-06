@@ -16,7 +16,7 @@ use crate::lfd::http::routes::{parse_lfd_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Event, Session, SessionUse, LIVE_SESSION_STATUSES};
+use crate::lfd::types::{Session, SessionUse, LIVE_SESSION_STATUSES};
 
 const COMPLETION_TOKEN_HEADER: &str = "x-terminal-completion-token";
 
@@ -251,9 +251,6 @@ async fn store_session_update(state: &HttpState, session: &Session) -> Result<()
         .update_control_session(session)
         .await
         .map_err(map_store_error)?;
-    state
-        .event_hub
-        .send(Event::session_updated(session.clone()));
     Ok(())
 }
 

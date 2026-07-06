@@ -82,9 +82,6 @@ pub async fn patch_attention_handler(
         .await
         .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, ApiMessage::Safe(err)))?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "attention item not found"))?;
-    state
-        .event_hub
-        .send(crate::lfd::types::Event::attention_updated(item.clone()));
     Ok(Json(attention_item_dto(item)))
 }
 

@@ -5,11 +5,9 @@
 //! sourced from lfdb + gh, then exits. The doorman's poll loop and PR-merged
 //! webhook will exec this verb once the collapse lands (wave 3).
 //!
-//! EventHub delta: the daemon path emits attention created/updated/resolved
-//! events when a queue block appears or clears. This verb has no hub — the
-//! journal/store write is the record of the fact. The doorman's
-//! store-poll→event push bridge (collapse call #4) owns turning those writes
-//! back into live events.
+//! Queue blocks are attention rows in the ledger — the durable record of the
+//! fact. There is no live push; a client reads them by querying attention
+//! (`lf status`), the same as every other durable fact in the wave model.
 
 use std::sync::Arc;
 
@@ -128,14 +126,7 @@ async fn reconcile_wave_queues_with_ops(
             continue;
         }
         let _guard = acquire_reconcile_lock(wave_row.id()).await;
-        let result = reconcile_wave_queue_with_ops(
-            store,
-            github,
-            wave_row.id(),
-            ops,
-            None, // no EventHub in the verb; see module docs
-        )
-        .await;
+        let result = reconcile_wave_queue_with_ops(store, github, wave_row.id(), ops).await;
         outcomes.push(WaveQueueOutcome {
             wave: wave_row.name().clone(),
             wave_id: wave_row.id().clone(),

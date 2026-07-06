@@ -13,11 +13,10 @@ use crate::lfd::attention::{
     attention_id_for_queue_block, queue_block_attention_item_from_existing,
 };
 use crate::lfd::config::GitHubConfig;
-use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, run_live_pr_key, LivePrSnapshot};
 use crate::lfd::types::{
-    AttentionStatus, Event, LivePrState, LivePullRequestState, QueueBlock, QueueBlockReason, Run,
+    AttentionStatus, LivePrState, LivePullRequestState, QueueBlock, QueueBlockReason, Run,
     RunStackStatus,
 };
 use crate::lfdb::SharedStore;
@@ -190,7 +189,6 @@ pub(crate) async fn reconcile_wave_queue_with_ops(
     github_config: &GitHubConfig,
     wave_id: &LfdId,
     ops: &dyn QueueOps,
-    event_hub: Option<&EventHub>,
 ) -> Result<(), String> {
     let wave_id_for_log = wave_id.clone();
     let mut runs = store
@@ -265,27 +263,11 @@ pub(crate) async fn reconcile_wave_queue_with_ops(
 
     let head = runs[head_index].clone();
     let Some(head_pr_number) = pr_number(&head) else {
-        set_queue_block(
-            store,
-            &head,
-            QueueBlockReason::MissingPr,
-            Vec::new(),
-            None,
-            event_hub,
-        )
-        .await?;
+        set_queue_block(store, &head, QueueBlockReason::MissingPr, Vec::new(), None).await?;
         return Ok(());
     };
     let Some(head_live_state) = live_snapshot.state_for_run(&head) else {
-        set_queue_block(
-            store,
-            &head,
-            QueueBlockReason::MissingPr,
-            Vec::new(),
-            None,
-            event_hub,
-        )
-        .await?;
+        set_queue_block(store, &head, QueueBlockReason::MissingPr, Vec::new(), None).await?;
         return Ok(());
     };
     if head_live_state.state != LivePrState::Open {
@@ -304,7 +286,6 @@ pub(crate) async fn reconcile_wave_queue_with_ops(
                 QueueBlockReason::WaveRunning,
                 Vec::new(),
                 None,
-                event_hub,
             )
             .await?;
             return Ok(());
@@ -319,7 +300,6 @@ pub(crate) async fn reconcile_wave_queue_with_ops(
             QueueBlockReason::ScratchDirty,
             Vec::new(),
             None,
-            event_hub,
         )
         .await?;
         return Ok(());
@@ -340,7 +320,6 @@ pub(crate) async fn reconcile_wave_queue_with_ops(
                 QueueBlockReason::RebaseConflict,
                 conflict.files.clone(),
                 Some("lazy rebase failed".to_string()),
-                event_hub,
             )
             .await?;
             return Ok(());
@@ -356,7 +335,6 @@ pub(crate) async fn reconcile_wave_queue_with_ops(
                 QueueBlockReason::PromotionFailed,
                 Vec::new(),
                 Some(err),
-                event_hub,
             )
             .await?;
             return Ok(());
@@ -368,7 +346,7 @@ pub(crate) async fn reconcile_wave_queue_with_ops(
         let _ = store.upsert_live_pr_state(&promoted_state).await;
     }
 
-    clear_queue_block(store, wave_id, &head.id, event_hub).await?;
+    clear_queue_block(store, wave_id, &head.id).await?;
     Ok(())
 }
 
@@ -474,7 +452,6 @@ async fn set_queue_block(
     reason: QueueBlockReason,
     conflict_files: Vec<String>,
     error: Option<String>,
-    event_hub: Option<&EventHub>,
 ) -> Result<(), String> {
     let block = QueueBlock {
         wave_id: run.wave_id.clone(),
@@ -495,24 +472,6 @@ async fn set_queue_block(
         .await
         .map_err(|err| format!("upsert_queue_block failed: {err}"))?;
 
-    if let Some(event_hub) = event_hub {
-        match existing {
-            None => event_hub.send(Event::attention_created(item)),
-            Some(existing) if existing.status == AttentionStatus::Resolved => {
-                event_hub.send(Event::attention_created(item));
-            }
-            Some(existing)
-                if existing.status != item.status
-                    || existing.title != item.title
-                    || existing.summary != item.summary
-                    || existing.context != item.context =>
-            {
-                event_hub.send(Event::attention_updated(item));
-            }
-            Some(_) => {}
-        }
-    }
-
     Ok(())
 }
 
@@ -520,7 +479,6 @@ async fn clear_queue_block(
     store: &SharedStore,
     _wave_id: &LfdId,
     run_id: &LfdId,
-    event_hub: Option<&EventHub>,
 ) -> Result<(), String> {
     let attention_id = attention_id_for_queue_block(run_id);
     let Some(mut item) = store
@@ -539,9 +497,6 @@ async fn clear_queue_block(
         .upsert_attention_item(&item)
         .await
         .map_err(|err| format!("resolve queue attention item failed: {err}"))?;
-    if let Some(event_hub) = event_hub {
-        event_hub.send(Event::attention_resolved(item));
-    }
     Ok(())
 }
 
@@ -550,7 +505,6 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
-    use crate::lfd::events::EventHub;
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         PullRequest, QueueBlockReason, RepoWork, Run, RunStatus, Wave, WaveStatus,
@@ -709,7 +663,7 @@ mod tests {
             scratch_clean: true,
             ..Default::default()
         };
-        reconcile_wave_queue_with_ops(&store, &GitHubConfig::default(), wave.id(), &ops, None)
+        reconcile_wave_queue_with_ops(&store, &GitHubConfig::default(), wave.id(), &ops)
             .await
             .expect("reconcile");
 
@@ -757,7 +711,7 @@ mod tests {
             scratch_clean: false,
             ..Default::default()
         };
-        reconcile_wave_queue_with_ops(&store, &GitHubConfig::default(), wave.id(), &ops, None)
+        reconcile_wave_queue_with_ops(&store, &GitHubConfig::default(), wave.id(), &ops)
             .await
             .expect("reconcile");
 
@@ -786,48 +740,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repeated_queue_block_preserves_age_and_emits_only_once() {
+    async fn repeated_queue_block_preserves_age() {
         let store = sqlite_store().await;
         let wave = make_wave(".");
         store.create_wave(&wave).await.expect("wave");
         let run = make_run(&wave, 0, 41);
         store.create_run(&run).await.expect("run");
         set_live_open(&store, &run, true).await;
-        let event_hub = EventHub::new(8);
-        let mut rx = event_hub.subscribe();
 
         let ops = MockOps {
             scratch_clean: false,
             ..Default::default()
         };
-        reconcile_wave_queue_with_ops(
-            &store,
-            &GitHubConfig::default(),
-            wave.id(),
-            &ops,
-            Some(&event_hub),
-        )
-        .await
-        .expect("first reconcile");
+        reconcile_wave_queue_with_ops(&store, &GitHubConfig::default(), wave.id(), &ops)
+            .await
+            .expect("first reconcile");
 
-        let created = rx.try_recv().expect("created event");
-        let first_item = match created {
-            Event::AttentionCreated { item, .. } => item,
-            other => panic!("expected attention created, got {other:?}"),
-        };
+        let attention_id = attention_id_for_queue_block(&run.id);
+        let first_item = store
+            .get_attention_item(&attention_id)
+            .await
+            .expect("get attention item")
+            .expect("queue block attention item created");
 
-        reconcile_wave_queue_with_ops(
-            &store,
-            &GitHubConfig::default(),
-            wave.id(),
-            &ops,
-            Some(&event_hub),
-        )
-        .await
-        .expect("second reconcile");
+        reconcile_wave_queue_with_ops(&store, &GitHubConfig::default(), wave.id(), &ops)
+            .await
+            .expect("second reconcile");
 
+        // A repeated block keeps the one row and its original age — reconcile
+        // doesn't reset surfaced_at on every pass.
         let queue_item = store
-            .get_attention_item(&first_item.id)
+            .get_attention_item(&attention_id)
             .await
             .expect("get attention item")
             .expect("attention item exists");
@@ -835,55 +778,42 @@ mod tests {
             queue_item.surfaced_at.unix_timestamp(),
             first_item.surfaced_at.unix_timestamp()
         );
-        assert!(rx.try_recv().is_err(), "no duplicate attention event");
     }
 
     #[tokio::test]
-    async fn clearing_queue_block_emits_attention_resolved() {
+    async fn clearing_queue_block_resolves_attention() {
         let store = sqlite_store().await;
         let wave = make_wave(".");
         store.create_wave(&wave).await.expect("wave");
         let run = make_run(&wave, 0, 51);
         store.create_run(&run).await.expect("run");
         set_live_open(&store, &run, true).await;
-        let event_hub = EventHub::new(8);
-        let mut rx = event_hub.subscribe();
 
         let blocked_ops = MockOps {
             scratch_clean: false,
             ..Default::default()
         };
-        reconcile_wave_queue_with_ops(
-            &store,
-            &GitHubConfig::default(),
-            wave.id(),
-            &blocked_ops,
-            Some(&event_hub),
-        )
-        .await
-        .expect("block reconcile");
-        let _ = rx.try_recv().expect("created event");
+        reconcile_wave_queue_with_ops(&store, &GitHubConfig::default(), wave.id(), &blocked_ops)
+            .await
+            .expect("block reconcile");
 
         let cleared_ops = MockOps {
             scratch_clean: true,
             ..Default::default()
         };
-        reconcile_wave_queue_with_ops(
-            &store,
-            &GitHubConfig::default(),
-            wave.id(),
-            &cleared_ops,
-            Some(&event_hub),
-        )
-        .await
-        .expect("clear reconcile");
+        reconcile_wave_queue_with_ops(&store, &GitHubConfig::default(), wave.id(), &cleared_ops)
+            .await
+            .expect("clear reconcile");
 
-        let resolved = rx.try_recv().expect("resolved event");
-        let resolved_item = match resolved {
-            Event::AttentionResolved { item, .. } => item,
-            other => panic!("expected attention resolved, got {other:?}"),
-        };
-        assert_eq!(resolved_item.status, AttentionStatus::Resolved);
+        // Clearing the block resolves the attention row in the ledger — the
+        // durable truth, no push.
+        let attention_id = attention_id_for_queue_block(&run.id);
+        let item = store
+            .get_attention_item(&attention_id)
+            .await
+            .expect("get attention item")
+            .expect("attention item exists");
+        assert_eq!(item.status, AttentionStatus::Resolved);
     }
 
     #[tokio::test]

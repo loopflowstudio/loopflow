@@ -12,7 +12,6 @@ pub mod system;
 pub mod usage;
 pub mod waves;
 pub mod worktrees;
-pub mod ws;
 
 #[cfg(test)]
 pub(crate) mod test_helpers;

@@ -4,8 +4,10 @@
 //!
 //! Shared home — called in-process by `lf op auth` and wrapped by the daemon's
 //! HTTP routes. Must not depend on daemon (`lfd`) types; auth lifecycle
-//! notifications go through [`AuthEventSink`], which the daemon maps onto its
-//! EventHub and the CLI ignores.
+//! notifications go through [`AuthEventSink`]. Auth is poll-only in the base
+//! wave model (see `scratch/eventing.md` §5), so both the CLI and the HTTP
+//! routes pass [`no_event_sink`] — the store write is the record; a caller
+//! reads it back by querying the provider list.
 
 pub mod credential_socket;
 
@@ -207,8 +209,9 @@ pub struct AuthFlowResponse {
     pub expires_in: Option<u64>,
 }
 
-/// Auth lifecycle notifications. The daemon maps these onto its EventHub;
-/// the CLI drops them — for a CLI caller the store write is the record.
+/// Auth lifecycle notifications. Base callers pass [`no_event_sink`] and rely
+/// on the store write; the type is retained as the sink a future narrow auth
+/// SSE (see `scratch/eventing.md` §5b) would feed.
 #[derive(Debug, Clone)]
 pub enum AuthEvent {
     FlowStarted {

@@ -9,10 +9,8 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use loopflow::lfd::config::LfdConfig;
-use loopflow::lfd::events::EventHub;
 use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
-use loopflow::lfd::output::OutputHub;
 use loopflow::lfd::security::path_within_root_planned;
 use loopflow::lfdb::{migrate_store, open_store, SharedStore, StorageConfig};
 use loopflow::provider_auth::ProviderAuthService;
@@ -131,10 +129,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let max_age =
         std::time::Duration::from_secs(u64::from(lfd_config.output_log_retention_days) * 86400);
     loopflow::lfd::output::prune_output_logs(&output_dir, max_age);
-    let output = OutputHub::new(2048, output_dir.clone());
-    let event_hub = EventHub::new(1024);
     let ci_failure_cache = Arc::new(Mutex::new(std::collections::HashSet::new()));
-    let executor = WaveExecutor::new(store.clone(), event_hub.clone());
+    let executor = WaveExecutor::new(store.clone());
 
     // Boot registry hygiene: runs left mid-flight by a dead daemon are
     // failed, and terminal sessions whose tmux sessions exited while lfd was
@@ -158,30 +154,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => tracing::warn!(error = %err, "terminal session reconcile failed"),
     }
 
-    // The one surviving background loop besides the push bridge: provider
-    // token refresh. Activation/watch/cron/recovery organs died in the
-    // collapse — webhooks exec `lf`, and cron lives in the wave's mind.
-    let token_refresh_handle = loopflow::lfd::triggers::spawn_token_refresh(
-        store.clone(),
-        event_hub.clone(),
-        cancel.clone(),
-    );
-    let journal_handle =
-        loopflow::lfd::journal::spawn(store.clone(), event_hub.clone(), cancel.clone());
-
-    // The push bridge: mutations happen in other processes now (lf wave
-    // registers store-direct, placed lf runs write runs, lf op writes attention) —
-    // poll the store and relay their effects to /ws subscribers.
-    {
-        let bridge = loopflow::lfd::bridge::StoreBridge::new(store.clone(), event_hub.clone());
-        let bridge_cancel = cancel.clone();
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = bridge_cancel.cancelled() => {}
-                _ = bridge.run(loopflow::lfd::bridge::POLL_CADENCE) => {}
-            }
-        });
-    }
+    // The one surviving background loop: provider token refresh. The push
+    // bridge, journal tailer, and /ws aggregate are gone — discovery is a query
+    // and each wave streams its own motion. Webhooks exec `lf`; cron lives in
+    // the wave's mind.
+    let token_refresh_handle =
+        loopflow::lfd::triggers::spawn_token_refresh(store.clone(), cancel.clone());
 
     // Hourly output log pruning.
     {
@@ -229,8 +207,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_state = HttpState {
         store: store.clone(),
         executor: Arc::new(executor),
-        event_hub,
-        output_hub: output,
         provider_auth: ProviderAuthService::new(store.clone()),
         auth: auth_provider,
         started_at: time::OffsetDateTime::now_utc(),
@@ -263,7 +239,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     cancel.cancel();
     let _ = token_refresh_handle.await;
-    let _ = journal_handle.await;
 
     Ok(())
 }

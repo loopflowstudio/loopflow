@@ -1,6 +1,8 @@
 use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, sync_main};
+use crate::engine::identity::WaveId;
+use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
     create_from_placement_plan, list_worktrees, main_repo_root, plan_placement,
     wave_name_from_worktree, wave_name_from_worktree_and_main, worktree_path, PlacementRequest,
@@ -1057,9 +1059,15 @@ fn wt_list(format: Option<&str>) -> Result<()> {
     }
 
     let c = Colors::new();
-    // Collect display info for all worktrees
+    let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
+
+    // Collect display info for all worktrees. `depth`/`sort_key` come from the
+    // branch's WaveId chain so children render indented under their parents.
     struct Row {
-        name: String,
+        depth: usize,
+        label: String,
+        stamp: Option<String>,
+        sort_key: String,
         is_current: bool,
         is_main: bool,
         merged: bool,
@@ -1070,19 +1078,31 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         diff_stat: String,
     }
 
-    let rows: Vec<Row> = worktrees
+    let mut rows: Vec<Row> = worktrees
         .iter()
         .map(|wt| {
             let is_main = wt.branch.as_deref() == Some(&default_branch);
-            let name = if is_main {
-                default_branch.clone()
+            let id = wt
+                .branch
+                .as_deref()
+                .and_then(|branch| WaveId::parse(branch, &user));
+            let (depth, label, stamp, sort_key) = if is_main {
+                (0, default_branch.clone(), None, String::new())
+            } else if let Some(id) = &id {
+                (
+                    id.depth(),
+                    id.leaf().to_string(),
+                    id.timestamp().map(str::to_string),
+                    id.chain_str(),
+                )
             } else {
-                wave_name_from_worktree(&wt.path).unwrap_or_else(|| {
+                let name = wave_name_from_worktree(&wt.path).unwrap_or_else(|| {
                     wt.path
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_else(|| "?".to_string())
-                })
+                });
+                (1, name.clone(), None, name)
             };
             let is_current = wt.path == repo_root;
             let diff_stat = if is_main {
@@ -1091,7 +1111,10 @@ fn wt_list(format: Option<&str>) -> Result<()> {
                 wt_diff_stat(&main_repo, wt.branch.as_deref(), &default_branch)
             };
             Row {
-                name,
+                depth,
+                label,
+                stamp,
+                sort_key,
                 is_current,
                 is_main,
                 merged: wt.merged,
@@ -1104,7 +1127,22 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         })
         .collect();
 
-    let max_name = rows.iter().map(|r| r.name.len()).max().unwrap_or(0);
+    // Main first (empty key), then a pre-order tree walk by chain.
+    rows.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+
+    // Displayed name = indent (one level per stacked tier) + leaf + worker stamp.
+    let display_name = |row: &Row| -> String {
+        let indent = "  ".repeat(row.depth.saturating_sub(1));
+        match &row.stamp {
+            Some(ts) => format!("{indent}{} {ts}", row.label),
+            None => format!("{indent}{}", row.label),
+        }
+    };
+    let max_name = rows
+        .iter()
+        .map(|r| display_name(r).len())
+        .max()
+        .unwrap_or(0);
 
     for row in &rows {
         let marker = if row.is_current { "*" } else { " " };
@@ -1146,7 +1184,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
 
         println!(
             "{marker} {name_color}{:<width$}{reset}  {status}{dirty_flag}{diff}",
-            row.name,
+            display_name(row),
             width = max_name,
             marker = marker,
             name_color = name_color,

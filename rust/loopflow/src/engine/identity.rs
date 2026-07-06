@@ -146,6 +146,25 @@ impl WaveId {
         self.chain[0].as_str()
     }
 
+    /// The last chain segment — this node's own name within its parent.
+    /// `bugs.fix-auth` → `fix-auth`; a bare wave → the wave name.
+    pub fn leaf(&self) -> &str {
+        self.chain
+            .last()
+            .map(WorktreeSegment::as_str)
+            .unwrap_or_default()
+    }
+
+    /// The dot-joined lineage, stamp-free: `bugs.fix-auth`. Sorts into a
+    /// pre-order tree walk, so ordering by it groups children under parents.
+    pub fn chain_str(&self) -> String {
+        self.chain
+            .iter()
+            .map(WorktreeSegment::as_str)
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+
     /// A worker (ephemeral, stamped) vs. a wave/subwave (persistent).
     pub fn is_worker(&self) -> bool {
         self.stamp.is_some()
@@ -284,6 +303,18 @@ mod tests {
         assert_eq!(from_branch, from_dir);
         assert_eq!(from_branch.branch(), branch);
         assert_eq!(from_dir.dir_component(), dir);
+    }
+
+    #[test]
+    fn leaf_and_chain_str_expose_lineage_for_the_tree_view() {
+        let id = WaveId::parse("jack/bugs.fix-auth.20260706_0801", "x").unwrap();
+        assert_eq!(id.leaf(), "fix-auth");
+        assert_eq!(id.chain_str(), "bugs.fix-auth"); // stamp-free, sorts as a tree
+        assert_eq!(id.depth(), 2);
+
+        let wave = WaveId::parse("bugs", "jack").unwrap();
+        assert_eq!(wave.leaf(), "bugs");
+        assert_eq!(wave.chain_str(), "bugs");
     }
 
     #[test]

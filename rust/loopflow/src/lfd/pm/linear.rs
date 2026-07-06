@@ -63,8 +63,8 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
   }
 }"#;
 
-const CREATE_ITEM_MUTATION: &str = r#"mutation CreateIssue($teamId: String!, $projectId: String!, $title: String!, $description: String!) {
-  issueCreate(input: { teamId: $teamId, projectId: $projectId, title: $title, description: $description }) {
+const CREATE_ITEM_MUTATION: &str = r#"mutation CreateIssue($teamId: String!, $projectId: String!, $title: String!, $description: String!, $stateId: String) {
+  issueCreate(input: { teamId: $teamId, projectId: $projectId, title: $title, description: $description, stateId: $stateId }) {
     issue {
       id
     }
@@ -91,6 +91,15 @@ const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowSta
   workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "completed" } }) {
     nodes {
       id
+    }
+  }
+}"#;
+
+const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowStates($teamId: String!) {
+  workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "unstarted" } }) {
+    nodes {
+      id
+      position
     }
   }
 }"#;
@@ -226,6 +235,25 @@ impl LinearClient {
             })
     }
 
+    /// Resolve the team's default active state (`type == "unstarted"`, e.g. Todo),
+    /// preferring the lowest-position state. Returns `None` when the team has no
+    /// unstarted state so the caller can fall back to Linear's own default.
+    async fn unstarted_state_id(&self, team_id: &str) -> PmResult<Option<String>> {
+        let response: WorkflowStatesData = self
+            .graphql(
+                LIST_UNSTARTED_WORKFLOW_STATES_QUERY,
+                json!({ "teamId": team_id }),
+            )
+            .await?;
+
+        Ok(response
+            .workflow_states
+            .nodes
+            .into_iter()
+            .min_by(|left, right| left.position.total_cmp(&right.position))
+            .map(|state| state.id))
+    }
+
     pub async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
         let team_id = self.resolve_team_id().await?;
         let response: ProjectCreateData = self
@@ -296,6 +324,7 @@ impl LinearClient {
 
     pub async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
         let team_id = self.resolve_team_id().await?;
+        let state_id = self.unstarted_state_id(&team_id).await?;
         let response: IssueCreateData = self
             .graphql(
                 CREATE_ITEM_MUTATION,
@@ -304,6 +333,7 @@ impl LinearClient {
                     "projectId": project_id,
                     "title": item.name,
                     "description": item.description,
+                    "stateId": state_id,
                 }),
             )
             .await?;
@@ -501,6 +531,8 @@ struct WorkflowStatesConnection {
 #[derive(Deserialize)]
 struct WorkflowStateNode {
     id: String,
+    #[serde(default)]
+    position: f64,
 }
 
 #[derive(Deserialize)]
@@ -713,6 +745,19 @@ mod tests {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
+                json!({
+                    "data": {
+                        "workflowStates": {
+                            "nodes": [
+                                { "id": "state-in-progress", "position": 2.0 },
+                                { "id": "state-todo", "position": 1.0 }
+                            ]
+                        }
+                    }
+                }),
+            ),
+            json_response(
+                StatusCode::OK,
                 json!({ "data": { "issueCreate": { "issue": { "id": "issue-123" } } } }),
             ),
             json_response(
@@ -759,7 +804,59 @@ mod tests {
             .expect("comment succeeds");
 
         assert_eq!(item_id, "issue-123");
-        assert_eq!(requests.lock().await.len(), 3);
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 4);
+
+        // create_item first resolves the team's active (unstarted) state, then
+        // sends that lowest-position state id as stateId on issueCreate so new
+        // issues land in Todo rather than the hidden Backlog.
+        let states_body: Value =
+            serde_json::from_str(&requests[0].body).expect("states body is json");
+        assert!(states_body["query"]
+            .as_str()
+            .expect("query present")
+            .contains("UnstartedWorkflowStates"));
+
+        let create_body: Value =
+            serde_json::from_str(&requests[1].body).expect("create body is json");
+        assert_eq!(create_body["variables"]["stateId"], json!("state-todo"));
+    }
+
+    #[tokio::test]
+    async fn create_item_omits_state_when_team_has_no_unstarted_state() {
+        let (base_url, requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "workflowStates": { "nodes": [] } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issueCreate": { "issue": { "id": "issue-123" } } } }),
+            ),
+        ])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-9".to_string()),
+            base_url,
+        );
+
+        client
+            .create_item(
+                "project-123",
+                &PmItemCreate {
+                    name: "Implement client".to_string(),
+                    description: "Build the GraphQL adapter".to_string(),
+                    rank: 7,
+                },
+            )
+            .await
+            .expect("create item succeeds");
+
+        let requests = requests.lock().await;
+        let create_body: Value =
+            serde_json::from_str(&requests[1].body).expect("create body is json");
+        assert_eq!(create_body["variables"]["stateId"], Value::Null);
     }
 
     #[test]

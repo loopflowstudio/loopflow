@@ -444,16 +444,6 @@ pub struct QueueBlock {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QueueMergeEvent {
-    pub wave_id: LfdId,
-    pub pr_number: u32,
-    #[serde(with = "time::serde::rfc3339")]
-    pub merged_at: OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    pub processed_at: OffsetDateTime,
-}
-
 impl Run {
     pub fn new(id: LfdId, wave_id: LfdId) -> Self {
         let stack_group_id = wave_id.to_string();

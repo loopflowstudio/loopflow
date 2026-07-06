@@ -210,6 +210,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "050_drop_trigger_organs",
         sql: include_str!("migrations/050_drop_trigger_organs.sql"),
     },
+    Migration {
+        version: "051_drop_dead_tables",
+        sql: include_str!("migrations/051_drop_dead_tables.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the

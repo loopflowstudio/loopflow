@@ -1,9 +1,7 @@
-use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use reqwest::Url;
 use time::OffsetDateTime;
 
 use crate::engine::platform::open_url;
@@ -74,10 +72,6 @@ async fn connect(raw_provider: &str) -> Result<()> {
     println!("If the browser does not open, visit:\n{verification_url}");
     open_url(&verification_url);
 
-    if provider == Provider::Asana {
-        complete_oauth_code_paste(&service, provider).await?;
-    }
-
     wait_for_active_status(&service, provider, flow.expires_in).await
 }
 
@@ -144,29 +138,6 @@ async fn local_store() -> Result<SharedStore> {
         .await
         .map_err(|err| anyhow!("failed to open local lfd credential store: {err}"))?;
     Ok(Arc::new(store))
-}
-
-async fn complete_oauth_code_paste(
-    service: &ProviderAuthService,
-    provider: Provider,
-) -> Result<()> {
-    println!("Paste the full redirect URL or just the authorization code.");
-    print!("Authorization code: ");
-    let _ = io::stdout().flush();
-
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .context("failed to read authorization code")?;
-    let code = extract_authorization_code(input.trim());
-    if code.is_empty() {
-        return Err(anyhow!(
-            "could not find an authorization code in the pasted value"
-        ));
-    }
-
-    service.complete_auth(provider, &code).await?;
-    Ok(())
 }
 
 async fn wait_for_active_status(
@@ -292,26 +263,6 @@ fn format_relative_delta(seconds: i64) -> String {
     format!("{}d", total_seconds / 86_400)
 }
 
-fn extract_authorization_code(value: &str) -> String {
-    if let Ok(url) = Url::parse(value) {
-        if let Some(code) = url
-            .query_pairs()
-            .find_map(|(key, value)| (key == "code").then(|| value.into_owned()))
-        {
-            return code;
-        }
-        if let Some(fragment) = url.fragment() {
-            for pair in fragment.split('&') {
-                let mut parts = pair.splitn(2, '=');
-                if let (Some("code"), Some(code)) = (parts.next(), parts.next()) {
-                    return code.to_string();
-                }
-            }
-        }
-    }
-    value.trim().to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use time::OffsetDateTime;
@@ -319,7 +270,7 @@ mod tests {
     use crate::lfdb::CredentialType;
     use crate::provider_auth::{AuthStatus, Provider, ProviderAuthSnapshot};
 
-    use super::{extract_authorization_code, format_relative_delta, format_snapshot};
+    use super::{format_relative_delta, format_snapshot};
 
     #[test]
     fn format_snapshot_shows_login_and_expiry() {
@@ -343,28 +294,15 @@ mod tests {
     #[test]
     fn format_snapshot_shows_disconnected_providers() {
         let rendered = format_snapshot(&ProviderAuthSnapshot {
-            provider: Provider::Asana,
+            provider: Provider::Linear,
             status: AuthStatus::None,
             expires_at: None,
             next_refresh_at: None,
             credential_type: None,
         });
 
-        assert!(rendered.contains("Asana"));
+        assert!(rendered.contains("Linear"));
         assert!(rendered.contains("not connected"));
-    }
-
-    #[test]
-    fn extract_authorization_code_accepts_raw_code() {
-        assert_eq!(extract_authorization_code("abc123"), "abc123");
-    }
-
-    #[test]
-    fn extract_authorization_code_reads_query_parameter() {
-        assert_eq!(
-            extract_authorization_code("urn:ietf:wg:oauth:2.0:oob?code=abc123&state=xyz"),
-            "abc123"
-        );
     }
 
     #[test]

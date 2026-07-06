@@ -30,7 +30,7 @@ use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -48,13 +48,6 @@ const SOCKET_AUTH_MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const OPENCODE_AUTH_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const OPENCODE_AUTH_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const OPENCODE_AUTH_URL: &str = "https://opencode.ai/auth";
-const ASANA_OAUTH_AUTHORIZE_URL: &str = "https://app.asana.com/-/oauth_authorize";
-const ASANA_OAUTH_TOKEN_URL: &str = "https://app.asana.com/-/oauth_token";
-const ASANA_OAUTH_REDIRECT_URI: &str = "urn:ietf:wg:oauth:2.0:oob";
-const ASANA_CLIENT_ID_ENV: &str = "ASANA_CLIENT_ID";
-const ASANA_CLIENT_SECRET_ENV: &str = "ASANA_CLIENT_SECRET";
-const ASANA_OAUTH_SCOPE_ENV: &str = "ASANA_OAUTH_SCOPE";
-const ASANA_OAUTH_DEFAULT_SCOPE: &str = "default";
 const LINEAR_OAUTH_AUTHORIZE_URL: &str = "https://linear.app/oauth/authorize";
 const LINEAR_OAUTH_TOKEN_URL: &str = "https://api.linear.app/oauth/token";
 const LINEAR_OAUTH_REDIRECT_URI: &str = "http://localhost:19222/oauth/callback";
@@ -82,7 +75,6 @@ pub enum Provider {
     Claude,
     Codex,
     OpenCodeZen,
-    Asana,
     Linear,
     Doppler,
 }
@@ -94,19 +86,17 @@ impl Provider {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::OpenCodeZen => "opencodezen",
-            Self::Asana => "asana",
             Self::Linear => "linear",
             Self::Doppler => "doppler",
         }
     }
 
-    pub fn all() -> [Self; 7] {
+    pub fn all() -> [Self; 6] {
         [
             Self::GitHub,
             Self::Claude,
             Self::Codex,
             Self::OpenCodeZen,
-            Self::Asana,
             Self::Linear,
             Self::Doppler,
         ]
@@ -118,7 +108,6 @@ impl Provider {
             Self::Claude => "Claude",
             Self::Codex => "Codex",
             Self::OpenCodeZen => "OpenCode Zen",
-            Self::Asana => "Asana",
             Self::Linear => "Linear",
             Self::Doppler => "Doppler",
         }
@@ -129,7 +118,7 @@ impl Provider {
             Self::Claude => Some("ANTHROPIC_API_KEY"),
             Self::Codex => Some("OPENAI_API_KEY"),
             Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
-            Self::GitHub | Self::Asana | Self::Linear | Self::Doppler => None,
+            Self::GitHub | Self::Linear | Self::Doppler => None,
         }
     }
 
@@ -139,7 +128,6 @@ impl Provider {
 
     pub fn api_key_configure_error(self) -> Option<&'static str> {
         match self {
-            Self::Asana => Some("Asana requires OAuth. Run 'lf op auth asana' to connect."),
             Self::Linear => Some("Linear requires OAuth. Run 'lf op auth linear' to connect."),
             _ => None,
         }
@@ -169,7 +157,6 @@ impl FromStr for Provider {
             "claude" => Ok(Self::Claude),
             "codex" => Ok(Self::Codex),
             "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
-            "asana" => Ok(Self::Asana),
             "linear" | "lin" => Ok(Self::Linear),
             "doppler" => Ok(Self::Doppler),
             _ => Err(ParseProviderError {
@@ -380,268 +367,18 @@ pub struct SocketAuthBroker {
     client: Arc<CredentialSocketClient>,
 }
 
-#[derive(Debug, Clone)]
-struct AsanaOAuthBroker {
-    completed_token: Arc<Mutex<Option<ProviderToken>>>,
-    pending_flow: Arc<Mutex<Option<PendingAsanaOAuthFlow>>>,
-}
-
-#[derive(Debug)]
-struct PendingAsanaOAuthFlow {
-    code_verifier: String,
-    completion_tx: oneshot::Sender<Result<(), AuthError>>,
-}
-
-#[derive(Debug, Clone)]
-struct AsanaOAuthApp {
-    client_id: String,
-    client_secret: String,
-    scope: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct AsanaOAuthTokenResponse {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_in: Option<i64>,
-    data: Option<AsanaOAuthUser>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AsanaOAuthUser {
-    email: Option<String>,
-    name: Option<String>,
-}
-
 #[derive(Debug, Deserialize)]
 struct OAuthErrorResponse {
     error: Option<String>,
     error_description: Option<String>,
 }
 
-impl AsanaOAuthBroker {
-    fn new() -> Self {
-        Self {
-            completed_token: Arc::new(Mutex::new(None)),
-            pending_flow: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    async fn oauth_app() -> Result<AsanaOAuthApp, AuthError> {
-        let (client_id, client_secret) = oauth_client_credentials(
-            Provider::Asana,
-            ASANA_CLIENT_ID_ENV,
-            ASANA_CLIENT_SECRET_ENV,
-        )
-        .await?;
-        let scope = read_nonempty_env(ASANA_OAUTH_SCOPE_ENV)
-            .unwrap_or_else(|| ASANA_OAUTH_DEFAULT_SCOPE.to_string());
-
-        Ok(AsanaOAuthApp {
-            client_id,
-            client_secret,
-            scope,
-        })
-    }
-
-    fn build_authorization_url(app: &AsanaOAuthApp, code_verifier: &str, state: &str) -> String {
-        let code_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
-        let mut url =
-            Url::parse(ASANA_OAUTH_AUTHORIZE_URL).expect("asana oauth authorize URL should parse");
-        {
-            let mut pairs = url.query_pairs_mut();
-            pairs.append_pair("client_id", &app.client_id);
-            pairs.append_pair("redirect_uri", ASANA_OAUTH_REDIRECT_URI);
-            pairs.append_pair("response_type", "code");
-            pairs.append_pair("state", state);
-            pairs.append_pair("scope", &app.scope);
-            pairs.append_pair("code_challenge", &code_challenge);
-            pairs.append_pair("code_challenge_method", "S256");
-        }
-        url.to_string()
-    }
-
-    async fn exchange_code(
-        &self,
-        app: &AsanaOAuthApp,
-        code_verifier: &str,
-        code: &str,
-    ) -> Result<ProviderToken, AuthError> {
-        let body = serde_urlencoded::to_string([
-            ("grant_type", "authorization_code"),
-            ("client_id", app.client_id.as_str()),
-            ("client_secret", app.client_secret.as_str()),
-            ("redirect_uri", ASANA_OAUTH_REDIRECT_URI),
-            ("code", code),
-            ("code_verifier", code_verifier),
-        ])
-        .map_err(|err| AuthError::OAuthRequest {
-            provider: Provider::Asana,
-            message: format!("failed to encode token request: {err}"),
-        })?;
-        let response = reqwest::Client::new()
-            .post(ASANA_OAUTH_TOKEN_URL)
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(body)
-            .send()
-            .await
-            .map_err(|err| AuthError::OAuthRequest {
-                provider: Provider::Asana,
-                message: err.to_string(),
-            })?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response
-                .bytes()
-                .await
-                .map_err(|err| AuthError::OAuthRequest {
-                    provider: Provider::Asana,
-                    message: err.to_string(),
-                })?;
-            let message = oauth_error_message(body.as_ref())
-                .unwrap_or_else(|| String::from_utf8_lossy(&body).trim().to_string());
-            if status == reqwest::StatusCode::BAD_REQUEST
-                || status == reqwest::StatusCode::UNAUTHORIZED
-            {
-                return Err(AuthError::CodeExchangeRejected {
-                    provider: Provider::Asana,
-                    message,
-                });
-            }
-            return Err(AuthError::OAuthRequest {
-                provider: Provider::Asana,
-                message: format!("HTTP {status}: {message}"),
-            });
-        }
-
-        let payload = response
-            .json::<AsanaOAuthTokenResponse>()
-            .await
-            .map_err(|err| AuthError::OAuthRequest {
-                provider: Provider::Asana,
-                message: format!("failed to decode token response: {err}"),
-            })?;
-
-        let expires_at = payload
-            .expires_in
-            .filter(|seconds| *seconds > 0)
-            .map(|seconds| now_unix() + seconds);
-        let login = payload
-            .data
-            .and_then(|user| user.email.or(user.name))
-            .filter(|value| !value.trim().is_empty());
-
-        Ok(ProviderToken {
-            provider: Provider::Asana.as_str().to_string(),
-            access_token: payload.access_token,
-            refresh_token: payload.refresh_token,
-            expires_at,
-            login,
-            updated_at: now_unix(),
-            credential_type: CredentialType::OAuth,
-        })
-    }
-}
-
-#[async_trait]
-impl AuthBroker for AsanaOAuthBroker {
-    fn provider(&self) -> Provider {
-        Provider::Asana
-    }
-
-    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let app = Self::oauth_app().await?;
-        let code_verifier = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-        let state = Uuid::new_v4().to_string();
-        let verification_uri = Self::build_authorization_url(&app, &code_verifier, &state);
-        let (completion_tx, completion_rx) = oneshot::channel();
-        *self.completed_token.lock().await = None;
-        *self.pending_flow.lock().await = Some(PendingAsanaOAuthFlow {
-            code_verifier,
-            completion_tx,
-        });
-
-        let response = AuthFlowResponse {
-            provider: Provider::Asana,
-            verification_uri_complete: Some(verification_uri.clone()),
-            verification_uri,
-            user_code: None,
-            expires_in: Some(15 * 60),
-        };
-        let monitor = tokio::spawn(async move {
-            completion_rx.await.unwrap_or_else(|_| {
-                Err(AuthError::CommandFailed {
-                    provider: Provider::Asana,
-                    message: "asana auth flow was cancelled".to_string(),
-                })
-            })
-        });
-
-        Ok(AuthFlowHandle::new(response, monitor))
-    }
-
-    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
-        let token = self.completed_token.lock().await;
-        let Some(token) = token.as_ref() else {
-            return Ok(AuthStatus::None);
-        };
-        if token
-            .expires_at
-            .is_some_and(|expires_at| expires_at <= now_unix())
-        {
-            return Ok(AuthStatus::Expired);
-        }
-        Ok(AuthStatus::Active {
-            login: token.login.clone(),
-        })
-    }
-
-    async fn disconnect(&self) -> Result<(), AuthError> {
-        self.pending_flow.lock().await.take();
-        *self.completed_token.lock().await = None;
-        Ok(())
-    }
-
-    async fn complete_auth(&self, code: &str) -> Result<(), AuthError> {
-        let app = Self::oauth_app().await?;
-        let pending = self
-            .pending_flow
-            .lock()
-            .await
-            .take()
-            .ok_or(AuthError::NoPendingFlow(Provider::Asana))?;
-
-        let exchange_result = self
-            .exchange_code(&app, &pending.code_verifier, code.trim())
-            .await;
-        match exchange_result {
-            Ok(token) => {
-                *self.completed_token.lock().await = Some(token);
-                let _ = pending.completion_tx.send(Ok(()));
-                Ok(())
-            }
-            Err(err) => {
-                let _ = pending.completion_tx.send(Err(AuthError::CommandFailed {
-                    provider: Provider::Asana,
-                    message: err.to_string(),
-                }));
-                Err(err)
-            }
-        }
-    }
-
-    async fn extract_token(&self) -> Option<ProviderToken> {
-        self.completed_token.lock().await.clone()
-    }
-}
-
 // ── Linear OAuth ────────────────────────────────────────────────────
 
-/// Linear OAuth uses a loopback redirect (`http://localhost:19222/oauth/callback`)
-/// rather than Asana's OOB paste: consent is a single click and the code arrives
-/// on a short-lived local listener. Refresh mirrors Asana — once Linear returns a
-/// refresh token, `refresh_pm_oauth_token` renews headlessly via the client creds.
+/// Linear OAuth uses a loopback redirect (`http://localhost:19222/oauth/callback`):
+/// consent is a single click and the code arrives on a short-lived local listener.
+/// Once Linear returns a refresh token, `refresh_pm_oauth_token` renews headlessly
+/// via the client creds.
 #[derive(Debug, Clone)]
 struct LinearOAuthBroker {
     completed_token: Arc<Mutex<Option<ProviderToken>>>,
@@ -1233,11 +970,8 @@ fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn A
     brokers
 }
 
-fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 2] {
-    [
-        Arc::new(AsanaOAuthBroker::new()) as Arc<dyn AuthBroker>,
-        Arc::new(LinearOAuthBroker::new()) as Arc<dyn AuthBroker>,
-    ]
+fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 1] {
+    [Arc::new(LinearOAuthBroker::new()) as Arc<dyn AuthBroker>]
 }
 
 fn socket_auth_flow_handle(
@@ -2354,9 +2088,7 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
-        Provider::Asana | Provider::Linear | Provider::Doppler => {
-            Err(TokenRefreshError::MissingToken { provider })
-        }
+        Provider::Linear | Provider::Doppler => Err(TokenRefreshError::MissingToken { provider }),
     }
 }
 
@@ -2369,11 +2101,6 @@ struct PmOAuthEndpoint {
 
 fn pm_oauth_endpoint(provider: Provider) -> Option<PmOAuthEndpoint> {
     match provider {
-        Provider::Asana => Some(PmOAuthEndpoint {
-            token_url: ASANA_OAUTH_TOKEN_URL,
-            client_id_env: ASANA_CLIENT_ID_ENV,
-            client_secret_env: ASANA_CLIENT_SECRET_ENV,
-        }),
         Provider::Linear => Some(PmOAuthEndpoint {
             token_url: LINEAR_OAUTH_TOKEN_URL,
             client_id_env: LINEAR_CLIENT_ID_ENV,
@@ -2491,7 +2218,7 @@ struct OAuthRefreshResponse {
 }
 
 /// Exchange a stored refresh token for a fresh access token via the PM provider's
-/// OAuth `grant_type=refresh_token` endpoint. Asana and Linear are supported;
+/// OAuth `grant_type=refresh_token` endpoint. Linear is the supported PM provider;
 /// client credentials are read from the provider's `*_CLIENT_ID`/`*_CLIENT_SECRET` env vars.
 ///
 /// The returned token carries `login: None`; callers should preserve the prior login.
@@ -2892,7 +2619,8 @@ mod tests {
         assert_eq!("opencodezen".parse::<Provider>(), Ok(Provider::OpenCodeZen));
         assert_eq!("zen".parse::<Provider>(), Ok(Provider::OpenCodeZen));
         assert_eq!("oc".parse::<Provider>(), Ok(Provider::OpenCodeZen));
-        assert_eq!("asana".parse::<Provider>(), Ok(Provider::Asana));
+        assert_eq!("linear".parse::<Provider>(), Ok(Provider::Linear));
+        assert_eq!("lin".parse::<Provider>(), Ok(Provider::Linear));
         assert!("gemini".parse::<Provider>().is_err());
     }
 
@@ -2902,7 +2630,7 @@ mod tests {
         assert!(Provider::Claude.api_key_bills_per_token());
         assert!(Provider::Codex.api_key_bills_per_token());
         assert!(Provider::OpenCodeZen.api_key_bills_per_token());
-        assert!(!Provider::Asana.api_key_bills_per_token());
+        assert!(!Provider::Linear.api_key_bills_per_token());
     }
 
     #[test]
@@ -3219,9 +2947,9 @@ mod tests {
         let expires_at = now_unix() + 7200;
         store
             .upsert_provider_token(&ProviderToken {
-                provider: "asana".to_string(),
-                access_token: "asana-token".to_string(),
-                refresh_token: Some("asana-refresh".to_string()),
+                provider: "linear".to_string(),
+                access_token: "linear-token".to_string(),
+                refresh_token: Some("linear-refresh".to_string()),
                 expires_at: Some(expires_at),
                 login: Some("jack@loopflow.studio".to_string()),
                 updated_at: now_unix(),
@@ -3231,7 +2959,7 @@ mod tests {
             .expect("upsert token");
         let service = ProviderAuthService::with_brokers_and_store(Vec::new(), Some(store));
 
-        let snapshot = service.status(Provider::Asana).await.expect("status");
+        let snapshot = service.status(Provider::Linear).await.expect("status");
         assert_eq!(
             snapshot.status,
             AuthStatus::Active {
@@ -3395,51 +3123,6 @@ mod tests {
     }
 
     #[test]
-    fn asana_oauth_authorization_url_includes_oob_redirect_and_pkce() {
-        let app = AsanaOAuthApp {
-            client_id: "client-123".to_string(),
-            client_secret: "secret-456".to_string(),
-            scope: "default".to_string(),
-        };
-
-        let url = AsanaOAuthBroker::build_authorization_url(&app, "verifier-123", "state-abc");
-        let parsed = Url::parse(&url).expect("asana oauth url should parse");
-        let query = parsed.query_pairs().collect::<HashMap<_, _>>();
-
-        assert_eq!(
-            parsed.as_str().split('?').next(),
-            Some(ASANA_OAUTH_AUTHORIZE_URL)
-        );
-        assert_eq!(
-            query.get("client_id").map(|value| value.as_ref()),
-            Some("client-123")
-        );
-        assert_eq!(
-            query.get("redirect_uri").map(|value| value.as_ref()),
-            Some(ASANA_OAUTH_REDIRECT_URI)
-        );
-        assert_eq!(
-            query.get("response_type").map(|value| value.as_ref()),
-            Some("code")
-        );
-        assert_eq!(
-            query.get("state").map(|value| value.as_ref()),
-            Some("state-abc")
-        );
-        assert_eq!(
-            query.get("scope").map(|value| value.as_ref()),
-            Some("default")
-        );
-        assert!(query.contains_key("code_challenge"));
-        assert_eq!(
-            query
-                .get("code_challenge_method")
-                .map(|value| value.as_ref()),
-            Some("S256")
-        );
-    }
-
-    #[test]
     fn linear_oauth_authorization_url_uses_loopback_redirect_and_pkce() {
         let app = LinearOAuthApp {
             client_id: "client-123".to_string(),
@@ -3486,7 +3169,7 @@ mod tests {
             Provider::Linear.api_key_configure_error(),
             Some("Linear requires OAuth. Run 'lf op auth linear' to connect.")
         );
-        // Refresh is wired: Linear resolves a PM OAuth endpoint like Asana.
+        // Refresh is wired: Linear resolves a PM OAuth endpoint.
         assert!(pm_oauth_endpoint(Provider::Linear).is_some());
     }
 
@@ -3501,8 +3184,8 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     async fn oauth_client_credentials_prefers_env_over_doppler() {
-        const CLIENT_ID_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_ID";
-        const CLIENT_SECRET_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_SECRET";
+        const CLIENT_ID_ENV: &str = "LOOPFLOW_TEST_LINEAR_CLIENT_ID";
+        const CLIENT_SECRET_ENV: &str = "LOOPFLOW_TEST_LINEAR_CLIENT_SECRET";
 
         let _lock = env_lock().lock().expect("env lock");
         let _env = EnvGuard::snapshot(&[CLIENT_ID_ENV, CLIENT_SECRET_ENV]);
@@ -3511,7 +3194,7 @@ mod tests {
 
         let mut doppler_calls = Vec::new();
         let credentials = oauth_client_credentials_with_doppler_runner(
-            Provider::Asana,
+            Provider::Linear,
             CLIENT_ID_ENV,
             CLIENT_SECRET_ENV,
             |name| {
@@ -3532,8 +3215,8 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     async fn oauth_client_credentials_falls_back_to_doppler() {
-        const CLIENT_ID_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_ID";
-        const CLIENT_SECRET_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_SECRET";
+        const CLIENT_ID_ENV: &str = "LOOPFLOW_TEST_LINEAR_CLIENT_ID";
+        const CLIENT_SECRET_ENV: &str = "LOOPFLOW_TEST_LINEAR_CLIENT_SECRET";
 
         let _lock = env_lock().lock().expect("env lock");
         let _env = EnvGuard::snapshot(&[CLIENT_ID_ENV, CLIENT_SECRET_ENV]);
@@ -3542,7 +3225,7 @@ mod tests {
 
         let mut doppler_calls = Vec::new();
         let credentials = oauth_client_credentials_with_doppler_runner(
-            Provider::Asana,
+            Provider::Linear,
             CLIENT_ID_ENV,
             CLIENT_SECRET_ENV,
             |name| {
@@ -3567,8 +3250,8 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     async fn oauth_client_credentials_returns_unavailable_when_env_and_doppler_miss() {
-        const CLIENT_ID_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_ID";
-        const CLIENT_SECRET_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_SECRET";
+        const CLIENT_ID_ENV: &str = "LOOPFLOW_TEST_LINEAR_CLIENT_ID";
+        const CLIENT_SECRET_ENV: &str = "LOOPFLOW_TEST_LINEAR_CLIENT_SECRET";
 
         let _lock = env_lock().lock().expect("env lock");
         let _env = EnvGuard::snapshot(&[CLIENT_ID_ENV, CLIENT_SECRET_ENV]);
@@ -3576,7 +3259,7 @@ mod tests {
         std::env::remove_var(CLIENT_SECRET_ENV);
 
         let result = oauth_client_credentials_with_doppler_runner(
-            Provider::Asana,
+            Provider::Linear,
             CLIENT_ID_ENV,
             CLIENT_SECRET_ENV,
             |_| std::future::ready(None),
@@ -3586,7 +3269,7 @@ mod tests {
         let Err(AuthError::CommandUnavailable { provider, command }) = result else {
             panic!("expected missing OAuth client credentials");
         };
-        assert_eq!(provider, Provider::Asana);
+        assert_eq!(provider, Provider::Linear);
         assert!(command.contains(CLIENT_ID_ENV));
         assert!(command.contains(CLIENT_SECRET_ENV));
         assert!(command.contains("Doppler"));
@@ -3605,8 +3288,8 @@ mod tests {
     #[test]
     fn pm_oauth_endpoint_maps_only_pm_providers() {
         assert_eq!(
-            pm_oauth_endpoint(Provider::Asana).map(|e| e.token_url),
-            Some(ASANA_OAUTH_TOKEN_URL)
+            pm_oauth_endpoint(Provider::Linear).map(|e| e.token_url),
+            Some(LINEAR_OAUTH_TOKEN_URL)
         );
         assert!(pm_oauth_endpoint(Provider::GitHub).is_none());
     }
@@ -3775,14 +3458,14 @@ mod tests {
 
     #[test]
     fn pm_providers_do_not_support_api_key_env_auth() {
-        assert_eq!(Provider::Asana.api_key_env_name(), None);
+        assert_eq!(Provider::Linear.api_key_env_name(), None);
     }
 
     #[test]
     fn pm_provider_configure_errors_point_to_oauth() {
         assert_eq!(
-            Provider::Asana.api_key_configure_error(),
-            Some("Asana requires OAuth. Run 'lf op auth asana' to connect.")
+            Provider::Linear.api_key_configure_error(),
+            Some("Linear requires OAuth. Run 'lf op auth linear' to connect.")
         );
         assert_eq!(Provider::Claude.api_key_configure_error(), None);
     }

@@ -31,7 +31,7 @@ public enum AuthProvider: String, Codable, Sendable, CaseIterable {
     case claude
     case codex
     case opencode = "opencodezen"
-    case asana
+    case linear
     case doppler
 
     public var displayName: String {
@@ -40,7 +40,7 @@ public enum AuthProvider: String, Codable, Sendable, CaseIterable {
         case .claude: "Claude"
         case .codex: "Codex"
         case .opencode: "OpenCode"
-        case .asana: "Asana"
+        case .linear: "Linear"
         case .doppler: "Doppler"
         }
     }
@@ -51,7 +51,7 @@ public enum AuthProvider: String, Codable, Sendable, CaseIterable {
         case .claude: "brain.head.profile"
         case .codex: "cpu"
         case .opencode: "chevron.left.forwardslash.chevron.right"
-        case .asana: "list.bullet.rectangle"
+        case .linear: "list.bullet.rectangle"
         case .doppler: "key.fill"
         }
     }
@@ -60,7 +60,7 @@ public enum AuthProvider: String, Codable, Sendable, CaseIterable {
         switch self {
         case .claude, .codex, .opencode: .agent
         case .github: .sourceControl
-        case .asana: .projectManagement
+        case .linear: .projectManagement
         case .doppler: .secrets
         }
     }

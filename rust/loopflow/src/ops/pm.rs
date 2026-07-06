@@ -9,7 +9,6 @@ use std::path::Path;
 
 use crate::engine::config::load_config_or_default;
 use crate::engine::wave_config::{read_wave_config, update_wave_goal_config, WavePmConfig};
-use crate::lfd::pm::asana::AsanaClient;
 use crate::lfd::pm::linear::LinearClient;
 use crate::lfd::pm::{PmError, PmItem, PmItemCreate, PmItemUpdate, PmProviderKind, PmResult};
 use crate::lfdb::open_store;
@@ -94,49 +93,42 @@ pub(crate) struct PmContext {
 }
 
 pub(crate) enum PmClient {
-    Asana(AsanaClient),
     Linear(LinearClient),
 }
 
 impl PmClient {
     async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
         match self {
-            Self::Asana(client) => client.create_project(name, description).await,
             Self::Linear(client) => client.create_project(name, description).await,
         }
     }
 
     async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
         match self {
-            Self::Asana(client) => client.list_items(project_id).await,
             Self::Linear(client) => client.list_items(project_id).await,
         }
     }
 
     async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
         match self {
-            Self::Asana(client) => client.create_item(project_id, item).await,
             Self::Linear(client) => client.create_item(project_id, item).await,
         }
     }
 
     async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
         match self {
-            Self::Asana(client) => client.update_item(item_id, update).await,
             Self::Linear(client) => client.update_item(item_id, update).await,
         }
     }
 
     async fn complete_item(&self, item_id: &str) -> PmResult<()> {
         match self {
-            Self::Asana(client) => client.complete_item(item_id).await,
             Self::Linear(client) => client.complete_item(item_id).await,
         }
     }
 
     async fn comment(&self, item_id: &str, body: &str) -> PmResult<()> {
         match self {
-            Self::Asana(client) => client.comment(item_id, body).await,
             Self::Linear(client) => client.comment(item_id, body).await,
         }
     }
@@ -168,27 +160,12 @@ fn resolve_provider(repo: &Path, wave: &str) -> OpsResult<PmProviderKind> {
     {
         return parse_provider(provider);
     }
-    if wave_pm
-        .as_ref()
-        .and_then(|pm| pm.linear_project.as_ref())
-        .is_some()
-    {
-        return Ok(PmProviderKind::Linear);
-    }
-    if wave_pm
-        .as_ref()
-        .and_then(|pm| pm.asana_project.as_ref())
-        .is_some()
-    {
-        return Ok(PmProviderKind::Asana);
-    }
     Ok(PmProviderKind::Linear)
 }
 
 fn read_project(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<String> {
     let pm = read_wave_pm_config(repo, wave)?;
     let project = match provider {
-        PmProviderKind::Asana => pm.asana_project,
         PmProviderKind::Linear => pm.linear_project,
     }?;
     Some(project).filter(|project| !project.trim().is_empty())
@@ -205,10 +182,6 @@ async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<PmClie
     let config = load_config_or_default(Some(repo));
     let token = resolve_pm_token(provider).await?;
     match provider {
-        PmProviderKind::Asana => Ok(PmClient::Asana(AsanaClient::new(
-            token,
-            config.asana.clone(),
-        ))),
         PmProviderKind::Linear => Ok(PmClient::Linear(LinearClient::new(
             token,
             config.linear.team.clone(),
@@ -233,12 +206,11 @@ async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     })
 }
 
-/// Both Asana and Linear authenticate via OAuth: the access token lives in the
-/// lfdb credential store (keyed by provider), and an expired token is refreshed
-/// in place when it carries a refresh token and the OAuth client creds resolve.
+/// Linear authenticates via OAuth: the access token lives in the lfdb credential
+/// store (keyed by provider), and an expired token is refreshed in place when it
+/// carries a refresh token and the OAuth client creds resolve.
 async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
     let auth_provider = match provider {
-        PmProviderKind::Asana => Provider::Asana,
         PmProviderKind::Linear => Provider::Linear,
     };
 
@@ -653,23 +625,10 @@ fn pm_to_ops(err: PmError) -> OpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::config::AsanaConfig;
     use crate::lfd::pm::test_server::{self, json_response};
     use crate::ops::NullProgress;
     use axum::http::StatusCode;
     use serde_json::json;
-
-    fn test_ctx(base_url: String, project: &str) -> PmContext {
-        PmContext {
-            client: PmClient::Asana(AsanaClient::with_base_url(
-                "test-token".to_string(),
-                AsanaConfig::default(),
-                base_url,
-            )),
-            provider: PmProviderKind::Asana,
-            project: project.to_string(),
-        }
-    }
 
     fn linear_test_ctx(base_url: String, project: &str) -> PmContext {
         PmContext {
@@ -691,16 +650,6 @@ mod tests {
             format!("---\n{frontmatter}---\nDrive the work.\n"),
         )
         .expect("write GOAL.md");
-    }
-
-    #[test]
-    fn resolve_provider_infers_asana_from_project_key() {
-        let repo = tempfile::tempdir().expect("temp dir");
-        write_goal(repo.path(), "goals", "pm:\n  asana_project: \"123\"\n");
-        assert_eq!(
-            resolve_provider(repo.path(), "goals").unwrap(),
-            PmProviderKind::Asana
-        );
     }
 
     #[test]
@@ -768,26 +717,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_items_reads_the_project_roadmap() {
-        let (base_url, _requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": [
-                { "gid": "1", "name": "First", "completed": false },
-                { "gid": "2", "name": "Second", "completed": true }
-            ] }),
-        )])
-        .await;
-        let ctx = test_ctx(base_url, "proj-1");
-
-        let result = fetch_items("goals", &ctx, &NullProgress)
-            .await
-            .expect("fetch succeeds");
-        assert_eq!(result.project, "proj-1");
-        assert_eq!(result.items.len(), 2);
-        assert_eq!(result.items[0].name, "First");
-    }
-
-    #[tokio::test]
     async fn fetch_items_dispatches_to_linear_provider() {
         let (base_url, requests) = test_server::spawn(vec![json_response(
             StatusCode::OK,
@@ -817,31 +746,13 @@ mod tests {
 
     #[tokio::test]
     async fn apply_update_creates_when_no_id_is_given() {
-        // create_item first resolves the project priority field, then POSTs the task.
-        let (base_url, requests) = test_server::spawn(vec![
-            json_response(
-                StatusCode::OK,
-                json!({ "data": [{
-                    "custom_field": {
-                        "gid": "field-1",
-                        "name": "Priority",
-                        "resource_subtype": "enum",
-                        "enum_options": [
-                            { "gid": "opt-urgent", "name": "Urgent" },
-                            { "gid": "opt-high", "name": "High" },
-                            { "gid": "opt-medium", "name": "Medium" },
-                            { "gid": "opt-low", "name": "Low" }
-                        ]
-                    }
-                }] }),
-            ),
-            json_response(
-                StatusCode::CREATED,
-                json!({ "data": { "gid": "new-task" } }),
-            ),
-        ])
+        // With a team already resolved, create_item is a single issueCreate mutation.
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "issueCreate": { "issue": { "id": "new-task" } } } }),
+        )])
         .await;
-        let ctx = test_ctx(base_url, "proj-1");
+        let ctx = linear_test_ctx(base_url, "project-123");
         let options = PmUpdateOptions {
             wave: None,
             id: None,
@@ -858,19 +769,29 @@ mod tests {
         assert_eq!(result.id, "new-task");
         assert!(!result.completed);
         assert!(result.linked_pr.is_none());
-        assert_eq!(requests.lock().await.len(), 2);
+        assert_eq!(requests.lock().await.len(), 1);
     }
 
     #[tokio::test]
     async fn apply_update_completes_when_status_done() {
         let (base_url, _requests) = test_server::spawn(vec![
-            // update_item PUT
-            json_response(StatusCode::OK, json!({ "data": {} })),
-            // complete_item PUT
-            json_response(StatusCode::OK, json!({ "data": {} })),
+            // update_item (issueUpdate)
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issueUpdate": { "issue": { "id": "task-9" } } } }),
+            ),
+            // complete_item resolves the completed workflow state, then transitions
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "workflowStates": { "nodes": [{ "id": "state-done" }] } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issueUpdate": { "issue": { "id": "task-9" } } } }),
+            ),
         ])
         .await;
-        let ctx = test_ctx(base_url, "proj-1");
+        let ctx = linear_test_ctx(base_url, "project-123");
         let options = PmUpdateOptions {
             wave: None,
             id: Some("task-9".to_string()),
@@ -891,15 +812,28 @@ mod tests {
     #[tokio::test]
     async fn apply_update_comments_pr_link_then_closes() {
         let (base_url, requests) = test_server::spawn(vec![
-            // update_item PUT
-            json_response(StatusCode::OK, json!({ "data": {} })),
-            // comment POST (PR link)
-            json_response(StatusCode::CREATED, json!({ "data": { "gid": "story-1" } })),
-            // complete_item PUT
-            json_response(StatusCode::OK, json!({ "data": {} })),
+            // update_item (issueUpdate)
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issueUpdate": { "issue": { "id": "task-9" } } } }),
+            ),
+            // comment (commentCreate) carrying the PR link
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "commentCreate": { "comment": { "id": "comment-1" } } } }),
+            ),
+            // complete_item: resolve the completed state, then transition
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "workflowStates": { "nodes": [{ "id": "state-done" }] } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issueUpdate": { "issue": { "id": "task-9" } } } }),
+            ),
         ])
         .await;
-        let ctx = test_ctx(base_url, "proj-1");
+        let ctx = linear_test_ctx(base_url, "project-123");
         let options = PmUpdateOptions {
             wave: None,
             id: Some("task-9".to_string()),
@@ -921,7 +855,7 @@ mod tests {
         let requests = requests.lock().await;
         let comment = requests
             .iter()
-            .find(|req| req.path.ends_with("/stories"))
+            .find(|req| req.body.contains("commentCreate"))
             .expect("PR link is posted as a comment");
         assert!(comment.body.contains("Shipped:"));
         assert!(comment.body.contains("pull/42"));

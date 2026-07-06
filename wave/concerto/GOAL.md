@@ -8,8 +8,8 @@ metrics:
   - Concerto renders no assistant turns itself — the vendor's TUI owns the conversation
   - Wave state is visible around every live session, not buried a click away
 pm:
-  provider: asana
-  asana_project: '1214270017631632'
+  provider: linear
+  linear_project: '9ee88f2a-ef37-46c7-b201-d197db3ccae0'
 ---
 
 Run one loop iteration for the Concerto wave.

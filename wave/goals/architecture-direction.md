@@ -1,12 +1,88 @@
-# Architecture direction (2026-07-05)
+# Architecture direction (2026-07-05, reconciled 2026-07-06)
 
 The technical architecture the wave-agent work is converging toward, and the
 roadmap to it. Durable record of the design conversation whose working notes
 lived in `scratch/{components,collapse,realign,post-m2}.md` (wiped on land).
 Decisions marked **[R]** are Jack-ratified; **[~]** are proposed/open. This
 document records the target direction. PR #801 (merged) reshaped the components;
-PR #803 (M1/M2 compression) then executed a large chunk of the debt below —
-resolved items are marked **[done #803]** in the staging-debt section.
+PR #803 (M1/M2 compression) then executed a large chunk of the debt below;
+PR #796 (merged 2026-07-06) landed the reactive server.
+
+**Reconciled against the merged tree on 2026-07-06** (a top-down four-layer
+read: wave core, lfdb substrate, engine+harness, lfd+lf+DTOs). The headline:
+the tree is *truer than this doc was* — ~80% of the M1/M2 debt list below was
+already executed and only survived here on paper. Resolved items are marked
+**[done]** with the PR that closed them. The "Current state" section is the
+ground-truth map the next full architecture review should start from; it
+supersedes the stale-debt narrative that used to lead this file.
+
+## Current state (2026-07-06 audit) — read this first
+
+### The kernel is small
+
+The whole system pivots on a handful of types and functions. Understand these
+and you understand loopflow.
+
+**Data structures.** `Event`/`EventKind` (`wave/journal.rs`) — the append-only
+per-wave log, the one truth. `ChatTurn` + `absorb_item` (`chat/turns.rs`) — a
+turn, with one growth rule shared by fold/adapter/live-snapshot. `WaveRuntime`
+(`wave/runtime.rs`) — the live in-memory materialization of the journal.
+`MindState` + `can_transition` (`wave/state.rs`) — the mind lifecycle, exactly
+four states. `ChildChannel`/`ChannelFrame` (`wave/channel.rs`) — a named stream
+under a wave. `ConversationEvent` (`chat/types.rs`) — the vendor-normalized
+event. The `Harness` trait (`harness/mod.rs`) — the vendor abstraction.
+`Run`/`RunEventRow`/`Session` (`lfdb`) — the operational rows.
+
+**Load-bearing APIs.** `Journal::append` — the single writer; journal order ==
+cache order == broadcast order because everything routes through it under one
+lock. `fold_thread`/`fold_workers` — pure folds; the store is truth, memory is
+a projection. `run_mind` (`wave/mind.rs`) — the scheduler `select!` loop (the
+"outer loop owns scheduling" claim, made real). `WaveRuntime::open` — the boot
+janitor that makes the journal closed-consistent before serving. The session
+env contract (`LFD_SESSION_ID` + `LFD_SESSION_INHERITED`) — the identity
+mechanism: present-without-inherited = "I own this row"; present-with-inherited
+= "ancestor's row, chain under it."
+
+### What the audit found: tiers of "unnecessary"
+
+**Tier 1 — already deleted (this doc was stale).** All confirmed gone in the
+merged tree: `loop_ticker` + the activation queue, `build_wave_agent_command` /
+`InFlightDispatch` / the old goal-agent launch path, `roadmap_item` plumbing,
+`LOOPFLOW_OPERATING_PROMPT` and the "Looping Agent" double-identity (single
+"mind" identity now), `--pool` / `Placement::Pool`, `LFD_DISABLE_TMUX`,
+`alias="loop"`, all postgres residue, and `render_goal`'s roadmap/metrics
+ceremony. The naming rule is authored **once** (not 4×); `find_repo_root` and
+`stream_events` are already in their charter homes.
+
+**Tier 2 — genuinely dead, being cut now** (PR: dead-code sweep):
+`secrets_provider_config` (0 refs) and `wave_pr_merge_events` (insert-only, no
+reader) tables dropped; the `worker_dispatched`/`worker_finished` serde back-
+compat aliases removed. Still live and deferred: migration-tolerance healing
+(048/049/050), deletable only after every store converges.
+
+**Tier 3 — the one real remaining charter gap: lfd is still a hand.** `/land`,
+`/next`, `/combine`, `/stop`, rename, `DELETE /waves`, and session
+create/cancel still mutate in-process (`crate::ops`, `git`, `tmux kill-session`)
+from route handlers. The code self-flags it (`waves.rs:29`). `hooks.rs` already
+shows the target pattern — it plans `LfExec`s and spawns detached `lf`. The fix
+is making the other routes look like `hooks.rs`. Adjacent placement smell:
+`lfd/pm/linear.rs` and `lfd/queue.rs` (vendor + git code) sit under the `lfd::`
+namespace though only `lf` calls them. **This is what M1 is now about.**
+
+**Tier 4 — shape questions for the full review (judgment, not cleanup).** Do
+not pre-resolve these; they are the review's payload. (a) `journal/mod.rs`
+double-writes run telemetry to both `events.jsonl` and sqlite `run_events` —
+the jsonl exists only for lfd's poller. (b) Two disjoint journal subsystems
+(`crate::journal` CLI-run telemetry vs `crate::wave::journal` the wave log)
+share one append+fold pattern built twice; hazard today is two `read_events`
+with the same name and different signatures. (c) Three shapes for "the agent
+said something": `ConversationEvent → EventKind → ChatTurn`. (d) `MEMORY.md`
+carries truth + progress + mailbox + cache at once.
+
+The DTO discipline is clean: no `serde(default)` in the mirrored wire types, and
+a real 3-language fixture round-trip test that treats an absent required field
+as a parse error. Only blemish: request-*body* DTOs (`LandWaveRequest`,
+`UpdateWaveRequest`) derive `Default` — inbound, not in the fixture set.
 
 ## The anatomy
 
@@ -70,6 +146,14 @@ Not in any store: wave identity (GOAL.md/MEMORY.md markdown), conversation
   promotion (a work line grows a GOAL) is the vocabulary.
 - **`lf wave` spawns the mind [R];** the resident's own command is a role
   flag (`--mind-only` / `--no-mind`), not a `mind` noun.
+- **A wave targets exactly one repo [R] (2026-07-06).** Cross-repo is a
+  nice-to-have, not a shaping constraint. The `Wave { repos: [RepoWork] }`
+  multi-repo model (the `wave_repos` table, `RepoWork`/`RepoWorkDto`) is being
+  stripped — the single repo and its execution state belong directly to the
+  wave. If cross-repo ever returns, it is a **wave-tree of single-repo
+  children** over channels, never a repo-list on one wave. This resolves the
+  code's prior split-brain: the substrate carried the multi-repo model while
+  the reactive server (#796) was already single-`repo_root`.
 
 ## The waves-outward claims (C1–C7)
 
@@ -102,21 +186,23 @@ Claude coinages and were reshaped in the July 5 design walk.
 
 ## Roadmap: M0 → M4 (ordered by when reviewing stops hurting)
 
-- **M0 — True (this branch):** the fix wave lands; the demo claims hold
-  again (worker reports reach the mind, no wedges, no message loss); PR
-  ships. *Exit: the live two-process demo runs clean.*
-- **M1 — Shaped (the conversion):** the component charter enforced — harness
-  → `crate::harness`; engine consolidation (config/naming/util,
-  the cycle-breaks); dispatch extracted from the executor's corpse;
-  gatekeeper sheds in-process mutations; grammar (`skill | flow | op | :` +
-  `--dispatch`); `step`→`skill` sweep. One worktree per move-set. *Exit:
-  cargo dependency direction matches the charter — commands import
-  components, never the reverse; `crate::wave` extracts cleanly.*
-- **M2 — Substrate:** postgres + dual-backend machinery deleted (~2.5k
-  lines); container mode cut as a product/deployment shape; sqlite narrowed to
-  the operational scratchpad; run lifecycle and conversation on their proper
-  tiers; the query plane. *Exit: `grep -r rusqlite::` in wave/ returns
-  nothing; postgres and `mode: container` gone.*
+- **M0 — True [done #796]:** the reactive server landed; worker reports reach
+  the mind, no wedges, no message loss; the live two-process demo runs clean.
+- **M1 — Shaped (the conversion):** *mostly done, one gap left.* Harness →
+  `crate::harness` [done #803]; the `step`→`skill`/`--dispatch` grammar
+  [done #803]; the naming rule, `find_repo_root`, `stream_events` all already
+  in their charter homes [done]. **The one remaining M1 move: lfd stops being a
+  hand** — convert `/land`, `/next`, `/combine`, `/stop`, rename, `DELETE
+  /waves`, session create/cancel to exec `lf` argv (pattern: `hooks.rs`), then
+  delete the private hands. Secondary: hoist `lfd/pm` + `lfd/queue` out of the
+  `lfd::` namespace (only `lf` calls them). *Exit: no route handler calls
+  git/tmux/ops in-process; the dependency arrow already matches the charter
+  (verified — nothing imports `lf::commands` but `bin/lf.rs`).*
+- **M2 — Substrate:** *mostly done.* Postgres + dual-backend deleted [done
+  #803]; container mode + `mode` knob cut [done #803]. Remaining: narrow sqlite
+  to the operational scratchpad, and the Tier-4 shape calls (the run-telemetry
+  double-write, the two journal subsystems) if the review greenlights them.
+  *Exit: run telemetry has one home; sqlite holds only operational facts.*
 - **M3 — Faced:** auth/identity, exec-under-client-identity door; `lfq` the
   proxy; `loopflow` the python viewer library; remote Concerto via relay;
   federation. Self-hosted operation stays SSH-first. *Exit: drive a Mac-Mini
@@ -129,20 +215,28 @@ Claude coinages and were reshaped in the July 5 design walk.
 Standing campaign, throughout: prove-the-language — three reference builds
 from goals.
 
-## The M1 conversion work-list (from the 2026-07-05 review's confirmed cycles)
+## The M1 conversion work-list (reconciled 2026-07-06)
 
-1. `stream_events` (SSE client): `lf::commands::sub` → `wave`.
-2. `find_repo_root`: `lf::commands::util` → `engine`.
-3. `wave_config` / `read_wave_config`: `lfd::http::routes` → `engine`.
-4. Worktree/naming: `channel.rs`'s private path math + executor's
-   `run_worktree_path` → one rule in `engine/worktrees` (fixes the
-   4×-authored divergence).
-5. `ensure_wave_worktree` + placement helpers: `lfd::executor` → `dispatch`.
-6. `process_alive` / tmux probes: one home; both `wave` and `dispatch` call.
-7. Primary-channel predicate: one function (name-equality vs dot-absence
-   unified), used by the listener and `wave_context`.
-8. `lfd`'s in-process mutations (`/land`, `/next`, `/combine`, `/stop`,
-   rename) → exec `lf` under client authority.
+Most of the 2026-07-05 list turned out already done in the merged tree. Verified
+status:
+
+1. ~~`stream_events`: `lf::commands::sub` → `wave`~~ — **[done]** lives at
+   `wave/subscription.rs`; `lf/commands/sub.rs` imports it.
+2. ~~`find_repo_root`: → `engine`~~ — **[done]** at `engine/repo.rs`;
+   `lf::commands::util` is a one-line delegate.
+3. ~~`wave_config` → `engine`~~ — **[done #803]** shim dropped; `WaveConfig`
+   lives in `engine/wave_config.rs`.
+4. ~~Worktree/naming: one rule~~ — **[done]** authored once (`engine/naming.rs`
+   + `engine/worktrees.rs`). The only residue: `wave/channel.rs`
+   `child_worktree_path` re-inlines the `{repo}.{suffix}` format — fold into
+   `engine::worktrees` (small).
+5. `ensure_wave_worktree` + placement helpers → `dispatch` — still in
+   `lfd::executor/helpers.rs`; the `dispatch` component isn't extracted yet.
+6. `process_alive` / tmux probes: one home — minor, still scattered.
+7. Primary-channel predicate: one function — minor.
+8. **`lfd`'s in-process mutations (`/land`, `/next`, `/combine`, `/stop`,
+   rename, `DELETE /waves`, session create/cancel) → exec `lf`.** *This is the
+   live M1 gap.* Pattern to copy: `hooks.rs` (`LfExec` + detached spawn).
 
 ## Component charter (role · data · API · IO)
 
@@ -186,13 +280,17 @@ target above:
 - Container mode's *deploy* mechanisms (env hardening, named credential mounts,
   health checks, redaction, service-file hygiene) still need a home in the
   future deploy/SSH story if they still apply.
-- `lfd` still has remote-bind/token scaffolding. Target: local capability token
-  through M2, with real remote identity/auth in M3.
-- `lfd` still has hand routes (`/land`, `/next`, `/combine`, `/stop`, rename)
-  that call ops or tmux in-process. Target: exec `lf` argv, then remove the
-  private hands.
-- `stream_events`, `find_repo_root`, and worktree naming/placement helpers
-  still sit in pre-charter homes. M1 owns these remaining moves.
+- `lfd` still has remote-bind/token scaffolding (an `AuthConfig.token` override,
+  `LFD_HTTP_TRUSTED_PROXY_CIDRS`, IP-source machinery) pre-wired for M3. The
+  runtime today meets the M2 target (local capability token only); the M3 knobs
+  are dormant. Self-flagged `TODO(M3)` in `lfd/auth.rs`.
+- **`lfd` still has hand routes — the live M1 gap.** `/land`, `/next`,
+  `/combine`, `/stop`, rename, `DELETE /waves`, session create/cancel call ops
+  or tmux in-process. Target: exec `lf` argv (pattern: `hooks.rs`), then remove
+  the private hands. See Current-state Tier 3 and M1 item 8.
+- **[done]** `stream_events`, `find_repo_root`, worktree naming — all already
+  in their charter homes (see the reconciled M1 work-list). Only `child_worktree_path`
+  (`wave/channel.rs`) still re-inlines the naming format.
 
 Mechanisms to preserve while moving or cutting old organs:
 
@@ -207,9 +305,28 @@ Mechanisms to preserve while moving or cutting old organs:
 - process hygiene: tmux/session reconciliation, worktree janitor, graceful
   shutdown hooks, interrupt deadlines
 
-## Open, needing Jack
+## Decisions ratified 2026-07-06
+
+- **Cross-repo model → wave = 1 repo [R].** `Wave { repos: [RepoWork] }` and
+  `wave_repos` are being stripped; cross-repo is a future wave-tree, not a repo
+  list. (See Ratified principles.)
+- **Interrupt grace window → accept immediate kill [R].** The design promised
+  cooperative→grace→kill; the code does immediate SIGKILL. Simpler is fine —
+  this doc now matches reality. A grace stage is an M4-if-ever note, not work.
+- **Offline waves → accept the bounce; fix the *workers*, not the transport
+  [R].** A down/absent wave server should be a shrug — workers degrade, note,
+  and keep going — not a source of concern. That's mostly an operating-
+  instructions adaptation (`<lf:loopflow>` already says "note it and move on";
+  agents don't yet act like it). The real goal is keeping the server *up*.
+  Queue-for-offline-waves stays a named follow-up, not a commitment.
+- **Conformance traces → hand-authored + a live smoke gate [R].** A live smoke
+  test is what actually catches vendor protocol drift (codex hardcodes 0.142.5
+  wire strings in `harness/codex.rs` — the drift point). Recorded real traces
+  are heavier for less; skip them.
+
+## Still open, needing Jack
 
 - Transport-contingency as a narrow wave-listener-only claim: keep or drop.
 - Channel vocabulary: how much should user-facing CLI expose channels directly?
-- Cross-repo model: wave tree of single-repo children, `Wave { repos:
-  [RepoWork] }`, or both as orthogonal axes?
+- The Tier-4 shape questions (Current state) are the full review's agenda, not
+  pre-decided here.

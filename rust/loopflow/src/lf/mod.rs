@@ -147,6 +147,11 @@ pub enum Commands {
         #[command(subcommand)]
         op: OpsCommand,
     },
+    /// Local launchd jobs that run lf commands on a schedule
+    Cron {
+        #[command(subcommand)]
+        cmd: CronCommand,
+    },
     /// Start a wave: a long-lived listener (journal, doors, live events over
     /// a loopback HTTP port; discovery via `wave/<name>/.wave-endpoint`)
     /// that spawns and supervises the wave's mind as a resident child
@@ -422,11 +427,6 @@ pub enum OpsCommand {
     Queue {
         #[command(subcommand)]
         cmd: QueueCommand,
-    },
-    /// Local launchd jobs that run lf commands on a schedule
-    Cron {
-        #[command(subcommand)]
-        cmd: CronCommand,
     },
 }
 

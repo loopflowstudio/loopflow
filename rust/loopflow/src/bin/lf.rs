@@ -511,6 +511,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Op { op }) => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::ops::run(op, cli.model.as_deref())
             }),
+            Some(Commands::Cron { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
+            }
             Some(Commands::Wave {
                 name,
                 force,
@@ -580,6 +583,7 @@ fn run_label(cli: &Cli) -> Option<String> {
             .map(|step| step.trim_end_matches(':').to_string()),
         None => Some("interactive".to_string()),
         Some(Commands::Op { .. })
+        | Some(Commands::Cron { .. })
         | Some(Commands::Wave { .. })
         | Some(Commands::Usage)
         | Some(Commands::Runs)

@@ -127,7 +127,6 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
                 crate::ops::queue::reconcile_queue_cmd(wave.as_deref())
             }
         },
-        OpsCommand::Cron { cmd } => cron_cmd(cmd),
     }
 }
 
@@ -539,7 +538,7 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
     Ok(())
 }
 
-fn cron_cmd(cmd: &CronCommand) -> Result<()> {
+pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
     let launch_agents_dir = crate::ops::default_launch_agents_dir()?;
     match cmd {
         CronCommand::Add {

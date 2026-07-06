@@ -234,9 +234,8 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
         | OpsCommand::Wt { .. }
         | OpsCommand::Shell { .. }
         | OpsCommand::Auth { .. }
-        | OpsCommand::Queue { .. }
-        | OpsCommand::Cron { .. } => Err(OpsError::Message(
-            "ops item does not support cp/doctor/pm/branches/wt/shell/auth/queue/cron commands"
+        | OpsCommand::Queue { .. } => Err(OpsError::Message(
+            "ops item does not support cp/doctor/pm/branches/wt/shell/auth/queue commands"
                 .to_string(),
         )),
     }

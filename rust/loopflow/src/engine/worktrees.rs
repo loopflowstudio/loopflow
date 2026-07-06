@@ -317,7 +317,10 @@ fn upstream_branch(worktree: &Path) -> Option<String> {
     if raw.is_empty() {
         return None;
     }
-    let branch = raw.split('/').next_back().unwrap_or(&raw).to_string();
+    let branch = raw
+        .strip_prefix("origin/")
+        .unwrap_or(raw.as_str())
+        .to_string();
     Some(branch)
 }
 

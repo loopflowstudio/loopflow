@@ -68,6 +68,30 @@ fn worktree_list_includes_created() {
 }
 
 #[test]
+fn worktree_list_preserves_namespaced_upstream_branch() {
+    let repo = TestRepo::new();
+    git_stdout(repo.path(), &["branch", "jack/parent"]);
+    git_stdout(repo.path(), &["push", "origin", "jack/parent"]);
+
+    let child_path = repo.path().parent().expect("repo parent").join(format!(
+        "{}.child",
+        repo.path().file_name().expect("repo dir").to_string_lossy()
+    ));
+    add_worktree(repo.path(), &child_path, "jack/child");
+    git_stdout(
+        &child_path,
+        &["branch", "--set-upstream-to", "origin/jack/parent"],
+    );
+
+    let (_, states) = list_worktrees_local(repo.path()).expect("list");
+    let child = states
+        .iter()
+        .find(|wt| wt.branch.as_deref() == Some("jack/child"))
+        .expect("should find child worktree");
+    assert_eq!(child.base_branch.as_deref(), Some("jack/parent"));
+}
+
+#[test]
 fn worktree_state_detects_dirty() {
     let repo = TestRepo::new();
     let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");

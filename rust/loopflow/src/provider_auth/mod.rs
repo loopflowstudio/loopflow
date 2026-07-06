@@ -55,7 +55,13 @@ const ASANA_CLIENT_ID_ENV: &str = "ASANA_CLIENT_ID";
 const ASANA_CLIENT_SECRET_ENV: &str = "ASANA_CLIENT_SECRET";
 const ASANA_OAUTH_SCOPE_ENV: &str = "ASANA_OAUTH_SCOPE";
 const ASANA_OAUTH_DEFAULT_SCOPE: &str = "default";
-const LINEAR_API_KEY_ENV: &str = "LINEAR_API_KEY";
+const LINEAR_OAUTH_AUTHORIZE_URL: &str = "https://linear.app/oauth/authorize";
+const LINEAR_OAUTH_TOKEN_URL: &str = "https://api.linear.app/oauth/token";
+const LINEAR_OAUTH_REDIRECT_URI: &str = "http://localhost:19222/oauth/callback";
+const LINEAR_OAUTH_CALLBACK_ADDR: &str = "127.0.0.1:19222";
+const LINEAR_CLIENT_ID_ENV: &str = "LINEAR_CLIENT_ID";
+const LINEAR_CLIENT_SECRET_ENV: &str = "LINEAR_CLIENT_SECRET";
+const LINEAR_OAUTH_DEFAULT_SCOPE: &str = "read,write";
 const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
 
 static USER_CODE_RE: Lazy<Regex> =
@@ -77,6 +83,7 @@ pub enum Provider {
     Codex,
     OpenCodeZen,
     Asana,
+    Linear,
     Doppler,
 }
 
@@ -88,17 +95,19 @@ impl Provider {
             Self::Codex => "codex",
             Self::OpenCodeZen => "opencodezen",
             Self::Asana => "asana",
+            Self::Linear => "linear",
             Self::Doppler => "doppler",
         }
     }
 
-    pub fn all() -> [Self; 6] {
+    pub fn all() -> [Self; 7] {
         [
             Self::GitHub,
             Self::Claude,
             Self::Codex,
             Self::OpenCodeZen,
             Self::Asana,
+            Self::Linear,
             Self::Doppler,
         ]
     }
@@ -110,6 +119,7 @@ impl Provider {
             Self::Codex => "Codex",
             Self::OpenCodeZen => "OpenCode Zen",
             Self::Asana => "Asana",
+            Self::Linear => "Linear",
             Self::Doppler => "Doppler",
         }
     }
@@ -119,7 +129,7 @@ impl Provider {
             Self::Claude => Some("ANTHROPIC_API_KEY"),
             Self::Codex => Some("OPENAI_API_KEY"),
             Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
-            Self::GitHub | Self::Asana | Self::Doppler => None,
+            Self::GitHub | Self::Asana | Self::Linear | Self::Doppler => None,
         }
     }
 
@@ -130,6 +140,7 @@ impl Provider {
     pub fn api_key_configure_error(self) -> Option<&'static str> {
         match self {
             Self::Asana => Some("Asana requires OAuth. Run 'lf op auth asana' to connect."),
+            Self::Linear => Some("Linear requires OAuth. Run 'lf op auth linear' to connect."),
             _ => None,
         }
     }
@@ -159,6 +170,7 @@ impl FromStr for Provider {
             "codex" => Ok(Self::Codex),
             "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
             "asana" => Ok(Self::Asana),
+            "linear" | "lin" => Ok(Self::Linear),
             "doppler" => Ok(Self::Doppler),
             _ => Err(ParseProviderError {
                 input: value.trim().to_string(),
@@ -624,6 +636,210 @@ impl AuthBroker for AsanaOAuthBroker {
     }
 }
 
+// ── Linear OAuth ────────────────────────────────────────────────────
+
+/// Linear OAuth uses a loopback redirect (`http://localhost:19222/oauth/callback`)
+/// rather than Asana's OOB paste: consent is a single click and the code arrives
+/// on a short-lived local listener. Refresh mirrors Asana — once Linear returns a
+/// refresh token, `refresh_pm_oauth_token` renews headlessly via the client creds.
+#[derive(Debug, Clone)]
+struct LinearOAuthBroker {
+    completed_token: Arc<Mutex<Option<ProviderToken>>>,
+}
+
+#[derive(Debug, Clone)]
+struct LinearOAuthApp {
+    client_id: String,
+    client_secret: String,
+    scope: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LinearOAuthTokenResponse {
+    access_token: String,
+    refresh_token: Option<String>,
+    expires_in: Option<i64>,
+}
+
+impl LinearOAuthBroker {
+    fn new() -> Self {
+        Self {
+            completed_token: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    async fn oauth_app() -> Result<LinearOAuthApp, AuthError> {
+        let (client_id, client_secret) = oauth_client_credentials(
+            Provider::Linear,
+            LINEAR_CLIENT_ID_ENV,
+            LINEAR_CLIENT_SECRET_ENV,
+        )
+        .await?;
+
+        Ok(LinearOAuthApp {
+            client_id,
+            client_secret,
+            scope: LINEAR_OAUTH_DEFAULT_SCOPE.to_string(),
+        })
+    }
+
+    fn build_authorization_url(app: &LinearOAuthApp, code_verifier: &str, state: &str) -> String {
+        let code_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
+        let mut url = Url::parse(LINEAR_OAUTH_AUTHORIZE_URL)
+            .expect("linear oauth authorize URL should parse");
+        {
+            let mut pairs = url.query_pairs_mut();
+            pairs.append_pair("client_id", &app.client_id);
+            pairs.append_pair("redirect_uri", LINEAR_OAUTH_REDIRECT_URI);
+            pairs.append_pair("response_type", "code");
+            pairs.append_pair("state", state);
+            pairs.append_pair("scope", &app.scope);
+            pairs.append_pair("code_challenge", &code_challenge);
+            pairs.append_pair("code_challenge_method", "S256");
+            pairs.append_pair("prompt", "consent");
+        }
+        url.to_string()
+    }
+
+    async fn exchange_code(
+        app: &LinearOAuthApp,
+        code_verifier: &str,
+        code: &str,
+    ) -> Result<ProviderToken, AuthError> {
+        let body = serde_urlencoded::to_string([
+            ("grant_type", "authorization_code"),
+            ("client_id", app.client_id.as_str()),
+            ("client_secret", app.client_secret.as_str()),
+            ("redirect_uri", LINEAR_OAUTH_REDIRECT_URI),
+            ("code", code),
+            ("code_verifier", code_verifier),
+        ])
+        .map_err(|err| AuthError::OAuthRequest {
+            provider: Provider::Linear,
+            message: format!("failed to encode token request: {err}"),
+        })?;
+        let response = reqwest::Client::new()
+            .post(LINEAR_OAUTH_TOKEN_URL)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(body)
+            .send()
+            .await
+            .map_err(|err| AuthError::OAuthRequest {
+                provider: Provider::Linear,
+                message: err.to_string(),
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .bytes()
+                .await
+                .map_err(|err| AuthError::OAuthRequest {
+                    provider: Provider::Linear,
+                    message: err.to_string(),
+                })?;
+            let message = oauth_error_message(body.as_ref())
+                .unwrap_or_else(|| String::from_utf8_lossy(&body).trim().to_string());
+            if status == reqwest::StatusCode::BAD_REQUEST
+                || status == reqwest::StatusCode::UNAUTHORIZED
+            {
+                return Err(AuthError::CodeExchangeRejected {
+                    provider: Provider::Linear,
+                    message,
+                });
+            }
+            return Err(AuthError::OAuthRequest {
+                provider: Provider::Linear,
+                message: format!("HTTP {status}: {message}"),
+            });
+        }
+
+        let payload = response
+            .json::<LinearOAuthTokenResponse>()
+            .await
+            .map_err(|err| AuthError::OAuthRequest {
+                provider: Provider::Linear,
+                message: format!("failed to decode token response: {err}"),
+            })?;
+
+        let expires_at = payload
+            .expires_in
+            .filter(|seconds| *seconds > 0)
+            .map(|seconds| now_unix() + seconds);
+
+        Ok(ProviderToken {
+            provider: Provider::Linear.as_str().to_string(),
+            access_token: payload.access_token,
+            refresh_token: payload.refresh_token,
+            expires_at,
+            login: None,
+            updated_at: now_unix(),
+            credential_type: CredentialType::OAuth,
+        })
+    }
+}
+
+#[async_trait]
+impl AuthBroker for LinearOAuthBroker {
+    fn provider(&self) -> Provider {
+        Provider::Linear
+    }
+
+    async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
+        let app = Self::oauth_app().await?;
+        let code_verifier = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+        let state = Uuid::new_v4().to_string();
+        let verification_uri = Self::build_authorization_url(&app, &code_verifier, &state);
+        let listener = oauth_callback_listener(Provider::Linear, LINEAR_OAUTH_CALLBACK_ADDR)?;
+        let completed_token = self.completed_token.clone();
+        let monitor = tokio::spawn(monitor_oauth_callback(
+            Provider::Linear,
+            listener,
+            Duration::from_secs(15 * 60),
+            "linear OAuth timed out",
+            completed_token,
+            move |code| {
+                let app = app.clone();
+                let code_verifier = code_verifier.clone();
+                async move { LinearOAuthBroker::exchange_code(&app, &code_verifier, &code).await }
+            },
+        ));
+
+        let response = AuthFlowResponse {
+            provider: Provider::Linear,
+            verification_uri_complete: Some(verification_uri.clone()),
+            verification_uri,
+            user_code: None,
+            expires_in: Some(15 * 60),
+        };
+
+        Ok(AuthFlowHandle::new(response, monitor))
+    }
+
+    async fn check_status(&self) -> Result<AuthStatus, AuthError> {
+        let token = self.completed_token.lock().await;
+        let Some(token) = token.as_ref() else {
+            return Ok(AuthStatus::None);
+        };
+        if token
+            .expires_at
+            .is_some_and(|expires_at| expires_at <= now_unix())
+        {
+            return Ok(AuthStatus::Expired);
+        }
+        Ok(AuthStatus::Active { login: None })
+    }
+
+    async fn disconnect(&self) -> Result<(), AuthError> {
+        *self.completed_token.lock().await = None;
+        Ok(())
+    }
+
+    async fn extract_token(&self) -> Option<ProviderToken> {
+        self.completed_token.lock().await.clone()
+    }
+}
+
 impl SocketAuthBroker {
     pub fn new(provider: Provider, client: Arc<CredentialSocketClient>) -> Self {
         Self {
@@ -1017,8 +1233,11 @@ fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn A
     brokers
 }
 
-fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 1] {
-    [Arc::new(AsanaOAuthBroker::new()) as Arc<dyn AuthBroker>]
+fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 2] {
+    [
+        Arc::new(AsanaOAuthBroker::new()) as Arc<dyn AuthBroker>,
+        Arc::new(LinearOAuthBroker::new()) as Arc<dyn AuthBroker>,
+    ]
 }
 
 fn socket_auth_flow_handle(
@@ -1930,16 +2149,6 @@ where
     fetch_secret(name).await
 }
 
-/// Resolve a Linear personal API key: environment first, then Doppler.
-///
-/// A Linear API key is a static bearer token used directly as the GraphQL
-/// Authorization header, so there is no OAuth exchange or refresh — this just
-/// locates the secret. The value is never printed; Doppler is consumed inline.
-pub async fn resolve_linear_api_key() -> Option<String> {
-    let mut fetch_secret = fetch_doppler_secret;
-    read_oauth_client_credential(LINEAR_API_KEY_ENV, &mut fetch_secret).await
-}
-
 async fn fetch_doppler_secret(name: &'static str) -> Option<String> {
     let output = Command::new("doppler")
         .args(["secrets", "get", name, "--plain"])
@@ -2145,7 +2354,9 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
-        Provider::Asana | Provider::Doppler => Err(TokenRefreshError::MissingToken { provider }),
+        Provider::Asana | Provider::Linear | Provider::Doppler => {
+            Err(TokenRefreshError::MissingToken { provider })
+        }
     }
 }
 
@@ -2163,8 +2374,113 @@ fn pm_oauth_endpoint(provider: Provider) -> Option<PmOAuthEndpoint> {
             client_id_env: ASANA_CLIENT_ID_ENV,
             client_secret_env: ASANA_CLIENT_SECRET_ENV,
         }),
+        Provider::Linear => Some(PmOAuthEndpoint {
+            token_url: LINEAR_OAUTH_TOKEN_URL,
+            client_id_env: LINEAR_CLIENT_ID_ENV,
+            client_secret_env: LINEAR_CLIENT_SECRET_ENV,
+        }),
         _ => None,
     }
+}
+
+/// Bind a short-lived loopback listener for an OAuth redirect callback.
+fn oauth_callback_listener(
+    provider: Provider,
+    address: &str,
+) -> Result<tokio::net::TcpListener, AuthError> {
+    let listener = std::net::TcpListener::bind(address).map_err(|err| AuthError::OAuthRequest {
+        provider,
+        message: format!("failed to bind {address} for OAuth callback: {err}"),
+    })?;
+    listener.set_nonblocking(true).ok();
+    tokio::net::TcpListener::from_std(listener).map_err(|err| AuthError::OAuthRequest {
+        provider,
+        message: format!("failed to create async listener: {err}"),
+    })
+}
+
+/// Wait for the browser to hit the loopback redirect, exchange the returned code
+/// for a token, and stash it for the broker's `extract_token`.
+async fn monitor_oauth_callback<F, Fut>(
+    provider: Provider,
+    listener: tokio::net::TcpListener,
+    timeout: Duration,
+    timeout_message: &'static str,
+    completed_token: Arc<Mutex<Option<ProviderToken>>>,
+    exchange_code: F,
+) -> Result<(), AuthError>
+where
+    F: Fn(String) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<ProviderToken, AuthError>> + Send,
+{
+    let deadline = Instant::now() + timeout;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(AuthError::CommandFailed {
+                provider,
+                message: timeout_message.to_string(),
+            });
+        }
+
+        let accept = tokio::time::timeout(Duration::from_secs(1), listener.accept()).await;
+        let (stream, _) = match accept {
+            Ok(Ok(conn)) => conn,
+            Ok(Err(_)) | Err(_) => continue,
+        };
+        let Some(code) = read_oauth_callback_code(stream).await else {
+            continue;
+        };
+
+        match exchange_code(code).await {
+            Ok(token) => {
+                *completed_token.lock().await = Some(token);
+                return Ok(());
+            }
+            Err(err) => {
+                return Err(AuthError::CommandFailed {
+                    provider,
+                    message: err.to_string(),
+                });
+            }
+        }
+    }
+}
+
+async fn read_oauth_callback_code(stream: tokio::net::TcpStream) -> Option<String> {
+    let (mut reader, mut writer) = stream.into_split();
+    let mut buf = vec![0u8; 4096];
+    let n = tokio::io::AsyncReadExt::read(&mut reader, &mut buf)
+        .await
+        .ok()?;
+    let request = String::from_utf8_lossy(&buf[..n]);
+    let code = extract_oauth_code_from_request(&request);
+
+    let response_body = if code.is_some() {
+        "Authenticated! You can close this tab."
+    } else {
+        "Authentication failed — no code found."
+    };
+    let http_response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<html><body><h2>{response_body}</h2></body></html>"
+    );
+    let _ = tokio::io::AsyncWriteExt::write_all(&mut writer, http_response.as_bytes()).await;
+    let _ = tokio::io::AsyncWriteExt::shutdown(&mut writer).await;
+    code
+}
+
+fn extract_oauth_code_from_request(request: &str) -> Option<String> {
+    let first_line = request.lines().next()?;
+    let path = first_line.split_whitespace().nth(1)?;
+    let query = path.split_once('?')?.1;
+    for pair in query.split('&') {
+        if let Some(value) = pair.strip_prefix("code=") {
+            let value = value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug, Deserialize)]
@@ -2175,7 +2491,7 @@ struct OAuthRefreshResponse {
 }
 
 /// Exchange a stored refresh token for a fresh access token via the PM provider's
-/// OAuth `grant_type=refresh_token` endpoint. Only Asana is supported;
+/// OAuth `grant_type=refresh_token` endpoint. Asana and Linear are supported;
 /// client credentials are read from the provider's `*_CLIENT_ID`/`*_CLIENT_SECRET` env vars.
 ///
 /// The returned token carries `login: None`; callers should preserve the prior login.
@@ -3121,6 +3437,65 @@ mod tests {
                 .map(|value| value.as_ref()),
             Some("S256")
         );
+    }
+
+    #[test]
+    fn linear_oauth_authorization_url_uses_loopback_redirect_and_pkce() {
+        let app = LinearOAuthApp {
+            client_id: "client-123".to_string(),
+            client_secret: "secret-456".to_string(),
+            scope: LINEAR_OAUTH_DEFAULT_SCOPE.to_string(),
+        };
+
+        let url = LinearOAuthBroker::build_authorization_url(&app, "verifier-123", "state-abc");
+        let parsed = Url::parse(&url).expect("linear oauth url should parse");
+        let query = parsed.query_pairs().collect::<HashMap<_, _>>();
+
+        assert_eq!(
+            parsed.as_str().split('?').next(),
+            Some(LINEAR_OAUTH_AUTHORIZE_URL)
+        );
+        assert_eq!(
+            query.get("client_id").map(|value| value.as_ref()),
+            Some("client-123")
+        );
+        assert_eq!(
+            query.get("redirect_uri").map(|value| value.as_ref()),
+            Some(LINEAR_OAUTH_REDIRECT_URI)
+        );
+        assert_eq!(
+            query.get("scope").map(|value| value.as_ref()),
+            Some("read,write")
+        );
+        assert!(query.contains_key("code_challenge"));
+        assert_eq!(
+            query
+                .get("code_challenge_method")
+                .map(|value| value.as_ref()),
+            Some("S256")
+        );
+    }
+
+    #[test]
+    fn linear_provider_parses_and_supports_oauth_refresh() {
+        assert_eq!("linear".parse::<Provider>(), Ok(Provider::Linear));
+        assert_eq!("lin".parse::<Provider>(), Ok(Provider::Linear));
+        assert_eq!(Provider::Linear.as_str(), "linear");
+        assert!(!Provider::Linear.api_key_bills_per_token());
+        assert_eq!(
+            Provider::Linear.api_key_configure_error(),
+            Some("Linear requires OAuth. Run 'lf op auth linear' to connect.")
+        );
+        // Refresh is wired: Linear resolves a PM OAuth endpoint like Asana.
+        assert!(pm_oauth_endpoint(Provider::Linear).is_some());
+    }
+
+    #[test]
+    fn linear_broker_registered_in_default_brokers() {
+        let has_linear = default_brokers(None)
+            .iter()
+            .any(|broker| broker.provider() == Provider::Linear);
+        assert!(has_linear, "`lf op auth linear` needs a registered broker");
     }
 
     #[tokio::test(flavor = "current_thread")]

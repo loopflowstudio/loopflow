@@ -16,7 +16,7 @@ use crate::lfdb::open_store;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::resolve_wave_name;
-use crate::provider_auth::{refresh_pm_oauth_token, resolve_linear_api_key, Provider};
+use crate::provider_auth::{refresh_pm_oauth_token, Provider};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -226,34 +226,26 @@ async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     })
 }
 
+/// Both Asana and Linear authenticate via OAuth: the access token lives in the
+/// lfdb credential store (keyed by provider), and an expired token is refreshed
+/// in place when it carries a refresh token and the OAuth client creds resolve.
 async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
-    match provider {
-        PmProviderKind::Asana => resolve_asana_token().await,
-        PmProviderKind::Linear => resolve_linear_token().await,
-    }
-}
+    let auth_provider = match provider {
+        PmProviderKind::Asana => Provider::Asana,
+        PmProviderKind::Linear => Provider::Linear,
+    };
 
-/// Linear authenticates with a static personal API key resolved from the
-/// environment (then Doppler); there is no OAuth exchange or refresh.
-async fn resolve_linear_token() -> OpsResult<String> {
-    resolve_linear_api_key().await.ok_or_else(|| {
-        OpsError::Message(
-            "No Linear API key found. Set LINEAR_API_KEY in the environment or Doppler."
-                .to_string(),
-        )
-    })
-}
-
-async fn resolve_asana_token() -> OpsResult<String> {
     let store = open_store(&storage_config_from_env()?)
         .await
         .map_err(|err| OpsError::Message(format!("failed to open lfd credential store: {err}")))?;
     let token = store
-        .get_provider_token("asana")
+        .get_provider_token(provider.as_str())
         .await
-        .map_err(|err| OpsError::Message(format!("failed to load asana token: {err}")))?
+        .map_err(|err| OpsError::Message(format!("failed to load {provider} token: {err}")))?
         .ok_or_else(|| {
-            OpsError::Message("No asana credential found. Run `lf op auth asana`.".to_string())
+            OpsError::Message(format!(
+                "No {provider} credential found. Run `lf op auth {provider}`."
+            ))
         })?;
 
     let expired = token
@@ -264,14 +256,14 @@ async fn resolve_asana_token() -> OpsResult<String> {
     }
 
     // The stored token is expired but may be refreshable: if it carries a refresh
-    // token and the OAuth client creds are in the env, refresh in place rather than
+    // token and the OAuth client creds resolve, refresh in place rather than
     // forcing the user to re-authenticate.
     let refresh_token = token
         .refresh_token
         .as_deref()
         .filter(|value| !value.trim().is_empty());
     if let Some(refresh_token) = refresh_token {
-        if let Ok(mut refreshed) = refresh_pm_oauth_token(Provider::Asana, refresh_token).await {
+        if let Ok(mut refreshed) = refresh_pm_oauth_token(auth_provider, refresh_token).await {
             if refreshed.refresh_token.is_none() {
                 refreshed.refresh_token = token.refresh_token.clone();
             }
@@ -283,15 +275,17 @@ async fn resolve_asana_token() -> OpsResult<String> {
                 .upsert_provider_token(&refreshed)
                 .await
                 .map_err(|err| {
-                    OpsError::Message(format!("failed to persist refreshed asana token: {err}"))
+                    OpsError::Message(format!(
+                        "failed to persist refreshed {provider} token: {err}"
+                    ))
                 })?;
             return Ok(access_token);
         }
     }
 
-    Err(OpsError::Message(
-        "Stored asana token has expired. Run `lf op auth asana` again.".to_string(),
-    ))
+    Err(OpsError::Message(format!(
+        "Stored {provider} token has expired. Run `lf op auth {provider}` again."
+    )))
 }
 
 fn storage_config_from_env() -> OpsResult<crate::lfdb::StorageConfig> {

@@ -2,6 +2,7 @@ mod abandon;
 mod branches;
 mod combine;
 mod commit;
+pub mod cron;
 mod error;
 mod flow;
 mod land;
@@ -22,6 +23,10 @@ pub use branches::{
 };
 pub use combine::{combine_prs, CombineOptions, CombineResult};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
+pub use cron::{
+    add_cron, default_launch_agents_dir, list_crons, parse_schedule, remove_cron, resolve_lf_path,
+    CronSpec, InstalledCron, Schedule, SystemLaunchctl,
+};
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
 pub use land::{land, mark_ready, submit, LandOptions, LandResult, RotationResult};

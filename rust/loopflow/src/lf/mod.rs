@@ -423,6 +423,38 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: QueueCommand,
     },
+    /// Local launchd jobs that run lf commands on a schedule
+    Cron {
+        #[command(subcommand)]
+        cmd: CronCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CronCommand {
+    /// Install or replace a scheduled lf invocation
+    Add {
+        /// Wave name passed to `lf <flow> --wave <wave>`
+        #[arg(short = 'w', long = "wave")]
+        wave: String,
+        /// Flow or step name to run
+        #[arg(long = "flow")]
+        flow: String,
+        /// Schedule expression. v0 supports `daily`.
+        #[arg(long = "schedule", default_value = "daily")]
+        schedule: String,
+    },
+    /// List installed loopflow cron jobs
+    List,
+    /// Uninstall a scheduled lf invocation
+    Remove {
+        /// Wave name passed to `lf <flow> --wave <wave>`
+        #[arg(short = 'w', long = "wave")]
+        wave: String,
+        /// Flow or step name to remove
+        #[arg(long = "flow")]
+        flow: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

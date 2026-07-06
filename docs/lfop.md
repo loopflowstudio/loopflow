@@ -70,6 +70,30 @@ Infers stack status from git and GitHub, flips PRs between draft and ready, lazi
 |------|-------------|
 | `-w, --wave NAME` | Only reconcile this wave (default: every wave with queue state) |
 
+## lf op cron
+
+Install local launchd jobs that run `lf` commands on a schedule.
+
+```bash
+lf op cron add --wave memory --flow export-memory --schedule daily
+lf op cron list
+lf op cron remove --wave memory --flow export-memory
+```
+
+`add` writes `~/Library/LaunchAgents/loopflow.cron.<wave>.<flow>.plist` and loads it with launchd. The job runs from the current repo with `ProgramArguments` set to `lf <flow> --wave <wave>`.
+
+| Command | What it does |
+|---------|--------------|
+| `add` | Install or replace a launchd cron job |
+| `list` | Show installed loopflow cron jobs |
+| `remove` | Unload and delete one cron job |
+
+| Flag | Description |
+|------|-------------|
+| `-w, --wave NAME` | Wave name passed to the scheduled command |
+| `--flow NAME` | Flow or step to run |
+| `--schedule daily` | Daily schedule (default) |
+
 ## lf op next
 
 Preserve the current worktree and create a fresh branch.

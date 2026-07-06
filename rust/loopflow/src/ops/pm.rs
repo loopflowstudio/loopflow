@@ -104,18 +104,6 @@ async fn build_asana_client(repo: &Path) -> OpsResult<AsanaClient> {
     Ok(AsanaClient::new(token, config.asana.clone()))
 }
 
-async fn build_asana_bootstrap_client(repo: &Path) -> OpsResult<AsanaClient> {
-    let config = load_config_or_default(Some(repo));
-    let token = resolve_asana_token().await?;
-    let bootstrap_team_name = if config.asana.default_team.is_some() {
-        None
-    } else {
-        github_repo_slug(repo).ok()
-    };
-
-    Ok(AsanaClient::new(token, config.asana.clone()).with_bootstrap_team_name(bootstrap_team_name))
-}
-
 async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     let project = read_asana_project(repo, wave).ok_or_else(|| {
         OpsError::Message(format!(
@@ -217,7 +205,20 @@ async fn pm_init_async(
         });
     }
 
-    let client = build_asana_bootstrap_client(repo).await?;
+    // Only the bootstrap path needs a team name; skip the gh call when an
+    // explicit team GID already wins in the client's precedence.
+    let bootstrap_team_name = if load_config_or_default(Some(repo))
+        .asana
+        .default_team
+        .is_some()
+    {
+        None
+    } else {
+        github_repo_slug(repo).ok()
+    };
+    let client = build_asana_client(repo)
+        .await?
+        .with_bootstrap_team_name(bootstrap_team_name);
     progress.status(&format!("creating asana project for wave/{wave}"));
     let project_id = client
         .create_project(&title_case(&wave), "")

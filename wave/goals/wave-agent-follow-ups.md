@@ -9,9 +9,33 @@ Linear (`lf op pm update`) — this doc is context, not the tracker.
 ## Decision questions
 
 Each is an accept-or-cut call. The governing insight: the distributed model
-obviates centralized machinery, not dispatch — `lf q worker run` IS the
-distributed dispatch. What remains is deciding which centralized organs are
-vestigial.
+obviates centralized machinery, not dispatch. What remains is deciding which
+centralized organs are vestigial.
+
+> **Reconciliation 2026-07-06** (top-down audit of the merged tree + Jack
+> decisions). Status of the questions below:
+> - **#2, #4, #5 — moot; the organ is already gone.** The old goal-agent launch
+>   path, `build_wave_agent_command`, `InFlightDispatch`,
+>   `LOOPFLOW_OPERATING_PROMPT` / "Looping Agent" double-identity, `loop_ticker`
+>   + the activation queue, and `roadmap_item` plumbing were all confirmed
+>   *removed* from the tree. `render_goal` ceremony is stripped. No work left.
+> - **#3 — moot.** `--pool` / `Placement::Pool` / `WorkerPlacementDto::Pool`
+>   are gone (`Placement` is `Stack | Fresh`). `--stack` survives, as intended.
+> - **#6 — DECIDED: accept immediate kill.** No grace stage now; the design
+>   doc was fixed to match. (M4-if-ever.)
+> - **#7 — DECIDED: accept the bounce.** Fix is worker *flexibility* (a down
+>   server is a shrug), mostly an operating-instructions adaptation. Queue-for-
+>   offline stays a named follow-up, not a commitment.
+> - **#9 — DECIDED: hand-authored traces + a live smoke gate.** The smoke gate
+>   is the real drift catcher; skip recorded traces.
+> - **#10 — mostly moot:** `LFD_DISABLE_TMUX` and `alias="loop"` are gone;
+>   migration-tolerance healing (048/049/050) stays until stores converge.
+> - **#8 — still live:** file-roadmap leftovers to delete (Linear is the
+>   roadmap). **#1** partial as noted.
+> - **New from the audit:** wave = 1 repo (strip `wave_repos`); the live M1 gap
+>   is "lfd stops being a hand." Two newly-dead tables
+>   (`secrets_provider_config`, `wave_pr_merge_events`) being cut. See
+>   `architecture-direction.md` → Current state.
 
 1. **Two dispatch worlds. — RESOLVED (#803).** `lf q` (`lf/commands/q.rs`)
    was retired; dispatch now flows through `--dispatch`/`--wave` on the flow

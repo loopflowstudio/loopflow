@@ -215,6 +215,16 @@ pub fn gather_wave_chat(repo_root: &Path, wave: &str) -> Option<String> {
     render_wave_chat(&turns)
 }
 
+/// The wave's prompt memory: recent stream facts layered above the compiled
+/// `MEMORY.md` base. Stream facts are newest first for prompt recency; the
+/// `lf memory log` command still prints oldest to newest.
+pub fn gather_wave_memory(repo_root: &Path, wave: &str) -> Option<String> {
+    let origin = wave_origin(repo_root);
+    let base = crate::wave::memory::Memory::for_wave(&origin, wave).read();
+    let adds = live_memory_adds(&origin, wave).or_else(|| journal_memory_adds(&origin, wave));
+    render_wave_memory(adds.unwrap_or_default(), &base)
+}
+
 /// Turn/char budget for the parent-wave section of a work line's overlay —
 /// the parent rides compactly beside the work line's own thread; the two
 /// budgets together stay within [`WAVE_CHAT_MAX_CHARS`].
@@ -298,6 +308,51 @@ fn live_turns(origin: &Path, wave: &str) -> Option<Vec<ChatTurn>> {
     serde_json::from_str::<ConversationBody>(&body)
         .ok()
         .map(|payload| payload.turns)
+}
+
+fn live_memory_adds(origin: &Path, wave: &str) -> Option<Vec<String>> {
+    #[derive(Debug, Deserialize)]
+    struct MemoryLogBody {
+        facts: Vec<String>,
+    }
+
+    let addr = read_endpoint_pointer(origin, wave)?;
+    let body = http_get(format!("http://{addr}/memory/log"))?;
+    serde_json::from_str::<MemoryLogBody>(&body)
+        .ok()
+        .map(|payload| payload.facts)
+}
+
+fn journal_memory_adds(origin: &Path, wave: &str) -> Option<Vec<String>> {
+    let events = read_events(&journal_path(origin, wave));
+    if events.is_empty() {
+        return None;
+    }
+    Some(fold_thread(&events).memory_adds)
+}
+
+fn render_wave_memory(mut adds: Vec<String>, base: &str) -> Option<String> {
+    let base = base.trim();
+    let has_base = !base.is_empty();
+    adds.retain(|fact| !fact.trim().is_empty());
+    if adds.is_empty() && !has_base {
+        return None;
+    }
+
+    let mut sections = Vec::new();
+    if !adds.is_empty() {
+        adds.reverse();
+        sections.push(
+            adds.into_iter()
+                .map(|fact| format!("- {}", fact.trim()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
+    if has_base {
+        sections.push(base.to_string());
+    }
+    Some(sections.join("\n\n"))
 }
 
 /// Read-only fold over the wave's journal: finalized thread plus any open
@@ -661,6 +716,39 @@ mod tests {
     fn no_wave_state_yields_no_chat() {
         let tmp = tempfile::tempdir().expect("tempdir");
         assert!(gather_wave_chat(tmp.path(), "ghost").is_none());
+    }
+
+    #[test]
+    fn render_wave_memory_layers_recent_above_base_newest_first() {
+        let rendered = render_wave_memory(
+            vec![
+                "first fact".to_string(),
+                " ".to_string(),
+                "second fact".to_string(),
+            ],
+            "# Memory\n\ncompiled base\n",
+        )
+        .expect("memory renders");
+        assert_eq!(
+            rendered,
+            "- second fact\n- first fact\n\n# Memory\n\ncompiled base"
+        );
+    }
+
+    #[test]
+    fn gather_wave_memory_uses_journal_delta_since_update() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime =
+            crate::wave::runtime::WaveRuntime::open("goals".to_string(), tmp.path().to_path_buf())
+                .expect("runtime");
+        runtime
+            .update_memory("# Goals\n\ncompiled\n", "compiled")
+            .expect("update");
+        runtime.append_memory("oldest").expect("append");
+        runtime.append_memory("newest").expect("append");
+
+        let memory = gather_wave_memory(tmp.path(), "goals").expect("memory");
+        assert_eq!(memory, "- newest\n- oldest\n\n# Goals\n\ncompiled");
     }
 
     /// Canned one-shot HTTP server: the "existing test-server pattern"

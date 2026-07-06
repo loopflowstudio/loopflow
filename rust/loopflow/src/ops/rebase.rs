@@ -144,6 +144,17 @@ pub fn rebase_with_recovery(
     // When a stacked branch's parent was squash-merged into the target,
     // a plain rebase replays the parent's commits (already in target) and
     // hits conflicts. Detect this and use --onto to skip them.
+    //
+    // TODO(stacking): this only covers a clean squash-merge. When the parent is
+    // *reworked* during land (its merged content diverges from what the child
+    // stacked on — a different design, CI fixups, edited squash), --onto still
+    // strands the child: mechanically the fork point may not match, and
+    // semantically the child's changes assume the pre-rework parent. A memory
+    // slice hit this — its parent merged as a redesigned version and the rebase
+    // replayed already-merged commits into GOAL.md/MEMORY.md conflicts. Interim
+    // policy: stacked worktrees just target main. Real fix (unresolved, systems
+    // wave): identity-preserving land for parents that have children, OR detect
+    // the rework and flag the stack for re-derivation instead of auto-rebasing.
     let fork_point = squash_merge_fork_point(repo, &options.onto).unwrap_or(None);
 
     progress.status(&format!("Rebasing onto {}...", options.onto));

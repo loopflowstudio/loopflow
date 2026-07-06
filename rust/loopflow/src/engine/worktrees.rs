@@ -84,17 +84,14 @@ impl StackBranch {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlacementRequest {
-    Default {
-        segment: WorktreeSegment,
-    },
+    /// Root branch off the default branch. The no-flag default for
+    /// `lf op wt create` — ad-hoc worktrees never stack unless asked.
     Main {
         segment: WorktreeSegment,
     },
+    /// Child branch stacked under an explicit parent (`--stack`/`--base`).
     Stack {
         parent: String,
-        segment: WorktreeSegment,
-    },
-    Fork {
         segment: WorktreeSegment,
     },
 }
@@ -635,38 +632,12 @@ pub fn create_with_schema_synced(
 
 pub fn plan_placement(
     repo: &Path,
-    current_branch: Option<&str>,
     request: PlacementRequest,
     branch_config: Option<&BranchNameConfig>,
 ) -> Result<PlacementPlan, GitError> {
     let default_branch = get_default_branch(repo)?;
     let (branch, base_ref, parent_branch, root_segment, stack_depth) = match request {
-        PlacementRequest::Default { segment } => {
-            if let Some(current) = current_branch {
-                if current != default_branch {
-                    let parent = StackBranch::parse(current, &default_branch);
-                    let branch = parent
-                        .as_ref()
-                        .map(|stack| stack.child(&segment))
-                        .unwrap_or_else(|| format!("{current}.{}", segment.as_str()));
-                    let depth = parent.map(|stack| stack.depth() + 1).unwrap_or(2);
-                    (
-                        branch,
-                        current.to_string(),
-                        Some(current.to_string()),
-                        segment,
-                        depth,
-                    )
-                } else {
-                    let branch = planned_root_branch(repo, segment.as_str(), branch_config)?;
-                    (branch, default_branch.clone(), None, segment, 1)
-                }
-            } else {
-                let branch = planned_root_branch(repo, segment.as_str(), branch_config)?;
-                (branch, default_branch.clone(), None, segment, 1)
-            }
-        }
-        PlacementRequest::Main { segment } | PlacementRequest::Fork { segment } => {
+        PlacementRequest::Main { segment } => {
             let branch = planned_root_branch(repo, segment.as_str(), branch_config)?;
             (branch, default_branch.clone(), None, segment, 1)
         }
@@ -1091,14 +1062,16 @@ mod tests {
     }
 
     #[test]
-    fn default_placement_from_stack_creates_child_branch() {
+    fn stack_placement_creates_child_branch() {
         let repo = init_repo();
         let segment = WorktreeSegment::parse("child").unwrap();
         let config = literal_branch_names();
         let plan = plan_placement(
             repo.path(),
-            Some("a.b"),
-            PlacementRequest::Default { segment },
+            PlacementRequest::Stack {
+                parent: "a.b".to_string(),
+                segment,
+            },
             Some(&config),
         )
         .expect("plan placement");
@@ -1117,13 +1090,12 @@ mod tests {
     }
 
     #[test]
-    fn main_placement_from_stack_creates_root_branch() {
+    fn main_placement_creates_root_branch() {
         let repo = init_repo();
         let segment = WorktreeSegment::parse("child").unwrap();
         let config = literal_branch_names();
         let plan = plan_placement(
             repo.path(),
-            Some("a.b"),
             PlacementRequest::Main { segment },
             Some(&config),
         )

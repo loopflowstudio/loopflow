@@ -866,12 +866,10 @@ fn run_worktree(cmd: &WtCommand) -> Result<()> {
     match cmd {
         WtCommand::Create {
             name,
-            base,
-            stack,
-            main,
-            fork,
+            child,
+            sibling: _,
             plan,
-        } => wt_create(name, base.as_deref(), stack.as_deref(), *main, *fork, *plan),
+        } => wt_create(name, child.as_deref(), *plan),
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { format, .. } => wt_list(format.as_deref()),
         WtCommand::Remove { name, force } => wt_remove(name, *force),
@@ -883,14 +881,7 @@ fn run_worktree(cmd: &WtCommand) -> Result<()> {
     }
 }
 
-fn wt_create(
-    name: &str,
-    base: Option<&str>,
-    stack: Option<&str>,
-    main: bool,
-    fork: bool,
-    dry_run: bool,
-) -> Result<()> {
+fn wt_create(name: &str, child: Option<&str>, dry_run: bool) -> Result<()> {
     let started = Instant::now();
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
@@ -900,16 +891,10 @@ fn wt_create(
     let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
     let segment = WorktreeSegment::parse(name)?;
     let current = current_branch(&repo_root)?;
-    let request = if main {
-        PlacementRequest::Main { segment }
-    } else if fork {
-        PlacementRequest::Fork { segment }
-    } else if let Some(parent) = base {
-        PlacementRequest::Stack {
-            parent: parent.to_string(),
-            segment,
-        }
-    } else if let Some(parent) = stack {
+    // Sibling (the default) roots from the default branch. A child stacks under
+    // its parent — opt-in only via --child, so ad-hoc worktrees never nest off
+    // the current feature branch by accident.
+    let request = if let Some(parent) = child {
         let parent = if parent == "__current__" {
             current
                 .as_deref()
@@ -920,23 +905,19 @@ fn wt_create(
         };
         PlacementRequest::Stack { parent, segment }
     } else {
-        PlacementRequest::Default { segment }
+        PlacementRequest::Main { segment }
     };
 
     let default_branch = get_default_branch(&main_repo)?;
-    let current_for_plan = current.as_deref().filter(|branch| *branch != "HEAD");
     let sync_default_base = match &request {
-        PlacementRequest::Default { .. } => current_for_plan
-            .map(|branch| branch == default_branch)
-            .unwrap_or(true),
-        PlacementRequest::Main { .. } | PlacementRequest::Fork { .. } => true,
+        PlacementRequest::Main { .. } => true,
         PlacementRequest::Stack { .. } => false,
     };
     if sync_default_base {
         let _ = sync_main(&main_repo, &default_branch);
     }
 
-    let placement = plan_placement(&main_repo, current_for_plan, request, branch_config)?;
+    let placement = plan_placement(&main_repo, request, branch_config)?;
 
     if dry_run {
         print_placement_plan(&placement);

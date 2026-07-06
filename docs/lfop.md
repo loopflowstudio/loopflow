@@ -252,21 +252,21 @@ Worktree helper commands.
 Create or select a worktree from a placement plan.
 
 ```bash
-lf op wt create my-feature              # root from main, or child from current branch
-lf op wt create my-feature --main       # force a root branch from main
-lf op wt create child --stack parent    # create parent.child
-lf op wt create child --stack           # stack on the current branch
-lf op wt create child --fork            # root branch from the review base
+lf op wt create my-feature              # sibling: root branch from main (the default)
+lf op wt create thing --child parent    # child: create parent.thing
+lf op wt create thing --child           # child of the current branch
 lf op wt create my-feature --plan       # print the plan without creating anything
 lf op wt create jack-heart.mobile.20260225_1122  # checks out origin branch in ../loopflow.mobile
 ```
 
+Two relative-to-here verbs. **Sibling** (the default) roots an independent
+branch from main. **Child** stacks under its parent. Ad-hoc worktrees never
+nest unless you ask with `--child`.
+
 | Flag | Description |
 |------|-------------|
-| `-b, --base` | Parent branch for a stacked placement |
-| `-s, --stack [PARENT]` | Stack on `PARENT`, or on the current branch when omitted |
-| `--main` | Force a root branch from the default branch |
-| `--fork` | Create an independent root branch from the review base |
+| `-c, --child [PARENT]` | Stack under `PARENT`, or under the current branch when omitted |
+| `-s, --sibling` | Root an independent branch from the default branch (already the default) |
 | `--plan` | Print the placement plan without mutating git |
 
 Dots are reserved for stack ancestry. Use `api-v2` as a worktree segment, not

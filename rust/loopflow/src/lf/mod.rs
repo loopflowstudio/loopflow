@@ -662,17 +662,12 @@ pub enum WtCommand {
     Create {
         /// Worktree name (creates ../NAME)
         name: String,
-        #[arg(short = 'b', long = "base")]
-        base: Option<String>,
-        /// Stack under a parent branch (defaults to current branch when no value is passed)
-        #[arg(short = 's', long = "stack", value_name = "PARENT", num_args = 0..=1, default_missing_value = "__current__")]
-        stack: Option<String>,
-        /// Force a root branch from the default branch
-        #[arg(long = "main", conflicts_with_all = ["base", "stack", "fork"])]
-        main: bool,
-        /// Create an independent root branch from the review base
-        #[arg(long, conflicts_with_all = ["base", "stack", "main"])]
-        fork: bool,
+        /// Stack as a child under a parent branch (defaults to the current branch)
+        #[arg(short = 'c', long = "child", value_name = "PARENT", num_args = 0..=1, default_missing_value = "__current__")]
+        child: Option<String>,
+        /// Root an independent sibling branch from the default branch (the default)
+        #[arg(short = 's', long = "sibling", conflicts_with = "child")]
+        sibling: bool,
         /// Print the placement plan without creating a worktree
         #[arg(long)]
         plan: bool,

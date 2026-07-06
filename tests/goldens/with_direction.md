@@ -18,9 +18,8 @@ lf op land                       # hands-off: arm auto-merge + rotate worktree
 lf op rebase --plan              # show reset/rebase strategy
 lf op rebase                     # apply the planned update
 lf op next                       # preserve worktree, fresh branch
-lf op wt create my-feature       # create/select placed worktree
-lf op wt create --main my-feature # force root branch from main
-lf op wt create --stack parent child # stack child under parent
+lf op wt create my-feature       # sibling worktree, root branch from main (default)
+lf op wt create thing --child parent # stack a child under parent
 lf op wt switch my-feature       # cd to existing worktree
 lf op wt prune                   # clean up merged worktrees
 ```

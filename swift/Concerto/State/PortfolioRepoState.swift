@@ -10,15 +10,25 @@ final class PortfolioRepoState {
 
     private let repoPath: String
     private let waveService: WaveService
+    /// Local discovery via `lf ls` (see `RegistryQuery`). `nil` on a platform
+    /// that can't shell `lf`, or for a remote repo — those fall back to the REST
+    /// wave list.
+    private let registryQuery: RegistryQuery?
 
     private(set) var waves: [WaveViewModel] = []
     private(set) var isConnected = false
     private(set) var isLoading = true
 
-    init(repo: PortfolioRepo, connection: ServerConnection, token: String?) {
+    init(
+        repo: PortfolioRepo,
+        connection: ServerConnection,
+        token: String?,
+        registryQuery: RegistryQuery? = nil
+    ) {
         self.repo = repo
         self.repoPath = repo.path.normalizedFilePath
         self.waveService = WaveService(connection: connection, tokenProvider: { token })
+        self.registryQuery = registryQuery
     }
 
     /// Create a wave file-first: a wave IS its markdown. Write
@@ -55,12 +65,21 @@ final class PortfolioRepoState {
         await refresh()
     }
 
+    /// Re-read this repo's waves. Discovery is a query, not a stream: `lf ls`
+    /// via `RegistryQuery` when a local runner is wired, else the surviving REST
+    /// wave list. The dashboard re-runs this on a cadence; a wave's live motion
+    /// rides its own per-wave SSE in the detail pane.
     func refresh() async {
         isLoading = true
         defer { isLoading = false }
 
         do {
-            let loaded = try await waveService.listWaves(repo: .local(repo.url))
+            let loaded: [Wave]
+            if let registryQuery {
+                loaded = try await registryQuery.waves(repoPath: repo.url.path)
+            } else {
+                loaded = try await waveService.listWaves(repo: .local(repo.url))
+            }
             applyConnectedWaves(loaded)
             isConnected = true
         } catch {
@@ -73,30 +92,6 @@ final class PortfolioRepoState {
             .filter { $0.repo.normalizedFilePath == repoPath }
             .map { WaveViewModel(api: $0) }
         waves = Self.sortWaves(filtered)
-    }
-
-    func applyWaveEvent(_ event: WaveEvent) {
-        switch event.type {
-        case .deleted:
-            if let wave = event.wave,
-               wave.repo.normalizedFilePath != repoPath {
-                return
-            }
-            waves.removeAll { $0.id == event.waveId }
-        case .created, .updated, .started, .stopped, .waiting:
-            guard let wave = event.wave,
-                  wave.repo.normalizedFilePath == repoPath else {
-                return
-            }
-            upsertWave(WaveViewModel(api: wave))
-        }
-    }
-
-    func updateConnectionState(_ state: ConnectionState) {
-        isConnected = if case .connected = state { true } else { false }
-        if !isConnected && waves.isEmpty {
-            isLoading = false
-        }
     }
 
     var blockedCount: Int {
@@ -117,15 +112,6 @@ final class PortfolioRepoState {
             return nil
         }
         return "+\(summary.insertions) -\(summary.deletions)"
-    }
-
-    private func upsertWave(_ wave: WaveViewModel) {
-        if let existingIndex = waves.firstIndex(where: { $0.id == wave.id }) {
-            waves[existingIndex] = wave
-        } else {
-            waves.append(wave)
-        }
-        waves = Self.sortWaves(waves)
     }
 
     private static func sortWaves(_ waves: [WaveViewModel]) -> [WaveViewModel] {

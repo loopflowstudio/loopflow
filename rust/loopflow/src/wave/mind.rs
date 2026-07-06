@@ -1303,7 +1303,13 @@ mod tests {
         let std_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         std_listener.set_nonblocking(true).unwrap();
         let addr = std_listener.local_addr().unwrap();
-        let app = server::router(runtime.clone(), door, None, None);
+        let app = server::router(
+            runtime.clone(),
+            door,
+            server::SubagentDoor::new(),
+            None,
+            None,
+        );
         let listener = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()

@@ -4,17 +4,16 @@ import Testing
 
 @Suite("ServerConnection")
 struct ServerConnectionTests {
-    @Test("local connection uses HTTP and plain WebSocket")
+    @Test("local connection uses HTTP")
     func localConnectionURLs() {
         let connection = ServerConnection.local
 
         #expect(connection.httpBaseURL.absoluteString == "http://127.0.0.1:2486")
-        #expect(connection.wsBaseURL.absoluteString == "ws://127.0.0.1:2486/ws")
         #expect(connection.isLocal)
         #expect(connection.displayName == "http://127.0.0.1:2486")
     }
 
-    @Test("TLS connection uses HTTPS and secure WebSocket")
+    @Test("TLS connection uses HTTPS")
     func tlsConnectionURLs() {
         let connection = ServerConnection(
             host: "example.com",
@@ -25,7 +24,6 @@ struct ServerConnectionTests {
         )
 
         #expect(connection.httpBaseURL.absoluteString == "https://example.com:443")
-        #expect(connection.wsBaseURL.absoluteString == "wss://example.com:443/ws")
         #expect(!connection.isLocal)
         #expect(connection.connectionKey == "example.com:443")
     }

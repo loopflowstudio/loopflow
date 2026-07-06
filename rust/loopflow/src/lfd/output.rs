@@ -1,17 +1,16 @@
-//! Output streaming hub with file-backed persistence.
+//! File-backed run output logging.
 //!
-//! Output lines are broadcast in-memory AND appended to per-run log files
-//! at `~/.lf/output/<run_id>.log`. The logs endpoint replays from
-//! the file, then follows live — no race conditions.
+//! Output lines are appended to per-run log files at `~/.lf/output/<run_id>.log`;
+//! the logs endpoint replays from the file. The old in-process broadcast bus
+//! (which fed the deleted `/ws` output stream) is gone — waves write their own
+//! logs and a client reads them from disk. No streaming center.
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
-use tokio::sync::broadcast;
 use tracing::warn;
 
 use crate::lfd::security::{path_within_root_existing, path_within_root_planned, validate_safe_id};
@@ -24,12 +23,17 @@ pub struct OutputEvent {
     pub text: String,
 }
 
-/// File writer cache — one writer per run_id.
+/// File writer cache — one writer per run_id. Retained run-output write
+/// machinery: the in-process broadcast bus that fed the old `/ws` output stream
+/// is gone (waves write their own logs now), so nothing feeds this on the lfd
+/// side; it stays as the append primitive for run-output logging.
+#[allow(dead_code)]
 struct Writers {
     dir: PathBuf,
     files: HashMap<String, File>,
 }
 
+#[allow(dead_code)]
 impl Writers {
     fn new(dir: PathBuf) -> Self {
         fs::create_dir_all(&dir).ok();
@@ -86,97 +90,19 @@ impl UsageTotals {
     }
 }
 
-#[derive(Clone)]
-pub struct OutputHub {
-    sender: broadcast::Sender<OutputEvent>,
-    writers: std::sync::Arc<Mutex<Writers>>,
-    usage: std::sync::Arc<Mutex<HashMap<String, UsageTotals>>>,
-    output_dir: PathBuf,
-}
-
-impl std::fmt::Debug for OutputHub {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OutputHub")
-            .field("output_dir", &self.output_dir)
-            .finish()
-    }
-}
-
-impl OutputHub {
-    pub fn new(buffer: usize, output_dir: PathBuf) -> Self {
-        let (sender, _) = broadcast::channel(buffer);
-        let writers = std::sync::Arc::new(Mutex::new(Writers::new(output_dir.clone())));
-        Self {
-            sender,
-            writers,
-            usage: std::sync::Arc::new(Mutex::new(HashMap::new())),
-            output_dir,
-        }
-    }
-
-    /// Add token counts to a run's running usage total. Called as
-    /// `StreamEvent::Usage` events are parsed from the agent's stream.
-    pub fn add_usage(
-        &self,
-        run_id: &str,
-        input_tokens: Option<u64>,
-        output_tokens: Option<u64>,
-        cache_read_tokens: Option<u64>,
-    ) {
-        if let Ok(mut usage) = self.usage.lock() {
-            let entry = usage.entry(run_id.to_string()).or_default();
-            entry.input_tokens += input_tokens.unwrap_or(0);
-            entry.output_tokens += output_tokens.unwrap_or(0);
-            entry.cache_read_tokens += cache_read_tokens.unwrap_or(0);
-        }
-    }
-
-    /// Remove and return a run's accumulated usage. Returns `None` when no
-    /// usage was recorded (e.g. tmux-backed runs that never stream in-process).
-    pub fn take_usage(&self, run_id: &str) -> Option<UsageTotals> {
-        self.usage
-            .lock()
-            .ok()
-            .and_then(|mut usage| usage.remove(run_id))
-    }
-
-    /// Append to log file, then broadcast. File write happens first so
-    /// that replay-then-follow has a clean dedup boundary.
-    pub fn send(&self, event: OutputEvent) {
-        if let Ok(mut w) = self.writers.lock() {
-            w.append(&event.run_id, &event.text);
-        }
-        let _ = self.sender.send(event);
-    }
-
-    pub fn subscribe(&self) -> broadcast::Receiver<OutputEvent> {
-        self.sender.subscribe()
-    }
-
-    /// Read the log file for a wave run. Returns lines and the byte offset
-    /// at end of read (for dedup with the broadcast stream).
-    pub fn read_log(&self, run_id: &str) -> Option<(Vec<String>, u64)> {
-        let relative = relative_log_path(run_id)?;
-        let path = path_within_root_existing(&self.output_dir, &relative).ok()?;
-        let file = File::open(&path).ok()?;
-        let metadata = file.metadata().ok()?;
-        let size = metadata.len();
-        let reader = BufReader::new(file);
-        let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
-        Some((lines, size))
-    }
-
-    /// Drop the file handle for a completed/failed wave run.
-    pub fn close_writer(&self, run_id: &str) {
-        if let Ok(mut w) = self.writers.lock() {
-            w.close(run_id);
-        }
-    }
-
-    /// Output directory path.
-    pub fn output_dir(&self) -> &Path {
-        &self.output_dir
-    }
+/// Replay a wave run's persisted output from its log file. Returns the lines
+/// and the byte offset at end of read. Pure file read against the durable
+/// per-run log — there is no live broadcast to follow anymore (the wave writes
+/// its own logs; a client reads them from disk, no center).
+pub fn read_output_log(output_dir: &Path, run_id: &str) -> Option<(Vec<String>, u64)> {
+    let relative = relative_log_path(run_id)?;
+    let path = path_within_root_existing(output_dir, &relative).ok()?;
+    let file = File::open(&path).ok()?;
+    let metadata = file.metadata().ok()?;
+    let size = metadata.len();
+    let reader = BufReader::new(file);
+    let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
+    Some((lines, size))
 }
 
 /// Delete output log files older than `max_age` based on filesystem mtime.
@@ -217,29 +143,29 @@ fn relative_log_path(run_id: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{OutputEvent, OutputHub};
+    use super::read_output_log;
+    use std::fs;
     use tempfile::tempdir;
 
     #[test]
-    fn read_log_returns_none_for_unsafe_run_id() {
+    fn read_output_log_returns_none_for_unsafe_run_id() {
         let tmp = tempdir().expect("tempdir");
-        let hub = OutputHub::new(8, tmp.path().to_path_buf());
-        assert!(hub.read_log("../escape").is_none());
+        assert!(read_output_log(tmp.path(), "../escape").is_none());
     }
 
     #[test]
-    fn send_ignores_unsafe_run_id_without_creating_file() {
+    fn read_output_log_replays_a_run_log_file() {
         let tmp = tempdir().expect("tempdir");
-        let hub = OutputHub::new(8, tmp.path().to_path_buf());
-        let outside = tmp.path().parent().expect("parent").join("escape.log");
+        fs::write(tmp.path().join("run-1.log"), "first\nsecond\n").expect("write log");
 
-        hub.send(OutputEvent {
-            wave_id: "wave-1".to_string(),
-            run_id: "../escape".to_string(),
-            agent_id: "agent-1".to_string(),
-            text: "nope".to_string(),
-        });
+        let (lines, size) = read_output_log(tmp.path(), "run-1").expect("log replays");
+        assert_eq!(lines, vec!["first".to_string(), "second".to_string()]);
+        assert!(size > 0);
+    }
 
-        assert!(!outside.exists());
+    #[test]
+    fn read_output_log_returns_none_when_no_file() {
+        let tmp = tempdir().expect("tempdir");
+        assert!(read_output_log(tmp.path(), "run-missing").is_none());
     }
 }

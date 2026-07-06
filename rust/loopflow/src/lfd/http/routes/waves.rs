@@ -24,7 +24,7 @@ use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Event, Run, RunStatus, Wave, WaveStatus, LIVE_SESSION_STATUSES};
+use crate::lfd::types::{Run, RunStatus, Wave, WaveStatus, LIVE_SESSION_STATUSES};
 
 // TODO(M1): convert the mutating wave routes in this file to exec lf argv or
 // remove them. lfd is the local face, not a hand: no direct git, worktree, tmux,
@@ -274,8 +274,6 @@ pub async fn update_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    state.event_hub.send(Event::wave_updated(wave.id().clone()));
-
     let view = build_wave_dto(&state.store, &state.github, wave, false)
         .await
         .map_err(map_store_error)?;
@@ -323,8 +321,6 @@ pub async fn delete_wave_handler(
             ApiMessage::Untrusted(err.to_string()),
         )
     })?;
-
-    state.event_hub.send(Event::wave_deleted(wave_id.clone()));
 
     Ok(Json(DeletedResourceResponse {
         id: wave_id.to_string(),
@@ -426,8 +422,6 @@ pub async fn stop_wave_handler(
         }
     }
 
-    state.event_hub.send(Event::wave_stopped(wave_id));
-
     Ok(Json(StopWaveResponse { stopped: true }))
 }
 
@@ -450,10 +444,6 @@ async fn cancel_active_session(state: &HttpState, run: &Run) -> Result<(), ApiEr
         .update_control_session(&session)
         .await
         .map_err(map_store_error)?;
-    state
-        .event_hub
-        .send(Event::session_updated(session.clone()));
-
     if session.is_tmux_backed() {
         match TokioCommand::new("tmux")
             .args(["kill-session", "-t", &session.tmux_name])
@@ -484,7 +474,6 @@ pub async fn land_wave_handler(
 ) -> ApiResult<LandWaveResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let payload = payload.map(|Json(value)| value).unwrap_or_default();
-    let wave_id_for_event = wave_id.clone();
     let wave = state
         .store
         .get_wave(&wave_id)
@@ -550,8 +539,6 @@ pub async fn land_wave_handler(
         }
     }
 
-    state.event_hub.send(Event::wave_updated(wave_id_for_event));
-
     Ok(Json(LandWaveResponse { merged: true }))
 }
 
@@ -580,8 +567,6 @@ pub async fn next_wave_handler(
     )
     .await?;
 
-    state.event_hub.send(Event::wave_updated(wave_id));
-
     Ok(Json(NextWaveResponse {
         new_branch: result.new_branch,
     }))
@@ -608,8 +593,6 @@ pub async fn combine_wave_handler(
         StatusCode::BAD_REQUEST,
     )
     .await?;
-
-    state.event_hub.send(Event::wave_updated(wave_id));
 
     Ok(Json(CombineResponse {
         ok: true,

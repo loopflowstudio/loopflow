@@ -1,15 +1,13 @@
 pub mod attention;
 pub mod auth;
-pub mod bridge;
 pub(crate) mod client;
 pub mod config;
-pub mod events;
 pub mod executor;
 pub mod github;
 pub mod http;
 pub(crate) mod http_client;
 pub mod id;
-pub mod journal;
+pub mod lf_exec;
 pub mod live_pr;
 pub mod obs;
 pub mod output;

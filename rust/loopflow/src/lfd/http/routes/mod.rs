@@ -1,6 +1,7 @@
 pub mod attention;
 pub mod auth;
 pub mod catalog;
+pub mod exec;
 pub mod flows;
 pub mod hooks;
 pub mod providers;
@@ -11,7 +12,6 @@ pub mod system;
 pub mod usage;
 pub mod waves;
 pub mod worktrees;
-pub mod ws;
 
 #[cfg(test)]
 pub(crate) mod test_helpers;

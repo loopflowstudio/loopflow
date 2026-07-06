@@ -6,7 +6,6 @@
 mod attention;
 mod chat_memory;
 mod chat_message;
-mod event;
 mod repo;
 mod session;
 mod summary;
@@ -18,7 +17,6 @@ pub const CI_FIX_FLOW: &str = "ci-fix";
 pub use attention::{AttentionItem, AttentionKind, AttentionStatus};
 pub use chat_memory::ChatMemoryBlock;
 pub use chat_message::ChatMessage;
-pub use event::Event;
 pub use repo::{Repo, RepoEdge, RepoId};
 pub use session::{
     tmux_session_name, Session, SessionStatus, SessionUse, LF_CLI_SOURCE, LIVE_SESSION_STATUSES,

@@ -212,17 +212,20 @@ Shortcuts only run when a text field is not focused. Terminal input and command 
 
 ## Communication with lfd
 
-Two patterns, intentionally different:
+Two patterns, intentionally different — split by durability (see
+`scratch/eventing.md`): durable facts are QUERIES, live motion is a per-wave
+stream. There is no machine-wide telemetry socket.
 
-1. **HTTP services** (WaveService in `LocalWaveService.swift`)
-   - Reads waves + runs from lfd HTTP API
-   - Used for primary wave data
+1. **Registry queries** (`RegistryQuery`, `LocalWaveService.swift`)
+   - Discovery + history: which waves exist (running and stopped), a wave's
+     runs, its attention — `lf ls/status/runs --json` over `lfdb`, or the
+     equivalent lfd HTTP reads
+   - A point-in-time snapshot, re-run on a cadence; not a stream
 
-2. **WebSocket subscription** (EventService in `LocalEventService.swift`)
-   - Connects to active server (`ws://.../ws` or `wss://.../ws`)
-   - Uses configured auth mode (none or static token)
-   - Subscribes to wave + agent + output events
-   - Used for live UI updates
+2. **Per-wave SSE** (`WaveChatConnection` in `WaveChatClient.swift`)
+   - One connection per wave the UI is watching, off that wave's `/events`
+   - Frames: `state` / `turn` / `memory` / `op` (run/flow/step motion)
+   - Drives both the chat pane and the wave's dashboard card
 
 ## Connections Panel
 

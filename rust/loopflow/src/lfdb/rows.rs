@@ -71,7 +71,9 @@ pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
     let created_at = unix_to_datetime(bigint(row, 5)?);
     let workers = int(row, 6)? as u32;
     let primary_flow = text(row, 7)?;
-    let goal = text(row, 8)?;
+    // Legacy rows predating migration 037 (goal NOT NULL DEFAULT) can hold
+    // NULL; fall back to the same default so `lf ls`/reads stay robust.
+    let goal = opt_text(row, 8)?.unwrap_or_else(|| "ship-roadmap".to_string());
     let metrics = parse_json_vec(&text(row, 9)?)?;
     let parent_wave_id = opt_text(row, 10)?.map(LfdId::from_raw);
 

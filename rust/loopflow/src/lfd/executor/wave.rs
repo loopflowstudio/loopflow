@@ -13,10 +13,9 @@ use tracing::{info, warn};
 use time::OffsetDateTime;
 
 use crate::engine::worktree::remove_worktree;
-use crate::lfd::events::EventHub;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    tmux_session_name, Event, Session, SessionStatus, SessionUse, LIVE_SESSION_STATUSES,
+    tmux_session_name, Session, SessionStatus, SessionUse, LIVE_SESSION_STATUSES,
     PALETTE_TERMINAL_SOURCE, WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
 };
 use crate::lfdb::SharedStore;
@@ -69,7 +68,6 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
 #[derive(Clone)]
 pub struct WaveExecutor {
     store: SharedStore,
-    event_hub: EventHub,
 }
 
 impl std::fmt::Debug for WaveExecutor {
@@ -79,8 +77,8 @@ impl std::fmt::Debug for WaveExecutor {
 }
 
 impl WaveExecutor {
-    pub fn new(store: SharedStore, event_hub: EventHub) -> Self {
-        Self { store, event_hub }
+    pub fn new(store: SharedStore) -> Self {
+        Self { store }
     }
 
     pub async fn launch_palette_session(
@@ -139,7 +137,6 @@ impl WaveExecutor {
             completion_token: None,
         };
         self.store.create_control_session(&session).await?;
-        self.event_hub.send(Event::session_created(session.clone()));
 
         let running = self.launch_tmux_session(session).await?;
         self.spawn_palette_completion_watcher(running.clone());
@@ -258,7 +255,6 @@ impl WaveExecutor {
         let mut running = session;
         let _ = running.start();
         self.store.update_control_session(&running).await?;
-        self.event_hub.send(Event::session_updated(running.clone()));
         Ok(running)
     }
 
@@ -293,7 +289,6 @@ impl WaveExecutor {
         if let Some(mut stored) = self.store.get_control_session(session_id).await? {
             if stored.complete(exit_code) {
                 self.store.update_control_session(&stored).await?;
-                self.event_hub.send(Event::session_updated(stored.clone()));
                 return Ok(true);
             }
         }

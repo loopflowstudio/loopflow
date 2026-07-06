@@ -306,7 +306,7 @@ fn wave_server_pid(session: &Session) -> Option<u32> {
 /// session row's env (trimmed, empty dropped). Shared by `lf chat`'s target
 /// resolution and the work-line channel knock; callers fall back to the
 /// `wave/<name>/.wave-endpoint` discovery file when the store has no live row.
-pub(crate) async fn wave_server_endpoint(
+pub async fn wave_server_endpoint(
     store: &SharedStore,
     wave_id: &LfdId,
 ) -> anyhow::Result<Option<String>> {

@@ -10,3 +10,4 @@ pub mod ssh;
 pub mod sub;
 pub mod usage;
 pub mod util;
+pub mod waves;

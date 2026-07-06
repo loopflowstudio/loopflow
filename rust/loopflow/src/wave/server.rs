@@ -49,8 +49,15 @@
 //!     under the same id — each frame replaces the client's previous state
 //!     for that (channel, id) pair (upsert, never append-if-seen).
 //!   - `memory`: data is the `MemoryUpdated` summary string, fired on every
-//!     curation. Live-only, no replay — MEMORY.md itself is the durable state.
-//!     Primary channel only (memory is wave identity; work lines have none).
+//!     curation. Live-only, no replay — MEMORY.md itself is the durable
+//!     state. Primary channel only (memory is wave identity; work lines have
+//!     none).
+//!   - `op`: data is an [`OpFrame`] — this wave's operational motion (a worker
+//!     run starting or finishing, observed by the [`StoreObserver`]), `kind`
+//!     mirroring the `run_events` ledger vocabulary 1:1 (`run.started`,
+//!     `run.completed`, `run.errored`). Live-only, no replay — history is a
+//!     `lf runs` query, the durable ledger the frame mirrors. Primary channel
+//!     only (workers are the wave's, not a child channel's).
 //!   - `memory-add`: data is the full added fact. Replays on connect for the
 //!     facts since the last curation, then streams live. Primary channel only.
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
@@ -113,17 +120,21 @@ use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{Query, State};
+use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::stream::{self, Stream, StreamExt};
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use time::OffsetDateTime;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
+use crate::lfd::http::routes::exec::{ExecRequest, ExecResponse};
+use crate::lfd::lf_exec::{exec_lf, validate_lf_argv};
 use crate::wave::channel::tagged_turn_json;
 use crate::wave::journal::{Attribution, MessageOp, PendingMessage};
 use crate::wave::registry::{process_alive, StoreObserver};
@@ -131,8 +142,9 @@ use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::state::MindState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
-    AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, PostDeltasRequest,
-    PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
+    AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, OpFrame,
+    PostDeltasRequest, PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
+    SUBAGENT_TOKEN_HEADER,
 };
 
 /// Basename of the discovery pointer under `wave/<name>/`.
@@ -142,22 +154,22 @@ pub const ENDPOINT_FILE: &str = ".wave-endpoint";
 /// the attached resident's pid, for liveness probing. Shared with the
 /// supervisor ([`crate::wave::supervisor`]), which probes attached pids and
 /// clears the seat when the resident dies.
+///
+/// The token is held as a [`SecretString`] and compared in constant time
+/// ([`subtle::ConstantTimeEq`]) — never `==`, never surfaced in `Debug` or a
+/// log. This mirrors [`crate::lfd::auth`], the machine lfd's bearer door.
 #[derive(Debug, Clone)]
 pub struct ResidentDoor {
-    token: String,
+    token: SecretString,
     seat: Arc<Mutex<Option<u32>>>,
 }
 
 impl ResidentDoor {
     pub fn new(token: impl Into<String>) -> Self {
         Self {
-            token: token.into(),
+            token: SecretString::new(token.into()),
             seat: Arc::new(Mutex::new(None)),
         }
-    }
-
-    pub fn token(&self) -> &str {
-        &self.token
     }
 
     /// The attached resident's pid, if one has attached and not been cleared.
@@ -180,7 +192,7 @@ impl ResidentDoor {
             .get(RESIDENT_TOKEN_HEADER)
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default();
-        if presented == self.token {
+        if token_matches(&self.token, presented) {
             return Ok(());
         }
         Err((
@@ -190,6 +202,17 @@ impl ResidentDoor {
     }
 }
 
+/// Constant-time compare of a presented token against a stored secret — the
+/// door's only equality check. Length inequality short-circuits (inherent, as
+/// in [`crate::lfd::auth`]); equal-length inputs compare in constant time.
+fn token_matches(expected: &SecretString, provided: &str) -> bool {
+    expected
+        .expose_secret()
+        .as_bytes()
+        .ct_eq(provided.as_bytes())
+        .into()
+}
+
 /// A fresh per-boot resident token.
 pub fn generate_resident_token() -> String {
     format!(
@@ -197,6 +220,73 @@ pub fn generate_resident_token() -> String {
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     )
+}
+
+/// The exec door's authority: the set of per-subagent capability tokens this
+/// boot accepts on `/v0/exec`. A distinct principal from [`ResidentDoor`] —
+/// `/exec` accepts a minted subagent token and never the resident token, so a
+/// least-privilege subagent (a sandboxed process spawned inside the wave) can
+/// run `lf` unsandboxed in the outwave without holding the resident's pen.
+///
+/// In-memory, per boot — no store, no schema. The listener mints a token when
+/// it spawns the resident (injected into the child env, inherited by every
+/// sandboxed descendant) and validates presented tokens against this set. A
+/// respawn reuses the boot's token, the same trust domain as the resident
+/// token, which is also per-boot.
+///
+/// Tokens are held as [`SecretString`]s (redacted in `Debug`, never logged)
+/// and membership is a constant-time scan ([`subtle::ConstantTimeEq`]): every
+/// accepted token is compared, results folded without an early return, so a
+/// presented token leaks neither its value nor its position in the set.
+#[derive(Debug, Clone, Default)]
+pub struct SubagentDoor {
+    accepted: Arc<Mutex<Vec<SecretString>>>,
+}
+
+impl SubagentDoor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mint a fresh capability token and register it as accepted.
+    pub fn mint(&self) -> String {
+        let token = generate_resident_token();
+        self.accepted
+            .lock()
+            .expect("subagent token set lock poisoned")
+            .push(SecretString::new(token.clone()));
+        token
+    }
+
+    fn authorize(&self, headers: &HeaderMap) -> Result<(), (StatusCode, String)> {
+        let presented = headers
+            .get(SUBAGENT_TOKEN_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        if !presented.is_empty() && self.accepts(presented) {
+            return Ok(());
+        }
+        Err((
+            StatusCode::UNAUTHORIZED,
+            format!("missing or wrong {SUBAGENT_TOKEN_HEADER}"),
+        ))
+    }
+
+    /// Constant-time set membership: compare the presented token against every
+    /// accepted token, folding matches with a non-short-circuiting bit-or so
+    /// timing reveals neither which token matched nor whether an early one did.
+    fn accepts(&self, presented: &str) -> bool {
+        let accepted = self
+            .accepted
+            .lock()
+            .expect("subagent token set lock poisoned");
+        let presented = presented.as_bytes();
+        let mut matched = subtle::Choice::from(0u8);
+        for token in accepted.iter() {
+            matched |= token.expose_secret().as_bytes().ct_eq(presented);
+        }
+        matched.into()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -322,6 +412,7 @@ struct PostMessageResponse {
 struct ServerState {
     runtime: Arc<WaveRuntime>,
     resident: ResidentDoor,
+    subagent: SubagentDoor,
     observer: Option<Arc<StoreObserver>>,
     supervisor: Option<SupervisorHandle>,
     started_at: OffsetDateTime,
@@ -331,15 +422,22 @@ struct ServerState {
 /// poller when this server is registered — `GET /resident/context` freshens
 /// it before serving. `supervisor` lets the attach door stand the respawn
 /// ladder down (`None` in tests without a supervisor).
+/// Request-body ceiling for the wave routes — parity with the machine lfd's
+/// `http_security.max_json_body_bytes` default (1 MiB). Loopback + token gate
+/// this, but an unbounded body is a needless same-user allocation.
+const MAX_BODY_BYTES: usize = 1_048_576;
+
 pub fn router(
     runtime: Arc<WaveRuntime>,
     resident: ResidentDoor,
+    subagent: SubagentDoor,
     observer: Option<Arc<StoreObserver>>,
     supervisor: Option<SupervisorHandle>,
 ) -> Router {
     let state = ServerState {
         runtime,
         resident,
+        subagent,
         observer,
         supervisor,
         started_at: OffsetDateTime::now_utc(),
@@ -351,10 +449,12 @@ pub fn router(
         .route("/messages", post(messages_handler))
         .route("/channels", post(channels_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
+        .route("/v0/exec", post(exec_handler))
         .route("/memory/log", get(memory_log_handler))
         .route("/resident/attach", post(resident_attach_handler))
         .route("/resident/deltas", post(resident_deltas_handler))
         .route("/resident/context", get(resident_context_handler))
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
 }
 
@@ -457,6 +557,140 @@ async fn resident_context_handler(
     Ok(Json(ContextResponse {
         thread_id: state.runtime.last_thread_id(),
         in_flight,
+    }))
+}
+
+/// The verb policy's ruling on one argv: run it, or refuse it naming the verb.
+#[derive(Debug, PartialEq, Eq)]
+enum ExecVerdict {
+    Allow,
+    Deny(String),
+}
+
+/// The wave `/v0/exec` door's verb allowlist — the F1 containment fix.
+///
+/// The door is the sandboxed subagent's escape hatch: it exists so a worker
+/// can COMMIT and DISPATCH in the outwave despite its own worktree's
+/// `.git`-write lock. It is NOT a general remote `lf`. `validate_lf_argv`
+/// only proves an argv *parses*, so without this a leaked subagent token (or
+/// a prompt-injected LLM holding it) could run ANY verb — rotate credentials,
+/// tear down a wave. Allowlist over denylist: permit exactly the escape
+/// hatch's needs, refuse everything else.
+///
+/// Permitted:
+/// - `op …` EXCEPT `op auth` — git/GitHub/pm/release/queue: the commit-and-land path.
+/// - `chat`, `memory` — a worker reporting up and curating wave memory.
+/// - the read verbs `ls`/`status`/`runs`/`sub`/`trace`/`usage` — inspection.
+/// - the dispatch path: a flow/step run or an inline prompt carrying
+///   `--dispatch`, which lands in a FRESH sandboxed worktree.
+///
+/// Rejected:
+/// - `op auth` — credential rotation is never the escape hatch's job.
+/// - `wave …` — wave lifecycle (start / `--force` take-over / dormant serve).
+/// - any flow / inline prompt WITHOUT `--dispatch` — that would run an
+///   arbitrary LLM prompt unsandboxed in the outwave, the exact power this
+///   door must not hand a leaked token.
+///
+/// Note the escape hatch's real invocation is `lf --dispatch <flow> …` (the
+/// `--dispatch` flag PRECEDES the flow name — clap's external-subcommand
+/// capture swallows everything after the flow token, so a trailing
+/// `--dispatch` would be an argument to the flow, not the top-level flag).
+fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
+    use crate::lf::{Cli, Commands, OpsCommand};
+    use clap::Parser;
+
+    let full = std::iter::once("lf".to_string()).chain(argv.iter().cloned());
+    // `validate_lf_argv` runs first and already rejected anything that does
+    // not parse — save help/version, which it lets through to print. So a
+    // parse error here is that harmless help/version case: nothing to police.
+    let Ok(cli) = Cli::try_parse_from(full) else {
+        return ExecVerdict::Allow;
+    };
+    match &cli.command {
+        Some(Commands::Op { op }) => match op {
+            OpsCommand::Auth { .. } => ExecVerdict::Deny("op auth".to_string()),
+            _ => ExecVerdict::Allow,
+        },
+        Some(Commands::Chat { .. })
+        | Some(Commands::Memory { .. })
+        | Some(Commands::Ls { .. })
+        | Some(Commands::Status { .. })
+        | Some(Commands::Runs { .. })
+        | Some(Commands::Sub { .. })
+        | Some(Commands::Trace { .. })
+        | Some(Commands::Usage) => ExecVerdict::Allow,
+        // A flow/step run or an inline prompt: allowed only when it will land
+        // in a sandboxed worktree (`--dispatch`), never run in the outwave.
+        Some(Commands::External(parts)) => {
+            if cli.dispatch {
+                ExecVerdict::Allow
+            } else {
+                let flow = parts.first().cloned().unwrap_or_else(|| "flow".to_string());
+                ExecVerdict::Deny(flow)
+            }
+        }
+        Some(Commands::Inline { .. }) => {
+            if cli.dispatch {
+                ExecVerdict::Allow
+            } else {
+                ExecVerdict::Deny(":".to_string())
+            }
+        }
+        Some(Commands::Wave { .. }) => ExecVerdict::Deny("wave".to_string()),
+        // `lf ssh` forwards the local credential bundle to a remote host and
+        // runs an arbitrary command there — the exact power a leaked token
+        // must not reach.
+        Some(Commands::Ssh { .. }) => ExecVerdict::Deny("ssh".to_string()),
+        // `lf cron` schedules recurring execution — a persistence/escalation
+        // vector, not part of the commit/dispatch escape hatch.
+        Some(Commands::Cron { .. }) => ExecVerdict::Deny("cron".to_string()),
+        // Bare `lf` (interactive launch) has no verb the door can run.
+        None => ExecVerdict::Deny("lf".to_string()),
+    }
+}
+
+/// `POST /v0/exec` — the wave's exec door: "a wave HAS an lfd" in one route.
+/// A subagent (a sandboxed process spawned inside this wave) presents its
+/// per-subagent token and runs an arbitrary `lf` argv **unsandboxed in the
+/// outwave** (`runtime.repo_root()`), escaping the `.git`-write restriction of
+/// its own worktree so it can commit / dispatch through the wave.
+///
+/// Two gates in front of the state-free [`crate::lfd::lf_exec`] engine: the
+/// generic shape check ([`validate_lf_argv`] — garbage argv → 400, no exec),
+/// then this door's own verb allowlist ([`wave_exec_verdict`] — a parsed but
+/// forbidden verb like `op auth` or `wave` → 400). Only then exec and
+/// capture. The door pins execution to the outwave, so a client-supplied
+/// `cwd` on the shared [`ExecRequest`] shape is ignored here — the machine
+/// lfd's `/v0/exec` honors it; the wave's does not, by design.
+async fn exec_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<ExecRequest>,
+) -> Result<Json<ExecResponse>, (StatusCode, String)> {
+    state.subagent.authorize(&headers)?;
+    // Shape gate (generic engine): does the argv parse as an `lf` command?
+    validate_lf_argv(&payload.argv).map_err(|err| (StatusCode::BAD_REQUEST, err))?;
+    // Verb gate (this door's policy): is the command one the escape hatch is
+    // allowed to run? A parsed-but-forbidden verb is a 400, not an exec.
+    if let ExecVerdict::Deny(verb) = wave_exec_verdict(&payload.argv) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("command '{verb}' is not permitted through the wave exec door"),
+        ));
+    }
+    let cwd = state.runtime.repo_root().display().to_string();
+    let result = exec_lf(&payload.argv, Some(&cwd), &[])
+        .await
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                crate::lfd::redaction::sanitize_operator_message(&err),
+            )
+        })?;
+    Ok(Json(ExecResponse {
+        exit_code: result.exit_code,
+        stdout: result.stdout,
+        stderr: result.stderr,
     }))
 }
 
@@ -748,8 +982,17 @@ async fn events_handler(
             };
             async move { out }
         });
+        // Worker-run motion (`op` frames). Live-only — no replay; a client
+        // that lags re-reads history from `lf runs`.
+        let live_ops = BroadcastStream::new(sub.op_rx).filter_map(move |res| {
+            let out = match res {
+                Ok(frame) => Some(Ok(op_event(&frame))),
+                Err(_) => None,
+            };
+            async move { out }
+        });
         let mut live: BoxedEventStream = Box::pin(stream::select(
-            live_turns,
+            stream::select(live_turns, live_ops),
             stream::select(live_states, stream::select(live_memory, live_memory_adds)),
         ));
         if include_inbox {
@@ -832,6 +1075,12 @@ fn state_event(state: &MindState) -> Event {
 
 fn memory_event(summary: &str) -> Event {
     Event::default().event("memory").data(summary)
+}
+
+fn op_event(frame: &OpFrame) -> Event {
+    Event::default()
+        .event("op")
+        .data(serde_json::to_string(frame).unwrap_or_default())
 }
 
 fn memory_add_event(fact: &str) -> Event {
@@ -1023,6 +1272,221 @@ mod tests {
         );
         remove_resident_token(tmp.path(), "ship", "tok-1");
         assert!(read_resident_token(tmp.path(), "ship").is_none());
+    }
+
+    /// Boot the HTTP surface over a runtime we control, with a subagent door
+    /// we can mint from. Returns the base URL and the minted token.
+    async fn boot_exec() -> (String, String, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("wave/ship");
+        std::fs::create_dir_all(&dir).expect("wave dir");
+        std::fs::write(dir.join("MEMORY.md"), "Goal: exercise /exec.\n").expect("memory");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+
+        let subagent = SubagentDoor::new();
+        let token = subagent.mint();
+        let app = router(runtime, ResidentDoor::new("resident"), subagent, None, None);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        (format!("http://{addr}"), token, tmp)
+    }
+
+    /// The wave's `/v0/exec` door: no token → 401, the resident token → 401,
+    /// and a minted subagent token clears auth (garbage argv then 400s at the
+    /// validator). Proves the exec door is a distinct principal from the
+    /// resident door. (The valid-argv exec path is exercised by dogfooding,
+    /// not here — a unit test must not spawn the real `lf` binary.)
+    #[tokio::test]
+    async fn exec_door_gates_on_the_subagent_token_and_validates_argv() {
+        let (base, token, _tmp) = boot_exec().await;
+        let client = reqwest::Client::new();
+        let url = format!("{base}/v0/exec");
+
+        // No token: refused before any exec.
+        let no_token = client
+            .post(&url)
+            .json(&serde_json::json!({ "argv": ["op", "doctor"], "cwd": null }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(no_token.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        // The resident token must NOT authorize a subagent exec call.
+        let resident_token = client
+            .post(&url)
+            .header(RESIDENT_TOKEN_HEADER, "resident")
+            .json(&serde_json::json!({ "argv": ["op", "doctor"], "cwd": null }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resident_token.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        // A minted token clears auth; a garbage argv proves we reached the
+        // validator (400, not 401).
+        let bad_argv = client
+            .post(&url)
+            .header(SUBAGENT_TOKEN_HEADER, &token)
+            .json(&serde_json::json!({ "argv": ["op", "next", "--nonesuch"], "cwd": null }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(bad_argv.status(), reqwest::StatusCode::BAD_REQUEST);
+    }
+
+    /// A worker dispatched while a client is subscribed to `/events` surfaces
+    /// as a live `op` frame carrying the ledger-vocabulary `kind`. This is the
+    /// wave's operational channel riding the same stream as `state`/`turn`.
+    #[tokio::test]
+    async fn op_frame_reaches_the_events_stream_for_a_run() {
+        use crate::wave::subscription::{stream_events, Frame};
+        use std::sync::{Arc, Mutex};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(
+            runtime.clone(),
+            ResidentDoor::new("resident"),
+            SubagentDoor::new(),
+            None,
+            None,
+        );
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        let seen: Arc<Mutex<Vec<Frame>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let endpoint = addr.to_string();
+        let task = tokio::spawn(async move {
+            let mut on_frame = |frame: Frame| sink.lock().unwrap().push(frame);
+            let _ = stream_events(&endpoint, "", &mut on_frame).await;
+        });
+
+        // Wait for the subscription to open (the state replay lands first),
+        // then a worker is observed — the live `op` frame must arrive.
+        for _ in 0..200 {
+            if seen.lock().unwrap().iter().any(|f| f.event == "state") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(runtime.journal_run_observed("run-42", "sess-1", "implement", "wire it"));
+        for _ in 0..200 {
+            if seen.lock().unwrap().iter().any(|f| f.event == "op") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        task.abort();
+
+        let frames = seen.lock().unwrap().clone();
+        let op = frames
+            .iter()
+            .find(|f| f.event == "op")
+            .expect("op frame arrives on /events");
+        let frame: OpFrame = serde_json::from_str(&op.data).expect("op frame parses");
+        assert_eq!(frame.kind, "run.started");
+        assert_eq!(frame.run_id, "run-42");
+        assert_eq!(frame.flow.as_deref(), Some("implement"));
+    }
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(ToString::to_string).collect()
+    }
+
+    /// The escape hatch's real work passes the verb policy: committing and
+    /// landing through `op`, reporting via `chat`/`memory`, inspecting via the
+    /// read verbs, and dispatching a flow into a sandboxed worktree.
+    #[test]
+    fn wave_exec_policy_permits_the_escape_hatch_essentials() {
+        for command in [
+            argv(&["op", "commit", "-m", "wip"]),
+            argv(&["op", "land", "--strict"]),
+            argv(&["op", "pr"]),
+            argv(&["chat", "worker done"]),
+            argv(&["memory", "add", "learned a thing"]),
+            argv(&["ls"]),
+            argv(&["status"]),
+            argv(&["runs"]),
+            argv(&["sub"]),
+            argv(&["trace", "deadbeef"]),
+            // The dispatch path: `--dispatch` precedes the flow name.
+            argv(&["--dispatch", "implement", "ship it"]),
+            argv(&["--dispatch", "-b", "review"]),
+        ] {
+            assert_eq!(
+                wave_exec_verdict(&command),
+                ExecVerdict::Allow,
+                "{command:?} should be permitted"
+            );
+        }
+    }
+
+    /// Credentials and wave lifecycle are refused, and a flow run WITHOUT
+    /// `--dispatch` (which would execute an arbitrary prompt unsandboxed in the
+    /// outwave) is refused — the F1 containment the door exists to enforce.
+    #[test]
+    fn wave_exec_policy_rejects_dangerous_verbs() {
+        let denied = [
+            argv(&["op", "auth", "login"]),
+            argv(&["op", "auth", "status"]),
+            argv(&["wave", "ship"]),
+            argv(&["wave", "ship", "--force"]),
+            // A flow / inline prompt with no `--dispatch`: no sandbox.
+            argv(&["implement", "ship it"]),
+            argv(&[":", "do", "something"]),
+        ];
+        for command in denied {
+            assert!(
+                matches!(wave_exec_verdict(&command), ExecVerdict::Deny(_)),
+                "{command:?} should be rejected"
+            );
+        }
+    }
+
+    /// The refusal names the offending verb, for a clear 400 body.
+    #[test]
+    fn wave_exec_policy_names_the_rejected_verb() {
+        assert_eq!(
+            wave_exec_verdict(&argv(&["op", "auth", "login"])),
+            ExecVerdict::Deny("op auth".to_string())
+        );
+        assert_eq!(
+            wave_exec_verdict(&argv(&["wave", "ship", "--force"])),
+            ExecVerdict::Deny("wave".to_string())
+        );
+        assert_eq!(
+            wave_exec_verdict(&argv(&["implement", "ship it"])),
+            ExecVerdict::Deny("implement".to_string())
+        );
+    }
+
+    /// A minted subagent token authorizes but a forbidden verb still 400s over
+    /// HTTP — the policy runs inside the live door, not just in isolation.
+    #[tokio::test]
+    async fn exec_door_refuses_forbidden_verb_over_http() {
+        let (base, token, _tmp) = boot_exec().await;
+        let client = reqwest::Client::new();
+        let url = format!("{base}/v0/exec");
+
+        let refused = client
+            .post(&url)
+            .header(SUBAGENT_TOKEN_HEADER, &token)
+            .json(&serde_json::json!({ "argv": ["op", "auth", "status"], "cwd": null }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), reqwest::StatusCode::BAD_REQUEST);
+        let body = refused.text().await.unwrap();
+        assert!(
+            body.contains("not permitted through the wave exec door"),
+            "body names the refusal: {body}"
+        );
     }
 
     /// A pointer to a dead address is stale: the probe says no live server.

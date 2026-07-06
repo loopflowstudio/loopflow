@@ -232,15 +232,21 @@ public final class RepoState {
     private let startBundledDaemon: (@MainActor () async throws -> ServerConnection)?
     private let shellCommandRunner: WaveService.ShellCommandRunner?
     private var waveService: WaveService
-    private var eventService: EventService?
+    /// Local discovery via `lf ls` (see `RegistryQuery`). Injected on platforms
+    /// that can shell `lf`; `nil` falls back to the surviving REST reads (the
+    /// remote/iOS branch — a remote `lf` over SSH is a later seam).
+    public var registryQuery: RegistryQuery?
+    private var snapshotTask: Task<Void, Never>?
     private weak var outputBuffer: OutputBuffer?
 
     public init(
         startBundledDaemon: (@MainActor () async throws -> ServerConnection)? = nil,
-        shellCommandRunner: WaveService.ShellCommandRunner? = nil
+        shellCommandRunner: WaveService.ShellCommandRunner? = nil,
+        registryQuery: RegistryQuery? = nil
     ) {
         self.startBundledDaemon = startBundledDaemon
         self.shellCommandRunner = shellCommandRunner
+        self.registryQuery = registryQuery
         let connection = connectionStore.activeConnection
         waveService = Self.makeWaveService(
             connection: connection,
@@ -478,213 +484,65 @@ public final class RepoState {
 
     public func closeRepo() {
         cancelTrackedSessions()
-        Task {
-            await eventService?.disconnect()
-        }
-        eventService = nil
+        snapshotTask?.cancel()
+        snapshotTask = nil
         resetTransientWaveState()
     }
 
-    // MARK: - Event Subscription
+    // MARK: - Registry snapshot
 
+    /// Load the wave registry and keep it fresh. There is no telemetry stream:
+    /// discovery is a QUERY (`RegistryQuery`/`lf ls` locally, the REST wave list
+    /// remotely) that this re-runs on a slow cadence, and a wave's live motion
+    /// is its own per-wave SSE (`WaveChatConnection`), opened by the detail
+    /// view. Replaces the deleted `/ws` connected snapshot + push.
     public func startEventSubscription(outputBuffer: OutputBuffer) {
-        LoggingService.append("startEventSubscription called", category: LoggingService.Category.lfd)
         self.outputBuffer = outputBuffer
-        if eventService != nil { return }
-        LoggingService.append("creating EventService", category: LoggingService.Category.lfd)
-        let connection = connectionStore.activeConnection
-        eventService = Self.makeEventService(
-            connection: connection,
-            token: connectionStore.token(for: connection)
-        )
-
-        Task {
-            await eventService?.subscribe(
-                onEvent: { [weak self, weak outputBuffer] event in
-                    Task { @MainActor in
-                        guard let self, let outputBuffer else { return }
-                        switch event {
-                        case .connected(let connected):
-                            self.updateConnectionState(.connected)
-                            self.applyConnectedSnapshot(connected.waves)
-                            self.preloadWaveContent(for: self.waves)
-                            await self.refreshAttention()
-                            await self.refreshSessions()
-                            await self.refreshWorktrees()
-                            self.hasCompletedInitialLoad = true
-                            await self.refreshFlowsAsync()
-                        case .wave(let waveEvent):
-                            await self.handleWaveEvent(waveEvent)
-                        case .attention(let attentionEvent):
-                            await self.handleAttentionEvent(attentionEvent)
-                        case .output(let outputEvent):
-                            outputBuffer.appendOutput(
-                                waveId: outputEvent.waveId,
-                                text: outputEvent.text,
-                                timestamp: outputEvent.timestamp
-                            )
-                        case .auth(let authEvent):
-                            self.authProviderStore.handleEvent(authEvent)
-                        case .terminalSession(let terminalEvent):
-                            await self.handleSessionEvent(terminalEvent)
-                        case .agentStarted, .agentEnded, .worktree:
-                            break
-                        }
-                    }
-                },
-                onConnectionStateChange: { [weak self] state in
-                    Task { @MainActor in
-                        LoggingService.lfd("onConnectionStateChange: state=\(state)")
-                        self?.updateConnectionState(state)
-                    }
-                }
-            )
+        guard snapshotTask == nil else { return }
+        snapshotTask = Task { [weak self] in
+            await self?.runSnapshotLoop()
         }
     }
 
-    private func handleWaveEvent(_ event: WaveEvent) async {
-        let currentRepoPath = repoTarget?.path.normalizedFilePath
+    private func runSnapshotLoop() async {
+        await refreshRegistrySnapshot()
+        preloadWaveContent(for: waves)
+        await refreshAttention()
+        await refreshSessions()
+        await refreshWorktrees()
+        hasCompletedInitialLoad = true
+        await refreshFlowsAsync()
 
-        if let currentRepoPath,
-           let wave = event.wave,
-           wave.repo.normalizedFilePath != currentRepoPath {
-            return
-        }
-
-        switch event.type {
-        case .created, .updated, .started, .stopped, .waiting:
-            let previousStatus = waveStore.wave(for: event.waveId)?.status
-            var refreshedWave: Wave?
-            if let wave = event.wave {
-                waveStore.set(makeWaveViewModel(api: wave))
-                refreshedWave = wave
-            } else if let wave = try? await waveService.getWave(event.waveId) {
-                if let currentRepoPath,
-                   wave.repo.normalizedFilePath != currentRepoPath {
-                    return
-                }
-                waveStore.set(makeWaveViewModel(api: wave))
-                refreshedWave = wave
-            }
-
-            if event.type == .waiting {
-                if let sessionId = event.sessionId {
-                    waitingSessionIds[event.waveId] = sessionId
-                    setOptimisticInteractiveSessionStart(for: event.waveId, isStarting: false)
-                    let state = sessionState(for: event.waveId, joinSessionId: sessionId)
-                    if let initialUserMessage = event.initialUserMessage {
-                        state.seedInitialUserMessage(initialUserMessage)
-                    }
-                    state.setAwaitingSession(false)
-                } else if let initialUserMessage = event.initialUserMessage {
-                    let state = sessionState(for: event.waveId)
-                    state.seedInitialUserMessage(initialUserMessage)
-                }
-                if let sessionId = event.sessionId {
-                    if selectedWaveId == nil || selectedWaveId == event.waveId {
-                        markAutoPresentTerminal(for: event.waveId)
-                    }
-                    await loadSession(id: sessionId, select: true)
-                    if selectedWaveId == nil {
-                        selectedWaveId = event.waveId
-                    }
-                }
-            } else if refreshedWave?.status != .waiting {
-                waitingSessionIds.removeValue(forKey: event.waveId)
-                if refreshedWave?.status == .failed || refreshedWave?.status == .idle {
-                    setOptimisticInteractiveSessionStart(for: event.waveId, isStarting: false)
-                }
-            }
-
-            let newStatus = refreshedWave?.status
-            let runCompleted = didRunComplete(oldStatus: previousStatus, newStatus: newStatus)
-            let waveIsActive = newStatus == .running || newStatus == .waiting
-
-            if event.type == .created || runCompleted {
-                loadWaveContent(for: event.waveId)
-            }
-
-            let shouldRefreshRuns = event.type == .started
-                || event.type == .stopped
-                || (event.type == .updated && (waveIsActive || runCompleted))
-            if shouldRefreshRuns {
-                loadRuns(for: event.waveId)
-            }
-            // New wave may adopt a worktree
-            if event.type == .created {
-                await refreshWorktrees()
-                await refreshFlowsAsync()
-            }
-        case .deleted:
-            waveStore.remove(event.waveId)
-            runStore.clear(for: event.waveId)
-            waitingSessionIds.removeValue(forKey: event.waveId)
-            setOptimisticInteractiveSessionStart(for: event.waveId, isStarting: false)
-            if selectedWaveId == event.waveId {
-                selectedWaveId = nil
-            }
-            // Deleted wave may orphan a worktree
-            await refreshWorktrees()
-            await refreshFlowsAsync()
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(5))
+            if Task.isCancelled { return }
+            await refreshRegistrySnapshot()
+            await refreshAttention()
         }
     }
 
-    private func handleAttentionEvent(_ event: AttentionEvent) async {
-        switch event.type {
-        case .created, .updated:
-            if let item = event.item {
-                attentionStore.set(item)
+    /// Re-read which waves exist for this repo. Local: `lf ls` via
+    /// `RegistryQuery`. Remote (or no local runner): the surviving REST wave
+    /// list — the same query underneath, over the wave server this window talks
+    /// to. `applyConnectedSnapshot` scopes a machine-wide `lf ls` to this repo.
+    private func refreshRegistrySnapshot() async {
+        guard let repoTarget else { return }
+        do {
+            let loaded: [Wave]
+            if case .local(let url) = repoTarget, let registryQuery {
+                loaded = try await registryQuery.waves(repoPath: url.path)
             } else {
-                await refreshAttention()
+                loaded = try await waveService.listWaves(repo: repoTarget)
             }
-        case .resolved:
-            if let item = event.item {
-                attentionStore.remove(item.id)
-            } else {
-                await refreshAttention()
+            applyConnectedSnapshot(loaded)
+            preloadWaveContent(for: waves)
+            if let selectedWaveId {
+                loadRuns(for: selectedWaveId)
             }
+            updateConnectionState(.connected)
+        } catch {
+            LoggingService.model("refreshRegistrySnapshot: error=\(error.localizedDescription)")
         }
-    }
-
-    private func handleSessionEvent(_ event: SessionEvent) async {
-        if let session = event.session {
-            terminalWorkspaceStore.upsert(session, select: !session.status.isTerminal)
-            if let wave = waveStore.wave(for: session.waveId) {
-                loadWaveContent(for: wave.id)
-                loadRuns(for: wave.id)
-            }
-            // Auto-attach the wave's terminal pane to the run's live tmux
-            // session so "Ingest & build" (and any other run start) lands the
-            // user on the running flow instead of leaving the pane hooked to
-            // the empty default `lf-<waveId>-<paneId>` session.
-            if session.runId != nil, !session.status.isTerminal {
-                attachTerminalPane(to: session)
-            }
-            if session.status.isTerminal {
-                await refreshSessions()
-            }
-        } else {
-            await refreshSessions()
-        }
-    }
-
-    func attachTerminalPane(to session: Session) {
-        guard let pane = multiplexerStore.pane(ofType: .terminal, for: session.waveId) else {
-            return
-        }
-        if pane.config.terminalSessionId != session.id {
-            var config = pane.config
-            config.terminalSessionId = session.id
-            multiplexerStore.updatePaneConfig(pane.id, config: config, for: session.waveId)
-        }
-        markAutoPresentTerminal(for: session.waveId)
-    }
-
-    private func didRunComplete(oldStatus: WaveStatus?, newStatus: WaveStatus?) -> Bool {
-        guard let oldStatus, let newStatus else { return false }
-        let wasActive = oldStatus == .running || oldStatus == .waiting
-        let isTerminal = newStatus == .idle || newStatus == .failed
-        return wasActive && isTerminal
     }
 
     // MARK: - Flows
@@ -837,6 +695,11 @@ public final class RepoState {
         if autoPresent {
             markAutoPresentTerminal(for: session.waveId)
         }
+        // A live run session repoints the wave's terminal pane at its tmux
+        // session, so focusing it lands on the running flow.
+        if session.runId != nil, !session.status.isTerminal {
+            attachTerminalPane(to: session)
+        }
         loadWaveContent(for: session.waveId)
         loadRuns(for: session.waveId)
     }
@@ -846,6 +709,21 @@ public final class RepoState {
             guard let runs = try? await waveService.listRuns(waveId: waveId) else { return }
             runStore.setRuns(for: waveId, runs)
         }
+    }
+
+    /// Point the wave's terminal pane at a run's live tmux session so opening
+    /// the wave lands the user on the running flow, not the empty default
+    /// `lf-<waveId>-<paneId>` session. Called when a run session is focused.
+    func attachTerminalPane(to session: Session) {
+        guard let pane = multiplexerStore.pane(ofType: .terminal, for: session.waveId) else {
+            return
+        }
+        if pane.config.terminalSessionId != session.id {
+            var config = pane.config
+            config.terminalSessionId = session.id
+            multiplexerStore.updatePaneConfig(pane.id, config: config, for: session.waveId)
+        }
+        markAutoPresentTerminal(for: session.waveId)
     }
 
     public func refreshWorktrees() async {
@@ -866,7 +744,7 @@ public final class RepoState {
     }
 
     private func handleWaveStatusChange(wave: WaveViewModel, from oldStatus: WaveStatus?, to newStatus: WaveStatus) {
-        // Note: loadWaveContent is handled by handleWaveEvent on run completion — not duplicated here.
+        // Note: loadWaveContent is driven by the snapshot loop / selection — not duplicated here.
         switch newStatus {
         case .waiting:
             let step = wave.recentSteps.first?.step ?? "step"
@@ -1079,14 +957,6 @@ public final class RepoState {
 
         resetTransientWaveState()
 
-        let probeService = Self.makeEventService(
-            connection: connection,
-            token: connectionStore.token(for: connection)
-        )
-        try await runConnectionPhase(.wsProbe, connection: connection) {
-            try await probeService.probe()
-        }
-
         startEventSubscription(outputBuffer: outputBuffer)
         updateConnectionState(.connected)
         await refreshWaves()
@@ -1126,7 +996,6 @@ public final class RepoState {
     }
 
     public func checkConnectionHealth() async {
-        await eventService?.resumeFromBackground()
         if connectionState == .connected {
             do {
                 try await waveService.checkConnection()
@@ -1201,10 +1070,8 @@ public final class RepoState {
         authProviderStore.bindService(waveService)
         outputBuffer?.configureConnection(connection, tokenProvider: { token })
 
-        Task {
-            await eventService?.disconnect()
-        }
-        eventService = nil
+        snapshotTask?.cancel()
+        snapshotTask = nil
     }
 
     private func canonicalRepoURL(_ url: URL) -> URL {
@@ -1305,13 +1172,6 @@ public final class RepoState {
         }
     }
 
-    private static func makeEventService(connection: ServerConnection, token: String?) -> EventService {
-        EventService(
-            connection: connection,
-            tokenProvider: { token }
-        )
-    }
-
     // MARK: - Optimistic helpers
 
     /// Apply optimistic mutation, run API call, commit on success or rollback on error.
@@ -1331,7 +1191,8 @@ public final class RepoState {
     }
 
     /// Like `optimistic`, but also schedules a safety-net refresh after commit.
-    /// Used for actions (run/stop/next) where the real state arrives via WebSocket.
+    /// Used for actions (run/stop/next) where the real state lands on the next
+    /// registry snapshot.
     private func optimisticAction(
         _ id: String,
         mutation: (inout WaveViewModel) -> Void,
@@ -1373,10 +1234,9 @@ public final class RepoState {
         }
     }
 
-    /// Apply the daemon's initial wave snapshot, scoped to this window's repo.
-    /// The bundled daemon may serve several repos at once; without this filter a
-    /// window would swallow every repo's waves. Per-event updates (`handleWaveEvent`)
-    /// are already repo-scoped — this closes the same gap on the bulk snapshot.
+    /// Apply a wave-registry snapshot, scoped to this window's repo. `lf ls`
+    /// (and the bundled daemon's REST list) spans every repo on the machine;
+    /// without this filter a window would swallow another repo's waves.
     func applyConnectedSnapshot(_ waves: [Wave]) {
         let currentRepoPath = repoTarget?.path.normalizedFilePath
         let scoped = waves.filter { wave in

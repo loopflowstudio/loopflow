@@ -158,6 +158,28 @@ struct FrameChannelTag: Decodable {
     let channel: String?
 }
 
+/// One `op` SSE frame — this wave's operational motion: a worker run starting
+/// or finishing, observed by the wave server's `StoreObserver`. Mirrors Rust
+/// `OpFrame` (`wave/wire.rs`); `kind` reuses the `run_events` ledger vocabulary
+/// 1:1 (`run.started`, `run.completed`, `run.errored`) so the live frame and a
+/// `lf runs` history row fold with one code path. Live-only — never replayed;
+/// history is the query. The dashboard card for a wave reads its run/flow/step
+/// motion from these frames on the same connection that drives the chat pane.
+public struct WaveOpFrame: Decodable, Equatable, Sendable {
+    public let kind: String
+    public let runID: String
+    public let flow: String?
+    public let task: String?
+    public let summary: String?
+    public let timestamp: String
+
+    enum CodingKeys: String, CodingKey {
+        case kind, flow, task, summary
+        case runID = "run_id"
+        case timestamp = "ts"
+    }
+}
+
 /// Observable connection to one wave's chat server: the live thread plus a phase
 /// the UI renders (not running / connecting / live).
 @MainActor
@@ -181,6 +203,10 @@ public final class WaveChatConnection {
     /// Last `memory` frame's summary — the wave's most recent MEMORY.md
     /// curation. Live-only (no replay); exposed for the UI to adopt later.
     public private(set) var memorySummary: String?
+    /// Last `op` frame — this wave's most recent run/flow/step motion. Live-only
+    /// (no replay); the dashboard card lights up from this alongside the chat
+    /// pane, both off this one connection. History is a `lf runs` query.
+    public private(set) var lastOp: WaveOpFrame?
 
     private var currentEndpoint: String?
     private var loop: Task<Void, Never>?
@@ -283,6 +309,7 @@ public final class WaveChatConnection {
         // The mind state resets too; the server's first frame is a `state` event.
         turns = []
         mindState = .idle
+        lastOp = nil
         phase = .live
 
         // Raw bytes, not `bytes.lines`: AsyncLineSequence drops the empty
@@ -316,6 +343,12 @@ public final class WaveChatConnection {
         }
         if event == "memory" {
             memorySummary = data
+            return
+        }
+        if event == "op" {
+            guard let json = data.data(using: .utf8),
+                  let frame = try? decoder.decode(WaveOpFrame.self, from: json) else { return }
+            lastOp = frame
             return
         }
         guard event.isEmpty || event == "turn", let json = data.data(using: .utf8) else { return }

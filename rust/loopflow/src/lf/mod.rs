@@ -855,6 +855,17 @@ mod tests {
     }
 
     #[test]
+    fn op_reset_waves_accepts_yes_flag() {
+        let cli = Cli::try_parse_from(["lf", "op", "reset-waves", "-y"]).expect("parse");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Op {
+                op: OpsCommand::ResetWaves { yes: true }
+            })
+        ));
+    }
+
+    #[test]
     fn branches_list_accepts_filters() {
         let cli = Cli::try_parse_from([
             "lf", "op", "branches", "list", "--user", "@me", "--stale", "60d",

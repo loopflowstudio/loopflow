@@ -158,6 +158,74 @@ fn rebase_stacked_branch_after_squash_merge() {
 }
 
 #[test]
+fn rebase_reparents_child_onto_main_when_parent_merged() {
+    // Parent `a.b` is squash-merged into main, but its local ref lingers at the
+    // pre-squash tip (a squash-merge deletes origin/a.b, not the local branch).
+    // The child `a.b.c` must re-parent onto main and carry ONLY its own change,
+    // not the parent's already-merged commits.
+    let repo = TestRepo::new();
+
+    repo.create_branch("a.b");
+    repo.create_file("p1.txt", "p1");
+    repo.stage_all();
+    repo.commit("p1");
+    repo.create_file("p2.txt", "p2");
+    repo.stage_all();
+    repo.commit("p2");
+
+    repo.create_branch("a.b.c");
+    repo.create_file("child.txt", "child");
+    repo.stage_all();
+    repo.commit("child work");
+
+    // Squash-merge the parent's two commits into main as a single commit.
+    repo.checkout("main");
+    git(repo.path(), &["merge", "--squash", "a.b"]);
+    git(repo.path(), &["commit", "-m", "squash merge a.b"]);
+    repo.push();
+    // Local `a.b` ref is left dangling at its pre-squash tip.
+
+    repo.checkout("a.b.c");
+    let plan = plan_rebase(repo.path(), None).expect("plan rebase");
+    // A merged parent is a dead base: re-parent onto the default branch.
+    assert_eq!(plan.base_ref, "origin/main");
+    assert!(
+        plan.fork_point.is_some(),
+        "should fork off the merged parent"
+    );
+    assert_eq!(plan.merged_parent.as_deref(), Some("a.b"));
+
+    rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+        },
+        &NullProgress,
+    )
+    .expect("re-parent onto main should succeed");
+
+    // The child's own change is present; the parent's merged content is present
+    // via main.
+    assert!(repo.path().join("child.txt").exists());
+    assert!(repo.path().join("p1.txt").exists());
+
+    // The child carries ONLY its own change relative to main — not the parent's
+    // now-merged commits.
+    let diff = git(repo.path(), &["diff", "--name-only", "origin/main...HEAD"]);
+    assert_eq!(diff, "child.txt", "child diff vs main is only its own file");
+    let commits_beyond = git(repo.path(), &["rev-list", "--count", "origin/main..HEAD"]);
+    assert_eq!(
+        commits_beyond, "1",
+        "only the child's commit sits above main"
+    );
+
+    // The merged parent's lingering local ref was pruned.
+    let branches = git(repo.path(), &["branch", "--list", "a.b"]);
+    assert!(branches.is_empty(), "merged local parent should be pruned");
+}
+
+#[test]
 fn plan_rebase_classifies_dirty_scratch_only_branch_as_reset() {
     let repo = TestRepo::new();
     repo.create_branch("feature");
@@ -256,4 +324,7 @@ fn plan_rebase_uses_open_stack_parent() {
     assert_eq!(plan.base_ref, "a");
     assert_eq!(plan.class, RebaseClass::StackParentOpen);
     assert_eq!(plan.strategy, RebaseStrategy::RebaseOntoParent);
+    // An open parent is not a merge: the child keeps stacking on it, unchanged.
+    assert!(plan.fork_point.is_none());
+    assert!(plan.merged_parent.is_none());
 }

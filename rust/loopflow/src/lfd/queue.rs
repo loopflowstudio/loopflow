@@ -133,10 +133,26 @@ impl QueueOps for RealQueueOps {
         git::fetch(&main_repo, "origin", default_branch).map_err(|err| QueueRebaseConflict {
             files: vec![err.to_string()],
         })?;
-        let rebase_result = git::rebase(worktree, &format!("origin/{default_branch}"), None)
-            .map_err(|err| QueueRebaseConflict {
-                files: vec![err.to_string()],
-            })?;
+        // When this child's stack parent has already merged, drop the parent's
+        // commits by forking off its tip. Without this the lazy rebase replays
+        // the (now-merged) parent commits against the default branch and blocks
+        // the queue with a spurious RebaseConflict.
+        let branch = git::current_branch(worktree)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let merged_parent = crate::ops::merged_parent_fork_point(worktree, &branch, default_branch);
+        let fork_point = merged_parent
+            .as_ref()
+            .map(|(fork_point, _)| fork_point.clone());
+        let rebase_result = git::rebase(
+            worktree,
+            &format!("origin/{default_branch}"),
+            fork_point.as_deref(),
+        )
+        .map_err(|err| QueueRebaseConflict {
+            files: vec![err.to_string()],
+        })?;
         if !rebase_result.success {
             return Err(QueueRebaseConflict {
                 files: rebase_result
@@ -150,6 +166,11 @@ impl QueueOps for RealQueueOps {
         git::push(worktree, true).map_err(|err| QueueRebaseConflict {
             files: vec![err.to_string()],
         })?;
+        // The child re-parented onto the default branch; prune the merged
+        // parent's lingering local ref so it stops resolving as an open base.
+        if let Some((_, Some(local_parent))) = merged_parent {
+            let _ = git::delete_local_branch(worktree, &local_parent);
+        }
         Ok(())
     }
 
@@ -830,5 +851,68 @@ mod tests {
         drop(guard);
         waiter.await.expect("waiter task");
         assert!(*locked.lock().expect("mutex"));
+    }
+
+    fn git_out(repo: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn queue_rebase_drops_squash_merged_parent_commits() {
+        use loopflow_test_support::TestRepo;
+
+        // Parent `a.b` builds shared.txt over two commits; child `a.b.c` extends
+        // it. A plain `git rebase origin/main` (fork-point None) would replay the
+        // parent's commits and conflict — the queue's old behavior, which
+        // surfaces as a spurious RebaseConflict block. The fork-point fix must
+        // drop the parent's commits and rebase cleanly.
+        let repo = TestRepo::new();
+
+        repo.create_branch("a.b");
+        repo.create_file("shared.txt", "a-line-1\na-line-2\n");
+        repo.stage_all();
+        repo.commit("p1");
+        repo.create_file("shared.txt", "a-line-1\na-line-2\na-line-3\n");
+        repo.stage_all();
+        repo.commit("p2");
+
+        repo.create_branch("a.b.c");
+        repo.create_file("shared.txt", "a-line-1\na-line-2\na-line-3\nb-line\n");
+        repo.stage_all();
+        repo.commit("child work");
+        repo.push_new_branch("a.b.c");
+
+        // Squash-merge the parent into main; leave the local `a.b` ref dangling.
+        repo.checkout("main");
+        git_out(repo.path(), &["merge", "--squash", "a.b"]);
+        git_out(repo.path(), &["commit", "-m", "squash merge a.b"]);
+        repo.push();
+
+        repo.checkout("a.b.c");
+        RealQueueOps
+            .rebase_onto_default(repo.path(), "main")
+            .expect("queue rebase should drop merged parent and succeed");
+
+        // The child carries only its own change relative to main.
+        let commits_beyond = git_out(repo.path(), &["rev-list", "--count", "origin/main..HEAD"]);
+        assert_eq!(
+            commits_beyond, "1",
+            "only the child's commit sits above main"
+        );
+        let diff = git_out(repo.path(), &["diff", "--name-only", "origin/main...HEAD"]);
+        assert_eq!(diff, "shared.txt");
+        // The merged parent's lingering local ref was pruned.
+        let branches = git_out(repo.path(), &["branch", "--list", "a.b"]);
+        assert!(branches.is_empty(), "merged local parent should be pruned");
     }
 }

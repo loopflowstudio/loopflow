@@ -19,7 +19,7 @@
 //! `RunObserved`/`RunCompleted` are produced by the registry observer
 //! ([`crate::wave::registry::StoreObserver`]): the server polls the
 //! shared store — these are confirmed facts, not commands — and the in-flight
-//! view is their fold ([`fold_workers`]). `MemoryUpdated` and `MemoryAdded`
+//! view is their fold ([`fold_workers`]). `MemoryCheckpointed` and `MemoryAdded`
 //! are produced by the server's memory routes (`lf memory update`/`add` —
 //! the server holds MEMORY.md's pen). `ThreadStarted` is produced by the mind:
 //! the vendor thread id is its first durable act, journaled before the first turn.

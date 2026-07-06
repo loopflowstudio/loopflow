@@ -242,4 +242,15 @@ mod tests {
         assert_eq!(key, "s3");
         assert!(goal.contains("True north: the whole is worth more than the sum of its parts."));
     }
+
+    #[test]
+    fn export_memory_step_is_registered() {
+        let step = get_builtin_step("export-memory").expect("export-memory step");
+
+        assert!(step.contains("lf memory show --wave <wave>"));
+        assert!(step.contains("lf memory log --wave <wave>"));
+        assert!(step.contains("lf memory update --wave <wave>"));
+        assert!(step.contains("lf op commit -m \"export-memory: compile MEMORY.md\""));
+        assert!(step.contains("write `wave/<wave>/MEMORY.md` directly"));
+    }
 }

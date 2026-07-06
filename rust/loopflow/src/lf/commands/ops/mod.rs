@@ -14,8 +14,8 @@ use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_step;
 use crate::lf::output::Colors;
 use crate::lf::{
-    BranchFilterArgs, BranchesCommand, OpsCommand, PmCommand, QueueCommand, ReleaseCommand,
-    ShellCommand, WtCommand,
+    BranchFilterArgs, BranchesCommand, CronCommand, OpsCommand, PmCommand, QueueCommand,
+    ReleaseCommand, ShellCommand, WtCommand,
 };
 use crate::ops::OpsError;
 use crate::ops::{
@@ -23,8 +23,8 @@ use crate::ops::{
     next_branch, plan_rebase, prune_branches, rebase_class_name, rebase_strategy_name,
     rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
     release_tag, submit, AbandonOptions, BranchFilterOptions, BranchListOptions,
-    BranchPruneOptions, CommitOptions, LandOptions, NextOptions, PrOptions, Progress,
-    RebaseOptions, RotationResult,
+    BranchPruneOptions, CommitOptions, CronSpec, LandOptions, NextOptions, PrOptions, Progress,
+    RebaseOptions, RotationResult, SystemLaunchctl,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -532,6 +532,45 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                         wave.wave, wave.provider, wave.project, wave.open, wave.total
                     );
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
+    let launch_agents_dir = crate::ops::default_launch_agents_dir()?;
+    match cmd {
+        CronCommand::Add {
+            wave,
+            flow,
+            schedule,
+        } => {
+            let repo_root = find_repo_root()?;
+            let spec = CronSpec {
+                wave: wave.clone(),
+                flow: flow.clone(),
+                schedule: crate::ops::parse_schedule(schedule)?,
+                working_directory: repo_root,
+                lf_path: crate::ops::resolve_lf_path()?,
+            };
+            let cron = crate::ops::add_cron(&launch_agents_dir, &spec, &SystemLaunchctl)?;
+            println!("installed {} at {}", cron.label, cron.path.display());
+        }
+        CronCommand::List => {
+            let crons = crate::ops::list_crons(&launch_agents_dir)?;
+            if crons.is_empty() {
+                println!("no loopflow crons installed");
+            } else {
+                for cron in crons {
+                    println!("{} {} {}", cron.label, cron.wave, cron.flow);
+                }
+            }
+        }
+        CronCommand::Remove { wave, flow } => {
+            match crate::ops::remove_cron(&launch_agents_dir, wave, flow, &SystemLaunchctl)? {
+                Some(cron) => println!("removed {}", cron.label),
+                None => println!("not installed"),
             }
         }
     }

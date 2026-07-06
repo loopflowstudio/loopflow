@@ -1,10 +1,10 @@
 ---
 requires: code on branch
-produces: PR ready for review, assigned to a human to merge
+produces: PR ready, assigned to a human to merge
 ---
-Submit the current branch for a human to land. Rebase, clear scratch, create/update the PR, mark it ready, and assign it — then stop. Nothing merges until the reviewer clicks merge.
+Submit the current branch for a human to land. Rebase, clear scratch, create/update the PR, mark it ready, and assign it — then stop. Nothing merges until a human clicks merge.
 
-Use `submit` (not `land`) whenever a person should approve the work. `land` is for headless/auto runs where loopflow merges hands-off; `submit` leaves the one required merge click to a human.
+Use `submit` (not `land`) whenever a person should land the work by hand. `land` is for headless/auto runs where loopflow merges hands-off; `submit` leaves the one required merge click to a human. (GitHub blocks approving your own PR, so the gate is the merge click, not a review approval — the button unlocks once checks pass.)
 
 ## Orientation
 
@@ -21,7 +21,7 @@ re-derive what these already record.
 
 ## API
 
-`lf op submit` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, marking it ready, and assigning it for review. It does **not** arm auto-merge or rotate the worktree.
+`lf op submit` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, marking it ready, and assigning it to the human who will merge. It does **not** arm auto-merge or rotate the worktree.
 
 ```
 lf op submit [--create-pr] [-m "commit message"] [--title "..."] [--body "..."]
@@ -79,9 +79,9 @@ If `lf op submit` fails due to rebase conflicts, launch a sub-agent to run the `
 
 ## Notes
 
-- The PR is left ready and assigned — the reviewer's merge click lands it. Don't enable auto-merge or merge on their behalf.
+- The PR is left ready and assigned — the assignee's merge click lands it. Don't enable auto-merge or merge on their behalf.
 - If the PR already has a good title and body, run `lf op submit` without `--title`/`--body` to keep existing content.
 
 ## Adaptation
 
-If you discovered repo-specific submit conventions — reviewer assignment, branch protection rules, CI wait behavior — encode them. Most belong in repo docs where all steps benefit. Copy this step to `.lf/steps/submit.md` when the repo needs submit to work differently.
+If you discovered repo-specific submit conventions — assignee, branch protection rules, CI wait behavior — encode them. Most belong in repo docs where all steps benefit. Copy this step to `.lf/steps/submit.md` when the repo needs submit to work differently.

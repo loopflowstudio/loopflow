@@ -363,7 +363,7 @@ fn finalize_remote(
             enable_auto_merge(repo_root, pr_title, pr_body)?;
         }
         Finalize::AssignForReview => {
-            progress.status("Assigning PR for review...");
+            progress.status("Assigning PR for you to merge...");
             assign_to_me(repo_root)?;
         }
     }

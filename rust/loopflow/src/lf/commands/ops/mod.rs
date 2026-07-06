@@ -263,7 +263,7 @@ fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()>
     let repo_root = find_repo_root()?;
     match submit(&repo_root, options, progress) {
         Ok(_) => {
-            progress.status("Ready to land — approve the PR on GitHub to merge.");
+            progress.status("Ready to land — click merge on the PR once checks pass.");
             Ok(())
         }
         Err(OpsError::RebaseConflict { onto, detail }) => {
@@ -274,7 +274,7 @@ fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()>
             launch_step_agent(&repo_root, "rebase", Some(&context))?;
             progress.status("Retrying submit after rebase...");
             submit(&repo_root, options, progress)?;
-            progress.status("Ready to land — approve the PR on GitHub to merge.");
+            progress.status("Ready to land — click merge on the PR once checks pass.");
             Ok(())
         }
         Err(err) => Err(err.into()),

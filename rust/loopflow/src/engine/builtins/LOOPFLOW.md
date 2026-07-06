@@ -33,9 +33,11 @@ lands it:
   only if behind, writes title/body, leaves the PR up for review. Use it to make
   work visible mid-stream; nothing is finalized.
 - **`lf op submit`** — the work is done and a **human** lands it. Rebases onto
-  main, clears `scratch/`, marks the PR ready, and assigns it to the reviewer.
-  Stops there: no auto-merge. The reviewer's merge click is the one required
-  gate. Use this as the default finish for anything a person should approve.
+  main, clears `scratch/`, marks the PR ready, and assigns it to you. Stops
+  there: no auto-merge. Your merge click on GitHub is the one required gate —
+  the button unlocks once checks pass. (GitHub blocks approving your own PR, so
+  the gate is the merge click, not a review approval.) Use this as the default
+  finish for anything a person should land by hand.
 - **`lf op land`** — the work is done and **loopflow** lands it hands-off. Does
   everything `submit` does, then arms auto-merge and rotates the worktree onto
   the next wave item. Use it in headless/auto runs where no human is gating.

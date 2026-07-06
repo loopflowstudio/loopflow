@@ -4,8 +4,8 @@ use std::fs;
 use std::process::Command;
 
 use loopflow::ops::{
-    bump_version, generate_release, release_bump, release_check, release_status, release_tag,
-    NullProgress,
+    bump_version, generate_release, release_bump, release_check, release_notes, release_status,
+    release_tag, NullProgress,
 };
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -108,6 +108,39 @@ fn release_with_bump_keyword() {
 
     let notes = fs::read_to_string(repo.path().join("RELEASE_NOTES.md")).expect("read notes");
     assert!(notes.starts_with("# v0.9.2\n\n"));
+}
+
+#[test]
+fn release_notes_falls_back_when_agent_cli_is_missing() {
+    let gh_script = write_gh_script(
+        r#"[{"number":101,"title":"Make weekly release self-contained","body":"Release automation no longer requires a workstation CLI.","additions":42,"deletions":7,"changedFiles":3}]"#,
+    );
+    let lf_script = "#!/bin/sh\necho \"'claude' CLI not found. Run \\`lf op doctor\\` to check dependencies.\" >&2\nexit 1\n";
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
+
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+    fs::create_dir_all(repo.path().join("release/unreleased")).unwrap();
+    fs::write(
+        repo.path().join("release/unreleased/DECISIONS.md"),
+        "# Decisions\n\nUse deterministic notes in CI when the agent CLI is unavailable.\n",
+    )
+    .unwrap();
+
+    let notes = release_notes(repo.path(), "0.9.1", Some("v0.9.0"), None, &NullProgress)
+        .expect("release notes should fall back");
+
+    assert!(notes.starts_with("# v0.9.1\n\n"));
+    assert!(
+        notes.contains("Generated mechanically because the release-note agent was unavailable.")
+    );
+    assert!(notes.contains("Make weekly release self-contained"));
+    assert!(notes.contains("Use deterministic notes in CI"));
+    assert_eq!(
+        fs::read_to_string(repo.path().join("release/v0.9.1/NOTES.md")).unwrap(),
+        notes,
+    );
+    assert!(!repo.path().join("release/unreleased").exists());
 }
 
 #[test]

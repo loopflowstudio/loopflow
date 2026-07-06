@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::engine::command::run_command;
+use crate::engine::command::{run_command, CommandError};
 use crate::engine::config::{load_config_or_default, Config, ReleaseTargetConfig};
 use crate::engine::git::{delete_local_branch, get_default_branch, worktree_remove};
 use crate::engine::worktrees::{create_with_schema_synced, main_repo_root};
@@ -468,10 +468,22 @@ fn run_release_notes_step(
         .arg("release-notes")
         .current_dir(repo)
         .env("LF_RELEASE_NOTES_CONTEXT", &context_path);
-    run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
-        command: err.command_line(),
-        stderr: err.stderr,
-    })?;
+    match run_command(&mut cmd) {
+        Ok(_) => {}
+        Err(err) if is_missing_release_notes_agent_cli(&err) => {
+            eprintln!(
+                "release-notes agent unavailable; writing deterministic fallback release notes"
+            );
+            let notes = generate_fallback_release_notes(&context);
+            write_release_notes(repo, &notes, version)?;
+        }
+        Err(err) => {
+            return Err(OpsError::CommandFailed {
+                command: err.command_line(),
+                stderr: err.stderr,
+            });
+        }
+    }
 
     if !repo.join("RELEASE_NOTES.md").exists() {
         return Err(OpsError::Message(
@@ -481,6 +493,137 @@ fn run_release_notes_step(
 
     archive_release_notes(repo, version)?;
     Ok(())
+}
+
+fn is_missing_release_notes_agent_cli(err: &CommandError) -> bool {
+    let stderr = err.stderr.to_lowercase();
+    let message = err.message.to_lowercase();
+    let combined = format!("{stderr}\n{message}");
+    let mentions_agent_cli = combined.contains("claude")
+        || combined.contains("codex")
+        || combined.contains("opencode")
+        || combined.contains("agent");
+    let missing_binary = combined.contains("cli not found")
+        || combined.contains("binary not found")
+        || combined.contains("not found on path")
+        || combined.contains("no such file or directory")
+        || combined.contains("failed to spawn");
+
+    mentions_agent_cli && missing_binary
+}
+
+fn generate_fallback_release_notes(context: &ReleaseNotesContext) -> String {
+    let mut lines = vec![
+        "Generated mechanically because the release-note agent was unavailable.".to_string(),
+        String::new(),
+        format!("## Changes since {}", context.prev_tag),
+        String::new(),
+        format!("- Target: {}", context.target),
+        format!(
+            "- Tag prefix: {}",
+            display_raw_tag_prefix(&context.tag_prefix)
+        ),
+        format!(
+            "- Area scope: {}",
+            display_raw_area_scope(&context.area_scope)
+        ),
+        String::new(),
+    ];
+
+    if let Some(decisions) = context
+        .decisions
+        .as_deref()
+        .map(str::trim)
+        .filter(|decisions| !decisions.is_empty())
+    {
+        lines.push("## Release decisions".to_string());
+        lines.push(String::new());
+        for decision in fallback_decision_lines(decisions) {
+            lines.push(format!("- {decision}"));
+        }
+        lines.push(String::new());
+    }
+
+    lines.push("## Merged PRs".to_string());
+    lines.push(String::new());
+
+    if context.merged_prs.is_empty() {
+        lines.push("- No merged PRs found in this window.".to_string());
+    } else {
+        for pr in &context.merged_prs {
+            lines.push(format!(
+                "- #{} {} (+{} -{}, {} files)",
+                pr.number, pr.title, pr.additions, pr.deletions, pr.changed_files
+            ));
+            if let Some(body) = pr
+                .body
+                .as_deref()
+                .map(str::trim)
+                .filter(|body| !body.is_empty())
+            {
+                lines.push(format!("  - {}", collapse_whitespace(body)));
+            }
+        }
+    }
+
+    lines.push(String::new());
+    lines.push(format!(
+        "_Generated mechanically for v{}._",
+        context.version
+    ));
+    lines.join("\n")
+}
+
+fn display_raw_tag_prefix(tag_prefix: &str) -> &str {
+    if tag_prefix.is_empty() {
+        "(none)"
+    } else {
+        tag_prefix
+    }
+}
+
+fn display_raw_area_scope(area_scope: &[String]) -> String {
+    if area_scope.is_empty() {
+        "(entire repository)".to_string()
+    } else {
+        area_scope.join(", ")
+    }
+}
+
+fn fallback_decision_lines(decisions: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    for line in decisions.lines() {
+        let line = line.trim();
+        if line.is_empty() || line == "# Decisions" {
+            continue;
+        }
+
+        let normalized = line
+            .trim_start_matches('#')
+            .trim()
+            .trim_start_matches("- ")
+            .trim_start_matches("* ")
+            .trim();
+        if !normalized.is_empty() {
+            lines.push(collapse_whitespace(normalized));
+        }
+        if lines.len() >= 8 {
+            break;
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push(
+            "Decision ledger present; see archived DECISIONS.md for source details.".to_string(),
+        );
+    }
+
+    lines
+}
+
+fn collapse_whitespace(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Read `release/unreleased/DECISIONS.md` if it exists.

@@ -3113,6 +3113,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     async fn oauth_client_credentials_prefers_env_over_doppler() {
         const CLIENT_ID_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_ID";
         const CLIENT_SECRET_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_SECRET";
@@ -3143,6 +3144,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     async fn oauth_client_credentials_falls_back_to_doppler() {
         const CLIENT_ID_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_ID";
         const CLIENT_SECRET_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_SECRET";
@@ -3177,6 +3179,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     async fn oauth_client_credentials_returns_unavailable_when_env_and_doppler_miss() {
         const CLIENT_ID_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_ID";
         const CLIENT_SECRET_ENV: &str = "LOOPFLOW_TEST_ASANA_CLIENT_SECRET";

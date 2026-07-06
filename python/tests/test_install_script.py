@@ -208,6 +208,23 @@ def test_sync_skills_warns_without_failing_when_lf_cannot_run(
     assert "binaries installed, skills unchanged" in captured.err
 
 
+def test_install_wheel_installs_into_venv_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    wheel = dist / "loopflow-9.9.9-py3-none-any.whl"
+    wheel.write_text("wheel")
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(install, "ROOT", tmp_path)
+    monkeypatch.setattr(install, "_run_or_raise", lambda cmd, label: commands.append(cmd))
+
+    install._install_wheel()
+
+    assert commands == [["uv", "pip", "install", "--force-reinstall", str(wheel)]]
+
+
 def test_promote_uses_worktree_build_and_replaces_installed_app(tmp_path: Path) -> None:
     local_bin = tmp_path / "local-bin"
     local_bin.mkdir()
@@ -235,3 +252,24 @@ def test_promote_uses_worktree_build_and_replaces_installed_app(tmp_path: Path) 
     assert (applications / "Loopflow.app" / "Contents" / "marker").read_text() == "new app"
     assert not (applications / "Loopflow.app" / "old").exists()
     assert not (applications / "Loopflow Concerto.app").exists()
+
+
+def test_resolve_applications_dir_uses_active_loopflow_bundle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    user_apps = tmp_path / "Users" / "jack" / "Applications"
+    lf = user_apps / "Loopflow.app" / "Contents" / "MacOS" / "lf"
+    lf.parent.mkdir(parents=True)
+    lf.write_text("lf")
+
+    monkeypatch.setattr(install.shutil, "which", lambda name: str(lf) if name == "lf" else None)
+
+    assert install._resolve_applications_dir() == user_apps
+
+
+def test_resolve_applications_dir_falls_back_without_active_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(install.shutil, "which", lambda name: None)
+
+    assert install._resolve_applications_dir() == install.APPLICATIONS_DIR

@@ -2,7 +2,7 @@
 """Build and install loopflow locally.
 
     install.py local            # build this worktree into local-bin/
-    install.py local --use      # promote this worktree onto PATH and /Applications
+    install.py local --use      # promote this worktree onto PATH and the active app bundle
     install.py local --service  # also install/restart lfd as a launchd service
     install.py local --skip swift
     install.py local -n         # dry run
@@ -274,6 +274,23 @@ def _resolve_install_dir() -> Path:
     return DEFAULT_INSTALL_DIR
 
 
+def _resolve_applications_dir() -> Path:
+    existing = shutil.which("lf")
+    if existing:
+        lf_path = Path(existing).expanduser()
+        macos_dir = lf_path.parent
+        contents_dir = macos_dir.parent
+        app_path = contents_dir.parent
+        if (
+            macos_dir.name == "MacOS"
+            and contents_dir.name == "Contents"
+            and app_path.name == f"{APP_NAME}.app"
+        ):
+            return app_path.parent
+
+    return APPLICATIONS_DIR
+
+
 def _install_wheel() -> None:
     wheels = sorted((ROOT / "dist").glob("loopflow-*.whl"))
     if not wheels:
@@ -282,9 +299,6 @@ def _install_wheel() -> None:
 
     typer.echo("Installing wheel into local venv...")
     _run_or_raise(["uv", "pip", "install", "--force-reinstall", wheel], "pip")
-
-    typer.echo("Installing wheel as global tool...")
-    _run_or_raise(["uv", "tool", "install", "--force", "--reinstall", wheel], "tool")
 
 
 def _stage_binaries(local_bin: Path) -> None:
@@ -326,7 +340,7 @@ def _promote(local_bin: Path, install_dir: Path, applications_dir: Path = APPLIC
     """Make this worktree's build the active one.
 
     Symlinks lf/lfd from the resolved bin dir to local-bin/ (so rebuilds take
-    effect with no extra step) and copies Loopflow.app into /Applications.
+    effect with no extra step) and copies Loopflow.app into applications_dir.
     """
     install_dir.mkdir(parents=True, exist_ok=True)
     for name in ("lf", "lfd"):
@@ -586,6 +600,7 @@ def local(
 
     spec = default_bundle_spec()
     install_dir = _resolve_install_dir()
+    applications_dir = _resolve_applications_dir()
     version = read_release_version(ROOT)
 
     if dry_run:
@@ -596,8 +611,8 @@ def local(
         typer.echo(f"  Contents/MacOS/: {executable_names}")
         if use:
             typer.echo(f"Would promote: symlink lf/lfd into {install_dir}")
-            typer.echo(f"Would install {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
-            typer.echo("Would install wheel with uv pip install + uv tool install")
+            typer.echo(f"Would install {applications_dir / f'{APP_NAME}.app'}")
+            typer.echo("Would install wheel with uv pip install")
             typer.echo("Would sync skills into ~/.claude/skills and ~/.agents/skills")
             typer.echo(
                 "Would install/restart lfd service"
@@ -623,8 +638,8 @@ def local(
             typer.echo("Wheel installed.")
 
             typer.echo(f"Promoting this worktree (symlinking lf/lfd into {install_dir})...")
-            _promote(LOCAL_BIN, install_dir)
-            typer.echo(f"Installed {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
+            _promote(LOCAL_BIN, install_dir, applications_dir=applications_dir)
+            typer.echo(f"Installed {applications_dir / f'{APP_NAME}.app'}")
             _report_path_collisions(install_dir)
             _sync_skills(install_dir / "lf")
 

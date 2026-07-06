@@ -22,7 +22,7 @@ updating its own charter. The dispatching wave believed this was a
 provider-selection code bug: "make `lf op pm show` honor the configured Linear
 provider."
 
-## The finding (this is not a code bug)
+## The finding
 
 The provider-selection path at HEAD already honors Linear. Built the current
 source (v0.10.0) and ran the exact command against this worktree:
@@ -43,8 +43,8 @@ and `read_project` returns `linear_project`. Unit tests
 (`resolve_provider_selects_linear_from_frontmatter`,
 `fetch_items_dispatches_to_linear_provider`) already cover it.
 
-**The failure comes from a stale deployed binary, not the code.** The `lf` that
-the wave's shell resolves is:
+**The original failure came from a stale deployed binary, not `ops::pm`
+provider resolution.** The `lf` that the wave's shell resolved was:
 
 ```
 $ command lf --version          # → /Users/jack/Applications/Loopflow.app/Contents/MacOS/lf
@@ -61,9 +61,25 @@ Two copies are installed; the stale one wins on PATH:
 | 14 | `~/Applications/Loopflow.app/Contents/MacOS/lf` | **0.9.12 (stale, shadows)** |
 | 20 | `~/.local/bin/lf` | 0.10.0 (fresh) |
 
-The app bundle at position 14 shadows the fresh `.local/bin` copy at 20, so
+The app bundle at position 14 shadowed the fresh `.local/bin` copy at 20, so
 every bare `lf` invocation — including the wave mind's `lf op pm` calls and
-`lfd`'s `resolve_lf_binary()` PATH fallback — runs 0.9.12.
+`lfd`'s `resolve_lf_binary()` PATH fallback — ran 0.9.12.
+
+There was one installer bug in the way: `scripts/install.py local --use`
+installed the app bundle into `/Applications`, while this shell's active bundle
+was `~/Applications/Loopflow.app`. It also failed before promotion because the
+Python package has no console entrypoints, so `uv tool install` could not install
+anything.
+
+## The fix
+
+- `scripts/install.py local --use` now detects when bare `lf` resolves inside a
+  `Loopflow.app/Contents/MacOS` bundle and promotes the rebuilt app back into
+  that active applications directory.
+- `_install_wheel()` now installs the wheel into the local venv only; the
+  obsolete global `uv tool install` step is gone.
+- Ran `LOOPFLOW_CODESIGN_IDENTITY=- uv run scripts/install.py local --use` to
+  avoid a headless keychain prompt while signing.
 
 ## The demo
 
@@ -86,13 +102,11 @@ PATH understands Linear. No provider-selection code changes.
 ```bash
 uv run scripts/install.py refresh        # pull default, rebuild lf/lfd, install to PATH
 # or, from this worktree:
-uv run scripts/install.py local --use    # build this tree, promote onto PATH + /Applications
+uv run scripts/install.py local --use    # build this tree, promote onto PATH + active app bundle
 ```
 
-`local --use` also rebuilds the Swift app and can restart the `lfd` launchd
-service. Restarting `lfd` mid-run disrupts the very wave server issuing this
-work — prefer running the deploy from outside the live wave loop, or use
-`refresh` once main carries the fix.
+`local --use` rebuilds the Swift app but does not restart the `lfd` launchd
+service unless `--service` is passed.
 
 Verify after:
 
@@ -108,8 +122,8 @@ lf op pm show --wave architecture        # lists the Linear roadmap, or a
 | Question | Finding | Impact on design |
 |----------|---------|-----------------|
 | Does `resolve_provider` honor `pm.provider: linear`? | Yes. Verified by building HEAD and running the command — it fetches the Linear project and lists items. | No code change to provider selection. |
-| Is the error from the source or a binary? | Binary. `command lf` is `lf 0.9.12` (Asana-only), predating the Linear commits. Fresh 0.10.0 works. | Fix is a redeploy, not a patch. |
-| Which `lf` does the wave actually run? | The app-bundle `lf` at PATH pos 14 (0.9.12) shadows `.local/bin/lf` at pos 20 (0.10.0). `lfd::resolve_lf_binary()` falls back to bare `lf` → same shadow. | Must refresh the app-bundle copy, not just `.local/bin`. |
+| Is the error from the source or a binary? | Binary. `command lf` was `lf 0.9.12` (Asana-only), predating the Linear commits. Fresh 0.10.0 works. | Fix is a redeploy, not an `ops::pm` patch. |
+| Which `lf` does the wave actually run? | The app-bundle `lf` at PATH pos 14 shadowed `.local/bin/lf` at pos 20. `lfd::resolve_lf_binary()` falls back to bare `lf` → same shadow. | Installer now refreshes the active app-bundle copy, not just `/Applications` or `.local/bin`. |
 | Does Linear auth work, or will it fail after redeploy? | `pm show` reached Linear and returned items, so the OAuth token in the lfdb store is present and valid. | Redeploy alone unblocks; no auth work needed. |
 | Is a Linear team configured for writes? | `LinearClient::new(token, config.linear.team)` — reads need only the project id (worked); `pm update` create-item may need `linear.team`. Out of scope for read access. | Note as a follow-up if `pm update` later fails. |
 
@@ -124,12 +138,12 @@ lf op pm show --wave architecture        # lists the Linear roadmap, or a
 
 ## Key decisions
 
-- **No provider-selection code change.** The honest root cause is deployment
-  staleness. Report it as such rather than fabricate a patch.
-- **Fix the app-bundle copy specifically.** `.local/bin/lf` is already 0.10.0;
-  the shadowing bundle binary is the one that must move.
-- **Deploy from outside the live wave** to avoid an `lfd` restart killing the
-  wave server that dispatched this.
+- **No provider-selection code change.** The honest root cause was deployment
+  staleness. `ops::pm::resolve_provider` already selects Linear correctly.
+- **Fix the app-bundle copy specifically.** `.local/bin/lf` was already 0.10.0;
+  the shadowing bundle binary was the one that had to move.
+- **Do not restart `lfd` for this unblock.** The install ran without `--service`;
+  bare CLI roadmap access is fixed and the live wave server was not restarted.
 
 ## Follow-up sketch (design-gated, not part of this fix)
 
@@ -142,9 +156,10 @@ unblock. Filed here as a sketch only.
 
 ## Scope
 
-- In scope: diagnosis; redeploy `lf`/app bundle to ≥0.10.0; verify roadmap reads.
+- In scope: diagnosis; installer fix; redeploy `lf`/app bundle to ≥0.10.0;
+  verify roadmap reads.
 - Out of scope: any `resolve_provider`/`read_project` code change; the staleness
-  guard; `pm update` Linear-team write config.
+  guard; `pm update` Linear-team write config; lfd hard-cut route-contract work.
 
 ## Done when
 
@@ -155,3 +170,18 @@ lf op pm show --wave architecture    # lists the Linear roadmap items
 
 succeed against the *deployed* binary — reproducing the fresh-build result above
 without pointing at `target/release/lf`.
+
+Verified after promotion:
+
+```
+$ type -a lf
+lf is /Users/jack/Applications/Loopflow.app/Contents/MacOS/lf
+lf is /Users/jack/.local/bin/lf
+$ lf --version
+lf 0.10.0
+$ lf op pm show --wave architecture
+fetching linear project 8c4ba3f9-cf23-4136-87ed-37847aa7dc82 for wave/architecture
+open  Collapse lfd/lfq into lf; shrink lfd to a guarded subscription server  id:1e1d2f55-…
+open  Unify the operating prompt                                             id:cfa35ff0-…
+open  Retire "chord" / "member" — one wave-tree vocabulary                   id:6f75cb7a-…
+```

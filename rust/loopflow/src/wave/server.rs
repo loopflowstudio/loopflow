@@ -641,6 +641,9 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         // runs an arbitrary command there — the exact power a leaked token
         // must not reach.
         Some(Commands::Ssh { .. }) => ExecVerdict::Deny("ssh".to_string()),
+        // `lf cron` schedules recurring execution — a persistence/escalation
+        // vector, not part of the commit/dispatch escape hatch.
+        Some(Commands::Cron { .. }) => ExecVerdict::Deny("cron".to_string()),
         // Bare `lf` (interactive launch) has no verb the door can run.
         None => ExecVerdict::Deny("lf".to_string()),
     }

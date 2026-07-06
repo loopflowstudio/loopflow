@@ -73,11 +73,11 @@ Use these unconditionally. Outside any wave they drop silently (exit 0) -
 publish-to-no-subscriber is correct pubsub, never a blocker. A wave whose
 server is down errors instead; note it and move on.
 
-## The Roadmap Lives in Asana
+## The Roadmap Lives in Linear
 
-A wave's roadmap is not in the repo — it lives in Asana, and `lf op pm` is the
+A wave's roadmap is not in the repo — it lives in Linear, and `lf op pm` is the
 only way to read or change it. There is no local roadmap file to edit and no
-sync step; Asana is the source of truth.
+sync step; Linear is the source of truth.
 
 ```bash
 lf op pm show                                          # the wave's live roadmap
@@ -98,7 +98,7 @@ roadmap files or a roadmap table in `GOAL.md` — that mirror is gone.
 - `scratch/<branch>.md` - design doc for the current work
 - `scratch/questions.md` - open questions, blockers, assumptions
 - `lf memory add "<fact>"` - durable wave learnings; `wave/<name>/MEMORY.md` is
-  server-owned, never edited directly (roadmap goes to Asana, above)
+  server-owned, never edited directly (roadmap goes to Linear, above)
 - Code - the actual work
 
 ## Checkpoint And Proceed

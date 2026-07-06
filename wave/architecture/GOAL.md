@@ -1,8 +1,8 @@
 ---
 primary_flow: build
 pm:
-  provider: asana
-  asana_project: '1216271408546327'
+  provider: linear
+  linear_project: '8c4ba3f9-cf23-4136-87ed-37847aa7dc82'
 ---
 
 Collapse the three binaries — `lf`, `lfd`, `lfq` — toward **one workhorse plus one

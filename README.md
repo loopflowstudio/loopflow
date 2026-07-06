@@ -94,7 +94,7 @@ commands for long-term coordination.
 
 ```bash
 lf debug -c    # paste an error, watch it fix
-lf op pm show --wave designer   # print the wave's live Asana roadmap
+lf op pm show --wave designer   # print the wave's live Linear roadmap
 lf design      # interactive design session
 lf gstack/office-hours   # run a built-in gstack workstyle step
 lf office-hours          # same thing — bare name works when unambiguous
@@ -338,34 +338,34 @@ watch it in Concerto. To remove a wave, delete `wave/engbot/` and its worktree
 (`lf op wt remove engbot`).
 
 ```bash
-lf op auth status    # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Asana)
+lf op auth status    # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Linear)
 lf op auth github    # connect GitHub in your browser
 lf op auth claude    # connect Claude in your browser
 lf op auth codex     # connect Codex in your browser
 lf op auth zen       # connect OpenCode Zen in your browser
-lf op auth asana     # connect Asana with OAuth
+lf op auth linear     # connect Linear with OAuth
 lf op auth disconnect github
 ```
 
-The roadmap lives in Asana. Pin a wave to its Asana project in `wave/<name>/GOAL.md` frontmatter — `lf op pm init` writes this for you:
+The roadmap lives in Linear. Pin a wave to its Linear project in `wave/<name>/GOAL.md` frontmatter — `lf op pm init` writes this for you:
 
 ```yaml
 # wave/designer/GOAL.md frontmatter
 pm:
-  asana_project: 1207xxxxxxxxxxxx
+  linear_project: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
 ```
 
 ```bash
 lf op branches list --user @me --stale 60d   # preview stale remote branches
 lf op branches prune --user @me --stale 60d  # delete after confirmation
-lf op pm init --wave designer                # connect/create the Asana project, write asana_project into GOAL.md
-lf op pm show --wave designer                # print the wave's live Asana roadmap
+lf op pm init --wave designer                # connect/create the Linear project, write linear_project into GOAL.md
+lf op pm show --wave designer                # print the wave's live Linear roadmap
 lf op pm update --wave designer --title "Add dark mode" --notes "..."   # create a task
 lf op pm update --wave designer --id 1207... --title "..." --status done # update or close a task
 lf op pm status                              # show linked waves
 ```
 
-`lf op pm` reads and edits the roadmap directly in Asana — there is no local mirror and nothing to sync. Task notes preserve basic markdown formatting: Loopflow writes rich text through `html_notes` and falls back to plaintext `notes` when a task has none yet.
+`lf op pm` reads and edits the roadmap directly in Linear — there is no local mirror and nothing to sync. Issue descriptions and comments are Markdown, which Linear renders natively.
 
 The `loopflow` Python package is a library only (wire models).
 Use the install script or cargo to install `lf` and `lfd`.

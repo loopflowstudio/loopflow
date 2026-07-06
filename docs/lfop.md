@@ -135,38 +135,38 @@ Keep release-cycle rationale in `release/unreleased/DECISIONS.md` when you want 
 
 ## lf op pm
 
-Read and edit a wave's roadmap. The roadmap lives in Asana — `lf op pm` talks to it directly, so there is no local mirror and nothing to sync.
+Read and edit a wave's roadmap. The roadmap lives in Linear — `lf op pm` talks to it directly, so there is no local mirror and nothing to sync.
 
 ```bash
-lf op pm show --wave designer                              # print the wave's live Asana roadmap
+lf op pm show --wave designer                              # print the wave's live Linear roadmap
 lf op pm update --wave designer --title "Add dark mode"    # create a task
 lf op pm update --wave designer --id 1207... --title "..." # update a task
 lf op pm update --wave designer --id 1207... --status done # close a task
-lf op pm init --wave designer                              # connect/create the Asana project, write asana_project into GOAL.md
+lf op pm init --wave designer                              # connect/create the Linear project, write linear_project into GOAL.md
 lf op pm status                                            # show linked waves
 ```
 
 | Command | What it does |
 |---------|--------------|
-| `show` | Print the wave's live roadmap from Asana |
+| `show` | Print the wave's live roadmap from Linear |
 | `update` | Create a task (no `--id`), or update/close one (`--id`; `--status done` closes it) |
-| `init` | Connect or create the wave's Asana project and write `asana_project` into `wave/<name>/GOAL.md` |
-| `status` | Show which waves are linked to an Asana project |
+| `init` | Connect or create the wave's Linear project and write `linear_project` into `wave/<name>/GOAL.md` |
+| `status` | Show which waves are linked to a Linear project |
 
 | Flag | Description |
 |------|-------------|
 | `--wave NAME` | Target wave (defaults to the current branch's wave) |
-| `--id TASK-ID` | Existing Asana task to update or close |
+| `--id TASK-ID` | Existing Linear issue to update or close |
 | `--title` | Task title (required when creating) |
 | `--notes` | Task notes/description |
 | `--status done` | Close the task |
 
-Connect Asana first with `lf op auth asana`. `lf op pm init` pins the project into `GOAL.md`:
+Connect Linear first with `lf op auth linear`. `lf op pm init` pins the project into `GOAL.md`:
 
 ```yaml
 # wave/designer/GOAL.md frontmatter
 pm:
-  asana_project: 1207xxxxxxxxxxxx
+  linear_project: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
 ```
 
 ---

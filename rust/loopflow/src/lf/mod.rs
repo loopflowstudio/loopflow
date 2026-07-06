@@ -360,7 +360,7 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: ReleaseCommand,
     },
-    /// Roadmap in Asana (show, update, init, status)
+    /// Roadmap in Linear (show, update, init, status)
     Pm {
         #[command(subcommand)]
         cmd: PmCommand,
@@ -432,7 +432,7 @@ pub struct BranchFilterArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum PmCommand {
-    /// Connect (or create) the wave's Asana project; write asana_project to GOAL.md
+    /// Connect (or create) the wave's Linear project; write linear_project to GOAL.md
     Init {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
@@ -443,13 +443,13 @@ pub enum PmCommand {
         #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
         all: bool,
     },
-    /// Print the wave's live Asana roadmap
+    /// Print the wave's live Linear roadmap
     Show {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
     },
-    /// Create, edit, or close a roadmap task in Asana
+    /// Create, edit, or close a roadmap task in Linear
     Update {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
@@ -500,7 +500,7 @@ pub enum AuthCommand {
         /// Provider name
         provider: String,
     },
-    /// External: provider name (so `lf op auth asana` works)
+    /// External: provider name (so `lf op auth linear` works)
     #[command(external_subcommand)]
     External(Vec<String>),
 }

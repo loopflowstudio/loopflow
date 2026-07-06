@@ -326,7 +326,7 @@ Worker: a scoped agent a wave dispatches to run a flow and open a PR; inherits
   the wave's GOAL.md and MEMORY.md.
 Step: a prompt that runs a coding agent. Flow: a sequence of steps.
 Direction: composable quality definitions that shape agent judgment.
-Roadmap: the wave's work queue, provider-backed (e.g. Asana).
+Roadmap: the wave's work queue, provider-backed (e.g. Linear).
 
 ## Docs
 /docs              Overview and quick start

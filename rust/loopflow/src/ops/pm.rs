@@ -175,7 +175,14 @@ fn resolve_provider(repo: &Path, wave: &str) -> OpsResult<PmProviderKind> {
     {
         return Ok(PmProviderKind::Linear);
     }
-    Ok(PmProviderKind::Asana)
+    if wave_pm
+        .as_ref()
+        .and_then(|pm| pm.asana_project.as_ref())
+        .is_some()
+    {
+        return Ok(PmProviderKind::Asana);
+    }
+    Ok(PmProviderKind::Linear)
 }
 
 fn read_project(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<String> {
@@ -687,12 +694,22 @@ mod tests {
     }
 
     #[test]
-    fn resolve_provider_defaults_to_asana() {
+    fn resolve_provider_infers_asana_from_project_key() {
         let repo = tempfile::tempdir().expect("temp dir");
         write_goal(repo.path(), "goals", "pm:\n  asana_project: \"123\"\n");
         assert_eq!(
             resolve_provider(repo.path(), "goals").unwrap(),
             PmProviderKind::Asana
+        );
+    }
+
+    #[test]
+    fn resolve_provider_defaults_to_linear() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        write_goal(repo.path(), "goals", "pm:\n  provider: \"\"\n");
+        assert_eq!(
+            resolve_provider(repo.path(), "goals").unwrap(),
+            PmProviderKind::Linear
         );
     }
 

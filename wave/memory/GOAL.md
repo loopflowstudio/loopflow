@@ -11,6 +11,7 @@ metrics:
 - The fold is the mind's job and it's done well — externalized blocks stay curated, deduplicated, and true; no external consolidator, no vector store, no Letta dependency
 pm:
   provider: linear
+  linear_project: 6cf881ef-55fa-435a-bda5-ebfb78d7cf0a
 ---
 
 Run one loop iteration for the Memory wave.

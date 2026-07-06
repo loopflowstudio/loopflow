@@ -306,9 +306,8 @@ fn push_current(force: bool) -> Result<()> {
 
 fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
-    let result = match land(&repo_root, options, progress) {
-        Ok(result) => result,
+    match land(&repo_root, options, progress) {
+        Ok(_) => {}
         Err(OpsError::RebaseConflict { onto, detail }) => {
             let context = format!(
                 "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
@@ -316,22 +315,12 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
             progress.status("Launching rebase agent to resolve conflicts...");
             launch_step_agent(&repo_root, "rebase", Some(&context))?;
             progress.status("Retrying land after rebase...");
-            land(&repo_root, options, progress)?
+            land(&repo_root, options, progress)?;
         }
         Err(err) => return Err(err.into()),
     };
 
-    let cd_target = match &result.rotation {
-        Some(RotationResult::Advanced { new_path, .. }) => Some(new_path.clone()),
-        Some(RotationResult::Complete { .. }) => Some(main_repo),
-        None => None,
-    };
-    if let Some(target) = cd_target {
-        if !write_shell_directive(&format!("cd {}", target.display()))? {
-            println!("cd {}", target.display());
-        }
-    }
-
+    // The wave home stays put on land — no rotation, no cd.
     Ok(())
 }
 

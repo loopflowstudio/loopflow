@@ -4,12 +4,7 @@ use std::process::Command;
 use crate::engine::git::{
     current_branch, get_default_branch, is_clean, land as git_land, LandStrategy,
 };
-use crate::engine::identity::WaveId;
-use crate::engine::naming::git_user;
-use crate::engine::worktrees::{
-    create_wave_worktree, main_repo_root, preserve_worktree, push_branch_with_upstream,
-    wave_name_from_worktree_and_main, worktree_path,
-};
+use crate::engine::worktrees::{main_repo_root, worktree_path};
 
 use crate::engine::command::run_command;
 use crate::ops::commit::{commit_workflow, CommitOptions};
@@ -33,20 +28,8 @@ pub struct LandOptions {
 #[derive(Debug, Clone)]
 pub struct LandResult {
     pub merged: bool,
-    pub rotation: Option<RotationResult>,
     /// The PR associated with this land, if one was created or already existed.
     pub pr: Option<PrInfo>,
-}
-
-#[derive(Debug, Clone)]
-pub enum RotationResult {
-    /// Worktree preserved and a new one created for the next wave item.
-    Advanced {
-        preserved: PathBuf,
-        new_path: PathBuf,
-    },
-    /// Worktree preserved but wave has no more items.
-    Complete { preserved: PathBuf },
 }
 
 /// How a prepared PR is handed off once it is rebased, scratch-cleared, and
@@ -61,19 +44,17 @@ enum Finalize {
     AssignForReview,
 }
 
-/// Result of preparing a PR up to (but not including) worktree rotation:
-/// committed, rebased onto main, scratch cleared, PR ready and either
-/// auto-merge armed or assigned for review (or merged locally when
-/// `options.local`).
+/// Result of preparing a PR: committed, rebased onto main, scratch cleared, PR
+/// ready and either auto-merge armed or assigned for review (or merged locally
+/// when `options.local`).
 struct PreparedPr {
-    repo_root: PathBuf,
-    main_repo: PathBuf,
-    feature_branch: String,
     pr: Option<PrInfo>,
 }
 
-/// Run every land step except worktree rotation. `land` follows this with a
-/// rotation; `submit` stops here and leaves the PR for a human to merge.
+/// Run every land step: commit, rebase onto main, clear scratch, mark the PR
+/// ready, and finalize per `finalize`. `land` arms auto-merge; `submit` assigns
+/// the PR for a human to merge. Neither rotates the worktree — the wave home is
+/// permanent.
 fn prepare_pr(
     repo: &Path,
     options: &LandOptions,
@@ -119,37 +100,28 @@ fn prepare_pr(
             finalize,
             progress,
         )?;
-        // Capture PR info before worktree rotation may invalidate the path.
         crate::ops::pr::current_pr(&repo_root).ok().flatten()
     };
 
-    Ok(PreparedPr {
-        repo_root,
-        main_repo,
-        feature_branch,
-        pr,
-    })
+    Ok(PreparedPr { pr })
 }
 
+/// Land a PR and walk away: commit, rebase, clear scratch, and arm auto-merge so
+/// GitHub merges it once checks pass. The wave home is permanent — a land never
+/// rotates or renames the live worktree; worker worktrees self-prune once their
+/// PR merges.
 pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> OpsResult<LandResult> {
     let prepared = prepare_pr(repo, options, Finalize::AutoMerge, progress)?;
-    let rotation = rotate_worktree(
-        &prepared.repo_root,
-        &prepared.main_repo,
-        &prepared.feature_branch,
-        progress,
-    )?;
     Ok(LandResult {
         merged: true,
-        rotation,
         pr: prepared.pr,
     })
 }
 
-/// Prepare a PR to land without rotating the worktree or arming auto-merge:
-/// commit, rebase onto main, clear scratch, mark the PR ready, and assign it to
-/// the current user. Nothing merges until that user clicks merge on GitHub —
-/// that one click is the required gate.
+/// Prepare a PR to land without arming auto-merge: commit, rebase onto main,
+/// clear scratch, mark the PR ready, and assign it to the current user. Nothing
+/// merges until that user clicks merge on GitHub — that one click is the
+/// required gate. Like `land`, this never rotates the worktree.
 pub fn submit(
     repo: &Path,
     options: &LandOptions,
@@ -158,7 +130,6 @@ pub fn submit(
     let prepared = prepare_pr(repo, options, Finalize::AssignForReview, progress)?;
     Ok(LandResult {
         merged: false,
-        rotation: None,
         pr: prepared.pr,
     })
 }
@@ -554,222 +525,4 @@ fn current_pr_url(repo: &Path) -> OpsResult<Option<String>> {
 
 fn open_url(url: &str) {
     crate::engine::platform::open_url(url);
-}
-
-fn rotate_worktree(
-    repo_root: &Path,
-    main_repo: &Path,
-    feature_branch: &str,
-    progress: &impl Progress,
-) -> OpsResult<Option<RotationResult>> {
-    let wave_name = match wave_name_from_worktree_and_main(repo_root, main_repo) {
-        Some(name) => name,
-        None => return Ok(None),
-    };
-
-    // Only rotate shortname worktrees (no timestamp suffix).
-    // preserve_worktree() produces {name}.{suffix}, so a dot means preserved.
-    if wave_name.contains('.') {
-        return Ok(None);
-    }
-
-    // Check wave items from the worktree (feature branch) before preserving,
-    // since update-wave removes shipped items on the branch, not on main.
-    let wave_dir = repo_root.join("wave").join(&wave_name);
-    let has_items = wave_dir.exists() && has_wave_items(&wave_dir)?;
-
-    // Use the branch's timestamp for the preserved directory name so it
-    // matches the work it contains, not when it was archived.
-    let user = git_user(main_repo).unwrap_or_else(|_| "user".to_string());
-    let branch_suffix =
-        WaveId::parse(feature_branch, &user).and_then(|id| id.timestamp().map(str::to_string));
-    let preserved = preserve_worktree(main_repo, repo_root, branch_suffix.as_deref())?;
-    progress.status(&format!(
-        "Preserved {} → {}",
-        repo_root.display(),
-        preserved.display()
-    ));
-
-    if has_items {
-        let result = create_wave_worktree(main_repo, &wave_name, Some(feature_branch), false)?;
-
-        // Push synchronously so the branch exists on origin before we return.
-        // schedule_upstream_sync uses a background thread that would be killed
-        // when the CLI process exits.
-        let _ = push_branch_with_upstream(&result.path, &result.branch);
-
-        progress.status(&format!(
-            "Created new worktree at {}",
-            result.path.display()
-        ));
-        Ok(Some(RotationResult::Advanced {
-            preserved,
-            new_path: result.path,
-        }))
-    } else {
-        progress.status("Wave complete — no more items");
-        Ok(Some(RotationResult::Complete { preserved }))
-    }
-}
-
-/// Check if a wave directory has actionable items (markdown files that aren't config).
-fn has_wave_items(wave_dir: &Path) -> OpsResult<bool> {
-    for entry in std::fs::read_dir(wave_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let ext = path.extension().and_then(|e| e.to_str());
-        if ext != Some("md") {
-            continue;
-        }
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        // Skip config files — only count actionable wave items.
-        if name.eq_ignore_ascii_case("readme.md") {
-            continue;
-        }
-        return Ok(true);
-    }
-    Ok(false)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ops::NullProgress;
-    use std::process::Command;
-    use tempfile::TempDir;
-
-    fn git(repo: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(repo)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "git {:?} failed: {}",
-            args,
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
-    }
-
-    #[test]
-    fn rotate_worktree_bases_on_feature_branch() {
-        let dir = TempDir::new().unwrap();
-        let main_repo = dir.path().join("repo");
-        std::fs::create_dir(&main_repo).unwrap();
-
-        // Set up main repo with an initial commit.
-        git(&main_repo, &["init", "-b", "main"]);
-        git(&main_repo, &["config", "user.email", "test@test.com"]);
-        git(&main_repo, &["config", "user.name", "test"]);
-        std::fs::write(main_repo.join("file.txt"), "initial").unwrap();
-        git(&main_repo, &["add", "."]);
-        git(&main_repo, &["commit", "-m", "initial"]);
-        let main_commit = git(&main_repo, &["rev-parse", "HEAD"]);
-
-        // Create a feature branch with an extra commit ahead of main.
-        let feature_branch = "test.mywave.20260228_1500";
-        git(&main_repo, &["checkout", "-b", feature_branch]);
-        std::fs::write(main_repo.join("feature.txt"), "feature work").unwrap();
-        git(&main_repo, &["add", "."]);
-        git(&main_repo, &["commit", "-m", "feature"]);
-        let feature_commit = git(&main_repo, &["rev-parse", "HEAD"]);
-        git(&main_repo, &["checkout", "main"]);
-
-        assert_ne!(main_commit, feature_commit);
-
-        // Create a worktree at repo.mywave (the naming convention rotate expects).
-        let wt_path = dir.path().join("repo.mywave");
-        git(
-            &main_repo,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                "wt-temp",
-                wt_path.to_str().unwrap(),
-                "main",
-            ],
-        );
-
-        // Add wave items to the worktree (feature branch) so rotation detects them.
-        // rotate_worktree checks repo_root (the worktree), not main_repo.
-        let wave_dir = wt_path.join("wave").join("mywave");
-        std::fs::create_dir_all(&wave_dir).unwrap();
-        std::fs::write(wave_dir.join("01-next-item.md"), "# Next").unwrap();
-
-        let result = rotate_worktree(&wt_path, &main_repo, feature_branch, &NullProgress)
-            .unwrap()
-            .expect("should produce a rotation");
-
-        let new_path = match result {
-            RotationResult::Advanced { new_path, .. } => new_path,
-            other => panic!("expected Advanced, got {:?}", other),
-        };
-
-        // The new worktree's HEAD must match the feature branch, not main.
-        let new_head = git(&new_path, &["rev-parse", "HEAD"]);
-        assert_eq!(
-            new_head, feature_commit,
-            "new worktree should be based on the feature branch"
-        );
-        assert_ne!(
-            new_head, main_commit,
-            "new worktree should NOT be based on main"
-        );
-    }
-
-    #[test]
-    fn rotate_worktree_preserves_with_branch_timestamp() {
-        let dir = TempDir::new().unwrap();
-        let main_repo = dir.path().join("repo");
-        std::fs::create_dir(&main_repo).unwrap();
-
-        git(&main_repo, &["init", "-b", "main"]);
-        git(&main_repo, &["config", "user.email", "test@test.com"]);
-        git(&main_repo, &["config", "user.name", "test"]);
-        std::fs::write(main_repo.join("file.txt"), "initial").unwrap();
-        git(&main_repo, &["add", "."]);
-        git(&main_repo, &["commit", "-m", "initial"]);
-
-        let feature_branch = "test.mywave.20260228_1500";
-        git(&main_repo, &["checkout", "-b", feature_branch]);
-        std::fs::write(main_repo.join("feature.txt"), "work").unwrap();
-        git(&main_repo, &["add", "."]);
-        git(&main_repo, &["commit", "-m", "feature"]);
-        git(&main_repo, &["checkout", "main"]);
-
-        let wt_path = dir.path().join("repo.mywave");
-        git(
-            &main_repo,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                "wt-temp",
-                wt_path.to_str().unwrap(),
-                "main",
-            ],
-        );
-
-        // No wave items — rotation will produce Complete, which still preserves.
-        let result = rotate_worktree(&wt_path, &main_repo, feature_branch, &NullProgress)
-            .unwrap()
-            .expect("should produce a rotation");
-
-        let preserved = match result {
-            RotationResult::Complete { preserved } => preserved,
-            other => panic!("expected Complete (no wave items), got {:?}", other),
-        };
-
-        let dir_name = preserved.file_name().unwrap().to_string_lossy().to_string();
-        assert!(
-            dir_name.ends_with(".20260228_1500"),
-            "preserved dir should use the branch timestamp, got: {dir_name}"
-        );
-    }
 }

@@ -29,7 +29,7 @@ pub use cron::{
 };
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
-pub use land::{land, mark_ready, submit, LandOptions, LandResult, RotationResult};
+pub use land::{land, mark_ready, submit, LandOptions, LandResult};
 pub use next::{advance_branch, next_branch, NextOptions, NextResult};
 pub use pr::{create_or_update_pr, current_pr, update_pr, PrInfo, PrOptions, PrResult};
 pub use progress::{NullProgress, Progress};

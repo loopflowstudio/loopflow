@@ -365,7 +365,6 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
 
     // submit prepares but never merges — that click is the human's.
     assert!(!result.merged);
-    assert!(result.rotation.is_none());
 
     let log = fs::read_to_string(log_path).expect("read gh log");
     // Assigns the PR to the current user for a required, manual merge.
@@ -415,7 +414,6 @@ fn submit_does_not_rotate_worktree() {
     .expect("submit from worktree");
 
     // The worktree stays put — no preserve, no next-item rotation.
-    assert!(result.rotation.is_none());
     assert!(worktree.path.exists());
 }
 
@@ -479,7 +477,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
 }
 
 #[test]
-fn lf_ops_land_writes_cd_directive_for_complete_rotation() {
+fn lf_ops_land_leaves_worktree_in_place() {
     let repo = TestRepo::new();
     let log_path = repo.path().join("gh.log");
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
@@ -520,12 +518,14 @@ fn lf_ops_land_writes_cd_directive_for_complete_rotation() {
         .expect("run lf op land");
     assert!(status.success(), "lf op land should succeed");
 
-    let directive = fs::read_to_string(&directive_path).expect("read directive file");
-    let target = directive
-        .trim()
-        .strip_prefix("cd ")
-        .expect("directive should start with cd");
-    let actual = fs::canonicalize(target).expect("canonicalize directive path");
-    let expected = fs::canonicalize(repo.path()).expect("canonicalize main repo");
-    assert_eq!(actual, expected);
+    // The wave home is permanent: land never rotates the worktree or cds away.
+    assert!(
+        worktree.path.exists(),
+        "worktree should stay in place after land"
+    );
+    let directive = fs::read_to_string(&directive_path).unwrap_or_default();
+    assert!(
+        !directive.contains("cd "),
+        "land should not emit a cd directive, got: {directive}"
+    );
 }

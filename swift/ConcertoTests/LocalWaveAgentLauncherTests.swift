@@ -186,18 +186,72 @@ struct LocalWaveAgentLauncherTests {
         #expect(live == nil)
     }
 
-    @Test("a ghost tmux session (no live server) is reclaimed, not blocked")
-    func tmuxSessionReclaimed() {
-        // The screenshot bug: a crashed `lf wave` leaves its tmux session
-        // behind and the old guard refused Start forever. With no live server,
-        // the session is a ghost — reclaim its name and launch.
+    @Test("an existing tmux session without a live server blocks with reset guidance")
+    func tmuxSessionWithoutEndpointBlocks() {
         let action = LocalWaveAgentLauncher.launchAction(
             sessionName: "lf-loopflow-goals",
             sessionExists: true,
             endpoint: nil
         )
 
-        #expect(action == .reclaim("lf-loopflow-goals"))
+        guard case let .blocked(reason) = action else {
+            Issue.record("expected blocked action")
+            return
+        }
+        #expect(reason.contains("lf-loopflow-goals"))
+        #expect(reason.contains("lf op reset-waves"))
+    }
+
+    @Test("awaitLiveEndpoint returns when a session publishes on a later probe")
+    func awaitLiveEndpointSeesLatePublisher() {
+        var reads = 0
+        var sleeps: [TimeInterval] = []
+
+        let endpoint = LocalWaveAgentLauncher.awaitLiveEndpoint(
+            origin: "/repo",
+            waveName: "goals",
+            attempts: 3,
+            readRecorded: { origin, wave in
+                #expect(origin == "/repo")
+                #expect(wave == "goals")
+                reads += 1
+                return reads == 2 ? "127.0.0.1:52340" : nil
+            },
+            probe: { endpoint in
+                #expect(endpoint == "127.0.0.1:52340")
+                return "goals"
+            },
+            sleep: { sleeps.append($0) }
+        )
+
+        #expect(endpoint == "127.0.0.1:52340")
+        #expect(reads == 2)
+        #expect(sleeps == [1])
+    }
+
+    @Test("awaitLiveEndpoint does one probe when only one attempt is requested")
+    func awaitLiveEndpointSingleAttemptDoesNotSleep() {
+        var reads = 0
+        var sleeps: [TimeInterval] = []
+
+        let endpoint = LocalWaveAgentLauncher.awaitLiveEndpoint(
+            origin: "/repo",
+            waveName: "goals",
+            attempts: 1,
+            readRecorded: { _, _ in
+                reads += 1
+                return nil
+            },
+            probe: { _ in
+                Issue.record("must not probe without a recorded endpoint")
+                return nil
+            },
+            sleep: { sleeps.append($0) }
+        )
+
+        #expect(endpoint == nil)
+        #expect(reads == 1)
+        #expect(sleeps.isEmpty)
     }
 
     @Test("no session and no endpoint: clear to launch")

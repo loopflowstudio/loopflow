@@ -27,7 +27,7 @@ use crate::ops::{
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
@@ -114,20 +114,26 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
     }
 }
 
-/// Kill every `lf-*` tmux session and clear stale wave endpoint pointers — the
-/// operator's fresh-start button.
+/// Kill this repo's `lf-*` tmux sessions and clear stale wave endpoint
+/// pointers — the operator's fresh-start button.
 ///
-/// Concerto launches every wave server and worker as an `lf-`-prefixed tmux
-/// session, so killing those takes down the wave minds too (tmux SIGHUPs the
-/// session's process group). Stale `.wave-endpoint` pointers under this repo's
-/// `wave/` are then removed so nothing dangles; lfd reconciles its own
-/// registry rows on next boot.
+/// Concerto launches wave servers and workers as `lf-`-prefixed tmux sessions
+/// rooted in the repo or one of its worktrees. Stale `.wave-endpoint` pointers
+/// under this repo's `wave/` are then removed only after probing that they do
+/// not answer; live manually-started waves keep their discovery pointer.
 fn reset_waves(assume_yes: bool) -> Result<()> {
-    let sessions = lf_tmux_sessions()?;
+    let repo = find_repo_root()?;
+    let main = main_repo_root(&repo).unwrap_or(repo);
+    let sessions = lf_tmux_sessions(&main)?;
+    if !assume_yes && !io::stdin().is_terminal() {
+        return Err(anyhow!(
+            "reset-waves kills tmux sessions and removes stale endpoint files; rerun with --yes to confirm"
+        ));
+    }
     if sessions.is_empty() {
-        println!("No lf-* tmux sessions running.");
+        println!("No lf-* tmux sessions running for this repo.");
     } else {
-        if !assume_yes && io::stdin().is_terminal() {
+        if !assume_yes {
             println!("About to kill {} lf tmux session(s):", sessions.len());
             for session in &sessions {
                 println!("  {session}");
@@ -142,26 +148,34 @@ fn reset_waves(assume_yes: bool) -> Result<()> {
             }
         }
         for session in &sessions {
-            let _ = Command::new("tmux")
+            let status = Command::new("tmux")
                 .args(["kill-session", "-t", session])
-                .status();
+                .status()
+                .map_err(|err| anyhow!("failed to run tmux kill-session for {session}: {err}"))?;
+            if !status.success() {
+                return Err(anyhow!("failed to kill tmux session {session}: {status}"));
+            }
             println!("killed {session}");
         }
     }
 
-    let cleared = clear_stale_endpoints()?;
+    let cleared = clear_stale_endpoints(&main)?;
     if cleared > 0 {
         println!("cleared {cleared} stale wave endpoint(s)");
     }
     Ok(())
 }
 
-/// Every tmux session whose name starts with `lf-` (wave agents
-/// `lf-<repo>-<wave>` and workers `lf-<branch>-<uuid>`). A missing tmux server
-/// means no sessions, not an error.
-fn lf_tmux_sessions() -> Result<Vec<String>> {
+/// Every `lf-*` tmux session whose current pane lives inside this repo or one
+/// of its git worktrees. A missing tmux server means no sessions, not an error.
+fn lf_tmux_sessions(main_repo: &Path) -> Result<Vec<String>> {
+    let roots = repo_worktree_roots(main_repo)?;
     let output = Command::new("tmux")
-        .args(["list-sessions", "-F", "#{session_name}"])
+        .args([
+            "list-sessions",
+            "-F",
+            "#{session_name}\t#{pane_current_path}",
+        ])
         .output()
         .map_err(|err| anyhow!("failed to run tmux: {err}"))?;
     if !output.status.success() {
@@ -169,28 +183,57 @@ fn lf_tmux_sessions() -> Result<Vec<String>> {
     }
     Ok(String::from_utf8_lossy(&output.stdout)
         .lines()
-        .map(str::trim)
-        .filter(|name| name.starts_with("lf-"))
-        .map(str::to_string)
+        .filter_map(|line| {
+            let (name, cwd) = line.split_once('\t')?;
+            let name = name.trim();
+            if !name.starts_with("lf-") {
+                return None;
+            }
+            let cwd = Path::new(cwd.trim());
+            roots
+                .iter()
+                .any(|root| cwd.starts_with(root))
+                .then(|| name.to_string())
+        })
         .collect())
 }
 
-/// Remove every `wave/<name>/.wave-endpoint` pointer under the main repo. Only
-/// called after the sessions are killed, so every pointer is now stale — a
-/// live wave would have kept its server (and pointer) alive.
-fn clear_stale_endpoints() -> Result<u32> {
-    let repo = find_repo_root()?;
-    let main = main_repo_root(&repo).unwrap_or(repo);
+fn repo_worktree_roots(main_repo: &Path) -> Result<Vec<PathBuf>> {
+    let mut roots = vec![main_repo.to_path_buf()];
+    for worktree in list_worktrees(main_repo)? {
+        roots.push(worktree.path);
+    }
+    Ok(roots)
+}
+
+/// Remove stale `wave/<name>/.wave-endpoint` pointers under the main repo.
+/// Live wave servers keep their pointer even when no tmux session was killed.
+fn clear_stale_endpoints(main: &Path) -> Result<u32> {
     let mut cleared = 0;
     if let Ok(entries) = std::fs::read_dir(main.join("wave")) {
         for entry in entries.flatten() {
+            let Some(wave_name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
             let endpoint = entry.path().join(crate::wave::server::ENDPOINT_FILE);
-            if endpoint.exists() && std::fs::remove_file(&endpoint).is_ok() {
+            if endpoint.exists()
+                && !wave_endpoint_is_live(main, &wave_name)?
+                && std::fs::remove_file(&endpoint).is_ok()
+            {
                 cleared += 1;
             }
         }
     }
     Ok(cleared)
+}
+
+fn wave_endpoint_is_live(main: &Path, wave_name: &str) -> Result<bool> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    Ok(rt
+        .block_on(crate::wave::server::live_endpoint(main, wave_name))
+        .is_some())
 }
 
 struct CliProgress;
@@ -933,7 +976,11 @@ fn record_ops_metric(repo: &Path, mut event: serde_json::Value) {
         "ts".to_string(),
         serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
     );
-    let path = repo.join(".lf").join("metrics").join("ops.jsonl");
+    let path = repo
+        .join(".lf")
+        .join("tmp")
+        .join("metrics")
+        .join("ops.jsonl");
     let Some(parent) = path.parent() else {
         return;
     };

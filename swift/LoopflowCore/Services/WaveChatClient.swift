@@ -178,9 +178,6 @@ public final class WaveChatConnection {
     /// Last mind state seen — sent once on subscribe, again on every
     /// transition, and echoed by `POST /messages` responses.
     public private(set) var mindState: WaveMindState = .idle
-    /// Last `memory` frame's summary — the wave's most recent MEMORY.md
-    /// curation. Live-only (no replay); exposed for the UI to adopt later.
-    public private(set) var memorySummary: String?
 
     private var currentEndpoint: String?
     private var loop: Task<Void, Never>?
@@ -312,10 +309,6 @@ public final class WaveChatConnection {
         if event == "state" {
             guard let state = WaveMindState(rawValue: data) else { return }
             mindState = state
-            return
-        }
-        if event == "memory" {
-            memorySummary = data
             return
         }
         guard event.isEmpty || event == "turn", let json = data.data(using: .utf8) else { return }

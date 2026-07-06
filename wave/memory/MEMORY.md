@@ -58,6 +58,25 @@ structure the model proposes.
   loopflow can act *before* Claude Code compacts. Unproven — the least-certain
   mechanism in the design. Fallback: land-externalization + periodic updates.
 
+## Someday (explicitly not now — Jack: "maybe someday")
+
+- **Memory export is a reader-optimized summary, not context compaction.** The
+  durable insight to build on when we get here. Claude's context compaction is
+  writer-optimized (preserve working state so the *same* mind continues). Memory
+  export is the opposite: the producer already knows everything, so the artifact
+  is never for their own reuse — it's a summary for a *cold reader* (next session,
+  parent reading a child's MEMORY.md, fresh worker). Quality bar: "can someone
+  with none of my context act correctly from this?" — not "can I resume?" Drop
+  the narrative ("I tried X then Y"), keep the durable conclusion ("X fails
+  because Y; use Z"). An export that reads like a session log is a bad export.
+  Restart doesn't pollute it: on restart the reader re-seeds from MEMORY.md +
+  replays the stream, so MEMORY.md stays a pure export.
+- **A compaction *tool* (not `lf memory update`).** The useful helper is a
+  reader-optimized summarizer: given the current MEMORY.md + the add-delta, it
+  *suggests* a compacted MEMORY.md the mind reviews and applies old-fashioned.
+  Best authored from a mind that knows the wave (the log is a memory-jog, not
+  the source). Route → fold-per-block → assemble. NOT being built now.
+
 ## Glossary
 
 - **add** — publish an immutable fact to the append stream. `lf memory add`.

@@ -228,14 +228,6 @@ pub enum MemoryCommand {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
-    /// Replace MEMORY.md from stdin (written by the live server, journaled)
-    Update {
-        /// One-line summary journaled with the update (default: first line)
-        #[arg(long)]
-        summary: Option<String>,
-        #[command(flatten)]
-        target: WaveTargetArgs,
-    },
     /// Append one curated fact as a bullet
     Add {
         /// The fact to append
@@ -817,24 +809,13 @@ mod tests {
     }
 
     #[test]
-    fn memory_parses_bare_show_update_and_add() {
+    fn memory_parses_bare_show_and_add() {
         let cli = Cli::try_parse_from(["lf", "memory", "--wave", "goals"]).expect("parse");
         let Some(Commands::Memory { cmd, target }) = cli.command else {
             panic!("expected memory command");
         };
         assert!(cmd.is_none(), "bare memory is show");
         assert_eq!(target.wave.as_deref(), Some("goals"));
-
-        let cli =
-            Cli::try_parse_from(["lf", "memory", "update", "--summary", "learned"]).expect("parse");
-        let Some(Commands::Memory {
-            cmd: Some(MemoryCommand::Update { summary, .. }),
-            ..
-        }) = cli.command
-        else {
-            panic!("expected memory update");
-        };
-        assert_eq!(summary.as_deref(), Some("learned"));
 
         let cli =
             Cli::try_parse_from(["lf", "memory", "add", "one fact", "--parent"]).expect("parse");

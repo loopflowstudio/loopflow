@@ -5,8 +5,8 @@
 //! mechanically per turn (the journal carries the raw history; see
 //! [`super::journal`]). The live server holds the pen: writes go through
 //! `lf memory update`/`add` → the server's memory routes →
-//! [`super::runtime::WaveRuntime`], which journals updates as `MemoryUpdated`
-//! and adds as `MemoryAdded` alongside the file edit. Direct file edits are
+//! [`super::runtime::WaveRuntime`], which journals updates as checkpoints and
+//! adds as `MemoryAdded` alongside the file edit. Direct file edits are
 //! for serverless waves only (the mind's file tools editing a worktree copy
 //! while seeds read the origin's was a live bug). It is a plain Markdown file
 //! — not an IPC channel. Concerto never reads it; the thread is the live

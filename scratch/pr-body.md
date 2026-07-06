@@ -18,7 +18,7 @@ Make wave memory adds replayable and fact-preserving. A subscriber should not lo
 
 ## Key decisions
 
-- Add `MemoryAdded { fact }` instead of overloading `MemoryUpdated`.
+- Add `MemoryAdded { fact }` beside a payload-free memory checkpoint event.
 - Add a new `memory-add` SSE event so the existing `memory` summary event stays stable.
 - Clear replayed adds on `lf memory update` to avoid double-counting facts already compiled into `MEMORY.md`.
 - Rebuild the add replay buffer from the journal fold on restart.
@@ -29,12 +29,4 @@ This does not remove raw add bullets from `MEMORY.md`, add typed memory blocks, 
 
 ## Validation
 
-```bash
-uv run python scripts/test.py --list
-cargo fmt --check
-cargo test -p loopflow
-cargo clippy -- -D warnings
-cargo test --all
-```
-
-All passed. The changed-aware plan selected Rust only.
+Pending this gate run.

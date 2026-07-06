@@ -22,11 +22,11 @@
 //!
 //! Output renders from the WIRE frames (never journal internals): human
 //! lines by default (the Narrator's console flavor — chat bylines, turn
-//! open/items/close, state transitions, memory curation; child-channel
+//! open/items/close, state transitions, memory adds; child-channel
 //! frames prefixed `[<channel>]`, progress keyed per (channel, id)), or raw
 //! frames as NDJSON with `--json` (`{"event": ..., "data": ...}` per line;
 //! `turn` data stays JSON — tagged frames keep their `channel` key —
-//! `state`/`memory`/`memory-add` data are strings).
+//! `state`/`memory-add` data are strings).
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -161,7 +161,7 @@ impl Renderer {
     }
 
     /// The output lines for one frame — NDJSON raw, or the human console
-    /// flavor (chat bylines, turn open/items/close, state, memory;
+    /// flavor (chat bylines, turn open/items/close, state, memory adds;
     /// child-channel frames prefixed with their channel name).
     fn lines_for(&mut self, frame: &Frame) -> Vec<String> {
         if self.json {
@@ -171,7 +171,6 @@ impl Renderer {
         }
         match frame.event.as_str() {
             "state" => vec![format!("state {}", frame.data)],
-            "memory" => vec![format!("memory curated: {}", ellipsize(&frame.data, 70))],
             "memory-add" => vec![format!("memory added: {}", frame.data)],
             "turn" => {
                 let Ok(turn) = serde_json::from_str::<ChatTurn>(&frame.data) else {
@@ -339,11 +338,11 @@ mod tests {
 
     #[test]
     fn sse_parser_handles_crlf_comments_and_multiline_data() {
-        let out = frames(": ping\r\n\r\nevent: memory\r\ndata: first\r\ndata: second\r\n\r\n");
+        let out = frames(": ping\r\n\r\nevent: memory-add\r\ndata: first\r\ndata: second\r\n\r\n");
         assert_eq!(
             out,
             vec![Frame {
-                event: "memory".into(),
+                event: "memory-add".into(),
                 data: "first\nsecond".into()
             }]
         );
@@ -378,13 +377,6 @@ mod tests {
                 data: "turning".into()
             }),
             vec!["state turning"]
-        );
-        assert_eq!(
-            renderer.lines_for(&Frame {
-                event: "memory".into(),
-                data: "fold is truth".into()
-            }),
-            vec!["memory curated: fold is truth"]
         );
         assert_eq!(
             renderer.lines_for(&Frame {
@@ -537,16 +529,21 @@ mod tests {
             let _ = stream_events(&endpoint, "", &mut on_frame).await;
         });
 
-        // Live event after subscribe: a memory curation.
+        // Wait for the replay to land, then publish a live fact.
         for _ in 0..200 {
             if seen.lock().unwrap().iter().any(|f| f.event == "turn") {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        runtime.update_memory("# Ship\n", "fold is truth").unwrap();
+        runtime.append_memory("a fact published after subscribe").unwrap();
         for _ in 0..200 {
-            if seen.lock().unwrap().iter().any(|f| f.event == "memory") {
+            if seen
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|f| f.event == "memory-add" && f.data.contains("after subscribe"))
+            {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -571,8 +568,8 @@ mod tests {
         assert!(
             frames
                 .iter()
-                .any(|f| f.event == "memory" && f.data == "fold is truth"),
-            "live memory frame arrives: {frames:?}"
+                .any(|f| f.event == "memory-add" && f.data == "a fact published after subscribe"),
+            "live memory-add frame arrives: {frames:?}"
         );
     }
 }

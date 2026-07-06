@@ -109,19 +109,6 @@ struct WaveChatConnectionTests {
         #expect(conn.turns.isEmpty)
     }
 
-    @Test("memory events expose the latest curation summary")
-    func memoryEventsExposeSummary() {
-        let conn = connection()
-        #expect(conn.memorySummary == nil)
-        conn.handle(event: "memory", data: "fold is truth")
-        #expect(conn.memorySummary == "fold is truth")
-        conn.handle(event: "memory", data: "second curation")
-        #expect(conn.memorySummary == "second curation")
-        // Memory payloads never masquerade as turns or states.
-        #expect(conn.turns.isEmpty)
-        #expect(conn.mindState == .idle)
-    }
-
     @Test("state events update the observable mind state")
     func stateEventsUpdateMindState() {
         let conn = connection()

@@ -106,6 +106,35 @@
   scripts that wait for local lfd should probe `http://127.0.0.1:2486/health`
   instead of `/v0/status` (`/status` is root and auth-protected).
 
+## Wave-agent session lifecycle (verified 2026-07-05, ghost-reclaim fix)
+
+- **A live server is the ONLY hard block on launching a wave — not a tmux
+  session, not a `.wave-endpoint` pointer file.** Both artifacts outlive a
+  crash: a SIGKILL leaves the pointer behind, and a dead `lf wave` leaves its
+  tmux session behind. The server's own boot floor is the real one-brain
+  guarantee; the launcher just clears the name for it.
+- **A tmux session that exists with no live endpoint is a GHOST, not a starting
+  wave — reclaim (kill) it, don't refuse forever.** This was the Start-button
+  bug: a crashed `lf wave` left `lf-<repo>-<wave>` behind and the old
+  `launchBlockReason` guard blocked Start permanently. `launchAction` now
+  returns `.blocked` / `.reclaim` / `.launch`
+  (`MacLocalWaveAgentLauncher.swift`); a live PROBED endpoint blocks, a ghost
+  session is reclaimed, otherwise launch.
+- **Grace-probe before declaring a ghost.** `awaitLiveEndpoint(attempts:)`
+  polls the live endpoint up to N times, 1s apart, to cover the mid-boot window
+  where `lf wave` is up but hasn't published `.wave-endpoint` yet. Use 3 probes
+  when a session already exists (don't kill a wave that's still coming up), 1
+  when there's no session.
+- **CLI counterpart is `lf op reset-waves`** (systems' `lf op` surface): kills
+  every `lf-*` tmux session and clears stale `wave/*/.wave-endpoint` pointers
+  under the main repo — the operator fresh-start button. Same ghost invariant,
+  applied in bulk. tmux SIGHUPs the session's process group, so killing the
+  `lf-` sessions takes the wave minds with them; lfd reconciles its registry on
+  next boot.
+- **Wave state lives at the wave's ORIGIN repo (`WaveOrigin.resolve`), not the
+  worktree.** Resolve the origin once and feed that one path to session-name,
+  endpoint read, and launch — a worktree `repoPath` must not fork these.
+
 ## Patterns (verified 2026-06-30, remote TLS connection)
 
 - **Concerto reaches a native remote `lfd` over HTTPS via Tailscale, not TLS in

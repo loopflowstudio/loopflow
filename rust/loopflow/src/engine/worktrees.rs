@@ -42,7 +42,7 @@ pub enum PlacementRequest {
     /// Root branch off the default branch. The no-flag default for
     /// `lf op wt create` — ad-hoc worktrees never stack unless asked.
     Main { segment: WorktreeSegment },
-    /// Child branch stacked under an explicit parent (`--stack`/`--base`).
+    /// Child branch stacked under an explicit parent (`--child`).
     Stack {
         parent: String,
         segment: WorktreeSegment,
@@ -73,7 +73,7 @@ pub enum PlacementError {
     #[error("worktree segment cannot be empty")]
     EmptySegment,
     #[error(
-        "\"{0}\" is not a worktree segment. Dots are reserved for stack ancestry. Use a hyphen, or create ancestry with --stack."
+        "\"{0}\" is not a worktree segment. Dots are reserved for stack ancestry. Use a hyphen, or create ancestry with --child."
     )]
     DotsReserved(String),
 }

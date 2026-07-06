@@ -90,9 +90,6 @@ docs:
 exclude:
   - "*.test.ts"
   - node_modules
-
-branch_names:
-  schema: "{user}.{name}.{date}_{ts}"
 ```
 
 ## Flows

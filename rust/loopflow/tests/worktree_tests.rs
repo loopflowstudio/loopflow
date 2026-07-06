@@ -3,8 +3,7 @@ use std::{fs, path::PathBuf};
 
 use loopflow::engine::git::{is_clean, worktree_move, worktree_remove};
 use loopflow::engine::worktrees::{
-    create_wave_worktree, list_worktrees, list_worktrees_local,
-    wave_name_from_worktree_and_main,
+    create_wave_worktree, list_worktrees, list_worktrees_local, wave_name_from_worktree_and_main,
 };
 use loopflow_test_support::TestRepo;
 

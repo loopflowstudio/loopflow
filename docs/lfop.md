@@ -256,7 +256,6 @@ lf op wt create my-feature              # sibling: root branch from main (the de
 lf op wt create thing --child parent    # child: create parent.thing
 lf op wt create thing --child           # child of the current branch
 lf op wt create my-feature --plan       # print the plan without creating anything
-lf op wt create jack-heart.mobile.20260225_1122  # checks out origin branch in ../loopflow.mobile
 ```
 
 Two relative-to-here verbs. **Sibling** (the default) roots an independent
@@ -270,9 +269,12 @@ nest unless you ask with `--child`.
 | `--plan` | Print the placement plan without mutating git |
 
 Dots are reserved for stack ancestry. Use `api-v2` as a worktree segment, not
-`api.v2`; create ancestry with `--stack`.
+`api.v2`; create ancestry with `--child`.
 
-If the input matches an existing `origin/<branch>` name, `lf` checks out that branch instead of creating a new one. Root branch names follow the configured branch schema. Stacked children append the new segment to the parent branch with a dot.
+Worktree branches use the fixed identity shape `<user>/<chain>`. A sibling
+`bugs` creates `<user>/bugs` in `../loopflow.bugs`; a child `fix-auth` under
+`<user>/bugs` creates `<user>/bugs.fix-auth` in
+`../loopflow.bugs.fix-auth`.
 
 ### lf op wt switch
 

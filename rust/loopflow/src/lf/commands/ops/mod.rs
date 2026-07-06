@@ -87,11 +87,7 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
             &progress,
         ),
         OpsCommand::Sync => sync_current(),
-        OpsCommand::SyncSkills {
-            global,
-            yes,
-            no_prune,
-        } => sync_skills_cmd(*global, *yes, !*no_prune),
+        OpsCommand::SyncSkills { yes, no_prune } => sync_skills_cmd(*yes, !*no_prune),
         OpsCommand::Advance { wave } => advance_cmd(wave.as_deref()),
         OpsCommand::Next {
             create_pr,
@@ -321,30 +317,25 @@ fn open_pr(
     Ok(())
 }
 
-fn sync_skills_cmd(include_global: bool, yes: bool, prune: bool) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    if include_global && !yes {
+fn sync_skills_cmd(yes: bool, prune: bool) -> Result<()> {
+    if !yes {
         if !std::io::stdin().is_terminal() {
             return Err(anyhow!(
-                "global skill sync writes under ~/.claude and ~/.agents; rerun with --yes to confirm"
+                "skill sync writes under ~/.claude and ~/.agents; rerun with --yes to confirm"
             ));
         }
         let progress = CliProgress;
         if !progress
             .confirm("Write loopflow-generated skills under ~/.claude/skills and ~/.agents/skills?")
         {
-            return Err(anyhow!("global skill sync cancelled"));
+            return Err(anyhow!("skill sync cancelled"));
         }
     }
 
-    let report = sync_skills(
-        &repo_root,
-        &SkillSyncOptions {
-            include_global,
-            prune,
-            global_home: None,
-        },
-    )?;
+    let report = sync_skills(&SkillSyncOptions {
+        prune,
+        global_home: None,
+    })?;
     println!(
         "synced skills ({} written, {} pruned)",
         report.written.len(),

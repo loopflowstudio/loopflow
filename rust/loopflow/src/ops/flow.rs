@@ -127,19 +127,11 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             }
             Ok(())
         }
-        OpsCommand::SyncSkills {
-            global,
-            yes: _,
-            no_prune,
-        } => {
-            sync_skills(
-                repo,
-                &SkillSyncOptions {
-                    include_global: *global,
-                    prune: !*no_prune,
-                    global_home: None,
-                },
-            )?;
+        OpsCommand::SyncSkills { yes: _, no_prune } => {
+            sync_skills(&SkillSyncOptions {
+                prune: !*no_prune,
+                global_home: None,
+            })?;
             Ok(())
         }
         OpsCommand::Advance { wave } => {

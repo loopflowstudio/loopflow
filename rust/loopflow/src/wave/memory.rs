@@ -3,14 +3,14 @@
 //! The server reads it to answer chat and to seed each progress pass. It is
 //! deliberately curated — the mind updates it when it learns something, not
 //! mechanically per turn (the journal carries the raw history; see
-//! [`super::journal`]). The live server holds the pen: writes go through
-//! `lf memory update`/`add` → the server's memory routes →
-//! [`super::runtime::WaveRuntime`], which journals updates as checkpoints and
-//! adds as `MemoryAdded` alongside the file edit. Direct file edits are
-//! for serverless waves only (the mind's file tools editing a worktree copy
-//! while seeds read the origin's was a live bug). It is a plain Markdown file
-//! — not an IPC channel. Concerto never reads it; the thread is the live
-//! surface.
+//! [`super::journal`]). The live server holds the pen: `lf memory add` → the
+//! server's memory route → [`super::runtime::WaveRuntime::append_memory`],
+//! which appends a bullet and journals `MemoryAdded` alongside the file edit.
+//! There is no whole-file write path — compiling MEMORY.md is the mind's job,
+//! edited old-fashioned. Direct file edits are for serverless waves only (the
+//! mind's file tools editing a worktree copy while seeds read the origin's was
+//! a live bug). It is a plain Markdown file — not an IPC channel. Concerto
+//! never reads it; the thread is the live surface.
 
 use std::path::{Path, PathBuf};
 

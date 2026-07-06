@@ -10,7 +10,7 @@ use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, land, next_branch, rebase_with_recovery,
-    release_bump, release_check, release_notes, release_run, release_status, release_tag,
+    release_bump, release_check, release_notes, release_run, release_status, release_tag, submit,
     AbandonOptions, CommitOptions, LandOptions, NextOptions, PrOptions, RebaseOptions,
 };
 
@@ -48,6 +48,30 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                 &LandOptions {
                     strict: *strict,
                     local: *local,
+                    create_pr: *create_pr,
+                    worktree: worktree.clone(),
+                    commit_message: message.clone(),
+                    pr_title: title.clone(),
+                    pr_body: body.clone(),
+                    agent: None,
+                },
+                progress,
+            )?;
+            Ok(())
+        }
+        OpsCommand::Submit {
+            strict,
+            create_pr,
+            worktree,
+            message,
+            title,
+            body,
+        } => {
+            submit(
+                repo,
+                &LandOptions {
+                    strict: *strict,
+                    local: false,
                     create_pr: *create_pr,
                     worktree: worktree.clone(),
                     commit_message: message.clone(),
@@ -212,7 +236,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
         },
         OpsCommand::Push { force } => crate::engine::git::push(repo, *force).map_err(Into::into),
         OpsCommand::Cp { .. }
-        | OpsCommand::Doctor
+        | OpsCommand::Doctor { .. }
         | OpsCommand::Pm { .. }
         | OpsCommand::Branches { .. }
         | OpsCommand::Wt { .. }

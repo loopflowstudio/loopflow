@@ -227,17 +227,12 @@ pub enum EventKind {
         reason: String,
     },
     // -- orchestration (observations, not commands) --
-    // The serde aliases keep yesterday's journals replayable: these kinds
-    // were written as `worker_dispatched`/`worker_finished` before the
-    // rename. New writes always carry the new names.
-    #[serde(alias = "worker_dispatched")]
     RunObserved {
         run_id: String,
         session_id: String,
         flow: String,
         task: String,
     },
-    #[serde(alias = "worker_finished")]
     RunCompleted {
         run_id: String,
         outcome: WorkerOutcome,
@@ -1161,67 +1156,14 @@ mod tests {
         }
     }
 
-    /// Yesterday's journals carry the pre-rename kind names
-    /// (`worker_dispatched`/`worker_finished`); the serde aliases must keep
-    /// them decoding — and folding — exactly as the new names do, while new
-    /// writes always carry the new names.
+    /// New appends carry the post-rename kind names on disk — a run completion
+    /// serializes as `run_completed`, never the retired `worker_finished`.
     #[test]
-    fn old_worker_kind_names_still_replay_and_fold_identically() {
+    fn new_appends_carry_the_renamed_kind_names() {
         let (_tmp, path) = open_tmp();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let old_lines = concat!(
-            "{\"v\":1,\"seq\":1,\"at\":\"2026-07-03T00:00:00Z\",\"kind\":{\"type\":\"worker_dispatched\",\"run_id\":\"run-1\",\"session_id\":\"sess-1\",\"flow\":\"implement\",\"task\":\"wire it\"}}\n",
-            "{\"v\":1,\"seq\":2,\"at\":\"2026-07-03T00:01:00Z\",\"kind\":{\"type\":\"worker_dispatched\",\"run_id\":\"run-2\",\"session_id\":\"sess-2\",\"flow\":\"design\",\"task\":\"sketch it\"}}\n",
-            "{\"v\":1,\"seq\":3,\"at\":\"2026-07-03T00:02:00Z\",\"kind\":{\"type\":\"worker_finished\",\"run_id\":\"run-1\",\"outcome\":\"completed\",\"summary\":\"pr landed\"}}\n",
-        );
-        std::fs::write(&path, old_lines).unwrap();
+        let (mut journal, _events) = Journal::open(&path).expect("journal opens");
 
-        let (mut journal, old_events) = Journal::open(&path).expect("old journal replays");
-        assert_eq!(old_events.len(), 3, "every old line decoded");
-        let old_fold = fold_workers(&old_events);
-
-        // The same facts written by this build, under the new names.
-        let new_events = vec![
-            Event {
-                v: FORMAT_VERSION,
-                seq: 1,
-                at: OffsetDateTime::now_utc(),
-                kind: EventKind::RunObserved {
-                    run_id: "run-1".into(),
-                    session_id: "sess-1".into(),
-                    flow: "implement".into(),
-                    task: "wire it".into(),
-                },
-            },
-            Event {
-                v: FORMAT_VERSION,
-                seq: 2,
-                at: OffsetDateTime::now_utc(),
-                kind: EventKind::RunObserved {
-                    run_id: "run-2".into(),
-                    session_id: "sess-2".into(),
-                    flow: "design".into(),
-                    task: "sketch it".into(),
-                },
-            },
-            Event {
-                v: FORMAT_VERSION,
-                seq: 3,
-                at: OffsetDateTime::now_utc(),
-                kind: EventKind::RunCompleted {
-                    run_id: "run-1".into(),
-                    outcome: WorkerOutcome::Completed,
-                    summary: "pr landed".into(),
-                },
-            },
-        ];
-        assert_eq!(
-            old_fold,
-            fold_workers(&new_events),
-            "old names fold identically to new names"
-        );
-
-        // New appends carry the new names on disk, never the aliases.
         journal.append(|_| EventKind::RunCompleted {
             run_id: "run-2".into(),
             outcome: WorkerOutcome::Failed,

@@ -7,8 +7,8 @@ use crate::lfd::attention::{queue_block_attention_item, queue_block_from_attenti
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
-    LivePullRequestState, QueueBlock, QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run,
-    RunStatus, Session, SessionStatus, SessionUse, Summary, Wave, WaveStatus,
+    LivePullRequestState, QueueBlock, Repo, RepoEdge, RepoId, RepoWork, Run, RunStatus, Session,
+    SessionStatus, SessionUse, Summary, Wave, WaveStatus,
 };
 use crate::lfdb::catalog::{list_runs_query, list_waves_query, sql, Query, SqlDialect};
 use crate::lfdb::rows::{
@@ -1160,22 +1160,6 @@ impl SqliteStore {
         item.resolved_at = Some(time::OffsetDateTime::now_utc());
         self.upsert_attention_item(&item)?;
         Ok(1)
-    }
-
-    pub fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let inserted = conn.execute(
-            "INSERT INTO wave_pr_merge_events (wave_id, pr_number, merged_at, processed_at)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(wave_id, pr_number, merged_at) DO NOTHING",
-            params![
-                event.wave_id,
-                event.pr_number as i64,
-                event.merged_at.unix_timestamp(),
-                event.processed_at.unix_timestamp(),
-            ],
-        )?;
-        Ok(inserted > 0)
     }
 
     pub fn fail_orphaned_runs(&self) -> StoreResult<u32> {

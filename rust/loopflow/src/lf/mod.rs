@@ -256,7 +256,11 @@ pub enum OpsCommand {
         paths: Vec<String>,
     },
     /// Check loopflow dependencies
-    Doctor,
+    Doctor {
+        /// Print the generated Brewfile (from the declared dependency list) and exit
+        #[arg(long, hide = true)]
+        brewfile: bool,
+    },
     /// Rebase current branch onto target (default: main)
     Rebase {
         /// Print the planned rebase strategy without mutating git
@@ -270,12 +274,30 @@ pub enum OpsCommand {
         #[arg(long)]
         force: bool,
     },
-    /// Submit PR to merge queue
+    /// Land a PR hands-off: rebase, clear scratch, arm auto-merge, and rotate
+    /// the worktree. For a human-gated merge instead, use `lf op submit`.
     Land {
         #[arg(long)]
         strict: bool,
         #[arg(long)]
         local: bool,
+        #[arg(short = 'c', long = "create-pr")]
+        create_pr: bool,
+        #[arg(short = 'w', long = "worktree")]
+        worktree: Option<String>,
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        #[arg(long = "title")]
+        title: Option<String>,
+        #[arg(long = "body")]
+        body: Option<String>,
+    },
+    /// Prepare a PR to land: rebase, clear scratch, mark ready, and assign it
+    /// to you. Nothing merges until you click merge on GitHub — the one
+    /// required gate. Does not arm auto-merge or rotate the worktree.
+    Submit {
+        #[arg(long)]
+        strict: bool,
         #[arg(short = 'c', long = "create-pr")]
         create_pr: bool,
         #[arg(short = 'w', long = "worktree")]

@@ -375,6 +375,13 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: QueueCommand,
     },
+    /// Kill every lf-* tmux session and clear stale wave endpoints (fresh start)
+    #[command(name = "reset-waves")]
+    ResetWaves {
+        /// Skip the confirmation prompt
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

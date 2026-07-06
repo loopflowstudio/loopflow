@@ -118,13 +118,13 @@ struct LocalWaveAgentLauncherTests {
 
     @Test("a live endpoint blocks the launch")
     func endpointBlocksLaunch() {
-        let reason = LocalWaveAgentLauncher.launchBlockReason(
+        let action = LocalWaveAgentLauncher.launchAction(
             sessionName: "lf-loopflow-goals",
             sessionExists: false,
             endpoint: "127.0.0.1:52340"
         )
 
-        #expect(reason == "Wave already has a live server at 127.0.0.1:52340.")
+        #expect(action == .blocked("Wave already has a live server at 127.0.0.1:52340."))
     }
 
     // MARK: - Endpoint liveness probe
@@ -154,11 +154,11 @@ struct LocalWaveAgentLauncherTests {
         )
 
         #expect(live == nil)
-        #expect(LocalWaveAgentLauncher.launchBlockReason(
+        #expect(LocalWaveAgentLauncher.launchAction(
             sessionName: "lf-loopflow-goals",
             sessionExists: false,
             endpoint: live
-        ) == nil, "stale pointer: clear to launch")
+        ) == .launch, "stale pointer: clear to launch")
     }
 
     @Test("a server answering for a different wave is stale")
@@ -186,26 +186,29 @@ struct LocalWaveAgentLauncherTests {
         #expect(live == nil)
     }
 
-    @Test("an existing tmux session blocks the launch")
-    func tmuxSessionBlocksLaunch() {
-        let reason = LocalWaveAgentLauncher.launchBlockReason(
+    @Test("a ghost tmux session (no live server) is reclaimed, not blocked")
+    func tmuxSessionReclaimed() {
+        // The screenshot bug: a crashed `lf wave` leaves its tmux session
+        // behind and the old guard refused Start forever. With no live server,
+        // the session is a ghost — reclaim its name and launch.
+        let action = LocalWaveAgentLauncher.launchAction(
             sessionName: "lf-loopflow-goals",
             sessionExists: true,
             endpoint: nil
         )
 
-        #expect(reason?.contains("lf-loopflow-goals") == true)
+        #expect(action == .reclaim("lf-loopflow-goals"))
     }
 
     @Test("no session and no endpoint: clear to launch")
     func clearToLaunch() {
-        let reason = LocalWaveAgentLauncher.launchBlockReason(
+        let action = LocalWaveAgentLauncher.launchAction(
             sessionName: "lf-loopflow-goals",
             sessionExists: false,
             endpoint: nil
         )
 
-        #expect(reason == nil)
+        #expect(action == .launch)
     }
 
     // MARK: - Not-running copy

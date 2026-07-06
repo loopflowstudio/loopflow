@@ -99,12 +99,12 @@ lf design      # interactive design session
 lf gstack/office-hours   # run a built-in gstack workstyle step
 lf office-hours          # same thing — bare name works when unambiguous
 lf npx/vercel-labs/deep-research   # fetch any Claude Skill live and run it
-lf op sync-skills       # write steps into .claude/skills and .agents/skills
+lf op sync-skills       # compile steps into ~/.claude/skills and ~/.agents/skills
 ```
 
 Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
-`lf op sync-skills` mirrors resolved steps into vendor Skill directories so compact skill invocations work in Claude and Codex sessions (`/step` for Claude, `$step` for Codex handoffs). It writes repo-local skills by default; add `--global --yes` to write generated skills under `~/.claude/skills` and `~/.agents/skills`.
+`lf op sync-skills` compiles resolved steps (builtins + your `~/.lf/`) into your personal vendor Skill directories under `~/.claude/skills` and `~/.agents/skills`, so compact skill invocations work in Claude and Codex sessions (`/step` for Claude, `$step` for Codex handoffs). It only ever writes under your home — never into a working repo. Add `--yes` to skip the confirmation prompt.
 
 Names resolve in this order: your repo (`.lf/steps/<name>.md`, `.lf/steps/<ns>/<name>.md`, or `.claude/commands/<name>.md`) → your global dir (`~/.lf/steps/<name>.md`, `~/.lf/steps/<ns>/<name>.md`, or `~/.claude/commands/<name>.md`) → core builtins (`build/`, `govern/`, `ops/`) → namespaced builtins (`gstack/`, …) → external skill namespaces. A bare name resolves to a namespaced builtin only when exactly one namespace has that name. Namespaced steps and flows use `/`, not `:`. For third-party skills, use `lf npx/<owner>/<repo>` (or `lf npx/<name>` once cached or searchable via `npx skills`). The legacy `rams/rams` shim also resolves when `~/.claude/commands/rams.md` exists.
 

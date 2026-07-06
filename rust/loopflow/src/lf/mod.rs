@@ -320,13 +320,10 @@ pub enum OpsCommand {
     },
     /// Update local main to match origin
     Sync,
-    /// Sync loopflow steps into vendor Skills directories
+    /// Compile loopflow steps into your home vendor Skills directories
     #[command(name = "sync-skills")]
     SyncSkills {
-        /// Also write global vendor skill directories under ~/
-        #[arg(long = "global")]
-        global: bool,
-        /// Confirm global writes without prompting
+        /// Confirm writes under ~/ without prompting
         #[arg(short = 'y', long = "yes")]
         yes: bool,
         /// Keep stale loopflow-generated skills

@@ -594,7 +594,7 @@ def local(
     if unknown:
         raise typer.BadParameter(f"unknown --skip values: {', '.join(sorted(unknown))}")
 
-    # The wheel is a global tool; only build it when promoting.
+    # The wheel is only needed when promoting into the active local environment.
     if not use:
         skip_set.add("wheel")
 

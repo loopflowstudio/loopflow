@@ -31,6 +31,7 @@ pub(crate) struct LfExecResult {
 /// would not parse. `argv` is the command line *after* the binary name
 /// (e.g. `["op", "next", "--create-pr"]`).
 pub(crate) fn validate_lf_argv(argv: &[String]) -> Result<(), String> {
+    use clap::error::ErrorKind;
     use clap::Parser;
     // Bare `lf` parses (it launches an interactive session), but the door has
     // nothing to run without a subcommand — refuse it explicitly.
@@ -38,9 +39,27 @@ pub(crate) fn validate_lf_argv(argv: &[String]) -> Result<(), String> {
         return Err("argv is empty: no lf command to run".to_string());
     }
     let full = std::iter::once("lf".to_string()).chain(argv.iter().cloned());
-    crate::lf::Cli::try_parse_from(full)
-        .map(|_| ())
-        .map_err(|err| err.to_string())
+    match crate::lf::Cli::try_parse_from(full) {
+        Ok(_) => Ok(()),
+        // `--help`/`--version` are surfaced by clap as "errors" from
+        // `try_parse`, but on the CLI `lf` prints them and exits 0. Let them
+        // through so the door execs `lf` and the caller gets the real
+        // help/version output — same as running `lf` themselves.
+        Err(err)
+            if matches!(
+                err.kind(),
+                ErrorKind::DisplayHelp
+                    | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                    | ErrorKind::DisplayVersion
+            ) =>
+        {
+            Ok(())
+        }
+        // Render the failure exactly as `lf` would on the CLI — usage line, the
+        // specific problem, and any "did you mean" suggestion — so the door's
+        // rejection reads identically to running the command yourself.
+        Err(err) => Err(err.render().to_string()),
+    }
 }
 
 /// Exec `lf <argv>` in `cwd` with `env` overlaid, wait, and capture. Assumes
@@ -95,5 +114,29 @@ mod tests {
     fn empty_argv_is_rejected() {
         // Bare `lf` (no subcommand) has nothing to run.
         assert!(validate_lf_argv(&[]).is_err());
+    }
+
+    #[test]
+    fn help_and_version_pass_through() {
+        // `--help`/`--version` aren't failures — they must validate so the door
+        // execs `lf` and the caller gets the real output, just like the CLI.
+        assert!(validate_lf_argv(&argv(&["--help"])).is_ok());
+        assert!(validate_lf_argv(&argv(&["--version"])).is_ok());
+        assert!(validate_lf_argv(&argv(&["op", "--help"])).is_ok());
+    }
+
+    #[test]
+    fn error_message_reads_like_the_cli() {
+        // A real parse error (unknown flag) should surface clap's full
+        // rendering — the problem, a usage line, and the try-help hint — not a
+        // bare string. (Unknown *subcommands* aren't errors: `lf` accepts
+        // external subcommands, same as the CLI, so they fail at exec time.)
+        let err = validate_lf_argv(&argv(&["op", "next", "--nonesuch"]))
+            .expect_err("unknown flag must not parse");
+        assert!(err.contains("--nonesuch"), "names the bad token: {err}");
+        assert!(
+            err.to_lowercase().contains("usage") || err.to_lowercase().contains("--help"),
+            "carries usage/help guidance like the CLI: {err}"
+        );
     }
 }

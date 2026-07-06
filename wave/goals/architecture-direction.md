@@ -139,10 +139,16 @@ One-liner: **`lf` is the query-and-command surface; the wave server is the
 reactive per-wave center; `lfd`-the-proxy is a liveness stub + the `/exec`
 backdoor + webhook ingress** — until the hosted version.
 
-Open: **live push (`/ws`)** — undecided. Either it stays on the proxy as a
-machine-level aggregate, or Concerto subscribes to each wave server's event
-stream directly (the wave server already streams SSE) and the proxy `/ws` goes
-too. Needs Jack.
+**Live telemetry [R] (2026-07-06):** today there are two surfaces — lfd `/ws`
+(WebSocket, machine-level aggregate: all waves/runs/sessions, Concerto's
+dashboard) and wave `/events` (SSE, per-wave conversation). Direction: **drop
+the machine aggregate `/ws`.** Base = per-wave SSE `/events` + `lf` queries for
+discovery and status (which handle not-running waves, where a stream can't).
+Unify transport on SSE (the WebSocket is push-only — buys nothing). **Aggregation
+is a performance PROXY, added later** (the company/OAuth deployment) — get the
+conceptual design right first; proxies solve N-connections/perf without changing
+the base contract. A fuller wave-native eventing proposal (informed by how
+opencode/codex model sessions/events) is in flight → `scratch/eventing.md`.
 
 ## The substrate: two write-tiers + a query plane
 

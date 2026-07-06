@@ -132,15 +132,6 @@ impl WaveId {
         })
     }
 
-    /// Strip a leading `<repo>.` before parsing, so a pasted worktree directory
-    /// name round-trips too. `loopflow.bugs.fix-auth` → the `bugs.fix-auth` id.
-    pub fn from_worktree_dir(dir_name: &str, repo_name: &str, fallback_user: &str) -> Option<Self> {
-        let stripped = dir_name
-            .strip_prefix(&format!("{repo_name}."))
-            .unwrap_or(dir_name);
-        Self::parse(stripped, fallback_user)
-    }
-
     /// The wave name — keys `wave/<name>/`, chat, pm. Never carries user or stamp.
     pub fn wave_name(&self) -> &str {
         self.chain[0].as_str()
@@ -323,13 +314,6 @@ mod tests {
         assert!(!id.is_worker());
         assert_eq!(id.wave_name(), "bugs");
         assert_eq!(id.branch(), "jack/bugs");
-    }
-
-    #[test]
-    fn from_worktree_dir_strips_repo_prefix() {
-        let id = WaveId::from_worktree_dir("loopflow.bugs.fix-auth", "loopflow", "jack").unwrap();
-        assert_eq!(id.wave_name(), "bugs");
-        assert_eq!(id.dir_component(), "bugs.fix-auth");
     }
 
     #[test]

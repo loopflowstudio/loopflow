@@ -332,21 +332,6 @@ session:
 Claude app by URL scheme and falls back to `tui` if no app handles the link.
 OpenCode is terminal-only. The per-run flags `--tui` / `--ide` override this default.
 
-### Branch Names
-
-Customize branch naming for `lf op wt create`.
-
-```yaml
-branch_names:
-  schema: "{user}.{name}.{date}_{ts}"
-```
-
-Available placeholders:
-- `{name}` — short name passed to `lf op wt create`
-- `{user}` — git `user.name` (sanitized)
-- `{date}` — `YYYYMMDD`
-- `{ts}` — `YYYYMMDD_HHMM`
-
 ### Summaries
 
 Pre-generated codebase overviews for large repos.

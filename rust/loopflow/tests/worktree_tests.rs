@@ -3,8 +3,8 @@ use std::{fs, path::PathBuf};
 
 use loopflow::engine::git::{is_clean, worktree_move, worktree_remove};
 use loopflow::engine::worktrees::{
-    create_with_schema, create_with_schema_synced, list_worktrees, list_worktrees_local,
-    preserve_worktree, wave_name_from_worktree_and_main,
+    create_wave_worktree, list_worktrees, list_worktrees_local, preserve_worktree,
+    wave_name_from_worktree_and_main,
 };
 use loopflow_test_support::TestRepo;
 
@@ -26,7 +26,7 @@ fn git_stdout(repo: &std::path::Path, args: &[&str]) -> String {
 #[test]
 fn worktree_add_creates_directory() {
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "feature", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
     assert!(result.path.exists());
     assert!(
         result.branch.contains("feature"),
@@ -38,7 +38,7 @@ fn worktree_add_creates_directory() {
 #[test]
 fn worktree_add_is_on_correct_branch() {
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "feature", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
 
     let output = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -52,7 +52,7 @@ fn worktree_add_is_on_correct_branch() {
 #[test]
 fn worktree_remove_deletes_directory() {
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "feature", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
     worktree_remove(repo.path(), &result.path).expect("remove");
     assert!(!result.path.exists());
 }
@@ -60,7 +60,7 @@ fn worktree_remove_deletes_directory() {
 #[test]
 fn worktree_list_includes_created() {
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "feature", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
     let worktrees = list_worktrees(repo.path()).expect("list");
     assert!(worktrees
         .iter()
@@ -70,7 +70,7 @@ fn worktree_list_includes_created() {
 #[test]
 fn worktree_state_detects_dirty() {
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "feature", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
     std::fs::write(result.path.join("dirty.txt"), "dirty").expect("write");
     assert!(!is_clean(&result.path).expect("is_clean"));
 }
@@ -78,7 +78,7 @@ fn worktree_state_detects_dirty() {
 #[test]
 fn worktree_move_preserves_content() {
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "feature", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
     let file_path = result.path.join("note.txt");
     std::fs::write(&file_path, "content").expect("write");
 
@@ -91,7 +91,7 @@ fn worktree_move_preserves_content() {
 }
 
 #[test]
-fn create_with_schema_synced_updates_main_before_creation() {
+fn create_wave_worktree_synced_updates_main_before_creation() {
     let repo = TestRepo::new();
     let original_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
 
@@ -137,7 +137,7 @@ fn create_with_schema_synced_updates_main_before_creation() {
         .expect("git push");
     assert!(status.success(), "git push should succeed");
 
-    let _ = create_with_schema_synced(repo.path(), "sync-check", None, None).expect("create");
+    let _ = create_wave_worktree(repo.path(), "sync-check", None, true).expect("create");
 
     let updated_head = git_stdout(repo.path(), &["rev-parse", "HEAD"]);
     let origin_head = git_stdout(repo.path(), &["rev-parse", "origin/main"]);
@@ -154,7 +154,7 @@ fn create_with_schema_synced_updates_main_before_creation() {
 #[test]
 fn wt_switch_finds_worktree_by_wave_name() {
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "docs", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "docs", None, false).expect("create");
 
     let worktrees = list_worktrees(repo.path()).expect("list");
     let name =
@@ -176,7 +176,7 @@ fn wt_switch_prefix_matching_is_dot_delimited() {
     // Simulate a worktree whose directory has a timestamp suffix (e.g. repo.waves.1772406404)
     // by creating a worktree with a dotted name.
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "waves", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "waves", None, false).expect("create");
     let wave_name =
         wave_name_from_worktree_and_main(&result.path, repo.path()).expect("should have wave name");
 
@@ -207,7 +207,7 @@ fn wt_switch_prefix_matching_is_dot_delimited() {
 fn wt_switch_finds_timestamped_worktree_by_short_name() {
     let repo = TestRepo::new();
     // Create worktree — the directory will be <repo>.waves
-    let result = create_with_schema(repo.path(), "waves", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "waves", None, false).expect("create");
 
     // Manually rename it to simulate a timestamped directory: <repo>.waves.1772406404
     let timestamped = result.path.with_file_name(format!(
@@ -282,14 +282,8 @@ fn wt_switch_prefers_exact_branch_match_over_wave_name_path() {
 }
 
 #[test]
-fn wt_switch_finds_exact_branch_match_with_custom_schema() {
+fn wt_switch_finds_exact_branch_match() {
     let repo = TestRepo::new();
-    fs::create_dir_all(repo.path().join(".lf")).expect("create .lf");
-    fs::write(
-        repo.path().join(".lf/config.yaml"),
-        "branch_names:\n  schema: \"{user}/{name}\"\n",
-    )
-    .expect("write config");
 
     let feature_path = repo.path().parent().expect("repo parent").join(format!(
         "{}.feature",
@@ -322,12 +316,6 @@ fn wt_switch_finds_exact_branch_match_with_custom_schema() {
 #[test]
 fn wt_switch_does_not_map_branch_name_to_unrelated_worktree_path() {
     let repo = TestRepo::new();
-    fs::create_dir_all(repo.path().join(".lf")).expect("create .lf");
-    fs::write(
-        repo.path().join(".lf/config.yaml"),
-        "branch_names:\n  schema: \"{user}/{name}\"\n",
-    )
-    .expect("write config");
 
     let feature_path = repo.path().parent().expect("repo parent").join(format!(
         "{}.feature",
@@ -396,7 +384,7 @@ fn nested_worktree_not_recognized_as_wave() {
 #[test]
 fn preserve_worktree_uses_human_readable_timestamp() {
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "feature", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
 
     let preserved = preserve_worktree(repo.path(), &result.path, None).expect("preserve");
     let dir_name = preserved.file_name().unwrap().to_string_lossy().to_string();
@@ -424,7 +412,7 @@ fn preserve_worktree_uses_human_readable_timestamp() {
 #[test]
 fn preserve_worktree_uses_explicit_suffix_when_provided() {
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "feature", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "feature", None, false).expect("create");
 
     let preserved =
         preserve_worktree(repo.path(), &result.path, Some("20260304_1442")).expect("preserve");
@@ -440,7 +428,7 @@ fn preserve_worktree_uses_explicit_suffix_when_provided() {
 fn branch_at_main_not_detected_as_squash_merged() {
     let repo = TestRepo::new();
     // Create a worktree whose branch points to the same commit as main.
-    let result = create_with_schema(repo.path(), "fresh", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "fresh", None, false).expect("create");
     // Make the worktree dirty (simulates lf ingest writing to scratch/).
     std::fs::write(result.path.join("scratch.txt"), "notes").expect("write");
 
@@ -464,7 +452,7 @@ fn branch_at_main_not_detected_as_squash_merged() {
 #[test]
 fn fresh_worktree_is_not_prunable() {
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "newwave", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "newwave", None, false).expect("create");
 
     let (_, states) = list_worktrees_local(repo.path()).expect("list");
     let wt = states
@@ -480,7 +468,7 @@ fn fresh_worktree_is_not_prunable() {
 #[test]
 fn fresh_dirty_worktree_is_not_prunable() {
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "wip", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "wip", None, false).expect("create");
     std::fs::write(result.path.join("work.txt"), "in progress").expect("write");
 
     let (_, states) = list_worktrees_local(repo.path()).expect("list");
@@ -497,7 +485,7 @@ fn fresh_dirty_worktree_is_not_prunable() {
 #[test]
 fn worktree_with_commits_is_active_not_fresh() {
     let repo = TestRepo::new();
-    let result = create_with_schema(repo.path(), "active", None, None).expect("create");
+    let result = create_wave_worktree(repo.path(), "active", None, false).expect("create");
     std::fs::write(result.path.join("feature.txt"), "work").expect("write");
     git_stdout(&result.path, &["add", "."]);
     git_stdout(&result.path, &["commit", "-m", "feature work"]);
@@ -517,7 +505,8 @@ fn worktree_with_commits_is_active_not_fresh() {
 fn branch_from_squash_merged_parent_stays_fresh() {
     let repo = TestRepo::new();
 
-    let landed = create_with_schema(repo.path(), "rules-old", None, None).expect("create landed");
+    let landed =
+        create_wave_worktree(repo.path(), "rules-old", None, false).expect("create landed");
     std::fs::write(landed.path.join("rules.txt"), "rule").expect("write");
     git_stdout(&landed.path, &["add", "."]);
     git_stdout(&landed.path, &["commit", "-m", "add rule"]);
@@ -528,8 +517,13 @@ fn branch_from_squash_merged_parent_stays_fresh() {
     git_stdout(repo.path(), &["push", "origin", "main"]);
 
     // Create the next branch from the landed branch tip (land rotation behavior).
-    let fresh = create_with_schema(repo.path(), "rules-new", Some(landed.branch.as_str()), None)
-        .expect("create fresh from landed");
+    let fresh = create_wave_worktree(
+        repo.path(),
+        "rules-new",
+        Some(landed.branch.as_str()),
+        false,
+    )
+    .expect("create fresh from landed");
 
     let (_, states) = list_worktrees_local(repo.path()).expect("list");
     let wt = states

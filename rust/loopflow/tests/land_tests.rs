@@ -3,7 +3,7 @@ mod support;
 use std::fs;
 use std::process::{Command, Stdio};
 
-use loopflow::engine::worktrees::create_with_schema;
+use loopflow::engine::worktrees::create_wave_worktree;
 use loopflow::ops::{land, submit, LandOptions, NullProgress, OpsError};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -382,7 +382,7 @@ fn submit_does_not_rotate_worktree() {
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
-    let worktree = create_with_schema(repo.path(), "sub", None, None).expect("create worktree");
+    let worktree = create_wave_worktree(repo.path(), "sub", None, false).expect("create worktree");
     fs::write(worktree.path.join("feature.txt"), "feature").expect("write feature file");
     let status = Command::new("git")
         .args(["add", "."])
@@ -485,7 +485,7 @@ fn lf_ops_land_writes_cd_directive_for_complete_rotation() {
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
-    let worktree = create_with_schema(repo.path(), "land", None, None).expect("create worktree");
+    let worktree = create_wave_worktree(repo.path(), "land", None, false).expect("create worktree");
 
     fs::write(worktree.path.join("feature.txt"), "feature").expect("write feature file");
     let status = Command::new("git")

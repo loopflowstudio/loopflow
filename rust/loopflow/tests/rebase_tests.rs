@@ -410,18 +410,19 @@ fn plan_rebase_classifies_wave_changes_as_protected() {
 #[test]
 fn plan_rebase_uses_open_stack_parent() {
     let repo = TestRepo::new();
-    repo.create_branch("a");
+    // Stacks are author-scoped: child jack/a.b rebases onto parent jack/a.
+    repo.create_branch("jack/a");
     repo.create_file("a.txt", "a");
     repo.stage_all();
     repo.commit("a");
     // A genuinely-open parent keeps its branch on origin (pushed with a PR).
-    repo.push_new_branch("a");
-    repo.create_branch("a.b");
+    repo.push_new_branch("jack/a");
+    repo.create_branch("jack/a.b");
 
     let plan = plan_rebase(repo.path(), None).expect("plan rebase");
 
-    assert_eq!(plan.stack_parent.as_deref(), Some("a"));
-    assert_eq!(plan.base_ref, "a");
+    assert_eq!(plan.stack_parent.as_deref(), Some("jack/a"));
+    assert_eq!(plan.base_ref, "jack/a");
     assert_eq!(plan.class, RebaseClass::StackParentOpen);
     assert_eq!(plan.strategy, RebaseStrategy::RebaseOntoParent);
     // An open parent is not a merge: the child keeps stacking on it, unchanged.

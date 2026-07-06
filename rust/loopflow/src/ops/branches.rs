@@ -5,11 +5,11 @@ use std::process::Command;
 use chrono::{DateTime, Local, NaiveDate, TimeZone, Utc};
 use serde::Serialize;
 
-use crate::engine::config::load_config;
 use crate::engine::git::{
     current_branch, delete_remote_branch, get_default_branch, is_squash_merged,
 };
-use crate::engine::naming::wave_name_from_branch;
+use crate::engine::identity::WaveId;
+use crate::engine::naming::git_user;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 
@@ -188,10 +188,7 @@ fn collect_branch_candidates(
     let refs = remote_branch_refs(repo)?;
     let open_prs = open_pr_branches(repo);
     let current = current_branch(repo)?.unwrap_or_default();
-    let branch_config = load_config(Some(repo))
-        .ok()
-        .flatten()
-        .and_then(|config| config.branch_names);
+    let user = git_user(repo).unwrap_or_else(|_| "user".to_string());
 
     let mut candidates = Vec::new();
     for item in refs {
@@ -203,7 +200,7 @@ fn collect_branch_candidates(
             continue;
         }
 
-        let parsed_wave = wave_name_from_branch(&item.branch, branch_config.as_ref());
+        let parsed_wave = WaveId::parse(&item.branch, &user).map(|id| id.wave_name().to_string());
         if let Some(user) = filters.user.as_deref() {
             if !matches_user(&item.author, user) {
                 continue;

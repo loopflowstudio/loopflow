@@ -1,0 +1,176 @@
+# Worktree redesign: recursive identity, stable wave homes, no land rotation
+
+Fixes the fallout from #802 (plan-first placement). Agents ended up in paths
+like `loopflow.jack-heart.bugs.20260705_1627.goals` with every wave-scoped `lf`
+op blocked.
+
+## What broke
+
+1. **Runaway nesting.** `lf op wt create goals` with no flag builds
+   `PlacementRequest::Default`. Off the default branch, `Default` treats the
+   current branch as a *stack parent* and appends the segment
+   (`worktrees.rs:644`). `stack_worktree_path` then sanitizes the whole dotted
+   branch into the dir name. Each `wt create` on a non-main branch deepens it.
+
+2. **Wave identity stops resolving.** `wave_name_from_worktree_and_main` strips
+   the `loopflow.` prefix and returns the rest verbatim, so the "wave name"
+   becomes `jack-heart.bugs.20260705_1627.goals` — matching no `wave/<name>/`
+   dir. `lf chat`, `lf op pm`, rotation all misfire. `rotate_worktree` also
+   hard-bails on any `.` in the wave name (`land.rs:481`). That is the "blocked."
+
+3. **Land rotation moves the worktree out from under the agent.** `land` →
+   `rotate_worktree` renames the live worktree to `<name>.<ts>` and spawns a
+   fresh empty `<repo>.<wave>`. A CI-fix then means chasing the moved dir, and
+   agents don't cope with their cwd being renamed mid-run.
+
+4. **The dot is overloaded three ways** — `{user}.{name}.{timestamp}` branch
+   schema, `seg.seg.seg` stack ancestry, `<repo>.<wave>.<run-id>` dirs — so
+   nothing parses once nested.
+
+## Identity model — SHIPPED (`WaveId` in `engine/identity.rs`)
+
+One thing, **two decoupled projections** that are not string-derivable from each
+other. The research killed `@` (footgun, outside GitHub's safe set) and pointed
+at `/` for the remote — but `/` can't go in a worktree dir (it'd nest). So the
+dir stays a flat `.`-chain and the remote branch carries `/` + author. The
+dir↔branch link lives on the `Run` record, not string surgery.
+
+| Projection    | Wave              | Worker                              |
+|---------------|-------------------|-------------------------------------|
+| Wave name     | `bugs`            | `bugs` (chain segment 0)            |
+| Chain         | `bugs`            | `bugs.fix-auth.retry`               |
+| Worktree dir  | `loopflow.bugs`   | `loopflow.bugs.fix-auth.retry.20260706_0801` |
+| Remote branch | `jack/bugs`       | `jack/bugs.fix-auth.retry.20260706_0801` |
+
+Rules:
+
+- **`dir_component()` = `{chain}[.{ts}]`** — flat, author-free, local. Dir is
+  `{repo}.{dir_component}`.
+- **`branch()` = `{user}/{chain}[.{ts}]`** — author-scoped (`/`), glob-able
+  (`jack/**`), never on disk.
+- **`parse(raw, fallback_user)`** is the single input funnel: accepts either
+  form (with/without `user/`, with/without trailing stamp), fills user from the
+  fallback when absent. Postel: liberal in, strict out.
+- **Wave name = chain segment 0.** Keys `wave/<name>/`, chat, pm.
+- **Waves/subwaves are stamp-free; workers carry one trailing `.ts`**, minted at
+  dispatch, always last. `a.b` worker `→ a.b.c.<new ts>` (re-stamp at the tail).
+  The stamp's presence *is* the worker/subwave marker.
+- **Stamps come from dispatch, not `wt create`.** Human `wt create` makes
+  persistent (unstamped) nodes; the executor makes stamped workers.
+
+Parsing (deterministic, no regex shape-guessing):
+
+```
+raw.split_once('/')  -> [user?, rest]     user before '/', else fallback
+rest.split('.')      -> segments; trailing YYYYMMDD_HHMM popped as the stamp
+segments[0]          -> wave name
+```
+
+Rejected delimiters: `@` (legal in refs but outside GitHub's safe set, shadows
+`@{upstream}`, breaks pip/CI URL parsing); `:` (illegal in refs, macOS Finder
+renders it `/`).
+
+### What the research changed (2026-07-06)
+
+Branch-format survey (Anthropic/OpenAI/Stripe/OSS + Graphite/Sapling/ghstack/gh).
+Three findings that move the design:
+
+1. **Lineage does not belong in the name — for correctness.** Every mature
+   stacking tool (Graphite, Sapling, ghstack, gh-stack) keeps the parent/child
+   DAG in its own metadata or the commit graph, and treats the branch name as a
+   disposable human label. ghstack is the only one that name-structures at all,
+   and even its `gh/user/N/{base,head,orig}` uses `N` as identity, not
+   parentage. **Loopflow already has the authoritative DAG** — `Run.parent_run_id`
+   / `stack_group_id` / `stack_position`. So the chain in the name is a *hint*;
+   never parse it for truth.
+
+2. **`@` is legal but a footgun.** `git check-ref-format` allows `@` mid-name
+   (only bare `@` and `@{` are illegal), but it's outside GitHub's documented
+   safe set (letters, digits, `.` `-` `_` `/`), shadows git's `@`/`@{upstream}`
+   revision syntax, and is a URL delimiter that breaks pip and some CI URL
+   parsing. No mature tool uses it. Reconsider.
+
+3. **`/` is the tooling-friendly separator** — enables branch-protection globs
+   (`bugs/**`), and is how ghstack/Graphite front-load the author. But `/` in a
+   branch name becomes a subdir in the worktree path, which **breaks the flat
+   sibling-dir invariant** loopflow depends on. So `/` is great on the *remote
+   branch*, unusable in the *dir name*.
+
+**Implication — decouple the two projections** (which the research says is
+normal): the worktree dir stays a flat `.`-chain (no `@`, no `/`, readable,
+stable); the remote branch can carry `/` + author for safety and globbability.
+The dir↔branch link lives on the `Run` record (it already stores both `worktree`
+and `branch`), not in string derivation. Candidate:
+
+```
+dir     loopflow.bugs.fix-auth.20260706_0801     (flat, local identity)
+branch  jack-heart/bugs.fix-auth.20260706_0801   (author-scoped, glob-able)
+```
+
+Open call for Jack: is dropping author from the *local dir* (you know who you
+are locally; author disambiguates on the shared remote) acceptable, or do you
+want it in both? And confirm decoupling dir≠branch vs. keeping one string
+everywhere (which forces choosing a single separator legal in both — `.` only,
+no `/`, no `@`).
+
+## Land redesign (kills rotation)
+
+- The wave lives permanently in `<repo>.<user>.<wave>` on branch
+  `{user}.{wave}` (stamp-free integration branch). **Never rotated.**
+- PRs are owned by dispatched **subworkers**, one per PR, each in its own
+  `@ts` worktree. A subworker owns the whole arc: commit → PR → land →
+  `lf-ci-fix`. When it lands, only its own worktree is preserved/pruned — the
+  wave home stays put.
+- Direct commits from the wave home stay *possible* (active firefighting) but
+  are discouraged as SOP. Soft guidance in LOOPFLOW.md, not a hard block.
+- Remove `rotate_worktree` (land.rs), `advance_branch` / `next_branch`
+  rotation (next.rs). Land from a worker worktree just lands and prunes itself.
+
+## Placement (point 1) — DONE
+
+Two relative-to-here verbs replace the old four flags:
+
+- **`--sibling`** (the default, no flag needed): root an independent branch off
+  main. Was `--main`/`--fork`.
+- **`--child [PARENT]`**: stack under `PARENT`, or under the current branch when
+  omitted. Was `--stack`/`--base`.
+
+Shipped: default no-flag `wt create` roots from main (kills the runaway nesting);
+`PlacementRequest::Default`/`Fork` deleted; docs + builtin LOOPFLOW.md + goldens
+regenerated. `PlacementRequest` internal variants stay `Main`/`Stack` for now;
+stage-2 aligns the vocabulary.
+
+## Dispatch kind: worker vs subwave
+
+Dispatch has a *kind*, orthogonal to placement:
+
+- **Worker** (all we launch today): ephemeral task executor. Gets the trailing
+  timestamp — `bugs.fix-auth@…20260706_0801`. Stamp = "this leaf is ephemeral."
+- **Subwave** (future): a persistent sub-*mind*, not a task. Extends the chain
+  **without** a timestamp — `bugs.triage` — because waves aren't ephemeral.
+
+So the timestamp's presence *is* the worker/subwave marker, and it falls out of
+the existing rule (waves stamp-free, workers stamped) for free. For now every
+dispatch is a worker; the CLI just needs a spot to say `subwave` later without
+reshaping identity.
+
+## Staged plan
+
+1. **Placement fix (this PR).** Default → root-from-main; remove `Default`
+   variant; collapse `--fork`. Stops the nesting today, independent of naming.
+2. **Chain-aware naming.** New identity type in `naming.rs`; branch
+   `{user}.{chain}[@{ts}]`; dir = `{repo}.{branch}`; `@`-based parse. Reshape
+   `PlacementRequest`/`StackBranch` around the chain. Rework `worktree_path*`,
+   `wave_name_from_*`, `run_worktree_path` (workers use `@ts`, not short-run-id).
+3. **Land redesign.** Remove rotation; wave home is permanent; subworker-owned
+   PR arc. Update the wave-server dispatch (`lfd/executor`, `wave/`).
+4. **Docs + goldens + tests.** LOOPFLOW.md agent workflow section, `docs/lfop.md`,
+   golden regen, e2e.
+
+## Open questions
+
+- Wave home branch: `{user}.{wave}` integration branch vs. wave home simply
+  tracking `main`. Doc assumes the former; confirm.
+- Do workers fork from the wave home branch or from `origin/main`? (Fresh vs.
+  Stack executor split already models both — map onto it.)
+- `@` in branch names is legal in git; confirm no tooling (gh, CI refs) chokes.

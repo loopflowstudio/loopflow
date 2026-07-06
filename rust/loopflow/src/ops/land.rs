@@ -4,9 +4,10 @@ use std::process::Command;
 use crate::engine::git::{
     current_branch, get_default_branch, is_clean, land as git_land, LandStrategy,
 };
-use crate::engine::naming::parse_branch_name;
+use crate::engine::identity::WaveId;
+use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
-    create_with_schema, main_repo_root, preserve_worktree, push_branch_with_upstream,
+    create_wave_worktree, main_repo_root, preserve_worktree, push_branch_with_upstream,
     wave_name_from_worktree_and_main, worktree_path,
 };
 
@@ -579,7 +580,9 @@ fn rotate_worktree(
 
     // Use the branch's timestamp for the preserved directory name so it
     // matches the work it contains, not when it was archived.
-    let branch_suffix = parse_branch_name(feature_branch, None).and_then(|parts| parts.timestamp);
+    let user = git_user(main_repo).unwrap_or_else(|_| "user".to_string());
+    let branch_suffix =
+        WaveId::parse(feature_branch, &user).and_then(|id| id.timestamp().map(str::to_string));
     let preserved = preserve_worktree(main_repo, repo_root, branch_suffix.as_deref())?;
     progress.status(&format!(
         "Preserved {} → {}",
@@ -588,7 +591,7 @@ fn rotate_worktree(
     ));
 
     if has_items {
-        let result = create_with_schema(main_repo, &wave_name, Some(feature_branch), None)?;
+        let result = create_wave_worktree(main_repo, &wave_name, Some(feature_branch), false)?;
 
         // Push synchronously so the branch exists on origin before we return.
         // schedule_upstream_sync uses a background thread that would be killed

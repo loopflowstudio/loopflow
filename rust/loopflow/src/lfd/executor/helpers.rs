@@ -6,14 +6,12 @@ use tracing::{error, info, warn};
 
 use time::OffsetDateTime;
 
-use crate::engine::config::load_config_or_default;
 use crate::engine::git::{
     fetch, get_default_branch, is_ancestor, rev_parse, sync_main, worktree_add, WorktreeBranch,
 };
-use crate::engine::naming::{format_branch_name, generate_word_pair};
 use crate::engine::worktrees::{
-    branch_exists, ensure_wave_worktree as ensure_wave_worktree_lease, run_worktree_path,
-    schedule_upstream_sync, short_run_id,
+    branch_exists, ensure_wave_worktree as ensure_wave_worktree_lease, schedule_upstream_sync,
+    short_run_id, worker_id, worktree_dir,
 };
 
 use crate::lfd::id::LfdId;
@@ -147,22 +145,10 @@ pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result
     Ok((lease.path.to_string_lossy().to_string(), lease.branch))
 }
 
-/// Generate a schema-formatted branch for the wave, de-colliding with word pairs.
-fn unique_wave_branch(main_repo: &Path, wave_name: &str) -> anyhow::Result<String> {
-    let config = load_config_or_default(Some(main_repo));
-    let branch_config = config.branch_names.as_ref();
-    let mut branch = format_branch_name(wave_name, branch_config, main_repo)
-        .map_err(|e| anyhow!("failed to generate branch name: {e}"))?;
-    while branch_exists(main_repo, &branch)? {
-        branch = format!("{branch}.{}", generate_word_pair());
-    }
-    Ok(branch)
-}
-
-/// Create a run-scoped worktree at `<repo>.<wave>.<short-run-id>`.
+/// Create a run-scoped worker worktree.
 ///
-/// Fresh placement: the worktree gets its own branch forked from the default
-/// branch — independent PR, independent land.
+/// Fresh placement: a stamped worker branch (`<user>/<wave>.<run-id>.<ts>`)
+/// forked from the default branch — independent PR, independent land.
 ///
 /// When `target_branch` is `Some` and not `"main"`, the worktree instead
 /// tracks that branch directly (e.g. a fix dispatched onto a PR branch).
@@ -172,7 +158,8 @@ pub(crate) fn create_run_worktree(
     run_id: &str,
     target_branch: Option<&str>,
 ) -> anyhow::Result<(String, String)> {
-    let run_wt = run_worktree_path(main_repo, wave_name, run_id);
+    let id = worker_id(main_repo, wave_name, run_id)?;
+    let run_wt = worktree_dir(main_repo, &id);
 
     let is_targeted = target_branch
         .map(|b| !b.is_empty() && b != "main")
@@ -198,10 +185,10 @@ pub(crate) fn create_run_worktree(
         return Ok((run_wt.to_string_lossy().to_string(), tb.to_string()));
     }
 
-    // Fresh: own branch off the default branch.
+    // Fresh: own worker branch off the default branch.
     let default_branch = get_default_branch(main_repo)?;
     let _ = sync_main(main_repo, &default_branch);
-    let branch = unique_wave_branch(main_repo, wave_name)?;
+    let branch = id.branch();
     worktree_add(
         main_repo,
         &run_wt,
@@ -214,7 +201,7 @@ pub(crate) fn create_run_worktree(
     Ok((run_wt.to_string_lossy().to_string(), branch))
 }
 
-/// Create a run-scoped worktree whose branch forks from `parent_branch`.
+/// Create a run-scoped worker worktree whose branch forks from `parent_branch`.
 ///
 /// Stack placement: the new branch starts at the parent run's branch tip
 /// (remote tip when available), so dependent work builds on unlanded work.
@@ -224,7 +211,8 @@ pub(crate) fn create_stacked_run_worktree(
     run_id: &str,
     parent_branch: &str,
 ) -> anyhow::Result<(String, String)> {
-    let run_wt = run_worktree_path(main_repo, wave_name, run_id);
+    let id = worker_id(main_repo, wave_name, run_id)?;
+    let run_wt = worktree_dir(main_repo, &id);
 
     let _ = fetch(main_repo, "origin", parent_branch);
     let remote_ref = format!("origin/{parent_branch}");
@@ -248,7 +236,7 @@ pub(crate) fn create_stacked_run_worktree(
         }
     };
 
-    let branch = unique_wave_branch(main_repo, wave_name)?;
+    let branch = id.branch();
     worktree_add(
         main_repo,
         &run_wt,

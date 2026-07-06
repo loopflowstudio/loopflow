@@ -5,7 +5,8 @@ use crate::engine::git::{
     current_branch, delete_local_branch, fetch, get_default_branch, is_merged_into, rebase,
     rev_parse, squash_merge_fork_point, sync_main,
 };
-use crate::engine::worktrees::StackBranch;
+use crate::engine::identity::WaveId;
+use crate::engine::naming::git_user;
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -100,8 +101,8 @@ pub(crate) fn merged_parent_fork_point(
     default_branch: &str,
     parent_landed: bool,
 ) -> Option<(String, Option<String>)> {
-    let stack = StackBranch::parse(branch, default_branch)?;
-    let parent = stack.parent()?;
+    let user = git_user(repo).unwrap_or_else(|_| "user".to_string());
+    let parent = WaveId::parse(branch, &user)?.parent()?;
     let parent_ref = resolve_parent_ref(repo, &parent)?;
     let default_ref = format!("origin/{default_branch}");
     let landed = parent_landed
@@ -118,8 +119,8 @@ pub(crate) fn merged_parent_fork_point(
 pub fn plan_rebase(repo: &Path, onto: Option<&str>) -> OpsResult<RebasePlan> {
     let default_branch = get_default_branch(repo)?;
     let branch = current_branch(repo)?.unwrap_or_else(|| "HEAD".to_string());
-    let stack = StackBranch::parse(&branch, &default_branch);
-    let stack_parent = stack.as_ref().and_then(StackBranch::parent);
+    let user = git_user(repo).unwrap_or_else(|_| "user".to_string());
+    let stack_parent = WaveId::parse(&branch, &user).and_then(|id| id.parent());
     // A surviving parent ref is only a valid base while the parent is still
     // open. Once the parent merges into the default branch, its ref is a dead
     // tip: rebasing onto it drags the parent's already-merged commits back into

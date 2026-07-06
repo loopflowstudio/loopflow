@@ -885,10 +885,6 @@ fn wt_create(name: &str, child: Option<&str>, dry_run: bool) -> Result<()> {
     let started = Instant::now();
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
-    let config = crate::engine::config::load_config(Some(&main_repo))
-        .ok()
-        .flatten();
-    let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
     let segment = WorktreeSegment::parse(name)?;
     let current = current_branch(&repo_root)?;
     // Sibling (the default) roots from the default branch. A child stacks under
@@ -917,7 +913,7 @@ fn wt_create(name: &str, child: Option<&str>, dry_run: bool) -> Result<()> {
         let _ = sync_main(&main_repo, &default_branch);
     }
 
-    let placement = plan_placement(&main_repo, request, branch_config)?;
+    let placement = plan_placement(&main_repo, request)?;
 
     if dry_run {
         print_placement_plan(&placement);
@@ -1018,8 +1014,12 @@ fn wt_switch(name: &str) -> Result<()> {
     {
         exact_branch_match
     } else {
+        // Path-guessing only applies to a bare wave/dir name. A full `user/…`
+        // branch spec must resolve via an exact branch match (handled above) or
+        // the wave-name match below — never by landing in whatever worktree
+        // happens to occupy the guessed directory.
         let target = worktree_path(&main_repo, name);
-        if target.exists() {
+        if target.exists() && !name.contains('/') {
             target
         } else {
             let mut matches = worktrees

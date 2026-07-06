@@ -70,7 +70,7 @@ final class PortfolioRepoState {
 
     func applyConnectedWaves(_ connectedWaves: [Wave]) {
         let filtered = connectedWaves
-            .filter { wave in wave.repos.contains { $0.repo.normalizedFilePath == repoPath } }
+            .filter { $0.repo.normalizedFilePath == repoPath }
             .map { WaveViewModel(api: $0) }
         waves = Self.sortWaves(filtered)
     }
@@ -79,13 +79,13 @@ final class PortfolioRepoState {
         switch event.type {
         case .deleted:
             if let wave = event.wave,
-               !wave.repos.contains(where: { $0.repo.normalizedFilePath == repoPath }) {
+               wave.repo.normalizedFilePath != repoPath {
                 return
             }
             waves.removeAll { $0.id == event.waveId }
         case .created, .updated, .started, .stopped, .waiting:
             guard let wave = event.wave,
-                  wave.repos.contains(where: { $0.repo.normalizedFilePath == repoPath }) else {
+                  wave.repo.normalizedFilePath == repoPath else {
                 return
             }
             upsertWave(WaveViewModel(api: wave))

@@ -13,8 +13,8 @@ use std::sync::Arc;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage, LivePrState,
-    LivePullRequestState, QueueBlock, Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus,
-    Session, SessionStatus, Summary, Wave,
+    LivePullRequestState, QueueBlock, Repo, RepoEdge, RepoId, Run, RunStackStatus, Session,
+    SessionStatus, Summary, Wave,
 };
 
 pub mod catalog;
@@ -236,47 +236,8 @@ impl Store {
         WaveStateStore::list_waves(self, repo).await
     }
 
-    pub async fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>> {
-        WaveStateStore::list_wave_repos(self, wave_id).await
-    }
-
-    pub async fn replace_wave_repos(&self, wave_id: &LfdId, repos: &[RepoWork]) -> StoreResult<()> {
-        WaveStateStore::delete_wave_repos(self, wave_id).await?;
-        for repo in repos {
-            WaveStateStore::upsert_wave_repo(self, wave_id, repo).await?;
-        }
-        Ok(())
-    }
-
-    /// Stitch `repos` from the `wave_repos` table onto each wave. The store read
-    /// path fills `repos: Vec::new()` in `map_wave_row`; the actual load happens
-    /// here, in the layer that owns the store handle.
-    async fn attach_repos_vec(&self, mut waves: Vec<Wave>) -> StoreResult<Vec<Wave>> {
-        for wave in &mut waves {
-            wave.repos = WaveStateStore::list_wave_repos(self, wave.id()).await?;
-        }
-        Ok(waves)
-    }
-
-    async fn attach_repos_opt(&self, wave: Option<Wave>) -> StoreResult<Option<Wave>> {
-        match wave {
-            Some(mut wave) => {
-                wave.repos = WaveStateStore::list_wave_repos(self, wave.id()).await?;
-                Ok(Some(wave))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Persist the wave's `repos` as the source of truth for per-repo execution
-    /// state (worktree/branch/status/iteration). The wave-level `paused` column
-    /// is written in `upsert_wave`.
-    async fn persist_wave_repos(&self, wave: &Wave) -> StoreResult<()> {
-        self.replace_wave_repos(wave.id(), &wave.repos).await
-    }
-
     /// A chord's contents: the waves whose `parent_wave_id` is `parent`,
-    /// ordered by creation, each stitched with its `repos`.
+    /// ordered by creation.
     pub async fn list_child_waves(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
         WaveStateStore::children_of(self, parent).await
     }
@@ -290,13 +251,11 @@ impl Store {
     }
 
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
-        WaveStateStore::create_wave(self, wave).await?;
-        self.persist_wave_repos(wave).await
+        WaveStateStore::create_wave(self, wave).await
     }
 
     pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
-        WaveStateStore::update_wave(self, wave).await?;
-        self.persist_wave_repos(wave).await
+        WaveStateStore::update_wave(self, wave).await
     }
 
     pub async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
@@ -627,9 +586,6 @@ pub trait WaveStateStore: Send + Sync {
     async fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
     async fn update_wave(&self, wave: &Wave) -> StoreResult<()>;
     async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
-    async fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>>;
-    async fn upsert_wave_repo(&self, wave_id: &LfdId, repo: &RepoWork) -> StoreResult<()>;
-    async fn delete_wave_repos(&self, wave_id: &LfdId) -> StoreResult<()>;
 
     async fn list_runs(&self, wave_id: Option<&LfdId>, limit: Option<u32>)
         -> StoreResult<Vec<Run>>;
@@ -789,31 +745,22 @@ impl WaveStateStore for Store {
             let repo = repo.map(str::to_string);
             run_sqlite(&self.sqlite, move |store| store.list_waves(repo.as_deref())).await
         }?;
-        self.attach_repos_vec(waves).await
+        Ok(waves)
     }
 
     async fn children_of(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
-        let waves = {
-            let parent = parent.clone();
-            run_sqlite(&self.sqlite, move |store| store.list_child_waves(&parent)).await
-        }?;
-        self.attach_repos_vec(waves).await
+        let parent = parent.clone();
+        run_sqlite(&self.sqlite, move |store| store.list_child_waves(&parent)).await
     }
 
     async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
-        let wave = {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.get_wave(&wave_id)).await
-        }?;
-        self.attach_repos_opt(wave).await
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.get_wave(&wave_id)).await
     }
 
     async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
-        let wave = {
-            let name = name.to_string();
-            run_sqlite(&self.sqlite, move |store| store.get_wave_by_name(&name)).await
-        }?;
-        self.attach_repos_opt(wave).await
+        let name = name.to_string();
+        run_sqlite(&self.sqlite, move |store| store.get_wave_by_name(&name)).await
     }
 
     async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -834,31 +781,6 @@ impl WaveStateStore for Store {
         {
             let wave_id = wave_id.clone();
             run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
-        }
-    }
-
-    async fn list_wave_repos(&self, wave_id: &LfdId) -> StoreResult<Vec<RepoWork>> {
-        {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.list_wave_repos(&wave_id)).await
-        }
-    }
-
-    async fn upsert_wave_repo(&self, wave_id: &LfdId, repo: &RepoWork) -> StoreResult<()> {
-        {
-            let wave_id = wave_id.clone();
-            let repo = repo.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.upsert_wave_repo(&wave_id, &repo)
-            })
-            .await
-        }
-    }
-
-    async fn delete_wave_repos(&self, wave_id: &LfdId) -> StoreResult<()> {
-        {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.delete_wave_repos(&wave_id)).await
         }
     }
 
@@ -1459,8 +1381,8 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest, QueueBlock,
-        QueueBlockReason, Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus, RunStatus,
-        Summary, Wave, WaveStatus,
+        QueueBlockReason, Repo, RepoEdge, RepoId, Run, RunStackStatus, RunStatus, Summary, Wave,
+        WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -1473,15 +1395,12 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            repos: vec![RepoWork {
-                repo: repo.to_string(),
-                worktree: String::new(),
-                branch: String::new(),
-                status: WaveStatus::Idle,
-                iteration: 0,
-                cycle_start_iteration: 0,
-                position: 0,
-            }],
+            repo: repo.to_string(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
             direction: vec!["focus".to_string()],
             area: vec!["src".to_string()],
             paused: false,
@@ -1535,9 +1454,8 @@ mod tests {
             .expect("get wave")
             .expect("wave exists");
         assert_eq!(loaded.status(), WaveStatus::Paused);
-        assert_eq!(loaded.repos.len(), 1);
-        assert_eq!(loaded.repos[0].repo, "/repo");
-        assert_eq!(loaded.repos[0].status, WaveStatus::Paused);
+        assert_eq!(loaded.repo(), "/repo");
+        assert_eq!(loaded.status, WaveStatus::Paused);
 
         let repo = Repo {
             path: "/tmp/repo".to_string(),

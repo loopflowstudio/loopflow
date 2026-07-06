@@ -1620,22 +1620,19 @@ mod tests {
     }
 
     fn make_wave_row(name: &str) -> crate::lfd::types::Wave {
-        use crate::lfd::types::{RepoWork, WaveStatus};
+        use crate::lfd::types::WaveStatus;
         crate::lfd::types::Wave {
             id: crate::lfd::id::LfdId::new(),
             name: name.to_string(),
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            repos: vec![RepoWork {
-                repo: "/tmp/repo".to_string(),
-                worktree: String::new(),
-                branch: String::new(),
-                status: WaveStatus::Idle,
-                iteration: 0,
-                cycle_start_iteration: 0,
-                position: 0,
-            }],
+            repo: "/tmp/repo".to_string(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
             direction: Vec::new(),
             area: Vec::new(),
             paused: false,

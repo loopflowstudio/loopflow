@@ -34,26 +34,23 @@ class TestWaveModel:
         assert wave.created_at is None
         assert wave.flow_steps == []
         assert wave.workers == 1
-        assert len(wave.repos) == 1
-        repo = wave.repos[0]
-        assert repo.repo == "/tmp/repo"
-        assert repo.iteration == 0
-        assert repo.active_run is None
-        assert repo.commits == []
-        assert repo.diff_stat is None
+        assert wave.repo == "/tmp/repo"
+        assert wave.iteration == 0
+        assert wave.active_run is None
+        assert wave.commits == []
+        assert wave.diff_stat is None
 
     def test_full_payload(self):
         wave = Wave.model_validate(WAVE_FULL)
         assert wave.created_at is not None
-        repo = wave.repos[0]
-        assert repo.active_run.status == "running"
-        assert repo.active_run.pr.number == 1
-        assert repo.remote_branch == "wave/architecture"
-        assert repo.pr.number == 1
-        assert len(repo.commits) == 2
-        assert repo.commits[0].sha == "a1b2c3d"
-        assert repo.commits[0].message == "implement: add retry logic"
-        assert repo.diff_stat == " 3 files changed, 42 insertions(+), 7 deletions(-)"
+        assert wave.active_run.status == "running"
+        assert wave.active_run.pr.number == 1
+        assert wave.remote_branch == "wave/architecture"
+        assert wave.pr.number == 1
+        assert len(wave.commits) == 2
+        assert wave.commits[0].sha == "a1b2c3d"
+        assert wave.commits[0].message == "implement: add retry logic"
+        assert wave.diff_stat == " 3 files changed, 42 insertions(+), 7 deletions(-)"
         assert [step.type for step in wave.flow_steps] == ["step", "step", "step", "step"]
         assert [step.name for step in wave.flow_steps] == [
             "review",
@@ -67,9 +64,9 @@ class TestWaveModel:
         dumped = wave.model_dump(mode="json")
         reparsed = Wave.model_validate(dumped)
         assert reparsed.id == wave.id
-        assert reparsed.repos[0].active_run.pr.url == wave.repos[0].active_run.pr.url
-        assert reparsed.repos[0].commits == wave.repos[0].commits
-        assert reparsed.repos[0].diff_stat == wave.repos[0].diff_stat
+        assert reparsed.active_run.pr.url == wave.active_run.pr.url
+        assert reparsed.commits == wave.commits
+        assert reparsed.diff_stat == wave.diff_stat
         assert reparsed.flow_steps == wave.flow_steps
 
     def test_unknown_fields_ignored(self):

@@ -214,6 +214,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "051_drop_dead_tables",
         sql: include_str!("migrations/051_drop_dead_tables.sql"),
     },
+    Migration {
+        version: "052_wave_single_repo",
+        sql: include_str!("migrations/052_wave_single_repo.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the
@@ -385,6 +389,8 @@ mod tests {
             "activation_log",
             "agents",
             "wave_crons",
+            // Collapsed back onto `waves` in migration 052 (wave = 1 repo).
+            "wave_repos",
         ] {
             assert!(
                 tables.iter().all(|t| t != unexpected),

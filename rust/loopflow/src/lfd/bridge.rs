@@ -302,8 +302,8 @@ mod tests {
 
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        AttentionKind, RepoWork, Run, RunStackStatus, RunStatus, Session, SessionStatus,
-        SessionUse, Wave, WaveStatus,
+        AttentionKind, Run, RunStackStatus, RunStatus, Session, SessionStatus, SessionUse, Wave,
+        WaveStatus,
     };
     use crate::lfdb::{open_store, StorageConfig};
 
@@ -322,15 +322,12 @@ mod tests {
             primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
-            repos: vec![RepoWork {
-                repo: "/tmp/repo".to_string(),
-                worktree: String::new(),
-                branch: String::new(),
-                status: WaveStatus::Idle,
-                iteration: 0,
-                cycle_start_iteration: 0,
-                position: 0,
-            }],
+            repo: "/tmp/repo".to_string(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
             direction: Vec::new(),
             area: Vec::new(),
             paused: false,

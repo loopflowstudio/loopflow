@@ -14,59 +14,47 @@ WAVE_MINIMAL = {
     "status": "running",
     "flow_steps": [],
     "parent_wave_id": None,
-    "repos": [
-        {
-            "repo": "/tmp/repo",
-            "status": "running",
-            "iteration": 0,
-            "commits": [],
-            "open_pr_count": 0,
-            "stack_count": 0,
-        }
-    ],
+    "repo": "/tmp/repo",
+    "iteration": 0,
+    "commits": [],
+    "open_pr_count": 0,
+    "stack_count": 0,
 }
 
 WAVE_FULL = {
     **WAVE_MINIMAL,
     "created_at": "2026-02-08T01:56:54Z",
     "flow_steps": ["review", "iterate", "build", "gate"],
-    "repos": [
-        {
-            "repo": "/tmp/repo",
-            "status": "running",
-            "iteration": 0,
-            "local_worktree": "/tmp/wt",
-            "remote_branch": "wave/architecture",
-            "commits": [
-                {"sha": "a1b2c3d", "message": "implement: add retry logic"},
-                {"sha": "e4f5g6h", "message": "design: initial sketch"},
-            ],
-            "diff_stat": " 3 files changed, 42 insertions(+), 7 deletions(-)",
-            "open_pr_count": 1,
-            "stack_count": 1,
-            "active_run": {
-                "id": "run-1",
-                "wave_id": "abc-123",
-                "iteration": 0,
-                "step_index": 0,
-                "status": "running",
-                "local_worktree": "/tmp/wt",
-                "remote_branch": "wave/architecture",
-                "pr": {
-                    "url": "https://github.com/org/repo/pull/1",
-                    "number": 1,
-                    "state": "open",
-                },
-                "started_at": "2026-02-08T02:00:00Z",
-                "flow_parents": ["parent-1"],
-            },
-            "pr": {
-                "url": "https://github.com/org/repo/pull/1",
-                "number": 1,
-                "state": "open",
-            },
-        }
+    "local_worktree": "/tmp/wt",
+    "remote_branch": "wave/architecture",
+    "commits": [
+        {"sha": "a1b2c3d", "message": "implement: add retry logic"},
+        {"sha": "e4f5g6h", "message": "design: initial sketch"},
     ],
+    "diff_stat": " 3 files changed, 42 insertions(+), 7 deletions(-)",
+    "open_pr_count": 1,
+    "stack_count": 1,
+    "active_run": {
+        "id": "run-1",
+        "wave_id": "abc-123",
+        "iteration": 0,
+        "step_index": 0,
+        "status": "running",
+        "local_worktree": "/tmp/wt",
+        "remote_branch": "wave/architecture",
+        "pr": {
+            "url": "https://github.com/org/repo/pull/1",
+            "number": 1,
+            "state": "open",
+        },
+        "started_at": "2026-02-08T02:00:00Z",
+        "flow_parents": ["parent-1"],
+    },
+    "pr": {
+        "url": "https://github.com/org/repo/pull/1",
+        "number": 1,
+        "state": "open",
+    },
 }
 
 WAVE_RUN_MINIMAL = {

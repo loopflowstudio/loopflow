@@ -10,7 +10,7 @@ use loopflow::engine::worktrees::{
 };
 use loopflow::lfd::executor::{create_run_for_placement, ensure_wave_worktree, Placement};
 use loopflow::lfd::id::LfdId;
-use loopflow::lfd::types::{RepoWork, Wave, WaveStatus};
+use loopflow::lfd::types::{Wave, WaveStatus};
 use loopflow::lfdb::{open_store, SharedStore, StorageConfig};
 use loopflow_test_support::TestRepo;
 
@@ -33,15 +33,12 @@ fn make_wave(repo: &str, name: &str) -> Wave {
         primary_flow: "ship-roadmap".to_string(),
         goal: "ship-roadmap".to_string(),
         metrics: Vec::new(),
-        repos: vec![RepoWork {
-            repo: repo.to_string(),
-            worktree: String::new(),
-            branch: String::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            position: 0,
-        }],
+        repo: repo.to_string(),
+        worktree: String::new(),
+        branch: String::new(),
+        status: WaveStatus::Idle,
+        iteration: 0,
+        cycle_start_iteration: 0,
         direction: vec![],
         area: vec![],
         paused: false,

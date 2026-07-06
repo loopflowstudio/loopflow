@@ -52,6 +52,12 @@
 //!     curation. Live-only, no replay — MEMORY.md itself is the durable
 //!     state. Primary channel only (memory is wave identity; work lines have
 //!     none).
+//!   - `op`: data is an [`OpFrame`] — this wave's operational motion (a worker
+//!     run starting or finishing, observed by the [`StoreObserver`]), `kind`
+//!     mirroring the `run_events` ledger vocabulary 1:1 (`run.started`,
+//!     `run.completed`, `run.errored`). Live-only, no replay — history is a
+//!     `lf runs` query, the durable ledger the frame mirrors. Primary channel
+//!     only (workers are the wave's, not a child channel's).
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
 //!     is an [`InboxFrame`] — a resident-directed op. The pending queue
 //!     (journaled messages not yet named in any `answers`) replays on
@@ -130,8 +136,9 @@ use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::state::MindState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
-    AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, PostDeltasRequest,
-    PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER, SUBAGENT_TOKEN_HEADER,
+    AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, OpFrame,
+    PostDeltasRequest, PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
+    SUBAGENT_TOKEN_HEADER,
 };
 
 /// Basename of the discovery pointer under `wave/<name>/`.
@@ -806,8 +813,17 @@ async fn events_handler(
             };
             async move { out }
         });
+        // Worker-run motion (`op` frames). Live-only — no replay; a client
+        // that lags re-reads history from `lf runs`.
+        let live_ops = BroadcastStream::new(sub.op_rx).filter_map(move |res| {
+            let out = match res {
+                Ok(frame) => Some(Ok(op_event(&frame))),
+                Err(_) => None,
+            };
+            async move { out }
+        });
         let mut live: BoxedEventStream = Box::pin(stream::select(
-            live_turns,
+            stream::select(live_turns, live_ops),
             stream::select(live_states, live_memory),
         ));
         if include_inbox {
@@ -890,6 +906,12 @@ fn state_event(state: &MindState) -> Event {
 
 fn memory_event(summary: &str) -> Event {
     Event::default().event("memory").data(summary)
+}
+
+fn op_event(frame: &OpFrame) -> Event {
+    Event::default()
+        .event("op")
+        .data(serde_json::to_string(frame).unwrap_or_default())
 }
 
 fn inbox_event(frame: &InboxFrame) -> Event {
@@ -1156,6 +1178,65 @@ mod tests {
                 || !ok["stderr"].as_str().unwrap_or_default().is_empty(),
             "doctor emits a report"
         );
+    }
+
+    /// A worker dispatched while a client is subscribed to `/events` surfaces
+    /// as a live `op` frame carrying the ledger-vocabulary `kind`. This is the
+    /// wave's operational channel riding the same stream as `state`/`turn`.
+    #[tokio::test]
+    async fn op_frame_reaches_the_events_stream_for_a_run() {
+        use crate::wave::subscription::{stream_events, Frame};
+        use std::sync::{Arc, Mutex};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(
+            runtime.clone(),
+            ResidentDoor::new("resident"),
+            SubagentDoor::new(),
+            None,
+            None,
+        );
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        let seen: Arc<Mutex<Vec<Frame>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let endpoint = addr.to_string();
+        let task = tokio::spawn(async move {
+            let mut on_frame = |frame: Frame| sink.lock().unwrap().push(frame);
+            let _ = stream_events(&endpoint, "", &mut on_frame).await;
+        });
+
+        // Wait for the subscription to open (the state replay lands first),
+        // then a worker is observed — the live `op` frame must arrive.
+        for _ in 0..200 {
+            if seen.lock().unwrap().iter().any(|f| f.event == "state") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(runtime.journal_run_observed("run-42", "sess-1", "implement", "wire it"));
+        for _ in 0..200 {
+            if seen.lock().unwrap().iter().any(|f| f.event == "op") {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        task.abort();
+
+        let frames = seen.lock().unwrap().clone();
+        let op = frames
+            .iter()
+            .find(|f| f.event == "op")
+            .expect("op frame arrives on /events");
+        let frame: OpFrame = serde_json::from_str(&op.data).expect("op frame parses");
+        assert_eq!(frame.kind, "run.started");
+        assert_eq!(frame.run_id, "run-42");
+        assert_eq!(frame.flow.as_deref(), Some("implement"));
     }
 
     /// A pointer to a dead address is stale: the probe says no live server.

@@ -167,8 +167,28 @@ pub enum Commands {
     },
     /// Show token usage by repo and provider (from a running lfd)
     Usage,
+    /// List every wave in the registry (running and stopped), marking which
+    /// have a live server. Local-only query over the shared ledger.
+    Ls {
+        /// Emit the wave snapshot as JSON (Concerto's dashboard snapshot)
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one wave's runs, attention, and (when live) mind state, from the
+    /// registry. Defaults to the ambient wave (`LFD_WAVE_ID`).
+    Status {
+        /// Wave name (default: the ambient wave)
+        wave: Option<String>,
+        /// Emit the status snapshot as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Show recent loopflow runs from the local ledger (all repos, local-only)
-    Runs,
+    Runs {
+        /// Emit the run history as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Reconstruct one run from the local ledger: steps, durations, tokens, prompt logs
     Trace {
         /// Run id from `lf runs` (a unique prefix is enough)

@@ -520,7 +520,11 @@ fn main() -> anyhow::Result<()> {
                 loopflow::wave::run(name, *force, *no_mind, *mind_only)
             }),
             Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
-            Some(Commands::Runs) => loopflow::lf::commands::runs::list(),
+            Some(Commands::Ls { json }) => loopflow::lf::commands::waves::ls(*json),
+            Some(Commands::Status { wave, json }) => {
+                loopflow::lf::commands::waves::status(wave.as_deref(), *json)
+            }
+            Some(Commands::Runs { json }) => loopflow::lf::commands::runs::list(*json),
             Some(Commands::Trace { run_id }) => loopflow::lf::commands::runs::trace(run_id),
             Some(Commands::Chat { text, from, target }) => {
                 loopflow::lf::commands::chat::run(text, from.as_deref(), target)
@@ -573,7 +577,9 @@ fn run_label(cli: &Cli) -> Option<String> {
         Some(Commands::Op { .. })
         | Some(Commands::Wave { .. })
         | Some(Commands::Usage)
-        | Some(Commands::Runs)
+        | Some(Commands::Ls { .. })
+        | Some(Commands::Status { .. })
+        | Some(Commands::Runs { .. })
         | Some(Commands::Trace { .. })
         | Some(Commands::Chat { .. })
         | Some(Commands::Sub { .. })
@@ -594,7 +600,7 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "op", "wave", "chat", "memory", "usage", "runs", "trace", "help",
+            ":", "op", "wave", "chat", "memory", "usage", "ls", "status", "runs", "trace", "help",
         ] {
             assert!(tables.commands.contains(command), "command {command}");
         }

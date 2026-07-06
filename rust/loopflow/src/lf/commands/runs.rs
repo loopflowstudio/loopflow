@@ -18,7 +18,9 @@ const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
 
 /// `lf runs`: timeline of recent runs across every repo on this machine.
-pub fn list() -> Result<()> {
+/// `--json` emits the same window as a machine-readable array (Concerto's
+/// run-history snapshot) — the durable ledger the live `op` frames mirror.
+pub fn list(json: bool) -> Result<()> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
     let events = store
@@ -26,12 +28,19 @@ pub fn list() -> Result<()> {
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
 
     let mut summaries = summarize(&events);
+    summaries.sort_by_key(|run| std::cmp::Reverse(run.started));
+    summaries.truncate(MAX_RUNS);
+
+    if json {
+        let entries: Vec<RunLedgerEntry> = summaries.iter().map(RunLedgerEntry::from).collect();
+        println!("{}", serde_json::to_string(&entries)?);
+        return Ok(());
+    }
+
     if summaries.is_empty() {
         println!("No runs recorded in the last {WINDOW_DAYS} days.");
         return Ok(());
     }
-    summaries.sort_by_key(|run| std::cmp::Reverse(run.started));
-    summaries.truncate(MAX_RUNS);
 
     let colors = Colors::default();
     println!(
@@ -238,6 +247,38 @@ impl RunSummary {
     }
 }
 
+/// `lf runs --json` entry: one folded run from the ledger. Wire type consumed
+/// by Concerto — every field required or explicitly Optional, no serde
+/// defaults. `started`/`ended` are unix seconds (the ledger's grain).
+#[derive(Debug, serde::Serialize)]
+struct RunLedgerEntry {
+    id: String,
+    repo: Option<String>,
+    wave: Option<String>,
+    label: String,
+    status: String,
+    started: i64,
+    ended: Option<i64>,
+    input_tokens: i64,
+    output_tokens: i64,
+}
+
+impl From<&RunSummary> for RunLedgerEntry {
+    fn from(run: &RunSummary) -> Self {
+        Self {
+            id: run.run_id.clone(),
+            repo: run.repo.clone(),
+            wave: run.wave.clone(),
+            label: run.label.clone(),
+            status: run.status.to_string(),
+            started: run.started,
+            ended: run.ended,
+            input_tokens: run.input_tokens,
+            output_tokens: run.output_tokens,
+        }
+    }
+}
+
 fn summarize(events: &[RunEventRow]) -> Vec<RunSummary> {
     let mut by_run: BTreeMap<&str, Vec<&RunEventRow>> = BTreeMap::new();
     for event in events {
@@ -433,6 +474,30 @@ mod tests {
         let summaries = summarize(&events);
         assert_eq!(summaries[0].status, "running");
         assert_eq!(summaries[0].ended, None);
+    }
+
+    #[test]
+    fn json_entry_carries_fold_and_stable_keys() {
+        use super::RunLedgerEntry;
+        let mut terminal = row("abc", 1, 110, "run", "completed");
+        terminal.input_tokens = Some(1000);
+        terminal.output_tokens = Some(200);
+        let events = vec![row("abc", 0, 100, "run", "started"), terminal];
+        let summaries = summarize(&events);
+        let entry = RunLedgerEntry::from(&summaries[0]);
+        let value = serde_json::to_value(&entry).expect("serialize");
+        assert_eq!(value["id"], "abc");
+        assert_eq!(value["status"], "ok");
+        assert_eq!(value["started"], 100);
+        assert_eq!(value["ended"], 110);
+        assert_eq!(value["label"], "gate");
+        // Explicitly-Optional fields stay present (a running run's `ended` is
+        // null, never absent) — one stable shape for the client.
+        let running = summarize(&[row("xyz", 0, 100, "run", "started")]);
+        let entry = RunLedgerEntry::from(&running[0]);
+        let value = serde_json::to_value(&entry).expect("serialize");
+        assert_eq!(value["ended"], serde_json::Value::Null);
+        assert_eq!(value["status"], "running");
     }
 
     #[test]

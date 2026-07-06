@@ -190,6 +190,36 @@ pub struct InboxFrame {
     pub from: Option<Attribution>,
 }
 
+/// One `op` SSE frame on `/events` — this wave's operational motion: a worker
+/// run starting or finishing, observed by the wave server's [`StoreObserver`]
+/// (`crate::wave::registry`). `kind` reuses the `run_events` ledger vocabulary
+/// 1:1 (`<node>.<event>`) so the durable ledger row and the live frame carry
+/// the same shape — a client folds `lf runs` history and live `op` frames with
+/// one code path. The base model emits run-grain kinds (`run.started`,
+/// `run.completed`, `run.errored`); step/flow granularity is future work, so
+/// `kind` stays a free-form string like the ledger's `node`/`event` columns.
+///
+/// Live-only: the past is a ledger query (`lf runs`), never a stream — nothing
+/// replays `op` frames on connect. DTO discipline: `flow`/`task`/`summary` are
+/// explicitly Optional (a finish carries a summary but no flow; a start the
+/// reverse); `kind`/`run_id`/`ts` are always present.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpFrame {
+    /// `<node>.<event>` from the ledger vocabulary: `run.started`,
+    /// `run.completed`, `run.errored`.
+    pub kind: String,
+    pub run_id: String,
+    /// The run's flow, on a `run.started` frame; absent on a finish.
+    pub flow: Option<String>,
+    /// The run's task text, on a `run.started` frame; absent on a finish.
+    pub task: Option<String>,
+    /// What the registry knows about a finish (session status, PR url, error);
+    /// absent on a start.
+    pub summary: Option<String>,
+    /// RFC3339 emission time.
+    pub ts: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

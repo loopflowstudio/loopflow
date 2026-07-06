@@ -43,7 +43,7 @@ use crate::wave::journal::{
 };
 use crate::wave::memory::Memory;
 use crate::wave::state::{can_transition, MindState};
-use crate::wave::wire::{ResidentDelta, ResidentStateTo};
+use crate::wave::wire::{OpFrame, ResidentDelta, ResidentStateTo};
 
 /// Capacity of the live turn broadcast. SSE clients that fall this far behind
 /// get a lag error and resync from `/conversation`; the journal is the source
@@ -66,6 +66,10 @@ const FAMILY_BROADCAST_CAPACITY: usize = 256;
 /// `/events?inbox=true` frames and the supervisor). The journal is the
 /// durable queue; a lagged subscriber resyncs from the pending replay.
 const INBOX_BROADCAST_CAPACITY: usize = 256;
+
+/// Capacity of the live `op` broadcast (worker run motion → `/events` `op`
+/// frames). Live-only; a lagged subscriber re-reads history from `lf runs`.
+const OP_BROADCAST_CAPACITY: usize = 256;
 
 /// How a channel name relates to a wave's family, per [`channel_role`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +153,9 @@ pub struct Subscription {
     pub pending: Vec<PendingMessage>,
     /// Live resident-directed ops sent after the snapshot.
     pub inbox_rx: broadcast::Receiver<InboxItem>,
+    /// Live worker-run motion (`op` frames) sent after the snapshot. Live-only
+    /// — history is a `lf runs` query, never replayed here.
+    pub op_rx: broadcast::Receiver<OpFrame>,
 }
 
 /// Everything that must stay mutually consistent: the journal (truth), the
@@ -240,6 +247,11 @@ pub struct WaveRuntime {
     /// name. The primary channel's frames ride the dedicated broadcasts above
     /// (untagged — absent channel means the wave's own).
     family_tx: broadcast::Sender<ChannelFrame>,
+    /// Fans worker-run motion (`op` frames) out to live `/events` subscribers.
+    /// Sent under the append lock in [`WaveRuntime::journal_run_observed`] /
+    /// [`WaveRuntime::journal_run_completed`], so op order matches journal
+    /// order. Live-only — a lagged subscriber re-reads `lf runs`.
+    op_tx: broadcast::Sender<OpFrame>,
 }
 
 impl WaveRuntime {
@@ -305,6 +317,7 @@ impl WaveRuntime {
         let (memory_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
         let (family_tx, _) = broadcast::channel(FAMILY_BROADCAST_CAPACITY);
         let (inbox_tx, _) = broadcast::channel(INBOX_BROADCAST_CAPACITY);
+        let (op_tx, _) = broadcast::channel(OP_BROADCAST_CAPACITY);
         let memory = Memory::for_wave(&repo_root, &name);
         Ok(Arc::new(Self {
             channel_name: wave_channel_name(&name),
@@ -334,6 +347,7 @@ impl WaveRuntime {
             resident_expected: AtomicBool::new(false),
             children: Mutex::new(HashMap::new()),
             family_tx,
+            op_tx,
         }))
     }
 
@@ -478,6 +492,16 @@ impl WaveRuntime {
             task: task.to_string(),
             finished: None,
         });
+        // Live `op` frame for the wave's operational stream — a send error
+        // just means no live subscribers.
+        let _ = self.op_tx.send(OpFrame {
+            kind: "run.started".to_string(),
+            run_id: run_id.to_string(),
+            flow: Some(flow.to_string()),
+            task: Some(task.to_string()),
+            summary: None,
+            ts: now_rfc3339(),
+        });
         true
     }
 
@@ -501,6 +525,7 @@ impl WaveRuntime {
             return false;
         };
         inner.workers[pos].finished = Some(outcome);
+        let flow = inner.workers[pos].flow.clone();
         let event = inner.journal.append(|_| EventKind::RunCompleted {
             run_id: run_id.to_string(),
             outcome,
@@ -508,7 +533,27 @@ impl WaveRuntime {
         });
         let turn = run_completed_turn(&event, run_id, outcome, summary);
         self.commit_locked(&mut inner, turn);
+        // Live `op` frame: the finish, kind mirroring the ledger's terminal
+        // event names (`run.completed` / `run.errored`).
+        let kind = match outcome {
+            WorkerOutcome::Completed => "run.completed",
+            WorkerOutcome::Failed => "run.errored",
+        };
+        let _ = self.op_tx.send(OpFrame {
+            kind: kind.to_string(),
+            run_id: run_id.to_string(),
+            flow: Some(flow),
+            task: None,
+            summary: Some(summary.to_string()),
+            ts: now_rfc3339(),
+        });
         true
+    }
+
+    /// Subscribe to this wave's live `op` stream (worker-run motion). Live-only
+    /// — the past is a `lf runs` query, so nothing replays.
+    pub fn subscribe_ops(&self) -> broadcast::Receiver<OpFrame> {
+        self.op_tx.subscribe()
     }
 
     /// Whether a `RunObserved` is already journaled for `run_id` —
@@ -775,6 +820,7 @@ impl WaveRuntime {
             memory_rx: self.memory_tx.subscribe(),
             pending: inner.pending_messages.clone(),
             inbox_rx: self.inbox_tx.subscribe(),
+            op_rx: self.op_tx.subscribe(),
         }
     }
 
@@ -1272,6 +1318,13 @@ fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
         (None, None) => None,
         (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
     }
+}
+
+/// Current time as an RFC3339 string for `op` frame timestamps.
+fn now_rfc3339() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -1895,6 +1948,45 @@ mod tests {
             .filter(|t| t.from.as_deref() == Some("observer"))
             .collect();
         assert_eq!(completed.len(), 1);
+    }
+
+    /// Worker motion rides the live `op` stream: a dispatch emits
+    /// `run.started` (flow + task), a finish emits the ledger-matching
+    /// terminal kind (`run.errored` on failure) with the registry summary.
+    /// Op frames are live-only — a subscriber that connects after the fact
+    /// sees nothing (history is a `lf runs` query).
+    #[test]
+    fn worker_motion_rides_the_op_stream() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let mut ops = rt.subscribe_ops();
+
+        assert!(rt.journal_run_observed("run-abcdef12", "sess-1", "implement", "wire it"));
+        let started = ops.try_recv().expect("run.started frame");
+        assert_eq!(started.kind, "run.started");
+        assert_eq!(started.run_id, "run-abcdef12");
+        assert_eq!(started.flow.as_deref(), Some("implement"));
+        assert_eq!(started.task.as_deref(), Some("wire it"));
+        assert_eq!(started.summary, None);
+        assert!(!started.ts.is_empty());
+
+        assert!(rt.journal_run_completed(
+            "run-abcdef12",
+            WorkerOutcome::Failed,
+            "session failed; error: boom"
+        ));
+        let finished = ops.try_recv().expect("run.errored frame");
+        assert_eq!(finished.kind, "run.errored");
+        assert_eq!(finished.run_id, "run-abcdef12");
+        assert_eq!(finished.flow.as_deref(), Some("implement"));
+        assert_eq!(
+            finished.summary.as_deref(),
+            Some("session failed; error: boom")
+        );
+
+        // Live-only: a fresh subscriber replays nothing.
+        let mut late = rt.subscribe_ops();
+        assert!(late.try_recv().is_err(), "op frames never replay");
     }
 
     /// Claimed-but-unanswered messages are requeued when a turn ends without

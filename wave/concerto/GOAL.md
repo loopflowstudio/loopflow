@@ -7,6 +7,9 @@ metrics:
   - Launching a session is one action from the wave view
   - Concerto renders no assistant turns itself — the vendor's TUI owns the conversation
   - Wave state is visible around every live session, not buried a click away
+pm:
+  provider: asana
+  asana_project: '1214270017631632'
 ---
 
 Run one loop iteration for the Concerto wave.

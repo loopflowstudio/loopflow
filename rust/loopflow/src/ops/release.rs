@@ -474,7 +474,13 @@ fn run_release_notes_step(
             eprintln!(
                 "release-notes agent unavailable; writing deterministic fallback release notes"
             );
-            let notes = generate_fallback_release_notes(&context);
+            let notes = generate_release_notes(
+                merged_prs,
+                version,
+                prev_tag,
+                target,
+                context.decisions.as_deref(),
+            )?;
             write_release_notes(repo, &notes, version)?;
         }
         Err(err) => {
@@ -510,120 +516,6 @@ fn is_missing_release_notes_agent_cli(err: &CommandError) -> bool {
         || combined.contains("failed to spawn");
 
     mentions_agent_cli && missing_binary
-}
-
-fn generate_fallback_release_notes(context: &ReleaseNotesContext) -> String {
-    let mut lines = vec![
-        "Generated mechanically because the release-note agent was unavailable.".to_string(),
-        String::new(),
-        format!("## Changes since {}", context.prev_tag),
-        String::new(),
-        format!("- Target: {}", context.target),
-        format!(
-            "- Tag prefix: {}",
-            display_raw_tag_prefix(&context.tag_prefix)
-        ),
-        format!(
-            "- Area scope: {}",
-            display_raw_area_scope(&context.area_scope)
-        ),
-        String::new(),
-    ];
-
-    if let Some(decisions) = context
-        .decisions
-        .as_deref()
-        .map(str::trim)
-        .filter(|decisions| !decisions.is_empty())
-    {
-        lines.push("## Release decisions".to_string());
-        lines.push(String::new());
-        for decision in fallback_decision_lines(decisions) {
-            lines.push(format!("- {decision}"));
-        }
-        lines.push(String::new());
-    }
-
-    lines.push("## Merged PRs".to_string());
-    lines.push(String::new());
-
-    if context.merged_prs.is_empty() {
-        lines.push("- No merged PRs found in this window.".to_string());
-    } else {
-        for pr in &context.merged_prs {
-            lines.push(format!(
-                "- #{} {} (+{} -{}, {} files)",
-                pr.number, pr.title, pr.additions, pr.deletions, pr.changed_files
-            ));
-            if let Some(body) = pr
-                .body
-                .as_deref()
-                .map(str::trim)
-                .filter(|body| !body.is_empty())
-            {
-                lines.push(format!("  - {}", collapse_whitespace(body)));
-            }
-        }
-    }
-
-    lines.push(String::new());
-    lines.push(format!(
-        "_Generated mechanically for v{}._",
-        context.version
-    ));
-    lines.join("\n")
-}
-
-fn display_raw_tag_prefix(tag_prefix: &str) -> &str {
-    if tag_prefix.is_empty() {
-        "(none)"
-    } else {
-        tag_prefix
-    }
-}
-
-fn display_raw_area_scope(area_scope: &[String]) -> String {
-    if area_scope.is_empty() {
-        "(entire repository)".to_string()
-    } else {
-        area_scope.join(", ")
-    }
-}
-
-fn fallback_decision_lines(decisions: &str) -> Vec<String> {
-    let mut lines = Vec::new();
-
-    for line in decisions.lines() {
-        let line = line.trim();
-        if line.is_empty() || line == "# Decisions" {
-            continue;
-        }
-
-        let normalized = line
-            .trim_start_matches('#')
-            .trim()
-            .trim_start_matches("- ")
-            .trim_start_matches("* ")
-            .trim();
-        if !normalized.is_empty() {
-            lines.push(collapse_whitespace(normalized));
-        }
-        if lines.len() >= 8 {
-            break;
-        }
-    }
-
-    if lines.is_empty() {
-        lines.push(
-            "Decision ledger present; see archived DECISIONS.md for source details.".to_string(),
-        );
-    }
-
-    lines
-}
-
-fn collapse_whitespace(value: &str) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Read `release/unreleased/DECISIONS.md` if it exists.
@@ -837,7 +729,7 @@ fn generate_release_with_target(
     let prs = merged_prs_since(repo, &prev_tag, target)?;
 
     progress.status("Generating release notes...");
-    let notes = generate_release_notes(&prs, &version, &prev_tag, target)?;
+    let notes = generate_release_notes(&prs, &version, &prev_tag, target, None)?;
 
     progress.status("Writing RELEASE_NOTES.md...");
     write_release_notes(repo, &notes, &version)?;
@@ -1305,6 +1197,7 @@ fn generate_release_notes(
     version: &str,
     prev_tag: &str,
     target: &ReleaseTarget,
+    decisions: Option<&str>,
 ) -> OpsResult<String> {
     let mut lines = vec![
         format!("## Changes since {prev_tag}"),
@@ -1313,9 +1206,17 @@ fn generate_release_notes(
         format!("- Tag prefix: {}", display_tag_prefix(target)),
         format!("- Area scope: {}", display_area_scope(target)),
         String::new(),
-        "## Merged PRs".to_string(),
-        String::new(),
     ];
+
+    if let Some(decisions) = decisions.map(str::trim).filter(|d| !d.is_empty()) {
+        lines.push("## Release decisions".to_string());
+        lines.push(String::new());
+        lines.push(decisions.to_string());
+        lines.push(String::new());
+    }
+
+    lines.push("## Merged PRs".to_string());
+    lines.push(String::new());
 
     if prs.is_empty() {
         lines.push("- No merged PRs found in this window.".to_string());

@@ -131,9 +131,8 @@ fn release_notes_falls_back_when_agent_cli_is_missing() {
         .expect("release notes should fall back");
 
     assert!(notes.starts_with("# v0.9.1\n\n"));
-    assert!(
-        notes.contains("Generated mechanically because the release-note agent was unavailable.")
-    );
+    assert!(notes.contains("_Generated mechanically for v0.9.1._"));
+    assert!(notes.contains("## Release decisions"));
     assert!(notes.contains("Make weekly release self-contained"));
     assert!(notes.contains("Use deterministic notes in CI"));
     assert_eq!(

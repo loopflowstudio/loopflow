@@ -20,7 +20,6 @@ const PROJECT_TEXT_FIELD_FIELDS: &str =
     "custom_field.gid,custom_field.name,custom_field.resource_subtype";
 const WORKSPACE_TEXT_FIELD_FIELDS: &str = "gid,name,resource_subtype";
 const CLAIM_TASK_FIELDS: &str = "assignee.gid,custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.text_value";
-const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Waves";
 const PRIORITY_FIELD_NAME: &str = "Priority";
 const WORKING_BRANCH_FIELD_NAME: &str = "Working branch";
 
@@ -30,6 +29,7 @@ pub struct AsanaClient {
     token: String,
     config: AsanaConfig,
     base_url: String,
+    bootstrap_team_name: Option<String>,
 }
 
 impl AsanaClient {
@@ -39,7 +39,13 @@ impl AsanaClient {
             token,
             config,
             base_url: ASANA_BASE_URL.to_string(),
+            bootstrap_team_name: None,
         }
+    }
+
+    pub(crate) fn with_bootstrap_team_name(mut self, name: Option<String>) -> Self {
+        self.bootstrap_team_name = name;
+        self
     }
 
     #[cfg(test)]
@@ -49,6 +55,7 @@ impl AsanaClient {
             token,
             config,
             base_url,
+            bootstrap_team_name: None,
         }
     }
 
@@ -159,16 +166,27 @@ impl AsanaClient {
             return Ok(team.to_string());
         }
 
+        let Some(team_name) = self
+            .bootstrap_team_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            return Err(PmError::Message(
+                "cannot determine asana bootstrap team name from the GitHub repo slug; set pm.team in wave/<name>/GOAL.md frontmatter or asana.default_team in .lf/config.yaml"
+                    .to_string(),
+            ));
+        };
+
         let teams = self.list_teams(workspace_id).await?;
         if let Some(existing) = teams
             .iter()
-            .find(|team| team.name.eq_ignore_ascii_case(DEFAULT_LOOPFLOW_TEAM_NAME))
+            .find(|team| team.name.eq_ignore_ascii_case(team_name))
         {
             return Ok(existing.gid.clone());
         }
 
-        self.create_team_in_workspace(workspace_id, DEFAULT_LOOPFLOW_TEAM_NAME)
-            .await
+        self.create_team_in_workspace(workspace_id, team_name).await
     }
 
     async fn create_project_for_team(
@@ -795,7 +813,7 @@ fn parse_error_message(status: StatusCode, body: &[u8]) -> String {
         if let Some(error) = error_body.errors.first() {
             if error.message.contains("Missing required `team` field") {
                 return format!(
-                    "asana request failed with status {status}: Missing required `team` field. Set `pm.team` in wave/<name>/GOAL.md frontmatter or `asana.default_team` in .lf/config.yaml."
+                    "asana request failed with status {status}: Missing required `team` field. `lf op pm init` creates or reuses an Asana team named after the GitHub repo slug (owner/repo); set `pm.team` in wave/<name>/GOAL.md frontmatter or `asana.default_team` in .lf/config.yaml when the slug cannot be inferred."
                 );
             }
             return format!(
@@ -901,13 +919,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_project_reuses_existing_loopflow_team_when_default_missing() {
+    async fn create_project_reuses_existing_repo_slug_team_when_default_missing() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
                 json!({
                     "data": [
-                        { "gid": "team-1", "name": "Waves" },
+                        { "gid": "team-1", "name": "owner/repo" },
                         { "gid": "team-2", "name": "Other" }
                     ]
                 }),
@@ -925,7 +943,8 @@ mod tests {
                 default_team: None,
             },
             base_url,
-        );
+        )
+        .with_bootstrap_team_name(Some("owner/repo".to_string()));
 
         let project_id = client
             .create_project("Wave PM", "Ship the Asana client")
@@ -942,7 +961,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_project_creates_loopflow_team_when_missing() {
+    async fn create_project_creates_repo_slug_team_when_missing() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(StatusCode::OK, json!({ "data": [] })),
             json_response(
@@ -962,7 +981,8 @@ mod tests {
                 default_team: None,
             },
             base_url,
-        );
+        )
+        .with_bootstrap_team_name(Some("owner/repo".to_string()));
 
         let project_id = client
             .create_project("Wave PM", "Ship the Asana client")
@@ -980,13 +1000,35 @@ mod tests {
             serde_json::from_str::<Value>(&requests[1].body).expect("json body"),
             json!({
                 "data": {
-                    "name": "Waves",
+                    "name": "owner/repo",
                     "organization": "workspace-1"
                 }
             })
         );
         assert_eq!(requests[2].method, "POST");
         assert_eq!(requests[2].path, "/teams/team-loopflow/projects");
+    }
+
+    #[tokio::test]
+    async fn create_project_requires_repo_slug_team_name_when_default_missing() {
+        let client = AsanaClient::with_base_url(
+            "secret-token".to_string(),
+            AsanaConfig {
+                workspace: Some("workspace-1".to_string()),
+                default_team: None,
+            },
+            "http://127.0.0.1:9".to_string(),
+        );
+
+        let error = client
+            .create_project("Wave PM", "Ship the Asana client")
+            .await
+            .expect_err("missing repo slug should fail before contacting asana");
+
+        let message = error.to_string();
+        assert!(message.contains("GitHub repo slug"));
+        assert!(message.contains("pm.team"));
+        assert!(message.contains("asana.default_team"));
     }
 
     #[tokio::test]
@@ -1396,7 +1438,8 @@ mod tests {
                 default_team: None,
             },
             base_url,
-        );
+        )
+        .with_bootstrap_team_name(Some("owner/repo".to_string()));
 
         let error = client
             .create_project("Wave PM", "Ship the Asana client")

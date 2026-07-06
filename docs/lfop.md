@@ -169,6 +169,11 @@ pm:
   asana_project: 1207xxxxxxxxxxxx
 ```
 
+When creating a project, `lf op pm init` creates or reuses an Asana team named
+after the GitHub repo slug, such as `owner/repo`. Set `asana.default_team` in
+`.lf/config.yaml` when a repo cannot infer its slug or must use an explicit team
+GID.
+
 ---
 
 ## lf op doctor

@@ -100,6 +100,21 @@ fn gh_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+pub(crate) fn github_repo_slug(repo: &Path) -> Result<String, GitError> {
+    gh_stdout(
+        repo,
+        &[
+            "repo",
+            "view",
+            "--json",
+            "nameWithOwner",
+            "--jq",
+            ".nameWithOwner",
+        ],
+    )
+    .map(|slug| slug.trim().to_string())
+}
+
 fn list_conflicts(repo: &Path) -> Result<Vec<PathBuf>, GitError> {
     let output = git_stdout(repo, &["diff", "--name-only", "--diff-filter=U"])?;
     let conflicts = output

@@ -8,6 +8,7 @@ use std::future::Future;
 use std::path::Path;
 
 use crate::engine::config::load_config_or_default;
+use crate::engine::git::github_repo_slug;
 use crate::engine::wave_config::{read_wave_config, update_wave_goal_config};
 use crate::lfd::pm::asana::AsanaClient;
 use crate::lfd::pm::{PmError, PmItem, PmItemCreate, PmItemUpdate};
@@ -101,6 +102,18 @@ async fn build_asana_client(repo: &Path) -> OpsResult<AsanaClient> {
     let config = load_config_or_default(Some(repo));
     let token = resolve_asana_token().await?;
     Ok(AsanaClient::new(token, config.asana.clone()))
+}
+
+async fn build_asana_bootstrap_client(repo: &Path) -> OpsResult<AsanaClient> {
+    let config = load_config_or_default(Some(repo));
+    let token = resolve_asana_token().await?;
+    let bootstrap_team_name = if config.asana.default_team.is_some() {
+        None
+    } else {
+        github_repo_slug(repo).ok()
+    };
+
+    Ok(AsanaClient::new(token, config.asana.clone()).with_bootstrap_team_name(bootstrap_team_name))
 }
 
 async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
@@ -204,7 +217,7 @@ async fn pm_init_async(
         });
     }
 
-    let client = build_asana_client(repo).await?;
+    let client = build_asana_bootstrap_client(repo).await?;
     progress.status(&format!("creating asana project for wave/{wave}"));
     let project_id = client
         .create_project(&title_case(&wave), "")

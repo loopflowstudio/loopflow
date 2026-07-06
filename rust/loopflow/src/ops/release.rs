@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::command::run_command;
 use crate::engine::config::{load_config_or_default, Config, ReleaseTargetConfig};
-use crate::engine::git::{delete_local_branch, get_default_branch, worktree_remove};
+use crate::engine::git::{
+    delete_local_branch, get_default_branch, github_repo_slug, worktree_remove,
+};
 use crate::engine::worktrees::{create_with_schema_synced, main_repo_root};
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
@@ -1071,21 +1073,6 @@ fn should_fallback_for_pr_files(err: &OpsError) -> bool {
         OpsError::Parse(message) => message.contains("files"),
         _ => false,
     }
-}
-
-fn github_repo_slug(repo: &Path) -> OpsResult<String> {
-    run_stdout(
-        repo,
-        "gh",
-        &[
-            "repo",
-            "view",
-            "--json",
-            "nameWithOwner",
-            "--jq",
-            ".nameWithOwner",
-        ],
-    )
 }
 
 fn fetch_pr_files(repo: &Path, repo_slug: &str, pr_number: u32) -> OpsResult<Vec<String>> {

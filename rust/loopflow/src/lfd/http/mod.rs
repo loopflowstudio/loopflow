@@ -14,7 +14,7 @@ use tower_http::trace::TraceLayer;
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
 use crate::lfd::http::routes::{
-    attention, auth as auth_routes, catalog, flows, hooks, providers, repos, runs,
+    attention, auth as auth_routes, catalog, exec, flows, hooks, providers, repos, runs,
     session_controls, system, usage, waves, worktrees, ws,
 };
 use crate::lfd::redaction::sanitize_operator_message;
@@ -59,6 +59,7 @@ pub fn router(state: HttpState) -> Router {
             put(auth_routes::configure_credential_handler),
         )
         .route("/providers", get(providers::list_providers_handler))
+        .route("/exec", post(exec::exec_handler))
         .route("/flows", get(flows::list_flows_handler))
         .route("/catalog", get(catalog::catalog_handler))
         .route(

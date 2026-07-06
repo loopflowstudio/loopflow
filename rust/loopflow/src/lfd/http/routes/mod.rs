@@ -1,6 +1,7 @@
 pub mod attention;
 pub mod auth;
 pub mod catalog;
+pub mod exec;
 pub mod flows;
 pub mod hooks;
 pub mod providers;

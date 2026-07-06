@@ -31,10 +31,14 @@ use axum::Json;
 use bytes::Bytes;
 use tokio::sync::Mutex;
 
+use crate::engine::git::{
+    delete_local_branch, get_default_branch, is_clean_ignoring_scratch, worktree_remove,
+};
+use crate::engine::worktrees::{list_porcelain, main_repo_root};
 use crate::lfd::executor::resolve_lf_binary;
 use crate::lfd::github::{
-    github_repo_from_local, verify_webhook_signature, GitHubCheckRunEvent, GitHubPullRequestEvent,
-    GitHubPushEvent,
+    github_repo_from_local, verify_webhook_signature, GitHubCheckRunEvent, GitHubDeleteEvent,
+    GitHubPullRequestEvent, GitHubPushEvent,
 };
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, ApiMessage, ApiResult};
@@ -242,6 +246,67 @@ async fn plan_pr_merged_reconciles(
     Ok(execs)
 }
 
+/// A deleted branch → remove the local worktree that was on it. GitHub deletes
+/// the head branch on merge (when the repo setting is on), so a merged PR's
+/// worktree self-cleans. This is a direct local git op, not an `lf` exec —
+/// worktree lifecycle is lfd-owned infrastructure, like the resident's bootstrap.
+///
+/// Skips the default branch, the main checkout, and any tree with uncommitted
+/// changes (scratch aside) — a `--force` removal is left to the human.
+async fn remove_worktrees_for_deleted_branch(
+    store: &SharedStore,
+    repo_full_name: &str,
+    branch: &str,
+) -> Result<Vec<String>, String> {
+    let waves = store
+        .list_waves(None)
+        .await
+        .map_err(|err| err.to_string())?;
+    let mut removed = Vec::new();
+    let mut seen_repos: HashSet<String> = HashSet::new();
+    for wave in waves {
+        if !wave_in_github_repo(&wave, repo_full_name)
+            || !seen_repos.insert(wave.repo().to_string())
+        {
+            continue;
+        }
+        match remove_branch_worktree(Path::new(wave.repo()), branch) {
+            Ok(Some(path)) => removed.push(path),
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(repo = wave.repo(), branch, error = %err, "worktree cleanup failed")
+            }
+        }
+    }
+    Ok(removed)
+}
+
+fn remove_branch_worktree(repo: &Path, branch: &str) -> Result<Option<String>, String> {
+    let main = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let default_branch = get_default_branch(&main).map_err(|err| err.to_string())?;
+    if branch == default_branch {
+        return Ok(None);
+    }
+    let found = list_porcelain(&main)
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .find(|(_, wt_branch)| wt_branch.as_deref() == Some(branch));
+    let Some((path, _)) = found else {
+        return Ok(None);
+    };
+    if !is_clean_ignoring_scratch(&path).unwrap_or(false) {
+        tracing::info!(
+            ?path,
+            branch,
+            "worktree has uncommitted changes; left for manual cleanup"
+        );
+        return Ok(None);
+    }
+    worktree_remove(&main, &path).map_err(|err| err.to_string())?;
+    let _ = delete_local_branch(&main, branch);
+    Ok(Some(path.display().to_string()))
+}
+
 fn wave_in_github_repo(wave: &Wave, repo_full_name: &str) -> bool {
     github_repo_from_local(Path::new(wave.repo()))
         .as_deref()
@@ -394,6 +459,42 @@ pub async fn github_webhook_handler(
             spawn_lf_execs(&state.ci_failure_cache, execs);
             Ok(Json(
                 serde_json::json!({ "ok": true, "processed": processed }),
+            ))
+        }
+        "delete" => {
+            let event = serde_json::from_slice::<GitHubDeleteEvent>(&body).map_err(|err| {
+                api_error(
+                    StatusCode::BAD_REQUEST,
+                    ApiMessage::Untrusted(err.to_string()),
+                )
+            })?;
+            if event.ref_type != "branch" {
+                return Ok(Json(
+                    serde_json::json!({ "ok": true, "removed": 0, "skipped": true }),
+                ));
+            }
+            let removed = remove_worktrees_for_deleted_branch(
+                &state.store,
+                &event.repository.full_name,
+                &event.git_ref,
+            )
+            .await
+            .map_err(|err| {
+                api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ApiMessage::Untrusted(err),
+                )
+            })?;
+            if !removed.is_empty() {
+                tracing::info!(
+                    repo = %event.repository.full_name,
+                    branch = %event.git_ref,
+                    count = removed.len(),
+                    "removed worktrees for deleted branch"
+                );
+            }
+            Ok(Json(
+                serde_json::json!({ "ok": true, "removed": removed.len() }),
             ))
         }
         _ => Ok(Json(
@@ -827,6 +928,62 @@ mod tests {
         let none = plan_pr_merged_reconciles(&store, "loopflowstudio/loopflow", 99)
             .await
             .expect("plan none");
+        assert!(none.is_empty());
+    }
+
+    /// A deleted branch removes the sibling worktree that was on it, and leaves
+    /// unrelated branches alone.
+    #[tokio::test]
+    async fn delete_branch_removes_the_matching_worktree() {
+        let tmp = tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
+        let repo_str = repo.to_string_lossy().to_string();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .status()
+                .expect("git")
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["-C", &repo_str, "config", "user.email", "t@x.com"]);
+        git(&["-C", &repo_str, "config", "user.name", "t"]);
+        std::fs::write(repo.join("f.txt"), "x").unwrap();
+        git(&["-C", &repo_str, "add", "."]);
+        git(&["-C", &repo_str, "commit", "-m", "init"]);
+
+        let wt = repo.parent().unwrap().join(format!(
+            "{}.feat",
+            repo.file_name().unwrap().to_string_lossy()
+        ));
+        git(&[
+            "-C",
+            &repo_str,
+            "worktree",
+            "add",
+            "-b",
+            "jack/feat",
+            wt.to_str().unwrap(),
+        ]);
+        assert!(wt.exists());
+        store
+            .create_wave(&make_wave("ship", &repo))
+            .await
+            .expect("wave");
+
+        let removed =
+            remove_worktrees_for_deleted_branch(&store, "loopflowstudio/loopflow", "jack/feat")
+                .await
+                .expect("remove");
+        assert_eq!(removed.len(), 1, "one worktree removed");
+        assert!(!wt.exists(), "worktree gone after its branch was deleted");
+
+        // A branch with no worktree removes nothing.
+        let none =
+            remove_worktrees_for_deleted_branch(&store, "loopflowstudio/loopflow", "jack/ghost")
+                .await
+                .expect("none");
         assert!(none.is_empty());
     }
 

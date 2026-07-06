@@ -252,5 +252,8 @@ mod tests {
         assert!(step.contains("lf memory update --wave <wave>"));
         assert!(step.contains("lf op commit -m \"export-memory: compile MEMORY.md\""));
         assert!(step.contains("write `wave/<wave>/MEMORY.md` directly"));
+        // Typed blocks: a starting vocabulary the agent owns, not an enforced schema.
+        assert!(step.contains("Organize into typed blocks"));
+        assert!(step.contains("starting vocabulary, not a schema"));
     }
 }

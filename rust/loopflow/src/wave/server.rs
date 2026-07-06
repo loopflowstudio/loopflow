@@ -1294,10 +1294,11 @@ mod tests {
         (format!("http://{addr}"), token, tmp)
     }
 
-    /// The wave's `/v0/exec` door: no token → 401, a minted subagent token
-    /// clears auth (garbage argv then 400s at the validator), and a valid
-    /// argv execs and returns a structured result. Proves the exec door is a
-    /// distinct principal from the resident door.
+    /// The wave's `/v0/exec` door: no token → 401, the resident token → 401,
+    /// and a minted subagent token clears auth (garbage argv then 400s at the
+    /// validator). Proves the exec door is a distinct principal from the
+    /// resident door. (The valid-argv exec path is exercised by dogfooding,
+    /// not here — a unit test must not spawn the real `lf` binary.)
     #[tokio::test]
     async fn exec_door_gates_on_the_subagent_token_and_validates_argv() {
         let (base, token, _tmp) = boot_exec().await;
@@ -1333,24 +1334,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(bad_argv.status(), reqwest::StatusCode::BAD_REQUEST);
-
-        // A valid argv execs and returns a structured result.
-        let ok: serde_json::Value = client
-            .post(&url)
-            .header(SUBAGENT_TOKEN_HEADER, &token)
-            .json(&serde_json::json!({ "argv": ["op", "doctor"], "cwd": null }))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        assert!(ok.get("exit_code").is_some(), "door returns exit_code");
-        assert!(
-            !ok["stdout"].as_str().unwrap_or_default().is_empty()
-                || !ok["stderr"].as_str().unwrap_or_default().is_empty(),
-            "doctor emits a report"
-        );
     }
 
     /// A worker dispatched while a client is subscribed to `/events` surfaces

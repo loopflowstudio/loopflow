@@ -122,8 +122,6 @@ pub async fn run(argv: Vec<String>) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wave::runtime::WaveRuntime;
-    use crate::wave::server::{self, ResidentDoor, SubagentDoor};
 
     /// Serialize the tests that mutate `LF_WAVE_ENDPOINT` (process-global env).
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -149,48 +147,5 @@ mod tests {
             Some(value) => std::env::set_var(WAVE_SERVER_ENDPOINT_ENV, value),
             None => std::env::remove_var(WAVE_SERVER_ENDPOINT_ENV),
         }
-    }
-
-    /// Boot a wave server with a minted subagent token and run a real `lf`
-    /// argv through it via the `lfq` client. `lf trace <bogus>` parses but
-    /// finds no matching run, so it exits non-zero — the door reports a
-    /// structured result and `lfq` propagates the code.
-    #[tokio::test]
-    async fn lfq_exec_round_trips_and_propagates_nonzero_exit() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let dir = tmp.path().join("wave/ship");
-        std::fs::create_dir_all(&dir).expect("wave dir");
-        std::fs::write(dir.join("MEMORY.md"), "Goal: exercise the exec door.\n").expect("memory");
-        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
-
-        let subagent = SubagentDoor::new();
-        let token = subagent.mint();
-        let app = server::router(runtime, ResidentDoor::new("resident"), subagent, None, None);
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
-        });
-        let endpoint = addr.to_string();
-
-        let result = exec_request(
-            &endpoint,
-            &token,
-            vec!["trace".to_string(), "deadbeef".to_string()],
-            None,
-        )
-        .await
-        .expect("exec round-trips through the door");
-        assert_ne!(result.exit_code, 0, "a failed lf run propagates non-zero");
-
-        // A wrong token is refused before any exec.
-        let refused = exec_request(
-            &endpoint,
-            "not-the-token",
-            vec!["trace".to_string(), "deadbeef".to_string()],
-            None,
-        )
-        .await;
-        assert!(refused.is_err(), "an unminted token is rejected");
     }
 }

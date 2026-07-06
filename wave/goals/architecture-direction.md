@@ -63,11 +63,13 @@ compat aliases removed. Still live and deferred: migration-tolerance healing
 **Tier 3 — the one real remaining charter gap: lfd is still a hand.** `/land`,
 `/next`, `/combine`, `/stop`, rename, `DELETE /waves`, and session
 create/cancel still mutate in-process (`crate::ops`, `git`, `tmux kill-session`)
-from route handlers. The code self-flags it (`waves.rs:29`). `hooks.rs` already
-shows the target pattern — it plans `LfExec`s and spawns detached `lf`. The fix
-is making the other routes look like `hooks.rs`. Adjacent placement smell:
+from route handlers. But the resolution is bigger than "convert the hands" —
+see **The lfd dissolution**: the hand routes don't get *converted*, they get
+*removed* (Concerto goes SSH / `lf`), the read routes become `lf` queries, and
+`lfd` shrinks to `/exec` + liveness + webhooks. Adjacent placement smell:
 `lfd/pm/linear.rs` and `lfd/queue.rs` (vendor + git code) sit under the `lfd::`
-namespace though only `lf` calls them. **This is what M1 is now about.**
+namespace though only `lf` calls them. **The dissolution is what M1/M2 are now
+about.**
 
 **Tier 4 — shape questions for the full review (judgment, not cleanup).** Do
 not pre-resolve these; they are the review's payload. (a) `journal/mod.rs`
@@ -88,20 +90,59 @@ as a parse error. Only blemish: request-*body* DTOs (`LandWaveRequest`,
 
 Four roles, one verb surface, distance as the only difference:
 
-- **`lf` — the hands.** Does the work, on the filesystem. Every capability
-  has a daemonless path.
-- **`lfd` — the ear-and-voice (the face), never a hand [R].** Four quadrants:
-  listens inward (scan/index/bridge over files + sqlite), listens outward
-  (webhooks and, later, authenticated remote clients), speaks outward (read
-  routes, `/ws` push, event relay), speaks inward by **execing `lf`**. For
-  M1/M2 it is local-only with a machine-local capability token, not user auth;
-  remote identity is M3. Hand-ban: no pens, no git, no tmux, no vendors.
-- **`lfq` — the future reach.** `lf`-through-HTTP: mirrors `lf`'s argv to a
-  gatekeeper. This is M3, not current scope. One exec door, no per-verb API to
-  drift.
+- **`lf` — the hands *and the query surface*.** Does the work, on the
+  filesystem, daemonless. Also answers questions: flows, providers, catalog,
+  wave/repo/usage state are all `lf` queries. There is no HTTP API you need
+  running to read the system — you run `lf`.
+- **The wave server — the per-wave reactive center (part of the wave).** `lf
+  wave <name>` spawns the listener + the resident mind. It owns the journal,
+  the mind, the **crons**, and the `/exec` door. Sovereign, per-wave. This is
+  what used to get lumped under "lfd" but is really the wave, not the proxy.
+- **`lfd` — the proxy, dissolving [R] (2026-07-06).** Not the face-with-an-API
+  it was drawn as. It shrinks to only what *must* be a daemon: the `/exec`
+  backdoor, liveness (`/status`/`/health`/`/metrics`), and webhook ingress
+  (`/hooks/github` — external HTTP that can't be SSH/`lf`). Every read route
+  becomes an `lf` query; every hand route becomes `lf` (directly, or SSH for
+  remote). Local-only with a capability token through M2. See "The lfd
+  dissolution" below.
+- **`lfq` — the `/exec` client.** Posts an `lf` argv to a listener's `/exec`
+  door. Two distances: *in-wave* (a sandboxed subagent → its outwave runs the
+  command unsandboxed — the sandbox-escape backdoor) and *remote* (across a
+  machine, M3). One door, no per-verb API to drift.
 - **The resident — the mind.** `lf wave <name> --mind-only`, spawned by its
   listener; owns the vendor harness; its input is its own subscription.
 - **The filesystem — the body.**
+
+Remote exec (Concerto → a box) is **SSH**, not HTTP-to-lfd. A future
+**OAuth-protected non-local `lfd`** is a separate concern — *company/hosted
+deployment*, distinct from the sandbox-escape backdoor.
+
+## The lfd dissolution [R] (2026-07-06)
+
+The old model was "Concerto executes and reads over HTTP to `lfd`" — `lfd` as a
+fat API. That's retired. `lfd` stops being an API. The route surface disposes as:
+
+| Today (lfd HTTP) | Becomes |
+|---|---|
+| Reads — `/providers`, `/flows`, `/catalog`, `/waves`, `/repos`, `/usage`, … | **`lf` queries** (Concerto runs `lf`, not `GET /v0/x`) |
+| Hands — `/land`, `/next`, `/combine`, `/stop`, rename, `DELETE` | **`lf` directly** (SSH for remote) |
+| Crons, mind, journal | **the wave server** (part of the wave) |
+| Remote exec (Concerto → box) | **SSH** (not HTTP-to-lfd) |
+| `/exec`, `/status`+`/health`+`/metrics`, `/hooks/github` | **stay** on the proxy — the only things that *must* be a daemon |
+
+So `lfd`-the-proxy converges to: the `/exec` backdoor + liveness + webhook
+ingress. **~every other route is removed.** The reactive per-wave machinery
+(crons especially) belongs to the wave server, not the proxy. A future
+OAuth-protected non-local `lfd` (company deployment) is a separate build.
+
+One-liner: **`lf` is the query-and-command surface; the wave server is the
+reactive per-wave center; `lfd`-the-proxy is a liveness stub + the `/exec`
+backdoor + webhook ingress** — until the hosted version.
+
+Open: **live push (`/ws`)** — undecided. Either it stays on the proxy as a
+machine-level aggregate, or Concerto subscribes to each wave server's event
+stream directly (the wave server already streams SSE) and the proxy `/ws` goes
+too. Needs Jack.
 
 ## The substrate: two write-tiers + a query plane
 
@@ -191,13 +232,15 @@ Claude coinages and were reshaped in the July 5 design walk.
 - **M1 — Shaped (the conversion):** *mostly done, one gap left.* Harness →
   `crate::harness` [done #803]; the `step`→`skill`/`--dispatch` grammar
   [done #803]; the naming rule, `find_repo_root`, `stream_events` all already
-  in their charter homes [done]. **The one remaining M1 move: lfd stops being a
-  hand** — convert `/land`, `/next`, `/combine`, `/stop`, rename, `DELETE
-  /waves`, session create/cancel to exec `lf` argv (pattern: `hooks.rs`), then
-  delete the private hands. Secondary: hoist `lfd/pm` + `lfd/queue` out of the
-  `lfd::` namespace (only `lf` calls them). *Exit: no route handler calls
-  git/tmux/ops in-process; the dependency arrow already matches the charter
-  (verified — nothing imports `lf::commands` but `bin/lf.rs`).*
+  in their charter homes [done]. **The remaining M1/M2 work is the lfd
+  dissolution** (see that section): (1) ship the `/exec` door — additive,
+  sandbox-escape, on the wave server; (2) crons move to the wave server;
+  (3) read routes become `lf` queries + Concerto migrates off them; (4) hand
+  routes removed (Concerto → SSH / `lf`); (5) `lfd/pm` + `lfd/queue` hoisted
+  out of the `lfd::` namespace. *Exit: `lfd` = `/exec` + liveness + webhook
+  ingress, nothing else; `lf` is the query-and-command surface.* The dependency
+  arrow already matches the charter (verified — nothing imports `lf::commands`
+  but `bin/lf.rs`).
 - **M2 — Substrate:** *mostly done.* Postgres + dual-backend deleted [done
   #803]; container mode + `mode` knob cut [done #803]. Remaining: narrow sqlite
   to the operational scratchpad, and the Tier-4 shape calls (the run-telemetry
@@ -234,9 +277,11 @@ status:
    `lfd::executor/helpers.rs`; the `dispatch` component isn't extracted yet.
 6. `process_alive` / tmux probes: one home — minor, still scattered.
 7. Primary-channel predicate: one function — minor.
-8. **`lfd`'s in-process mutations (`/land`, `/next`, `/combine`, `/stop`,
-   rename, `DELETE /waves`, session create/cancel) → exec `lf`.** *This is the
-   live M1 gap.* Pattern to copy: `hooks.rs` (`LfExec` + detached spawn).
+8. **The lfd dissolution** (supersedes the old "convert the hands" item):
+   `/exec` shipped (additive, lfd-side, `POST /v0/exec`); the wave-server
+   `/exec` door is gated on the subagent-auth decision (below). Then read
+   routes → `lf` queries, hand routes removed (Concerto → SSH), crons → wave
+   server. See **The lfd dissolution**.
 
 ## Component charter (role · data · API · IO)
 
@@ -253,7 +298,12 @@ status:
 - **`dispatch`:** mint a work line — placement → worktree → rows → channel
   journal → detached tmux `lf`. Survives the executor's death.
 - **`lf` (commands):** thin verbs; NOTHING imports from here.
-- **`lfd` (gatekeeper):** see anatomy. Reads + push + webhook-ingress-as-exec
+- **`lf_exec` (the `/exec` engine):** host-neutral, state-free —
+  `validate_lf_argv` (clap `try_parse` gate, no shell) + `exec_lf` (capture
+  exit/stdout/stderr). Reused verbatim by both the lfd route and the
+  wave-server door. This is the whole backdoor's mechanism.
+- **`lfd` (proxy, dissolving):** converges to `/exec` + liveness
+  (`/status`/`/health`/`/metrics`) + webhook ingress-as-exec
   + boot hygiene. Local-only with a capability token through M2. Never
   git/tmux/vendors/pens in the target shape.
 - **`lfdb`:** the machine scratchpad (see substrate).

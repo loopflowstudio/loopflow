@@ -413,6 +413,7 @@ fn submit_does_not_rotate_worktree() {
     )
     .expect("submit from worktree");
 
+    assert!(!result.merged);
     // The worktree stays put — no preserve, no next-item rotation.
     assert!(worktree.path.exists());
 }

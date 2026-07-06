@@ -95,11 +95,48 @@ Rejected delimiters: `@` (legal in refs but outside GitHub's safe set, shadows
 `@{upstream}`, breaks pip/CI URL parsing); `:` (illegal in refs, macOS Finder
 renders it `/`).
 
-The decoupling (dir = flat `.`-chain, author-free; branch = `/`+author,
-remote-only) is settled and shipped. The supporting branch-format research
-(Graphite/Sapling/ghstack/gh keep lineage in metadata not names; `@` is a legal
-footgun; `/` breaks the flat sibling-dir invariant) is folded into
-`wave/systems/MEMORY.md`.
+### What the research changed (2026-07-06)
+
+Branch-format survey (Anthropic/OpenAI/Stripe/OSS + Graphite/Sapling/ghstack/gh).
+Three findings that move the design:
+
+1. **Lineage does not belong in the name — for correctness.** Every mature
+   stacking tool (Graphite, Sapling, ghstack, gh-stack) keeps the parent/child
+   DAG in its own metadata or the commit graph, and treats the branch name as a
+   disposable human label. ghstack is the only one that name-structures at all,
+   and even its `gh/user/N/{base,head,orig}` uses `N` as identity, not
+   parentage. **Loopflow already has the authoritative DAG** — `Run.parent_run_id`
+   / `stack_group_id` / `stack_position`. So the chain in the name is a *hint*;
+   never parse it for truth.
+
+2. **`@` is legal but a footgun.** `git check-ref-format` allows `@` mid-name
+   (only bare `@` and `@{` are illegal), but it's outside GitHub's documented
+   safe set (letters, digits, `.` `-` `_` `/`), shadows git's `@`/`@{upstream}`
+   revision syntax, and is a URL delimiter that breaks pip and some CI URL
+   parsing. No mature tool uses it. Reconsider.
+
+3. **`/` is the tooling-friendly separator** — enables branch-protection globs
+   (`bugs/**`), and is how ghstack/Graphite front-load the author. But `/` in a
+   branch name becomes a subdir in the worktree path, which **breaks the flat
+   sibling-dir invariant** loopflow depends on. So `/` is great on the *remote
+   branch*, unusable in the *dir name*.
+
+**Implication — decouple the two projections** (which the research says is
+normal): the worktree dir stays a flat `.`-chain (no `@`, no `/`, readable,
+stable); the remote branch can carry `/` + author for safety and globbability.
+The dir↔branch link lives on the `Run` record (it already stores both `worktree`
+and `branch`), not in string derivation. Candidate:
+
+```
+dir     loopflow.bugs.fix-auth.20260706_0801     (flat, local identity)
+branch  jack-heart/bugs.fix-auth.20260706_0801   (author-scoped, glob-able)
+```
+
+Open call for Jack: is dropping author from the *local dir* (you know who you
+are locally; author disambiguates on the shared remote) acceptable, or do you
+want it in both? And confirm decoupling dir≠branch vs. keeping one string
+everywhere (which forces choosing a single separator legal in both — `.` only,
+no `/`, no `@`).
 
 ## Land redesign (kills rotation)
 
@@ -175,6 +212,12 @@ reshaping identity.
   should run in its Worker's worktree with no new branch. Collapses per-Run
   worktrees into per-Worker.
 - **Retiring `next`/`advance`.** `next_wave_handler` is a wire endpoint Concerto
-  calls. Removing it is a Rust + wire + Swift change. Confirm before cutting.
-- **Subwave dispatch.** A CLI/dispatch flag to spawn a subwave-mind (unstamped
-  descent) vs. a worker (stamped). Identity already supports both.
+  calls. Rust + wire + Swift. Confirm before cutting.
+
+## Open questions
+
+- Wave home branch: `{user}.{wave}` integration branch vs. wave home simply
+  tracking `main`. Doc assumes the former; confirm.
+- Do workers fork from the wave home branch or from `origin/main`? (Fresh vs.
+  Stack executor split already models both — map onto it.)
+- `@` in branch names is legal in git; confirm no tooling (gh, CI refs) chokes.

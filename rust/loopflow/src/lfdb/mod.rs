@@ -13,8 +13,8 @@ use std::sync::Arc;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage, LivePrState,
-    LivePullRequestState, QueueBlock, QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run,
-    RunStackStatus, Session, SessionStatus, Summary, Wave,
+    LivePullRequestState, QueueBlock, Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus,
+    Session, SessionStatus, Summary, Wave,
 };
 
 pub mod catalog;
@@ -409,10 +409,6 @@ impl Store {
         WaveStateStore::delete_queue_block(self, wave_id, run_id).await
     }
 
-    pub async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool> {
-        WaveStateStore::record_merge_event(self, event).await
-    }
-
     pub async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
         WaveStateStore::get_summary(self, wave_id).await
     }
@@ -675,7 +671,6 @@ pub trait WaveStateStore: Send + Sync {
     async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>>;
     async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()>;
     async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32>;
-    async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool>;
 
     async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>>;
     async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()>;
@@ -1088,13 +1083,6 @@ impl WaveStateStore for Store {
         }
     }
 
-    async fn record_merge_event(&self, event: &QueueMergeEvent) -> StoreResult<bool> {
-        {
-            let event = event.clone();
-            run_sqlite(&self.sqlite, move |store| store.record_merge_event(&event)).await
-        }
-    }
-
     async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
         {
             let wave_id = wave_id.clone();
@@ -1471,8 +1459,8 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest, QueueBlock,
-        QueueBlockReason, QueueMergeEvent, Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus,
-        RunStatus, Summary, Wave, WaveStatus,
+        QueueBlockReason, Repo, RepoEdge, RepoId, RepoWork, Run, RunStackStatus, RunStatus,
+        Summary, Wave, WaveStatus,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -2508,23 +2496,6 @@ mod tests {
             .await
             .expect("delete block");
         assert_eq!(deleted, 1);
-
-        let merge_event = QueueMergeEvent {
-            wave_id: wave.id().clone(),
-            pr_number: 42,
-            merged_at: OffsetDateTime::now_utc(),
-            processed_at: OffsetDateTime::now_utc(),
-        };
-        let first = store
-            .record_merge_event(&merge_event)
-            .await
-            .expect("record first");
-        let second = store
-            .record_merge_event(&merge_event)
-            .await
-            .expect("record second");
-        assert!(first);
-        assert!(!second);
 
         store.delete_wave(wave.id()).await.expect("delete wave");
     }

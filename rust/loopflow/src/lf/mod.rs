@@ -256,7 +256,11 @@ pub enum OpsCommand {
         paths: Vec<String>,
     },
     /// Check loopflow dependencies
-    Doctor,
+    Doctor {
+        /// Print the generated Brewfile (from the declared dependency list) and exit
+        #[arg(long, hide = true)]
+        brewfile: bool,
+    },
     /// Rebase current branch onto target (default: main)
     Rebase {
         /// Print the planned rebase strategy without mutating git

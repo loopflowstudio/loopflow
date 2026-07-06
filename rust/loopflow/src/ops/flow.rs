@@ -212,7 +212,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
         },
         OpsCommand::Push { force } => crate::engine::git::push(repo, *force).map_err(Into::into),
         OpsCommand::Cp { .. }
-        | OpsCommand::Doctor
+        | OpsCommand::Doctor { .. }
         | OpsCommand::Pm { .. }
         | OpsCommand::Branches { .. }
         | OpsCommand::Wt { .. }

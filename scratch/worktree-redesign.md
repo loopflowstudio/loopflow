@@ -27,6 +27,31 @@ op blocked.
    schema, `seg.seg.seg` stack ancestry, `<repo>.<wave>.<run-id>` dirs — so
    nothing parses once nested.
 
+## Vocabulary (settled 2026-07-06)
+
+Three roles, two of them the same primitive:
+
+| Role       | What it is                                                          | Owns                          | Branch example        |
+|------------|---------------------------------------------------------------------|-------------------------------|-----------------------|
+| **Wave**   | Persistent looping mind, arbitrary goal. Ships many PRs over time.   | a chain node (worktree+branch)| `jack/bugs`           |
+| **Worker** | Ephemeral looping mind. Goal: land one PR to its parent, then dies.  | a chain node (worktree+branch)| `jack/bugs.fix@ts`    |
+| **Exec**   | One arbitrary `lf` invocation (step/op/flow). No mind, no branch.    | nothing — runs in the mind's worktree | — (`lf debug`) |
+
+Wave and Worker are the **same primitive** — a recursive, goal-directed looping
+mind. The name marks the role: the root you point at a goal (Wave); every
+descendant carries one PR up the stack (Worker). So:
+
+- **A chain segment ⇔ a mind ⇔ one PR-to-parent.** Execs don't get chain
+  segments; they run inside a mind's worktree and mutate its branch.
+- **Dispatch is one rule: fork from, and target, `parent()`.** A Worker's PR
+  targets its parent mind's branch; the root Wave's PR targets `main`. Infinite
+  tiers fall out of the recursion — no per-level special-casing. `WaveId::parent()`
+  already encodes it (`None` ⇒ target `main`).
+- **The Worker-mind tier is the missing layer.** Today the Wave mind dispatches
+  `lf` runs (Execs) directly; nothing owns the "get this one PR landed to my
+  parent" loop (change → PR → CI fails → fix → retry — inherently a loop, so a
+  mind). Building that runtime is stage 3b.
+
 ## Identity model — SHIPPED (`WaveId` in `engine/identity.rs`)
 
 One thing, **two decoupled projections** that are not string-derivable from each
@@ -128,18 +153,27 @@ reshaping identity.
    - 3a. **Kill land rotation — DONE.** `rotate_worktree`/`RotationResult`/the
      land-cd removed. A land never renames the live worktree; the wave home is
      permanent. Workers self-prune once merged.
-   - 3b. **Dispatch stacking + retire rotation endpoints — TODO.** Fresh workers
-     fork from the *wave branch* (`jack/bugs`), not `main`, so they stack on the
-     wave. Retire `lf op next`/`advance` and `next_wave_handler` (the old
-     ephemeral rotation). Reshapes the wave server + wire + Concerto — needs its
-     own pass and the open questions below.
+   - 3b. **The Worker-mind runtime — TODO (new subsystem, not a mechanical edit).**
+     Insert the Worker tier: a looping mind per PR whose goal is "land to
+     `parent()`", that dispatches Execs (`lf` runs) in its own worktree and
+     retries through CI. Dispatch collapses to fork-and-target `parent()`
+     (decided: worker PRs target the parent branch, `jack/bugs`, recursively to
+     `main`). Retire the old ephemeral rotation (`lf op next`/`advance`,
+     `next_wave_handler`) — a Rust + wire + Concerto change.
 4. **Docs + goldens + tests.** Per slice.
 
-## Stage 3b open questions (before touching the wave server)
+## Stage 3b open questions (before building the Worker runtime)
 
-- **Worker PR target.** If Fresh workers stack on `jack/bugs`, does their PR
-  target `jack/bugs` or `main`? If `jack/bugs`, who lands `jack/bugs → main`,
-  and when?
+- **Integration trigger (per tier).** Once a Worker's PR merges into its parent,
+  what lands the parent up to *its* parent — cascading to `main`? Lean: a mind
+  lands into its parent automatically once its own PR merges *and* it has no
+  unlanded children (self-draining bottom-up). Confirm vs. manual/threshold.
+- **Worker vs Wave in the runtime.** Same primitive — how much of the Wave mind
+  loop (`wave/resident.rs`, `mind.rs`) is reused for a Worker with a fixed
+  land-to-parent goal vs. an arbitrary one?
+- **Exec = Run minus worktree.** Today a `Run` gets its own worktree; an Exec
+  should run in its Worker's worktree with no new branch. Collapses per-Run
+  worktrees into per-Worker.
 - **Retiring `next`/`advance`.** `next_wave_handler` is a wire endpoint Concerto
   calls. Removing it is a Rust + wire + Swift change. Confirm before cutting.
 - **Subwave dispatch.** A CLI/dispatch flag to spawn a subwave-mind (unstamped

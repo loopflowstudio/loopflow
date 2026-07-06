@@ -1,6 +1,6 @@
 ---
 requires: diff vs main | scratch/ analysis | both
-produces: wave/<wave>/ (GOAL.md, MEMORY.md), roadmap updates in Asana, scratch/ cleanup
+produces: wave/<wave>/ (GOAL.md, MEMORY.md), roadmap updates in Linear, scratch/ cleanup
 ---
 Single owner of `wave/<wave>/`. Keeps the wave's identity current and folds what the branch learned into memory.
 
@@ -10,10 +10,10 @@ A wave is two local files plus a remote roadmap:
 
 - **`wave/<wave>/GOAL.md`** — the wave's identity: what it's for, how it judges
   progress, the loop prompt it runs. Frontmatter carries `primary_flow` and the
-  Asana handle (`pm.asana_project`). This is the anchor; it changes rarely.
+  Linear handle (`pm.linear_project`). This is the anchor; it changes rarely.
 - **`wave/<wave>/MEMORY.md`** — what the wave remembers between loops. Durable
   observations, decisions, and context. This is where branch learnings land.
-- **The roadmap lives in Asana**, not in the repo. Read it with `lf op pm show`;
+- **The roadmap lives in Linear**, not in the repo. Read it with `lf op pm show`;
   change it with `lf op pm update`. There is no local roadmap mirror — never
   write `N-*.md` item files or a roadmap table.
 
@@ -35,7 +35,7 @@ Whether you're cleaning up after a build, reconciling scratch analysis, or both:
 - Durable learnings from `scratch/` are folded into `MEMORY.md`.
 - `GOAL.md` still describes the wave truthfully — if the branch changed the
   wave's intent, flow, or metrics, update it. Otherwise leave it.
-- The roadmap in Asana reflects reality: shipped work is closed, new work is
+- The roadmap in Linear reflects reality: shipped work is closed, new work is
   filed, stale items are corrected — all through `lf op pm update`.
 - `scratch/` is trimmed to what a reviewer needs (see below).
 
@@ -63,7 +63,7 @@ fold it. If it only describes what was already built, let it go.
 1. Read the diff (if any) to understand what this branch built.
 2. Read `GOAL.md`, `MEMORY.md`, and the live roadmap (`lf op pm show`).
 3. Read `scratch/` — every file, completely.
-4. **Reconcile the roadmap against reality.** For each item on the Asana
+4. **Reconcile the roadmap against reality.** For each item on the Linear
    roadmap, ask:
    - **Shipped?** If this branch (or main) crossed its finish line, close it:
      `lf op pm update --id <task-id> --status done`.
@@ -94,9 +94,9 @@ When `scratch/` holds a proposal and no wave exists yet, create one:
 2. Create `wave/<wave>/MEMORY.md` — seed it with the load-bearing context from
    the proposal (key decisions, constraints, what's known). It can be short.
 3. Connect the roadmap: `lf op pm init --wave <name>` creates/links the wave's
-   Asana project and writes `asana_project` into `GOAL.md`.
-4. File the opening roadmap items in Asana with `lf op pm update` — the urgent
-   and next-step work, one task each. The roadmap starts in Asana, not on disk.
+   Linear project and writes `linear_project` into `GOAL.md`.
+4. File the opening roadmap items in Linear with `lf op pm update` — the urgent
+   and next-step work, one task each. The roadmap starts in Linear, not on disk.
 
 ### GOAL.md
 
@@ -108,7 +108,7 @@ When `scratch/` holds a proposal and no wave exists yet, create one:
 ---
 primary_flow: build            # the flow this wave loops
 pm:
-  asana_project: "1201234567890"   # written by `lf op pm init`
+  linear_project: "8c4ba3f9-cf23-4136-87ed-37847aa7dc82"   # written by `lf op pm init`
 ---
 ```
 
@@ -119,7 +119,7 @@ pm:
 - The milestones or shape of the work ahead.
 
 **GOAL.md must not contain:** a roadmap table, status indicators
-(shipped/in-progress/planned), or item lists. The roadmap is in Asana.
+(shipped/in-progress/planned), or item lists. The roadmap is in Linear.
 
 ## Coherence
 
@@ -153,7 +153,7 @@ human explicitly closes it.
 ## Output
 
 Updated `wave/<wave>/MEMORY.md` (and `GOAL.md` if intent moved), a roadmap in
-Asana that reflects reality, and a trimmed `scratch/`.
+Linear that reflects reality, and a trimmed `scratch/`.
 
 **"No changes needed" is only valid when scratch/ is empty and the roadmap
 already matches reality.** If scratch has files, something must move into

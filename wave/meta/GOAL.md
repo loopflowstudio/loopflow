@@ -10,7 +10,8 @@ metrics:
 - Every builtin step and flow is legible — declared shape visible before a run, hotness and real duration empirical from the ledger; redundant or dead ones get merged or deleted
 - The general/taste split is clean — universal lessons live in builtins, personal taste in the repo's agent file, proven on both loopflow and cadenza
 pm:
-  asana_project: '1216277277718272'
+  provider: linear
+  linear_project: '0e2c75ee-a287-467b-988c-2c83f0f3cbba'
 ---
 
 Run one loop iteration for the Meta wave.

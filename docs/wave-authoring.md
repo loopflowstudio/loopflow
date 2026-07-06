@@ -29,7 +29,7 @@ wave/infra/
 └── MEMORY.md  # What the agent remembers between loops
 ```
 
-`GOAL.md` and `MEMORY.md` are the two files a wave authors. The roadmap itself lives in Asana, not in the repo — read and edit it with `lf op pm` (see [Roadmap](#the-roadmap)).
+`GOAL.md` and `MEMORY.md` are the two files a wave authors. The roadmap itself lives in Linear, not in the repo — read and edit it with `lf op pm` (see [Roadmap](#the-roadmap)).
 
 ### The Goal
 
@@ -61,20 +61,20 @@ lf wave s3           # the s3 (control) charter
 
 ### The Roadmap
 
-The roadmap lives in Asana. There are no local roadmap files and nothing to sync — `lf op pm` reads and edits the wave's Asana project directly.
+The roadmap lives in Linear. There are no local roadmap files and nothing to sync — `lf op pm` reads and edits the wave's Linear project directly.
 
-Connect a wave to Asana once. `lf op pm init` creates (or links) the project and writes its id into `GOAL.md` frontmatter:
+Connect a wave to Linear once. `lf op pm init` creates (or links) the project and writes its id into `GOAL.md` frontmatter:
 
 ```yaml
 # wave/infra/GOAL.md frontmatter
 pm:
-  asana_project: 1207xxxxxxxxxxxx
+  linear_project: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
 ```
 
 Then read and edit the roadmap:
 
 ```bash
-lf op pm init --wave infra                              # connect/create the Asana project
+lf op pm init --wave infra                              # connect/create the Linear project
 lf op pm show --wave infra                              # print the live roadmap
 lf op pm update --wave infra --title "Daemon data integrity" --notes "..."   # add a task
 lf op pm update --wave infra --id 1207... --status done # close a task
@@ -92,7 +92,7 @@ Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels l
 | `metrics` | Criteria the loop re-judges each iteration |
 | `agent` | Preferred agent harness/model |
 | `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident mind |
-| `pm.asana_project` | Asana project id backing the wave's roadmap (written by `lf op pm init`) |
+| `pm.linear_project` | Linear project id backing the wave's roadmap (written by `lf op pm init`) |
 
 The resident mind reads `crons:` directly from this frontmatter and opens a system turn when a schedule comes due; edits land without a restart. See [Crons](waves.md#crons).
 
@@ -172,7 +172,7 @@ A `wave/billing/` directory for a billing rewrite. **`GOAL.md`** sets the intent
 - Invoices generate correctly for all plan types
 - Legacy endpoints return the same responses during migration
 
-The **Asana roadmap** holds the tasks, each scoped to one PR:
+The **Linear roadmap** holds the tasks, each scoped to one PR:
 
 ```
 Usage events       → Event capture and storage

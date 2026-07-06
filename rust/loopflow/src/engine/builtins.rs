@@ -217,7 +217,7 @@ mod tests {
         let scan_waves = get_builtin_step("scan").expect("scan prompt");
         let split_wave = get_builtin_step("split-wave").expect("split-wave prompt");
 
-        // The roadmap lives in Asana, reached via `lf op pm` — no local N-*.md files.
+        // The roadmap lives in Linear, reached via `lf op pm` — no local N-*.md files.
         assert!(update_wave.contains("lf op pm"));
         assert!(update_wave.contains("MEMORY.md"));
         assert!(!update_wave.contains("1-fix-broken-build.md"));
@@ -227,7 +227,7 @@ mod tests {
         assert!(scan_waves.contains("lf op pm show"));
         assert!(split_wave.contains("lf op pm"));
         assert!(WAVE_AUTHORING_DOC.contains("GOAL.md"));
-        assert!(WAVE_AUTHORING_DOC.contains("Asana"));
+        assert!(WAVE_AUTHORING_DOC.contains("Linear"));
         assert!(!WAVE_AUTHORING_DOC.contains("1-fix-crash-loop.md"));
 
         // The ingest step is gone; workers are handed their task at dispatch.

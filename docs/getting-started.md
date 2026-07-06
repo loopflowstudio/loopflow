@@ -204,7 +204,7 @@ Auth connects your providers:
 ```bash
 lf op auth github    # connect GitHub
 lf op auth claude    # connect Claude
-lf op auth asana     # connect Asana with OAuth
+lf op auth linear     # connect Linear with OAuth
 lf op auth status    # check connections
 ```
 

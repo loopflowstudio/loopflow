@@ -12,7 +12,8 @@ metrics:
 - Local and host lf/lfd/app stay fresh with one command; failures surface as work, not Actions-history noise
 - Agents run unattended — every human-in-the-loop step a CLI or API could do (credential fetch, discovery, setup, approval) is automated away
 pm:
-  asana_project: '1216278115228408'
+  provider: linear
+  linear_project: '7cf1518e-340e-4cfa-8426-63f06b7a5e1c'
 ---
 
 Run one loop iteration for the Systems wave.

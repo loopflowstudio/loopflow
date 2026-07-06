@@ -52,7 +52,7 @@ Git/PR/PM ops             Clients
 | Direction | `.lf/directions/` | `engine` prompt assembly |
 | Wave goal | `wave/<name>/GOAL.md` | `lf wave` server + resident mind |
 | Wave memory | `wave/<name>/MEMORY.md` | wave agent |
-| Roadmap item | Asana | `lf op pm` and wave flows |
+| Roadmap item | Linear | `lf op pm` and wave flows |
 | Session | lfdb | `lf` runs and placement flags |
 | Run/event | lfdb | lfd HTTP/event stream |
 | Attention | lfdb | lfd + Concerto |
@@ -149,7 +149,7 @@ Loopflow integrates with:
 
 - Git and worktrees for branch isolation.
 - GitHub for PRs, webhook ingress translated to `lf` execs, and release workflows.
-- Asana, Linear, and Notion for PM-backed wave roadmaps.
+- Linear, Asana, and Notion for PM-backed wave roadmaps.
 - tmux and local processes for interactive sessions.
 - Swift/macOS services for Concerto and native host behavior.
 

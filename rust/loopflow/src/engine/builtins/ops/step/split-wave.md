@@ -24,7 +24,7 @@ Wave mitosis. The parent wave ceases to exist — its identity and roadmap are d
 
 The numeric argument controls how many children to create (default 2).
 
-Roadmap items (Asana tasks) move as-is — each one lands in exactly one child. But `GOAL.md` needs rewriting, not slicing:
+Roadmap items (Linear issues) move as-is — each one lands in exactly one child. But `GOAL.md` needs rewriting, not slicing:
 
 - **Intent**: written fresh for each child. Must be internally coherent, not a fragment of the parent's.
 - **Metrics**: preserved and distributed. A metric can appear in multiple children if it spans both.
@@ -42,12 +42,12 @@ Roadmap items (Asana tasks) move as-is — each one lands in exactly one child. 
    - Each resulting wave should stand alone
 
 3. Allocate roadmap items
-   - Assign each Asana task to exactly one child — no orphans
+   - Assign each Linear issue to exactly one child — no orphans
 
 4. Create the new waves
    - `wave/<child>/GOAL.md` — fresh intent and metrics for each child; carry forward the primary flow; draw scope boundaries between siblings
    - `wave/<child>/MEMORY.md` — the decisions and context this child inherits
-   - `lf op pm init --wave <child>` — connect each child's Asana project
+   - `lf op pm init --wave <child>` — connect each child's Linear project
    - Recreate the allocated items on each child's roadmap with `lf op pm update`, and close them on the parent (`lf op pm update --id <task> --status done` is for shipped work; for a move, recreate on the child and delete/close on the parent)
 
 5. Remove the parent
@@ -55,7 +55,7 @@ Roadmap items (Asana tasks) move as-is — each one lands in exactly one child. 
    - Commit: `split-wave: <parent> → <child-a>, <child-b>`
 
 6. Verify
-   - Each child has a `GOAL.md`, a `MEMORY.md`, and a connected Asana project
+   - Each child has a `GOAL.md`, a `MEMORY.md`, and a connected Linear project
    - No content from the parent is unaccounted for
 
 ## Guardrails

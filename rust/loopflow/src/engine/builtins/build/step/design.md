@@ -84,19 +84,19 @@ This is the natural session exit point. The user's answer determines what to run
 1. Choose a wave name and create `wave/<name>/`.
 2. Write `wave/<name>/GOAL.md` — the wave's identity and anchor:
    - frontmatter: `primary_flow` (default `ship` unless the user asks for
-     something else) and, once connected, `pm.asana_project`
+     something else) and, once connected, `pm.linear_project`
    - body (the loop prompt): what this wave is and why it exists (scope
      boundaries as natural qualifiers), how it judges progress (numeric metrics
      where possible), and the shape of the work ahead
    - **No roadmap table, no status indicators, no item lists** — the roadmap
-     lives in Asana.
+     lives in Linear.
 3. Write `wave/<name>/MEMORY.md` — seed it with the load-bearing context from the
    Detail phase (key decisions, constraints, what's known). Short is fine.
-4. Connect and seed the roadmap in Asana:
-   - `lf op pm init --wave <name>` creates/links the Asana project and writes
-     `asana_project` into `GOAL.md`.
+4. Connect and seed the roadmap in Linear:
+   - `lf op pm init --wave <name>` creates/links the Linear project and writes
+     `linear_project` into `GOAL.md`.
    - File the opening items with `lf op pm update --title "…" --notes "…"` — the
-     urgent and next-step work, one task each. The roadmap starts in Asana, not
+     urgent and next-step work, one task each. The roadmap starts in Linear, not
      on disk.
 5. The first item you expect to build now becomes the design doc for this branch
    (`scratch/<branch>.md`).

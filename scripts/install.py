@@ -336,7 +336,7 @@ def _sync_skills(lf_bin: Path) -> None:
         )
 
 
-def _promote(local_bin: Path, install_dir: Path, applications_dir: Path = APPLICATIONS_DIR) -> None:
+def _promote(local_bin: Path, install_dir: Path, applications_dir: Path) -> None:
     """Make this worktree's build the active one.
 
     Symlinks lf/lfd from the resolved bin dir to local-bin/ (so rebuilds take

@@ -13,7 +13,7 @@ Use `lf op` for mechanical git and GitHub operations.
 lf op commit -m "message" -p     # commit and push
 lf op pr --title "..."           # create/update PR
 lf op submit                     # prep + mark ready + assign to you; you click merge
-lf op land                       # hands-off: arm auto-merge + rotate worktree
+lf op land                       # hands-off: submit, then arm auto-merge
 lf op rebase --plan              # show reset/rebase strategy
 lf op rebase                     # apply the planned update
 lf op next                       # preserve worktree, fresh branch

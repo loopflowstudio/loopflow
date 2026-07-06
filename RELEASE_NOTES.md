@@ -1,3 +1,44 @@
+# v0.10.1
+
+This is a maintenance release that **completes the PM migration from Asana to Linear** and plugs a few operational gaps exposed by v0.10.0 running in CI and on headless hosts.
+
+## Linear replaces Asana
+
+The PM backend migrated from Asana to Linear. Configuration now lives in `.lf/config.toml` and wave frontmatter; the GraphQL client handles OAuth, paginated issue listing, priority ranking, and rate-limit retries.
+
+- **Linear is the sole PM provider** — Asana is gone. The ~2700-line Asana client, HTML/markdown conversion layer, OAuth code-paste flow, config, and wave `asana_project` field are all deleted. New issues land in Todo instead of Backlog (#819, #820, #821, #822).
+- **Docs retarget to Linear** — wave operating guidance, GOAL.md, and PM documentation reference Linear rather than Asana (#823).
+
+## `lf op submit`: a human-gated finish
+
+`lf op pr` and `lf op land` sat at opposite ends — one keeps work visible mid-stream, the other merges hands-off. `lf op submit` is the middle gear for finished work a human should land.
+
+```bash
+lf op submit    # prep to land, mark ready, assign to you — you click merge
+lf op land      # hands-off: same prep, then arm auto-merge + rotate worktree
+```
+
+`submit` rebases onto main, clears `scratch/`, marks the PR ready, and assigns it to you — then stops. Nothing merges until you click merge on GitHub. The merge click is the required gate (#828).
+
+## Headless reliability
+
+- **Git identity fallback** — `commit()` now supplies a `loopflow` committer identity when the environment has none (headless hosts, CI runners). A configured identity is never overridden (#826).
+- **Scheduled release notes without agent CLIs** — `lf op release notes` now falls back to deterministic notes when the runner lacks a Claude/Codex/OpenCode CLI; decisions are still folded in and archives are still written (#824).
+
+## Small changes
+
+- **`lf op doctor` declares system dependencies** — `uv` and `doppler` are required deps, checks run from a single `SYSTEM_DEPS` list, and `lf op doctor --brewfile` regenerates the repo-root `Brewfile` (#827).
+- **Dead code swept from `lfdb`** — three unused items removed (#825).
+- **Wave cleanup** — the website wave wrapper and root/mobile/workflows waves are retired (#817, #818).
+- **Provider auth fallback** — `provider_auth` falls back to Doppler for OAuth client credentials when local secrets are unavailable (#819).
+
+## Operational notes
+
+- **Set `pm.provider = "linear"` in `.lf/config.toml`** and use `linear_project` in wave frontmatter instead of `asana_project`. Asana configuration is no longer recognized.
+- The Asana OAuth code-paste flow is removed from `lf auth connect`; use `lf auth connect linear` instead.
+
+---
+
 # v0.10.0
 
 This is the release where the **Wave** becomes loopflow's core primitive: a persistent, goal-driven looping agent that reads one `goal.md`, keeps its own `MEMORY.md`, works an Asana roadmap, and dispatches steerable sub-sessions instead of solving inline. Around that idea the runtime collapsed hard — the lifecycle model shrank to three nouns (Wave, Run, Session), and Postgres, `lfq`, the Docker `lfd` path, the conversations subsystem, Linear/Notion, and studio auth all left the tree. The result deletes far more than it adds: a self-hosted-by-default product with one authoring surface and a much smaller surface to run. If you upgrade for one reason, upgrade for the Wave.

@@ -183,7 +183,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
     if let Some(step_name) = step_name.as_deref() {
         if should_launch_via_skill(step_name) {
             let sync_start = Instant::now();
-            crate::engine::sync_skills(&repo_root, &SkillSyncOptions::default())?;
+            crate::engine::sync_skills(&SkillSyncOptions::default())?;
             debug!(
                 elapsed_ms = sync_start.elapsed().as_millis(),
                 "synced vendor skills"

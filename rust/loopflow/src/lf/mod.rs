@@ -204,6 +204,30 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
+    /// Run a command on a remote host carrying your local credentials.
+    ///
+    /// Resolves the local credential bundle (GitHub, Claude, PM) and forwards it
+    /// over the ssh channel per-invocation; nothing persists on the remote. The
+    /// Doppler token is never forwarded — name specific secrets with `--secret`
+    /// to resolve them locally. Example: `lf ssh mini-heart -- lf op pr`.
+    Ssh {
+        /// Remote host (ssh alias or user@host)
+        host: String,
+        /// Repository path on the remote, relative to $HOME
+        #[arg(long = "repo")]
+        repo: Option<String>,
+        /// Doppler secret to resolve locally and forward as an env var
+        /// (repeatable). The Doppler token itself is never forwarded.
+        #[arg(long = "secret")]
+        secret: Vec<String>,
+        /// Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the
+        /// forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk.
+        #[arg(long = "forward-agent")]
+        forward_agent: bool,
+        /// Command to run on the remote (after `--`)
+        #[arg(last = true)]
+        cmd: Vec<String>,
+    },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -236,9 +260,9 @@ pub enum MemoryCommand {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
-    /// Append one curated fact as a bullet
+    /// Publish one fact to the replayable memory stream
     Add {
-        /// The fact to append
+        /// The fact to publish
         fact: String,
         #[command(flatten)]
         target: WaveTargetArgs,
@@ -320,13 +344,10 @@ pub enum OpsCommand {
     },
     /// Update local main to match origin
     Sync,
-    /// Sync loopflow steps into vendor Skills directories
+    /// Compile loopflow steps into your home vendor Skills directories
     #[command(name = "sync-skills")]
     SyncSkills {
-        /// Also write global vendor skill directories under ~/
-        #[arg(long = "global")]
-        global: bool,
-        /// Confirm global writes without prompting
+        /// Confirm writes under ~/ without prompting
         #[arg(short = 'y', long = "yes")]
         yes: bool,
         /// Keep stale loopflow-generated skills

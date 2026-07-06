@@ -49,9 +49,10 @@
 //!     under the same id — each frame replaces the client's previous state
 //!     for that (channel, id) pair (upsert, never append-if-seen).
 //!   - `memory`: data is the `MemoryUpdated` summary string, fired on every
-//!     curation. Live-only, no replay — MEMORY.md itself is the durable
-//!     state. Primary channel only (memory is wave identity; work lines have
-//!     none).
+//!     curation. Live-only, no replay — MEMORY.md itself is the durable state.
+//!     Primary channel only (memory is wave identity; work lines have none).
+//!   - `memory-add`: data is the full added fact. Replays on connect for the
+//!     facts since the last curation, then streams live. Primary channel only.
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
 //!     is an [`InboxFrame`] — a resident-directed op. The pending queue
 //!     (journaled messages not yet named in any `answers`) replays on
@@ -98,10 +99,11 @@
 //!   origin repo. Wave-level only: memory is wave identity, channels don't
 //!   have it.
 //! - `POST /memory {op, content, summary}` → `{summary}`. `op` is `"update"`
-//!   (full replacement) or `"add"` (append one curated bullet; `content` must
-//!   be non-empty). `summary` is explicitly Optional — null falls back to the
+//!   (full replacement) or `"add"` (publish one fact; `content` must be
+//!   non-empty). `summary` is explicitly Optional — null falls back to the
 //!   content's first non-empty line. The server is the sole writer of the
-//!   origin repo's `wave/<name>/MEMORY.md` and journals `MemoryUpdated`.
+//!   origin repo's `wave/<name>/MEMORY.md` and journals `MemoryUpdated`;
+//!   add-only facts journal `MemoryAdded` and broadcast `memory-add`.
 //!
 //! `Turn` is [`crate::chat::turns::ChatTurn`].
 
@@ -273,7 +275,7 @@ struct MemoryBody {
     content: String,
 }
 
-/// `POST /memory` op — full replacement or one appended bullet.
+/// `POST /memory` op — full replacement or one published fact.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum MemoryOp {
@@ -560,7 +562,7 @@ async fn memory_write_handler(
                     "content is required for the add op".to_string(),
                 ));
             }
-            state.runtime.append_memory(fact, &summary)
+            state.runtime.append_memory(fact)
         }
     };
     match result {
@@ -589,9 +591,9 @@ fn first_line(content: &str) -> Option<String> {
 /// (every frame replaces the client's state for that (channel, id), so an
 /// in-progress turn updates in place and its terminal frame lands under the
 /// same id), `memory` on every curation (live-only; the file is the durable
-/// state). Snapshot and subscription are atomic in the runtime (broadcasts
-/// share the append lock), so no primary live frame is ever older than the
-/// replayed snapshot.
+/// state), and `memory-add` for replayable facts. Snapshot and subscription
+/// are atomic in the runtime (broadcasts share the append lock), so no primary
+/// live frame is ever older than the replayed snapshot.
 ///
 /// Child channels replay their folded threads (turn frames tagged with
 /// `channel`) and stream live off the family bus, subscribed BEFORE the
@@ -691,6 +693,11 @@ async fn events_handler(
         let replay = stream::iter(
             std::iter::once(Ok(state_event(&sub.state)))
                 .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t))))
+                .chain(
+                    sub.memory_adds
+                        .into_iter()
+                        .map(|fact| Ok(memory_add_event(&fact))),
+                )
                 .chain(inbox_replay),
         );
         let live_turns = BroadcastStream::new(sub.turn_rx).filter_map(move |res| {
@@ -710,6 +717,14 @@ async fn events_handler(
             };
             async move { out }
         });
+        let live_memory_adds = BroadcastStream::new(sub.memory_add_rx).filter_map(move |res| {
+            let out = match res {
+                Ok(fact) => Some(Ok(memory_add_event(&fact))),
+                // Lagged: reconnect gets a fresh add snapshot.
+                Err(_) => None,
+            };
+            async move { out }
+        });
         let live_memory = BroadcastStream::new(sub.memory_rx).filter_map(move |res| {
             let out = match res {
                 Ok(summary) => Some(Ok(memory_event(&summary))),
@@ -720,7 +735,7 @@ async fn events_handler(
         });
         let mut live: BoxedEventStream = Box::pin(stream::select(
             live_turns,
-            stream::select(live_states, live_memory),
+            stream::select(live_states, stream::select(live_memory, live_memory_adds)),
         ));
         if include_inbox {
             let live_inbox = BroadcastStream::new(sub.inbox_rx).filter_map(move |res| {
@@ -802,6 +817,10 @@ fn state_event(state: &MindState) -> Event {
 
 fn memory_event(summary: &str) -> Event {
     Event::default().event("memory").data(summary)
+}
+
+fn memory_add_event(fact: &str) -> Event {
+    Event::default().event("memory-add").data(fact)
 }
 
 fn inbox_event(frame: &InboxFrame) -> Event {

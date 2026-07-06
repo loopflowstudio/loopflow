@@ -96,7 +96,9 @@ extraction — `TurnStarted`/`TurnItem`/`TurnSteered`/`TurnFinished`/
 receipt from the wire. The vendor thread itself cold-starts on codex; the new
 `ThreadStarted` is journaled so the break is explicit. `wave/<name>/MEMORY.md`
 seeds the mind (read from the origin repo), and the live listener holds its
-pen: `lf memory update`/`add` POST to the memory routes.
+pen: `lf memory update` POSTs the compiled checkpoint. `lf memory add`
+publishes a replayable fact to the stream without accreting raw bullets into
+the checkpoint.
 
 ## The resident wire
 
@@ -159,10 +161,11 @@ doesn't vanish). Dispatched workers finish with an `lf chat` report — it
 arrives in the thread with a `from` byline and wakes the mind like any input.
 
 `lf sub [NAME] [--json]` is the read half: follow the family's `/events`
-stream (turns, mind state, memory) until killed, reconnecting with backoff
-and re-resolving the endpoint across server restarts. `lf sub goals` follows
-the whole family; `lf sub goals.148e0e02` follows one work line. The resident
-is the subscription's second customer — same machinery, plus the inbox scope.
+stream (turns, mind state, memory curation, memory adds) until killed,
+reconnecting with backoff and re-resolving the endpoint across server
+restarts. `lf sub goals` follows the whole family; `lf sub goals.148e0e02`
+follows one work line. The resident is the subscription's second customer —
+same machinery, plus the inbox scope.
 
 The context flows back out the same way: every `lf` run born inside a wave
 inherits ambient context by CHANNEL in its assembled prompt —
@@ -183,11 +186,11 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 |---------------------------|----------|
 | `GET /health`             | `{status, mind, wave, turns, workers, uptime_seconds}`; `status` is channel liveness — always `serving` while the process answers; `mind` is the resident's state (`idle \| turning \| interrupting \| failed`), or null while no resident was ever spawned or attached (`--no-mind` serves dormant) — a live channel whose resident died reads `serving` + `failed`; `workers` counts observed in-flight worker runs |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread; `?limit=N` tails the last N turns (open turn included) |
-| `GET /events`             | SSE, the family's one unified stream. Scope: `?channel=<name>` (one channel), `?prefix=<name>` (subtree), default = whole family; names outside the family 404. Event names: `state` (mind-state name, on subscribe + every transition; primary only), `turn` (a `Turn` JSON; replay then live; child-channel turns carry an extra `"channel"` key; ids repeat — each frame replaces the client's previous state for that (channel, id)), `memory` (curation summaries, live-only; primary only), and — only with `?inbox=true`, the resident's subscription — `inbox` (`{id, op, text, from}`; pending replay + live ops; bare interrupts ride `id: null`). |
+| `GET /events`             | SSE, the family's one unified stream. Scope: `?channel=<name>` (one channel), `?prefix=<name>` (subtree), default = whole family; names outside the family 404. Event names: `state` (mind-state name, on subscribe + every transition; primary only), `turn` (a `Turn` JSON; replay then live; child-channel turns carry an extra `"channel"` key; ids repeat — each frame replaces the client's previous state for that (channel, id)), `memory-add` (full added facts since the last externalization, replay then live; primary only), `memory` (curation summaries, live-only; primary only), and — only with `?inbox=true`, the resident's subscription — `inbox` (`{id, op, text, from}`; pending replay + live ops; bare interrupts ride `id: null`). |
 | `POST /messages {op, text, from?, channel?}` | `op` required: `message` (human speech: steers the live turn when one is open and the harness supports it, otherwise queued for the next turn), `steer` (into the live turn when supported), `interrupt` (cancel the open turn; non-empty text becomes the next turn), or `say` (an attributed emission — `lf chat`; `from {session_id?, label}` required for `say`, rejected otherwise). `channel` null = the wave channel; a child name lands in that work line's journal (404 outside the family). Returns `{turn, state}`. |
 | `POST /channels {name, run_id}` | The dispatch knock: journals `ChannelOpened` on the wave channel. Idempotent on `run_id`; 404 outside the family. Returns `{turn}`. |
 | `GET /memory`             | `{content}` — the wave's MEMORY.md (origin repo). |
-| `POST /memory {op, content, summary}` | `op`: `update` or `add`. `summary` null → first non-empty content line. Returns `{summary}`. |
+| `POST /memory {op, content, summary}` | `op`: `update` replaces `MEMORY.md`; `add` publishes one replayable fact. `summary` null → first non-empty content line. Returns `{summary}`. |
 | `POST /resident/attach {pid}` | Resident door (token-gated): register the resident's pid, revive a failed mind. Returns `{wave, thread_id}`. |
 | `POST /resident/deltas {deltas}` | Resident door (token-gated): ordered turn deltas → the journal fold. Returns `{accepted}`. |
 | `GET /resident/context`   | Resident door (token-gated): `{thread_id, in_flight}`; freshens the store observations. |

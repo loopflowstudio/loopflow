@@ -1,14 +1,13 @@
 //! `lf memory` — read or curate a wave's MEMORY.md through its live server.
 //!
-//! The live server holds the pen: `update` (full replacement from stdin) and
-//! `add "fact"` (append one curated bullet) POST to the wave server, which is
-//! the sole writer of the ORIGIN repo's `wave/<name>/MEMORY.md` and journals
-//! `MemoryUpdated {summary}`. `show` (the bare default) reads through the
-//! server when one is live and falls back to the origin file otherwise —
-//! reads don't need the pen. Targeting (`--wave`, `--parent`) matches
-//! `lf chat` ([`super::chat`]), including the drop rule: a write with no wave
-//! context anywhere is a publish to no subscriber — exit 0, one stderr note.
-//! `show` is a read, so no wave context stays an error.
+//! The live server holds the pen: `update` (full replacement from stdin) POSTs
+//! the compiled checkpoint and `add "fact"` publishes one replayable fact to
+//! the stream. `show` (the bare default) reads through the server when one is
+//! live and falls back to the origin file otherwise — reads don't need the
+//! pen. Targeting (`--wave`, `--parent`) matches `lf chat` ([`super::chat`]),
+//! including the drop rule: a write with no wave context anywhere is a publish
+//! to no subscriber — exit 0, one stderr note. `show` is a read, so no wave
+//! context stays an error.
 
 use std::io::Read;
 
@@ -161,22 +160,16 @@ mod tests {
         (addr.to_string(), runtime)
     }
 
-    fn memory_summaries(origin: &Path, wave: &str) -> Vec<String> {
+    fn memory_events(origin: &Path, wave: &str) -> Vec<EventKind> {
         let (_, events) = Journal::open(&journal_path(origin, wave)).expect("journal");
-        events
-            .into_iter()
-            .filter_map(|event| match event.kind {
-                EventKind::MemoryUpdated { summary } => Some(summary),
-                _ => None,
-            })
-            .collect()
+        events.into_iter().map(|event| event.kind).collect()
     }
 
     /// `update` replaces the ORIGIN repo's file through the server and
-    /// journals `MemoryUpdated` (summary = first line, or the --summary flag);
-    /// `add` appends a bullet.
+    /// journals `MemoryUpdated`; `add` publishes a replayable fact without
+    /// mutating the compiled file.
     #[tokio::test]
-    async fn update_and_add_write_the_origin_file_and_journal() {
+    async fn update_writes_the_origin_file_and_add_journals() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path();
         let (addr, _runtime) = boot_server(origin, "ship").await;
@@ -192,27 +185,30 @@ mod tests {
             "the ORIGIN file is the one replaced"
         );
 
-        let summary = write_memory(&target, "update", "# Ship v2\n", Some("rewrote the plan"))
-            .await
-            .expect("update with summary");
-        assert_eq!(summary, "rewrote the plan");
-
         let summary = write_memory(&target, "add", "workers report via lf chat", None)
             .await
             .expect("add");
         assert_eq!(summary, "workers report via lf chat");
         assert_eq!(
             std::fs::read_to_string(origin.join("wave/ship/MEMORY.md")).expect("origin file"),
-            "# Ship v2\n- workers report via lf chat\n",
-            "add appends a curated bullet"
+            "# Ship\n\nfold is truth\n",
+            "add publishes a stream fact without accreting raw bullets"
         );
-
         assert_eq!(
-            memory_summaries(origin, "ship"),
+            memory_events(origin, "ship")
+                .into_iter()
+                .filter(|event| matches!(
+                    event,
+                    EventKind::MemoryUpdated { .. } | EventKind::MemoryAdded { .. }
+                ))
+                .collect::<Vec<_>>(),
             vec![
-                "# Ship".to_string(),
-                "rewrote the plan".to_string(),
-                "workers report via lf chat".to_string(),
+                EventKind::MemoryUpdated {
+                    summary: "# Ship".to_string()
+                },
+                EventKind::MemoryAdded {
+                    fact: "workers report via lf chat".to_string()
+                },
             ]
         );
     }

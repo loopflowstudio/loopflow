@@ -11,8 +11,8 @@ use crate::lfd::executor::{create_run_for_placement, Placement};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{PullRequest, Run, RunStatus};
 use crate::lfdb::{open_existing_store, SharedStore};
-use crate::ops::pm::{pm_show, pm_update, PmShowOptions, PmUpdateOptions};
-use crate::ops::{current_pr, NullProgress, OpsError, OpsResult};
+use crate::ops::pm::{pm_complete, pm_show, PmCompleteOptions, PmShowOptions};
+use crate::ops::{NullProgress, OpsError, OpsResult};
 
 const TASK_PASS_FLOW: &str = "task-pass";
 const DEFAULT_MAX_PASSES: u32 = 8;
@@ -174,7 +174,8 @@ fn run_task_passes(
 ) -> OpsResult<()> {
     let started = Instant::now();
     let mut remembered_pr: Option<u64> = None;
-    for pass in 1..=options.max_passes {
+    let mut pass = 0;
+    loop {
         if let Err(err) = check_wall_clock(started, options.wall_clock) {
             escalate_parent(&err.to_string());
             return Err(err);
@@ -196,6 +197,10 @@ fn run_task_passes(
             }
         }
 
+        if pass >= options.max_passes {
+            break;
+        }
+        pass += 1;
         eprintln!("task pass {pass}/{}", options.max_passes);
         run_task_pass(worktree, task, options)?;
 
@@ -261,10 +266,21 @@ fn poll_pr_oracle(worktree: &Path, remembered_pr: Option<u64>) -> OpsResult<Opti
     if let Some(number) = remembered_pr {
         return poll_pr_by_number(worktree, number);
     }
-    match current_pr(worktree)? {
-        Some(pr) => poll_pr_by_number(worktree, pr.number),
-        None => Ok(None),
+    poll_current_branch_pr(worktree)
+}
+
+fn poll_current_branch_pr(worktree: &Path) -> OpsResult<Option<PrOracle>> {
+    let output = Command::new("gh")
+        .arg("pr")
+        .arg("view")
+        .arg("--json")
+        .arg("state,url,number")
+        .current_dir(worktree)
+        .output()?;
+    if !output.status.success() {
+        return Ok(None);
     }
+    parse_pr_view_json(&output.stdout).map(Some)
 }
 
 fn poll_pr_by_number(worktree: &Path, number: u64) -> OpsResult<Option<PrOracle>> {
@@ -305,14 +321,11 @@ fn parse_pr_view_json(raw: &[u8]) -> OpsResult<PrOracle> {
 }
 
 fn close_task(worktree: &Path, wave: &str, task: &TaskStatement, pr: &PrOracle) -> OpsResult<()> {
-    pm_update(
+    pm_complete(
         worktree,
-        &PmUpdateOptions {
+        &PmCompleteOptions {
             wave: Some(wave.to_string()),
-            id: Some(task.id.clone()),
-            title: task.title.clone(),
-            notes: Some(task.description.clone()),
-            status: Some("done".to_string()),
+            id: task.id.clone(),
             pr: Some(pr.url.clone()),
         },
         &NullProgress,

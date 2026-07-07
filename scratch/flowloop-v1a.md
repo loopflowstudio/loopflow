@@ -1,5 +1,11 @@
 # flowloop v1a — research findings (R1, R2, R3) + proposal
 
+> **SUPERSEDED by `scratch/flowloop-run2.md`.** Run 1 shipped this doc's v1a
+> scope (`lf task` + `flowloop/task.rs`). Its two deferrals — the mind→flowloop
+> renames and the "wave re-expression is v3" call — were overruled: run 2
+> builds the tier-generic runtime, converts the wave, and lands the renames.
+> The R1/R3 findings below (Linear oracle, budget backstop) remain valid.
+
 Companion to `scratch/flowloop.md` (the charter). This is the design doc for
 the first PR: research answers with file refs, then the v1a build.
 

@@ -172,11 +172,12 @@ Shared contracts (all non-wave flowloops):
 
 ## 4. Decisions locked
 
-1. **Flowloop is the noun; "mind" is retired.** Code renames land with v1:
-   `wave/mind.rs` → `wave/flowloop.rs`, `run_mind` → `run_flowloop`,
-   `MindEnd` → `FlowloopEnd`, `MindConfig` → `FlowloopConfig`. (Current code
-   still says mind — R2 reads it under the old names.) The judgment steps are
-   agentic; only the halt is deterministic.
+1. **Flowloop is the noun; "mind" is retired — everywhere in the code.**
+   Renames land in run 2 (see `scratch/flowloop-run2.md` §3):
+   `wave/mind.rs` → `flowloop/wave.rs`, `run_mind` → `run_flowloop`,
+   `MindEnd` → `FlowloopEnd`, `MindConfig` → `FlowloopConfig`, plus the
+   comment/doc sweep; `MindState` (wire DTO) may split into a follow-up.
+   The judgment steps are agentic; only the halt is deterministic.
 2. Deterministic terminator per §2; in-agent clause + `-b` backstop.
 3. Tiers = ownership × stop-condition (§1). "Worker" is renamed **task**.
 4. Task PRs target **`main`**; stacking is opt-in for genuinely dependent work
@@ -203,13 +204,17 @@ via `Submit`, terminates on the `gh` oracle, worktree self-prunes. Bounded:
 attempt/budget caps, **waiting ≠ thrashing**, non-convergence fingerprint,
 Blocked-exit escalates via `lf chat --parent`.
 
-Build order: **v1a** happy path → **v1b** fix loop (CI/rebase/review) →
-**v1c** unattended hardening → **v1d** surfacing (chat to the task flowloop;
-its execs visible as attachable tmux sessions; phase runs invisible).
+Build order: **v1a** happy path (shipped: `lf task` + `flowloop/task.rs`) →
+**run 2** the runtime itself — tier-generic `flowloop/` module, the wave
+converted to run as a flowloop, the project tier built (unwired), the
+mind→flowloop rename sweep; see `scratch/flowloop-run2.md` → **v1b** fix loop
+(CI/rebase/review) → **v1c** unattended hardening → **v1d** surfacing (chat to
+the task flowloop; its execs visible as attachable tmux sessions; phase runs
+invisible).
 
-**v2+:** the **project flowloop** (KR set, decompose→spawn tasks, self-renewing
-KRs); chat review checkpoints; prod-verification oracle; Exec=Run-minus-worktree
-substrate; opt-in stacking; Concerto surfacing.
+**v2+:** project tier wiring (the wave spawns projects; `lf project` or
+equivalent); chat review checkpoints; prod-verification oracle;
+Exec=Run-minus-worktree substrate; opt-in stacking; Concerto surfacing.
 
 Acceptance bar for v1: point it at a real Linear task, walk away, come back to a
 merged reviewable-size PR and no running process. Kill switch never needed.

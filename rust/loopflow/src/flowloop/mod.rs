@@ -4,8 +4,6 @@ pub mod project;
 pub mod run;
 pub mod task;
 
-use oracle::Oracle;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
     Wave,
@@ -19,14 +17,6 @@ impl Tier {
             Self::Wave => "wave-pass",
             Self::Project => "project-pass",
             Self::Task => "task-pass",
-        }
-    }
-
-    pub fn oracle(self) -> Oracle {
-        match self {
-            Self::Wave => Oracle::Never,
-            Self::Project => Oracle::KrSetDone,
-            Self::Task => Oracle::PrMerged,
         }
     }
 }

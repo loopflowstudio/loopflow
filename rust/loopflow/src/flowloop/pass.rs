@@ -12,18 +12,7 @@ pub struct PassOptions {
     pub max_turns: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PassOutcome {
-    pub stdout: Vec<u8>,
-    pub stderr: Vec<u8>,
-}
-
-pub fn run_pass(
-    worktree: &Path,
-    tier: Tier,
-    seed: &str,
-    options: &PassOptions,
-) -> OpsResult<PassOutcome> {
+pub fn run_pass(worktree: &Path, tier: Tier, seed: &str, options: &PassOptions) -> OpsResult<()> {
     let mut cmd = lf_command();
     cmd.arg("-b");
     if let Some(max_turns) = options.max_turns {
@@ -42,10 +31,7 @@ pub fn run_pass(
         });
     }
 
-    Ok(PassOutcome {
-        stdout: output.stdout,
-        stderr: output.stderr,
-    })
+    Ok(())
 }
 
 pub(crate) fn check_wall_clock(started: Instant, wall_clock: Duration) -> OpsResult<()> {

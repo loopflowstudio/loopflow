@@ -624,14 +624,10 @@ impl WaveFlowloop {
     async fn on_inbox(&mut self, item: InboxItem) {
         match item {
             InboxItem::Message(message) => {
-                if !self.seen.insert(message.id.clone()) {
-                    return;
-                }
-                match message.op {
-                    MessageOp::Interrupt => self.queue.push(message),
-                    MessageOp::Message | MessageOp::Say | MessageOp::Steer => {
-                        self.queue.push(message)
-                    }
+                // Idle: every op just queues — an interrupt has no pass to
+                // cancel, so it seeds the next one like any other message.
+                if self.seen.insert(message.id.clone()) {
+                    self.queue.push(message);
                 }
             }
             InboxItem::Interrupt => {}

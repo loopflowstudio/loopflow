@@ -7,13 +7,6 @@ use crate::ops::pm::{pm_show, PmShowOptions};
 use crate::ops::{NullProgress, OpsError, OpsResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Oracle {
-    PrMerged,
-    KrSetDone,
-    Never,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrState {
     Open,
     Merged,

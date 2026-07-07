@@ -32,7 +32,7 @@
 //! `wave/<name>/.wave-resident-token` beside the endpoint pointer for
 //! attached residents (`lf wave <name> --flowloop-only`) — the same
 //! filesystem-trust domain as the discovery file. This is a stopgap: when a
-//! human (or a remote mind) can hold the resident seat, the token becomes a
+//! human (or a remote flowloop) can hold the resident seat, the token becomes a
 //! credential the gatekeeper issues, not a file the repo trusts.
 
 use serde::{Deserialize, Serialize};
@@ -105,13 +105,13 @@ pub enum ResidentDelta {
     /// and the boundary `Idle` are DERIVED by the listener from
     /// `TurnOpened`/`TurnFinished`; only the transitions the turn deltas
     /// can't express ride here.
-    MindState { to: ResidentStateTo, reason: String },
+    FlowloopState { to: ResidentStateTo, reason: String },
     /// The vendor thread the flowloop runs on — its first durable act, journaled
     /// by the listener before the first turn (borrowed-handle rule).
     ThreadStarted { vendor: String, thread_id: String },
 }
 
-/// Destination of a reported [`ResidentDelta::MindState`] transition. The
+/// Destination of a reported [`ResidentDelta::FlowloopState`] transition. The
 /// listener supplies the turn id for `Interrupting` (the current open turn —
 /// the resident never learns journal-minted ids).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,7 +142,7 @@ pub struct PostDeltasResponse {
 
 /// `POST /resident/attach` request: the resident's first call. Registers the
 /// resident's pid for liveness (the listener probes attached residents; a
-/// spawned child is watched by process exit) and revives a `failed` mind
+/// spawned child is watched by process exit) and revives a `failed` flowloop
 /// state — a fresh resident IS the revival.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AttachRequest {
@@ -257,7 +257,7 @@ mod tests {
             ResidentDelta::MessagesRequeued {
                 ids: vec!["msg-3".into()],
             },
-            ResidentDelta::MindState {
+            ResidentDelta::FlowloopState {
                 to: ResidentStateTo::Failed,
                 reason: "harness disconnected".into(),
             },
@@ -282,7 +282,7 @@ mod tests {
             serde_json::json!({ "kind": "turn_opened" }),
             serde_json::json!({ "kind": "turn_finished", "cost_usd": null }),
             serde_json::json!({ "kind": "turn_text" }),
-            serde_json::json!({ "kind": "mind_state", "to": "failed" }),
+            serde_json::json!({ "kind": "flowloop_state", "to": "failed" }),
             serde_json::json!({ "kind": "messages_requeued" }),
             serde_json::json!({ "kind": "thread_started", "vendor": "codex" }),
         ] {

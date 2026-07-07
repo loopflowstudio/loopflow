@@ -22,7 +22,7 @@
 //! death the subscription ends and the resident exits cleanly — its keeper is
 //! gone; whether anything restarts the pair is the human's arrangement
 //! (tmux, systemd). On flowloop failure the resident reports
-//! `MindState::Failed` over the wire and exits nonzero — the listener's
+//! `FlowloopState::Failed` over the wire and exits nonzero — the listener's
 //! supervisor owns the respawn ladder.
 
 use std::path::{Path, PathBuf};

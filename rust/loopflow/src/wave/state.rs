@@ -2,9 +2,9 @@
 //!
 //! This machine is about the FLOWLOOP only: workers grinding in the
 //! background are not a flowloop state (wave-level display is derived from
-//! `(mind_state, workers_in_flight)`). A failed *pass* is
+//! `(flowloop_state, workers_in_flight)`). A failed *pass* is
 //! `TurnFinished { status: Failed }` and the flowloop returns to `Idle`;
-//! [`MindState::Failed`] is reserved for the flowloop itself (consecutive
+//! [`FlowloopState::Failed`] is reserved for the flowloop itself (consecutive
 //! pass failures — see [`crate::flowloop::wave`]).
 //!
 //! `Failed → Idle` fires when a user message revives the flowloop.
@@ -15,16 +15,16 @@
 //!
 //! Transitions go through [`can_transition`]; an illegal move is a bug —
 //! logged and refused by the caller (see `WaveRuntime::transition`), never
-//! silently applied. Every legal transition appends a `MindState` event to the
+//! silently applied. Every legal transition appends a `FlowloopState` event to the
 //! wave journal.
 
 use serde::{Deserialize, Serialize};
 
-/// Current state of the wave's flowloop. Serialized into journal `MindState`
+/// Current state of the wave's flowloop. Serialized into journal `FlowloopState`
 /// events; internal persistence, not a wire DTO.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
-pub enum MindState {
+pub enum FlowloopState {
     /// No pass in flight.
     Idle,
     /// One turn generating / tool-calling.
@@ -35,7 +35,7 @@ pub enum MindState {
     Failed { reason: String },
 }
 
-impl MindState {
+impl FlowloopState {
     /// Short name for `/health` and logs.
     pub fn name(&self) -> &'static str {
         match self {
@@ -56,8 +56,8 @@ impl MindState {
 /// - `Interrupting → Idle`: the interrupted turn finalized.
 /// - any live state `→ Failed`: the flowloop died.
 /// - `Failed → Idle`: recovery (restart janitor / thread respawn).
-pub fn can_transition(from: &MindState, to: &MindState) -> bool {
-    use MindState::*;
+pub fn can_transition(from: &FlowloopState, to: &FlowloopState) -> bool {
+    use FlowloopState::*;
     match (from, to) {
         (Idle, Turning { .. }) => true,
         (Turning { .. }, Idle) => true,
@@ -74,42 +74,48 @@ pub fn can_transition(from: &MindState, to: &MindState) -> bool {
 mod tests {
     use super::*;
 
-    fn turning(id: &str) -> MindState {
-        MindState::Turning {
+    fn turning(id: &str) -> FlowloopState {
+        FlowloopState::Turning {
             turn_id: id.to_string(),
         }
     }
 
-    fn interrupting(id: &str) -> MindState {
-        MindState::Interrupting {
+    fn interrupting(id: &str) -> FlowloopState {
+        FlowloopState::Interrupting {
             turn_id: id.to_string(),
         }
     }
 
-    fn failed(reason: &str) -> MindState {
-        MindState::Failed {
+    fn failed(reason: &str) -> FlowloopState {
+        FlowloopState::Failed {
             reason: reason.to_string(),
         }
     }
 
     #[test]
     fn turn_lifecycle_is_legal() {
-        assert!(can_transition(&MindState::Idle, &turning("turn-1")));
-        assert!(can_transition(&turning("turn-1"), &MindState::Idle));
+        assert!(can_transition(&FlowloopState::Idle, &turning("turn-1")));
+        assert!(can_transition(&turning("turn-1"), &FlowloopState::Idle));
     }
 
     #[test]
     fn interrupt_targets_the_open_turn_only() {
         assert!(can_transition(&turning("turn-3"), &interrupting("turn-3")));
         assert!(!can_transition(&turning("turn-3"), &interrupting("turn-9")));
-        assert!(can_transition(&interrupting("turn-3"), &MindState::Idle));
+        assert!(can_transition(
+            &interrupting("turn-3"),
+            &FlowloopState::Idle
+        ));
         // Nothing to interrupt when idle.
-        assert!(!can_transition(&MindState::Idle, &interrupting("turn-3")));
+        assert!(!can_transition(
+            &FlowloopState::Idle,
+            &interrupting("turn-3")
+        ));
     }
 
     #[test]
     fn any_live_state_can_fail_but_failed_is_sticky() {
-        assert!(can_transition(&MindState::Idle, &failed("spawn error")));
+        assert!(can_transition(&FlowloopState::Idle, &failed("spawn error")));
         assert!(can_transition(&turning("turn-1"), &failed("thread died")));
         assert!(can_transition(
             &interrupting("turn-1"),
@@ -120,36 +126,36 @@ mod tests {
 
     #[test]
     fn failed_recovers_only_to_idle() {
-        assert!(can_transition(&failed("dead"), &MindState::Idle));
+        assert!(can_transition(&failed("dead"), &FlowloopState::Idle));
         assert!(!can_transition(&failed("dead"), &turning("turn-1")));
         assert!(!can_transition(&failed("dead"), &interrupting("turn-1")));
     }
 
     #[test]
     fn no_self_loops_or_skips() {
-        assert!(!can_transition(&MindState::Idle, &MindState::Idle));
+        assert!(!can_transition(&FlowloopState::Idle, &FlowloopState::Idle));
         assert!(!can_transition(&turning("turn-1"), &turning("turn-2")));
         assert!(!can_transition(&interrupting("turn-1"), &turning("turn-1")));
     }
 
     #[test]
     fn state_names_for_health() {
-        assert_eq!(MindState::Idle.name(), "idle");
+        assert_eq!(FlowloopState::Idle.name(), "idle");
         assert_eq!(turning("turn-1").name(), "turning");
         assert_eq!(interrupting("turn-1").name(), "interrupting");
         assert_eq!(failed("x").name(), "failed");
     }
 
     #[test]
-    fn mind_state_round_trips_through_json() {
+    fn flowloop_state_round_trips_through_json() {
         for state in [
-            MindState::Idle,
+            FlowloopState::Idle,
             turning("turn-4"),
             interrupting("turn-4"),
             failed("thread died"),
         ] {
             let value = serde_json::to_value(&state).expect("serialize");
-            let decoded: MindState = serde_json::from_value(value).expect("deserialize");
+            let decoded: FlowloopState = serde_json::from_value(value).expect("deserialize");
             assert_eq!(decoded, state);
         }
     }

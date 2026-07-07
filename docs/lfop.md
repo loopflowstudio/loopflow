@@ -114,7 +114,7 @@ lf op advance                # wave inferred from the worktree
 lf op advance --wave shipper
 ```
 
-Generates the wave's next schema-named branch (de-colliding with a word pair if taken), creates it in the worktree, and pushes it with upstream set. Unlike `lf op next`, it doesn't commit or rebase — it's the branch rotation a recurring wave (or its mind) runs after landing.
+Generates the wave's next schema-named branch (de-colliding with a word pair if taken), creates it in the worktree, and pushes it with upstream set. Unlike `lf op next`, it doesn't commit or rebase — it's the branch rotation a recurring wave (or its flowloop) runs after landing.
 
 | Flag | Description |
 |------|-------------|

@@ -119,7 +119,7 @@ struct WaveChatConnectionTests {
         #expect(conn.memorySummary == "second curation")
         // Memory payloads never masquerade as turns or states.
         #expect(conn.turns.isEmpty)
-        #expect(conn.mindState == .idle)
+        #expect(conn.flowloopState == .idle)
     }
 
     @Test("op frames expose the wave's latest run motion")
@@ -135,9 +135,9 @@ struct WaveChatConnectionTests {
         #expect(conn.lastOp?.flow == "build")
         #expect(conn.lastOp?.task == "wire it")
 
-        // op frames never masquerade as turns or mind states.
+        // op frames never masquerade as turns or flowloop states.
         #expect(conn.turns.isEmpty)
-        #expect(conn.mindState == .idle)
+        #expect(conn.flowloopState == .idle)
 
         // A finish carries a summary, no flow — the same channel, latest wins.
         let completed = "{\"kind\":\"run.completed\",\"run_id\":\"run-42\",\"flow\":null,\"task\":null,\"summary\":\"pr opened\",\"ts\":\"2026-07-06T00:01:00Z\"}"
@@ -147,20 +147,20 @@ struct WaveChatConnectionTests {
         #expect(conn.lastOp?.summary == "pr opened")
     }
 
-    @Test("state events update the observable mind state")
-    func stateEventsUpdateMindState() {
+    @Test("state events update the observable flowloop state")
+    func stateEventsUpdateFlowloopState() {
         let conn = connection()
-        #expect(conn.mindState == .idle)
+        #expect(conn.flowloopState == .idle)
         conn.handle(event: "state", data: "turning")
-        #expect(conn.mindState == .turning)
+        #expect(conn.flowloopState == .turning)
         conn.handle(event: "state", data: "interrupting")
-        #expect(conn.mindState == .interrupting)
+        #expect(conn.flowloopState == .interrupting)
         conn.handle(event: "state", data: "idle")
-        #expect(conn.mindState == .idle)
+        #expect(conn.flowloopState == .idle)
 
         // Unknown state names are dropped, never crash the stream.
         conn.handle(event: "state", data: "transcending")
-        #expect(conn.mindState == .idle)
+        #expect(conn.flowloopState == .idle)
         // State payloads never masquerade as turns.
         #expect(conn.turns.isEmpty)
     }
@@ -193,7 +193,7 @@ struct WaveChatConnectionTests {
             conn.handle(event: frame.event, data: frame.data)
         }
 
-        #expect(conn.mindState == .turning)
+        #expect(conn.flowloopState == .turning)
         #expect(conn.turns.count == 1)
         let turn = try #require(conn.turns.first)
         #expect(turn.id == "turn-101")
@@ -268,7 +268,7 @@ struct SSEFrameParserTests {
 /// A complete, unedited `turn` frame payload from a live wave server.
 private let realTurnFrame = #"{"id":"turn-101","role":"assistant","text":"This supersedes the kickoff design in an important way: the flow must avoid interactive `design` or it will park headlessly. I’m recording the corrected shape and writing it back to Asana from the wave root, then I’ll try the stacked implementation dispatch again.\nMemory and Asana are updated; the worker session still exists, but the registry may have cleared if the process exited inside tmux. I’m using the queue as the authority for whether the stacked implementation can start.\nCaptured the corrected review-design result in memory and wrote it back to Asana.\n\nThe important correction is now durable: `greenfield` must be `scaffold -> implement -> run -> gate`, not `scaffold -> design -> ...`, because interactive `design` parks in headless flow execution.\n\nTried to start the stacked implementation worker on commit `7c64bcef1`, but the queue still reports `goals` at worker capacity `1/1`. No new worker launched.","status":"completed","items":[{"type":"command","id":"call_KgomG7XIADii2YrIuFuCY8nL","command":["/bin/zsh -lc \"tmux list-sessions | rg 'lf-jack-heart-goals|148e0e02|68a936f3'\""],"cwd":"/Users/jack/src/loopflow.goals","status":"completed","output":"lf-jack-heart-goals-20260704_1626-68a936f3-25ac-4daf-9579-6206602def88: 1 windows (created Sat Jul  4 16:26:19 2026)\n","exit_code":0,"duration_ms":0},{"type":"command","id":"call_YgukOJma1DKNLCnfcKXxjQgU","command":["/bin/zsh -lc 'lf memory add \"2026-07-04 worker review-design result for Asana 1216257471904678: reshaped scratch/prove-the-language.md at commit 7c64bcef1 after checking actual code. Fixed real design defect: greenfield flow must not chain interactive design because headless flows park on interactive steps (flow.rs:272 -> WaitInteractive). Correct flow is scaffold -> implement -> run -> gate, with scaffold seeding scratch/<branch>.md directly from GOAL. Done gates split: deterministic CI registry test proves scaffold/run/greenfield resolve and greenfield expands with zero interactive steps; manual one-shot probe covers the paid agentic build. Metric is binary: probe dir .lf/steps/ must stay empty.\"'"],"cwd":"/Users/jack/src/loopflow.goals","status":"completed","output":"memory fact added for wave 'goals': 2026-07-04 worker review-design result for Asana 1216257471904678: reshaped scratch/prove-the-language.md at commit 7c64bcef1 after checking actual code. Fixed real design defect: greenfield flow must not chain interactive design because headless flows park on interactive steps (flow.rs:272 -> WaitInteractive). Correct flow is scaffold -> implement -> run -> gate, with scaffold seeding scratch/<branch>.md directly from GOAL. Done gates split: deterministic CI registry test proves scaffold/run/greenfield resolve and greenfield expands with zero interactive steps; manual one-shot probe covers the paid agentic build. Metric is binary: probe dir .lf/steps/ must stay empty.\n","exit_code":0,"duration_ms":0},{"type":"command","id":"call_EeLYzG54t0Z7M3fiEuqw96TA","command":["/bin/zsh -lc \"lf op pm update --wave goals --id 1216257471904678 --title \\\"Prove the language — three reference builds from goals\\\" --notes \\\"Review-design landed in worker run 148e0e02 at commit 7c64bcef1. It corrected the implementation plan against actual flow behavior: headless flows park on interactive design steps, so the greenfield flow must be scaffold -> implement -> run -> gate, with scaffold seeding scratch/<branch>.md from GOAL. Deterministic gate: registry test proves scaffold/run/greenfield resolve and greenfield expands with zero interactive steps. Manual one-shot probe remains outside cargo test. Binary metric: the probe dir's .lf/steps/ stays empty.\\\"\""],"cwd":"/Users/jack/src/loopflow.goals","status":"completed","output":"goals: updated task 1216257471904678\n","exit_code":0,"duration_ms":1186},{"type":"command","id":"call_dTTuy9oEf1I3oPAhYs4W3NSw","command":["/bin/zsh -lc \"lf q worker run goals --flow build --stack 148e0e02-06c3-4657-9040-68c02249dc9f --task \\\"Implement the accepted review-design plan for Asana 1216257471904678 from scratch/prove-the-language.md, building on commit 7c64bcef1. Scope: add first-class builtin scaffold and run prompt steps registered through build.rs; add a greenfield flow that expands to scaffold -> implement -> run -> gate with zero interactive steps; add the deterministic registry test proving scaffold/run/greenfield resolve and greenfield contains no WaitInteractive steps; add scripts/prove_language_cli.sh as a manual one-shot probe from an empty temp dir and a tiny GOAL.md, with the binary success metric that the probe dir's .lf/steps/ remains empty. Do not include the interactive design step. Keep integrate/server and platform-build/rams/mobile probes deferred. Use lf op pm update --wave goals for write-back.\\\"\""],"cwd":"/Users/jack/src/loopflow.goals","status":"failed","output":"Error: wave 'goals' already at worker capacity (1/1)\n","exit_code":1,"duration_ms":0}],"created_at":"2026-07-04T23:35:42.657239Z","from":null}"#
 
-// Composer verb selection: the smallest honest mapping from (mind state, has
+// Composer verb selection: the smallest honest mapping from (flowloop state, has
 // text) to what the primary/secondary buttons do. The view renders this
 // directly, so the table below IS the composer's behavior.
 @Suite("Composer verb selection")
@@ -313,7 +313,7 @@ struct ComposerVerbTests {
         #expect(!empty.primaryEnabled, "the cancel is already in flight")
     }
 
-    @Test("failed behaves like idle: a message revives the mind")
+    @Test("failed behaves like idle: a message revives the flowloop")
     func failedSends() {
         let verbs = composerVerbs(state: .failed, hasText: true)
         #expect(verbs.primary == .send)

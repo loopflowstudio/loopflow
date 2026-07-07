@@ -6,7 +6,7 @@ import Loopflow
 /// wave's chat server through its `.wave-endpoint` pointer, replays + streams the
 /// thread over SSE, and posts messages back through the composer. The composer is
 /// verb-aware — Send while idle, Steer / Interrupt & Send / Interrupt while a turn
-/// runs — keyed off the streamed mind state. When the wave isn't running (no
+/// runs — keyed off the streamed flowloop state. When the wave isn't running (no
 /// pointer file, or the server refuses), it shows a clear not-running state and
 /// keeps polling so it attaches the moment the wave comes up.
 struct WaveChatView: View {
@@ -227,7 +227,7 @@ struct WaveChatView: View {
 
     // MARK: - Composer
     //
-    // The composer is verb-aware: it keys off the streamed mind state.
+    // The composer is verb-aware: it keys off the streamed flowloop state.
     // Idle + text → Send (op=message). Turning + text → Steer into the live
     // turn, with Interrupt & Send one click away. Turning + empty → Interrupt.
     // Verb selection lives in `composerVerbs` (Loopflow), tested there.
@@ -239,7 +239,7 @@ struct WaveChatView: View {
     }
 
     private var verbs: ComposerVerbs {
-        composerVerbs(state: connection?.mindState ?? .idle, hasText: hasText)
+        composerVerbs(state: connection?.flowloopState ?? .idle, hasText: hasText)
     }
 
     private var composer: some View {

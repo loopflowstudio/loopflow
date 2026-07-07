@@ -223,7 +223,7 @@ pub async fn register(config: &RegistryConfig, endpoint: &str) -> StoreResult<Re
         run_id: None,
         parent_session_id: None,
         session_use: SessionUse::WaveAgent,
-        step: "mind".to_string(),
+        step: "flowloop".to_string(),
         agent: "lf".to_string(),
         cwd: config.cwd.clone(),
         argv: vec![
@@ -732,7 +732,7 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::WaveAgent,
-            step: "mind".to_string(),
+            step: "flowloop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
             argv: vec!["lf".to_string(), "wave".to_string(), wave.name().clone()],

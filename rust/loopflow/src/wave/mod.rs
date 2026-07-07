@@ -28,7 +28,7 @@
 //!
 //! Default `lf wave <name>` boots the listener and spawns the resident as a
 //! child `lf` process — keeper spawns tenant, one command, today's UX.
-//! `--no-flowloop` serves a dormant channel (`/health` reads `mind: null`);
+//! `--no-flowloop` serves a dormant channel (`/health` reads `flowloop: null`);
 //! `--flowloop-only` attaches a resident to an existing listener.
 //!
 //! Truth is the per-wave append-only [`journal`] (JSONL under `.lf/journal/
@@ -80,7 +80,7 @@ pub enum FlowloopPolicy {
     /// (respawn ladder, immediate respawn on a human message).
     Spawn,
     /// Serve dormant: pens, folds, and doors only — `/health` reads
-    /// `mind: null` until a resident attaches by hand.
+    /// `flowloop: null` until a resident attaches by hand.
     Dormant,
 }
 
@@ -742,7 +742,7 @@ mod tests {
     }
 
     /// `/health` splits channel liveness from the resident: `status` says
-    /// the channel serves; `mind` is null while no resident was ever spawned
+    /// the channel serves; `flowloop` is null while no resident was ever spawned
     /// or attached (`--no-flowloop` serves dormant), then carries the resident's
     /// state — a dead resident on a live channel reads `serving` + `failed`.
     #[tokio::test]
@@ -750,7 +750,7 @@ mod tests {
         let (base, runtime, _tmp) = boot().await;
         narrate(&runtime, "first");
 
-        // Dormant: no resident ever — mind is null, the channel serves.
+        // Dormant: no resident ever — flowloop is null, the channel serves.
         let body: serde_json::Value = reqwest::get(format!("{base}/health"))
             .await
             .unwrap()
@@ -758,11 +758,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body["status"], "serving", "status is channel liveness");
-        assert!(body["mind"].is_null(), "dormant channel has no flowloop");
+        assert!(
+            body["flowloop"].is_null(),
+            "dormant channel has no flowloop"
+        );
         assert_eq!(body["wave"], "ship");
         assert_eq!(body["turns"], 1);
 
-        // A resident exists: mind reports its state.
+        // A resident exists: flowloop reports its state.
         runtime.set_resident_expected();
         let body: serde_json::Value = reqwest::get(format!("{base}/health"))
             .await
@@ -770,11 +773,11 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert_eq!(body["mind"], "idle", "mind is the resident's state");
+        assert_eq!(body["flowloop"], "idle", "flowloop is the resident's state");
 
         // The resident dies; the channel keeps serving.
         runtime.transition(
-            crate::wave::state::MindState::Failed {
+            crate::wave::state::FlowloopState::Failed {
                 reason: "vendor gone".into(),
             },
             "test",
@@ -786,7 +789,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body["status"], "serving");
-        assert_eq!(body["mind"], "failed");
+        assert_eq!(body["flowloop"], "failed");
     }
 
     /// The resident door end to end over HTTP: auth gates on the token,
@@ -815,7 +818,7 @@ mod tests {
         // A failed flowloop + attach: the fresh resident IS the revival.
         runtime.set_resident_expected();
         runtime.transition(
-            crate::wave::state::MindState::Failed {
+            crate::wave::state::FlowloopState::Failed {
                 reason: "old resident died".into(),
             },
             "test",
@@ -832,7 +835,7 @@ mod tests {
             .unwrap();
         assert_eq!(attach["wave"], "ship");
         assert!(attach["thread_id"].is_null());
-        assert_eq!(runtime.mind_state().name(), "idle", "attach revives");
+        assert_eq!(runtime.flowloop_state().name(), "idle", "attach revives");
 
         // Deltas through the door: a whole turn, in order, one batch.
         let deltas: serde_json::Value = client

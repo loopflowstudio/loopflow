@@ -8,7 +8,7 @@
 //!   attached one (`lf wave <name> --flowloop-only`) by a pid probe on the seat
 //!   the attach door recorded. Death closes whatever turn the resident left
 //!   open (`TurnFinished{Failed}` — the journal never dangles), journals
-//!   `MindState::Failed`, and arms the respawn ladder.
+//!   `FlowloopState::Failed`, and arms the respawn ladder.
 //! - **Respawn ladder.** Process-level auto-revival: attempt N waits the Nth
 //!   rung (5m/15m/45m by default, the last rung repeating; an empty ladder
 //!   disables it). A completed assistant turn resets the ladder. A human
@@ -40,7 +40,7 @@ use crate::wave::journal::MessageOp;
 use crate::wave::registry::process_alive;
 use crate::wave::runtime::{InboxItem, TurnFrame, WaveRuntime};
 use crate::wave::server::ResidentDoor;
-use crate::wave::state::MindState;
+use crate::wave::state::FlowloopState;
 
 /// Default respawn ladder: attempt N (0-based) waits the Nth rung; past the
 /// end, the last rung repeats. Reset by a completed assistant turn.
@@ -139,7 +139,7 @@ pub struct Supervisor {
     spawner: Option<SpawnResident>,
     config: SupervisorConfig,
     inbox_rx: broadcast::Receiver<InboxItem>,
-    state_rx: broadcast::Receiver<MindState>,
+    state_rx: broadcast::Receiver<FlowloopState>,
     turn_rx: broadcast::Receiver<Arc<TurnFrame>>,
     /// Attach signals from the listener's door (see [`SupervisorHandle`]).
     /// The paired sender is kept alive by `handle`, so `recv` never closes.
@@ -226,12 +226,12 @@ impl Supervisor {
                 }
                 state = self.state_rx.recv() => {
                     match state {
-                        Ok(MindState::Idle) => self.interrupt_at = None,
+                        Ok(FlowloopState::Idle) => self.interrupt_at = None,
                         Ok(_) => {}
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             // Resync from the fold: an Idle we missed still
                             // stands down the janitor.
-                            if self.runtime.mind_state() == MindState::Idle {
+                            if self.runtime.flowloop_state() == FlowloopState::Idle {
                                 self.interrupt_at = None;
                             }
                         }
@@ -328,12 +328,12 @@ impl Supervisor {
         }
     }
 
-    /// Journal `MindState::Failed` unless the resident already reported it
+    /// Journal `FlowloopState::Failed` unless the resident already reported it
     /// (the normal failure path reports Failed over the wire, then exits).
     fn mark_failed(&self, reason: &str) {
-        if !matches!(self.runtime.mind_state(), MindState::Failed { .. }) {
+        if !matches!(self.runtime.flowloop_state(), FlowloopState::Failed { .. }) {
             self.runtime.transition(
-                MindState::Failed {
+                FlowloopState::Failed {
                     reason: reason.to_string(),
                 },
                 reason,
@@ -349,7 +349,7 @@ impl Supervisor {
                 // ladder or no ladder ("interrupt & send" included).
                 if self.spawner.is_some()
                     && self.child.is_none()
-                    && matches!(self.runtime.mind_state(), MindState::Failed { .. })
+                    && matches!(self.runtime.flowloop_state(), FlowloopState::Failed { .. })
                 {
                     tracing::info!(
                         wave = self.runtime.name(),
@@ -365,8 +365,8 @@ impl Supervisor {
         if is_interrupt
             && self.interrupt_at.is_none()
             && matches!(
-                self.runtime.mind_state(),
-                MindState::Turning { .. } | MindState::Interrupting { .. }
+                self.runtime.flowloop_state(),
+                FlowloopState::Turning { .. } | FlowloopState::Interrupting { .. }
             )
         {
             self.interrupt_at = Some(Instant::now() + self.config.interrupt_deadline);
@@ -548,7 +548,7 @@ mod tests {
         // First spawn dies instantly → Failed; the ladder respawns at least
         // twice more.
         wait_for("flowloop failed", || {
-            matches!(rt.mind_state(), MindState::Failed { .. })
+            matches!(rt.flowloop_state(), FlowloopState::Failed { .. })
         })
         .await;
         assert!(rt.resident_expected(), "spawn marks the resident expected");
@@ -559,7 +559,7 @@ mod tests {
         assert!(
             events.iter().any(|e| matches!(
                 &e.kind,
-                EventKind::MindState { to: MindState::Failed { reason }, .. }
+                EventKind::FlowloopState { to: FlowloopState::Failed { reason }, .. }
                     if reason.contains("resident process exited")
             )),
             "the death is journaled with its reason"
@@ -586,7 +586,7 @@ mod tests {
             text: "half".into(),
         });
         wait_for("flowloop failed", || {
-            matches!(rt.mind_state(), MindState::Failed { .. })
+            matches!(rt.flowloop_state(), FlowloopState::Failed { .. })
         })
         .await;
         task.abort();
@@ -602,7 +602,7 @@ mod tests {
             cost_usd: None,
         });
         assert_eq!(rt.thread_snapshot().len(), 1);
-        assert!(matches!(rt.mind_state(), MindState::Failed { .. }));
+        assert!(matches!(rt.flowloop_state(), FlowloopState::Failed { .. }));
     }
 
     /// A human message revives a dead resident immediately, even when the
@@ -624,7 +624,7 @@ mod tests {
         );
 
         wait_for("flowloop failed", || {
-            matches!(rt.mind_state(), MindState::Failed { .. })
+            matches!(rt.flowloop_state(), FlowloopState::Failed { .. })
         })
         .await;
         let before = spawns.load(Ordering::SeqCst);
@@ -660,7 +660,7 @@ mod tests {
                 .is_some_and(|t| t.status == Lifecycle::Interrupted)
         })
         .await;
-        assert_eq!(rt.mind_state(), MindState::Idle);
+        assert_eq!(rt.flowloop_state(), FlowloopState::Idle);
         task.abort();
 
         // The journal is closed; a replay agrees.
@@ -690,7 +690,7 @@ mod tests {
 
         // The spawned resident dies; the ladder arms (120ms out).
         wait_for("flowloop failed", || {
-            matches!(rt.mind_state(), MindState::Failed { .. })
+            matches!(rt.flowloop_state(), FlowloopState::Failed { .. })
         })
         .await;
         let before = spawns.load(Ordering::SeqCst);
@@ -733,7 +733,7 @@ mod tests {
         );
 
         wait_for("flowloop failed", || {
-            matches!(rt.mind_state(), MindState::Failed { .. })
+            matches!(rt.flowloop_state(), FlowloopState::Failed { .. })
         })
         .await;
         let before = spawns.load(Ordering::SeqCst);
@@ -763,7 +763,7 @@ mod tests {
             tokio::spawn(Supervisor::new(rt.clone(), door.clone(), None, config(Vec::new())).run());
 
         wait_for("flowloop failed via probe", || {
-            matches!(rt.mind_state(), MindState::Failed { .. })
+            matches!(rt.flowloop_state(), FlowloopState::Failed { .. })
         })
         .await;
         assert!(door.seat_pid().is_none(), "the seat is freed");

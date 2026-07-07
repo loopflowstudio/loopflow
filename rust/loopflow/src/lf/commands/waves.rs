@@ -4,7 +4,7 @@
 //! center (see `scratch/eventing.md`): `lf ls` lists every wave the registry
 //! knows — running and stopped alike (`list_waves(None)`) — and marks which
 //! have a live server answering; `lf status <wave>` reports one wave's runs,
-//! attention, and (when live) its mind state. Both are pure readers over the
+//! attention, and (when live) its flowloop state. Both are pure readers over the
 //! shared SQLite ledger; `--json` is the machine-readable snapshot Loopflow's
 //! dashboard reads. A live wave has an endpoint you can subscribe to for
 //! motion (`GET /events`); a stopped one is a row with no endpoint — visible,
@@ -50,14 +50,14 @@ pub struct WaveSnapshot {
 }
 
 /// `lf status <wave>` snapshot: the wave plus its runs, attention, and — when
-/// a server is live — its mind state. Wire type; no serde defaults.
+/// a server is live — its flowloop state. Wire type; no serde defaults.
 #[derive(Debug, Serialize)]
 pub struct WaveStatusSnapshot {
     pub wave: WaveSnapshot,
-    /// Resident mind state name from the live server's `/health`
+    /// Resident flowloop state name from the live server's `/health`
     /// (`idle | turning | interrupting | failed`), `null` when stopped or
     /// serving dormant.
-    pub mind: Option<String>,
+    pub flowloop: Option<String>,
     pub runs: Vec<RunSnapshot>,
     pub attention: Vec<AttentionSnapshot>,
 }
@@ -114,7 +114,7 @@ pub fn ls(json: bool) -> Result<()> {
     })
 }
 
-/// `lf status <wave>` — one wave's runs, attention, and live mind state.
+/// `lf status <wave>` — one wave's runs, attention, and live flowloop state.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let name = wave
         .map(str::to_string)
@@ -131,8 +131,8 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
             .ok_or_else(|| anyhow!("wave '{name}' is not in the registry"))?;
         let snapshot = snapshot_wave(&store, &wave).await?;
-        let mind = match &snapshot.endpoint {
-            Some(endpoint) => mind_state(endpoint).await,
+        let flowloop = match &snapshot.endpoint {
+            Some(endpoint) => flowloop_state(endpoint).await,
             None => None,
         };
         let runs = store
@@ -153,7 +153,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .collect::<Vec<_>>();
         let status = WaveStatusSnapshot {
             wave: snapshot,
-            mind,
+            flowloop,
             runs,
             attention,
         };
@@ -232,8 +232,8 @@ fn ambient_wave() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Ask a live server for its resident mind state (`/health` `mind` field).
-async fn mind_state(endpoint: &str) -> Option<String> {
+/// Ask a live server for its resident flowloop state (`/health` `flowloop` field).
+async fn flowloop_state(endpoint: &str) -> Option<String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
@@ -246,7 +246,7 @@ async fn mind_state(endpoint: &str) -> Option<String> {
         .json()
         .await
         .ok()?;
-    body.get("mind")
+    body.get("flowloop")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
 }
@@ -311,15 +311,15 @@ fn print_status(status: &WaveStatusSnapshot) {
     let colors = Colors::default();
     let wave = &status.wave;
     println!(
-        "{bold}{name}{reset}  {status}{mind}",
+        "{bold}{name}{reset}  {status}{flowloop}",
         bold = colors.bold,
         reset = colors.reset,
         name = wave.name,
         status = wave.status,
-        mind = status
-            .mind
+        flowloop = status
+            .flowloop
             .as_deref()
-            .map(|m| format!("  mind:{m}"))
+            .map(|m| format!("  flowloop:{m}"))
             .unwrap_or_default(),
     );
     println!("  goal      {}", wave.goal);
@@ -412,7 +412,7 @@ mod tests {
                 created_at: None,
                 parent_wave_id: None,
             },
-            mind: None,
+            flowloop: None,
             runs: vec![RunSnapshot {
                 id: "run-1".into(),
                 flow: "implement".into(),
@@ -437,7 +437,7 @@ mod tests {
         };
         let value: serde_json::Value = serde_json::to_value(&status).expect("serialize");
         assert_eq!(value["wave"]["name"], "goals");
-        assert_eq!(value["mind"], serde_json::Value::Null);
+        assert_eq!(value["flowloop"], serde_json::Value::Null);
         assert_eq!(value["runs"][0]["flow"], "implement");
         assert_eq!(value["attention"][0]["kind"], "interactive");
     }

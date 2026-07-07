@@ -10,7 +10,7 @@ use loopflow::chat::types::{ConversationItem, Lifecycle};
 use loopflow::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
 use loopflow::wave::runtime::WaveRuntime;
 use loopflow::wave::server::{self, ResidentDoor, SubagentDoor};
-use loopflow::wave::state::MindState;
+use loopflow::wave::state::FlowloopState;
 use loopflow::wave::wire::ResidentDelta;
 
 /// One complete resident turn, as the flowloop emits it after a pass: an
@@ -83,7 +83,7 @@ async fn restart_replays_thread_and_turn_ids_continue() {
         before,
         "restart keeps the full thread"
     );
-    assert_eq!(rt.mind_state(), MindState::Idle);
+    assert_eq!(rt.flowloop_state(), FlowloopState::Idle);
 
     // And new turn ids continue the journal's seq domain monotonically.
     let max_before = before.iter().map(|t| turn_seq(&t.id)).max().unwrap();
@@ -135,9 +135,9 @@ async fn crashed_open_turn_is_finalized_failed_on_reboot() {
                 phase: None,
             },
         });
-        journal.append(|_| EventKind::MindState {
-            from: MindState::Idle,
-            to: MindState::Turning {
+        journal.append(|_| EventKind::FlowloopState {
+            from: FlowloopState::Idle,
+            to: FlowloopState::Turning {
                 turn_id: "turn-1".into(),
             },
             reason: "turn opened".into(),
@@ -153,7 +153,11 @@ async fn crashed_open_turn_is_finalized_failed_on_reboot() {
         "janitor closed the crash tail"
     );
     assert_eq!(thread[0].text, "half a thought");
-    assert_eq!(rt.mind_state(), MindState::Idle, "janitor settled the mind");
+    assert_eq!(
+        rt.flowloop_state(),
+        FlowloopState::Idle,
+        "janitor settled the flowloop"
+    );
 }
 
 #[tokio::test]
@@ -196,27 +200,27 @@ async fn thread_started_survives_a_restart() {
 }
 
 #[tokio::test]
-async fn illegal_mind_transition_is_refused() {
+async fn illegal_flowloop_transition_is_refused() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
 
     assert!(!rt.transition(
-        MindState::Interrupting {
+        FlowloopState::Interrupting {
             turn_id: "turn-1".into()
         },
         "nothing to interrupt"
     ));
-    assert_eq!(rt.mind_state(), MindState::Idle, "state untouched");
+    assert_eq!(rt.flowloop_state(), FlowloopState::Idle, "state untouched");
     // Refused moves leave no trace in the journal.
     let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("open journal");
     assert!(events.is_empty());
 }
 
 /// `/health` splits channel liveness (`status`, always `serving`) from the
-/// resident's condition (`mind`: null while no resident was ever spawned or
-/// attached, then the mind-state name).
+/// resident's condition (`flowloop`: null while no resident was ever spawned or
+/// attached, then the flowloop-state name).
 #[tokio::test]
-async fn health_reports_channel_liveness_and_the_mind_state() {
+async fn health_reports_channel_liveness_and_the_flowloop_state() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
 
@@ -240,7 +244,10 @@ async fn health_reports_channel_liveness_and_the_mind_state() {
         .await
         .unwrap();
     assert_eq!(body["status"], "serving");
-    assert!(body["mind"].is_null(), "no resident yet: a dormant channel");
+    assert!(
+        body["flowloop"].is_null(),
+        "no resident yet: a dormant channel"
+    );
 
     rt.set_resident_expected();
     let body: serde_json::Value = reqwest::get(format!("http://{addr}/health"))
@@ -249,10 +256,10 @@ async fn health_reports_channel_liveness_and_the_mind_state() {
         .json()
         .await
         .unwrap();
-    assert_eq!(body["mind"], "idle");
+    assert_eq!(body["flowloop"], "idle");
 
     rt.transition(
-        MindState::Turning {
+        FlowloopState::Turning {
             turn_id: "turn-1".into(),
         },
         "test turn",
@@ -264,5 +271,5 @@ async fn health_reports_channel_liveness_and_the_mind_state() {
         .await
         .unwrap();
     assert_eq!(body["status"], "serving", "channel liveness is constant");
-    assert_eq!(body["mind"], "turning");
+    assert_eq!(body["flowloop"], "turning");
 }

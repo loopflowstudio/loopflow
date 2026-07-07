@@ -5,7 +5,7 @@
 //! per-machine, never committed): the wave channel's under the origin repo,
 //! a work-line channel's inside its own worktree (see
 //! [`crate::wave::channel`]). Every projection is a fold over it: the
-//! thread is the conversation events, the flowloop state is the last `MindState`
+//! thread is the conversation events, the flowloop state is the last `FlowloopState`
 //! event, the message queue is `UserMessage`s not yet named in any
 //! `TurnStarted.answers` or `TurnSteered.answers`. Store is truth; the SSE
 //! broadcast bus is liveness.
@@ -36,7 +36,7 @@ use time::OffsetDateTime;
 
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::wave::state::MindState;
+use crate::wave::state::FlowloopState;
 
 /// Current journal format version, stamped on every line.
 const FORMAT_VERSION: u32 = 1;
@@ -221,9 +221,9 @@ pub enum EventKind {
         vendor: String,
         thread_id: String,
     },
-    MindState {
-        from: MindState,
-        to: MindState,
+    FlowloopState {
+        from: FlowloopState,
+        to: FlowloopState,
         reason: String,
     },
     // -- orchestration (observations, not commands) --
@@ -462,7 +462,7 @@ impl Narrator {
             EventKind::ThreadStarted { vendor, thread_id } => {
                 info(format!("flowloop thread {vendor} {thread_id}"))
             }
-            EventKind::MindState { from, to, reason } => {
+            EventKind::FlowloopState { from, to, reason } => {
                 info(format!("state {} → {} ({reason})", from.name(), to.name()))
             }
             EventKind::RunObserved {
@@ -713,8 +713,8 @@ pub struct ThreadFold {
     /// Turns started but never finished — the crash tail. The boot janitor
     /// finalizes these as `Failed`.
     pub open: Vec<ChatTurn>,
-    /// Last `MindState` transition's destination; `Idle` if none.
-    pub state: MindState,
+    /// Last `FlowloopState` transition's destination; `Idle` if none.
+    pub state: FlowloopState,
     /// Last `ThreadStarted`'s vendor thread id — the resume handle for the
     /// flowloop's persistent vendor session.
     pub thread_id: Option<String>,
@@ -808,7 +808,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut turns: Vec<ChatTurn> = Vec::new();
     // In-order list, not a map: the crash tail keeps its start order.
     let mut open: Vec<ChatTurn> = Vec::new();
-    let mut state = MindState::Idle;
+    let mut state = FlowloopState::Idle;
     let mut thread_id: Option<String> = None;
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
     let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
@@ -877,7 +877,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 claims_by_open_turn.remove(turn_id);
                 turns.push(turn);
             }
-            EventKind::MindState { to, .. } => {
+            EventKind::FlowloopState { to, .. } => {
                 state = to.clone();
             }
             EventKind::ThreadStarted {
@@ -1132,9 +1132,9 @@ mod tests {
                 vendor: "codex".into(),
                 thread_id: "thread-abc".into(),
             },
-            EventKind::MindState {
-                from: MindState::Idle,
-                to: MindState::Turning {
+            EventKind::FlowloopState {
+                from: FlowloopState::Idle,
+                to: FlowloopState::Turning {
                     turn_id: "turn-2".into(),
                 },
                 reason: "turn opened".into(),
@@ -1267,9 +1267,9 @@ mod tests {
                 vendor: "codex".into(),
                 thread_id: "thread-abc".into(),
             },
-            EventKind::MindState {
-                from: MindState::Idle,
-                to: MindState::Turning {
+            EventKind::FlowloopState {
+                from: FlowloopState::Idle,
+                to: FlowloopState::Turning {
                     turn_id: "turn-2".into(),
                 },
                 reason: "turn opened".into(),
@@ -1355,9 +1355,9 @@ mod tests {
             "chat ← (steer) \"focus on the journal tests first\" (msg-3)"
         );
 
-        let n = render(EventKind::MindState {
-            from: MindState::Idle,
-            to: MindState::Turning {
+        let n = render(EventKind::FlowloopState {
+            from: FlowloopState::Idle,
+            to: FlowloopState::Turning {
                 turn_id: "turn-4".into(),
             },
             reason: "turn opened".into(),
@@ -1566,9 +1566,9 @@ mod tests {
             answers: vec![],
         }));
         let turn_id = "turn-2".to_string();
-        events.push(journal.append(|_| EventKind::MindState {
-            from: MindState::Idle,
-            to: MindState::Turning {
+        events.push(journal.append(|_| EventKind::FlowloopState {
+            from: FlowloopState::Idle,
+            to: FlowloopState::Turning {
                 turn_id: turn_id.clone(),
             },
             reason: "turn opened".into(),
@@ -1622,7 +1622,7 @@ mod tests {
         assert_eq!(assistant.status, Lifecycle::Completed);
         assert_eq!(
             fold.state,
-            MindState::Turning {
+            FlowloopState::Turning {
                 turn_id: turn_id.clone()
             }
         );

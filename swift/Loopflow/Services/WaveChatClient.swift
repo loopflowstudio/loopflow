@@ -43,7 +43,7 @@ public enum WaveEndpoint {
 /// because `URLSession.AsyncBytes.lines` silently drops empty lines — and the
 /// empty line is precisely what terminates an SSE frame. (Observed live: with
 /// `.lines`, no frame boundary ever fired, so nothing the server streamed —
-/// replay, turns, mind state — reached the UI.) Comment lines (`:` keep-alive
+/// replay, turns, flowloop state — reached the UI.) Comment lines (`:` keep-alive
 /// pings) drop; `event:` names the pending frame; `data:` lines accumulate,
 /// joined by `\n`; a blank line emits the frame when it carries data.
 struct SSEFrameParser {
@@ -87,9 +87,9 @@ struct SSEFrameParser {
     }
 }
 
-/// The wave mind's live state, streamed as `state` SSE events (the event data
+/// The wave flowloop's live state, streamed as `state` SSE events (the event data
 /// is the bare state name). The composer keys its verb off it.
-public enum WaveMindState: String, Equatable, Sendable {
+public enum WaveFlowloopState: String, Equatable, Sendable {
     case idle
     case turning
     case interrupting
@@ -99,7 +99,7 @@ public enum WaveMindState: String, Equatable, Sendable {
 /// How a posted message asks to be handled — the required `op` of the
 /// `POST /messages {op, text}` body. Explicit at the API, never inferred.
 public enum WaveMessageOp: String, Equatable, Sendable {
-    /// Queued; the mind's next turn answers it.
+    /// Queued; the flowloop's next turn answers it.
     case message
     /// Into the live turn (server degrades to a queued message when the
     /// harness can't steer or nothing is turning).
@@ -109,7 +109,7 @@ public enum WaveMessageOp: String, Equatable, Sendable {
     case interrupt
 }
 
-/// What the composer's buttons should do for a mind state + text presence.
+/// What the composer's buttons should do for a flowloop state + text presence.
 public enum ComposerVerb: Equatable, Sendable {
     case send            // POST op=message
     case steer           // POST op=steer
@@ -129,7 +129,7 @@ public struct ComposerVerbs: Equatable, Sendable {
 /// Verb selection: idle+text = Send; turning+text = Steer (Interrupt & Send
 /// one step away); turning+empty = Interrupt. While interrupting, text
 /// degrades to a queued Send and a bare re-interrupt is pointless (disabled).
-public func composerVerbs(state: WaveMindState, hasText: Bool) -> ComposerVerbs {
+public func composerVerbs(state: WaveFlowloopState, hasText: Bool) -> ComposerVerbs {
     switch (state, hasText) {
     case (.turning, true):
         return ComposerVerbs(primary: .steer, primaryEnabled: true, secondary: .interruptAndSend)
@@ -143,7 +143,7 @@ public func composerVerbs(state: WaveMindState, hasText: Bool) -> ComposerVerbs 
 }
 
 /// `POST /messages {op, text}` response: the appended user turn (null for a
-/// bare interrupt) plus the mind-state name at acceptance. Mirrors Rust
+/// bare interrupt) plus the flowloop-state name at acceptance. Mirrors Rust
 /// `PostMessageResponse` (wave/server.rs); pinned by the
 /// `post_message_response.json` fixture in ContractTests.
 struct PostMessageResponse: Decodable {
@@ -197,9 +197,9 @@ public final class WaveChatConnection {
 
     public private(set) var turns: [ChatTurn] = []
     public private(set) var phase: Phase = .idle
-    /// Last mind state seen — sent once on subscribe, again on every
+    /// Last flowloop state seen — sent once on subscribe, again on every
     /// transition, and echoed by `POST /messages` responses.
-    public private(set) var mindState: WaveMindState = .idle
+    public private(set) var flowloopState: WaveFlowloopState = .idle
     /// Last `memory` frame's summary — the wave's most recent MEMORY.md
     /// curation. Live-only (no replay); exposed for the UI to adopt later.
     public private(set) var memorySummary: String?
@@ -262,8 +262,8 @@ public final class WaveChatConnection {
         if let turn = posted.turn {
             upsert(turn)
         }
-        if let state = WaveMindState(rawValue: posted.state) {
-            mindState = state
+        if let state = WaveFlowloopState(rawValue: posted.state) {
+            flowloopState = state
         }
     }
 
@@ -306,9 +306,9 @@ public final class WaveChatConnection {
         // A fresh stream replays the server's full transcript. Drop the previous
         // generation first: after a server restart, turn ids and sequences start
         // over, and stale high-sequence turns would interleave with the replay.
-        // The mind state resets too; the server's first frame is a `state` event.
+        // The flowloop state resets too; the server's first frame is a `state` event.
         turns = []
-        mindState = .idle
+        flowloopState = .idle
         lastOp = nil
         phase = .live
 
@@ -324,7 +324,7 @@ public final class WaveChatConnection {
     }
 
     /// One SSE frame off `/events`. Three event names: `state` carries the
-    /// bare mind-state name (sent on subscribe and on every transition);
+    /// bare flowloop-state name (sent on subscribe and on every transition);
     /// `turn` carries a whole turn — re-sent under the same id as it grows,
     /// then a terminal frame at finalization, every frame replacing the
     /// previous state of its id; `memory` carries a MEMORY.md curation
@@ -337,8 +337,8 @@ public final class WaveChatConnection {
     /// debug — never silent. Internal for tests.
     func handle(event: String, data: String) {
         if event == "state" {
-            guard let state = WaveMindState(rawValue: data) else { return }
-            mindState = state
+            guard let state = WaveFlowloopState(rawValue: data) else { return }
+            flowloopState = state
             return
         }
         if event == "memory" {

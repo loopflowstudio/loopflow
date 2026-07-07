@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use loopflow::chat::turns::{ChatRole, ChatTurn};
 use loopflow::chat::types::{ConversationItem, Lifecycle};
 use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, UsageReportDto, WaveDto};
-use loopflow::wave::state::MindState;
+use loopflow::wave::state::FlowloopState;
 use loopflow::wave::wire::{
     AttachRequest, AttachResponse, ContextResponse, PostDeltasRequest, ResidentDelta,
     ResidentStateTo,
@@ -172,7 +172,7 @@ fn usage_report_fixture_pins_repo_provider_shape() {
 
 /// `POST /messages` response — `{turn, state}` (wave/server.rs
 /// `PostMessageResponse`). The same fixture Loopflow's ContractTests decodes;
-/// `turn` must parse as a `ChatTurn` and `state` must be a mind-state name.
+/// `turn` must parse as a `ChatTurn` and `state` must be a flowloop-state name.
 #[test]
 fn post_message_response_fixture_pins_wave_chat_reply() {
     let value = load_fixture("post_message_response.json");
@@ -189,12 +189,12 @@ fn post_message_response_fixture_pins_wave_chat_reply() {
         value["turn"]
     );
 
-    // `state` carries the mind-state name at acceptance; it must be a name
-    // MindState actually produces (renaming a state fails here AND in Swift).
+    // `state` carries the flowloop-state name at acceptance; it must be a name
+    // FlowloopState actually produces (renaming a state fails here AND in Swift).
     let state = value["state"].as_str().expect("state is a string");
     assert_eq!(
         state,
-        MindState::Turning {
+        FlowloopState::Turning {
             turn_id: turn.id.clone(),
         }
         .name()
@@ -274,14 +274,14 @@ fn resident_deltas_fixture_round_trips_the_wire() {
     ));
     assert!(matches!(
         &request.deltas[8],
-        ResidentDelta::MindState {
+        ResidentDelta::FlowloopState {
             to: ResidentStateTo::Interrupting,
             ..
         }
     ));
     assert!(matches!(
         &request.deltas[9],
-        ResidentDelta::MindState { to: ResidentStateTo::Failed, reason }
+        ResidentDelta::FlowloopState { to: ResidentStateTo::Failed, reason }
             if reason.contains("codex_disconnected")
     ));
 
@@ -355,11 +355,11 @@ fn resident_door_fixture_round_trips_attach_and_context() {
 
 /// The SSE `state` vocabulary (`idle | turning | interrupting | failed`)
 /// crosses the boundary as bare names. The fixture pins the shared list:
-/// renaming a `MindState` variant fails here, and Swift's ContractTests pin
-/// the same file against `WaveMindState`.
+/// renaming a `FlowloopState` variant fails here, and Swift's ContractTests pin
+/// the same file against `WaveFlowloopState`.
 #[test]
-fn wave_mind_states_fixture_pins_the_state_vocabulary() {
-    let value = load_fixture("wave_mind_states.json");
+fn wave_flowloop_states_fixture_pins_the_state_vocabulary() {
+    let value = load_fixture("wave_flowloop_states.json");
     let fixture_names: Vec<&str> = value["states"]
         .as_array()
         .expect("states array")
@@ -368,17 +368,17 @@ fn wave_mind_states_fixture_pins_the_state_vocabulary() {
         .collect();
 
     let variants = [
-        MindState::Idle,
-        MindState::Turning {
+        FlowloopState::Idle,
+        FlowloopState::Turning {
             turn_id: "turn-1".to_string(),
         },
-        MindState::Interrupting {
+        FlowloopState::Interrupting {
             turn_id: "turn-1".to_string(),
         },
-        MindState::Failed {
+        FlowloopState::Failed {
             reason: "dead".to_string(),
         },
     ];
-    let names: Vec<&str> = variants.iter().map(MindState::name).collect();
+    let names: Vec<&str> = variants.iter().map(FlowloopState::name).collect();
     assert_eq!(fixture_names, names);
 }

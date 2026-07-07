@@ -51,16 +51,16 @@ public struct RegistryQuery: Sendable {
     }
 
     /// One wave's runs and attention (its durable history from the ledger),
-    /// plus the live mind state when a server is answering. Feeds `RunStore`
+    /// plus the live flowloop state when a server is answering. Feeds `RunStore`
     /// and `AttentionStore` for the focused wave.
     public func status(wave: String, waveId: String, cwd: String?) async throws
-        -> (runs: [Run], attention: [AttentionItem], mind: String?) {
+        -> (runs: [Run], attention: [AttentionItem], flowloop: String?) {
         let stdout = try await run(["status", wave, "--json"], cwd)
         let snapshot = try Self.decode(WaveStatusSnapshot.self, from: stdout)
         let repo = snapshot.wave.repo
         let runs = snapshot.runs.map { $0.toRun(waveId: waveId, repo: repo) }
         let attention = snapshot.attention.map { $0.toItem(waveId: waveId) }
-        return (runs, attention, snapshot.mind)
+        return (runs, attention, snapshot.flowloop)
     }
 
     /// The recent-run window across every wave on the machine — the ledger the
@@ -132,7 +132,7 @@ struct WaveSnapshot: Decodable {
 /// `lf status <wave>` snapshot. Mirrors Rust `WaveStatusSnapshot`.
 struct WaveStatusSnapshot: Decodable {
     let wave: WaveSnapshot
-    let mind: String?
+    let flowloop: String?
     let runs: [RunSnapshot]
     let attention: [AttentionSnapshot]
 }

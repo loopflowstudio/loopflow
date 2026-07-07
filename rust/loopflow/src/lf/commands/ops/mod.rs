@@ -137,7 +137,7 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
 /// operator's fresh-start button.
 ///
 /// Loopflow launches every wave server and worker as an `lf-`-prefixed tmux
-/// session, so killing those takes down the wave minds too (tmux SIGHUPs the
+/// session, so killing those takes down the wave flowloops too (tmux SIGHUPs the
 /// session's process group). Stale `.wave-endpoint` pointers under this repo's
 /// `wave/` are then removed so nothing dangles; lfd reconciles its own
 /// registry rows on next boot.

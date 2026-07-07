@@ -8,7 +8,7 @@
 //! the chat journal riding every pass's seed, never a vendor thread.
 //! Everything the flowloop does surfaces as [`ResidentDelta`]s sent through
 //! the listener's resident door, where the journal, the open-turn snapshot,
-//! SSE broadcast, and `MindState` transitions live.
+//! SSE broadcast, and `FlowloopState` transitions live.
 //!
 //! # Scheduling
 //! Input is the wave's `/events?inbox=true` subscription, parsed into
@@ -37,7 +37,7 @@
 //! A failed pass (spawn failure, nonzero exit, timeout) finishes its turn
 //! `Failed` and returns the flowloop to idle.
 //! [`MAX_CONSECUTIVE_PASS_FAILURES`] consecutive failures FAIL THE FLOWLOOP:
-//! the resident reports `MindState::Failed` over the wire and
+//! the resident reports `FlowloopState::Failed` over the wire and
 //! [`run_flowloop`] returns an error — the process exits nonzero and the
 //! LISTENER's supervisor owns revival (the process-level respawn ladder; a
 //! human message respawns immediately). A dead flowloop is a dead process —
@@ -270,7 +270,7 @@ type SpawnPass =
     Box<dyn Fn(&Path, &str, Option<u32>) -> std::io::Result<tokio::process::Child> + Send>;
 
 /// Run the wave flowloop until the listener disappears (`Ok`) or the
-/// flowloop fails (`Err`, after reporting `MindState::Failed` over the wire).
+/// flowloop fails (`Err`, after reporting `FlowloopState::Failed` over the wire).
 ///
 /// # Errors
 /// Flowloop failure only — the caller exits the process nonzero so the
@@ -551,7 +551,7 @@ impl WaveFlowloop {
         &mut self,
         wait_task: &mut tokio::task::JoinHandle<std::io::Result<std::process::Output>>,
     ) {
-        self.send(vec![ResidentDelta::MindState {
+        self.send(vec![ResidentDelta::FlowloopState {
             to: ResidentStateTo::Interrupting,
             reason: "user interrupt".to_string(),
         }])
@@ -618,7 +618,7 @@ impl WaveFlowloop {
             reason,
             "wave flowloop failed; reporting and exiting"
         );
-        self.send(vec![ResidentDelta::MindState {
+        self.send(vec![ResidentDelta::FlowloopState {
             to: ResidentStateTo::Failed,
             reason: reason.to_string(),
         }])
@@ -658,7 +658,7 @@ mod tests {
     use crate::wave::journal::{journal_path, Attribution, EventKind, Journal};
     use crate::wave::runtime::WaveRuntime;
     use crate::wave::server::{self, ResidentDoor};
-    use crate::wave::state::MindState;
+    use crate::wave::state::FlowloopState;
 
     /// The rig: a REAL listener (runtime + router with the resident door)
     /// and a resident (subscription follower + `run_flowloop_with` and a
@@ -1091,7 +1091,7 @@ mod tests {
     // -- Failure and teardown --
 
     /// The failure cap ends the RESIDENT: `run_flowloop` returns an error
-    /// after reporting `MindState::Failed` over the wire. No in-process limbo
+    /// after reporting `FlowloopState::Failed` over the wire. No in-process limbo
     /// — revival is the listener supervisor's respawn (tested in
     /// supervisor.rs).
     #[tokio::test]
@@ -1099,10 +1099,10 @@ mod tests {
         let mut loop_ = boot(Duration::from_millis(30), "exit 1").await;
         // Heartbeats keep opening passes; every pass exits nonzero.
         wait_for("flowloop failed", || {
-            matches!(loop_.runtime.mind_state(), MindState::Failed { .. })
+            matches!(loop_.runtime.flowloop_state(), FlowloopState::Failed { .. })
         })
         .await;
-        let MindState::Failed { reason } = loop_.runtime.mind_state() else {
+        let FlowloopState::Failed { reason } = loop_.runtime.flowloop_state() else {
             unreachable!()
         };
         assert!(
@@ -1148,7 +1148,7 @@ mod tests {
         })
         .await;
         wait_for("back to idle", || {
-            loop_.runtime.mind_state() == MindState::Idle
+            loop_.runtime.flowloop_state() == FlowloopState::Idle
         })
         .await;
     }
@@ -1162,11 +1162,14 @@ mod tests {
             .runtime
             .deliver_user_message("start".into(), MessageOp::Message);
         wait_for("pass spawned", || loop_.pass_count() == 1).await;
-        wait_for("turning", || loop_.runtime.mind_state().name() == "turning").await;
+        wait_for("turning", || {
+            loop_.runtime.flowloop_state().name() == "turning"
+        })
+        .await;
 
         loop_.runtime.deliver_interrupt();
         wait_for("idle again", || {
-            loop_.runtime.mind_state() == MindState::Idle
+            loop_.runtime.flowloop_state() == FlowloopState::Idle
         })
         .await;
 
@@ -1182,7 +1185,7 @@ mod tests {
             .journal_events()
             .iter()
             .filter_map(|kind| match kind {
-                EventKind::MindState { from, to, .. } => {
+                EventKind::FlowloopState { from, to, .. } => {
                     Some((from.name().to_string(), to.name().to_string()))
                 }
                 _ => None,

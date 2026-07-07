@@ -44,12 +44,12 @@
       "ids": ["msg-6"]
     },
     {
-      "kind": "mind_state",
+      "kind": "flowloop_state",
       "to": "interrupting",
       "reason": "user interrupt"
     },
     {
-      "kind": "mind_state",
+      "kind": "flowloop_state",
       "to": "failed",
       "reason": "harness disconnected: codex_disconnected"
     }

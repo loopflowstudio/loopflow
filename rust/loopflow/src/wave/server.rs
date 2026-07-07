@@ -19,12 +19,12 @@
 //! child journal; doors are name-addressed.
 //!
 //! Wire contract (snake_case, stable — a Loopflow worker builds against it):
-//! - `GET /health` → `{status, mind, wave, turns, workers, uptime_seconds}`;
+//! - `GET /health` → `{status, flowloop, wave, turns, workers, uptime_seconds}`;
 //!   `status` is CHANNEL liveness — always `serving` while this process
-//!   answers; `mind` is the resident's state (`idle | turning | interrupting
+//!   answers; `flowloop` is the resident's state (`idle | turning | interrupting
 //!   | failed`), or null while no resident has ever been spawned or attached
 //!   (`--no-flowloop` serves dormant); a served channel whose resident died reads
-//!   `status: "serving", mind: "failed"`. `workers` counts this wave's
+//!   `status: "serving", flowloop: "failed"`. `workers` counts this wave's
 //!   observed in-flight worker runs.
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
 //!   `running`), if one is in progress, after the finalized thread. Optional
@@ -69,7 +69,7 @@
 //! - The resident door (token-gated via the `x-lf-resident-token` header —
 //!   401 without this boot's token):
 //!   - `POST /resident/attach {pid}` → `{wave, thread_id}` — registers the
-//!     resident's pid for liveness and revives a `failed` mind (a fresh
+//!     resident's pid for liveness and revives a `failed` flowloop (a fresh
 //!     resident IS the revival).
 //!   - `POST /resident/deltas {deltas: [...]}` → `{accepted}` — ordered turn
 //!     deltas, applied to the journal fold
@@ -140,7 +140,7 @@ use crate::wave::channel::tagged_turn_json;
 use crate::wave::journal::{Attribution, MessageOp, PendingMessage};
 use crate::wave::registry::{process_alive, StoreObserver};
 use crate::wave::runtime::{InboxItem, WaveRuntime};
-use crate::wave::state::MindState;
+use crate::wave::state::FlowloopState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
     AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, OpFrame,
@@ -293,12 +293,12 @@ impl SubagentDoor {
 #[derive(Debug, Serialize)]
 struct HealthBody {
     /// Channel liveness: always `"serving"` while this process answers. The
-    /// resident's condition is `mind` — a served channel whose resident died
-    /// is `status: "serving", mind: "failed"`.
+    /// resident's condition is `flowloop` — a served channel whose resident
+    /// died is `status: "serving", flowloop: "failed"`.
     status: String,
-    /// Resident (mind) state name, or null for a channel with no resident
+    /// Resident flowloop state name, or null for a channel with no resident
     /// (a dormant `--no-flowloop` channel, or before any resident attaches).
-    mind: Option<String>,
+    flowloop: Option<String>,
     wave: String,
     turns: usize,
     /// Workers observed in flight for this wave (dispatch is daemonless —
@@ -460,15 +460,15 @@ pub fn router(
 }
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
-    // `mind` is null until a resident has ever been spawned or attached —
+    // `flowloop` is null until a resident has ever been spawned or attached —
     // a dormant channel (`--no-flowloop`) has no flowloop to report on.
-    let mind = state
+    let flowloop = state
         .runtime
         .resident_expected()
-        .then(|| state.runtime.mind_state().name().to_string());
+        .then(|| state.runtime.flowloop_state().name().to_string());
     Json(HealthBody {
         status: "serving".to_string(),
-        mind,
+        flowloop,
         wave: state.runtime.name().to_string(),
         turns: state.runtime.thread_len(),
         workers: state.runtime.in_flight_workers().len(),
@@ -510,10 +510,10 @@ async fn resident_attach_handler(
         supervisor.on_attach(body.pid);
     }
     // A fresh resident IS the revival: a failed flowloop goes idle on attach.
-    if matches!(state.runtime.mind_state(), MindState::Failed { .. }) {
+    if matches!(state.runtime.flowloop_state(), FlowloopState::Failed { .. }) {
         state
             .runtime
-            .transition(MindState::Idle, "resident attached");
+            .transition(FlowloopState::Idle, "resident attached");
     }
     tracing::info!(pid = body.pid, "resident attached");
     Ok(Json(AttachResponse {
@@ -756,7 +756,7 @@ async fn messages_handler(
         .map_err(|err| (StatusCode::NOT_FOUND, err.to_string()))?;
     Ok(Json(PostMessageResponse {
         turn,
-        state: state.runtime.mind_state().name().to_string(),
+        state: state.runtime.flowloop_state().name().to_string(),
     }))
 }
 
@@ -1057,7 +1057,7 @@ fn tagged_turn_event(channel: &str, turn: &ChatTurn) -> Event {
         .data(tagged_turn_json(channel, turn))
 }
 
-fn state_event(state: &MindState) -> Event {
+fn state_event(state: &FlowloopState) -> Event {
     Event::default().event("state").data(state.name())
 }
 

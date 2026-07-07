@@ -38,11 +38,11 @@ lf build "…" --wave shipper --fork           # independent branch from the rev
 
 `--dispatch` creates a placed worktree and blocks until the normal `lf` run exits. `--stack` starts dependent work on top of an unlanded run's branch; `--fork` starts an independent branch from the review base.
 
-Waves are independent by default. When one process needs to report into a wave, post into its thread — `lf chat --wave <name> "…"` works from any process, including another wave's mind.
+Waves are independent by default. When one process needs to report into a wave, post into its thread — `lf chat --wave <name> "…"` works from any process, including another wave's flowloop.
 
 ## Crons
 
-Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter and are read by the wave's resident mind: when a schedule comes due while the mind is idle, it opens a system turn ("cron due: <flow> — dispatch it") and dispatches the flow with judgment. Edits to the file land without a restart.
+Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter and are read by the wave's resident flowloop: when a schedule comes due while the flowloop is idle, it opens a system pass ("cron due: <flow> — dispatch it") and dispatches the flow with judgment. Edits to the file land without a restart.
 
 ```markdown
 <!-- wave/shipper/GOAL.md -->

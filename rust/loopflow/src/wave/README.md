@@ -30,7 +30,7 @@
 
 One command runs both: the listener spawns the resident as a child `lf`
 process (keeper spawns tenant) and both narrate into the same terminal.
-`--no-flowloop` serves a dormant channel (`/health` reads `mind: null`);
+`--no-flowloop` serves a dormant channel (`/health` reads `flowloop: null`);
 `--flowloop-only` attaches a resident to an existing listener by hand — also
 the respawn affordance, and one day the human-in-the-seat affordance.
 
@@ -63,7 +63,7 @@ the respawn affordance, and one day the human-in-the-seat affordance.
   wire deltas for it are dropped until the next `TurnOpened` — the
   anti-wedge lives where the pen is.
 - **Failure is a dead process.** Three consecutive failed passes (nonzero
-  exit, spawn failure, timeout) → the resident reports `MindState::Failed`
+  exit, spawn failure, timeout) → the resident reports `FlowloopState::Failed`
   over the wire and exits nonzero. The listener's supervisor owns revival:
   the process-level respawn ladder (5m/15m/45m, last rung repeating; reset
   by a completed turn), and a human message respawns immediately — talking
@@ -88,7 +88,7 @@ per-machine, never committed. The in-process state (`WaveRuntime`) is a fold
 of it: the `thread` and the flowloop state are rebuilt from the journal on
 boot, so a restart keeps the full conversation and turn ids continue
 monotonically. The journal event vocabulary predates the pass model —
-`TurnStarted`/`TurnItem`/`TurnSteered`/`TurnFinished`/`MindState`/
+`TurnStarted`/`TurnItem`/`TurnSteered`/`TurnFinished`/`FlowloopState`/
 `ThreadStarted` are all still journaled by the listener on receipt from the
 wire (`TurnSteered` and `ThreadStarted` are vestigial: pass-based residents
 never emit them, but old journals still fold). `wave/<name>/MEMORY.md`
@@ -107,7 +107,7 @@ don't consume this wire):
 - **Resident → listener**: `POST /resident/deltas {deltas: [...]}` — the old
   in-process TurnSink vocabulary promoted to the wire: `turn_opened
   {answers}`, `turn_text`, `turn_item`, `turn_usage`, `turn_finished {status,
-  cost_usd}`, `turn_steered {answers}`, `mind_state {to, reason}`
+  cost_usd}`, `turn_steered {answers}`, `flowloop_state {to, reason}`
   (interrupting/failed — turning/idle are derived from the turn deltas),
   `thread_started {vendor, thread_id}`. Sent serially, so per-turn order is
   the transport's order; turn ids never ride the wire — the listener mints
@@ -183,7 +183,7 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 
 | Method + path             | Behavior |
 |---------------------------|----------|
-| `GET /health`             | `{status, mind, wave, turns, workers, uptime_seconds}`; `status` is channel liveness — always `serving` while the process answers; `mind` is the flowloop's state (`idle \| turning \| interrupting \| failed`), or null while no resident was ever spawned or attached (`--no-flowloop` serves dormant) — a live channel whose resident died reads `serving` + `failed`; `workers` counts observed in-flight worker runs |
+| `GET /health`             | `{status, flowloop, wave, turns, workers, uptime_seconds}`; `status` is channel liveness — always `serving` while the process answers; `flowloop` is the flowloop's state (`idle \| turning \| interrupting \| failed`), or null while no resident was ever spawned or attached (`--no-flowloop` serves dormant) — a live channel whose resident died reads `serving` + `failed`; `workers` counts observed in-flight worker runs |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread; `?limit=N` tails the last N turns (open turn included) |
 | `GET /events`             | SSE, the family's one unified stream. Scope: `?channel=<name>` (one channel), `?prefix=<name>` (subtree), default = whole family; names outside the family 404. Event names: `state` (flowloop-state name, on subscribe + every transition; primary only), `turn` (a `Turn` JSON; replay then live; child-channel turns carry an extra `"channel"` key; ids repeat — each frame replaces the client's previous state for that (channel, id)), `memory-add` (full added facts since the last externalization, replay then live; primary only), `memory` (curation summaries, live-only; primary only), and — only with `?inbox=true`, the resident's subscription — `inbox` (`{id, op, text, from}`; pending replay + live ops; bare interrupts ride `id: null`). |
 | `POST /messages {op, text, from?, channel?}` | `op` required: `message` (human speech: queued, the next pass answers it), `steer` (degrades to `message` — steering folds at pass boundaries), `interrupt` (kill the open pass; non-empty text queues for the next pass), or `say` (an attributed emission — `lf chat`; `from {session_id?, label}` required for `say`, rejected otherwise). `channel` null = the wave channel; a child name lands in that work line's journal (404 outside the family). Returns `{turn, state}`. |

@@ -167,7 +167,7 @@ pub enum Commands {
         /// Take over even if lfd reports another live wave-agent session
         #[arg(long)]
         force: bool,
-        /// Serve dormant: listener only, no resident (health reads mind: null until the wire field renames)
+        /// Serve dormant: listener only, no resident (health reads flowloop: null)
         #[arg(long, conflicts_with = "flowloop_only")]
         no_flowloop: bool,
         /// Run only the resident flowloop against an existing listener

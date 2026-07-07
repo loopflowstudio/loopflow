@@ -16,7 +16,7 @@
 //! family; subscription is by name or prefix. The family head's server holds
 //! the pen for every child channel — single-writer per journal file, all
 //! pens in one process. Child channels have NO flowloop: they are pure streams
-//! (no `MindState`, no memory — a work line's notes are files; MEMORY.md is
+//! (no `FlowloopState`, no memory — a work line's notes are files; MEMORY.md is
 //! wave identity).
 
 use std::path::{Path, PathBuf};

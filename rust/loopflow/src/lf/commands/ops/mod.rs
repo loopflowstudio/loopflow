@@ -26,7 +26,7 @@ use crate::ops::{
     rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
     release_tag, submit, AbandonOptions, BranchFilterOptions, BranchListOptions,
     BranchPruneOptions, CommitOptions, CronSpec, LandOptions, NextOptions, PrOptions, Progress,
-    RebaseOptions, RotationResult, SystemLaunchctl,
+    RebaseOptions, SystemLaunchctl,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};

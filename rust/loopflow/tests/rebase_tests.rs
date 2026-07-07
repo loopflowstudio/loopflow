@@ -165,7 +165,7 @@ fn rebase_reparents_child_onto_main_when_parent_merged() {
     // not the parent's already-merged commits.
     let repo = TestRepo::new();
 
-    repo.create_branch("a.b");
+    repo.create_branch("jack/a.b");
     repo.create_file("p1.txt", "p1");
     repo.stage_all();
     repo.commit("p1");
@@ -173,19 +173,19 @@ fn rebase_reparents_child_onto_main_when_parent_merged() {
     repo.stage_all();
     repo.commit("p2");
 
-    repo.create_branch("a.b.c");
+    repo.create_branch("jack/a.b.c");
     repo.create_file("child.txt", "child");
     repo.stage_all();
     repo.commit("child work");
 
     // Squash-merge the parent's two commits into main as a single commit.
     repo.checkout("main");
-    git(repo.path(), &["merge", "--squash", "a.b"]);
+    git(repo.path(), &["merge", "--squash", "jack/a.b"]);
     git(repo.path(), &["commit", "-m", "squash merge a.b"]);
     repo.push();
     // Local `a.b` ref is left dangling at its pre-squash tip.
 
-    repo.checkout("a.b.c");
+    repo.checkout("jack/a.b.c");
     let plan = plan_rebase(repo.path(), None).expect("plan rebase");
     // A merged parent is a dead base: re-parent onto the default branch.
     assert_eq!(plan.base_ref, "origin/main");
@@ -193,7 +193,7 @@ fn rebase_reparents_child_onto_main_when_parent_merged() {
         plan.fork_point.is_some(),
         "should fork off the merged parent"
     );
-    assert_eq!(plan.merged_parent.as_deref(), Some("a.b"));
+    assert_eq!(plan.merged_parent.as_deref(), Some("jack/a.b"));
 
     rebase_with_recovery(
         repo.path(),
@@ -221,7 +221,7 @@ fn rebase_reparents_child_onto_main_when_parent_merged() {
     );
 
     // The merged parent's lingering local ref was pruned.
-    let branches = git(repo.path(), &["branch", "--list", "a.b"]);
+    let branches = git(repo.path(), &["branch", "--list", "jack/a.b"]);
     assert!(branches.is_empty(), "merged local parent should be pruned");
 }
 
@@ -234,13 +234,13 @@ fn rebase_reparents_child_when_reworked_parent_branch_deleted() {
     // carry ONLY its own change — never the stale parent's diverged content.
     let repo = TestRepo::new();
 
-    repo.create_branch("a.b");
+    repo.create_branch("jack/a.b");
     repo.create_file("feature.txt", "v1\n");
     repo.stage_all();
     repo.commit("feature v1");
-    repo.push_new_branch("a.b");
+    repo.push_new_branch("jack/a.b");
 
-    repo.create_branch("a.b.c");
+    repo.create_branch("jack/a.b.c");
     repo.create_file("child.txt", "child\n");
     repo.stage_all();
     repo.commit("child work");
@@ -251,16 +251,16 @@ fn rebase_reparents_child_when_reworked_parent_branch_deleted() {
     repo.stage_all();
     repo.commit("feature v2 (reworked in review)");
     repo.push();
-    git(repo.path(), &["push", "origin", "--delete", "a.b"]);
+    git(repo.path(), &["push", "origin", "--delete", "jack/a.b"]);
 
-    repo.checkout("a.b.c");
+    repo.checkout("jack/a.b.c");
     let plan = plan_rebase(repo.path(), None).expect("plan rebase");
     assert_eq!(
         plan.base_ref, "origin/main",
         "reworked parent re-parents onto main, not the stale local a.b"
     );
     assert!(plan.fork_point.is_some());
-    assert_eq!(plan.merged_parent.as_deref(), Some("a.b"));
+    assert_eq!(plan.merged_parent.as_deref(), Some("jack/a.b"));
 
     rebase_with_recovery(
         repo.path(),
@@ -279,7 +279,7 @@ fn rebase_reparents_child_when_reworked_parent_branch_deleted() {
         feature, "v2\n",
         "child inherits main's reworked content, not the stale parent's v1"
     );
-    let branches = git(repo.path(), &["branch", "--list", "a.b"]);
+    let branches = git(repo.path(), &["branch", "--list", "jack/a.b"]);
     assert!(branches.is_empty(), "stale local parent should be pruned");
 }
 
@@ -290,13 +290,13 @@ fn rebase_surfaces_conflict_when_reworked_parent_overlaps_child() {
     // conflict — the correct outcome — not silently rebase onto the dead parent.
     let repo = TestRepo::new();
 
-    repo.create_branch("a.b");
+    repo.create_branch("jack/a.b");
     repo.create_file("feature.txt", "v1\n");
     repo.stage_all();
     repo.commit("feature v1");
-    repo.push_new_branch("a.b");
+    repo.push_new_branch("jack/a.b");
 
-    repo.create_branch("a.b.c");
+    repo.create_branch("jack/a.b.c");
     repo.create_file("feature.txt", "v1\nchild addition\n");
     repo.stage_all();
     repo.commit("child extends feature");
@@ -306,9 +306,9 @@ fn rebase_surfaces_conflict_when_reworked_parent_overlaps_child() {
     repo.stage_all();
     repo.commit("feature v2");
     repo.push();
-    git(repo.path(), &["push", "origin", "--delete", "a.b"]);
+    git(repo.path(), &["push", "origin", "--delete", "jack/a.b"]);
 
-    repo.checkout("a.b.c");
+    repo.checkout("jack/a.b.c");
     let result = rebase_with_recovery(
         repo.path(),
         &RebaseOptions {

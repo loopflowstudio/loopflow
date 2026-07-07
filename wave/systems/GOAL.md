@@ -1,20 +1,11 @@
 ---
-primary_flow: ship-roadmap
-mode: manual
 workers: 0
-metrics:
-- Billing stays bounded and visible — infra and agent spend has a budget and no surprises
-- Prod uptime holds — the self-hosted lfd host and services stay up
-- Main stays green — the merge gate is trusted and rarely red
-- Tests finish fast — local and GitHub test time trends down, never up
-- Releases are boring — verified before shipped, shipped on a schedule, run on infrastructure the repo owns
-- Anything done by hand twice becomes automation; flaky or hanging machinery gets fixed, not tolerated
-- Local and host lf/lfd/app stay fresh with one command; failures surface as work, not Actions-history noise
-- Agents run unattended — every human-in-the-loop step a CLI or API could do (credential fetch, discovery, setup, approval) is automated away
 pm:
   provider: linear
   linear_project: '7cf1518e-340e-4cfa-8426-63f06b7a5e1c'
 ---
+
+## Objective
 
 Run one loop iteration for the Systems wave.
 
@@ -34,3 +25,21 @@ irreversible call). Handing off avoidable work is the inefficiency this wave
 exists to remove.
 
 If no safe move remains, record the blocker instead of inventing work.
+
+## Measures
+
+- **Quality**: billing stays bounded and visible — infra and agent spend has a budget and no surprises.
+- **Quality**: prod uptime holds — the self-hosted lfd host and services stay up.
+- **Quality**: main stays green — the merge gate is trusted and rarely red.
+- **Key Results**: tests finish fast — local and GitHub test time trends down, never up.
+- **Quality**: releases are boring — verified before shipped, shipped on a schedule, run on infrastructure the repo owns.
+- **Quality**: anything done by hand twice becomes automation; flaky or hanging machinery gets fixed, not tolerated.
+- **Quality**: local and host lf/lfd/app stay fresh with one command; failures surface as work, not Actions-history noise.
+- **Key Results**: agents run unattended — every human-in-the-loop step a CLI or API could do is automated away.
+- **Done means**: a landed PR of real product code, roadmap item closed and PR-linked.
+
+## Process
+
+Read the live roadmap, judge the engineering operation against the measures, and
+dispatch the appropriate flow for the next useful move. Routing is a judgment in
+this section, not a frontmatter field.

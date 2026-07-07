@@ -11,7 +11,7 @@ A wave is a named agent with a goal. You author its intent and memory; it works 
 
 ## Creating a Wave
 
-Author `wave/<name>/GOAL.md` — the body is the goal prompt; optional frontmatter sets durable defaults such as `primary_flow:` and `workers:`. Then run the agent:
+Author `wave/<name>/GOAL.md` — the body is the goal prompt; optional frontmatter sets machine config such as `workers:`, `crons:`, and `pm:`. Then run the agent:
 
 ```bash
 lf wave infra             # start the wave agent
@@ -33,20 +33,29 @@ wave/infra/
 
 ### The Goal
 
-`GOAL.md` is the wave's loop surface. Frontmatter carries durable intent; the body is the prompt the wave agent runs each loop.
+`GOAL.md` is the wave's loop surface. Frontmatter carries machine config; the body is the prompt the wave agent runs each loop.
 
 ```markdown
 ---
-primary_flow: build
 workers: 2
-metrics:
-  - daemon migrations are transactional
-  - webhook security is enabled by default
 ---
+
+## Objective
 
 Harden the daemon. Each loop: read the roadmap and memory, pick the next useful
 move, dispatch a worker to build it, watch the PR, and fold what shipped into
 memory.
+
+## Measures
+
+- **Quality**: daemon migrations are transactional.
+- **Quality**: webhook security is enabled by default.
+- **Done means**: a landed PR of real product code, roadmap item closed and PR-linked.
+
+## Process
+
+Use a direct worker for mechanical changes; write a scratch design first when the
+blast radius crosses storage, auth, or public APIs.
 ```
 
 Run `lf wave <wave>` to start that wave directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
@@ -87,9 +96,7 @@ Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels l
 
 | Field | What it does |
 |-------|-------------|
-| `primary_flow` | Default flow a worker runs (`build`, `garden`, `sync`, …) |
 | `workers` | Parallelism for dispatched work. `0` means "don't auto-dispatch" |
-| `metrics` | Criteria the loop re-judges each iteration |
 | `agent` | Preferred agent harness/model |
 | `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident mind |
 | `pm.linear_project` | Linear project id backing the wave's roadmap (written by `lf op pm init`) |
@@ -152,7 +159,6 @@ Crons live in `GOAL.md` frontmatter; the wave's resident mind fires each due sch
 ```markdown
 <!-- wave/governance/GOAL.md -->
 ---
-primary_flow: garden
 workers: 0
 crons:
   - flow: govern-coordination

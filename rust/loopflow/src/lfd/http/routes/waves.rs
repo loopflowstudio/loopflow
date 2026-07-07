@@ -92,7 +92,6 @@ pub struct GetWaveAgentTreeQuery {
 #[derive(Debug, Deserialize, Default)]
 pub struct UpdateWaveRequest {
     name: Option<String>,
-    flow: Option<String>,
     goal: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
@@ -237,9 +236,6 @@ pub async fn update_wave_handler(
         }
     }
 
-    if let Some(flow) = payload.flow {
-        wave.primary_flow = flow;
-    }
     if let Some(goal) = trimmed_non_empty(payload.goal.as_deref()) {
         wave.goal = goal;
     }
@@ -799,7 +795,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo: repo.to_string(),
@@ -1087,7 +1082,6 @@ mod tests {
             Path(created_id.clone()),
             Json(UpdateWaveRequest {
                 name: Some("after".to_string()),
-                flow: Some("build".to_string()),
                 direction: Some(vec!["clarity".to_string()]),
                 area: Some(vec!["docs/".to_string()]),
                 ..Default::default()
@@ -1097,7 +1091,6 @@ mod tests {
         .expect("update wave");
 
         assert_eq!(updated.name, "after");
-        assert_eq!(updated.primary_flow, "build");
         assert_eq!(updated.direction, vec!["clarity".to_string()]);
         assert_eq!(updated.area, vec!["docs/".to_string()]);
 
@@ -1109,7 +1102,6 @@ mod tests {
         .await
         .expect("get updated wave");
         assert_eq!(found.name, "after");
-        assert_eq!(found.primary_flow, "build");
         assert_eq!(found.direction, vec!["clarity".to_string()]);
         assert_eq!(found.area, vec!["docs/".to_string()]);
     }

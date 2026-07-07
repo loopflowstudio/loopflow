@@ -68,11 +68,12 @@ Before choosing a move, the loop reads a small state vector:
 
 ### Flow tension to resolve
 
-`GOAL.md` currently declares `primary_flow: ship-roadmap`. The assess-first loop
-above is not ship-roadmap — it's a custom priority function over reduce's own
-durable state. Part of this item is deciding whether reduce runs a bespoke goal
-flow or whether ship-roadmap is extended to read the analysis/proposals/queue
-state vector. Pick the smaller change; note the decision in `GOAL.md`.
+`GOAL.md` now carries routing judgment in Process instead of `primary_flow`
+frontmatter. The assess-first loop above is still a custom priority function over
+reduce's own durable state. Part of this item is deciding whether reduce needs a
+bespoke process clause or whether the shared roadmap-reading loop can cover the
+analysis/proposals/queue state vector. Pick the smaller change; note the decision
+in `GOAL.md`.
 
 ## Done when
 

@@ -198,7 +198,6 @@ impl SqliteStore {
                 },
                 created_at,
                 wave.workers as i64,
-                wave.primary_flow(),
                 wave.goal(),
                 metrics_json,
                 wave.parent_wave_id(),

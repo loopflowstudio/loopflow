@@ -30,7 +30,7 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 ## Workflow
 
 1. **Read wave configs.** For each member wave directory in the area:
-   - `GOAL.md` — intent, metrics, primary flow, and the Linear handle
+   - `GOAL.md` — intent, measures, process judgment, and the Linear handle
    - `MEMORY.md` — what the wave has learned and decided
    - The live roadmap — `lf op pm show --wave <wave-name>` (Linear is the source of truth; there are no local roadmap files)
 

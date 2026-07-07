@@ -15,7 +15,9 @@ use crate::engine::worktrees::{
 };
 
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Run, RunStackStatus, RunStatus, Session, Wave, WaveStatus};
+use crate::lfd::types::{
+    Run, RunStackStatus, RunStatus, Session, Wave, WaveStatus, DEFAULT_WAVE_FLOW,
+};
 use crate::lfdb::SharedStore;
 use crate::ops::{rebase_with_recovery, Progress, RebaseOptions};
 
@@ -100,7 +102,7 @@ pub async fn create_run_for_placement(
         id: run_id.clone(),
         wave_id: wave.id().clone(),
         repo: wave.repo.clone(),
-        flow: wave.primary_flow().clone(),
+        flow: DEFAULT_WAVE_FLOW.to_string(),
         task: None,
         direction: wave.direction().clone(),
         area: wave.area().clone(),

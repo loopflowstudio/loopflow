@@ -83,11 +83,10 @@ This is the natural session exit point. The user's answer determines what to run
 
 1. Choose a wave name and create `wave/<name>/`.
 2. Write `wave/<name>/GOAL.md` — the wave's identity and anchor:
-   - frontmatter: `primary_flow` (default `ship` unless the user asks for
-     something else) and, once connected, `pm.linear_project`
-   - body (the loop prompt): what this wave is and why it exists (scope
-     boundaries as natural qualifiers), how it judges progress (numeric metrics
-     where possible), and the shape of the work ahead
+   - frontmatter: machine config only (`workers`, `crons`, and, once connected,
+     `pm.linear_project`)
+   - body (the loop prompt): Objective, Measures, Cron if any, and Process. Put
+     routing judgment in Process, not frontmatter.
    - **No roadmap table, no status indicators, no item lists** — the roadmap
      lives in Linear.
 3. Write `wave/<name>/MEMORY.md` — seed it with the load-bearing context from the

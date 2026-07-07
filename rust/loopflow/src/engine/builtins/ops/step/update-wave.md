@@ -9,7 +9,7 @@ Single owner of `wave/<wave>/`. Keeps the wave's identity current and folds what
 A wave is two local files plus a remote roadmap:
 
 - **`wave/<wave>/GOAL.md`** — the wave's identity: what it's for, how it judges
-  progress, the loop prompt it runs. Frontmatter carries `primary_flow` and the
+  progress, the loop prompt it runs. Frontmatter carries machine config and the
   Linear handle (`pm.linear_project`). This is the anchor; it changes rarely.
 - **`wave/<wave>/MEMORY.md`** — what the wave remembers between loops. Durable
   observations, decisions, and context. This is where branch learnings land.
@@ -74,8 +74,8 @@ fold it. If it only describes what was already built, let it go.
 5. **Fold scratch learnings into `MEMORY.md`.** Merge into existing sections
    where there's a clear match; add sections for new durable context. Keep it
    tight — memory is a working store, not an archive.
-6. **Update `GOAL.md` only if the wave's identity moved.** New primary flow,
-   changed metrics, a sharpened or redirected intent. If the branch didn't
+6. **Update `GOAL.md` only if the wave's identity moved.** Changed objective,
+   changed measures, or changed routing judgment count. If the branch didn't
    change what the wave *is*, leave `GOAL.md` alone.
 7. **Trim scratch docs for shipped work.** Don't delete them — `lf op pr land`
    handles that. Strip implementation detail that now lives in the code. Keep
@@ -106,7 +106,6 @@ When `scratch/` holds a proposal and no wave exists yet, create one:
 
 ```yaml
 ---
-primary_flow: build            # the flow this wave loops
 pm:
   linear_project: "8c4ba3f9-cf23-4136-87ed-37847aa7dc82"   # written by `lf op pm init`
 ---

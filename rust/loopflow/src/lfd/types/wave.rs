@@ -9,6 +9,8 @@ fn default_workers() -> u32 {
     1
 }
 
+pub const DEFAULT_WAVE_FLOW: &str = "ship-roadmap";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum WaveStatus {
@@ -189,7 +191,6 @@ impl std::str::FromStr for QueueBlockReason {
 pub struct Wave {
     pub id: LfdId,
     pub name: String,
-    pub primary_flow: String,
     pub goal: String,
     pub metrics: Vec<String>,
     /// The single repo this wave targets. A wave = exactly one repo.
@@ -225,8 +226,7 @@ impl Wave {
         Self {
             id,
             name,
-            primary_flow: "ship-roadmap".to_string(),
-            goal: "ship-roadmap".to_string(),
+            goal: DEFAULT_WAVE_FLOW.to_string(),
             metrics: Vec::new(),
             repo,
             worktree: String::new(),
@@ -265,10 +265,6 @@ impl Wave {
     /// The repo this wave targets.
     pub fn repo(&self) -> &str {
         &self.repo
-    }
-
-    pub fn primary_flow(&self) -> &String {
-        &self.primary_flow
     }
 
     pub fn goal(&self) -> &str {

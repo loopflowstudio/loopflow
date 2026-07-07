@@ -861,7 +861,6 @@ public final class RepoState {
             let config = WaveConfigUpdate(
                 area: area,
                 direction: direction,
-                flow: flow,
                 status: status,
                 agent: agent,
                 stepAgents: stepAgents

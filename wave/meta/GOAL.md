@@ -1,18 +1,11 @@
 ---
-primary_flow: ship-roadmap
-mode: manual
 workers: 0
-metrics:
-- Every run is reconstructable locally — what prompt ran, what context it loaded, what it spawned, what it cost in tokens and time; nothing ever leaves the machine
-- Measured prompt changes land — gate, compress, and implement edits cite observed runs; gate first-pass rate is measured and holds high
-- Tokens per run trend down while the quality proxy holds — context loading is deliberate; nothing large loads unread
-- Agents stay on the paved road — worktrees, commits, landings, dispatch go through `lf op`/`lfq`; deviations are counted and each one becomes a prompt or tooling fix
-- Every builtin step and flow is legible — declared shape visible before a run, hotness and real duration empirical from the ledger; redundant or dead ones get merged or deleted
-- The general/taste split is clean — universal lessons live in builtins, personal taste in the repo's agent file, proven on both loopflow and cadenza
 pm:
   provider: linear
   linear_project: '0e2c75ee-a287-467b-988c-2c83f0f3cbba'
 ---
+
+## Objective
 
 Run one loop iteration for the Meta wave.
 
@@ -48,3 +41,19 @@ a measurement change a prompt, and did the change show up in the next week's
 runs*. Instrumentation earns its place only when it feeds an edit.
 
 If no safe move remains, record the blocker instead of inventing work.
+
+## Measures
+
+- **Quality**: every run is reconstructable locally — what prompt ran, what context it loaded, what it spawned, what it cost in tokens and time; nothing ever leaves the machine.
+- **Key Results**: measured prompt changes land — gate, compress, and implement edits cite observed runs; gate first-pass rate is measured and holds high.
+- **Key Results**: tokens per run trend down while the quality proxy holds — context loading is deliberate; nothing large loads unread.
+- **Quality**: agents stay on the paved road — worktrees, commits, landings, and dispatch go through `lf op`/`--dispatch`; deviations are counted and each one becomes a prompt or tooling fix.
+- **Quality**: every builtin step and flow is legible — declared shape visible before a run, hotness and real duration empirical from the ledger; redundant or dead ones get merged or deleted.
+- **Quality**: the general/taste split is clean — universal lessons live in builtins, personal taste in the repo's agent file, proven on both loopflow and cadenza.
+- **Done means**: a landed PR of real product code, roadmap item closed and PR-linked.
+
+## Process
+
+Read the live roadmap, judge the run evidence against the measures, and dispatch
+the appropriate flow for the next useful move. Routing is prose judgment, not
+frontmatter.

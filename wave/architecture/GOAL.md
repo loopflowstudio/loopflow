@@ -1,9 +1,10 @@
 ---
-primary_flow: build
 pm:
   provider: linear
   linear_project: '8c4ba3f9-cf23-4136-87ed-37847aa7dc82'
 ---
+
+## Objective
 
 Collapse the three binaries — `lf`, `lfd`, `lfq` — toward **one workhorse plus one
 thin server**. `lf` already does the real behavior (run steps/flows, `lf wave`
@@ -16,18 +17,17 @@ the live wave-status and terminal-output streams Concerto needs, which a transie
 is an architecture wave: each note should leave the system smaller and more true. Not a
 rewrite — a collapse of concepts, net-negative code each pass.
 
-**Metrics to improve**
-- Binaries: 3 → 2 (`lf`, `lfd serve`). `lfq` deleted.
-- lfd LOC: only the subscription hub + guarded external interface survives; the
-  query API and executor move to `lf`. Target: net-negative on every landed item.
-- Behavior reimplemented across binaries: 0 — `lfd serve` execs `lf`, never
-  duplicates it.
-- `lf`-launched sessions visible in live status: 0% → 100% (via the registry).
+## Measures
 
-**Milestones**
-- `lfdb` extracted: persistence is shared infra, not lfd-owned; lfd is one client.
-- Session registry: every `lf` session self-registers; "active agents by
-  worktree" is a real query.
-- `lf d` / `lf q` absorb lfd's query+exec and lfq's queue; `lfq` binary deleted.
-- Hard cut: `lfd serve` shrinks to the subscription hub + guarded interface,
-  execing `lf` for launch; the old HTTP executor is gone.
+- **Key Results**: binaries move from 3 to 2 (`lf`, `lfd serve`); `lfq` is deleted.
+- **Key Results**: lfd LOC falls; only the subscription hub and guarded external interface survive. Target: net-negative on every landed item.
+- **Quality**: behavior reimplemented across binaries stays at 0 — `lfd serve` execs `lf`, never duplicates it.
+- **Key Results**: `lf`-launched sessions visible in live status: 0% -> 100% via the registry.
+- **Done means**: a landed PR of real product code, roadmap item closed and PR-linked.
+
+## Process
+
+Read the live roadmap and choose the smallest collapse that leaves the system
+more true. Use direct implementation for mechanical deletions; write a scratch
+design and review pass for cross-boundary moves. Routing is prose judgment, not
+frontmatter.

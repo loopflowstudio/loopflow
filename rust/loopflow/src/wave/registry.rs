@@ -137,8 +137,8 @@ impl Registration {
 /// not degrade to running unregistered (observed live — two brains on one
 /// wave because boot skipped registration entirely). The created row is
 /// minimal and mirrors wave creation from GOAL.md frontmatter
-/// ([`read_wave_config`]): goal/primary-flow from the frontmatter when
-/// present, [`Wave::new`] defaults otherwise.
+/// ([`read_wave_config`]): goal from the frontmatter when present,
+/// [`Wave::new`] defaults otherwise.
 ///
 /// # Errors
 /// Store failures only; the caller treats them as soft (run unregistered).
@@ -156,9 +156,6 @@ pub async fn ensure_wave_row(
         main_repo.display().to_string(),
     );
     if let Some(config) = read_wave_config(main_repo, name) {
-        if let Some(flow) = config.primary_flow {
-            wave.primary_flow = flow;
-        }
         if let Some(goal) = config.goal.filter(|goal| !goal.trim().is_empty()) {
             wave.goal = goal;
         }
@@ -700,7 +697,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo: "/tmp/repo".to_string(),
@@ -871,7 +867,6 @@ mod tests {
             .await
             .expect("row created");
         assert_eq!(wave.goal, "ship-roadmap");
-        assert_eq!(wave.primary_flow, "ship-roadmap");
     }
 
     #[tokio::test]

@@ -555,7 +555,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use crate::lfd::id::LfdId;
-    use crate::lfd::types::{PullRequest, QueueBlockReason, Run, RunStatus, Wave, WaveStatus};
+    use crate::lfd::types::{
+        PullRequest, QueueBlockReason, Run, RunStatus, Wave, WaveStatus, DEFAULT_WAVE_FLOW,
+    };
 
     #[derive(Debug, Default)]
     struct MockOps {
@@ -618,7 +620,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "queue-wave".to_string(),
-            primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo: repo.to_string(),
@@ -641,7 +642,7 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             repo: wave.repo().to_string(),
-            flow: wave.primary_flow().clone(),
+            flow: DEFAULT_WAVE_FLOW.to_string(),
             task: None,
             direction: wave.direction().clone(),
             area: wave.area().clone(),

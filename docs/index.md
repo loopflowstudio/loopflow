@@ -78,17 +78,24 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
 | **Cron** | Scheduled supplementary flow | goal frontmatter |
 
-A wave is a named agent with a goal. Everything that defines it — goal, memory, worker defaults, crons — is authored in the repo. Crons live in `GOAL.md` frontmatter and are fired by the wave's resident mind. lfd serves wave status and live sessions to clients.
+A wave is a named agent with a goal. Everything that defines it — goal, memory, routing judgment, crons — is authored in the repo. Crons live in `GOAL.md` frontmatter and are fired by the wave's resident mind. lfd serves wave status and live sessions to clients.
 
 ```markdown
 ---
-primary_flow: build
 workers: 2
-metrics:
-  - backlog is empty
 ---
 
+## Objective
+
 Run one loop iteration for this wave.
+
+## Measures
+
+- **Key Results**: backlog is empty.
+
+## Process
+
+Read the roadmap, pick the next useful move, and dispatch the appropriate flow.
 ```
 
 ---

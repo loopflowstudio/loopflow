@@ -47,16 +47,23 @@ Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter
 ```markdown
 <!-- wave/shipper/GOAL.md -->
 ---
-primary_flow: build
 workers: 2
 crons:
   - flow: sync
     schedule: "0 0 0 1 * * *"
-metrics:
-  - backlog is empty
 ---
 
+## Objective
+
 Run one loop iteration for the shipper wave.
+
+## Measures
+
+- **Key Results**: backlog is empty.
+
+## Process
+
+Read the roadmap and dispatch the appropriate flow for the next useful move.
 ```
 
 Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due mid-turn fires at the next turn boundary; occurrences older than 24 hours are missed, not replayed.
@@ -66,7 +73,6 @@ Use `workers: 0` in `GOAL.md` for waves that only run from cron schedules:
 ```markdown
 <!-- wave/governance/GOAL.md -->
 ---
-primary_flow: garden
 workers: 0
 crons:
   - flow: govern-identity

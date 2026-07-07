@@ -33,7 +33,8 @@ Everything else in DATAMODEL and the brief is **absorbed** (below). Only the
 "state machine vs mind" fork is overridden.
 
 **Scrap:** `rust/loopflow/src/worker.rs` (the b1 policy core) + its `lib.rs` line.
-Deletion is staged in the worktree; **not yet committed** (§10).
+That deletion is already in the base tree; this branch starts from the cleaned
+substrate and lands the S1 dispatch-targeting slice.
 
 ---
 

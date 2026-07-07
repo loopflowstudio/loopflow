@@ -179,9 +179,10 @@ The spine Concerto builds toward (Jack, this session):
   implementation" law at the daemon layer; kills the two-code-path / three-mirror
   drift the DTO rule fights; shrinks local-vs-remote to "which lfd proxies."
 
-**The infra already moved; this branch is Swift catching up.** (Jack: "the infra
-is already going that direction, but we haven't really redone Swift's code to
-match.") The primitives exist on the Rust side:
+**The infra is moving that way (started, not complete); this branch is Swift
+catching up.** (Jack: "the infra is already going that direction, but we haven't
+really redone Swift's code to match" … "it's not complete, but started for
+sure.") The primitives that exist on the Rust side:
 
 - `lf runs` (`lf/commands/runs.rs`) — `RunSummary`, trace, event-folding. The
   daemon-less runs query is already there.

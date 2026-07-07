@@ -61,6 +61,7 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 
 // -- Shared row mappers ------------------------------------------------------
 
+/// SELECT id, name, direction, area, paused, created_at, workers,
 ///        goal, metrics, parent_wave_id,
 ///        repo, worktree, branch, status, iteration, cycle_start_iteration
 pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {

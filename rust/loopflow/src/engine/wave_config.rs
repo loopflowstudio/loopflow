@@ -25,7 +25,6 @@ pub struct WavePmConfig {
 /// Intent read from `wave/<name>/GOAL.md` frontmatter during wave creation.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
-    pub flow: Option<String>,
     pub goal: Option<String>,
     pub crons: Option<Vec<WaveCronDef>>,
     pub workers: Option<u32>,
@@ -69,7 +68,6 @@ pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
         None => WaveConfig::default(),
     };
     config.goal = config.goal.or_else(|| Some(name.to_string()));
-    config.flow = None;
     config.serialized = None;
     config.area = None;
     config.direction = None;

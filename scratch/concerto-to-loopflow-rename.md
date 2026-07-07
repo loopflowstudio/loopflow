@@ -21,11 +21,32 @@ comes back as a first-class app.
 Everyone `import Loopflow`. Products both ship as "Loopflow.app". SPM (`swift build`,
 unit tests, macOS dev) + xcodegen `project.yml` (Xcode, real iOS build) both updated.
 
-### Pulled up into `Loopflow` library (SPM: shared files live in one target)
-`Flags.swift`, `SessionNotifications.swift`, `Views/LiveOutput.swift`,
-`Views/PlatformHelpers.swift` (already `#if os(macOS)`-guarded), `Models/PortfolioRepo.swift`,
-`State/PortfolioRepoState.swift`, and shared `AppBootstrap` (font reg, AppRuntime,
-LaunchArguments, AppearanceMode ext). macOS-only bootstrap bits stay in LoopflowMac.
+### Library additions (kept minimal after a correction)
+Only `AppBootstrap.swift` is pulled into the library — the genuinely shared
+app-startup helpers (`bootstrapLoopflowApp`, `AppRuntime`, `LaunchArguments`,
+`AppearanceMode.resolvedTheme`, font registration via a `SWIFT_PACKAGE`-aware
+`Bundle` accessor). Fonts moved to the library as a resource.
+
+First attempt over-pulled `Flags`, `SessionNotifications`, `PlatformHelpers`,
+`LiveOutput`, `PortfolioRepo`, `PortfolioRepoState` into the library. That broke
+the build: `PortfolioRepoState` calls `LocalWaveAgentLauncher` (a per-platform
+`enum` in each app target — the library can't see app code), and the rest forced
+needless cross-module `public`. Fix: relocate each to its actual consumer —
+`Flags`/`SessionNotifications`/`PlatformHelpers`/`PortfolioRepo`/`PortfolioRepoState`
+→ `LoopflowMac` (mac-only), `LiveOutput` → `LoopflowiOS` (iOS-only). The library
+stays the clean cross-platform core.
+
+Lesson: "outside `Platform/` in the old single target" ≠ cross-platform. And
+`swift build ... | tail` masks the real exit code — verify builds without a pipe.
+
+### Xcode module-name collision (the subtle one)
+Setting `PRODUCT_NAME: Loopflow` on the app made its **Swift module** `Loopflow`
+too (Xcode derives the module name from PRODUCT_NAME by default), colliding with
+the framework module → `import Loopflow` in app files became a self-import
+("file is part of module 'Loopflow'; ignoring import") and every framework
+symbol read as "cannot find in scope." SPM was unaffected (module = target name).
+Fix: `PRODUCT_MODULE_NAME: LoopflowMac` / `LoopflowiOS` so the product ships as
+`Loopflow.app` but the module stays distinct from the framework.
 
 ## What "Concerto" means where
 

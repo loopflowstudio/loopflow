@@ -142,8 +142,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     public var displayName: String {
         if !name.isEmpty { return name }
-        let areaStr = area.first.map { $0 == "." ? "root" : $0 } ?? "root"
-        return areaStr
+        return area.first.map { $0 == "." ? "root" : $0 } ?? "root"
     }
 
     /// First line of the vision section — the tagline.

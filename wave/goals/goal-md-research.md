@@ -71,7 +71,7 @@ but still counts):
 
 | # | Section | Where | Purpose (one line) | Budget |
 |---|---------|-------|--------------------|--------|
-| 0 | **Frontmatter config** | YAML | `primary_flow`, `mind`, `crons`, `pm.linear_project`, `mode/workers` — machine-read, not prose attention | ~free |
+| 0 | **Frontmatter config** | YAML | `crons`, `pm.linear_project`, and other machine-read config that is not prose attention; routing judgment stays in Process, not a `primary_flow` knob | ~free |
 | 1 | **Objective (Mission · Vision · Vibe)** | body | The judgment prior AND the **one** thing the loop steers toward. *Mission* = what this loop does now; *Vision* = the end-state that stops the loop; *Vibe* = tone as a decision tool. Identity **by contrast** with a sibling. **Exactly one objective** — a second one forks a child wave. | 150–300 |
 | 2 | **Non-goals / Guardrails** | body | What this wave does **not** do + soft scope boundary. The clause the mind queries when tempted to scope-creep. (Hard numeric bounds live in §3c.) | 40–90 |
 | 3a | **Milestone KRs** (*complete-this*) | `metrics:`/roadmap | 0–5 moving targets the loop converges toward, **retired when hit**. Checked for **progress**. Highest-churn section. | 60–140 |
@@ -79,7 +79,7 @@ but still counts):
 | 3c | **Constraints / budget** (*never-exceed*) | frontmatter | Hard bounds (spend cap, resource/time limits) checked **every loop** for **violation**. Durable. | 30–80 |
 | 4 | **Honest-question north** | body | The one check a lazy loop can't fake — the tiebreaker that outranks any metric. Guards the measures against gaming. | 20–40 |
 | 5 | **Responsibilities: Domains + Accountabilities** | body | *Domains* = what this wave exclusively controls (so parallel waves don't collide). *Accountabilities* = verb-first, ongoing (`-ing`) areas of standing attention. | 80–180 |
-| 6 | **Loop body / Processes** | body | The concrete-verb move menu + how work flows: read the roadmap, pick a move, dispatch `primary_flow`, honor crons. **Points to the roadmap** — the charter/roadmap seam. | 120–220 |
+| 6 | **Loop body / Processes** | body | The concrete-verb move menu + how work flows: read the roadmap, pick a move, choose a flow or direct dispatch, honor crons. **Points to the roadmap** — the charter/roadmap seam. | 120–220 |
 | 7 | **Definition of Done** | body | The durable, non-negotiable quality bar every increment clears before "shipped." | 40–90 |
 | 8 | **Stop discipline** | body | When *not* to invent work; idle/rest behavior. The off-ramp. | 20–40 |
 
@@ -161,7 +161,7 @@ charter bug to fix before doing downstream work.**
 
 **6. Loop body / Processes**
 - [ ] Gives a **menu of concrete verbs** to choose among ("sand / automate / harden / turn a failure into a fix PR"), not "make it better."
-- [ ] Names the **primary flow** and how heavy work is **dispatched** (mind orchestrates, doesn't grind).
+- [ ] Names the routing judgment for heavy work and how it is **dispatched** (mind orchestrates, doesn't grind).
 - [ ] **Points to the roadmap** — makes the charter→roadmap seam explicit (read it, write status back).
 - [ ] Crons/deadlines, if any, are declared and their handling is defined.
 

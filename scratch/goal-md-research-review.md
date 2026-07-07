@@ -12,6 +12,7 @@ Removed `primary_flow` from the wave wire/storage model across Rust, Python, Swi
 - Included `wave/memory/GOAL.md` in the retrofit because it was a live wave still carrying the old shape.
 - Kept applied migrations intact and added a forward drop migration, with convergence tolerance for stores that already lack the column.
 - Treated charters as the primary deliverable; the code migration is deliberately minimal and mirrors the existing DTO/storage patterns.
+- Left `wave/goals/MEMORY.md` out of the PR after gate review. Durable wave memory is server-owned and should be changed through `lf memory`, not by hand-editing the tracked file.
 
 ## How it fits together
 
@@ -23,7 +24,7 @@ The storage and DTO change removes the old default-flow field from `Wave`; run d
 
 - Stores that missed earlier wave migrations rely on the convergence-tolerance path for `053_drop_wave_primary_flow`.
 - `wave/goals/MEMORY.md` still mentions the old `goal + primary_flow` model, but MEMORY.md is server-owned and was not edited directly in this gate pass.
-- Concerto UI validation is blocked locally: the app/unit target builds and 301 Concerto tests pass, but the UI screenshot target hangs in XCTest/LaunchServices before the single UI test runs (`waiting for workers to materialize`, `Waiting for -runningDidFinish call`). This should be rechecked in CI or a clean macOS UI-test environment.
+- Concerto UI validation is blocked locally: `swift test` passes the 301 Concerto package tests, but the xcodebuild UI target hangs in XCTest/LaunchServices before the single UI test runs (`waiting for workers to materialize`, `Waiting for -runningDidFinish call`). This should be rechecked in CI or a clean macOS UI-test environment.
 
 ## What's not included
 
@@ -41,4 +42,4 @@ The storage and DTO change removes the old default-flow field from `Wave`; run d
 - `cd website && uv run python dev.py test` passed: 61 passed, 3 skipped.
 - `swift test --package-path swift -Xswiftc -gnone` passed: 301 Swift tests.
 - `tests/e2e/test_smoke.sh` passed.
-- `cd swift && xcodegen generate && xcodebuild test ...` did not complete locally: first run hit a DerivedData linker write error; clean rerun built and passed the 301 unit tests, then hung in the UI target. A focused `-only-testing:ConcertoUITests/ScreenshotPipelineTests/testCapture` run repeated the same XCTest worker-materialization hang.
+- `cd swift && xcodegen generate && xcodebuild test ...` did not complete locally: first run hit a DerivedData linker write error. Retrying with an isolated `-derivedDataPath` built past that, reached `Testing started`, then hung in the UI target with `waiting for workers to materialize` and `Waiting for -runningDidFinish call`; interrupted after about three silent minutes.

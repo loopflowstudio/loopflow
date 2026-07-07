@@ -21,6 +21,7 @@ tests/e2e/test_smoke.sh
 ```
 
 The Concerto UI xcodebuild target built and passed its 301 unit tests, but the UI screenshot target hung locally in XCTest/LaunchServices before the test body ran (`waiting for workers to materialize`). Recheck that target in CI or a clean macOS UI-test environment.
+Fresh gate rerun: default DerivedData hit a local linker write error for `ConcertoUITests`; retrying with an isolated `-derivedDataPath` reached `Testing started` and then hung waiting for UI runner workers to materialize / `-runningDidFinish`. The package-level Swift tests above are green.
 
 ## Intent
 
@@ -36,6 +37,7 @@ Linear remains the live roadmap. MEMORY.md remains server-owned. Cron frontmatte
 - Kept the code migration minimal; the main product value is the substantive wave-charter rewrite.
 - Updated Rust, Python, Swift, and fixture DTOs together so absent `primary_flow` is the only wire shape.
 - Removed stale user-facing examples that taught `primary_flow` frontmatter.
+- Kept `wave/goals/MEMORY.md` out of the PR diff; durable memory updates belong through `lf memory`.
 
 ## Not included
 

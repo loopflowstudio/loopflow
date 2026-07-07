@@ -61,32 +61,29 @@ impl TaskStatement {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum PrOracle {
-    Missing,
-    Open { number: u64, url: String },
-    Merged { number: u64, url: String },
-    Closed { number: u64, url: String },
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrState {
+    Open,
+    Merged,
+    Closed,
 }
 
-impl PrOracle {
-    fn number(&self) -> Option<u64> {
+impl PrState {
+    fn as_str(self) -> &'static str {
         match self {
-            Self::Missing => None,
-            Self::Open { number, .. }
-            | Self::Merged { number, .. }
-            | Self::Closed { number, .. } => Some(*number),
+            Self::Open => "open",
+            Self::Merged => "merged",
+            Self::Closed => "closed",
         }
     }
+}
 
-    fn url(&self) -> Option<&str> {
-        match self {
-            Self::Missing => None,
-            Self::Open { url, .. } | Self::Merged { url, .. } | Self::Closed { url, .. } => {
-                Some(url)
-            }
-        }
-    }
+/// A PR the task loop is tracking. Absence (no PR yet) is `Option::None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PrOracle {
+    number: u64,
+    url: String,
+    state: PrState,
 }
 
 pub fn run_task_loop(repo: &Path, options: &TaskLoopOptions) -> OpsResult<()> {
@@ -173,7 +170,7 @@ fn run_task_passes(
     wave: &str,
     task: &TaskStatement,
     options: &TaskLoopOptions,
-    mut on_pr: impl FnMut(&PrOracle) -> OpsResult<()>,
+    mut on_pr: impl FnMut(Option<&PrOracle>) -> OpsResult<()>,
 ) -> OpsResult<()> {
     let started = Instant::now();
     let mut remembered_pr: Option<u64> = None;
@@ -184,37 +181,33 @@ fn run_task_passes(
         }
 
         let before = poll_pr_oracle(worktree, remembered_pr)?;
-        on_pr(&before)?;
-        if matches!(before, PrOracle::Merged { .. }) {
-            return close_task(worktree, wave, task, &before);
-        }
-        if matches!(before, PrOracle::Closed { .. }) {
-            return Err(OpsError::Message(format!(
-                "{} was closed without merging",
-                before.url().unwrap_or("task PR")
-            )));
-        }
-        if matches!(before, PrOracle::Open { .. }) && worktree_clean(worktree)? {
-            eprintln!("task PR open; waiting for merge");
-            thread::sleep(options.poll);
-            remembered_pr = before.number();
-            continue;
+        on_pr(before.as_ref())?;
+        if let Some(pr) = &before {
+            match pr.state {
+                PrState::Merged => return close_task(worktree, wave, task, pr),
+                PrState::Closed => return Err(closed_without_merging(pr)),
+                PrState::Open if worktree_clean(worktree)? => {
+                    eprintln!("task PR open; waiting for merge");
+                    thread::sleep(options.poll);
+                    remembered_pr = Some(pr.number);
+                    continue;
+                }
+                PrState::Open => {}
+            }
         }
 
         eprintln!("task pass {pass}/{}", options.max_passes);
         run_task_pass(worktree, task, options)?;
 
         let after = poll_pr_oracle(worktree, remembered_pr)?;
-        remembered_pr = after.number().or(remembered_pr);
-        on_pr(&after)?;
-        match after {
-            PrOracle::Merged { .. } => return close_task(worktree, wave, task, &after),
-            PrOracle::Closed { url, .. } => {
-                return Err(OpsError::Message(format!(
-                    "{url} was closed without merging"
-                )));
+        remembered_pr = after.as_ref().map(|pr| pr.number).or(remembered_pr);
+        on_pr(after.as_ref())?;
+        if let Some(pr) = &after {
+            match pr.state {
+                PrState::Merged => return close_task(worktree, wave, task, pr),
+                PrState::Closed => return Err(closed_without_merging(pr)),
+                PrState::Open => {}
             }
-            PrOracle::Missing | PrOracle::Open { .. } => {}
         }
     }
 
@@ -260,17 +253,21 @@ fn run_task_pass(
     Ok(())
 }
 
-fn poll_pr_oracle(worktree: &Path, remembered_pr: Option<u64>) -> OpsResult<PrOracle> {
+fn closed_without_merging(pr: &PrOracle) -> OpsError {
+    OpsError::Message(format!("{} was closed without merging", pr.url))
+}
+
+fn poll_pr_oracle(worktree: &Path, remembered_pr: Option<u64>) -> OpsResult<Option<PrOracle>> {
     if let Some(number) = remembered_pr {
         return poll_pr_by_number(worktree, number);
     }
     match current_pr(worktree)? {
         Some(pr) => poll_pr_by_number(worktree, pr.number),
-        None => Ok(PrOracle::Missing),
+        None => Ok(None),
     }
 }
 
-fn poll_pr_by_number(worktree: &Path, number: u64) -> OpsResult<PrOracle> {
+fn poll_pr_by_number(worktree: &Path, number: u64) -> OpsResult<Option<PrOracle>> {
     let output = Command::new("gh")
         .arg("pr")
         .arg("view")
@@ -280,9 +277,9 @@ fn poll_pr_by_number(worktree: &Path, number: u64) -> OpsResult<PrOracle> {
         .current_dir(worktree)
         .output()?;
     if !output.status.success() {
-        return Ok(PrOracle::Missing);
+        return Ok(None);
     }
-    parse_pr_view_json(&output.stdout)
+    parse_pr_view_json(&output.stdout).map(Some)
 }
 
 #[derive(Debug, Deserialize)]
@@ -295,26 +292,19 @@ struct GhPrView {
 fn parse_pr_view_json(raw: &[u8]) -> OpsResult<PrOracle> {
     let view: GhPrView = serde_json::from_slice(raw)
         .map_err(|err| OpsError::Parse(format!("failed to parse gh pr view: {err}")))?;
-    match view.state.as_str() {
-        "MERGED" => Ok(PrOracle::Merged {
-            number: view.number,
-            url: view.url,
-        }),
-        "CLOSED" => Ok(PrOracle::Closed {
-            number: view.number,
-            url: view.url,
-        }),
-        _ => Ok(PrOracle::Open {
-            number: view.number,
-            url: view.url,
-        }),
-    }
+    let state = match view.state.as_str() {
+        "MERGED" => PrState::Merged,
+        "CLOSED" => PrState::Closed,
+        _ => PrState::Open,
+    };
+    Ok(PrOracle {
+        number: view.number,
+        url: view.url,
+        state,
+    })
 }
 
 fn close_task(worktree: &Path, wave: &str, task: &TaskStatement, pr: &PrOracle) -> OpsResult<()> {
-    let pr_url = pr
-        .url()
-        .ok_or_else(|| OpsError::Message("merged PR oracle missing URL".to_string()))?;
     pm_update(
         worktree,
         &PmUpdateOptions {
@@ -323,7 +313,7 @@ fn close_task(worktree: &Path, wave: &str, task: &TaskStatement, pr: &PrOracle) 
             title: task.title.clone(),
             notes: Some(task.description.clone()),
             status: Some("done".to_string()),
-            pr: Some(pr_url.to_string()),
+            pr: Some(pr.url.clone()),
         },
         &NullProgress,
     )?;
@@ -334,26 +324,15 @@ fn update_run_pr(
     runtime: &tokio::runtime::Runtime,
     store: &SharedStore,
     run: &mut Run,
-    pr: &PrOracle,
+    pr: Option<&PrOracle>,
 ) -> OpsResult<()> {
-    let Some(number) = pr.number() else {
-        return Ok(());
-    };
-    let Some(url) = pr.url() else {
+    let Some(pr) = pr else {
         return Ok(());
     };
     run.pr = Some(PullRequest {
-        url: url.to_string(),
-        number: Some(number as u32),
-        state: Some(
-            match pr {
-                PrOracle::Missing => "missing",
-                PrOracle::Open { .. } => "open",
-                PrOracle::Merged { .. } => "merged",
-                PrOracle::Closed { .. } => "closed",
-            }
-            .to_string(),
-        ),
+        url: pr.url.clone(),
+        number: Some(pr.number as u32),
+        state: Some(pr.state.as_str().to_string()),
         title: None,
         branch: Some(run.branch.clone()),
     });
@@ -419,7 +398,7 @@ mod tests {
     use std::process::Command;
     use std::time::{Duration, Instant};
 
-    use super::{check_wall_clock, parse_pr_view_json, run_with_timeout, PrOracle};
+    use super::{check_wall_clock, parse_pr_view_json, run_with_timeout, PrOracle, PrState};
 
     #[test]
     fn pr_oracle_parses_merged() {
@@ -430,9 +409,10 @@ mod tests {
 
         assert_eq!(
             oracle,
-            PrOracle::Merged {
+            PrOracle {
                 number: 12,
-                url: "https://github.test/pr/12".to_string()
+                url: "https://github.test/pr/12".to_string(),
+                state: PrState::Merged,
             }
         );
     }
@@ -445,9 +425,10 @@ mod tests {
 
         assert_eq!(
             oracle,
-            PrOracle::Open {
+            PrOracle {
                 number: 7,
-                url: "https://github.test/pr/7".to_string()
+                url: "https://github.test/pr/7".to_string(),
+                state: PrState::Open,
             }
         );
     }
@@ -461,9 +442,10 @@ mod tests {
 
         assert_eq!(
             oracle,
-            PrOracle::Closed {
+            PrOracle {
                 number: 8,
-                url: "https://github.test/pr/8".to_string()
+                url: "https://github.test/pr/8".to_string(),
+                state: PrState::Closed,
             }
         );
     }

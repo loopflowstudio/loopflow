@@ -18,12 +18,6 @@ def test_products_redirects_to_home(page: Page, base_url: str):
     assert page.url == f"{base_url}/"
 
 
-def test_concerto_page_loads(page: Page, base_url: str):
-    page.goto(f"{base_url}/concerto")
-    assert page.locator("h1", has_text="Concerto").is_visible()
-
-
-def test_symphonia_page_loads(page: Page, base_url: str):
-    page.goto(f"{base_url}/symphonia")
-    assert page.locator("h1", has_text="Symphonia").is_visible()
-    assert page.locator("a", has_text="teams@loopflow.studio").is_visible()
+def test_loopflow_page_loads(page: Page, base_url: str):
+    page.goto(f"{base_url}/loopflow")
+    assert page.locator("h1", has_text="Loopflow").is_visible()

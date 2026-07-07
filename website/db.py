@@ -1,4 +1,4 @@
-"""Waitlist database for Concerto preview access and Symphonia interest."""
+"""Waitlist database for Loopflow preview access."""
 
 import logging
 import os

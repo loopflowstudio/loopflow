@@ -255,13 +255,13 @@ PRODUCTS_CONTENT = _require_content_path("homepage.products")
 
 for required_key in (
     "homepage.hero.tagline",
-    "homepage.hero.concerto_download_url",
+    "homepage.hero.loopflow_download_url",
     "homepage.video.poster",
     "homepage.install.command_display",
     "homepage.install.command_copy",
     "homepage.capabilities.items",
     "homepage.building_blocks.items",
-    "homepage.products.concerto",
+    "homepage.products.loopflow",
     "homepage.products.server",
 ):
     _require_content_path(required_key)
@@ -588,13 +588,13 @@ HOMEPAGE_VIDEO_BEHAVIOR_SCRIPT = """
 
 
 def build_homepage():
-    concerto_download_url = HERO_CONTENT["concerto_download_url"]
+    loopflow_download_url = HERO_CONTENT["loopflow_download_url"]
     install_display = INSTALL_CONTENT["command_display"].strip()
     install_copy = INSTALL_CONTENT["command_copy"]
     capability_items = CAPABILITIES_CONTENT["items"]
     building_blocks = BUILDING_BLOCKS_CONTENT["items"]
 
-    concerto_product = PRODUCTS_CONTENT["concerto"]
+    loopflow_product = PRODUCTS_CONTENT["loopflow"]
     server_product = PRODUCTS_CONTENT["server"]
     server_terminal_lines = [
         (line["type"], line["content"]) for line in server_product["terminal_lines"]
@@ -614,7 +614,7 @@ def build_homepage():
                     H1("Loopflow"),
                     P(HERO_CONTENT["tagline"], cls="tagline"),
                     Div(
-                        A("Download for Mac", href=concerto_download_url, cls="btn btn-primary"),
+                        A("Download for Mac", href=loopflow_download_url, cls="btn btn-primary"),
                         A("Read the docs", href="/docs", cls="btn btn-secondary"),
                         cls="btn-group hero-actions",
                     ),
@@ -668,14 +668,14 @@ def build_homepage():
                     H2(PRODUCTS_CONTENT["heading"]),
                     Div(
                         ProductCard(
-                            concerto_product["name"],
-                            concerto_product["description"],
-                            concerto_product["details"],
+                            loopflow_product["name"],
+                            loopflow_product["description"],
+                            loopflow_product["details"],
                             Img(
-                                src=concerto_product["image"],
-                                alt=concerto_product["image_alt"],
+                                src=loopflow_product["image"],
+                                alt=loopflow_product["image_alt"],
                             ),
-                            note=concerto_product.get("note"),
+                            note=loopflow_product.get("note"),
                         ),
                         ProductCard(
                             server_product["name"],
@@ -694,7 +694,7 @@ def build_homepage():
             Section(
                 Div(
                     Div(
-                        A("Download for Mac", href=concerto_download_url, cls="btn btn-primary"),
+                        A("Download for Mac", href=loopflow_download_url, cls="btn btn-primary"),
                         A("Read the docs", href="/docs", cls="btn btn-secondary"),
                         cls="hero-actions",
                     ),
@@ -740,14 +740,14 @@ def get():
     return RedirectResponse("/", status_code=302)
 
 
-# Concerto runtime concepts (Triggers, Loops, Subscriptions)
-CONCERTO_VOCAB_ESSENCES = {
+# Loopflow runtime concepts (Triggers, Loops, Subscriptions)
+LOOPFLOW_VOCAB_ESSENCES = {
     "Trigger": "What starts an agent",
     "Loop": "What keeps it going",
     "Subscription": "What connects them",
 }
 
-CONCERTO_VOCAB_DETAILS = {
+LOOPFLOW_VOCAB_DETAILS = {
     "Trigger": [
         ("Manual", "Button click or command"),
         ("File change", "Watch and respond"),
@@ -763,24 +763,24 @@ CONCERTO_VOCAB_DETAILS = {
     ],
 }
 
-CONCERTO_VOCAB_ICONS = {
+LOOPFLOW_VOCAB_ICONS = {
     "Trigger": _ICON_BOLT,
     "Loop": _ICON_LOOP,
     "Subscription": _ICON_SWAP,
 }
 
 
-@rt("/concerto")
+@rt("/loopflow")
 def get():
     return (
-        Title("Concerto — Loopflow UI"),
+        Title("Loopflow — Loopflow UI"),
         SkipLink(),
         Navbar(),
         Main(
             # Hero
             Section(
                 Div(
-                    H1("Concerto"),
+                    H1("Loopflow"),
                     P("Arrange and conduct agent orchestras.", cls="tagline"),
                     cls="container hero-centered",
                 ),
@@ -794,23 +794,23 @@ def get():
                         TermCard(
                             "1",
                             "Trigger",
-                            CONCERTO_VOCAB_ICONS["Trigger"],
-                            CONCERTO_VOCAB_ESSENCES["Trigger"],
-                            CONCERTO_VOCAB_DETAILS["Trigger"],
+                            LOOPFLOW_VOCAB_ICONS["Trigger"],
+                            LOOPFLOW_VOCAB_ESSENCES["Trigger"],
+                            LOOPFLOW_VOCAB_DETAILS["Trigger"],
                         ),
                         TermCard(
                             "2",
                             "Loop",
-                            CONCERTO_VOCAB_ICONS["Loop"],
-                            CONCERTO_VOCAB_ESSENCES["Loop"],
-                            CONCERTO_VOCAB_DETAILS["Loop"],
+                            LOOPFLOW_VOCAB_ICONS["Loop"],
+                            LOOPFLOW_VOCAB_ESSENCES["Loop"],
+                            LOOPFLOW_VOCAB_DETAILS["Loop"],
                         ),
                         TermCard(
                             "3",
                             "Subscription",
-                            CONCERTO_VOCAB_ICONS["Subscription"],
-                            CONCERTO_VOCAB_ESSENCES["Subscription"],
-                            CONCERTO_VOCAB_DETAILS["Subscription"],
+                            LOOPFLOW_VOCAB_ICONS["Subscription"],
+                            LOOPFLOW_VOCAB_ESSENCES["Subscription"],
+                            LOOPFLOW_VOCAB_DETAILS["Subscription"],
                         ),
                         cls="vocab-grid vocab-grid-3",
                     ),
@@ -823,17 +823,17 @@ def get():
             Section(
                 Div(
                     Img(
-                        src="/static/concerto-main.png",
-                        alt="Concerto showing waves with active, idle, and scheduled states",
-                        cls="concerto-showcase-img",
+                        src="/static/loopflow-main.png",
+                        alt="Loopflow showing waves with active, idle, and scheduled states",
+                        cls="loopflow-showcase-img",
                     ),
                     P(
                         "All your agents, all your branches, one view.",
-                        cls="concerto-showcase-caption",
+                        cls="loopflow-showcase-caption",
                     ),
                     cls="container",
                 ),
-                cls="concerto-showcase-section",
+                cls="loopflow-showcase-section",
             ),
             # Install
             Section(
@@ -866,51 +866,6 @@ def get():
 def get():
     # Redirect /maestro to download
     return RedirectResponse("/download", status_code=302)
-
-
-@rt("/symphonia")
-def get():
-    return (
-        Title("Symphonia — Loopflow for Teams"),
-        SkipLink(),
-        Navbar(),
-        Main(
-            Section(
-                Div(
-                    Span(
-                        "Coming Soon",
-                        cls="maturity-badge maturity-experimental",
-                        style="margin-bottom: 24px; display: inline-block;",
-                    ),
-                    H1("Symphonia"),
-                    P("Concerto for teams.", cls="tagline"),
-                    P(
-                        "Server-side agents, coordinating agents at very large scale as a collective team.",
-                        style="color: var(--text-secondary); font-size: 16px; max-width: 520px; margin: 0 auto 32px;",
-                    ),
-                    cls="container",
-                ),
-                cls="page-hero",
-            ),
-            Section(
-                Div(
-                    H2("Get in touch"),
-                    P(
-                        "Symphonia is in development. If you're interested in running coordinated agent teams at scale, we'd love to hear from you."
-                    ),
-                    A(
-                        "teams@loopflow.studio",
-                        href="mailto:teams@loopflow.studio",
-                        cls="contact-email",
-                    ),
-                    cls="container",
-                ),
-                cls="contact-section",
-            ),
-            id="main-content",
-        ),
-        SiteFooter(),
-    )
 
 
 @rt("/team")

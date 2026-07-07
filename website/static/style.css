@@ -1140,11 +1140,11 @@ h3:hover .anchor-link,
     }
 }
 
-/* Concerto showcase (promoted image section) */
-.concerto-showcase-section {
+/* Loopflow showcase (promoted image section) */
+.loopflow-showcase-section {
     padding: 48px 0 0;
 }
-.concerto-showcase-img {
+.loopflow-showcase-img {
     max-width: 100%;
     border-radius: 12px;
     border: 1px solid var(--border);
@@ -1152,13 +1152,13 @@ h3:hover .anchor-link,
     margin: 0 auto;
     display: block;
 }
-.concerto-showcase-caption {
+.loopflow-showcase-caption {
     text-align: center;
     color: var(--text-secondary);
     font-size: 14px;
     margin-top: 12px;
 }
-.concerto-showcase-caption a {
+.loopflow-showcase-caption a {
     color: var(--burgundy);
     text-decoration: underline;
     text-underline-offset: 2px;

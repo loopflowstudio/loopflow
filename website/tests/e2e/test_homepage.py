@@ -1,7 +1,7 @@
 from playwright.sync_api import Page
 
 TAGLINE = "Coding agents that work in a team and build over time."
-CONCERTO_DMG_URL = "https://downloads.loopflow.studio/LoopflowConcerto-latest.dmg"
+LOOPFLOW_DMG_URL = "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 
 
 def test_hero_elements_visible(homepage: Page):
@@ -13,10 +13,10 @@ def test_tagline(homepage: Page):
     assert homepage.locator(".tagline", has_text=TAGLINE).is_visible()
 
 
-def test_download_concerto_cta(homepage: Page):
+def test_download_loopflow_cta(homepage: Page):
     cta = homepage.locator(".hero a", has_text="Download for Mac").first
     assert cta.is_visible()
-    assert cta.get_attribute("href") == CONCERTO_DMG_URL
+    assert cta.get_attribute("href") == LOOPFLOW_DMG_URL
 
 
 def test_docs_cta_navigates_to_docs(homepage: Page):
@@ -29,7 +29,7 @@ def test_hero_video(homepage: Page):
     assert section.is_visible()
     assert section.locator("video.demo-video").is_visible()
     assert (
-        section.locator("video.demo-video").get_attribute("poster") == "/static/concerto-main.png"
+        section.locator("video.demo-video").get_attribute("poster") == "/static/loopflow-main.png"
     )
 
 
@@ -49,7 +49,7 @@ def test_products_section(homepage: Page):
     section = homepage.locator(".products-section")
     assert section.is_visible()
     assert section.locator(".product-card").count() == 2
-    assert section.locator("h3", has_text="Concerto").is_visible()
+    assert section.locator("h3", has_text="Loopflow").is_visible()
     assert section.locator("h3", has_text="Server").is_visible()
 
 

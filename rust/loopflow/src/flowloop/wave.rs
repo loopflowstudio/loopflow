@@ -232,7 +232,7 @@ fn build_goal_seed(repo: &Path, wave: &str, memory: &Memory) -> String {
 }
 
 /// The coordinating-session discipline, promoted into the flowloop's system
-/// prompt: the flowloop orchestrates, it never grinds inline. Mind-specific rules
+/// prompt: the flowloop orchestrates, it never grinds inline. Wave-specific rules
 /// only — shared loopflow operating guidance is appended in
 /// [`wave_pass_seed`], not duplicated here.
 fn orchestration_discipline(wave: &str) -> String {

@@ -19,8 +19,9 @@ Everything agentic is the **same flowloop runtime**. Flowloops differ on exactly
 **two axes**:
 
 1. **Ownership** — which concrete artifact/PM unit it owns and clarifies.
-2. **Stop-condition** — a **termination bit** the agent has write access to,
-   deterministically checked at the end of each pass.
+2. **Stop-condition** — the generic termination bit, flipped by the agent
+   per its mutate skill's judgment, deterministically consumed by the runner
+   at each pass boundary.
 
 The tiers form an OKR decomposition:
 
@@ -49,21 +50,21 @@ Key consequences:
 
 ## 2. Termination: deterministic oracle, agentic everything-else
 
-**The heart of the design.** The agent decides it is done — its skill states
-exactly how to decide — but the decision only counts by **setting a bit in the
-world**; the runner's halt is `if (bit) stop`, a deterministic read of what the
-agent set:
+**The heart of the design.** The agent decides it is done; the mutate skill
+states exactly how to decide, anchored to a real-world condition it must
+check first:
 
-- task → `gh pr view` says MERGED (later: + a prod-verification check)
-- project → the KR set reads all-done (KRs are measurable by definition)
-- wave → no bit to set; the loop is the point
+- task → its PR is merged (`gh pr view` says MERGED; later + prod verify)
+- project → every KR in its doc verifiably holds
+- wave → no condition; the loop is the point
 
-The agent can't dark-room its way out — "done" in the transcript counts for
-nothing; only the bit (merged PR, completed KRs) does, and the moves that set
-it (submit, land, close KRs) are exactly the legible, reviewable ones. The
-terminator is a **composable predicate**:
-swap in `spend ≥ $N` for a budget-bounded explorer; AND them for "finish, but stop
-at $N either way."
+The bit itself is generic and mechanical: the agent writes
+`scratch/loop.yaml` (`done: true`, or `recheck: <cmd>` to hand a free wait
+to the runner), the runner consumes it at each boundary. The agent can't
+dark-room its way out — "done" in the transcript counts for nothing, the
+skill forbids flipping the bit before the condition is checked, and the
+moves that make it true (submit, merge, verify) are exactly the legible,
+reviewable ones.
 
 **Enforcement (v1, revisitable):** the termination clause lives **in the agent's
 seed** ("poll the oracle; stop only when terminal") and each phase run carries

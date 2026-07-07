@@ -59,7 +59,6 @@ use crate::chat::types::Lifecycle;
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
 use crate::flowloop::pass::lf_command;
-use crate::flowloop::Tier;
 use crate::wave::journal::{ellipsize, MessageId, MessageOp, PendingMessage};
 use crate::wave::memory::Memory;
 use crate::wave::resident::ListenerClient;
@@ -640,7 +639,7 @@ fn spawn_wave_pass(
         command.arg("--max-turns").arg(max_turns.to_string());
     }
     command
-        .arg(Tier::Wave.pass_flow())
+        .arg("wave-pass")
         .arg(seed)
         .current_dir(cwd)
         .stdout(std::process::Stdio::piped())

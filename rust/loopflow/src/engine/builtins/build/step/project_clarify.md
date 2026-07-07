@@ -1,22 +1,25 @@
 ---
-description: Make the project KR set measurable for the project flowloop.
+description: Make the project's KR set measurable in its own doc.
 default_agent: codex
 action_style: procedural
 ---
-Clarify the project artifact: the wave's kr-labeled Linear items.
+Clarify the project artifact: its KR set.
 
 ## Orientation
 
-Read the KR set in `<lf:message>`, then read `wave/<wave>/GOAL.md`,
-`wave/<wave>/MEMORY.md`, and `scratch/questions.md` if present.
+The project seed is in `<lf:message>`. The KR set lives in the project's own
+doc — `scratch/<branch>.md`, a `## KRs` section of 2–10 checkboxed items —
+not in an external tracker. Read the seed, the doc if present, the wave's
+GOAL.md and MEMORY.md.
 
 ## Work
 
-- Make every KR measurable enough for the oracle: completed or not completed.
-- If a KR is vague, update its Linear title or notes to state the observable
-  condition.
-- If the project has no real KRs, record that as a blocker and stop; the
-  runtime refuses an empty KR set.
+- If the doc's KR set is measurable (each KR states an observable condition
+  you could check with a command or a look), leave it alone.
+- Otherwise write it: 2–10 KRs, each one line, each checkable. Milestone KRs
+  retire when true; self-renewing KRs say what respawns them.
+- If the seed can't support real KRs, record that as a blocker in
+  `scratch/questions.md` and stop.
 
 Do not decompose work in this phase unless the clarification is trivial and
 directly unblocks the next phase.

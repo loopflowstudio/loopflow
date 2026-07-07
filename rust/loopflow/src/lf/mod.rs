@@ -174,14 +174,18 @@ pub enum Commands {
         #[arg(long, conflicts_with = "no_flowloop")]
         flowloop_only: bool,
     },
-    /// Run a Linear roadmap task as a bounded task flowloop
+    /// Run a task as a bounded flowloop: loop task-pass until the PR merges
     Task {
-        /// Linear item ID from the wave roadmap
-        item_id: String,
+        /// What to do — free text; the flow's skills clarify it into a design
+        /// doc and drive one small PR to merged
+        seed: String,
+        /// Loop a different flow (any flow is loopable)
+        #[arg(long = "flow", default_value = "task-pass")]
+        flow: String,
         /// Wave name (default: inferred from the current worktree/branch)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// Maximum task passes before escalation
+        /// Maximum passes before escalation
         #[arg(long = "max-passes", default_value_t = 8)]
         max_passes: u32,
         /// Per-pass timeout in seconds
@@ -190,10 +194,10 @@ pub enum Commands {
         /// Overall timeout in seconds
         #[arg(long = "wall-clock-secs", default_value_t = 7200)]
         wall_clock_secs: u64,
-        /// Poll interval while waiting for a human merge
+        /// Poll interval for the loop file's recheck predicate
         #[arg(long = "poll-secs", default_value_t = 60)]
         poll_secs: u64,
-        /// Maximum agent turns per task pass
+        /// Maximum agent turns per pass
         #[arg(long = "max-turns")]
         max_turns: Option<u32>,
     },

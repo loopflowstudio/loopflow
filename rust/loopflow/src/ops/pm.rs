@@ -64,14 +64,6 @@ pub struct PmUpdateResult {
     pub linked_pr: Option<String>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct PmCompleteOptions {
-    pub wave: Option<String>,
-    pub id: String,
-    /// PR URL to attach as a comment on the task before closing it.
-    pub pr: Option<String>,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct PmStatusOptions {
     pub wave: Option<String>,
@@ -444,25 +436,6 @@ async fn pm_update_async(
     apply_update(&wave, &ctx, options, progress).await
 }
 
-pub(crate) fn pm_complete(
-    repo: &Path,
-    options: &PmCompleteOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmUpdateResult> {
-    block_on_pm(pm_complete_async(repo, options, progress))
-}
-
-async fn pm_complete_async(
-    repo: &Path,
-    options: &PmCompleteOptions,
-    progress: &impl Progress,
-) -> OpsResult<PmUpdateResult> {
-    let wave = resolve_wave_name(repo, options.wave.as_deref())
-        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
-    let ctx = resolve_context(repo, &wave).await?;
-    complete_existing_item(&wave, &ctx, &options.id, options.pr.as_deref(), progress).await
-}
-
 async fn apply_update(
     wave: &str,
     ctx: &PmContext,
@@ -538,37 +511,6 @@ async fn apply_update(
         id,
         created,
         completed: mark_done,
-        linked_pr,
-    })
-}
-
-async fn complete_existing_item(
-    wave: &str,
-    ctx: &PmContext,
-    id: &str,
-    pr: Option<&str>,
-    progress: &impl Progress,
-) -> OpsResult<PmUpdateResult> {
-    let linked_pr = match pr.map(str::trim).filter(|pr| !pr.is_empty()) {
-        Some(pr) => {
-            progress.status(&format!("commenting PR link on {} task {id}", ctx.provider));
-            ctx.client
-                .comment(id, &format!("Shipped: {pr}"))
-                .await
-                .map_err(pm_to_ops)?;
-            Some(pr.to_string())
-        }
-        None => None,
-    };
-
-    progress.status(&format!("closing {} task {id}", ctx.provider));
-    ctx.client.complete_item(id).await.map_err(pm_to_ops)?;
-
-    Ok(PmUpdateResult {
-        wave: wave.to_string(),
-        id: id.to_string(),
-        created: false,
-        completed: true,
         linked_pr,
     })
 }

@@ -28,7 +28,7 @@ lf office-hours                   # bare name works when unambiguous
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
-lf task 1207... --wave designer   # run one Linear task until its PR merges
+lf task "fix the flaky test" --wave designer   # loop task-pass until the PR merges
 ```
 
 ## Steps
@@ -120,16 +120,18 @@ lf ship -w feature-branch
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
-## Running Roadmap Tasks
+## Running Tasks
 
 ```bash
-lf task <linear-item-id> --wave designer
-lf task <linear-item-id> --wave designer --max-passes 4 --wall-clock-secs 3600
+lf task "fix the flaky chord-timeout test" --wave designer
+lf task "…" --wave designer --max-passes 4 --wall-clock-secs 3600
+lf task "…" --flow scan-pass          # any flow is loopable
 ```
 
-`lf task` resolves the Linear item from the wave roadmap, creates a worker
-worktree, runs bounded task passes, waits for the PR to merge, then links and
-closes the Linear task.
+`lf task` takes free text, creates a task worktree, and loops the flow over
+it until the flow's skills write `done` to `scratch/loop.yaml` (for
+`task-pass`: when the PR merges). The open runs with a task flow are the
+wave's open tasks (`lf runs`); the merged PR is the record of done.
 
 ## Speaking to Waves
 

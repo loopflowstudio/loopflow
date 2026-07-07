@@ -1,18 +1,16 @@
 # Open assumptions
 
-- `lf task <linear-item-id>` is the public command; the three-phase flow is
-  named `task-pass` to avoid colliding with the subcommand. A wave must be
-  registered before `lf task` can place its worktree.
-- KR set = items labeled `kr` in the wave's Linear project; an empty set
-  refuses to start rather than reading as done. Richer KR representation is
-  deferred to project-tier wiring.
+- `lf task "<seed>"` takes free text; `--flow` loops any flow. No tracker in
+  the path: the open runs with a task flow are the wave's open tasks
+  (`lf runs`); the merged PR is the record of done. `lf op pm` remains for
+  waves that still want Linear, but nothing in the flowloop requires it.
+- The loop file is `scratch/loop.yaml`, consumed every boundary; the runner
+  injects the how-to-terminate instruction into every pass seed.
 - Executive calls awaiting review, not blocking: `HEARTBEAT_IDLE` = 4h for
-  pass-based waves; the pass's reply text is its stdout tail (stderr appended
-  when present).
-- The wire rename shipped with NO journal compat: pre-rename
-  `journal.jsonl` files (mind_state tags) no longer fold. Existing wave
-  journals on this machine reset on first boot after deploy — accepted,
-  single-user.
-- The `mind:` GOAL.md vendor knob was deleted, not renamed: pass runs select
-  agents through the standard machinery (`agent:`, `step_agents:`, step
-  `default_agent:`).
+  pass-based waves; recheck predicates run under `sh -c` in the worktree.
+- The wire rename shipped with NO journal compat: pre-rename `journal.jsonl`
+  files no longer fold; existing wave journals reset on first boot after
+  deploy — accepted, single-user.
+- Project tier: KR set lives in the project's own doc (`## KRs` checklist),
+  not Linear. Driver deleted with the tier collapse; `project-pass` skills
+  remain and loop via `lf task "<seed>" --flow project-pass` when wanted.

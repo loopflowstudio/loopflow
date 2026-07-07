@@ -523,7 +523,8 @@ fn main() -> anyhow::Result<()> {
                 loopflow::wave::run(name, *force, *no_flowloop, *flowloop_only)
             }),
             Some(Commands::Task {
-                item_id,
+                seed,
+                flow,
                 wave,
                 max_passes,
                 pass_timeout_secs,
@@ -532,13 +533,14 @@ fn main() -> anyhow::Result<()> {
                 max_turns,
             }) => in_repo_runtime(&args, |repo| {
                 let mut options =
-                    loopflow::flowloop::task::TaskLoopOptions::new(item_id.clone(), wave.clone());
+                    loopflow::flowloop::driver::LoopOptions::new(flow.clone(), wave.clone());
                 options.max_passes = *max_passes;
                 options.pass_timeout = std::time::Duration::from_secs(*pass_timeout_secs);
                 options.wall_clock = std::time::Duration::from_secs(*wall_clock_secs);
                 options.poll = std::time::Duration::from_secs(*poll_secs);
                 options.max_turns = max_turns.or(cli.max_turns);
-                loopflow::flowloop::task::run_task_loop(repo, &options).map_err(anyhow::Error::from)
+                loopflow::flowloop::driver::run_flowloop(repo, seed, &options)
+                    .map_err(anyhow::Error::from)
             }),
             Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
             Some(Commands::Ls { json }) => loopflow::lf::commands::waves::ls(*json),

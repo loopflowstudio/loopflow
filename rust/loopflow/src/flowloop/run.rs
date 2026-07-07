@@ -3,16 +3,15 @@ use std::sync::Arc;
 
 use time::OffsetDateTime;
 
-use crate::flowloop::Tier;
 use crate::lfd::executor::{create_run_for_placement, Placement};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{Run, RunStatus};
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::ops::{OpsError, OpsResult};
 
-/// A tier driver's registry-backed run: a fresh worktree plus the tokio
+/// A flowloop's registry-backed run: a fresh worktree plus the tokio
 /// runtime and store handle it needs to update the run as the flowloop
-/// progresses. Every tier shares this lifecycle; only the pass loop differs.
+/// progresses. Every looped flow shares this lifecycle.
 pub(crate) struct FlowloopRun {
     pub runtime: tokio::runtime::Runtime,
     pub store: SharedStore,
@@ -21,7 +20,7 @@ pub(crate) struct FlowloopRun {
 
 impl FlowloopRun {
     /// Resolve the wave, create a fresh worktree, and register the run.
-    pub fn start(wave_name: &str, tier: Tier, task: String) -> OpsResult<Self> {
+    pub fn start(wave_name: &str, flow: &str, task: String) -> OpsResult<Self> {
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|err| OpsError::Message(format!("failed to build flowloop runtime: {err}")))?;
         let store: SharedStore = Arc::new(runtime.block_on(async {
@@ -45,7 +44,7 @@ impl FlowloopRun {
                 .map_err(|err| {
                     OpsError::Message(format!("failed to create flowloop worktree: {err}"))
                 })?;
-            run.flow = tier.pass_flow().to_string();
+            run.flow = flow.to_string();
             run.task = Some(task);
             store.update_run(&run).await.map_err(|err| {
                 OpsError::Message(format!("failed to update flowloop run: {err}"))

@@ -36,17 +36,6 @@ pub fn run_pass(worktree: &Path, flow: &str, seed: &str, options: &PassOptions) 
     Ok(())
 }
 
-pub(crate) fn check_wall_clock(started: Instant, wall_clock: Duration) -> OpsResult<()> {
-    if started.elapsed() >= wall_clock {
-        let message = format!(
-            "flowloop exceeded wall-clock cap of {}s",
-            wall_clock.as_secs()
-        );
-        return Err(OpsError::Message(message));
-    }
-    Ok(())
-}
-
 pub(crate) fn run_with_timeout(
     mut cmd: Command,
     timeout: Duration,
@@ -70,14 +59,6 @@ pub(crate) fn run_with_timeout(
     }
 }
 
-pub(crate) fn escalate_parent(message: &str) {
-    let _ = lf_command()
-        .arg("chat")
-        .arg("--parent")
-        .arg(message)
-        .status();
-}
-
 pub(crate) fn lf_command() -> Command {
     if let Ok(path) = std::env::current_exe() {
         return Command::new(path);
@@ -88,17 +69,9 @@ pub(crate) fn lf_command() -> Command {
 #[cfg(test)]
 mod tests {
     use std::process::Command;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
-    use super::{check_wall_clock, run_with_timeout};
-
-    #[test]
-    fn wall_clock_cap_fires() {
-        let started = Instant::now() - Duration::from_secs(5);
-        let err = check_wall_clock(started, Duration::from_secs(1)).expect_err("cap");
-
-        assert!(err.to_string().contains("wall-clock cap"));
-    }
+    use super::run_with_timeout;
 
     #[test]
     fn pass_runner_kills_on_timeout() {

@@ -74,12 +74,13 @@ Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its int
 Run a roadmap task as a bounded task flowloop:
 
 ```bash
-lf task 1207... --wave designer
+lf task "fix the flaky chord-timeout test" --wave designer
 ```
 
-`lf task` resolves the Linear item from the wave roadmap, creates a worker
-worktree, runs bounded `task-pass` cycles, waits for the PR to merge, then
-links and closes the Linear task.
+`lf task` takes free text, creates a task worktree, and loops `task-pass`
+over it until the PR merges. The open runs with a task flow ARE the wave's
+open tasks (`lf runs`); the merged PR is the record of done — no tracker
+required.
 
 ### Crons
 

@@ -53,7 +53,8 @@ struct LocalWaveAgentLauncherTests {
             bundled: URL(fileURLWithPath: "/Applications/Concerto.app/Contents/MacOS/lf"),
             pathEnv: "/usr/local/bin",
             isExecutableFile: { _ in true },
-            probe: { _ in true }
+            probe: { _ in true },
+            useCache: false
         )
 
         #expect(resolved == "/Applications/Concerto.app/Contents/MacOS/lf")
@@ -70,7 +71,8 @@ struct LocalWaveAgentLauncherTests {
             probe: { candidate in
                 probed.append(candidate)
                 return candidate == "/Users/jack/src/loopflow/target/release/lf"
-            }
+            },
+            useCache: false
         )
 
         #expect(resolved == "/Users/jack/src/loopflow/target/release/lf")
@@ -88,7 +90,8 @@ struct LocalWaveAgentLauncherTests {
                 bundled: nil,
                 pathEnv: "/Users/jack/.local/bin",
                 isExecutableFile: { _ in true },
-                probe: { _ in false }
+                probe: { _ in false },
+                useCache: false
             )
         } throws: { error in
             guard case let WaveLaunchError.noUsableLf(detail) = error else { return false }
@@ -106,7 +109,8 @@ struct LocalWaveAgentLauncherTests {
                 bundled: nil,
                 pathEnv: "/usr/local/bin:/usr/bin",
                 isExecutableFile: { _ in false },
-                probe: { _ in true }
+                probe: { _ in true },
+                useCache: false
             )
         } throws: { error in
             guard case let WaveLaunchError.noUsableLf(detail) = error else { return false }

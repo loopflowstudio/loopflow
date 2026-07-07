@@ -89,7 +89,6 @@ public final class RepoState {
     public var repoTarget: RepoTarget?
     public var flows: [Flow] = []
     public var availableDirections: [String] = []
-    public var supportedHarnesses: [String] = []
 
     // Wave state — delegated to WaveStore
     public let waveStore = WaveStore()
@@ -233,8 +232,7 @@ public final class RepoState {
     private let shellCommandRunner: WaveService.ShellCommandRunner?
     private var waveService: WaveService
     /// Local discovery via `lf ls` (see `RegistryQuery`). Injected on platforms
-    /// that can shell `lf`; `nil` falls back to the surviving REST reads (the
-    /// remote/iOS branch — a remote `lf` over SSH is a later seam).
+    /// that can shell `lf`; `nil` means the registry is unavailable in this UI.
     public var registryQuery: RegistryQuery?
     private var snapshotTask: Task<Void, Never>?
     private weak var outputBuffer: OutputBuffer?
@@ -275,7 +273,6 @@ public final class RepoState {
         currentRepo = repoURL
         repoTarget = .local(repoURL)
         flows = []
-        supportedHarnesses = []
         waveStore.removeAll()
         worktreeStore.removeAll()
         resetTransientWaveState()
@@ -487,8 +484,8 @@ public final class RepoState {
     // MARK: - Registry snapshot
 
     /// Load the wave registry and keep it fresh. There is no telemetry stream:
-    /// discovery is a QUERY (`RegistryQuery`/`lf ls` locally, the REST wave list
-    /// remotely) that this re-runs on a slow cadence, and a wave's live motion
+    /// discovery is a QUERY (`RegistryQuery`/`lf ls`) that this re-runs on a
+    /// slow cadence, and a wave's live motion
     /// is its own per-wave SSE (`WaveChatConnection`), opened by the detail
     /// view. Replaces the deleted `/ws` connected snapshot + push.
     public func startEventSubscription(outputBuffer: OutputBuffer) {
@@ -516,23 +513,16 @@ public final class RepoState {
         }
     }
 
-    /// Re-read which waves exist for this repo. Local: `lf ls` via
-    /// `RegistryQuery`. Remote (or no local runner): the surviving REST wave
-    /// list — the same query underneath, over the wave server this window talks
-    /// to. `applyConnectedSnapshot` scopes a machine-wide `lf ls` to this repo.
+    /// Re-read which waves exist for this repo. `applyConnectedSnapshot` scopes
+    /// a machine-wide `lf ls` to this repo.
     private func refreshRegistrySnapshot() async {
-        guard let repoTarget else { return }
+        guard let repoTarget, case .local(let url) = repoTarget, let registryQuery else { return }
         do {
-            let loaded: [Wave]
-            if case .local(let url) = repoTarget, let registryQuery {
-                loaded = try await registryQuery.waves(repoPath: url.path)
-            } else {
-                loaded = try await waveService.listWaves(repo: repoTarget)
-            }
+            let loaded = try await registryQuery.waves(repoPath: url.path)
             applyConnectedSnapshot(loaded)
             preloadWaveContent(for: waves)
             if let selectedWaveId {
-                loadRuns(for: selectedWaveId)
+                loadStatus(for: selectedWaveId)
             }
             updateConnectionState(.connected)
         } catch {
@@ -545,26 +535,24 @@ public final class RepoState {
     public func refreshFlowsAsync() async {
         guard let repo = repoTarget else { return }
         guard let result = try? await waveService.listFlowsAndDirections(repo: repo) else {
-            supportedHarnesses = []
             return
         }
         if !result.flows.isEmpty {
             flows = result.flows
         }
         availableDirections = result.directions
-        supportedHarnesses = result.supportedHarnesses
     }
 
     // MARK: - Waves
 
     public func refreshWaves() async {
-        guard let repo = repoTarget else {
+        guard let repo = repoTarget, case .local(let url) = repo, let registryQuery else {
             LoggingService.model("refreshWaves: no repoTarget")
             return
         }
         LoggingService.model("refreshWaves: starting for repo=\(repo.path)")
         do {
-            let newWaves = try await waveService.listWaves(repo: repo)
+            let newWaves = try await registryQuery.waves(repoPath: url.path)
             LoggingService.model("refreshWaves: got \(newWaves.count) waves")
             waveStore.setAll(newWaves.map(makeWaveViewModel))
             preloadWaveContent(for: waves)
@@ -602,12 +590,17 @@ public final class RepoState {
     }
 
     public func refreshAttention() async {
-        guard let repo = repoTarget else {
+        guard registryQuery != nil else {
             attentionStore.removeAll()
             return
         }
         do {
-            let items = try await waveService.listAttention(repo: repo)
+            var items: [AttentionItem] = []
+            for wave in waves {
+                let status = try await statusSnapshot(for: wave.id)
+                items.append(contentsOf: status.attention)
+                runStore.setRuns(for: wave.id, status.runs)
+            }
             attentionStore.setAll(items)
         } catch {
             LoggingService.model("refreshAttention: error=\(error.localizedDescription)")
@@ -700,10 +693,26 @@ public final class RepoState {
     }
 
     public func loadRuns(for waveId: String) {
+        loadStatus(for: waveId)
+    }
+
+    public func loadStatus(for waveId: String) {
         Task {
-            guard let runs = try? await waveService.listRuns(waveId: waveId) else { return }
-            runStore.setRuns(for: waveId, runs)
+            guard let status = try? await statusSnapshot(for: waveId) else { return }
+            runStore.setRuns(for: waveId, status.runs)
+            attentionStore.setAll(status.attention)
         }
+    }
+
+    private func statusSnapshot(for waveId: String) async throws
+        -> (runs: [Run], attention: [AttentionItem], mind: String?) {
+        guard let registryQuery,
+              let wave = waveStore.wave(for: waveId)
+        else {
+            return ([], [], nil)
+        }
+        let cwd = currentRepo?.path()
+        return try await registryQuery.status(wave: wave.name, waveId: wave.id, cwd: cwd)
     }
 
     /// Point the wave's terminal pane at a run's live tmux session so opening
@@ -1198,9 +1207,7 @@ public final class RepoState {
         Task {
             try? await Task.sleep(for: .seconds(delay))
             guard waveStore.wave(for: waveId) != nil else { return }
-            if let wave = try? await waveService.getWave(waveId) {
-                waveStore.set(makeWaveViewModel(api: wave))
-            }
+            await refreshRegistrySnapshot()
         }
     }
 
@@ -1212,7 +1219,11 @@ public final class RepoState {
         }
 
         let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: wave.name, branch: wave.branch)
-        _ = waveStore.applyOptimistic(waveId) { $0.content = content }
+        let plan = WavePlanParser.parse(repoRoot: repoRoot, waveName: wave.name)
+        _ = waveStore.applyOptimistic(waveId) {
+            $0.content = content
+            $0.plan = plan
+        }
         waveStore.commitMutation(waveId)
     }
 
@@ -1240,7 +1251,8 @@ public final class RepoState {
     private func makeWaveViewModel(api wave: Wave) -> WaveViewModel {
         WaveViewModel(
             api: wave,
-            content: waveStore.wave(for: wave.id)?.content
+            content: waveStore.wave(for: wave.id)?.content,
+            plan: waveStore.wave(for: wave.id)?.plan
         )
     }
 }

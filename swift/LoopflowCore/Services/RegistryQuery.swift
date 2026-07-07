@@ -9,9 +9,8 @@
 // This runs `lf ls/status/runs --json` as a subprocess and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
 // `lf/commands/runs.rs`) into the app models the stores hold. The subprocess
-// runner is injected: on macOS it resolves and execs a local `lf`; the
-// `RepoTarget.remote` path is a later seam (an `lf` over SSH), so a caller with
-// no runner falls back to the surviving REST reads.
+// runner is injected: on macOS it resolves and execs a local `lf`. There is no
+// HTTP fallback for reads; remote reads need to become proxied `lf` queries.
 
 import Foundation
 
@@ -34,16 +33,21 @@ public struct RegistryQuery: Sendable {
         self.run = run
     }
 
+    /// Every wave the registry knows across the machine. Callers that need
+    /// several repo slices should call this once and filter locally.
+    public func allWaves() async throws -> [Wave] {
+        let stdout = try await run(["ls", "--json"], nil)
+        let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
+        return snapshots.map { $0.toWave() }
+    }
+
     /// Every wave the registry knows (running and stopped alike), scoped to one
     /// repo. This replaces the old `/ws` connected snapshot — a point-in-time
     /// read the caller re-queries on a cadence, not a stream.
     public func waves(repoPath: String) async throws -> [Wave] {
-        let stdout = try await run(["ls", "--json"], nil)
-        let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
+        let waves = try await allWaves()
         let target = repoPath.normalizedFilePath
-        return snapshots
-            .filter { $0.repo.normalizedFilePath == target }
-            .map { $0.toWave() }
+        return waves.filter { $0.repo.normalizedFilePath == target }
     }
 
     /// One wave's runs and attention (its durable history from the ledger),
@@ -162,16 +166,15 @@ struct RunSnapshot: Decodable {
             waveId: waveId,
             flow: flow,
             task: task,
-            area: ".",
             repo: repo,
-            status: RunStatus(rawValue: status) ?? .pending,
+            status: RunStatus(lfToken: status),
             worktree: worktree.isEmpty ? nil : worktree,
             branch: branch.isEmpty ? nil : branch,
             error: error,
             pr: pr,
             startedAt: RegistrySnapshotDate.parse(startedAt),
             endedAt: RegistrySnapshotDate.parse(endedAt),
-            createdAt: RegistrySnapshotDate.parse(startedAt) ?? Date()
+            createdAt: RegistrySnapshotDate.parse(startedAt)
         )
     }
 }

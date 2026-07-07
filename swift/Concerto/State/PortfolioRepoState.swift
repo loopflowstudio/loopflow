@@ -9,15 +9,14 @@ final class PortfolioRepoState {
     let repo: PortfolioRepo
 
     private let repoPath: String
-    private let waveService: WaveService
-    /// Local discovery via `lf ls` (see `RegistryQuery`). `nil` on a platform
-    /// that can't shell `lf`, or for a remote repo — those fall back to the REST
-    /// wave list.
+    /// Local discovery via `lf ls` (see `RegistryQuery`). `nil` means this
+    /// platform cannot read the registry yet; there is no lfd HTTP fallback.
     private let registryQuery: RegistryQuery?
 
     private(set) var waves: [WaveViewModel] = []
     private(set) var isConnected = false
     private(set) var isLoading = true
+    private var plansByKey: [String: WavePlan] = [:]
 
     init(
         repo: PortfolioRepo,
@@ -27,8 +26,9 @@ final class PortfolioRepoState {
     ) {
         self.repo = repo
         self.repoPath = repo.path.normalizedFilePath
-        self.waveService = WaveService(connection: connection, tokenProvider: { token })
         self.registryQuery = registryQuery
+        _ = connection
+        _ = token
     }
 
     /// Create a wave file-first: a wave IS its markdown. Write
@@ -66,32 +66,49 @@ final class PortfolioRepoState {
     }
 
     /// Re-read this repo's waves. Discovery is a query, not a stream: `lf ls`
-    /// via `RegistryQuery` when a local runner is wired, else the surviving REST
-    /// wave list. The dashboard re-runs this on a cadence; a wave's live motion
-    /// rides its own per-wave SSE in the detail pane.
+    /// via `RegistryQuery`. The dashboard re-runs this on a cadence; a wave's
+    /// live motion rides its own per-wave SSE in the detail pane.
     func refresh() async {
         isLoading = true
         defer { isLoading = false }
 
+        guard let registryQuery else {
+            waves = []
+            isConnected = false
+            return
+        }
+
         do {
-            let loaded: [Wave]
-            if let registryQuery {
-                loaded = try await registryQuery.waves(repoPath: repo.url.path)
-            } else {
-                loaded = try await waveService.listWaves(repo: .local(repo.url))
-            }
-            applyConnectedWaves(loaded)
+            let loaded = try await registryQuery.waves(repoPath: repo.url.path)
+            applyConnectedWaves(loaded, plans: plansByKey)
             isConnected = true
         } catch {
             isConnected = false
         }
     }
 
-    func applyConnectedWaves(_ connectedWaves: [Wave]) {
+    func applyConnectedWaves(_ connectedWaves: [Wave], plans: [String: WavePlan] = [:]) {
+        plansByKey = plans
         let filtered = connectedWaves
             .filter { $0.repo.normalizedFilePath == repoPath }
-            .map { WaveViewModel(api: $0) }
+            .map { wave in
+                WaveViewModel(
+                    api: wave,
+                    plan: plans[Self.wavePlanKey(repoPath: wave.repo, waveName: wave.name)]
+                )
+            }
         waves = Self.sortWaves(filtered)
+        isConnected = true
+        isLoading = false
+    }
+
+    func markRefreshFailed() {
+        isConnected = false
+        isLoading = false
+    }
+
+    nonisolated static func wavePlanKey(repoPath: String, waveName: String) -> String {
+        "\(repoPath.normalizedFilePath)#\(waveName)"
     }
 
     var blockedCount: Int {
@@ -127,9 +144,9 @@ final class PortfolioRepoState {
 
     private static func statusPriority(_ status: WaveStatus) -> Int {
         switch status {
-        case .running: 0
+        case .failed: 0
         case .waiting: 1
-        case .failed: 2
+        case .running: 2
         case .paused: 3
         case .idle: 4
         }

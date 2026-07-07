@@ -1,1 +1,0 @@
-concerto: show objective and project plan in the wave viewer

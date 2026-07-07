@@ -529,6 +529,7 @@ fn main() -> anyhow::Result<()> {
                 pass_timeout_secs,
                 wall_clock_secs,
                 poll_secs,
+                max_turns,
             }) => in_repo_runtime(&args, |repo| {
                 let mut options =
                     loopflow::flowloop::task::TaskLoopOptions::new(item_id.clone(), wave.clone());
@@ -536,7 +537,7 @@ fn main() -> anyhow::Result<()> {
                 options.pass_timeout = std::time::Duration::from_secs(*pass_timeout_secs);
                 options.wall_clock = std::time::Duration::from_secs(*wall_clock_secs);
                 options.poll = std::time::Duration::from_secs(*poll_secs);
-                options.max_turns = cli.max_turns;
+                options.max_turns = max_turns.or(cli.max_turns);
                 loopflow::flowloop::task::run_task_loop(repo, &options).map_err(anyhow::Error::from)
             }),
             Some(Commands::Usage) => loopflow::lf::commands::usage::run(),

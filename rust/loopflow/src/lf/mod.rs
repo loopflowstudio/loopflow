@@ -193,6 +193,9 @@ pub enum Commands {
         /// Poll interval while waiting for a human merge
         #[arg(long = "poll-secs", default_value_t = 60)]
         poll_secs: u64,
+        /// Maximum agent turns per task pass
+        #[arg(long = "max-turns")]
+        max_turns: Option<u32>,
     },
     /// Show token usage by repo and provider (from a running lfd)
     Usage,

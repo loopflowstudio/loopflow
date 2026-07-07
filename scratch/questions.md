@@ -101,3 +101,13 @@ Ranked pass implemented in this branch:
 
 Out of scope by instruction: perf monitoring, budgets, metrics infra, and
 regression harnesses.
+
+## Product gap found killing the architecture wave (2026-07-07)
+
+No `lf wave stop <name>` exists. Choices were raw `tmux kill-session` (used) or
+`lf op reset-waves` (kills EVERY lf-* session — too broad). A wave killed
+out-of-band leaves its registry row `status: running` forever; only the probed
+LIVE column tells the truth. Wants: a single-wave stop verb that kills the
+session, clears `.wave-endpoint`, and settles the registry status. Belongs to
+goals/systems waves, not this PR — filed here so it isn't lost (Linear auth
+expired).

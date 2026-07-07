@@ -1,17 +1,13 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use time::OffsetDateTime;
-
 use crate::flowloop::oracle::{poll_pr_oracle, worktree_clean, PrOracle, PrState};
 use crate::flowloop::pass::{check_wall_clock, escalate_parent, run_pass, PassOptions};
+use crate::flowloop::run::FlowloopRun;
 use crate::flowloop::Tier;
-use crate::lfd::executor::{create_run_for_placement, Placement};
-use crate::lfd::id::LfdId;
-use crate::lfd::types::{PullRequest, Run, RunStatus};
-use crate::lfdb::{open_existing_store, SharedStore};
+use crate::lfd::types::{PullRequest, Run};
+use crate::lfdb::SharedStore;
 use crate::ops::pm::{pm_complete, pm_show, PmCompleteOptions, PmShowOptions};
 use crate::ops::{NullProgress, OpsError, OpsResult};
 
@@ -65,59 +61,18 @@ pub fn run_task_loop(repo: &Path, options: &TaskLoopOptions) -> OpsResult<()> {
     let wave_name = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
     let task = resolve_task_statement(repo, &wave_name, &options.item_id)?;
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|err| OpsError::Message(format!("failed to build task runtime: {err}")))?;
-    let store: SharedStore = Arc::new(runtime.block_on(async {
-        open_existing_store().await.ok_or_else(|| {
-            OpsError::Message(
-                "no run registry on this machine - start or register the wave first".to_string(),
-            )
-        })
-    })?);
+    let mut flowloop = FlowloopRun::start(&wave_name, Tier::Task, task.prompt())?;
+    eprintln!("task {} running in {}", task.id, flowloop.run.worktree);
 
-    let mut run = runtime.block_on(async {
-        let wave = store
-            .get_wave_by_name(&wave_name)
-            .await
-            .map_err(|err| OpsError::Message(format!("failed to read wave registry: {err}")))?
-            .ok_or_else(|| OpsError::Message(format!("wave '{wave_name}' not found")))?;
-        let run_id = LfdId::new();
-        let mut run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh, None)
-            .await
-            .map_err(|err| OpsError::Message(format!("failed to create task worktree: {err}")))?;
-        run.flow = Tier::Task.pass_flow().to_string();
-        run.task = Some(task.prompt());
-        store
-            .update_run(&run)
-            .await
-            .map_err(|err| OpsError::Message(format!("failed to update task run: {err}")))?;
-        Ok::<Run, OpsError>(run)
-    })?;
+    let worktree = flowloop.worktree();
+    let runtime = &flowloop.runtime;
+    let store = &flowloop.store;
+    let run = &mut flowloop.run;
+    let result = run_task_passes(&worktree, &wave_name, &task, options, |pr| {
+        update_run_pr(runtime, store, run, pr)
+    });
 
-    eprintln!("task {} running in {}", task.id, run.worktree);
-    let result = run_task_passes(
-        &PathBuf::from(&run.worktree),
-        &wave_name,
-        &task,
-        options,
-        |pr| update_run_pr(&runtime, &store, &mut run, pr),
-    );
-
-    runtime.block_on(async {
-        run.status = if result.is_ok() {
-            RunStatus::Completed
-        } else {
-            RunStatus::Failed
-        };
-        run.ended_at = Some(OffsetDateTime::now_utc());
-        run.error = result.as_ref().err().map(ToString::to_string);
-        store
-            .update_run(&run)
-            .await
-            .map_err(|err| OpsError::Message(format!("failed to finish task run: {err}")))
-    })?;
-
-    result
+    flowloop.finish(result)
 }
 
 fn resolve_task_statement(repo: &Path, wave: &str, item_id: &str) -> OpsResult<TaskStatement> {
@@ -177,7 +132,15 @@ fn run_task_passes(
         }
         pass += 1;
         eprintln!("task pass {pass}/{}", options.max_passes);
-        run_task_pass(worktree, task, options)?;
+        run_pass(
+            worktree,
+            Tier::Task,
+            &task.prompt(),
+            &PassOptions {
+                timeout: options.pass_timeout,
+                max_turns: options.max_turns,
+            },
+        )?;
 
         let after = poll_pr_oracle(worktree, remembered_pr)?;
         remembered_pr = after.as_ref().map(|pr| pr.number).or(remembered_pr);
@@ -197,23 +160,6 @@ fn run_task_passes(
     );
     escalate_parent(&message);
     Err(OpsError::Message(message))
-}
-
-fn run_task_pass(
-    worktree: &Path,
-    task: &TaskStatement,
-    options: &TaskLoopOptions,
-) -> OpsResult<()> {
-    run_pass(
-        worktree,
-        Tier::Task,
-        &task.prompt(),
-        &PassOptions {
-            timeout: options.pass_timeout,
-            max_turns: options.max_turns,
-        },
-    )?;
-    Ok(())
 }
 
 fn closed_without_merging(pr: &PrOracle) -> OpsError {

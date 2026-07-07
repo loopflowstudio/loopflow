@@ -1,6 +1,7 @@
 pub mod oracle;
 pub mod pass;
 pub mod project;
+pub mod run;
 pub mod task;
 
 use oracle::Oracle;

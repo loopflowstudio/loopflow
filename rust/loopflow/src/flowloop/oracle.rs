@@ -38,32 +38,15 @@ pub struct PrOracle {
     pub state: PrState,
 }
 
+/// Poll the tracked PR by number, or the current branch's PR when none is
+/// remembered yet. A `gh` failure (no PR, no auth) reads as `None`.
 pub fn poll_pr_oracle(worktree: &Path, remembered_pr: Option<u64>) -> OpsResult<Option<PrOracle>> {
+    let mut cmd = Command::new("gh");
+    cmd.arg("pr").arg("view");
     if let Some(number) = remembered_pr {
-        return poll_pr_by_number(worktree, number);
+        cmd.arg(number.to_string());
     }
-    poll_current_branch_pr(worktree)
-}
-
-fn poll_current_branch_pr(worktree: &Path) -> OpsResult<Option<PrOracle>> {
-    let output = Command::new("gh")
-        .arg("pr")
-        .arg("view")
-        .arg("--json")
-        .arg("state,url,number")
-        .current_dir(worktree)
-        .output()?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    parse_pr_view_json(&output.stdout).map(Some)
-}
-
-fn poll_pr_by_number(worktree: &Path, number: u64) -> OpsResult<Option<PrOracle>> {
-    let output = Command::new("gh")
-        .arg("pr")
-        .arg("view")
-        .arg(number.to_string())
+    let output = cmd
         .arg("--json")
         .arg("state,url,number")
         .current_dir(worktree)

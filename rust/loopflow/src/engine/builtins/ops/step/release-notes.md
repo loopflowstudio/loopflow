@@ -46,8 +46,8 @@ Structure:
 - Be specific and factual. No marketing filler.
 - Prefer a few strong themes over many headings.
 - Write for the person deciding whether to upgrade and the operator debugging the release six weeks later.
-- Keep the decision ledger archived under `release/v<version>/DECISIONS.md`; `RELEASE_NOTES.md` should be the interpreted story.
+- Synthesize from the merged PRs and their intent; `RELEASE_NOTES.md` is the interpreted story, not a changelog.
 
 ## Quality bar
 
-A good release note could not be generated from PR titles alone. It carries the intent from `DECISIONS.md`, proves it against shipped changes, and leaves a concise operational record.
+A good release note could not be generated from PR titles alone. It reads the intent from the merged PRs (their descriptions, not just titles), proves it against shipped changes, and leaves a concise operational record. Per-decision context lives in each wave's `MEMORY.md`, not a central ledger.

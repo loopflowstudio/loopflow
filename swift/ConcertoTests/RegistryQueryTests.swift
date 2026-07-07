@@ -27,6 +27,27 @@ struct RegistryQueryTests {
         #expect(waves[0].repo == "/tmp/repo-a")
     }
 
+    @Test("lf ls can be decoded once for every repo")
+    func allWavesDecode() async throws {
+        let json = """
+        [
+          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","iteration":3,"workers":2,"active_runs":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
+          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
+        ]
+        """
+        let counter = CallCounter()
+        let query = RegistryQuery { args, _ in
+            await counter.increment()
+            #expect(args == ["ls", "--json"])
+            return json
+        }
+
+        let waves = try await query.allWaves()
+        #expect(await counter.value == 1)
+        #expect(waves.map(\.id) == ["goals", "other"])
+    }
+
+
     @Test("lf status maps runs and attention onto the wave")
     func statusMapsRunsAndAttention() async throws {
         let json = """
@@ -104,5 +125,15 @@ struct RegistryQueryTests {
         await #expect(throws: RegistryQueryError.self) {
             _ = try await query.waves(repoPath: "/tmp/repo-a")
         }
+    }
+}
+
+private actor CallCounter {
+    private var count = 0
+
+    var value: Int { count }
+
+    func increment() {
+        count += 1
     }
 }

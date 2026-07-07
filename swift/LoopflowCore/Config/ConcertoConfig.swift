@@ -5,6 +5,14 @@ public struct ConcertoConfig: Codable {
     public var container: ContainerConfig? = nil
 }
 
+public struct ConcertoState: Codable, Equatable {
+    public var selectedRepoPath: String? = nil
+
+    public init(selectedRepoPath: String? = nil) {
+        self.selectedRepoPath = selectedRepoPath
+    }
+}
+
 public struct ContainerConfig: Codable {
     public var mounts: [ExtraMount]? = nil
     public var image: String? = nil
@@ -57,11 +65,44 @@ public func loadConcertoConfig(configURL: URL? = nil) -> ConcertoConfig? {
     return parseConcertoConfig(raw)
 }
 
+public func loadConcertoState(stateURL: URL? = nil) -> ConcertoState? {
+    let resolvedURL = stateURL ?? ConcertoState.defaultURL
+    guard
+        let raw = try? String(contentsOf: resolvedURL, encoding: .utf8),
+        !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+        return nil
+    }
+
+    return parseConcertoState(raw)
+}
+
+public func saveConcertoState(_ state: ConcertoState, stateURL: URL? = nil) throws {
+    let resolvedURL = stateURL ?? ConcertoState.defaultURL
+    try FileManager.default.createDirectory(
+        at: resolvedURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+
+    let selected = state.selectedRepoPath
+        .map { "\"\(escapeYAMLString($0))\"" }
+        ?? ""
+    try "selected_repo_path: \(selected)\n".write(to: resolvedURL, atomically: true, encoding: .utf8)
+}
+
 private extension ConcertoConfig {
     static var defaultURL: URL {
         URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent(".lf", isDirectory: true)
             .appendingPathComponent("concerto.yaml", isDirectory: false)
+    }
+}
+
+private extension ConcertoState {
+    static var defaultURL: URL {
+        URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent(".lf", isDirectory: true)
+            .appendingPathComponent("concerto-state.yaml", isDirectory: false)
     }
 }
 
@@ -71,6 +112,27 @@ private func parseConcertoConfig(_ raw: String) -> ConcertoConfig {
         connection: parseConnectionConfig(lines),
         container: parseContainerConfig(lines)
     )
+}
+
+private func parseConcertoState(_ raw: String) -> ConcertoState {
+    let lines = raw.components(separatedBy: .newlines)
+    var selectedRepoPath: String?
+
+    for line in lines where indentation(of: line) == 0 {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty || trimmed.hasPrefix("#") {
+            continue
+        }
+        guard let (key, value) = keyValuePair(from: trimmed) else {
+            continue
+        }
+        if key == "selected_repo_path" {
+            let parsed = unquote(value)
+            selectedRepoPath = parsed.isEmpty ? nil : parsed
+        }
+    }
+
+    return ConcertoState(selectedRepoPath: selectedRepoPath)
 }
 
 private func parseConnectionConfig(_ lines: [String]) -> RemoteConnectionConfig? {
@@ -248,4 +310,10 @@ private func unquote(_ value: String) -> String {
     }
 
     return value
+}
+
+private func escapeYAMLString(_ value: String) -> String {
+    value
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
 }

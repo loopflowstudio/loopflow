@@ -46,11 +46,13 @@ struct WavesView: View {
     /// Authored waves discovered on disk per repo path: `<repo>/wave/<name>/GOAL.md`.
     /// Merged with lfd's running waves so not-yet-launched waves are still listed.
     @State private var authoredWavesByRepo: [String: [AuthoredWaveSnapshot]] = [:]
+    @State private var plansByWaveKey: [String: WavePlan] = [:]
 
     @State private var selection: RepoFilter = .all
     @State private var selectedWaveId: String?
     @State private var isShowingCreate = false
     @State private var didApplyInitialRepo = false
+    @State private var didRestoreStickyRepo = false
 
     /// Synthetic id prefix for an authored-on-disk wave that lfd hasn't created yet.
     private static let authoredIdPrefix = "authored:"
@@ -86,7 +88,7 @@ struct WavesView: View {
             name: snapshot.name,
             repo: repoPath,
             status: snapshot.status
-        ), plan: WavePlanParser.parse(repoRoot: URL(fileURLWithPath: repoPath), waveName: snapshot.name))
+        ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: snapshot.name)])
     }
 
     private static func statusPriority(_ status: WaveStatus) -> Int {
@@ -121,12 +123,12 @@ struct WavesView: View {
     var body: some View {
         HStack(spacing: 0) {
             repoRail
-                .frame(width: 200)
+                .frame(width: 100)
 
             Divider()
 
             waveListColumn
-                .frame(width: 340)
+                .frame(width: 400)
 
             Divider()
 
@@ -146,26 +148,34 @@ struct WavesView: View {
             .environment(\.palette, palette)
         }
         .task {
-            await prepareConnectionIfNeeded()
+            let daemonTask = Task {
+                await prepareConnectionIfNeeded()
+            }
             let initialMain = await registerInitialRepoIfNeeded()
             await refreshRepos()
             await refreshAuthoredWaves()
             if let initialMain, !didApplyInitialRepo {
                 didApplyInitialRepo = true
                 selection = .repo(initialMain)
+            } else {
+                restoreStickyRepoSelectionIfNeeded()
             }
             ensureRepoStates()
             await syncRepoStates()
+            _ = await daemonTask.value
             await prepareAuth()
             await pollRegistry()
         }
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
             Task {
-                await prepareConnectionIfNeeded()
+                let daemonTask = Task {
+                    await prepareConnectionIfNeeded()
+                }
                 await refreshRepos()
                 await refreshAuthoredWaves()
                 ensureRepoStates()
                 await syncRepoStates()
+                _ = await daemonTask.value
             }
         }
         .onChange(of: selection) { _, _ in
@@ -173,6 +183,7 @@ struct WavesView: View {
             if let id = selectedWaveId, !filteredWaves.contains(where: { $0.id == id }) {
                 selectedWaveId = nil
             }
+            persistRepoSelection()
         }
     }
 
@@ -185,14 +196,14 @@ struct WavesView: View {
                 .fontWeight(.medium)
                 .foregroundStyle(.white.opacity(0.25))
                 .tracking(0.5)
-                .padding(.horizontal, Spacing.lg)
+                .padding(.horizontal, Spacing.sm)
                 .padding(.top, Spacing.lg)
                 .padding(.bottom, Spacing.sm)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.xxs) {
                     repoRow(
-                        title: "All Repos",
+                        title: "All",
                         icon: "square.stack.3d.up",
                         filter: .all
                     )
@@ -224,16 +235,16 @@ struct WavesView: View {
                 Image(systemName: icon)
                     .font(Typography.caption())
                     .foregroundStyle(.white.opacity(isSelected ? 0.9 : 0.45))
-                    .frame(width: 16)
+                    .frame(width: 14)
                 Text(title)
-                    .font(Typography.body(13))
+                    .font(Typography.caption(11))
                     .foregroundStyle(.white.opacity(isSelected ? 1 : 0.7))
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .truncationMode(.tail)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, Spacing.md)
-            .padding(.vertical, Spacing.sm)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, Spacing.xs)
             .background(
                 RoundedRectangle(cornerRadius: CornerRadius.md)
                     .fill(isSelected ? Color.white.opacity(0.14) : .clear)
@@ -412,6 +423,10 @@ struct WavesView: View {
 
     // MARK: - Data
 
+    private nonisolated static func wavePlanKey(repoPath: String, waveName: String) -> String {
+        PortfolioRepoState.wavePlanKey(repoPath: repoPath, waveName: waveName)
+    }
+
     private func createWave(repoPath: String, name: String) async throws {
         ensureRepoStates()
         guard let state = repoStates[repoPath] else {
@@ -509,16 +524,20 @@ struct WavesView: View {
         if RepoState.uiTestMode() != nil { return }
         let paths = repos.map(\.path)
         authoredWavesByRepo = await Task.detached {
+            let liveSessions = LocalWaveAgentLauncher.tmuxSessionNames()
             var result: [String: [AuthoredWaveSnapshot]] = [:]
             for path in paths {
-                result[path] = Self.authoredWaves(inRepo: path)
+                result[path] = Self.authoredWaves(inRepo: path, liveTmuxSessionNames: liveSessions)
             }
             return result
         }.value
     }
 
     /// Wave names authored on disk at `<repo>/wave/<name>/GOAL.md`, sorted.
-    private nonisolated static func authoredWaves(inRepo repoPath: String) -> [AuthoredWaveSnapshot] {
+    private nonisolated static func authoredWaves(
+        inRepo repoPath: String,
+        liveTmuxSessionNames: Set<String>
+    ) -> [AuthoredWaveSnapshot] {
         let waveDir = URL(fileURLWithPath: repoPath).appendingPathComponent("wave", isDirectory: true)
         let fm = FileManager.default
         guard let children = try? fm.contentsOfDirectory(
@@ -536,7 +555,8 @@ struct WavesView: View {
             }
             .map { url in
                 let name = url.lastPathComponent
-                let status: WaveStatus = PortfolioRepoState.waveAgentSessionExists(repoPath: repoPath, waveName: name)
+                let sessionName = PortfolioRepoState.waveAgentSessionName(repoPath: repoPath, waveName: name)
+                let status: WaveStatus = liveTmuxSessionNames.contains(sessionName)
                     ? .running
                     : .idle
                 return AuthoredWaveSnapshot(name: name, status: status)
@@ -579,15 +599,77 @@ struct WavesView: View {
 
     private func syncRepoStates() async {
         if RepoState.uiTestMode() != nil { return }
-        if connectionStore.mode == .bundled, SharedDaemon.currentConnection == nil {
-            return
-        }
         ensureRepoStates()
 
-        await withTaskGroup(of: Void.self) { group in
-            for state in repoStates.values {
-                group.addTask { await state.refresh() }
+        if connectionStore.mode == .bundled {
+            do {
+                let waves = try await RegistryQueryLocal.shared.allWaves()
+                let plans = await buildWavePlanCache(registryWaves: waves)
+                plansByWaveKey = plans
+                for state in repoStates.values {
+                    state.applyConnectedWaves(waves, plans: plans)
+                }
+            } catch {
+                for state in repoStates.values {
+                    state.markRefreshFailed()
+                }
             }
+        } else {
+            await withTaskGroup(of: Void.self) { group in
+                for state in repoStates.values {
+                    group.addTask { await state.refresh() }
+                }
+            }
+        }
+    }
+
+    private func buildWavePlanCache(registryWaves: [Wave]) async -> [String: WavePlan] {
+        let authored = authoredWavesByRepo
+        return await Task.detached {
+            var targets: [(repoPath: String, waveName: String)] = []
+            for wave in registryWaves {
+                targets.append((wave.repo, wave.name))
+            }
+            for (repoPath, snapshots) in authored {
+                for snapshot in snapshots {
+                    targets.append((repoPath, snapshot.name))
+                }
+            }
+
+            var plans: [String: WavePlan] = [:]
+            for target in targets {
+                let key = Self.wavePlanKey(repoPath: target.repoPath, waveName: target.waveName)
+                guard plans[key] == nil else { continue }
+                if let plan = WavePlanParser.parse(
+                    repoRoot: URL(fileURLWithPath: target.repoPath),
+                    waveName: target.waveName
+                ) {
+                    plans[key] = plan
+                }
+            }
+            return plans
+        }.value
+    }
+
+    private func restoreStickyRepoSelectionIfNeeded() {
+        guard !didRestoreStickyRepo else { return }
+        didRestoreStickyRepo = true
+        guard let path = loadConcertoState()?.selectedRepoPath?.normalizedFilePath else { return }
+        guard repos.contains(where: { $0.path.normalizedFilePath == path }) else { return }
+        selection = .repo(path)
+    }
+
+    private func persistRepoSelection() {
+        let selectedRepoPath: String?
+        switch selection {
+        case .all:
+            selectedRepoPath = nil
+        case .repo(let path):
+            selectedRepoPath = path.normalizedFilePath
+        }
+
+        Task.detached {
+            try? saveConcertoState(ConcertoState(selectedRepoPath: selectedRepoPath))
         }
     }
 

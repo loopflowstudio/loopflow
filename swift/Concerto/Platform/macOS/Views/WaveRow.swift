@@ -16,7 +16,8 @@ struct WaveRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Text(wave.displayName)
-                    .fontWeight(.medium)
+                    .font(Typography.sectionTitle(18))
+                    .fontWeight(.semibold)
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .accessibilityIdentifier("wave-name")

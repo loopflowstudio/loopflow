@@ -64,3 +64,40 @@ memoized; runs ledger has no renderer yet. Minor: cold-start double-refresh via
 - `RunSnapshot.toRun` `area: "."` placeholder — drop the field from `Run` if the
   snapshot can't supply it.
 - `createdAt: … ?? Date()` — avoid the nondeterministic default.
+
+## Perf audit — cheap wins
+
+Ranked pass implemented in this branch:
+
+1. One machine-wide registry read per poll: `RegistryQuery.allWaves()` shells
+   `lf ls --json` once, then `WavesView.syncRepoStates()` distributes that slice
+   to each `PortfolioRepoState` instead of asking each repo state to spawn its
+   own query. Anchors: `swift/LoopflowCore/Services/RegistryQuery.swift:37`,
+   `swift/Concerto/Platform/macOS/Views/WavesView.swift:600`,
+   `swift/Concerto/State/PortfolioRepoState.swift:91`.
+2. `lf` binary resolution is memoized behind a locked cache, so polling no longer
+   repeats the `lf help wave` capability probe for the same candidate set.
+   Anchors: `swift/Concerto/Platform/macOS/MacLocalWaveAgentLauncher.swift:30`,
+   `swift/Concerto/Platform/macOS/MacLocalWaveAgentLauncher.swift:176`,
+   `swift/Concerto/Platform/macOS/MacLocalWaveAgentLauncher.swift:313`.
+3. First paint is not gated on the bundled daemon: `WavesView` starts lfd
+   concurrently, paints from local `lf` registry data, then awaits daemon startup
+   only before auth/pubsub work. Anchors:
+   `swift/Concerto/Platform/macOS/Views/WavesView.swift:150`,
+   `swift/Concerto/Platform/macOS/Views/WavesView.swift:169`,
+   `swift/Concerto/Platform/macOS/Views/WavesView.swift:587`.
+4. `WavePlanParser.parse` moved off render/body paths for the wave list. The view
+   builds a per-refresh plan cache on a detached task and row construction reads
+   from that cache. Anchors:
+   `swift/Concerto/Platform/macOS/Views/WavesView.swift:626`,
+   `swift/Concerto/Platform/macOS/Views/WavesView.swift:641`,
+   `swift/Concerto/State/PortfolioRepoState.swift:96`.
+5. Authored-wave status uses one `tmux list-sessions -F '#S'` snapshot per
+   refresh, then does `Set` lookups, instead of spawning `tmux has-session` per
+   wave. Anchors:
+   `swift/Concerto/Platform/macOS/MacLocalWaveAgentLauncher.swift:219`,
+   `swift/Concerto/Platform/macOS/Views/WavesView.swift:523`,
+   `swift/Concerto/Platform/macOS/Views/WavesView.swift:558`.
+
+Out of scope by instruction: perf monitoring, budgets, metrics infra, and
+regression harnesses.

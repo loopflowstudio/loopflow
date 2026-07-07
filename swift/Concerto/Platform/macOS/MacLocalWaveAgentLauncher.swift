@@ -27,6 +27,8 @@ enum WaveLaunchError: LocalizedError, Equatable {
 }
 
 enum LocalWaveAgentLauncher {
+    private static let resolutionCache = ResolvedLfCache()
+
     static func sessionExists(repoPath: String, waveName: String) -> Bool {
         runCommandSync(
             [
@@ -176,8 +178,16 @@ enum LocalWaveAgentLauncher {
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
         pathEnv: String = GUIProcessEnvironment.enrichedPath(from: ProcessInfo.processInfo.environment["PATH"]),
         isExecutableFile: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
-        probe: (String) -> Bool = hasWaveCommand
+        probe: (String) -> Bool = hasWaveCommand,
+        useCache: Bool = true
     ) throws -> String {
+        let cacheKey = "\(originRepo)|\(bundled?.path ?? "")|\(pathEnv)"
+        if useCache,
+           let cached = resolutionCache.get(cacheKey),
+           isExecutableFile(cached) {
+            return cached
+        }
+
         let candidates = lfCandidates(
             originRepo: originRepo,
             bundled: bundled,
@@ -190,6 +200,9 @@ enum LocalWaveAgentLauncher {
             )
         }
         for candidate in candidates where probe(candidate) {
+            if useCache {
+                resolutionCache.set(candidate, for: cacheKey)
+            }
             return candidate
         }
         throw WaveLaunchError.noUsableLf(
@@ -201,6 +214,19 @@ enum LocalWaveAgentLauncher {
     /// `lf help wave` exits 0 only when this build knows the subcommand.
     static func hasWaveCommand(lfPath: String) -> Bool {
         run([lfPath, "help", "wave"])?.status == 0
+    }
+
+    static func tmuxSessionNames() -> Set<String> {
+        guard let result = run(["tmux", "list-sessions", "-F", "#S"]) else {
+            return []
+        }
+        guard result.status == 0 else {
+            return []
+        }
+        return Set(result.stdout
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty })
     }
 
     /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its
@@ -281,6 +307,27 @@ enum LocalWaveAgentLauncher {
         let stdoutText = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let stderrText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         return (process.terminationStatus, stdoutText, stderrText)
+    }
+}
+
+private final class ResolvedLfCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var resolvedLfByKey: [String: String] = [:]
+
+    func get(_ key: String) -> String? {
+        withLock { resolvedLfByKey[key] }
+    }
+
+    func set(_ value: String, for key: String) {
+        withLock {
+            resolvedLfByKey[key] = value
+        }
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
     }
 }
 #endif

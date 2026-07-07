@@ -135,6 +135,33 @@ struct ConcertoConfigTests {
         #expect(config.container == nil)
     }
 
+    @Test("loads sticky selected repo state")
+    func loadsStickySelectedRepoState() throws {
+        let (stateURL, cleanup) = makeStateURL()
+        defer { cleanup() }
+
+        try """
+        selected_repo_path: "/Users/jack/src/loopflow"
+        """.write(to: stateURL, atomically: true, encoding: .utf8)
+
+        let state = try #require(loadConcertoState(stateURL: stateURL))
+        #expect(state.selectedRepoPath == "/Users/jack/src/loopflow")
+    }
+
+    @Test("saves sticky selected repo state")
+    func savesStickySelectedRepoState() throws {
+        let (stateURL, cleanup) = makeStateURL()
+        defer { cleanup() }
+
+        try saveConcertoState(
+            ConcertoState(selectedRepoPath: "/Users/jack/src/loopflow.concerto"),
+            stateURL: stateURL
+        )
+
+        let state = try #require(loadConcertoState(stateURL: stateURL))
+        #expect(state.selectedRepoPath == "/Users/jack/src/loopflow.concerto")
+    }
+
     private func makeConfigURL() -> (URL, () -> Void) {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -144,5 +171,16 @@ struct ConcertoConfigTests {
             _ = try? FileManager.default.removeItem(at: directory)
         }
         return (configURL, cleanup)
+    }
+
+    private func makeStateURL() -> (URL, () -> Void) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("concerto-state.yaml", isDirectory: false)
+        let cleanup: () -> Void = {
+            _ = try? FileManager.default.removeItem(at: directory)
+        }
+        return (stateURL, cleanup)
     }
 }

@@ -16,6 +16,7 @@ final class PortfolioRepoState {
     private(set) var waves: [WaveViewModel] = []
     private(set) var isConnected = false
     private(set) var isLoading = true
+    private var plansByKey: [String: WavePlan] = [:]
 
     init(
         repo: PortfolioRepo,
@@ -79,23 +80,35 @@ final class PortfolioRepoState {
 
         do {
             let loaded = try await registryQuery.waves(repoPath: repo.url.path)
-            applyConnectedWaves(loaded)
+            applyConnectedWaves(loaded, plans: plansByKey)
             isConnected = true
         } catch {
             isConnected = false
         }
     }
 
-    func applyConnectedWaves(_ connectedWaves: [Wave]) {
+    func applyConnectedWaves(_ connectedWaves: [Wave], plans: [String: WavePlan] = [:]) {
+        plansByKey = plans
         let filtered = connectedWaves
             .filter { $0.repo.normalizedFilePath == repoPath }
             .map { wave in
                 WaveViewModel(
                     api: wave,
-                    plan: WavePlanParser.parse(repoRoot: repo.url, waveName: wave.name)
+                    plan: plans[Self.wavePlanKey(repoPath: wave.repo, waveName: wave.name)]
                 )
             }
         waves = Self.sortWaves(filtered)
+        isConnected = true
+        isLoading = false
+    }
+
+    func markRefreshFailed() {
+        isConnected = false
+        isLoading = false
+    }
+
+    nonisolated static func wavePlanKey(repoPath: String, waveName: String) -> String {
+        "\(repoPath.normalizedFilePath)#\(waveName)"
     }
 
     var blockedCount: Int {

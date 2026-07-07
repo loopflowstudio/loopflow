@@ -193,27 +193,8 @@ pub(crate) fn create_stacked_run_worktree(
     let id = worker_id(main_repo, wave_name, run_id)?;
     let run_wt = worktree_dir(main_repo, &id);
 
-    let _ = fetch(main_repo, "origin", parent_branch);
-    let remote_ref = format!("origin/{parent_branch}");
-    let local_exists = branch_exists(main_repo, parent_branch)?;
-    let remote_exists = rev_parse(main_repo, &remote_ref).is_ok();
-    // Fork from the freshest tip: the parent run's unpushed local commits
-    // must reach the stack, so the local branch wins unless it is strictly
-    // behind the remote (absent, or all its commits already on origin).
-    let start_point = match (local_exists, remote_exists) {
-        (false, false) => {
-            return Err(anyhow!("stack parent branch not found: {parent_branch}"));
-        }
-        (true, false) => parent_branch.to_string(),
-        (false, true) => remote_ref,
-        (true, true) => {
-            if local_strictly_behind(main_repo, parent_branch, &remote_ref)? {
-                remote_ref
-            } else {
-                parent_branch.to_string()
-            }
-        }
-    };
+    let start_point = resolve_freshest_parent(main_repo, parent_branch)?
+        .ok_or_else(|| anyhow!("stack parent branch not found: {parent_branch}"))?;
 
     let branch = id.branch();
     worktree_add(
@@ -241,56 +222,45 @@ fn local_strictly_behind(repo: &Path, local: &str, remote_ref: &str) -> anyhow::
     Ok(is_ancestor(repo, &local_sha, &remote_sha)?)
 }
 
+/// Resolve which branch a fresh worker should fork from and target.
+///
+/// Returns `(start_point, target_branch)`. Falls back to the default branch
+/// when there is no distinct parent, or when the parent exists nowhere.
 fn resolve_parent_start_point(
     repo: &Path,
     parent_branch: Option<&str>,
     default_branch: &str,
 ) -> anyhow::Result<(String, String)> {
-    let Some(parent_branch) = parent_branch else {
-        return Ok((default_branch.to_string(), default_branch.to_string()));
+    let default = || (default_branch.to_string(), default_branch.to_string());
+    let Some(parent_branch) = parent_branch.filter(|b| *b != default_branch) else {
+        return Ok(default());
     };
-    if parent_branch == default_branch {
-        return Ok((default_branch.to_string(), default_branch.to_string()));
+    match resolve_freshest_parent(repo, parent_branch)? {
+        Some(start_point) => Ok((start_point, parent_branch.to_string())),
+        None => Ok(default()),
     }
+}
 
+/// Fetch `parent_branch` and return its freshest tip: the local branch wins
+/// unless it is strictly behind the remote (absent, or all its commits already
+/// on origin). `None` when the branch exists neither locally nor on origin.
+fn resolve_freshest_parent(repo: &Path, parent_branch: &str) -> anyhow::Result<Option<String>> {
     let _ = fetch(repo, "origin", parent_branch);
     let remote_ref = format!("origin/{parent_branch}");
     let local_exists = branch_exists(repo, parent_branch)?;
     let remote_exists = rev_parse(repo, &remote_ref).is_ok();
-
-    let Some(start_point) = resolve_available_parent_ref(
-        repo,
-        parent_branch,
-        &remote_ref,
-        local_exists,
-        remote_exists,
-    )?
-    else {
-        return Ok((default_branch.to_string(), default_branch.to_string()));
-    };
-
-    Ok((start_point, parent_branch.to_string()))
-}
-
-fn resolve_available_parent_ref(
-    repo: &Path,
-    parent_branch: &str,
-    remote_ref: &str,
-    local_exists: bool,
-    remote_exists: bool,
-) -> anyhow::Result<Option<String>> {
-    match (local_exists, remote_exists) {
-        (false, false) => Ok(None),
-        (true, false) => Ok(Some(parent_branch.to_string())),
-        (false, true) => Ok(Some(remote_ref.to_string())),
+    Ok(match (local_exists, remote_exists) {
+        (false, false) => None,
+        (true, false) => Some(parent_branch.to_string()),
+        (false, true) => Some(remote_ref),
         (true, true) => {
-            if local_strictly_behind(repo, parent_branch, remote_ref)? {
-                Ok(Some(remote_ref.to_string()))
+            if local_strictly_behind(repo, parent_branch, &remote_ref)? {
+                Some(remote_ref)
             } else {
-                Ok(Some(parent_branch.to_string()))
+                Some(parent_branch.to_string())
             }
         }
-    }
+    })
 }
 
 pub(crate) fn is_active_run_status(status: RunStatus) -> bool {

@@ -37,6 +37,29 @@ pursued: paint the list from `lf` immediately; start the bundled daemon in the
 background for pubsub only, never as a barrier before the first read. This is the
 "reads never block on lfd" KR's first instance.
 
+## Perf audit — cheap wins, ranked (subagent, 2026-07-07; parked under Performance)
+
+The 5s poll re-pays the full cold-start cost every cycle, multiplied across repos:
+
+1. **`lf ls --json` fan-out** (S/M·H) — machine-wide read called once *per repo*
+   (`RegistryQuery.swift:40`, `WavesView.swift:587`, `PortfolioRepoState.swift:79`);
+   M identical subprocesses per refresh. Fix: one `allWaves()` per poll, distribute.
+2. **Capability probe per query** (S·M) — `lf help wave` spawned before every real
+   call (`MacLocalWaveAgentLauncher.swift:212`); 2 spawns per read. Fix: memoize.
+3. **Daemon gate on first paint** (S/M·H) — `WavesView.swift:148/582`; drop the
+   `SharedDaemon.currentConnection == nil` guard, boot lfd concurrently
+   (pubsub-only). The known archetype, confirmed.
+4. **`WavePlanParser.parse` in `body`** (M·H) — sync disk I/O (GOAL.md + every
+   project file) re-runs on main thread per re-render (`WavesView.swift:60-90`,
+   `PortfolioRepoState.swift:90-100`). Fix: parse off-main once per refresh, cache.
+5. **tmux spawn storm** (S/M·M) — `tmux has-session` per authored wave per repo
+   every 5s (`WavesView.swift:508-545`). Fix: one `list-sessions` → Set lookup.
+6. **Unconditional 5s poll** (S·M) — mostly subsumed by 1/2/4/5.
+
+Non-findings: `~/src` scan already cheap (no per-dir git spawn); `WaveOrigin`
+memoized; runs ledger has no renderer yet. Minor: cold-start double-refresh via
+`onChange(repos)` after `registerInitialRepoIfNeeded`.
+
 ## Minor (fold in)
 - `RunSnapshot.toRun` `area: "."` placeholder — drop the field from `Run` if the
   snapshot can't supply it.

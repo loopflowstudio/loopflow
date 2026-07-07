@@ -458,7 +458,7 @@ fn main() -> anyhow::Result<()> {
     // survive as an orphan. The `termination` feature extends the handler
     // to SIGTERM and SIGHUP: `tmux kill-session` delivers SIGHUP, which
     // otherwise bypasses every cleanup (observed live: it orphaned the wave
-    // mind's codex app-server pair and left a stale .wave-endpoint).
+    // flowloop's codex app-server pair and left a stale .wave-endpoint).
     ctrlc::set_handler(|| {
         loopflow::engine::agent::run_interrupt_cleanups();
         loopflow::engine::agent::kill_child_if_running();
@@ -517,10 +517,10 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Wave {
                 name,
                 force,
-                no_mind,
-                mind_only,
+                no_flowloop,
+                flowloop_only,
             }) => in_repo_runtime(&args, |_| {
-                loopflow::wave::run(name, *force, *no_mind, *mind_only)
+                loopflow::wave::run(name, *force, *no_flowloop, *flowloop_only)
             }),
             Some(Commands::Task {
                 item_id,

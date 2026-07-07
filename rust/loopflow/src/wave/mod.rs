@@ -11,17 +11,16 @@
 //! - supervises the resident ([`supervisor`]): process liveness, the respawn
 //!   ladder, the interrupt janitor.
 //!
-//! The resident (`lf wave <name> --mind-only`, [`resident`]) is the mind: it
-//! owns the vendor harness and the scheduler ([`mind`]), runs in the wave's
-//! `<repo>.<wave>` worktree, consumes its own wave's `/events?inbox=true`
-//! subscription, and publishes ordered turn deltas back through the resident
-//! door. The wire between them is [`wire`].
+//! The resident (`lf wave <name> --flowloop-only`, [`resident`]) owns the
+//! pass scheduler, runs in the wave's `<repo>.<wave>` worktree, consumes its
+//! own wave's `/events?inbox=true` subscription, and publishes ordered turn
+//! deltas back through the resident door. The wire between them is [`wire`].
 //!
 //! ```text
-//!   lf wave <name>                      lf wave <name> --mind-only
+//!   lf wave <name>                      lf wave <name> --flowloop-only
 //!   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
 //!   │ LISTENER (origin repo)│──────────▶│ RESIDENT (<repo>.<wave>) │
-//!   │ pens · folds · doors  │           │ harness · scheduler      │
+//!   │ pens · folds · doors  │           │ pass scheduler           │
 //!   │ observer · supervisor │◀──deltas──│ seed · queue             │
 //!   └──────────┬────────────┘           └────────────▲─────────────┘
 //!              └────────── /events?inbox=true ───────┘
@@ -29,9 +28,8 @@
 //!
 //! Default `lf wave <name>` boots the listener and spawns the resident as a
 //! child `lf` process — keeper spawns tenant, one command, today's UX.
-//! `--no-mind` serves a dormant channel (`/health` reads `mind: null`);
-//! `--mind-only` attaches a resident to an existing listener (also the
-//! respawn affordance and, one day, the human-as-mind seat).
+//! `--no-flowloop` serves a dormant channel (`/health` reads `mind: null`);
+//! `--flowloop-only` attaches a resident to an existing listener.
 //!
 //! Truth is the per-wave append-only [`journal`] (JSONL under `.lf/journal/
 //! waves/<name>/` in the ORIGIN repo — the listener serves from the origin
@@ -78,7 +76,7 @@ use crate::wave::runtime::WaveRuntime;
 /// Whether the listener spawns (and supervises) a resident.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MindPolicy {
-    /// Spawn `lf wave <name> --mind-only` as a child and keep it alive
+    /// Spawn `lf wave <name> --flowloop-only` as a child and keep it alive
     /// (respawn ladder, immediate respawn on a human message).
     Spawn,
     /// Serve dormant: pens, folds, and doors only — `/health` reads
@@ -86,20 +84,20 @@ pub enum MindPolicy {
     Dormant,
 }
 
-/// `lf wave <name>` — start the wave. `mind_only` runs the resident half
+/// `lf wave <name>` — start the wave. `flowloop_only` runs the resident half
 /// against an existing listener; otherwise this boots the listener (from the
 /// ORIGIN repo — the worktree bootstrap lives with the resident) and, unless
-/// `no_mind`, spawns the resident as a child process. Blocks until stopped
+/// `no_flowloop`, spawns the resident as a child process. Blocks until stopped
 /// (Ctrl-C).
-pub fn run(name: &str, force: bool, no_mind: bool, mind_only: bool) -> Result<()> {
-    if mind_only {
+pub fn run(name: &str, force: bool, no_flowloop: bool, flowloop_only: bool) -> Result<()> {
+    if flowloop_only {
         return resident::run(name);
     }
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let wave = resolve_wave_name(&main_repo, Some(name))
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
-    let mind = if no_mind {
+    let mind = if no_flowloop {
         MindPolicy::Dormant
     } else {
         MindPolicy::Spawn
@@ -156,7 +154,7 @@ async fn resolve_registry(
     }
 }
 
-/// The production resident spawner: `lf wave <wave> --mind-only`, run by this
+/// The production resident spawner: `lf wave <wave> --flowloop-only`, run by this
 /// same executable, endpoint + token + wave-session context in env. The
 /// resident's stdout/stderr inherit — one `lf wave` terminal shows both
 /// halves, today's UX.
@@ -177,7 +175,7 @@ fn resident_spawner(
         command
             .arg("wave")
             .arg(&wave)
-            .arg("--mind-only")
+            .arg("--flowloop-only")
             .current_dir(&repo_root)
             .env(WAVE_SERVER_ENDPOINT_ENV, &endpoint)
             .env(wire::RESIDENT_TOKEN_ENV, &token)
@@ -324,7 +322,7 @@ async fn serve(
     }
 
     // The resident door: a per-boot token, published beside the endpoint
-    // pointer so `--mind-only` residents can attach (same trust domain).
+    // pointer so `--flowloop-only` residents can attach (same trust domain).
     let token = server::generate_resident_token();
     let door = server::ResidentDoor::new(token.clone());
     server::write_resident_token(&repo_root, &wave, &token)?;
@@ -350,7 +348,7 @@ async fn serve(
         MindPolicy::Dormant => None,
     };
     // Build the supervisor before spawning so the attach door can hold its
-    // handle: an attached resident (`--mind-only`) signals the keeper to
+    // handle: an attached resident (`--flowloop-only`) signals the keeper to
     // stand the respawn ladder down, so the deadline never spawns a second
     // mind over it.
     let supervisor = supervisor::Supervisor::new(
@@ -385,7 +383,7 @@ async fn serve(
          (Ctrl-C to stop, RUST_LOG=loopflow=debug for the firehose)",
         match mind {
             MindPolicy::Spawn => " · spawning resident",
-            MindPolicy::Dormant => " · dormant (--no-mind)",
+            MindPolicy::Dormant => " · dormant (--no-flowloop)",
         }
     );
 
@@ -745,7 +743,7 @@ mod tests {
 
     /// `/health` splits channel liveness from the resident: `status` says
     /// the channel serves; `mind` is null while no resident was ever spawned
-    /// or attached (`--no-mind` serves dormant), then carries the resident's
+    /// or attached (`--no-flowloop` serves dormant), then carries the resident's
     /// state — a dead resident on a live channel reads `serving` + `failed`.
     #[tokio::test]
     async fn health_splits_channel_liveness_from_the_mind() {

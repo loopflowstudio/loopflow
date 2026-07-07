@@ -3,7 +3,7 @@
 `lf wave <name>` starts a wave as **two processes**:
 
 ```
-  lf wave <name>                      lf wave <name> --mind-only
+  lf wave <name>                      lf wave <name> --flowloop-only
   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
   │ LISTENER (origin repo)│──────────▶│ RESIDENT (<repo>.<wave>) │
   │ pens · folds · doors  │           │ codex harness · scheduler│
@@ -28,8 +28,8 @@
 
 One command runs both: the listener spawns the resident as a child `lf`
 process (keeper spawns tenant) and both narrate into the same terminal.
-`--no-mind` serves a dormant channel (`/health` reads `mind: null`);
-`--mind-only` attaches a resident to an existing listener by hand — also the
+`--no-flowloop` serves a dormant channel (`/health` reads `mind: null`);
+`--flowloop-only` attaches a resident to an existing listener by hand — also the
 respawn affordance, and one day the human-as-mind seat.
 
 - **One mind, two inputs.** Chat and progress share the same context. A
@@ -185,7 +185,7 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 
 | Method + path             | Behavior |
 |---------------------------|----------|
-| `GET /health`             | `{status, mind, wave, turns, workers, uptime_seconds}`; `status` is channel liveness — always `serving` while the process answers; `mind` is the resident's state (`idle \| turning \| interrupting \| failed`), or null while no resident was ever spawned or attached (`--no-mind` serves dormant) — a live channel whose resident died reads `serving` + `failed`; `workers` counts observed in-flight worker runs |
+| `GET /health`             | `{status, mind, wave, turns, workers, uptime_seconds}`; `status` is channel liveness — always `serving` while the process answers; `mind` is the resident's state (`idle \| turning \| interrupting \| failed`), or null while no resident was ever spawned or attached (`--no-flowloop` serves dormant) — a live channel whose resident died reads `serving` + `failed`; `workers` counts observed in-flight worker runs |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread; `?limit=N` tails the last N turns (open turn included) |
 | `GET /events`             | SSE, the family's one unified stream. Scope: `?channel=<name>` (one channel), `?prefix=<name>` (subtree), default = whole family; names outside the family 404. Event names: `state` (mind-state name, on subscribe + every transition; primary only), `turn` (a `Turn` JSON; replay then live; child-channel turns carry an extra `"channel"` key; ids repeat — each frame replaces the client's previous state for that (channel, id)), `memory-add` (full added facts since the last externalization, replay then live; primary only), `memory` (curation summaries, live-only; primary only), and — only with `?inbox=true`, the resident's subscription — `inbox` (`{id, op, text, from}`; pending replay + live ops; bare interrupts ride `id: null`). |
 | `POST /messages {op, text, from?, channel?}` | `op` required: `message` (human speech: steers the live turn when one is open and the harness supports it, otherwise queued for the next turn), `steer` (into the live turn when supported), `interrupt` (cancel the open turn; non-empty text becomes the next turn), or `say` (an attributed emission — `lf chat`; `from {session_id?, label}` required for `say`, rejected otherwise). `channel` null = the wave channel; a child name lands in that work line's journal (404 outside the family). Returns `{turn, state}`. |

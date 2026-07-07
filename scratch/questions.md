@@ -11,3 +11,8 @@
   thread reply is the `wave_mutate` phase's final text (builder verifies what
   `lf -b` emits); `MindState` → `FlowloopState` DTO rename may split into an
   immediate follow-up PR — the only permitted deferral.
+- Implementation note: this slice switches the live resident path to
+  pass-based `wave-pass` execution and renames the public wave flags to
+  `--no-flowloop` / `--flowloop-only`. The broader `MindState`/health-field
+  rename and removal of the legacy harness scheduler remain as the DTO
+  follow-up because the wire and Swift mirrors still expose `mind`.

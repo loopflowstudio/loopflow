@@ -1,7 +1,7 @@
 //! The resident's scheduler: one persistent vendor thread, scheduled by
 //! events, publishing through the wire.
 //!
-//! This runs INSIDE THE RESIDENT PROCESS (`lf wave <name> --mind-only`, see
+//! This runs INSIDE THE RESIDENT PROCESS (`lf wave <name> --flowloop-only`, see
 //! [`crate::wave::resident`]) — never in the listener. The mind's identity is
 //! its operating prompt (the rendered `GOAL.md` seed plus the orchestration
 //! discipline); everything it does surfaces as [`ResidentDelta`]s sent
@@ -80,6 +80,8 @@ use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::engine::agent::AgentConfig;
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
+use crate::flowloop::pass::lf_command;
+use crate::flowloop::Tier;
 use crate::harness::{is_terminal_harness_error, Harness};
 use crate::wave::journal::{ellipsize, MessageId, MessageOp, PendingMessage};
 use crate::wave::memory::Memory;
@@ -93,6 +95,10 @@ use crate::wave::wire::{InFlightWorker, ResidentDelta, ResidentStateTo};
 /// quiet-wave cadence is deliberately coarse; messages and turn boundaries
 /// drive the mind the rest of the time.
 pub const HEARTBEAT_IDLE: Duration = Duration::from_secs(300);
+
+/// Pass-based wave flowloops are much coarser than persistent vendor
+/// sessions: each heartbeat burns a full three-phase `wave-pass`.
+pub const FLOWLOOP_HEARTBEAT_IDLE: Duration = Duration::from_secs(4 * 60 * 60);
 
 /// Consecutive failed turns before the mind itself is declared failed and
 /// the resident exits (the listener's supervisor revives by respawning).
@@ -214,6 +220,26 @@ impl Default for MindConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct FlowloopConfig {
+    /// Idle window before a heartbeat `wave-pass`.
+    pub heartbeat_idle: Duration,
+    /// Per-pass wall-clock timeout.
+    pub pass_timeout: Duration,
+    /// Maximum agent turns forwarded to each phase run.
+    pub max_turns: Option<u32>,
+}
+
+impl Default for FlowloopConfig {
+    fn default() -> Self {
+        Self {
+            heartbeat_idle: FLOWLOOP_HEARTBEAT_IDLE,
+            pass_timeout: Duration::from_secs(30 * 60),
+            max_turns: Some(20),
+        }
+    }
+}
+
 /// PATH for the mind's harness and every child the resident spawns: this
 /// executable's directory first, so placed `lf` commands resolve to the binary
 /// running this resident, never whatever `lf` the user's shell happens to find.
@@ -252,6 +278,16 @@ pub fn mind_agent_config(origin_repo: &Path, wave: &str, cwd: &Path) -> AgentCon
         structured_replies: Vec::new(),
         directive_relay: None,
     }
+}
+
+fn wave_pass_seed(origin_repo: &Path, wave: &str, wake: &str) -> String {
+    let memory = Memory::for_wave(origin_repo, wave);
+    let seed = build_goal_seed(origin_repo, wave, &memory);
+    format!(
+        "{seed}\n\n{}\n\n{}\n\n<wake>\n{wake}\n</wake>",
+        orchestration_discipline(wave),
+        crate::engine::prompt::loopflow_section()
+    )
 }
 
 /// The wave's rendered `GOAL.md` plus current memory, or a minimal-but-real
@@ -490,6 +526,374 @@ enum MindEnd {
     /// The mind itself failed (reported over the wire before ending). The
     /// resident exits nonzero; the listener's supervisor respawns.
     Failed(String),
+}
+
+enum FlowloopEnd {
+    ListenerGone,
+    Failed(String),
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_flowloop(
+    client: ListenerClient,
+    mut inbox_rx: mpsc::UnboundedReceiver<InboxItem>,
+    cwd: PathBuf,
+    origin_repo: PathBuf,
+    wave: String,
+    config: FlowloopConfig,
+) -> Result<()> {
+    let mut flowloop = WaveFlowloop {
+        client,
+        cwd,
+        origin_repo,
+        wave,
+        config,
+        queue: Vec::new(),
+        seen: HashSet::new(),
+        consecutive_failures: 0,
+        idle_since: Instant::now(),
+        cron_last_fired: HashMap::new(),
+        end: None,
+    };
+
+    while flowloop.end.is_none() {
+        if !flowloop.queue.is_empty() {
+            flowloop.start_queued_pass(&mut inbox_rx).await;
+            continue;
+        }
+        let heartbeat_at = flowloop.heartbeat_deadline();
+        let cron_at = flowloop.cron_deadline();
+        tokio::select! {
+            biased;
+            item = inbox_rx.recv() => {
+                match item {
+                    Some(item) => flowloop.on_inbox(item).await,
+                    None => flowloop.end = Some(FlowloopEnd::ListenerGone),
+                }
+            }
+            _ = sleep_until_opt(cron_at), if cron_at.is_some() => {
+                flowloop.on_cron(&mut inbox_rx).await;
+            }
+            _ = sleep_until_opt(Some(heartbeat_at)) => {
+                flowloop.on_heartbeat(&mut inbox_rx).await;
+            }
+        }
+    }
+
+    match flowloop.end {
+        Some(FlowloopEnd::Failed(reason)) => Err(anyhow!(reason)),
+        _ => Ok(()),
+    }
+}
+
+struct WaveFlowloop {
+    client: ListenerClient,
+    cwd: PathBuf,
+    origin_repo: PathBuf,
+    wave: String,
+    config: FlowloopConfig,
+    queue: Vec<PendingMessage>,
+    seen: HashSet<MessageId>,
+    consecutive_failures: u32,
+    idle_since: Instant,
+    cron_last_fired: HashMap<String, DateTime<Utc>>,
+    end: Option<FlowloopEnd>,
+}
+
+impl WaveFlowloop {
+    fn heartbeat_deadline(&self) -> Instant {
+        self.idle_since + self.config.heartbeat_idle
+    }
+
+    fn cron_deadline(&self) -> Option<Instant> {
+        let now = Utc::now();
+        let next = read_crons(&self.origin_repo, &self.wave)
+            .iter()
+            .filter_map(|cron| {
+                next_cron_fire(
+                    &cron.schedule,
+                    self.cron_last_fired.get(&cron_key(cron)).copied(),
+                    now,
+                )
+            })
+            .min()?;
+        let wait = (next - now).to_std().unwrap_or(Duration::ZERO);
+        Some(Instant::now() + wait)
+    }
+
+    async fn on_inbox(&mut self, item: InboxItem) {
+        match item {
+            InboxItem::Message(message) => {
+                if !self.seen.insert(message.id.clone()) {
+                    return;
+                }
+                match message.op {
+                    MessageOp::Interrupt => self.queue.push(message),
+                    MessageOp::Message | MessageOp::Say | MessageOp::Steer => {
+                        self.queue.push(message)
+                    }
+                }
+            }
+            InboxItem::Interrupt => {}
+        }
+    }
+
+    async fn on_heartbeat(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
+        let workers = self.fetch_in_flight().await;
+        if self.end.is_some() {
+            return;
+        }
+        let prompt = heartbeat_prompt(&workers);
+        self.run_pass(prompt, Vec::new(), inbox_rx).await;
+    }
+
+    async fn on_cron(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
+        let now = Utc::now();
+        let due: Vec<WaveCronDef> = read_crons(&self.origin_repo, &self.wave)
+            .into_iter()
+            .filter(|cron| {
+                next_cron_fire(
+                    &cron.schedule,
+                    self.cron_last_fired.get(&cron_key(cron)).copied(),
+                    now,
+                )
+                .is_some_and(|fire_at| fire_at <= now)
+            })
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+        for cron in &due {
+            self.cron_last_fired.insert(cron_key(cron), now);
+        }
+        let prompt = cron_prompt(&due);
+        self.run_pass(prompt, Vec::new(), inbox_rx).await;
+    }
+
+    async fn start_queued_pass(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
+        let messages = std::mem::take(&mut self.queue);
+        let answers: Vec<MessageId> = messages.iter().map(|m| m.id.clone()).collect();
+        let content = messages
+            .iter()
+            .map(|m| match &m.from {
+                Some(from) => format!("[{}] {}", from.label, m.text),
+                None => m.text.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        self.run_pass(content, answers, inbox_rx).await;
+    }
+
+    async fn run_pass(
+        &mut self,
+        wake: String,
+        answers: Vec<MessageId>,
+        inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
+    ) {
+        self.fetch_in_flight().await;
+        if self.end.is_some() {
+            return;
+        }
+        let seed = wave_pass_seed(&self.origin_repo, &self.wave, &wake);
+        let answers = answers.into_iter().map(|id| id.0).collect();
+        self.send(vec![ResidentDelta::TurnOpened { answers }]).await;
+        if self.end.is_some() {
+            return;
+        }
+
+        let child = match spawn_wave_pass(&self.cwd, &seed, self.config.max_turns) {
+            Ok(child) => child,
+            Err(err) => {
+                self.finish_failed_pass(&format!("failed to spawn wave-pass: {err:#}"))
+                    .await;
+                return;
+            }
+        };
+        let mut wait_task = tokio::spawn(async move { child.wait_with_output().await });
+        let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
+        loop {
+            tokio::select! {
+                biased;
+                item = inbox_rx.recv() => {
+                    match item {
+                        Some(InboxItem::Interrupt) => {
+                            self.interrupt_child(&mut wait_task).await;
+                            return;
+                        }
+                        Some(InboxItem::Message(message)) if message.op == MessageOp::Interrupt => {
+                            if self.seen.insert(message.id.clone()) {
+                                self.queue.push(message);
+                            }
+                            self.interrupt_child(&mut wait_task).await;
+                            return;
+                        }
+                        Some(item) => self.on_inbox(item).await,
+                        None => {
+                            self.end = Some(FlowloopEnd::ListenerGone);
+                            wait_task.abort();
+                            return;
+                        }
+                    }
+                }
+                _ = &mut timeout => {
+                    wait_task.abort();
+                    self.finish_failed_pass(&format!(
+                        "wave-pass timed out after {}s",
+                        self.config.pass_timeout.as_secs()
+                    )).await;
+                    return;
+                }
+                result = &mut wait_task => {
+                    match result {
+                        Ok(output) => self.on_pass_output(output).await,
+                        Err(err) => {
+                            self.finish_failed_pass(&format!("wave-pass wait task failed: {err:#}"))
+                                .await;
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    async fn on_pass_output(&mut self, result: std::io::Result<std::process::Output>) {
+        match result {
+            Ok(output) if output.status.success() => {
+                self.consecutive_failures = 0;
+                self.ship_output(output).await;
+                self.send(vec![ResidentDelta::TurnFinished {
+                    status: Lifecycle::Completed,
+                    cost_usd: None,
+                }])
+                .await;
+                self.idle_since = Instant::now();
+            }
+            Ok(output) => {
+                self.ship_output(output).await;
+                self.finish_failed_pass("wave-pass exited nonzero").await;
+            }
+            Err(err) => {
+                self.finish_failed_pass(&format!("wave-pass wait failed: {err:#}"))
+                    .await;
+            }
+        }
+    }
+
+    async fn ship_output(&mut self, output: std::process::Output) {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let text = match (stdout.trim(), stderr.trim()) {
+            ("", "") => String::new(),
+            (out, "") => out.to_string(),
+            ("", err) => err.to_string(),
+            (out, err) => format!("{out}\n\nstderr:\n{err}"),
+        };
+        if !text.is_empty() {
+            self.send(vec![ResidentDelta::TurnText { text }]).await;
+        }
+    }
+
+    async fn interrupt_child(
+        &mut self,
+        wait_task: &mut tokio::task::JoinHandle<std::io::Result<std::process::Output>>,
+    ) {
+        self.send(vec![ResidentDelta::MindState {
+            to: ResidentStateTo::Interrupting,
+            reason: "user interrupt".to_string(),
+        }])
+        .await;
+        wait_task.abort();
+        self.consecutive_failures = 0;
+        self.send(vec![ResidentDelta::TurnFinished {
+            status: Lifecycle::Interrupted,
+            cost_usd: None,
+        }])
+        .await;
+        self.idle_since = Instant::now();
+    }
+
+    async fn finish_failed_pass(&mut self, reason: &str) {
+        self.send(vec![ResidentDelta::TurnFinished {
+            status: Lifecycle::Failed,
+            cost_usd: None,
+        }])
+        .await;
+        self.idle_since = Instant::now();
+        self.consecutive_failures += 1;
+        if self.consecutive_failures >= MAX_CONSECUTIVE_TURN_FAILURES {
+            self.fail(&format!(
+                "{MAX_CONSECUTIVE_TURN_FAILURES} consecutive wave-pass failures: {reason}"
+            ))
+            .await;
+        }
+    }
+
+    async fn fetch_in_flight(&mut self) -> Vec<InFlightWorker> {
+        match self.client.context().await {
+            Ok(context) => context.in_flight,
+            Err(err) => {
+                tracing::info!(
+                    error = %format!("{err:#}"),
+                    "listener unreachable; ending residency"
+                );
+                self.end = Some(FlowloopEnd::ListenerGone);
+                Vec::new()
+            }
+        }
+    }
+
+    async fn send(&mut self, deltas: Vec<ResidentDelta>) {
+        if self.end.is_some() || deltas.is_empty() {
+            return;
+        }
+        if let Err(err) = self.client.send_deltas(deltas).await {
+            tracing::info!(
+                error = %format!("{err:#}"),
+                "listener unreachable; ending residency"
+            );
+            self.end = Some(FlowloopEnd::ListenerGone);
+        }
+    }
+
+    async fn fail(&mut self, reason: &str) {
+        if self.end.is_some() {
+            return;
+        }
+        tracing::error!(
+            wave = self.wave,
+            reason,
+            "wave flowloop failed; reporting and exiting"
+        );
+        self.send(vec![ResidentDelta::MindState {
+            to: ResidentStateTo::Failed,
+            reason: reason.to_string(),
+        }])
+        .await;
+        if self.end.is_none() {
+            self.end = Some(FlowloopEnd::Failed(reason.to_string()));
+        }
+    }
+}
+
+fn spawn_wave_pass(
+    cwd: &Path,
+    seed: &str,
+    max_turns: Option<u32>,
+) -> std::io::Result<tokio::process::Child> {
+    let mut command = tokio::process::Command::from(lf_command());
+    command.arg("-b");
+    if let Some(max_turns) = max_turns {
+        command.arg("--max-turns").arg(max_turns.to_string());
+    }
+    command
+        .arg(Tier::Wave.pass_flow())
+        .arg(seed)
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    command.spawn()
 }
 
 /// Run the mind until the listener disappears (`Ok`) or the mind fails
@@ -1408,6 +1812,24 @@ mod tests {
         assert_eq!(
             first, exe_dir,
             "the mind's PATH resolves `lf` to this build first"
+        );
+    }
+
+    #[test]
+    fn wave_flowloop_seed_carries_goal_loopflow_and_wake() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let goal_dir = tmp.path().join("wave/ship");
+        std::fs::create_dir_all(&goal_dir).expect("goal dir");
+        std::fs::write(goal_dir.join("GOAL.md"), "Ship the thing.").expect("goal");
+
+        let seed = wave_pass_seed(tmp.path(), "ship", "hello from chat");
+
+        assert!(seed.contains("Ship the thing."));
+        assert!(seed.contains("<lf:loopflow>"));
+        assert!(seed.contains("<wake>\nhello from chat\n</wake>"));
+        assert_eq!(
+            FlowloopConfig::default().heartbeat_idle,
+            Duration::from_secs(4 * 60 * 60)
         );
     }
 

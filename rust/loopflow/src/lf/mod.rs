@@ -158,7 +158,7 @@ pub enum Commands {
     },
     /// Start a wave: a long-lived listener (journal, doors, live events over
     /// a loopback HTTP port; discovery via `wave/<name>/.wave-endpoint`)
-    /// that spawns and supervises the wave's mind as a resident child
+    /// that spawns and supervises the wave's flowloop as a resident child
     /// process.
     #[command(name = "wave")]
     Wave {
@@ -168,11 +168,11 @@ pub enum Commands {
         #[arg(long)]
         force: bool,
         /// Serve dormant: listener only, no resident (health reads mind: null)
-        #[arg(long, conflicts_with = "mind_only")]
-        no_mind: bool,
-        /// Run only the resident (the mind) against an existing listener
-        #[arg(long, conflicts_with = "no_mind")]
-        mind_only: bool,
+        #[arg(long, conflicts_with = "flowloop_only")]
+        no_flowloop: bool,
+        /// Run only the resident flowloop against an existing listener
+        #[arg(long, conflicts_with = "no_flowloop")]
+        flowloop_only: bool,
     },
     /// Run a Linear roadmap task as a bounded task flowloop
     Task {

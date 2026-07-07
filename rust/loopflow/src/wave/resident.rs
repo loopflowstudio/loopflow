@@ -1,6 +1,6 @@
 //! The resident: the wave's mind as its own `lf` process.
 //!
-//! `lf wave <name> --mind-only` runs here. The resident owns everything
+//! `lf wave <name> --flowloop-only` runs here. The resident owns everything
 //! vendor-shaped — the conversations harness, the scheduler
 //! ([`crate::wave::mind`]), the rendered GOAL.md seed — and NOTHING
 //! pen-shaped: it never touches a journal file. Its two connections to the
@@ -31,15 +31,14 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use tokio::sync::mpsc;
 
-use crate::chat::types::ConversationEvent;
 use crate::engine::repo::find_repo_root;
 use crate::engine::wave_config::read_wave_config;
 use crate::engine::worktrees::{ensure_wave_worktree, main_repo_root};
-use crate::harness::{canonical_harness, default_create_harness, ApprovalPolicy, Harness};
+use crate::harness::canonical_harness;
 use crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV;
 use crate::ops::util::resolve_wave_name;
 use crate::wave::journal::{MessageId, PendingMessage};
-use crate::wave::mind::{path_for_children, run_mind, MindConfig};
+use crate::wave::mind::{path_for_children, run_flowloop, FlowloopConfig};
 use crate::wave::runtime::InboxItem;
 use crate::wave::server;
 use crate::wave::subscription::stream_events;
@@ -48,7 +47,7 @@ use crate::wave::wire::{
     RESIDENT_TOKEN_ENV, RESIDENT_TOKEN_HEADER,
 };
 
-/// `lf wave <name> --mind-only`: attach to the wave's live listener and be
+/// `lf wave <name> --flowloop-only`: attach to the wave's live listener and be
 /// its mind until one of us dies.
 pub fn run(name: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
@@ -74,24 +73,16 @@ pub fn run(name: &str) -> Result<()> {
     // installed one.
     std::env::set_var("PATH", path_for_children());
 
-    let vendor = resolve_mind_vendor(&main_repo, &wave)?;
-    let (events_tx, events_rx) = mpsc::unbounded_channel();
-    let harness = default_create_harness(&vendor, ApprovalPolicy::AutoApprove, events_tx)?;
     println!(
-        "lf wave · {wave} · resident (vendor {vendor}) · listener http://{endpoint} \
+        "lf wave · {wave} · resident flowloop · listener http://{endpoint} \
          · worktree {}",
         mind_cwd.display()
     );
 
-    let config = MindConfig {
-        vendor,
-        ..MindConfig::default()
-    };
+    let config = FlowloopConfig::default();
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(drive(
         ListenerClient::new(endpoint, token),
-        harness,
-        events_rx,
         mind_cwd,
         main_repo,
         wave,
@@ -104,12 +95,10 @@ pub fn run(name: &str) -> Result<()> {
 /// listener's supervisor takes it from there).
 pub async fn drive(
     client: ListenerClient,
-    harness: Box<dyn Harness>,
-    events_rx: mpsc::UnboundedReceiver<ConversationEvent>,
     cwd: PathBuf,
     origin_repo: PathBuf,
     wave: String,
-    config: MindConfig,
+    config: FlowloopConfig,
 ) -> Result<()> {
     let attach = client
         .attach(std::process::id())
@@ -124,18 +113,7 @@ pub async fn drive(
     }
     let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
     let subscription = tokio::spawn(follow_inbox(client.endpoint().to_string(), inbox_tx));
-    let result = run_mind(
-        client,
-        inbox_rx,
-        harness,
-        events_rx,
-        cwd,
-        origin_repo,
-        wave,
-        attach.thread_id,
-        config,
-    )
-    .await;
+    let result = run_flowloop(client, inbox_rx, cwd, origin_repo, wave, config).await;
     subscription.abort();
     result
 }
@@ -148,7 +126,7 @@ fn wave_worktree(main_repo: &Path, wave: &str) -> Result<PathBuf> {
 
 /// Where the listener is and how to prove we belong at its resident door:
 /// spawn env first (the keeper passed both), the discovery files second
-/// (`--mind-only` by hand, same trust domain as `.wave-endpoint`).
+/// (`--flowloop-only` by hand, same trust domain as `.wave-endpoint`).
 fn resolve_attachment(
     env_endpoint: Option<String>,
     env_token: Option<String>,
@@ -400,7 +378,7 @@ mod tests {
         let err = resolve_attachment(None, None, tmp.path(), "ship").expect_err("no listener");
         assert!(err.to_string().contains("lf wave ship"), "{err}");
 
-        // Files only (the --mind-only path).
+        // Files only (the --flowloop-only path).
         let addr: std::net::SocketAddr = "127.0.0.1:50607".parse().unwrap();
         server::write_endpoint(tmp.path(), "ship", addr).expect("pointer");
         server::write_resident_token(tmp.path(), "ship", "tok-file").expect("token");

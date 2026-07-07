@@ -5,7 +5,7 @@
 //! on the resident's health lives here, server-side:
 //!
 //! - **Resident death.** A spawned resident is watched by process exit; an
-//!   attached one (`lf wave <name> --mind-only`) by a pid probe on the seat
+//!   attached one (`lf wave <name> --flowloop-only`) by a pid probe on the seat
 //!   the attach door recorded. Death closes whatever turn the resident left
 //!   open (`TurnFinished{Failed}` — the journal never dangles), journals
 //!   `MindState::Failed`, and arms the respawn ladder.
@@ -59,7 +59,7 @@ pub const LISTENER_INTERRUPT_DEADLINE: Duration = Duration::from_secs(20);
 /// How often an attached (not spawned) resident's pid is probed.
 pub const ATTACH_PROBE: Duration = Duration::from_secs(10);
 
-/// Spawn one resident process. Production spawns `lf wave <name> --mind-only`
+/// Spawn one resident process. Production spawns `lf wave <name> --flowloop-only`
 /// (the current executable); tests spawn whatever stands in for a resident.
 /// A closure, not a trait: the supervisor needs exactly one behavior.
 pub type SpawnResident = Box<dyn FnMut() -> std::io::Result<Child> + Send>;
@@ -161,7 +161,7 @@ pub struct Supervisor {
 
 impl Supervisor {
     /// Build the supervisor, subscribing to the runtime's broadcasts now.
-    /// `spawner` is `None` for a pure listener (`--no-mind`): the janitor and
+    /// `spawner` is `None` for a pure listener (`--no-flowloop`): the janitor and
     /// the attach probe still run — the pen-side anti-wedges never depend on
     /// who spawned the resident.
     pub fn new(
@@ -375,7 +375,7 @@ impl Supervisor {
     }
 
     /// The attach door admitted a resident (its pid already on the seat).
-    /// For a foreign resident — `lf wave <name> --mind-only`, not our own
+    /// For a foreign resident — `lf wave <name> --flowloop-only`, not our own
     /// spawned child — the attach IS the revival: the respawn ladder stands
     /// down and resets, and the seat is watched by pid probe
     /// (attached-not-child). Without this, an armed respawn deadline would

@@ -23,7 +23,7 @@
 //!   `status` is CHANNEL liveness — always `serving` while this process
 //!   answers; `mind` is the resident's state (`idle | turning | interrupting
 //!   | failed`), or null while no resident has ever been spawned or attached
-//!   (`--no-mind` serves dormant); a served channel whose resident died reads
+//!   (`--no-flowloop` serves dormant); a served channel whose resident died reads
 //!   `status: "serving", mind: "failed"`. `workers` counts this wave's
 //!   observed in-flight worker runs.
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
@@ -297,7 +297,7 @@ struct HealthBody {
     /// is `status: "serving", mind: "failed"`.
     status: String,
     /// Resident (mind) state name, or null for a channel with no resident
-    /// (a dormant `--no-mind` channel, or before any resident attaches).
+    /// (a dormant `--no-flowloop` channel, or before any resident attaches).
     mind: Option<String>,
     wave: String,
     turns: usize,
@@ -461,7 +461,7 @@ pub fn router(
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
     // `mind` is null until a resident has ever been spawned or attached —
-    // a dormant channel (`--no-mind`) has no mind to report on.
+    // a dormant channel (`--no-flowloop`) has no mind to report on.
     let mind = state
         .runtime
         .resident_expected()
@@ -1171,7 +1171,7 @@ pub fn resident_token_path(repo_root: &Path, wave: &str) -> PathBuf {
 }
 
 /// Publish this boot's resident token so an attached resident (`lf wave
-/// <name> --mind-only`) can present it — the same filesystem-trust domain as
+/// <name> --flowloop-only`) can present it — the same filesystem-trust domain as
 /// the endpoint pointer. Owner-only on unix.
 pub fn write_resident_token(repo_root: &Path, wave: &str, token: &str) -> std::io::Result<()> {
     let path = resident_token_path(repo_root, wave);
@@ -1187,7 +1187,7 @@ pub fn write_resident_token(repo_root: &Path, wave: &str, token: &str) -> std::i
     Ok(())
 }
 
-/// Read the current resident token, for `--mind-only` attachment.
+/// Read the current resident token, for `--flowloop-only` attachment.
 pub fn read_resident_token(repo_root: &Path, wave: &str) -> Option<String> {
     let token = std::fs::read_to_string(resident_token_path(repo_root, wave)).ok()?;
     let token = token.trim().to_string();

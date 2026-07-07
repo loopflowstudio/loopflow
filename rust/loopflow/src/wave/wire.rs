@@ -30,7 +30,7 @@
 //! ([`RESIDENT_TOKEN_HEADER`]): the listener generates it at bind, passes it
 //! to a spawned resident via [`RESIDENT_TOKEN_ENV`], and writes it to
 //! `wave/<name>/.wave-resident-token` beside the endpoint pointer for
-//! attached residents (`lf wave <name> --mind-only`) — the same
+//! attached residents (`lf wave <name> --flowloop-only`) — the same
 //! filesystem-trust domain as the discovery file. This is a stopgap: when a
 //! human (or a remote mind) can hold the resident seat, the token becomes a
 //! credential the gatekeeper issues, not a file the repo trusts.

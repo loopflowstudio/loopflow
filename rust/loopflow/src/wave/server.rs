@@ -130,6 +130,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use time::OffsetDateTime;
+use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
@@ -949,62 +950,29 @@ async fn events_handler(
                 )
                 .chain(inbox_replay),
         );
-        let live_turns = BroadcastStream::new(sub.turn_rx).filter_map(move |res| {
-            let out = match res {
-                // The frame's wire JSON was serialized once at the send site.
-                Ok(frame) => Some(Ok(Event::default().event("turn").data(frame.json.as_str()))),
-                // Lagged: the client fell behind. Skip; it resyncs from /conversation.
-                Err(_) => None,
-            };
-            async move { out }
-        });
-        let live_states = BroadcastStream::new(sub.state_rx).filter_map(move |res| {
-            let out = match res {
-                Ok(mind_state) => Some(Ok(state_event(&mind_state))),
-                // Lagged: fine — the next transition carries the current state.
-                Err(_) => None,
-            };
-            async move { out }
-        });
-        let live_memory_adds = BroadcastStream::new(sub.memory_add_rx).filter_map(move |res| {
-            let out = match res {
-                Ok(fact) => Some(Ok(memory_add_event(&fact))),
-                // Lagged: reconnect gets a fresh add snapshot.
-                Err(_) => None,
-            };
-            async move { out }
-        });
-        let live_memory = BroadcastStream::new(sub.memory_rx).filter_map(move |res| {
-            let out = match res {
-                Ok(summary) => Some(Ok(memory_event(&summary))),
-                // Lagged: fine — MEMORY.md itself is the durable state.
-                Err(_) => None,
-            };
-            async move { out }
+        // The frame's wire JSON was serialized once at the send site. Lagged:
+        // the client fell behind; it resyncs from /conversation.
+        let live_turns = live_stream(sub.turn_rx, |frame| {
+            Event::default().event("turn").data(frame.json.as_str())
         });
         // Worker-run motion (`op` frames). Live-only — no replay; a client
         // that lags re-reads history from `lf runs`.
-        let live_ops = BroadcastStream::new(sub.op_rx).filter_map(move |res| {
-            let out = match res {
-                Ok(frame) => Some(Ok(op_event(&frame))),
-                Err(_) => None,
-            };
-            async move { out }
-        });
+        let live_ops = live_stream(sub.op_rx, |frame| op_event(&frame));
+        // Lagged: fine — the next transition carries the current state.
+        let live_states = live_stream(sub.state_rx, |s| state_event(&s));
+        // Lagged: reconnect gets a fresh add snapshot.
+        let live_memory_adds = live_stream(sub.memory_add_rx, |fact| memory_add_event(&fact));
+        // Lagged: fine — MEMORY.md itself is the durable state.
+        let live_memory = live_stream(sub.memory_rx, |summary| memory_event(&summary));
         let mut live: BoxedEventStream = Box::pin(stream::select(
             stream::select(live_turns, live_ops),
             stream::select(live_states, stream::select(live_memory, live_memory_adds)),
         ));
         if include_inbox {
-            let live_inbox = BroadcastStream::new(sub.inbox_rx).filter_map(move |res| {
-                let out = match res {
-                    Ok(item) => Some(Ok(inbox_event(&inbox_item_frame(&item)))),
-                    // Lagged: the pending fold is the durable queue; a
-                    // resident that falls behind resubscribes.
-                    Err(_) => None,
-                };
-                async move { out }
-            });
+            // Lagged: the pending fold is the durable queue; a resident that
+            // falls behind resubscribes.
+            let live_inbox =
+                live_stream(sub.inbox_rx, |item| inbox_event(&inbox_item_frame(&item)));
             live = Box::pin(stream::select(live, live_inbox));
         }
         streams.push(Box::pin(replay.chain(live)));
@@ -1028,6 +996,23 @@ async fn events_handler(
 
 type BoxedEventStream =
     std::pin::Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send + 'static>>;
+
+/// One live SSE stream off a broadcast receiver: each value becomes an event,
+/// a lagged receiver drops silently (every stream's durable state resyncs on
+/// reconnect — see each call site for what backs it).
+fn live_stream<T, F>(
+    rx: broadcast::Receiver<T>,
+    to_event: F,
+) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static
+where
+    T: Clone + Send + 'static,
+    F: Fn(T) -> Event + Send + 'static,
+{
+    BroadcastStream::new(rx).filter_map(move |res| {
+        let out = res.ok().map(|value| Ok(to_event(value)));
+        async move { out }
+    })
+}
 
 /// The scope one `/events` subscription covers.
 #[derive(Debug, Clone)]

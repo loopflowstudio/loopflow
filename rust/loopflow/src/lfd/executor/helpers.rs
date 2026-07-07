@@ -2,7 +2,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
-use tracing::{error, info, warn};
+use tracing::warn;
 
 use time::OffsetDateTime;
 
@@ -11,13 +11,12 @@ use crate::engine::git::{
 };
 use crate::engine::worktrees::{
     branch_exists, ensure_wave_worktree as ensure_wave_worktree_lease, schedule_upstream_sync,
-    short_run_id, worker_id, worktree_dir,
+    worker_id, worktree_dir,
 };
 
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{Run, RunStackStatus, RunStatus, Session, Wave, WaveStatus};
 use crate::lfdb::SharedStore;
-use crate::ops::{rebase_with_recovery, Progress, RebaseOptions};
 
 // TODO(M1): extract dispatch into crate::dispatch. lfd/executor should not own
 // placement, worktree creation, tmux launch wiring, or the run env contract.
@@ -27,8 +26,8 @@ use crate::ops::{rebase_with_recovery, Progress, RebaseOptions};
 /// shared-vs-per-run heuristic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Placement {
-    /// New `<repo>.<wave>.<short-run-id>` worktree off the default branch;
-    /// independent branch, independent PR, independent land.
+    /// New `<repo>.<wave>.<short-run-id>.<ts>` worktree off the wave parent
+    /// branch when available, falling back to the default branch.
     Fresh,
     /// New worktree whose branch forks from the parent run's branch, for
     /// dependent series. Branch lineage carries the stack; the filesystem
@@ -75,24 +74,21 @@ pub async fn create_run_for_placement(
 
     let main_repo = Path::new(&wave.repo);
 
-    let ((wt_path, branch), run_target_branch) = match placement {
-        Placement::Fresh => (
-            create_run_worktree(main_repo, wave.name(), run_id.as_str(), target_branch)?,
-            target_branch.unwrap_or("main").to_string(),
-        ),
+    let (wt_path, branch, run_target_branch) = match placement {
+        Placement::Fresh => {
+            create_run_worktree(main_repo, wave.name(), run_id.as_str(), target_branch)?
+        }
         Placement::Stack { .. } => {
             let parent = lineage_parent
                 .as_ref()
                 .expect("stack placement resolved its parent above");
-            (
-                create_stacked_run_worktree(
-                    main_repo,
-                    wave.name(),
-                    run_id.as_str(),
-                    &parent.branch,
-                )?,
-                parent.branch.clone(),
-            )
+            let (wt_path, branch) = create_stacked_run_worktree(
+                main_repo,
+                wave.name(),
+                run_id.as_str(),
+                &parent.branch,
+            )?;
+            (wt_path, branch, parent.branch.clone())
         }
     };
 
@@ -145,60 +141,43 @@ pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result
     Ok((lease.path.to_string_lossy().to_string(), lease.branch))
 }
 
-/// Create a run-scoped worker worktree.
+/// Create a run-scoped worker worktree whose branch targets its parent.
 ///
 /// Fresh placement: a stamped worker branch (`<user>/<wave>.<run-id>.<ts>`)
-/// forked from the default branch — independent PR, independent land.
-///
-/// When `target_branch` is `Some` and not `"main"`, the worktree instead
-/// tracks that branch directly (e.g. a fix dispatched onto a PR branch).
+/// forked from the parent branch (`<user>/<wave>`), falling back to the default
+/// branch when the parent does not exist yet.
 pub(crate) fn create_run_worktree(
     main_repo: &Path,
     wave_name: &str,
     run_id: &str,
-    target_branch: Option<&str>,
-) -> anyhow::Result<(String, String)> {
+    parent_branch: Option<&str>,
+) -> anyhow::Result<(String, String, String)> {
     let id = worker_id(main_repo, wave_name, run_id)?;
     let run_wt = worktree_dir(main_repo, &id);
-
-    let is_targeted = target_branch
-        .map(|b| !b.is_empty() && b != "main")
-        .unwrap_or(false);
-    if is_targeted {
-        // Targeted dispatch: track the specified branch directly through a
-        // run-local branch, so git push from the worktree lands on it.
-        let tb = target_branch.expect("checked above");
-        fetch(main_repo, "origin", tb)?;
-        let run_branch = format!("{tb}-run-{}", short_run_id(run_id));
-        let remote_ref = format!("origin/{tb}");
-        worktree_add(
-            main_repo,
-            &run_wt,
-            &run_branch,
-            WorktreeBranch::Track {
-                remote: &remote_ref,
-            },
-        )?;
-        sync_existing_worktree(main_repo, &run_wt, &run_branch)?;
-        // Return the target branch (not the run-local branch) so the run
-        // record tracks which remote branch it pushes to.
-        return Ok((run_wt.to_string_lossy().to_string(), tb.to_string()));
-    }
-
-    // Fresh: own worker branch off the default branch.
     let default_branch = get_default_branch(main_repo)?;
     let _ = sync_main(main_repo, &default_branch);
+    let requested_parent = parent_branch
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+        .map(str::to_string)
+        .or_else(|| id.parent());
+    let (start_point, run_target_branch) =
+        resolve_parent_start_point(main_repo, requested_parent.as_deref(), &default_branch)?;
     let branch = id.branch();
     worktree_add(
         main_repo,
         &run_wt,
         &branch,
         WorktreeBranch::New {
-            start_point: &default_branch,
+            start_point: &start_point,
         },
     )?;
     schedule_upstream_sync(run_wt.clone(), branch.clone());
-    Ok((run_wt.to_string_lossy().to_string(), branch))
+    Ok((
+        run_wt.to_string_lossy().to_string(),
+        branch,
+        run_target_branch,
+    ))
 }
 
 /// Create a run-scoped worker worktree whose branch forks from `parent_branch`.
@@ -260,6 +239,58 @@ fn local_strictly_behind(repo: &Path, local: &str, remote_ref: &str) -> anyhow::
         return Ok(false);
     }
     Ok(is_ancestor(repo, &local_sha, &remote_sha)?)
+}
+
+fn resolve_parent_start_point(
+    repo: &Path,
+    parent_branch: Option<&str>,
+    default_branch: &str,
+) -> anyhow::Result<(String, String)> {
+    let Some(parent_branch) = parent_branch else {
+        return Ok((default_branch.to_string(), default_branch.to_string()));
+    };
+    if parent_branch == default_branch {
+        return Ok((default_branch.to_string(), default_branch.to_string()));
+    }
+
+    let _ = fetch(repo, "origin", parent_branch);
+    let remote_ref = format!("origin/{parent_branch}");
+    let local_exists = branch_exists(repo, parent_branch)?;
+    let remote_exists = rev_parse(repo, &remote_ref).is_ok();
+
+    let Some(start_point) = resolve_available_parent_ref(
+        repo,
+        parent_branch,
+        &remote_ref,
+        local_exists,
+        remote_exists,
+    )?
+    else {
+        return Ok((default_branch.to_string(), default_branch.to_string()));
+    };
+
+    Ok((start_point, parent_branch.to_string()))
+}
+
+fn resolve_available_parent_ref(
+    repo: &Path,
+    parent_branch: &str,
+    remote_ref: &str,
+    local_exists: bool,
+    remote_exists: bool,
+) -> anyhow::Result<Option<String>> {
+    match (local_exists, remote_exists) {
+        (false, false) => Ok(None),
+        (true, false) => Ok(Some(parent_branch.to_string())),
+        (false, true) => Ok(Some(remote_ref.to_string())),
+        (true, true) => {
+            if local_strictly_behind(repo, parent_branch, remote_ref)? {
+                Ok(Some(remote_ref.to_string()))
+            } else {
+                Ok(Some(parent_branch.to_string()))
+            }
+        }
+    }
 }
 
 pub(crate) fn is_active_run_status(status: RunStatus) -> bool {
@@ -469,70 +500,6 @@ fn append_lf_run_options(
     }
     cmd.push("-w".to_string());
     cmd.push(wave_name.to_string());
-}
-
-fn sync_existing_worktree(main_repo: &Path, worktree: &Path, branch: &str) -> anyhow::Result<()> {
-    if branch.is_empty() {
-        return Ok(());
-    }
-
-    dual_rebase(main_repo, worktree, branch)
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct TracingProgress;
-
-impl Progress for TracingProgress {
-    fn status(&self, msg: &str) {
-        info!("{msg}");
-    }
-
-    fn error(&self, msg: &str) {
-        error!("{msg}");
-    }
-
-    fn warning(&self, msg: &str) {
-        warn!("{msg}");
-    }
-
-    fn confirm(&self, _msg: &str) -> bool {
-        true
-    }
-}
-
-fn dual_rebase(main_repo: &Path, worktree: &Path, branch: &str) -> Result<()> {
-    let progress = TracingProgress;
-    rebase_onto_if_available(main_repo, worktree, branch, &progress)?;
-
-    let default_branch = get_default_branch(main_repo)?;
-    rebase_onto_if_available(main_repo, worktree, &default_branch, &progress)?;
-    Ok(())
-}
-
-fn rebase_onto_if_available(
-    main_repo: &Path,
-    worktree: &Path,
-    branch: &str,
-    progress: &impl Progress,
-) -> Result<()> {
-    if fetch(main_repo, "origin", branch).is_err() {
-        return Ok(());
-    }
-
-    let remote_ref = format!("origin/{branch}");
-    if rev_parse(main_repo, &remote_ref).is_err() {
-        return Ok(());
-    }
-
-    rebase_with_recovery(
-        worktree,
-        &RebaseOptions {
-            onto: remote_ref,
-            push: false,
-        },
-        progress,
-    )?;
-    Ok(())
 }
 
 #[cfg(test)]

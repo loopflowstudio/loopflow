@@ -161,7 +161,7 @@ async fn run_records_parent_lineage() {
 }
 
 #[tokio::test]
-async fn fresh_placement_creates_run_scoped_worktree_off_default_branch() {
+async fn bare_wave_fresh_falls_back_to_main() {
     let repo = TestRepo::new();
     let store = make_store().await;
     let wave = make_wave(&repo.path().to_string_lossy(), "grind");
@@ -197,6 +197,41 @@ async fn fresh_placement_creates_run_scoped_worktree_off_default_branch() {
     let fork_point = run_git_output(Path::new(&run.worktree), &["merge-base", "HEAD", "main"]);
     let main_tip = run_git_output(repo.path(), &["rev-parse", "main"]);
     assert_eq!(fork_point, main_tip);
+}
+
+#[tokio::test]
+async fn fresh_forks_from_wave_branch_not_main() {
+    let repo = TestRepo::new();
+    let store = make_store().await;
+    let wave_name = "grind";
+    let wave = make_wave(&repo.path().to_string_lossy(), wave_name);
+    store.create_wave(&wave).await.unwrap();
+
+    let wave_branch = format!("{}/{}", git_user(repo.path()).unwrap(), wave_name);
+    repo.create_branch(&wave_branch);
+    repo.create_file("wave.txt", "wave branch\n");
+    repo.stage_all();
+    repo.commit("wave work");
+    repo.push_new_branch(&wave_branch);
+    repo.checkout("main");
+
+    let run = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh, None)
+        .await
+        .unwrap();
+
+    assert_eq!(run.target_branch, wave_branch);
+    assert_ne!(run.branch, run.target_branch);
+
+    let worker = Path::new(&run.worktree);
+    assert!(
+        worker.join("wave.txt").exists(),
+        "fresh dispatch should fork from the wave branch"
+    );
+    let fork_point = run_git_output(worker, &["merge-base", "HEAD", &run.target_branch]);
+    let wave_tip = run_git_output(repo.path(), &["rev-parse", &run.target_branch]);
+    let main_tip = run_git_output(repo.path(), &["rev-parse", "main"]);
+    assert_eq!(fork_point, wave_tip);
+    assert_ne!(fork_point, main_tip);
 }
 
 #[tokio::test]

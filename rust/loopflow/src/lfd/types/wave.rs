@@ -359,8 +359,9 @@ pub struct Run {
     pub stack_status: RunStackStatus,
     #[serde(default)]
     pub lineage_inferred: bool,
-    /// The branch this run targets. "main" means new branch off main (produce
-    /// PR). Any other value means check out that branch and push to it (no PR).
+    /// The branch this run targets for review/landing. Root workers target the
+    /// default branch; wave workers target their parent wave branch when it
+    /// exists.
     #[serde(default = "default_target_branch")]
     pub target_branch: String,
     /// When set, this run is a repair attempt for the referenced failed run.

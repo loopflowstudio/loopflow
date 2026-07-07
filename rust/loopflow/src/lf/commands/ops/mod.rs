@@ -127,7 +127,87 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
                 crate::ops::queue::reconcile_queue_cmd(wave.as_deref())
             }
         },
+        OpsCommand::ResetWaves { yes } => reset_waves(*yes),
     }
+}
+
+/// Kill every `lf-*` tmux session and clear stale wave endpoint pointers — the
+/// operator's fresh-start button.
+///
+/// Concerto launches every wave server and worker as an `lf-`-prefixed tmux
+/// session, so killing those takes down the wave minds too (tmux SIGHUPs the
+/// session's process group). Stale `.wave-endpoint` pointers under this repo's
+/// `wave/` are then removed so nothing dangles; lfd reconciles its own
+/// registry rows on next boot.
+fn reset_waves(assume_yes: bool) -> Result<()> {
+    let sessions = lf_tmux_sessions()?;
+    if sessions.is_empty() {
+        println!("No lf-* tmux sessions running.");
+    } else {
+        if !assume_yes && io::stdin().is_terminal() {
+            println!("About to kill {} lf tmux session(s):", sessions.len());
+            for session in &sessions {
+                println!("  {session}");
+            }
+            print!("Proceed? [y/N]: ");
+            let _ = io::stdout().flush();
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+                println!("Aborted.");
+                return Ok(());
+            }
+        }
+        for session in &sessions {
+            let _ = Command::new("tmux")
+                .args(["kill-session", "-t", session])
+                .status();
+            println!("killed {session}");
+        }
+    }
+
+    let cleared = clear_stale_endpoints()?;
+    if cleared > 0 {
+        println!("cleared {cleared} stale wave endpoint(s)");
+    }
+    Ok(())
+}
+
+/// Every tmux session whose name starts with `lf-` (wave agents
+/// `lf-<repo>-<wave>` and workers `lf-<branch>-<uuid>`). A missing tmux server
+/// means no sessions, not an error.
+fn lf_tmux_sessions() -> Result<Vec<String>> {
+    let output = Command::new("tmux")
+        .args(["list-sessions", "-F", "#{session_name}"])
+        .output()
+        .map_err(|err| anyhow!("failed to run tmux: {err}"))?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|name| name.starts_with("lf-"))
+        .map(str::to_string)
+        .collect())
+}
+
+/// Remove every `wave/<name>/.wave-endpoint` pointer under the main repo. Only
+/// called after the sessions are killed, so every pointer is now stale — a
+/// live wave would have kept its server (and pointer) alive.
+fn clear_stale_endpoints() -> Result<u32> {
+    let repo = find_repo_root()?;
+    let main = main_repo_root(&repo).unwrap_or(repo);
+    let mut cleared = 0;
+    if let Ok(entries) = std::fs::read_dir(main.join("wave")) {
+        for entry in entries.flatten() {
+            let endpoint = entry.path().join(crate::wave::server::ENDPOINT_FILE);
+            if endpoint.exists() && std::fs::remove_file(&endpoint).is_ok() {
+                cleared += 1;
+            }
+        }
+    }
+    Ok(cleared)
 }
 
 struct CliProgress;

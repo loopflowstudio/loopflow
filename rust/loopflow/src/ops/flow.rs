@@ -234,8 +234,9 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
         | OpsCommand::Wt { .. }
         | OpsCommand::Shell { .. }
         | OpsCommand::Auth { .. }
-        | OpsCommand::Queue { .. } => Err(OpsError::Message(
-            "ops item does not support cp/doctor/pm/branches/wt/shell/auth/queue commands"
+        | OpsCommand::Queue { .. }
+        | OpsCommand::ResetWaves { .. } => Err(OpsError::Message(
+            "ops item does not support cp/doctor/pm/branches/wt/shell/auth/queue/reset-waves commands"
                 .to_string(),
         )),
     }

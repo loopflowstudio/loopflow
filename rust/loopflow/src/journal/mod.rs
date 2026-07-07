@@ -1,6 +1,8 @@
 use std::cell::RefCell;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -476,9 +478,48 @@ fn append_event(run_dir: &Path, event: &LfEvent) -> Result<(), std::io::Error> {
         .create(true)
         .append(true)
         .open(events_path(run_dir))?;
-    serde_json::to_writer(&mut file, event).map_err(std::io::Error::other)?;
-    file.write_all(b"\n")?;
+    let _lock = lock_file(&file)?;
+    let mut line = serde_json::to_vec(event).map_err(std::io::Error::other)?;
+    line.push(b'\n');
+    file.write_all(&line)?;
     Ok(())
+}
+
+#[cfg(unix)]
+struct FileLock {
+    fd: std::os::fd::RawFd,
+}
+
+#[cfg(unix)]
+fn lock_file(file: &File) -> Result<FileLock, std::io::Error> {
+    let fd = file.as_raw_fd();
+    loop {
+        // SAFETY: flock only observes the valid file descriptor borrowed from
+        // `file`; the File outlives the returned guard.
+        if unsafe { libc::flock(fd, libc::LOCK_EX) } == 0 {
+            return Ok(FileLock { fd });
+        }
+        let err = std::io::Error::last_os_error();
+        if err.kind() != std::io::ErrorKind::Interrupted {
+            return Err(err);
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        // SAFETY: the guard only exists while the borrowed File is alive.
+        let _ = unsafe { libc::flock(self.fd, libc::LOCK_UN) };
+    }
+}
+
+#[cfg(not(unix))]
+struct FileLock;
+
+#[cfg(not(unix))]
+fn lock_file(_file: &File) -> Result<FileLock, std::io::Error> {
+    Ok(FileLock)
 }
 
 fn current_context() -> Option<RunContext> {
@@ -539,10 +580,20 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{emit, read_events, runs_root, test_env_lock, LfEventFields, LfEventType, LfNode};
+    use super::{
+        emit, events_path, read_events, runs_root, test_env_lock, LfEvent, LfEventFields,
+        LfEventType, LfNode,
+    };
     use crate::engine::git::is_clean;
     use crate::lfd::id::LfdId;
     use loopflow_test_support::TestRepo;
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
+
+    const CHILD_APPEND_ENV: &str = "LOOPFLOW_JOURNAL_APPEND_CHILD";
+    const CHILD_EVENT_COUNT_ENV: &str = "LOOPFLOW_JOURNAL_CHILD_EVENT_COUNT";
+    const CHILD_RUN_DIR_ENV: &str = "LOOPFLOW_JOURNAL_CHILD_RUN_DIR";
+    const CHILD_WRITER_ENV: &str = "LOOPFLOW_JOURNAL_CHILD_WRITER";
 
     fn with_run_id_env<T>(value: Option<&str>, run: impl FnOnce() -> T) -> T {
         let _guard = test_env_lock();
@@ -596,6 +647,89 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(entries.len(), 1, "expected a single journal run dir");
         entries.pop().expect("run dir")
+    }
+
+    #[test]
+    fn concurrent_child_process_appends_keep_events_jsonl_parseable() {
+        let tmp = tempfile::TempDir::new().expect("temp journal");
+        let run_dir = tmp.path().join("run");
+        std::fs::create_dir_all(&run_dir).expect("create run dir");
+
+        let current_exe = std::env::current_exe().expect("current test binary");
+        let writers = 8;
+        let events_per_writer = 20;
+        let mut children = Vec::new();
+        for writer in 0..writers {
+            let child = Command::new(&current_exe)
+                .arg("journal_child_process_appends_events_for_concurrency_regression")
+                .arg("--nocapture")
+                .env(CHILD_APPEND_ENV, "1")
+                .env(CHILD_RUN_DIR_ENV, &run_dir)
+                .env(CHILD_WRITER_ENV, writer.to_string())
+                .env(CHILD_EVENT_COUNT_ENV, events_per_writer.to_string())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn child journal writer");
+            children.push(child);
+        }
+
+        for mut child in children {
+            let status = child.wait().expect("wait for child journal writer");
+            assert!(status.success(), "child journal writer failed: {status}");
+        }
+
+        let raw = std::fs::read_to_string(events_path(&run_dir)).expect("read events.jsonl");
+        let lines = raw
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>();
+        assert_eq!(lines.len(), writers * events_per_writer);
+
+        for (line_number, line) in lines.iter().enumerate() {
+            serde_json::from_str::<LfEvent>(line).unwrap_or_else(|err| {
+                panic!("line {} is malformed JSONL: {err}: {line}", line_number + 1)
+            });
+        }
+
+        let parsed = read_events(&run_dir).expect("parse all events");
+        assert_eq!(parsed.len(), writers * events_per_writer);
+    }
+
+    #[test]
+    fn journal_child_process_appends_events_for_concurrency_regression() {
+        if std::env::var(CHILD_APPEND_ENV).ok().as_deref() != Some("1") {
+            return;
+        }
+
+        let run_dir = PathBuf::from(std::env::var(CHILD_RUN_DIR_ENV).expect("child run dir env"));
+        let writer = std::env::var(CHILD_WRITER_ENV).expect("child writer env");
+        let event_count = std::env::var(CHILD_EVENT_COUNT_ENV)
+            .expect("child event count env")
+            .parse::<usize>()
+            .expect("child event count");
+        let run_id = LfdId::parse("8985c55b-9864-4c2b-860f-b7054a71bbea").expect("run id");
+
+        for index in 0..event_count {
+            let event = LfEvent {
+                run_id: run_id.clone(),
+                ts: time::OffsetDateTime::now_utc(),
+                node: LfNode::Step,
+                event: LfEventType::Errored,
+                wave_name: Some("meta".to_string()),
+                worktree: Some(run_dir.display().to_string()),
+                command: None,
+                flow: Some("garden".to_string()),
+                step: Some(format!("writer-{writer}-{index}")),
+                index: Some(index as u32),
+                error: Some(format!(
+                    "writer-{writer}-event-{index}:{}",
+                    "x".repeat(16 * 1024)
+                )),
+                signal: None,
+            };
+            super::append_event(&run_dir, &event).expect("child append event");
+        }
     }
 
     #[test]

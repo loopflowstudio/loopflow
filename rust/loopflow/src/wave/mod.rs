@@ -573,7 +573,7 @@ mod tests {
         assert_eq!(body["state"], "idle");
 
         // The message is in the thread; the resident answers it at its next
-        // turn (mind scheduling is covered in mind.rs tests).
+        // turn (flowloop scheduling is covered in flowloop/wave.rs tests).
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].role, ChatRole::User);

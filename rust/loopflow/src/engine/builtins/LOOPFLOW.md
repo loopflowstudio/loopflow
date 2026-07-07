@@ -81,10 +81,10 @@ they came in: when a human's message reaches you, reply in your own turn
 text. Everything proactive goes through `lf`:
 
 - `lf chat "<note>"` - report outcomes, FYIs, and blockers to the wave's
-  thread; the post wakes the wave's mind like any message. One short
+  thread; the post wakes the wave's flowloop like any message. One short
   paragraph: what landed, links, anything surprising. Pipe stdin for longer.
 - `lf chat --parent "<report>"` - escalate to the parent wave.
-- `lf sub` - listen to your wave: follow its live events (turns, mind state,
+- `lf sub` - listen to your wave: follow its live events (turns, flowloop state,
   memory) until killed. Workers may run it in a background terminal to
   receive steering mid-task. Outside a wave it exits silently.
 - `lf memory add "<fact>"` - record a durable learning. `lf memory update`

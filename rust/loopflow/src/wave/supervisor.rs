@@ -18,11 +18,11 @@
 //!   which disarms and resets the ladder and probes the seat by pid; and a
 //!   spawn never fires over a live seat (probe before spawn).
 //! - **Interrupt janitor.** When an interrupt op is delivered while a turn is
-//!   live, a deadline arms. The RESIDENT owns the cooperative cancel (its own
-//!   shorter deadline force-closes through the wire); this janitor is the
-//!   backstop for a resident gone fully silent: past the deadline the open
-//!   turn is force-finalized `Interrupted` and late wire deltas for it are
-//!   dropped (see `WaveRuntime::force_finalize_open_turn`).
+//!   live, a deadline arms. The RESIDENT kills the pass child and closes the
+//!   turn through the wire immediately; this janitor is the backstop for a
+//!   resident gone fully silent: past the deadline the open turn is
+//!   force-finalized `Interrupted` and late wire deltas for it are dropped
+//!   (see `WaveRuntime::force_finalize_open_turn`).
 //!
 //! The supervisor never touches a vendor: it spawns and kills `lf` processes
 //! and folds what it observes into the journal.
@@ -279,7 +279,7 @@ impl Supervisor {
         // Never spawn over a live seat: a resident may have attached while
         // the ladder was armed (the attach signal disarms it, but a deadline
         // already due can race the signal). The attached resident IS the
-        // revival; spawning would seat a second mind and orphan the first.
+        // revival; spawning would seat a second flowloop and orphan the first.
         if self.child.is_none() {
             if let Some(pid) = self.door.seat_pid() {
                 if process_alive(pid).await {
@@ -378,7 +378,7 @@ impl Supervisor {
     /// spawned child — the attach IS the revival: the respawn ladder stands
     /// down and resets, and the seat is watched by pid probe
     /// (attached-not-child). Without this, an armed respawn deadline would
-    /// later spawn a second mind over the attached one and overwrite its
+    /// later spawn a second flowloop over the attached one and overwrite its
     /// seat pid.
     fn on_attach(&mut self, pid: u32) {
         if self
@@ -392,7 +392,7 @@ impl Supervisor {
         }
         if let Some(mut child) = self.child.take() {
             // Defensive: the door seated a foreign resident over a live
-            // spawned child. One seat, one mind — ask the replaced child to
+            // spawned child. One seat, one flowloop — ask the replaced child to
             // leave, and reap it off-loop so its exit is never journaled as
             // a death.
             if let Some(old_pid) = child.id() {
@@ -530,7 +530,7 @@ mod tests {
     /// A dying resident process is detected, journaled as a failed flowloop, and
     /// respawned on the ladder — process-level auto-revival.
     #[tokio::test]
-    async fn resident_death_fails_the_mind_and_the_ladder_respawns() {
+    async fn resident_death_fails_the_flowloop_and_the_ladder_respawns() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
         let door = ResidentDoor::new("tok");
@@ -547,7 +547,7 @@ mod tests {
 
         // First spawn dies instantly → Failed; the ladder respawns at least
         // twice more.
-        wait_for("mind failed", || {
+        wait_for("flowloop failed", || {
             matches!(rt.mind_state(), MindState::Failed { .. })
         })
         .await;
@@ -585,7 +585,7 @@ mod tests {
         rt.apply_resident_delta(ResidentDelta::TurnText {
             text: "half".into(),
         });
-        wait_for("mind failed", || {
+        wait_for("flowloop failed", || {
             matches!(rt.mind_state(), MindState::Failed { .. })
         })
         .await;
@@ -623,7 +623,7 @@ mod tests {
             .run(),
         );
 
-        wait_for("mind failed", || {
+        wait_for("flowloop failed", || {
             matches!(rt.mind_state(), MindState::Failed { .. })
         })
         .await;
@@ -689,7 +689,7 @@ mod tests {
         let task = tokio::spawn(sup.run());
 
         // The spawned resident dies; the ladder arms (120ms out).
-        wait_for("mind failed", || {
+        wait_for("flowloop failed", || {
             matches!(rt.mind_state(), MindState::Failed { .. })
         })
         .await;
@@ -732,13 +732,13 @@ mod tests {
             .run(),
         );
 
-        wait_for("mind failed", || {
+        wait_for("flowloop failed", || {
             matches!(rt.mind_state(), MindState::Failed { .. })
         })
         .await;
         let before = spawns.load(Ordering::SeqCst);
         // Only the seat is taken (no attach signal): the deadline fires, the
-        // pre-spawn probe finds a live pid, and no second mind spawns.
+        // pre-spawn probe finds a live pid, and no second flowloop spawns.
         door.record_pid(std::process::id());
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert_eq!(
@@ -762,7 +762,7 @@ mod tests {
         let task =
             tokio::spawn(Supervisor::new(rt.clone(), door.clone(), None, config(Vec::new())).run());
 
-        wait_for("mind failed via probe", || {
+        wait_for("flowloop failed via probe", || {
             matches!(rt.mind_state(), MindState::Failed { .. })
         })
         .await;

@@ -588,7 +588,7 @@ impl WaveRuntime {
     // -- Channel family (this server holds every child channel's pen) --
     //
     // The primary (wave) channel lives in `inner`, exactly as before —
-    // mind-attached, hot path untouched. Child channels are pure streams
+    // flowloop-attached, hot path untouched. Child channels are pure streams
     // (no flowloop, no memory), materialized on demand from their worktree
     // journals and folded separately; the family view folds upward through
     // the tagged `family_tx` bus. Consumption markers never cross journals.

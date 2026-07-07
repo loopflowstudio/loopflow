@@ -1,10 +1,9 @@
 //! Turn vocabulary: `ChatTurn`, the wire type Loopflow consumes.
 //!
-//! The wave's mind runs on a persistent harness session
-//! ([`crate::harness`]) inside the RESIDENT process; its
-//! `ConversationEvent` stream is adapted into resident wire deltas (see
-//! [`crate::flowloop::wave::EventAdapter`] and [`crate::wave::wire`]) and folded
-//! by the listener's runtime into journaled, broadcast turns.
+//! The wave's flowloop runs each turn as a bounded `wave-pass` child inside
+//! the RESIDENT process (see [`crate::flowloop::wave`]) and reports it as
+//! resident wire deltas ([`crate::wave::wire`]), folded by the listener's
+//! runtime into journaled, broadcast turns.
 //!
 //! Mapping:
 //! - a human message becomes one `user` turn;

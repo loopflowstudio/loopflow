@@ -485,7 +485,7 @@ async fn resident_attach_handler(
     Json(body): Json<AttachRequest>,
 ) -> Result<Json<AttachResponse>, (StatusCode, String)> {
     state.resident.authorize(&headers)?;
-    // Seat exclusivity: one mind per wave. A live seat already probed alive
+    // Seat exclusivity: one flowloop per wave. A live seat already probed alive
     // refuses the attach naming it — a second resident would split-brain the
     // wire. A dead/absent seat is free (takeover after a crash rides the same
     // door; the supervisor's own seat probe frees a dead pid on its cadence).

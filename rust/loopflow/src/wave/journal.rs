@@ -415,10 +415,10 @@ impl Narrator {
                     )),
                     ConversationItem::Message { text, .. } => {
                         if turn.text_shown {
-                            debug(format!("  mind: \"{}\"", ellipsize(text, 120)))
+                            debug(format!("  flowloop: \"{}\"", ellipsize(text, 120)))
                         } else {
                             turn.text_shown = true;
-                            info(format!("mind: \"{}\"", ellipsize(text, 80)))
+                            info(format!("flowloop: \"{}\"", ellipsize(text, 80)))
                         }
                     }
                     ConversationItem::Thought { text, .. } => {
@@ -1382,7 +1382,7 @@ mod tests {
         assert_eq!(n.level, NarrationLevel::Info);
         assert_eq!(
             n.line,
-            "mind: \"Checking the worker reports, then answering the chat.\""
+            "flowloop: \"Checking the worker reports, then answering the chat.\""
         );
 
         let n = render(EventKind::TurnItem {

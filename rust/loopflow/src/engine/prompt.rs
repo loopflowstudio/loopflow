@@ -1664,7 +1664,7 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
 
 /// The one loopflow operating document (including the Speak vocabulary) as a
 /// prompt section. Emitted exactly once per prompt: assembled prompts get it
-/// from [`format_system_sections`]; the wave mind's prompt bypasses assembly
+/// from [`format_system_sections`]; the wave flowloop's seed bypasses assembly
 /// and appends the same section itself.
 pub fn loopflow_section() -> String {
     format!(

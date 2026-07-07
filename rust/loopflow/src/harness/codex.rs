@@ -568,7 +568,7 @@ impl CodexHarness {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            // Dropping the harness (e.g. the wave mind's task is aborted)
+            // Dropping the harness (e.g. a run task is aborted)
             // must not leak a live app-server.
             .kill_on_drop(true);
         // Own process group so stop() can kill everything under the `codex`

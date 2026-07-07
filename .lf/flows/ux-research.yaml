@@ -1,5 +1,5 @@
-# Concerto UX research loop. Each run = one iteration that keeps *learning* how
-# Concerto's UI should work by simulating personas using the app.
+# Loopflow UX research loop. Each run = one iteration that keeps *learning* how
+# Loopflow's UI should work by simulating personas using the app.
 #
 #   propose  → pick ONE target behavior + the questions to answer about it
 #   generate → prototype ≥3 genuinely-distinct design candidates for it

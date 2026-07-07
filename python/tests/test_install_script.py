@@ -37,11 +37,11 @@ def _write_fake_macho(path: Path, content: bytes = b"fake-macho") -> None:
 def _stage_build_artifacts(root: Path) -> None:
     swift_rel = root / "swift" / ".build" / "release"
     swift_rel.mkdir(parents=True)
-    _write_fake_macho(swift_rel / "Concerto")
+    _write_fake_macho(swift_rel / "LoopflowMac")
 
-    swift_concerto = root / "swift" / "Concerto"
-    swift_concerto.mkdir(parents=True)
-    (swift_concerto / "Info.plist").write_text(
+    swift_loopflow = root / "swift" / "LoopflowMac"
+    swift_loopflow.mkdir(parents=True)
+    (swift_loopflow / "Info.plist").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
         '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
@@ -49,8 +49,8 @@ def _stage_build_artifacts(root: Path) -> None:
         "<key>CFBundleName</key><string>Loopflow</string>"
         "</dict></plist>\n"
     )
-    (swift_concerto / "Concerto.sdef").write_text("<dictionary/>")
-    (swift_concerto / "AppIcon.icns").write_bytes(b"icns-fake")
+    (swift_loopflow / "Loopflow.sdef").write_text("<dictionary/>")
+    (swift_loopflow / "AppIcon.icns").write_bytes(b"icns-fake")
 
     cargo_rel = root / "target" / "release"
     cargo_rel.mkdir(parents=True)
@@ -102,12 +102,12 @@ def _patch_subprocess(
 # --- Tests ---
 
 
-def test_install_concerto_bundles_lfd_and_lf(
+def test_install_loopflow_bundles_lfd_and_lf(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Regression: BundledDaemonManager uses
     Bundle.main.url(forAuxiliaryExecutable: "lfd"), which only searches
-    Contents/MacOS/. If we skip copying lfd/lf there, Concerto fails at
+    Contents/MacOS/. If we skip copying lfd/lf there, Loopflow fails at
     launch with "Missing bundled executable: lfd".
     """
     root = tmp_path / "repo"
@@ -115,9 +115,9 @@ def test_install_concerto_bundles_lfd_and_lf(
     _patch_subprocess(monkeypatch)
 
     spec = _make_spec(root)
-    install._install_concerto(spec, "9.9.9")
+    install._install_loopflow(spec, "9.9.9")
 
-    assert (spec.macos_dir / "Concerto").exists()
+    assert (spec.macos_dir / "Loopflow").exists()
     assert (spec.macos_dir / "lfd").exists(), (
         "lfd must live in Contents/MacOS/ — "
         "Bundle.main.url(forAuxiliaryExecutable:) only resolves there."
@@ -133,7 +133,7 @@ def test_verify_bundle_rejects_missing_aux_executable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     spec = _make_spec(tmp_path / "repo")
-    _stage_bundle(spec, binaries=("Concerto", "lf"))
+    _stage_bundle(spec, binaries=("Loopflow", "lf"))
     _patch_subprocess(monkeypatch)
 
     with pytest.raises(install.StageError, match="missing:.*lfd"):
@@ -144,7 +144,7 @@ def test_verify_bundle_rejects_wrong_architecture(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     spec = _make_spec(tmp_path / "repo")
-    _stage_bundle(spec, binaries=("Concerto", "lf", "lfd"))
+    _stage_bundle(spec, binaries=("Loopflow", "lf", "lfd"))
     _patch_subprocess(monkeypatch, archs=["sparc64"])
 
     with pytest.raises(install.StageError, match="built for sparc64"):
@@ -153,25 +153,25 @@ def test_verify_bundle_rejects_wrong_architecture(
 
 def test_verify_bundle_rejects_non_macho(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     spec = _make_spec(tmp_path / "repo")
-    _stage_bundle(spec, binaries=("Concerto", "lf", "lfd"))
+    _stage_bundle(spec, binaries=("Loopflow", "lf", "lfd"))
     _patch_subprocess(monkeypatch, archs=[])  # lipo fails -> not Mach-O
 
     with pytest.raises(install.StageError, match="not a Mach-O"):
         install._verify_bundle_layout(spec)
 
 
-def test_install_concerto_fails_when_codesign_verify_fails(
+def test_install_loopflow_fails_when_codesign_verify_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Signing smoke step: if `codesign --verify` rejects the bundle,
-    _install_concerto must raise instead of silently proceeding.
+    _install_loopflow must raise instead of silently proceeding.
     """
     root = tmp_path / "repo"
     _stage_build_artifacts(root)
     _patch_subprocess(monkeypatch, codesign_verify_rc=1)
 
     with pytest.raises(install.StageError, match="codesign --verify failed"):
-        install._install_concerto(_make_spec(root), "9.9.9")
+        install._install_loopflow(_make_spec(root), "9.9.9")
 
 
 def test_stage_binaries_errors_on_missing_cargo_output(
@@ -224,7 +224,7 @@ def test_promote_uses_worktree_build_and_replaces_installed_app(tmp_path: Path) 
     applications = tmp_path / "Applications"
     (applications / "Loopflow.app").mkdir(parents=True)
     (applications / "Loopflow.app" / "old").write_text("old app")
-    (applications / "Loopflow Concerto.app").mkdir()
+    (applications / "Concerto.app").mkdir()
 
     install._promote(local_bin, install_dir, applications_dir=applications)
 
@@ -234,4 +234,4 @@ def test_promote_uses_worktree_build_and_replaces_installed_app(tmp_path: Path) 
     assert (install_dir / "lfd").readlink() == local_bin / "lfd"
     assert (applications / "Loopflow.app" / "Contents" / "marker").read_text() == "new app"
     assert not (applications / "Loopflow.app" / "old").exists()
-    assert not (applications / "Loopflow Concerto.app").exists()
+    assert not (applications / "Concerto.app").exists()

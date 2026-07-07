@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Configure this Mac to use a private self-hosted lfd over Tailscale.
-# Stores the client environment in ~/.lf/private-host.env and seeds Concerto's remote
+# Stores the client environment in ~/.lf/private-host.env and seeds Loopflow's remote
 # connection + Keychain token for the same host.
 
 set -euo pipefail
@@ -17,7 +17,7 @@ Options:
   --token TOKEN      lfd bearer token. Defaults to LFD_TOKEN or LFD_AUTH_TOKEN.
   --token-file PATH  Read bearer token from PATH.
   --env-file PATH    Write shell exports here (default: ~/.lf/private-host.env)
-  --no-concerto      Do not seed Concerto UserDefaults/Keychain.
+  --no-loopflow      Do not seed Loopflow UserDefaults/Keychain.
   --verify           Probe the host (authed /v0/waves) after writing local config.
   -h, --help         Show this help.
 
@@ -32,7 +32,7 @@ use_tls=0
 token="${LFD_TOKEN:-${LFD_AUTH_TOKEN:-}}"
 token_file=""
 env_file="$HOME/.lf/private-host.env"
-configure_concerto=1
+configure_loopflow=1
 verify=0
 
 while [[ $# -gt 0 ]]; do
@@ -89,8 +89,8 @@ while [[ $# -gt 0 ]]; do
             env_file="${1#--env-file=}"
             shift
             ;;
-        --no-concerto)
-            configure_concerto=0
+        --no-loopflow)
+            configure_loopflow=0
             shift
             ;;
         --verify)
@@ -153,7 +153,7 @@ EOF_ENV
 install -m 0600 "$tmp" "$env_file"
 rm -f "$tmp"
 
-if [[ "$configure_concerto" -eq 1 ]]; then
+if [[ "$configure_loopflow" -eq 1 ]]; then
     json="$(python3 - "$host" "$port" "$use_tls" <<'PY'
 import json
 import sys
@@ -171,7 +171,7 @@ print(json.dumps(value, separators=(",", ":")))
 PY
 )"
     hex="$(printf '%s' "$json" | xxd -p -c 256)"
-    defaults write com.loopflow.concerto concerto.connectionSettings.v2 -data "$hex"
+    defaults write com.loopflow.mac loopflow.connectionSettings.v2 -data "$hex"
     security add-generic-password \
         -U \
         -s loopflow.connection.token \
@@ -182,8 +182,8 @@ fi
 echo "wrote $env_file"
 echo "lfd url: $url"
 echo "ssh alias: source $env_file && lfdhost"
-if [[ "$configure_concerto" -eq 1 ]]; then
-    echo "seeded Concerto remote connection for $host:$port"
+if [[ "$configure_loopflow" -eq 1 ]]; then
+    echo "seeded Loopflow remote connection for $host:$port"
 fi
 
 if [[ "$verify" -eq 1 ]]; then

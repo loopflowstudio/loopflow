@@ -56,13 +56,13 @@ def build_ios(device: str) -> int:
     project = SWIFT_DIR / "LoopflowSwift.xcodeproj"
     destination = f"platform=iOS Simulator,name={device}"
 
-    print(f"Building Concerto for {device}...")
+    print(f"Building Loopflow for {device}...")
     result = run(
         [
             "xcodebuild",
             "build",
             "-scheme",
-            "Concerto",
+            "LoopflowMac",
             "-project",
             str(project),
             "-destination",
@@ -85,7 +85,7 @@ def print_checklist() -> None:
     print()
     print("Prerequisites:")
     print("  - lfd running with at least one wave")
-    print("  - Concerto installed on iPhone Simulator")
+    print("  - Loopflow installed on iPhone Simulator")
     print("  - Connected to lfd from the app")
     print()
     print("1. FOREGROUND RECONNECT")
@@ -99,7 +99,7 @@ def print_checklist() -> None:
     print()
     print("2. CROSS-CLIENT ACTION CLEARING")
     print("   a. On iPhone, open a wave with suggested action buttons")
-    print("   b. From another client (macOS Concerto), send a message")
+    print("   b. From another client (macOS Loopflow), send a message")
     print("   c. This starts a new turn on the server")
     print("   [ ] Action buttons on iPhone disappear when turnStarted arrives")
     print()

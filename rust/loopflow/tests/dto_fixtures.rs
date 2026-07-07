@@ -75,7 +75,7 @@ fn session_fixture_pins_palette_shape() {
 
 #[test]
 fn chat_turn_fixture_pins_wave_chat_shape() {
-    // The same fixture Concerto's ContractTests decodes; if the wire shape drifts
+    // The same fixture Loopflow's ContractTests decodes; if the wire shape drifts
     // between Rust and Swift, one of the two fails.
     let turn: ChatTurn =
         serde_json::from_value(load_fixture("chat_turn.json")).expect("chat turn should parse");
@@ -171,7 +171,7 @@ fn usage_report_fixture_pins_repo_provider_shape() {
 }
 
 /// `POST /messages` response — `{turn, state}` (wave/server.rs
-/// `PostMessageResponse`). The same fixture Concerto's ContractTests decodes;
+/// `PostMessageResponse`). The same fixture Loopflow's ContractTests decodes;
 /// `turn` must parse as a `ChatTurn` and `state` must be a mind-state name.
 #[test]
 fn post_message_response_fixture_pins_wave_chat_reply() {

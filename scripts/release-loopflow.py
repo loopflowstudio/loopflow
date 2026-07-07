@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build, sign, notarize, and package Concerto as a DMG.
+"""Build, sign, notarize, and package Loopflow as a DMG.
 
 Usage:
-    python3 scripts/release-concerto.py
+    python3 scripts/release-loopflow.py
 
 Expects to run from the repo root. On CI, signing credentials come from
 environment variables (NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER). Locally,
@@ -149,7 +149,7 @@ def _copy_bundled_tools(app_macos_dir: Path) -> None:
 
 
 def release() -> int:
-    print("Building Concerto release...", flush=True)
+    print("Building Loopflow release...", flush=True)
 
     result = run(
         ["swift", "build", "-c", "release"],
@@ -171,11 +171,11 @@ def release() -> int:
     (app_dir / "Resources").mkdir(parents=True)
 
     build_dir = SWIFT_DIR / ".build" / "release"
-    shutil.copy(build_dir / "Concerto", app_dir / "MacOS")
-    shutil.copy(SWIFT_DIR / "Concerto" / "Info.plist", app_dir)
+    shutil.copy(build_dir / "Loopflow", app_dir / "MacOS")
+    shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     stamp_bundle_version(app_dir / "Info.plist", version)
-    shutil.copy(SWIFT_DIR / "Concerto" / "Concerto.sdef", app_dir / "Resources")
-    shutil.copy(SWIFT_DIR / "Concerto" / "AppIcon.icns", app_dir / "Resources")
+    shutil.copy(SWIFT_DIR / "LoopflowMac" / "Loopflow.sdef", app_dir / "Resources")
+    shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS")
     (app_dir / "PkgInfo").write_text("APPL????")
 
@@ -188,7 +188,7 @@ def release() -> int:
     # Codesign
     identity = _detect_signing_identity()
     if identity:
-        entitlements = SWIFT_DIR / "Concerto" / "Concerto.entitlements"
+        entitlements = SWIFT_DIR / "LoopflowMac" / "Loopflow.entitlements"
         app_path = dist_dir / f"{app_name}.app"
         rc = _codesign_app(app_path, identity, entitlements)
         if rc != 0:
@@ -207,7 +207,7 @@ def release() -> int:
     dmg_staging.mkdir()
     shutil.copytree(dist_dir / f"{app_name}.app", dmg_staging / f"{app_name}.app")
 
-    bg_image = SWIFT_DIR / "Concerto" / "dmg-background.png"
+    bg_image = SWIFT_DIR / "LoopflowMac" / "dmg-background.png"
     has_create_dmg = shutil.which("create-dmg") is not None
 
     if has_create_dmg and bg_image.exists():

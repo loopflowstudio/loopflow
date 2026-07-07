@@ -9,7 +9,7 @@ matrix every pass. Stdlib only.
     uv run python scripts/test.py --all      # run every suite
     uv run python scripts/test.py --list     # print the plan, run nothing
 
-Suites mirror the jobs in .github/workflows/ci.yml. Slow suites (concerto,
+Suites mirror the jobs in .github/workflows/ci.yml. Slow suites (loopflow,
 e2e) stay off in changed-mode unless forced with --all or their own flag,
 since they dominate wall-clock time.
 """
@@ -158,7 +158,7 @@ def _swift_commands(_changed: list[str]) -> list[Command]:
     ]
 
 
-def _concerto_commands(_changed: list[str]) -> list[Command]:
+def _loopflow_commands(_changed: list[str]) -> list[Command]:
     swift_dir = REPO_ROOT / "swift"
     return [
         Command(["xcodegen", "generate"], swift_dir, "xcodegen"),
@@ -169,7 +169,7 @@ def _concerto_commands(_changed: list[str]) -> list[Command]:
                 "-project",
                 "LoopflowSwift.xcodeproj",
                 "-scheme",
-                "Concerto",
+                "LoopflowMac",
                 "-destination",
                 "platform=macOS",
                 "CODE_SIGNING_ALLOWED=NO",
@@ -234,14 +234,14 @@ SUITES: list[Suite] = [
         build=_e2e_commands,
     ),
     Suite(
-        name="concerto",
+        name="loopflow",
         slow=True,
-        trigger_desc="Concerto app/UI (swift/Concerto, project.yml)",
+        trigger_desc="Loopflow app/UI (swift/Loopflow, project.yml)",
         match=lambda c: (
-            _touches(c, "swift/Concerto/", "swift/ConcertoUITests/")
+            _touches(c, "swift/LoopflowMac/", "swift/LoopflowUITests/")
             or _touches_exact(c, "swift/project.yml")
         ),
-        build=_concerto_commands,
+        build=_loopflow_commands,
     ),
 ]
 

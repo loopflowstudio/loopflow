@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Development commands for Concerto (Swift app) and GhosttyKit.
+"""Development commands for Loopflow (Swift app) and GhosttyKit.
 
 Usage:
-    uv run python scripts/concerto-dev.py <command>
+    uv run python scripts/loopflow-dev.py <command>
 
 Commands:
     setup           Install/check repo dev environment tools
@@ -15,7 +15,7 @@ Commands:
     run-ios         Build and launch in iOS Simulator
     run-ios --device "iPad Pro 13-inch (M4)"
                     Target a specific simulator device
-    release         Build release .app and .dmg (delegates to release-concerto.py)
+    release         Build release .app and .dmg (delegates to release-loopflow.py)
     clean           Remove dev app and reset permissions
     xcode           Open in Xcode
     logs            Tail the app logs
@@ -29,7 +29,7 @@ Commands:
 
 Streaming logs (long-running commands):
     ~/.lf/logs/dev/<repo>.lfd.log
-    ~/.lf/logs/dev/<repo>.concerto-run-debug.log
+    ~/.lf/logs/dev/<repo>.loopflow-run-debug.log
 """
 
 import argparse
@@ -49,22 +49,22 @@ from typing import TextIO
 REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
 GHOSTTY_DIR = REPO_ROOT / "vendor" / "ghostty"
-DEV_APP = Path.home() / "Applications" / "Concerto Dev.app"
+DEV_APP = Path.home() / "Applications" / "Loopflow Dev.app"
 # Dev build runs under its own bundle id so it never shares connection settings
-# (UserDefaults/keychain) with the installed Concerto. Worktree dev stays on the
+# (UserDefaults/keychain) with the installed Loopflow. Worktree dev stays on the
 # local bundled lfd; the installed app keeps its own (e.g. Mac Mini) connection.
-DEV_BUNDLE_ID = "com.loopflow.concerto.dev"
+DEV_BUNDLE_ID = "com.loopflow.mac.dev"
 # Stable self-signed identity used to sign dev builds. Ad-hoc signing (`--sign -`)
 # yields a fresh cdhash every build, so the keychain ACL that "Always Allow"
 # creates for the connection token never matches the next build and macOS
 # re-prompts. A persistent identity keeps the cdhash constant so the ACL sticks.
-DEV_SIGNING_IDENTITY = "Concerto Dev"
+DEV_SIGNING_IDENTITY = "Loopflow Dev"
 LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
 R2_URL = "https://bin.loopflow.studio"
 ENV_SETUP = REPO_ROOT / ".lf" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LFD_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.lfd.log"
-CONCERTO_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.concerto-run-debug.log"
+LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 
 
 def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -155,7 +155,7 @@ def run_app_bundle_with_log(
         return run(open_cmd, check=False).returncode
     except KeyboardInterrupt:
         print("\nStopping app...")
-        _stop_concerto_app(app_path)
+        _stop_loopflow_app(app_path)
         return 130
     finally:
         if tail_process.poll() is None:
@@ -166,12 +166,12 @@ def run_app_bundle_with_log(
                 tail_process.kill()
 
 
-def _stop_concerto_app(app_path: Path) -> None:
-    """Quit Concerto Dev, falling back to killing the app if a modal blocks quit."""
-    executable = app_path / "Contents" / "MacOS" / "Concerto"
+def _stop_loopflow_app(app_path: Path) -> None:
+    """Quit Loopflow Dev, falling back to killing the app if a modal blocks quit."""
+    executable = app_path / "Contents" / "MacOS" / "Loopflow"
     bundled_lfd = app_path / "Contents" / "MacOS" / "lfd"
 
-    run(["osascript", "-e", 'tell application id "com.loopflow.concerto" to quit'], check=False)
+    run(["osascript", "-e", 'tell application id "com.loopflow.mac" to quit'], check=False)
     if _wait_for_process_exit(str(executable), timeout_seconds=3):
         return
 
@@ -227,7 +227,7 @@ def _resolve_lfd_sqlite_path(db_path: str) -> Path:
 
 
 def _bundled_lfd_sqlite_path() -> Path:
-    return Path.home() / "Library" / "Application Support" / "Concerto" / "lfd" / "concerto.db"
+    return Path.home() / "Library" / "Application Support" / "Loopflow" / "lfd" / "loopflow.db"
 
 
 def _remove_sqlite_database(db_path: Path) -> None:
@@ -315,7 +315,7 @@ def cmd_setup(install: bool = False, dry_run: bool = False) -> int:
 
 def cmd_build() -> int:
     """Build the app."""
-    print("Building Concerto...")
+    print("Building Loopflow...")
     return run(["swift", "build"], cwd=SWIFT_DIR, check=False).returncode
 
 
@@ -330,20 +330,20 @@ def cmd_test() -> int:
 
 def cmd_run() -> int:
     """Build and launch the app."""
-    print("Building and running Concerto...")
+    print("Building and running Loopflow...")
     result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)
     if result.returncode != 0:
         return result.returncode
 
     _install_dev_app()
-    # Dev launches read this checkout's wave/ dir + lfd AS-IS (CONCERTO_DEV_WAVE_REPO);
+    # Dev launches read this checkout's wave/ dir + lfd AS-IS (LOOPFLOW_DEV_WAVE_REPO);
     # a plain production launch leaves it unset and reads the main worktree.
     run(
         [
             "open",
             "-n",
             "--env",
-            f"CONCERTO_DEV_WAVE_REPO={REPO_ROOT}",
+            f"LOOPFLOW_DEV_WAVE_REPO={REPO_ROOT}",
             str(DEV_APP),
             "--args",
             "--repo",
@@ -392,7 +392,7 @@ def cmd_run_debug(with_lfd: bool = False, repo: Path = REPO_ROOT) -> int:
                 lfd_log.close()
             return 1
 
-    print("Building and running Concerto (debug mode with logs)...")
+    print("Building and running Loopflow (debug mode with logs)...")
     result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)
     if result.returncode != 0:
         if lfd_process is not None:
@@ -402,18 +402,18 @@ def cmd_run_debug(with_lfd: bool = False, repo: Path = REPO_ROOT) -> int:
         return result.returncode
 
     _install_dev_app()
-    print("Logs: ~/Library/Logs/Concerto/")
-    print(f"Stream log: {CONCERTO_STREAM_LOG}")
+    print("Logs: ~/Library/Logs/Loopflow/")
+    print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
     _print_run_debug_checklist()
     print("Press Ctrl+C to quit")
     print("---")
     app_exit = run_app_bundle_with_log(
         DEV_APP,
-        CONCERTO_STREAM_LOG,
+        LOOPFLOW_STREAM_LOG,
         args=["--repo", str(repo)],
         # Dev launches read the launched checkout's wave/ dir + lfd AS-IS; a plain
         # production launch leaves this unset and reads the main worktree.
-        env={"CONCERTO_DEV_WAVE_REPO": str(repo)},
+        env={"LOOPFLOW_DEV_WAVE_REPO": str(repo)},
     )
 
     if lfd_process is not None:
@@ -454,7 +454,7 @@ def _find_default_iphone_simulator() -> str:
 
 
 def cmd_run_ios(device: str | None = None) -> int:
-    """Build and launch Concerto in the iOS Simulator."""
+    """Build and launch Loopflow in the iOS Simulator."""
     device = device or _find_default_iphone_simulator()
 
     # Regenerate xcode project to pick up current file layout
@@ -467,13 +467,13 @@ def cmd_run_ios(device: str | None = None) -> int:
     project = SWIFT_DIR / "LoopflowSwift.xcodeproj"
     destination = f"platform=iOS Simulator,name={device}"
 
-    print(f"Building Concerto for {device}...")
+    print(f"Building Loopflow for {device}...")
     result = run(
         [
             "xcodebuild",
             "build",
             "-scheme",
-            "Concerto",
+            "LoopflowMac",
             "-project",
             str(project),
             "-destination",
@@ -493,7 +493,7 @@ def cmd_run_ios(device: str | None = None) -> int:
             "xcodebuild",
             "-showBuildSettings",
             "-scheme",
-            "Concerto",
+            "LoopflowMac",
             "-project",
             str(project),
             "-destination",
@@ -508,11 +508,11 @@ def cmd_run_ios(device: str | None = None) -> int:
         line = line.strip()
         if line.startswith("BUILT_PRODUCTS_DIR = "):
             products_dir = line.split(" = ", 1)[1].strip()
-            app_path = Path(products_dir) / "Concerto.app"
+            app_path = Path(products_dir) / "Loopflow.app"
             break
 
     if not app_path or not app_path.exists():
-        print("Could not locate built Concerto.app in derived data")
+        print("Could not locate built Loopflow.app in derived data")
         return 1
 
     # Boot simulator and install
@@ -520,23 +520,23 @@ def cmd_run_ios(device: str | None = None) -> int:
     run(["xcrun", "simctl", "boot", device], check=False)  # already booted is fine
     run(["open", "-a", "Simulator"], check=False)
 
-    print("Installing Concerto...")
+    print("Installing Loopflow...")
     result = run(["xcrun", "simctl", "install", "booted", str(app_path)], check=False)
     if result.returncode != 0:
         return result.returncode
 
-    print(f"Launching Concerto on {device}...")
+    print(f"Launching Loopflow on {device}...")
     print("Press Ctrl+C to quit")
     print("---")
     return run(
-        ["xcrun", "simctl", "launch", "--console-pty", "booted", "com.loopflow.concerto"],
+        ["xcrun", "simctl", "launch", "--console-pty", "booted", "com.loopflow.mac"],
         check=False,
     ).returncode
 
 
 def cmd_release() -> int:
-    """Build release .app and .dmg. Delegates to scripts/release-concerto.py."""
-    script = REPO_ROOT / "scripts" / "release-concerto.py"
+    """Build release .app and .dmg. Delegates to scripts/release-loopflow.py."""
+    script = REPO_ROOT / "scripts" / "release-loopflow.py"
     result = run([sys.executable, str(script)], check=False)
     return result.returncode
 
@@ -548,11 +548,11 @@ def cmd_clean() -> int:
         shutil.rmtree(DEV_APP)
 
     print("Resetting Accessibility permissions...")
-    run(["tccutil", "reset", "Accessibility", "com.loopflow.concerto"], check=False)
+    run(["tccutil", "reset", "Accessibility", "com.loopflow.mac"], check=False)
     print("Resetting Automation permissions...")
-    run(["tccutil", "reset", "AppleEvents", "com.loopflow.concerto"], check=False)
+    run(["tccutil", "reset", "AppleEvents", "com.loopflow.mac"], check=False)
     print("Resetting Microphone permissions...")
-    run(["tccutil", "reset", "Microphone", "com.loopflow.concerto"], check=False)
+    run(["tccutil", "reset", "Microphone", "com.loopflow.mac"], check=False)
     print("Done. Next run will require re-granting permissions.")
     return 0
 
@@ -565,7 +565,7 @@ def cmd_xcode() -> int:
 
 def cmd_logs() -> int:
     """Tail the app logs."""
-    log_dir = Path.home() / "Library" / "Logs" / "Concerto"
+    log_dir = Path.home() / "Library" / "Logs" / "Loopflow"
     if log_dir.exists():
         logs = list(log_dir.glob("*.log"))
         if logs:
@@ -807,7 +807,7 @@ def _create_dev_signing_identity() -> None:
     the trust step may raise a one-time authorization dialog.
     """
     print(f'Creating stable dev signing identity "{DEV_SIGNING_IDENTITY}"...')
-    p12_password = "concerto-dev"  # transient; only unlocks the export archive
+    p12_password = "loopflow-dev"  # transient; only unlocks the export archive
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         config = tmp_dir / "cert.conf"
@@ -912,15 +912,15 @@ def _install_dev_app() -> None:
     (app_dir / "MacOS").mkdir(parents=True, exist_ok=True)
     (app_dir / "Resources").mkdir(parents=True, exist_ok=True)
 
-    shutil.copy(SWIFT_DIR / ".build" / "debug" / "Concerto", app_dir / "MacOS")
-    shutil.copy(SWIFT_DIR / "Concerto" / "Info.plist", app_dir)
+    shutil.copy(SWIFT_DIR / ".build" / "debug" / "LoopflowMac", app_dir / "MacOS")
+    shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     _apply_dev_identity(app_dir / "Info.plist")
-    shutil.copy(SWIFT_DIR / "Concerto" / "Concerto.sdef", app_dir / "Resources")
-    shutil.copy(SWIFT_DIR / "Concerto" / "AppIcon.icns", app_dir / "Resources")
+    shutil.copy(SWIFT_DIR / "LoopflowMac" / "Loopflow.sdef", app_dir / "Resources")
+    shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS", profile="debug")
 
     identity = _ensure_dev_signing_identity()
-    entitlements = SWIFT_DIR / "Concerto" / "Concerto.entitlements"
+    entitlements = SWIFT_DIR / "LoopflowMac" / "Loopflow.entitlements"
     codesign_cmd = ["codesign", "--force", "--deep", "--sign", identity]
     if entitlements.exists():
         codesign_cmd += ["--entitlements", str(entitlements)]
@@ -931,8 +931,8 @@ def _install_dev_app() -> None:
 def _apply_dev_identity(plist: Path) -> None:
     """Rewrite the dev app's bundle id and name so it gets its own settings domain."""
     run(["plutil", "-replace", "CFBundleIdentifier", "-string", DEV_BUNDLE_ID, str(plist)])
-    run(["plutil", "-replace", "CFBundleName", "-string", "Concerto Dev", str(plist)])
-    run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Concerto Dev", str(plist)])
+    run(["plutil", "-replace", "CFBundleName", "-string", "Loopflow Dev", str(plist)])
+    run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Loopflow Dev", str(plist)])
 
 
 def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:
@@ -959,7 +959,7 @@ def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:
 
 def cmd_ghostty_build() -> int:
     """Build GhosttyKit xcframework locally."""
-    print("=== Building Ghostty for Concerto ===")
+    print("=== Building Ghostty for Loopflow ===")
 
     # Check zig
     result = run_capture(["zig", "version"])
@@ -1180,7 +1180,7 @@ COMMANDS = {
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Development commands for Concerto and GhosttyKit",
+        description="Development commands for Loopflow and GhosttyKit",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", metavar="command")
@@ -1204,7 +1204,7 @@ def main() -> int:
             mode_group.add_argument(
                 "--no-lfd",
                 action="store_true",
-                help="Run UI only (default; bundled lfd managed by Concerto)",
+                help="Run UI only (default; bundled lfd managed by Loopflow)",
             )
             sub.add_argument(
                 "--repo",

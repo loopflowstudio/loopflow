@@ -45,7 +45,7 @@ jobs:
           fi
 
           # Only close when a required check failed. Flakes in non-required
-          # jobs (e.g. concerto-ui-test) must not kill otherwise-good PRs.
+          # jobs (e.g. loopflow-ui-test) must not kill otherwise-good PRs.
           FAILED=$(gh pr view "$PR" --repo "$REPO" --json statusCheckRollup \
             --jq '[.statusCheckRollup[] | select(.conclusion == "FAILURE") | .name] | join(" ")')
           HARD_FAIL=""

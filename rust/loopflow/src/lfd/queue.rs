@@ -8,7 +8,7 @@ use time::OffsetDateTime;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::engine::git;
-use crate::engine::worktrees::main_repo_root;
+use crate::engine::worktrees::{main_repo_root, StackBranch};
 use crate::lfd::attention::{
     attention_id_for_queue_block, queue_block_attention_item_from_existing,
 };
@@ -82,6 +82,7 @@ pub(crate) trait QueueOps: Send + Sync {
         &self,
         worktree: &Path,
         default_branch: &str,
+        parent_landed: bool,
     ) -> Result<(), QueueRebaseConflict>;
     fn scratch_clean(&self, worktree: &Path) -> Result<bool, String>;
 }
@@ -128,20 +129,24 @@ impl QueueOps for RealQueueOps {
         &self,
         worktree: &Path,
         default_branch: &str,
+        parent_landed: bool,
     ) -> Result<(), QueueRebaseConflict> {
         let main_repo = main_repo_root(worktree).unwrap_or_else(|_| worktree.to_path_buf());
         git::fetch(&main_repo, "origin", default_branch).map_err(|err| QueueRebaseConflict {
             files: vec![err.to_string()],
         })?;
-        // When this child's stack parent has already merged, drop the parent's
-        // commits by forking off its tip. Without this the lazy rebase replays
-        // the (now-merged) parent commits against the default branch and blocks
-        // the queue with a spurious RebaseConflict.
+        // When this child's stack parent has landed, drop the parent's commits
+        // by forking off its tip. `parent_landed` carries the daemon's lfdb
+        // signal (the parent PR merged, content-independent) so a *reworked*
+        // parent is handled too; without it the lazy rebase replays the parent's
+        // commits against the default branch and blocks the queue with a
+        // spurious RebaseConflict.
         let branch = git::current_branch(worktree)
             .ok()
             .flatten()
             .unwrap_or_default();
-        let merged_parent = crate::ops::merged_parent_fork_point(worktree, &branch, default_branch);
+        let merged_parent =
+            crate::ops::merged_parent_fork_point(worktree, &branch, default_branch, parent_landed);
         let fork_point = merged_parent
             .as_ref()
             .map(|(fork_point, _)| fork_point.clone());
@@ -330,10 +335,16 @@ pub(crate) async fn reconcile_wave_queue_with_ops(
         let main_repo = main_repo_root(worktree).unwrap_or_else(|_| worktree.to_path_buf());
         let default_branch =
             git::get_default_branch(&main_repo).unwrap_or_else(|_| "main".to_string());
+        // The head is the oldest unmerged run, so its stack parent has usually
+        // landed — but only re-parent onto main when that parent's PR is
+        // actually Merged (not merely closed/superseded, whose changes never
+        // reached main). This lfdb signal is content-independent, so a reworked
+        // parent is caught where a git content-check would miss it.
+        let parent_landed = head_stack_parent_merged(&runs, &head, &default_branch, &live_snapshot);
         if let Err(conflict) = ops
             .ensure_branch_checked_out(worktree, &head.branch)
             .map_err(|err| QueueRebaseConflict { files: vec![err] })
-            .and_then(|_| ops.rebase_onto_default(worktree, &default_branch))
+            .and_then(|_| ops.rebase_onto_default(worktree, &default_branch, parent_landed))
         {
             set_queue_block(
                 store,
@@ -440,6 +451,26 @@ fn queue_next_action(role: QueueRole, block: Option<&QueueBlock>, has_pr: bool) 
             _ => QueueNextAction::AwaitMerge,
         },
     }
+}
+
+/// True when the head's dotted stack parent has a run whose inferred status is
+/// `Merged` — the content-independent "parent PR merged" signal that tells the
+/// child to re-parent onto the default branch (even for a reworked parent).
+fn head_stack_parent_merged(
+    runs: &[Run],
+    head: &Run,
+    default_branch: &str,
+    live_snapshot: &LivePrSnapshot,
+) -> bool {
+    let Some(parent) = StackBranch::parse(&head.branch, default_branch).and_then(|s| s.parent())
+    else {
+        return false;
+    };
+    runs.iter().any(|run| {
+        run.branch == parent
+            && inferred_stack_status(run.stack_status, live_snapshot.state_for_run(run))
+                == RunStackStatus::Merged
+    })
 }
 
 fn find_queue_head_index(runs: &[Run], live_snapshot: &LivePrSnapshot) -> Option<usize> {
@@ -557,6 +588,7 @@ mod tests {
             &self,
             _worktree: &Path,
             default_branch: &str,
+            _parent_landed: bool,
         ) -> Result<(), QueueRebaseConflict> {
             if self
                 .rebase_fail_for_branch
@@ -900,7 +932,7 @@ mod tests {
 
         repo.checkout("a.b.c");
         RealQueueOps
-            .rebase_onto_default(repo.path(), "main")
+            .rebase_onto_default(repo.path(), "main", true)
             .expect("queue rebase should drop merged parent and succeed");
 
         // The child carries only its own change relative to main.
@@ -914,5 +946,43 @@ mod tests {
         // The merged parent's lingering local ref was pruned.
         let branches = git_out(repo.path(), &["branch", "--list", "a.b"]);
         assert!(branches.is_empty(), "merged local parent should be pruned");
+    }
+
+    #[test]
+    fn queue_rebase_surfaces_conflict_when_reworked_parent_overlaps() {
+        use loopflow_test_support::TestRepo;
+
+        // The parent landed REWORKED (lfdb says merged; main's content diverges)
+        // and the child's own commit overlaps the divergent lines. The queue
+        // must surface a RebaseConflict — not silently rebase onto the stale
+        // parent, not auto-heal.
+        let repo = TestRepo::new();
+
+        repo.create_branch("a.b");
+        repo.create_file("feature.txt", "v1\n");
+        repo.stage_all();
+        repo.commit("feature v1");
+        repo.push_new_branch("a.b");
+
+        repo.create_branch("a.b.c");
+        repo.create_file("feature.txt", "v1\nchild addition\n");
+        repo.stage_all();
+        repo.commit("child extends feature");
+        repo.push_new_branch("a.b.c");
+
+        repo.checkout("main");
+        repo.create_file("feature.txt", "v2 reworked\n");
+        repo.stage_all();
+        repo.commit("feature v2");
+        repo.push();
+        git_out(repo.path(), &["push", "origin", "--delete", "a.b"]);
+
+        repo.checkout("a.b.c");
+        // parent_landed = true: lfdb reports the parent PR merged.
+        let result = RealQueueOps.rebase_onto_default(repo.path(), "main", true);
+        assert!(
+            result.is_err(),
+            "reworked overlap must block the queue with a conflict"
+        );
     }
 }

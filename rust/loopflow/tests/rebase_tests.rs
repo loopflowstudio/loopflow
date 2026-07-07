@@ -226,6 +226,104 @@ fn rebase_reparents_child_onto_main_when_parent_merged() {
 }
 
 #[test]
+fn rebase_reparents_child_when_reworked_parent_branch_deleted() {
+    // Parent `a.b` lands in a REWORKED form: main's content diverges from what
+    // the child stacked on, so no content-based merge check matches. The signal
+    // is purely "origin/a.b was deleted on merge" while local `a.b` lingers. The
+    // child (which touches unrelated files) must still re-parent onto main and
+    // carry ONLY its own change — never the stale parent's diverged content.
+    let repo = TestRepo::new();
+
+    repo.create_branch("a.b");
+    repo.create_file("feature.txt", "v1\n");
+    repo.stage_all();
+    repo.commit("feature v1");
+    repo.push_new_branch("a.b");
+
+    repo.create_branch("a.b.c");
+    repo.create_file("child.txt", "child\n");
+    repo.stage_all();
+    repo.commit("child work");
+
+    // Reworked land: main gets a divergent feature.txt = v2; origin/a.b deleted.
+    repo.checkout("main");
+    repo.create_file("feature.txt", "v2\n");
+    repo.stage_all();
+    repo.commit("feature v2 (reworked in review)");
+    repo.push();
+    git(repo.path(), &["push", "origin", "--delete", "a.b"]);
+
+    repo.checkout("a.b.c");
+    let plan = plan_rebase(repo.path(), None).expect("plan rebase");
+    assert_eq!(
+        plan.base_ref, "origin/main",
+        "reworked parent re-parents onto main, not the stale local a.b"
+    );
+    assert!(plan.fork_point.is_some());
+    assert_eq!(plan.merged_parent.as_deref(), Some("a.b"));
+
+    rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+        },
+        &NullProgress,
+    )
+    .expect("clean child re-parents cleanly onto reworked main");
+
+    let diff = git(repo.path(), &["diff", "--name-only", "origin/main...HEAD"]);
+    assert_eq!(diff, "child.txt", "child carries only its own change");
+    let feature = std::fs::read_to_string(repo.path().join("feature.txt")).expect("read feature");
+    assert_eq!(
+        feature, "v2\n",
+        "child inherits main's reworked content, not the stale parent's v1"
+    );
+    let branches = git(repo.path(), &["branch", "--list", "a.b"]);
+    assert!(branches.is_empty(), "stale local parent should be pruned");
+}
+
+#[test]
+fn rebase_surfaces_conflict_when_reworked_parent_overlaps_child() {
+    // Same reworked-parent land, but now the child's own commit touches the same
+    // lines the rework diverged on. Replaying the child onto main must SURFACE a
+    // conflict — the correct outcome — not silently rebase onto the dead parent.
+    let repo = TestRepo::new();
+
+    repo.create_branch("a.b");
+    repo.create_file("feature.txt", "v1\n");
+    repo.stage_all();
+    repo.commit("feature v1");
+    repo.push_new_branch("a.b");
+
+    repo.create_branch("a.b.c");
+    repo.create_file("feature.txt", "v1\nchild addition\n");
+    repo.stage_all();
+    repo.commit("child extends feature");
+
+    repo.checkout("main");
+    repo.create_file("feature.txt", "v2 reworked\n");
+    repo.stage_all();
+    repo.commit("feature v2");
+    repo.push();
+    git(repo.path(), &["push", "origin", "--delete", "a.b"]);
+
+    repo.checkout("a.b.c");
+    let result = rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+        },
+        &NullProgress,
+    );
+    assert!(
+        matches!(result, Err(OpsError::RebaseConflict { ref onto, .. }) if onto == "origin/main"),
+        "reworked parent overlapping the child must surface a conflict, got: {result:?}"
+    );
+}
+
+#[test]
 fn plan_rebase_classifies_dirty_scratch_only_branch_as_reset() {
     let repo = TestRepo::new();
     repo.create_branch("feature");
@@ -316,6 +414,8 @@ fn plan_rebase_uses_open_stack_parent() {
     repo.create_file("a.txt", "a");
     repo.stage_all();
     repo.commit("a");
+    // A genuinely-open parent keeps its branch on origin (pushed with a PR).
+    repo.push_new_branch("a");
     repo.create_branch("a.b");
 
     let plan = plan_rebase(repo.path(), None).expect("plan rebase");

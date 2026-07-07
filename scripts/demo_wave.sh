@@ -131,11 +131,22 @@ git -C "$DEMO_REPO" config user.email "demo@loopflow.studio"
 
 cat > "$DEMO_REPO/wave/$WAVE/GOAL.md" <<'EOF'
 ---
-primary_flow: implement
+workers: 1
 ---
+
+## Objective
+
 Maintain TODO.md in this repo. Each pass, make ONE small, concrete
 improvement: complete an item, tighten wording, or add a genuinely useful
 task. Keep the file short. Commit your work.
+
+## Measures
+
+- **Quality**: TODO.md stays short, current, and useful.
+
+## Process
+
+Use the implement flow for each small improvement.
 EOF
 cat > "$DEMO_REPO/wave/$WAVE/MEMORY.md" <<'EOF'
 # Memory

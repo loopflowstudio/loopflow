@@ -1,0 +1,1 @@
+waves: make GOAL.md the durable charter

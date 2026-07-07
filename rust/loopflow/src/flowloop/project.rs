@@ -79,7 +79,7 @@ fn run_project_passes(worktree: &Path, wave: &str, options: &ProjectLoopOptions)
                 eprintln!("project pass {pass}/{}", options.max_passes);
                 run_pass(
                     worktree,
-                    Tier::Project,
+                    Tier::Project.pass_flow(),
                     &project_prompt(wave, &items),
                     &PassOptions {
                         timeout: options.pass_timeout,

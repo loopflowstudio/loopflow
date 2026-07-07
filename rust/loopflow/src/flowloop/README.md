@@ -1,11 +1,11 @@
 # flowloop — the runtime for everything agentic
 
-A **flowloop** is a looping flow: `clarify → pursue_goal → mutate`, run
-again and again. The agent has **write access to a termination bit** —
-the merged PR, the completed KR set — and its skill states exactly how to
-decide when to set it. At the end of each pass the runner checks the bit and
-exits the loop when it reads set. Self-report counts for nothing; only the
-bit does.
+A **flowloop** is a looping flow. Any flow can loop — a single skill, a scan
+flow — the tiers below bind the canonical `clarify → pursue_goal → mutate`.
+The agent has **write access to a termination bit** — the merged PR, the
+completed KR set — and its skill states exactly how to decide when to set
+it. At the end of each pass the runner checks the bit and exits the loop
+when it reads set. Self-report counts for nothing; only the bit does.
 
 ```
 lf task <linear-item-id>     # run one roadmap task to a merged PR, bounded
@@ -23,8 +23,8 @@ it:
 ## Layout
 
 - `mod.rs` — `Tier`: the tier → pass-flow → oracle binding.
-- `pass.rs` — one bounded, headless run of a tier's three-phase flow in a
-  worktree (`lf -b <tier>-pass`, killed on timeout).
+- `pass.rs` — one bounded, headless run of ANY flow in a worktree
+  (`lf -b <flow>`, killed on timeout) — the loopable unit.
 - `oracle.rs` — the halt predicates: PR state via `gh`, KR completion via
   the wave's Linear project (an empty KR set refuses to start), `Never`.
 - `run.rs` — `FlowloopRun`: the registry-backed run lifecycle (worktree,

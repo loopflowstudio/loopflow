@@ -3,7 +3,6 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::flowloop::Tier;
 use crate::ops::{OpsError, OpsResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,13 +11,16 @@ pub struct PassOptions {
     pub max_turns: Option<u32>,
 }
 
-pub fn run_pass(worktree: &Path, tier: Tier, seed: &str, options: &PassOptions) -> OpsResult<()> {
+/// One bounded, headless pass of ANY flow in a worktree — the flowloop
+/// primitive. The tiers bind their `<tier>-pass` flows here, but a skill
+/// loop or a scan flow loops the same way: `lf -b <flow>`, killed on
+/// timeout.
+pub fn run_pass(worktree: &Path, flow: &str, seed: &str, options: &PassOptions) -> OpsResult<()> {
     let mut cmd = lf_command();
     cmd.arg("-b");
     if let Some(max_turns) = options.max_turns {
         cmd.arg("--max-turns").arg(max_turns.to_string());
     }
-    let flow = tier.pass_flow();
     cmd.arg(flow);
     cmd.arg(seed);
     cmd.current_dir(worktree);

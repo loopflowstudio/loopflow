@@ -134,7 +134,7 @@ fn run_task_passes(
         eprintln!("task pass {pass}/{}", options.max_passes);
         run_pass(
             worktree,
-            Tier::Task,
+            Tier::Task.pass_flow(),
             &task.prompt(),
             &PassOptions {
                 timeout: options.pass_timeout,

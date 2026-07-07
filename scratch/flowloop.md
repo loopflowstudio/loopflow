@@ -5,10 +5,10 @@ The consolidated design from the 2026-07-06/07 sessions. Supersedes
 `worker-build-brief.md` and the recovered `wave/DATAMODEL.md` (#818). This is the
 single doc to build from.
 
-**Vocabulary:** a **flowloop** is *a looping flow* —
-`clarify → pursue_goal → mutate`, run again and again. The agent has write
-access to a termination bit; the runner checks it at the end of each pass and
-exits when it reads set. Every agentic long-running thing in loopflow is a
+**Vocabulary:** a **flowloop** is *a looping flow*. Any flow can loop — a
+single skill, a scan flow; the tiers bind the canonical
+`clarify → pursue_goal → mutate`. The agent has write access to a termination
+bit; the runner checks it at the end of each pass and exits when it reads set. Every agentic long-running thing in loopflow is a
 flowloop; "mind" is retired as a noun (code renames in §4.1).
 
 ---

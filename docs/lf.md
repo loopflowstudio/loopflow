@@ -28,6 +28,7 @@ lf office-hours                   # bare name works when unambiguous
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
+lf task 1207... --wave designer   # run one Linear task until its PR merges
 ```
 
 ## Steps
@@ -80,6 +81,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 |------|-------------|
 | `-i, --interactive` | Run interactively (can interrupt, redirect) |
 | `-b, --batch` | Run in batch/headless mode |
+| `--max-turns N` | Cap agent turns for this invocation |
 
 ## Model Flags
 
@@ -117,6 +119,17 @@ lf ship -w feature-branch
 | `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
+
+## Running Roadmap Tasks
+
+```bash
+lf task <linear-item-id> --wave designer
+lf task <linear-item-id> --wave designer --max-passes 4 --wall-clock-secs 3600
+```
+
+`lf task` resolves the Linear item from the wave roadmap, creates a worker
+worktree, runs bounded task passes, waits for the PR to merge, then links and
+closes the Linear task.
 
 ## Speaking to Waves
 

@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod engine;
+pub mod flowloop;
 pub mod harness;
 pub mod journal;
 pub mod lf;

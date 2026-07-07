@@ -86,6 +86,10 @@ pub struct Cli {
     #[arg(long = "no-diff", overrides_with = "diff")]
     pub no_diff: bool,
 
+    /// Maximum agent turns for this invocation
+    #[arg(long = "max-turns")]
+    pub max_turns: Option<u32>,
+
     /// Wave name for wave/ scoping
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
     pub wave: Option<String>,
@@ -169,6 +173,26 @@ pub enum Commands {
         /// Run only the resident (the mind) against an existing listener
         #[arg(long, conflicts_with = "no_mind")]
         mind_only: bool,
+    },
+    /// Run a Linear roadmap task as a bounded task flowloop
+    Task {
+        /// Linear item ID from the wave roadmap
+        item_id: String,
+        /// Wave name (default: inferred from the current worktree/branch)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Maximum task passes before escalation
+        #[arg(long = "max-passes", default_value_t = 8)]
+        max_passes: u32,
+        /// Per-pass timeout in seconds
+        #[arg(long = "pass-timeout-secs", default_value_t = 1800)]
+        pass_timeout_secs: u64,
+        /// Overall timeout in seconds
+        #[arg(long = "wall-clock-secs", default_value_t = 7200)]
+        wall_clock_secs: u64,
+        /// Poll interval while waiting for a human merge
+        #[arg(long = "poll-secs", default_value_t = 60)]
+        poll_secs: u64,
     },
     /// Show token usage by repo and provider (from a running lfd)
     Usage,

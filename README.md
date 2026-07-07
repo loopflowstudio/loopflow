@@ -71,6 +71,16 @@ lf build "unify button variants" --wave designer --dispatch
 
 Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its intent in view. Their PRs are how results flow back to the wave.
 
+Run a roadmap task as a bounded task flowloop:
+
+```bash
+lf task 1207... --wave designer
+```
+
+`lf task` resolves the Linear item from the wave roadmap, creates a worker
+worktree, runs bounded `task-pass` cycles, waits for the PR to merge, then
+links and closes the Linear task.
+
 ### Crons
 
 Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. They live in `GOAL.md` frontmatter; the wave's resident mind fires each due schedule as a system turn. `workers: 0` is valid for a cron-only wave.

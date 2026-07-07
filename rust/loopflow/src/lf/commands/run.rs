@@ -132,7 +132,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
             no_loopflow: cli.no_loopflow,
             agent: cli.model.clone(),
             cwd: Some(repo_root.clone()),
-            max_turns: None,
+            max_turns: cli.max_turns,
             yolo_mode: cli.yolo || config.yolo,
             include_config_directions: !cli.no_direction,
             source_overrides: ContextSourceOverrides {

@@ -588,6 +588,8 @@ enum ExecVerdict {
 /// Rejected:
 /// - `op auth` — credential rotation is never the escape hatch's job.
 /// - `wave …` — wave lifecycle (start / `--force` take-over / dormant serve).
+/// - `task …` — starts a long-running task flowloop; dispatch it from the
+///   wave mind, not through this unsandboxed exec door.
 /// - any flow / inline prompt WITHOUT `--dispatch` — that would run an
 ///   arbitrary LLM prompt unsandboxed in the outwave, the exact power this
 ///   door must not hand a leaked token.
@@ -638,6 +640,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
             }
         }
         Some(Commands::Wave { .. }) => ExecVerdict::Deny("wave".to_string()),
+        Some(Commands::Task { .. }) => ExecVerdict::Deny("task".to_string()),
         // `lf ssh` forwards the local credential bundle to a remote host and
         // runs an arbitrary command there — the exact power a leaked token
         // must not reach.

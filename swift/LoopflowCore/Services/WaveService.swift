@@ -33,12 +33,10 @@ public struct WaveConfigUpdate: Sendable {
 public struct WaveFlowsResult: Sendable {
     public var flows: [Flow]
     public var directions: [String]
-    public var supportedHarnesses: [String]
 
-    public init(flows: [Flow], directions: [String], supportedHarnesses: [String] = []) {
+    public init(flows: [Flow], directions: [String]) {
         self.flows = flows
         self.directions = directions
-        self.supportedHarnesses = supportedHarnesses
     }
 }
 
@@ -205,14 +203,13 @@ public struct WaveService: @unchecked Sendable {
 
     public func listFlowsAndDirections(repo: RepoTarget) async throws -> WaveFlowsResult {
         guard case .local(let url) = repo else {
-            return WaveFlowsResult(flows: [], directions: [], supportedHarnesses: [])
+            return WaveFlowsResult(flows: [], directions: [])
         }
         let lfDir = url.appendingPathComponent(".lf", isDirectory: true)
         return WaveFlowsResult(
             flows: Self.listNamedMarkdown(in: lfDir.appendingPathComponent("flows", isDirectory: true), type: .flow)
                 + Self.listNamedMarkdown(in: lfDir.appendingPathComponent("steps", isDirectory: true), type: .step),
-            directions: Self.listNames(in: lfDir.appendingPathComponent("directions", isDirectory: true)),
-            supportedHarnesses: []
+            directions: Self.listNames(in: lfDir.appendingPathComponent("directions", isDirectory: true))
         )
     }
 
@@ -242,10 +239,6 @@ public struct WaveService: @unchecked Sendable {
     public func connectLfd() async throws {
         guard let shellCommandRunner else { return }
         try await shellCommandRunner(["lfd", "install"])
-    }
-
-    public func checkAvailability() async -> Bool {
-        true
     }
 
     public func listRuns(waveId: String? = nil, repo: URL? = nil, limit: Int = 50) async throws -> [Run] {

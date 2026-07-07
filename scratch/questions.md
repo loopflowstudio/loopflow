@@ -111,3 +111,33 @@ LIVE column tells the truth. Wants: a single-wave stop verb that kills the
 session, clears `.wave-endpoint`, and settles the registry status. Belongs to
 goals/systems waves, not this PR — filed here so it isn't lost (Linear auth
 expired).
+
+## Compress pass — reductions taken + deferred (2026-07-07)
+
+Took (safe, all 303 swift-package tests green):
+- Deleted `WaveService.checkAvailability()` — returned `true`, zero callers, not
+  in any protocol.
+- Deleted the always-empty `supportedHarnesses` throughout: `WaveFlowsResult`
+  field + init param, `listFlowsAndDirections` construction, and the
+  `RepoState.supportedHarnesses` published property with its four writes. It was
+  written in four places and read nowhere.
+
+Deferred (real duplication, but blocked — a human should decide):
+1. `WaveService` is a ~600-line retired-lfd-HTTP facade whose ~25 action methods
+   all `throw unsupported(...)`. They aren't dead — RepoState/SessionState/
+   AuthProviderStore still call them behind live UI actions (stop, delete, land,
+   next, addTrigger, combinePRs, session create/attach/cancel). Collapsing the
+   facade means deleting those call paths and the UI actions that surface the
+   error — a behavior change tied to the active session-lifecycle and
+   wave-conducting projects, not a compress edit.
+2. `WaveService.parse*FromJSON` (the dict-based parser, ~260 lines) is a SECOND
+   wire mirror of the same types `RegistryQuery` now decodes via Codable — the
+   drift hazard CLAUDE.md's DTO rule warns about. It's not deletable in isolation:
+   `parseSessionFromJSON` backs the mandated `session.json` DTO fixture test, and
+   `parseWaveFromJSON`/`parseAttentionFromJSON` back the wire-contract tests
+   (ContractTests, WaveTests, AttentionStoreTests). Consolidating means migrating
+   those contract/fixture tests onto RegistryQuery's Codable path — a real
+   refactor across four untouched test files, out of scope for a compress pass.
+3. Duplicate fractional-ISO8601 date parsing exists in both `WaveService.parseDate`
+   and `RegistryQuery.RegistrySnapshotDate.parse` (identical logic). Consolidation
+   is coupled to (2) — the WaveService copy dies when the dict parser does.

@@ -89,7 +89,6 @@ public final class RepoState {
     public var repoTarget: RepoTarget?
     public var flows: [Flow] = []
     public var availableDirections: [String] = []
-    public var supportedHarnesses: [String] = []
 
     // Wave state — delegated to WaveStore
     public let waveStore = WaveStore()
@@ -274,7 +273,6 @@ public final class RepoState {
         currentRepo = repoURL
         repoTarget = .local(repoURL)
         flows = []
-        supportedHarnesses = []
         waveStore.removeAll()
         worktreeStore.removeAll()
         resetTransientWaveState()
@@ -537,14 +535,12 @@ public final class RepoState {
     public func refreshFlowsAsync() async {
         guard let repo = repoTarget else { return }
         guard let result = try? await waveService.listFlowsAndDirections(repo: repo) else {
-            supportedHarnesses = []
             return
         }
         if !result.flows.isEmpty {
             flows = result.flows
         }
         availableDirections = result.directions
-        supportedHarnesses = result.supportedHarnesses
     }
 
     // MARK: - Waves

@@ -51,16 +51,10 @@ fn next_creates_branch_from_current() {
 }
 
 #[test]
-fn next_with_naming_schema() {
+fn next_branch_is_author_scoped() {
     let gh_script = write_gh_script(None, None);
     let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("claude", MOCK_CLAUDE)]);
     let repo = TestRepo::new();
-    repo.create_file(
-        ".lf/config.yaml",
-        "branch_names:\n  schema: '{user}/{words}'\n",
-    );
-    repo.stage_all();
-    repo.commit("add config");
     repo.create_branch("feature");
 
     let result = next_branch(
@@ -75,6 +69,7 @@ fn next_with_naming_schema() {
     )
     .expect("next");
 
+    // Rotated branches are author-scoped: <user>/<wave>.<ts>.
     assert!(result.new_branch.starts_with("jack/"));
 }
 
@@ -109,15 +104,11 @@ fn next_detects_merged_pr_starts_fresh() {
 }
 
 #[test]
-fn next_appends_suffix_on_branch_name_collision() {
+fn next_creates_fresh_stamped_branch_for_wave() {
     let gh_script = write_gh_script(None, None);
     let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("claude", MOCK_CLAUDE)]);
     let repo = TestRepo::new();
-    // Schema {name} produces "wave" — but that branch already exists, triggering collision
-    repo.create_file(".lf/config.yaml", "branch_names:\n  schema: '{name}'\n");
-    repo.stage_all();
-    repo.commit("add config");
-    repo.create_branch("wave");
+    repo.create_branch("wave"); // off main — next refuses to run from the default branch
 
     let result = next_branch(
         repo.path(),
@@ -129,10 +120,13 @@ fn next_appends_suffix_on_branch_name_collision() {
         },
         &NullProgress,
     )
-    .expect("next should succeed despite name collision");
+    .expect("next should succeed");
 
-    assert!(result.new_branch.starts_with("wave."));
-    assert!(result.new_branch.len() > "wave.".len());
+    // A fresh, author-scoped, stamped branch under the wave: <user>/wave.<ts>.
+    assert!(
+        result.new_branch.contains("/wave."),
+        "expected an author-scoped stamped branch, got {}",
+        result.new_branch
+    );
     assert!(branch_exists(&repo, &result.new_branch));
-    assert!(branch_exists(&repo, "wave"));
 }

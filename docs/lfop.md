@@ -252,44 +252,65 @@ Worktree helper commands.
 Create or select a worktree from a placement plan.
 
 ```bash
-lf op wt create my-feature              # root from main, or child from current branch
-lf op wt create my-feature --main       # force a root branch from main
-lf op wt create child --stack parent    # create parent.child
-lf op wt create child --stack           # stack on the current branch
-lf op wt create child --fork            # root branch from the review base
+lf op wt create my-feature              # sibling: root branch from main (the default)
+lf op wt create thing --child parent    # child: create parent.thing
+lf op wt create thing --child           # child of the current branch
 lf op wt create my-feature --plan       # print the plan without creating anything
-lf op wt create jack-heart.mobile.20260225_1122  # checks out origin branch in ../loopflow.mobile
 ```
+
+Two relative-to-here verbs. **Sibling** (the default) roots an independent
+branch from main. **Child** stacks under its parent. Ad-hoc worktrees never
+nest unless you ask with `--child`.
 
 | Flag | Description |
 |------|-------------|
-| `-b, --base` | Parent branch for a stacked placement |
-| `-s, --stack [PARENT]` | Stack on `PARENT`, or on the current branch when omitted |
-| `--main` | Force a root branch from the default branch |
-| `--fork` | Create an independent root branch from the review base |
+| `-c, --child [PARENT]` | Stack under `PARENT`, or under the current branch when omitted |
+| `-s, --sibling` | Root an independent branch from the default branch (already the default) |
 | `--plan` | Print the placement plan without mutating git |
 
 Dots are reserved for stack ancestry. Use `api-v2` as a worktree segment, not
-`api.v2`; create ancestry with `--stack`.
+`api.v2`; create ancestry with `--child`.
 
-If the input matches an existing `origin/<branch>` name, `lf` checks out that branch instead of creating a new one. Root branch names follow the configured branch schema. Stacked children append the new segment to the parent branch with a dot.
+Worktree branches use the fixed identity shape `<user>/<chain>`. A sibling
+`bugs` creates `<user>/bugs` in `../loopflow.bugs`; a child `fix-auth` under
+`<user>/bugs` creates `<user>/bugs.fix-auth` in
+`../loopflow.bugs.fix-auth`.
 
 ### lf op wt switch
 
-Switch to a worktree by its short directory name or full branch name.
+Switch to a worktree by wave name, chain leaf, or full branch.
 
 ```bash
-lf op wt switch my-feature       # switches to ../loopflow.my-feature
-lf op wt switch jack.my-feature.20260316_1856  # resolves that exact branch's worktree
+lf op wt switch bugs             # the bugs wave worktree
+lf op wt switch fix-auth         # the …bugs.fix-auth… worktree, by leaf
+lf op wt switch jack/bugs.fix-auth.20260316_1856  # exact branch
+```
+
+### lf op wt up / down
+
+Move through the stack — `up` toward main, `down` away from it.
+
+```bash
+lf op wt up              # to the parent worktree
+lf op wt down            # to the only child (else lists them)
+lf op wt down fix-auth   # to a specific child by leaf
 ```
 
 ### lf op wt list
 
-List worktrees with prunable metadata.
+Worktrees as a tree: children indent under their parent, workers show their
+timestamp, main leads.
 
 ```bash
 lf op wt list
 lf op wt list --format json
+```
+
+```
+* main                      active
+  bugs                      active
+    fix-auth                active
+      retry                 active
 ```
 
 ### lf op wt ci

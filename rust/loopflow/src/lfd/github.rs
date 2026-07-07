@@ -37,6 +37,16 @@ pub struct GitHubPushEvent {
     pub repository: GitHubRepository,
 }
 
+/// A `delete` event: a branch or tag was deleted on the remote. GitHub fires
+/// this on merge when "automatically delete head branches" is on.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitHubDeleteEvent {
+    #[serde(rename = "ref")]
+    pub git_ref: String,
+    pub ref_type: String,
+    pub repository: GitHubRepository,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct GitHubWebhookPullRequest {
     pub number: u32,

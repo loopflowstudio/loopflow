@@ -13,14 +13,16 @@ Use `lf op` for mechanical git and GitHub operations.
 lf op commit -m "message" -p     # commit and push
 lf op pr --title "..."           # create/update PR
 lf op submit                     # prep + mark ready + assign to you; you click merge
-lf op land                       # hands-off: arm auto-merge + rotate worktree
+lf op land                       # hands-off: submit, then arm auto-merge
 lf op rebase --plan              # show reset/rebase strategy
 lf op rebase                     # apply the planned update
 lf op next                       # preserve worktree, fresh branch
-lf op wt create my-feature       # create/select placed worktree
-lf op wt create --main my-feature # force root branch from main
-lf op wt create --stack parent child # stack child under parent
-lf op wt switch my-feature       # cd to existing worktree
+lf op wt create my-feature       # sibling worktree, root branch from main (default)
+lf op wt create thing --child parent # stack a child under parent
+lf op wt switch my-feature       # cd to a worktree (wave name, leaf, or branch)
+lf op wt up                      # cd to the parent worktree in the stack
+lf op wt down                    # cd to a child worktree in the stack
+lf op wt list                    # the worktree stack as a tree
 lf op wt prune                   # clean up merged worktrees
 ```
 
@@ -39,12 +41,14 @@ lands it:
   the gate is the merge click, not a review approval.) Use this as the default
   finish for anything a person should land by hand.
 - **`lf op land`** — the work is done and **loopflow** lands it hands-off. Does
-  everything `submit` does, then arms auto-merge and rotates the worktree onto
-  the next wave item. Use it in headless/auto runs where no human is gating.
+  everything `submit` does, then arms auto-merge so it merges when checks pass.
+  Use it in headless/auto runs where no human is gating. The wave home stays put
+  — landing never moves your worktree; a merged worker's tree is pruned when its
+  branch is deleted.
 
-The sibling naming convention (`<repo>.<name>`) is load-bearing. Worktrees
-created elsewhere will not be recognized and may be corrupted during land
-rotation.
+The sibling naming convention (`<repo>.<name>`) is load-bearing: worktrees
+created elsewhere aren't recognized by `lf op wt` (list, switch, up/down, prune)
+or by land.
 
 ## Delegate Work
 

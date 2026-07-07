@@ -3,7 +3,7 @@ mod support;
 use std::fs;
 use std::process::{Command, Stdio};
 
-use loopflow::engine::worktrees::create_with_schema;
+use loopflow::engine::worktrees::create_wave_worktree;
 use loopflow::ops::{land, submit, LandOptions, NullProgress, OpsError};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -96,7 +96,7 @@ fn land_local_squash_merges_to_main() {
     repo.commit("feature work");
     push_branch(&repo, "feature");
 
-    let result = land(
+    land(
         repo.path(),
         &LandOptions {
             strict: true,
@@ -112,7 +112,6 @@ fn land_local_squash_merges_to_main() {
     )
     .expect("land");
 
-    assert!(result.merged);
     let output = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(repo.path())
@@ -178,7 +177,7 @@ fn land_cleans_up_remote_branch() {
     repo.commit("feature work");
     push_branch(&repo, "feature");
 
-    let result = land(
+    land(
         repo.path(),
         &LandOptions {
             strict: true,
@@ -194,7 +193,6 @@ fn land_cleans_up_remote_branch() {
     )
     .expect("land");
 
-    assert!(result.merged);
     assert!(!remote_branch_exists(&repo, "feature"));
 }
 
@@ -224,7 +222,7 @@ fn land_clears_scratch_and_preserves_gitkeep() {
         .expect("git commit scratch");
     assert!(status.success(), "git commit scratch should succeed");
 
-    let result = land(
+    land(
         repo.path(),
         &LandOptions {
             strict: true,
@@ -240,7 +238,6 @@ fn land_clears_scratch_and_preserves_gitkeep() {
     )
     .expect("land should clear scratch");
 
-    assert!(result.merged);
     let scratch_entries = fs::read_dir(repo.path().join("scratch"))
         .expect("read scratch after land")
         .map(|entry| {
@@ -312,7 +309,7 @@ fn land_uses_cached_pr_copy_when_available() {
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
-    let result = land(
+    land(
         repo.path(),
         &LandOptions {
             strict: false,
@@ -328,7 +325,6 @@ fn land_uses_cached_pr_copy_when_available() {
     )
     .expect("land with cached copy");
 
-    assert!(result.merged);
     let log = fs::read_to_string(log_path).expect("read gh log");
     assert!(log.contains("--title cached title"));
     assert!(log.contains("--body cached body"));
@@ -347,7 +343,7 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
-    let result = submit(
+    submit(
         repo.path(),
         &LandOptions {
             strict: true,
@@ -364,9 +360,6 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
     .expect("submit");
 
     // submit prepares but never merges — that click is the human's.
-    assert!(!result.merged);
-    assert!(result.rotation.is_none());
-
     let log = fs::read_to_string(log_path).expect("read gh log");
     // Assigns the PR to the current user for a required, manual merge.
     assert!(log.contains("pr edit --add-assignee @me"));
@@ -382,7 +375,7 @@ fn submit_does_not_rotate_worktree() {
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
-    let worktree = create_with_schema(repo.path(), "sub", None, None).expect("create worktree");
+    let worktree = create_wave_worktree(repo.path(), "sub", None, false).expect("create worktree");
     fs::write(worktree.path.join("feature.txt"), "feature").expect("write feature file");
     let status = Command::new("git")
         .args(["add", "."])
@@ -398,7 +391,7 @@ fn submit_does_not_rotate_worktree() {
     assert!(status.success(), "git commit should succeed");
     push_branch(&repo, &worktree.branch);
 
-    let result = submit(
+    submit(
         &worktree.path,
         &LandOptions {
             strict: true,
@@ -415,7 +408,6 @@ fn submit_does_not_rotate_worktree() {
     .expect("submit from worktree");
 
     // The worktree stays put — no preserve, no next-item rotation.
-    assert!(result.rotation.is_none());
     assert!(worktree.path.exists());
 }
 
@@ -459,7 +451,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         .expect("git commit scratch");
     assert!(status.success(), "git commit scratch should succeed");
 
-    let result = land(
+    land(
         repo.path(),
         &LandOptions {
             strict: true,
@@ -474,18 +466,16 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
         &NullProgress,
     )
     .expect("land with stale cached copy should regenerate");
-
-    assert!(result.merged);
 }
 
 #[test]
-fn lf_ops_land_writes_cd_directive_for_complete_rotation() {
+fn lf_ops_land_leaves_worktree_in_place() {
     let repo = TestRepo::new();
     let log_path = repo.path().join("gh.log");
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
-    let worktree = create_with_schema(repo.path(), "land", None, None).expect("create worktree");
+    let worktree = create_wave_worktree(repo.path(), "land", None, false).expect("create worktree");
 
     fs::write(worktree.path.join("feature.txt"), "feature").expect("write feature file");
     let status = Command::new("git")
@@ -520,12 +510,14 @@ fn lf_ops_land_writes_cd_directive_for_complete_rotation() {
         .expect("run lf op land");
     assert!(status.success(), "lf op land should succeed");
 
-    let directive = fs::read_to_string(&directive_path).expect("read directive file");
-    let target = directive
-        .trim()
-        .strip_prefix("cd ")
-        .expect("directive should start with cd");
-    let actual = fs::canonicalize(target).expect("canonicalize directive path");
-    let expected = fs::canonicalize(repo.path()).expect("canonicalize main repo");
-    assert_eq!(actual, expected);
+    // The wave home is permanent: land never rotates the worktree or cds away.
+    assert!(
+        worktree.path.exists(),
+        "worktree should stay in place after land"
+    );
+    let directive = fs::read_to_string(&directive_path).unwrap_or_default();
+    assert!(
+        !directive.contains("cd "),
+        "land should not emit a cd directive, got: {directive}"
+    );
 }

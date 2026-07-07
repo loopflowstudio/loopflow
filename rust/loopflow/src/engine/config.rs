@@ -34,25 +34,6 @@ fn default_summary_agent() -> String {
     "gemini".to_string()
 }
 
-/// Branch naming configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BranchNameConfig {
-    #[serde(default = "default_branch_schema", alias = "schema")]
-    pub schema_: String,
-}
-
-fn default_branch_schema() -> String {
-    "{user}.{name}.{timestamp}".to_string()
-}
-
-impl Default for BranchNameConfig {
-    fn default() -> Self {
-        Self {
-            schema_: default_branch_schema(),
-        }
-    }
-}
-
 /// Autoprune configuration.
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct AutopruneConfig {
@@ -219,10 +200,6 @@ pub struct Config {
     #[serde(default = "default_summary_tokens")]
     pub summary_tokens: usize,
 
-    /// Branch naming schema
-    #[serde(default)]
-    pub branch_names: Option<BranchNameConfig>,
-
     /// Autoprune configuration
     #[serde(default)]
     pub autoprune: AutopruneConfig,
@@ -268,7 +245,6 @@ impl Default for Config {
             direction: None,
             summaries: Vec::new(),
             summary_tokens: default_summary_tokens(),
-            branch_names: None,
             autoprune: AutopruneConfig::default(),
             release: ReleaseConfig::default(),
             linear: LinearConfig::default(),
@@ -685,20 +661,6 @@ summaries:
         assert_eq!(config.summaries[0].agent, "claude");
         assert_eq!(config.summaries[1].path, "tests/");
         assert_eq!(config.summaries[1].agent, "gemini"); // default
-    }
-
-    #[test]
-    fn config_from_yaml_branch_names() {
-        let yaml = r#"
-branch_names:
-  schema: "{user}.{name}.{date}_{ts}"
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert!(config.branch_names.is_some());
-        assert_eq!(
-            config.branch_names.as_ref().unwrap().schema_,
-            "{user}.{name}.{date}_{ts}"
-        );
     }
 
     #[test]

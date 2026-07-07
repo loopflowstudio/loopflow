@@ -1,9 +1,9 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use crate::engine::config::load_config_or_default;
 use crate::engine::git::current_branch;
-use crate::engine::naming::wave_name_from_branch;
+use crate::engine::identity::WaveId;
+use crate::engine::naming::git_user;
 use crate::engine::worktrees::wave_name_from_worktree;
 
 pub fn command_exists(name: &str) -> bool {
@@ -31,8 +31,9 @@ pub fn resolve_wave_name(repo: &Path, explicit: Option<&str>) -> Option<String> 
         return Some(name);
     }
     if let Ok(Some(branch)) = current_branch(repo) {
-        let config = load_config_or_default(Some(repo));
-        return wave_name_from_branch(&branch, config.branch_names.as_ref())
+        let user = git_user(repo).unwrap_or_else(|_| "user".to_string());
+        return WaveId::parse(&branch, &user)
+            .map(|id| id.wave_name().to_string())
             .and_then(|name| normalize_wave_name(&name));
     }
     None

@@ -1,10 +1,10 @@
-use crate::engine::config::{load_config, BranchNameConfig};
 use crate::engine::error::GitError;
 use crate::engine::git::{
     current_branch, get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
-    is_squash_merged, rev_parse, sync_main, worktree_add, worktree_move, WorktreeBranch,
+    is_squash_merged, rev_parse, sync_main, worktree_add, WorktreeBranch,
 };
-use crate::engine::naming::{format_branch_name, generate_timestamp, wave_name_from_branch};
+use crate::engine::identity::{Timestamp, WaveId};
+use crate::engine::naming::{generate_word_pair, git_user};
 use crate::lfd::security::sanitize_fs_component;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -24,10 +24,12 @@ impl WorktreeSegment {
         if trimmed.is_empty() {
             return Err(PlacementError::EmptySegment);
         }
+        // Dots are the chain separator; a dot in a single segment is a user
+        // mistake to surface, not something to silently join.
         if trimmed.contains('.') {
             return Err(PlacementError::DotsReserved(trimmed.to_string()));
         }
-        Ok(Self(trimmed.to_string()))
+        Ok(Self(crate::engine::naming::sanitize_for_branch(trimmed)))
     }
 
     pub fn as_str(&self) -> &str {
@@ -36,65 +38,13 @@ impl WorktreeSegment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StackBranch {
-    pub name: String,
-    pub segments: Vec<WorktreeSegment>,
-}
-
-impl StackBranch {
-    pub fn parse(branch: &str, default_branch: &str) -> Option<Self> {
-        if branch == default_branch || branch.trim().is_empty() {
-            return None;
-        }
-        let segments = branch
-            .split('.')
-            .map(WorktreeSegment::parse)
-            .collect::<Result<Vec<_>, _>>()
-            .ok()?;
-        if segments.is_empty() {
-            return None;
-        }
-        Some(Self {
-            name: branch.to_string(),
-            segments,
-        })
-    }
-
-    pub fn parent(&self) -> Option<String> {
-        if self.segments.len() < 2 {
-            return None;
-        }
-        Some(
-            self.segments[..self.segments.len() - 1]
-                .iter()
-                .map(WorktreeSegment::as_str)
-                .collect::<Vec<_>>()
-                .join("."),
-        )
-    }
-
-    pub fn child(&self, segment: &WorktreeSegment) -> String {
-        format!("{}.{}", self.name, segment.as_str())
-    }
-
-    pub fn depth(&self) -> usize {
-        self.segments.len()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlacementRequest {
-    Default {
-        segment: WorktreeSegment,
-    },
-    Main {
-        segment: WorktreeSegment,
-    },
+    /// Root branch off the default branch. The no-flag default for
+    /// `lf op wt create` — ad-hoc worktrees never stack unless asked.
+    Main { segment: WorktreeSegment },
+    /// Child branch stacked under an explicit parent (`--child`).
     Stack {
         parent: String,
-        segment: WorktreeSegment,
-    },
-    Fork {
         segment: WorktreeSegment,
     },
 }
@@ -123,7 +73,7 @@ pub enum PlacementError {
     #[error("worktree segment cannot be empty")]
     EmptySegment,
     #[error(
-        "\"{0}\" is not a worktree segment. Dots are reserved for stack ancestry. Use a hyphen, or create ancestry with --stack."
+        "\"{0}\" is not a worktree segment. Dots are reserved for stack ancestry. Use a hyphen, or create ancestry with --child."
     )]
     DotsReserved(String),
 }
@@ -181,8 +131,33 @@ pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
     Ok(repo_root)
 }
 
+/// The worktree directory for an identity: `<parent>/<repo>.<dir_component>`.
+/// The `/`-scoped branch never reaches disk — only the flat dir component does.
+pub fn worktree_dir(repo: &Path, id: &WaveId) -> PathBuf {
+    dir_for_component(repo, &id.dir_component())
+}
+
+fn dir_for_component(repo: &Path, component: &str) -> PathBuf {
+    let repo_root = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let repo_name = repo_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("repo");
+    repo_root
+        .parent()
+        .unwrap_or(repo_root.as_path())
+        .join(format!("{repo_name}.{component}"))
+}
+
+/// The worktree directory for a name in any surface form — wave name, branch, or
+/// dir component. Liberal on input via [`WaveId::parse`], falling back to a
+/// sanitized component when the name isn't a valid identity.
 pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
-    worktree_path_with_config(repo, name, None)
+    let user = git_user(repo).unwrap_or_else(|_| "user".to_string());
+    let component = WaveId::parse(name, &user)
+        .map(|id| id.dir_component())
+        .unwrap_or_else(|| sanitize_fs_component(name));
+    dir_for_component(repo, &component)
 }
 
 /// Create a worktree for this wave, or reuse the existing one.
@@ -193,9 +168,7 @@ pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result
         return Ok(WorktreeLease { path, branch });
     }
 
-    let config = load_config(Some(main_repo)).ok().flatten();
-    let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
-    let result = create_with_schema_synced(main_repo, wave_name, None, branch_config)?;
+    let result = create_wave_worktree(main_repo, wave_name, None, true)?;
     Ok(WorktreeLease {
         path: result.path,
         branch: result.branch,
@@ -217,14 +190,21 @@ pub fn short_run_id(run_id: &str) -> String {
     }
 }
 
-/// Sibling worktree for a wave-dispatched worker: `<repo>.<wave>.<short-run-id>`.
-pub fn run_worktree_path(main_repo: &Path, wave_name: &str, run_id: &str) -> PathBuf {
-    let base_wt = worktree_path(main_repo, wave_name);
-    let base_name = base_wt
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("wave");
-    base_wt.with_file_name(format!("{base_name}.{}", short_run_id(run_id)))
+/// The identity of a wave-dispatched worker: the wave, plus the short run id as
+/// its chain segment and a fresh worker stamp. `bugs` + run `a1b2…` →
+/// `bugs.a1b2c3d4.<ts>` on disk, `<user>/bugs.a1b2c3d4.<ts>` on the remote.
+pub fn worker_id(repo: &Path, wave_name: &str, run_id: &str) -> Result<WaveId, GitError> {
+    let user = git_user(repo)?;
+    let wave = WaveId::for_wave(&user, wave_name).ok_or_else(|| GitError::CommandFailed {
+        command: "worker id".to_string(),
+        stderr: format!("invalid wave name: {wave_name}"),
+    })?;
+    let segment =
+        WorktreeSegment::parse(&short_run_id(run_id)).map_err(|e| GitError::CommandFailed {
+            command: "worker id".to_string(),
+            stderr: e.to_string(),
+        })?;
+    Ok(wave.child(segment, Some(Timestamp::now())))
 }
 
 fn short_hash(value: &str, chars: usize) -> String {
@@ -232,24 +212,6 @@ fn short_hash(value: &str, chars: usize) -> String {
     let mut hash = hex::encode(digest);
     hash.truncate(chars);
     hash
-}
-
-pub fn worktree_path_with_config(
-    repo: &Path,
-    name: &str,
-    branch_config: Option<&BranchNameConfig>,
-) -> PathBuf {
-    let repo_root = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let dir_name =
-        wave_name_from_branch(name, branch_config).unwrap_or_else(|| sanitize_fs_component(name));
-    let repo_name = repo_root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("repo");
-    repo_root
-        .parent()
-        .unwrap_or(repo_root.as_path())
-        .join(format!("{repo_name}.{dir_name}"))
 }
 
 /// Extract the wave name from a worktree directory.
@@ -355,7 +317,10 @@ fn upstream_branch(worktree: &Path) -> Option<String> {
     if raw.is_empty() {
         return None;
     }
-    let branch = raw.split('/').next_back().unwrap_or(&raw).to_string();
+    let branch = raw
+        .strip_prefix("origin/")
+        .unwrap_or(raw.as_str())
+        .to_string();
     Some(branch)
 }
 
@@ -615,87 +580,158 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
     Ok(states)
 }
 
-pub fn create_with_schema(
+/// Create (or reuse) the wave-home worktree: `<repo>.<wave>` on branch
+/// `<user>/<wave>`, off the default branch (or `base` when forking). Waves are
+/// persistent, so the branch carries no stamp.
+pub fn create_wave_worktree(
     repo: &Path,
-    short_name: &str,
+    wave_name: &str,
     base: Option<&str>,
-    branch_config: Option<&BranchNameConfig>,
+    sync_default_base: bool,
 ) -> Result<CreateWorktreeResult, GitError> {
-    create_with_schema_internal(repo, short_name, base, branch_config, false)
-}
-
-pub fn create_with_schema_synced(
-    repo: &Path,
-    short_name: &str,
-    base: Option<&str>,
-    branch_config: Option<&BranchNameConfig>,
-) -> Result<CreateWorktreeResult, GitError> {
-    create_with_schema_internal(repo, short_name, base, branch_config, true)
-}
-
-pub fn plan_placement(
-    repo: &Path,
-    current_branch: Option<&str>,
-    request: PlacementRequest,
-    branch_config: Option<&BranchNameConfig>,
-) -> Result<PlacementPlan, GitError> {
-    let default_branch = get_default_branch(repo)?;
-    let (branch, base_ref, parent_branch, root_segment, stack_depth) = match request {
-        PlacementRequest::Default { segment } => {
-            if let Some(current) = current_branch {
-                if current != default_branch {
-                    let parent = StackBranch::parse(current, &default_branch);
-                    let branch = parent
-                        .as_ref()
-                        .map(|stack| stack.child(&segment))
-                        .unwrap_or_else(|| format!("{current}.{}", segment.as_str()));
-                    let depth = parent.map(|stack| stack.depth() + 1).unwrap_or(2);
-                    (
-                        branch,
-                        current.to_string(),
-                        Some(current.to_string()),
-                        segment,
-                        depth,
-                    )
-                } else {
-                    let branch = planned_root_branch(repo, segment.as_str(), branch_config)?;
-                    (branch, default_branch.clone(), None, segment, 1)
-                }
-            } else {
-                let branch = planned_root_branch(repo, segment.as_str(), branch_config)?;
-                (branch, default_branch.clone(), None, segment, 1)
-            }
+    if sync_default_base {
+        if let Ok(default_branch) = get_default_branch(repo) {
+            let _ = sync_main(repo, &default_branch);
         }
-        PlacementRequest::Main { segment } | PlacementRequest::Fork { segment } => {
-            let branch = planned_root_branch(repo, segment.as_str(), branch_config)?;
-            (branch, default_branch.clone(), None, segment, 1)
+    }
+
+    let user = git_user(repo)?;
+    let id = WaveId::for_wave(&user, wave_name).ok_or_else(|| GitError::CommandFailed {
+        command: "git worktree add".to_string(),
+        stderr: format!("invalid wave name: {wave_name}"),
+    })?;
+    let branch = id.branch();
+    let worktree_path = worktree_dir(repo, &id);
+
+    if worktree_path.exists() {
+        return Err(GitError::CommandFailed {
+            command: "git worktree add".to_string(),
+            stderr: format!("worktree path already exists: {worktree_path:?}"),
+        });
+    }
+    if list_porcelain(repo)?
+        .into_iter()
+        .filter_map(|(_, existing)| existing)
+        .any(|existing| existing == branch)
+    {
+        return Err(GitError::CommandFailed {
+            command: "git worktree add".to_string(),
+            stderr: format!("branch already checked out: {branch}"),
+        });
+    }
+
+    let remote_branch = format!("origin/{branch}");
+    if rev_parse(repo, &remote_branch).is_ok() {
+        let mode = if branch_exists(repo, &branch)? {
+            WorktreeBranch::Existing
+        } else {
+            WorktreeBranch::Track {
+                remote: &remote_branch,
+            }
+        };
+        worktree_add(repo, &worktree_path, &branch, mode)?;
+        return Ok(CreateWorktreeResult {
+            path: worktree_path,
+            branch,
+            base_branch: None,
+            base_commit: None,
+        });
+    }
+
+    if branch_exists(repo, &branch)? {
+        return Err(GitError::CommandFailed {
+            command: "git worktree add".to_string(),
+            stderr: format!("branch exists without worktree: {branch}"),
+        });
+    }
+
+    let default_branch = get_default_branch(repo)?;
+    let base_ref = base.unwrap_or(default_branch.as_str());
+    let base_branch = base.and_then(|value| (value != default_branch).then(|| value.to_string()));
+    let base_commit = if base_branch.is_some() {
+        rev_parse(repo, base_ref).ok()
+    } else {
+        None
+    };
+
+    worktree_add(
+        repo,
+        &worktree_path,
+        &branch,
+        WorktreeBranch::New {
+            start_point: base_ref,
+        },
+    )?;
+    schedule_upstream_sync(worktree_path.clone(), branch.clone());
+    Ok(CreateWorktreeResult {
+        path: worktree_path,
+        branch,
+        base_branch,
+        base_commit,
+    })
+}
+
+/// A fresh, stamped worker branch for `wave_name`, de-collided against existing
+/// branches with a word-pair segment. Used by branch rotation.
+pub fn fresh_stamped_branch(repo: &Path, wave_name: &str) -> Result<String, GitError> {
+    let user = git_user(repo)?;
+    let wave = WaveId::parse(wave_name, &user)
+        .map(|id| id.wave_name().to_string())
+        .unwrap_or_else(|| wave_name.to_string());
+    let base = WaveId::for_wave(&user, &wave).ok_or_else(|| GitError::CommandFailed {
+        command: "rotate branch".to_string(),
+        stderr: format!("invalid wave name: {wave_name}"),
+    })?;
+    let mut id = base.clone().stamped(Timestamp::now());
+    while branch_exists(repo, &id.branch())? {
+        let pair =
+            WorktreeSegment::parse(&generate_word_pair()).map_err(|e| GitError::CommandFailed {
+                command: "rotate branch".to_string(),
+                stderr: e.to_string(),
+            })?;
+        id = base.child(pair, Some(Timestamp::now()));
+    }
+    Ok(id.branch())
+}
+
+pub fn plan_placement(repo: &Path, request: PlacementRequest) -> Result<PlacementPlan, GitError> {
+    let default_branch = get_default_branch(repo)?;
+    let user = git_user(repo)?;
+
+    let (id, base_ref, parent_branch) = match request {
+        PlacementRequest::Main { segment } => {
+            (WaveId::wave(&user, segment), default_branch.clone(), None)
         }
         PlacementRequest::Stack { parent, segment } => {
-            let parent_stack = StackBranch::parse(&parent, &default_branch);
-            let base_ref = if branch_exists(repo, &parent)? {
-                parent.clone()
+            let parent_id =
+                WaveId::parse(&parent, &user).ok_or_else(|| GitError::CommandFailed {
+                    command: "wt create --child".to_string(),
+                    stderr: format!("cannot parse parent branch: {parent}"),
+                })?;
+            let parent_branch = parent_id.branch();
+            let base_ref = if branch_exists(repo, &parent_branch)? {
+                parent_branch.clone()
             } else {
-                let remote_parent = format!("origin/{parent}");
+                let remote_parent = format!("origin/{parent_branch}");
                 if rev_parse(repo, &remote_parent).is_ok() {
                     remote_parent
                 } else {
-                    parent.clone()
+                    parent_branch.clone()
                 }
             };
-            let branch = parent_stack
-                .as_ref()
-                .map(|stack| stack.child(&segment))
-                .unwrap_or_else(|| format!("{parent}.{}", segment.as_str()));
-            let depth = parent_stack.map(|stack| stack.depth() + 1).unwrap_or(2);
-            (branch, base_ref, Some(parent), segment, depth)
+            // A human-created child is a persistent subwave — unstamped.
+            (
+                parent_id.child(segment, None),
+                base_ref,
+                Some(parent_branch),
+            )
         }
     };
 
-    let planned_path = if parent_branch.is_some() {
-        stack_worktree_path(repo, &branch)
-    } else {
-        worktree_path_with_config(repo, root_segment.as_str(), branch_config)
-    };
+    let branch = id.branch();
+    let planned_path = worktree_dir(repo, &id);
+    let stack_depth = id.depth();
+
     let existing_worktree_path =
         list_porcelain(repo)?
             .into_iter()
@@ -721,35 +757,6 @@ pub fn plan_placement(
         stack_depth,
         strategy,
     })
-}
-
-fn planned_root_branch(
-    repo: &Path,
-    short_name: &str,
-    branch_config: Option<&BranchNameConfig>,
-) -> Result<String, GitError> {
-    let remote_branch = format!("origin/{short_name}");
-    if rev_parse(repo, &remote_branch).is_ok() {
-        return Ok(short_name.to_string());
-    }
-    format_branch_name(short_name, branch_config, repo)
-}
-
-fn stack_worktree_path(repo: &Path, branch: &str) -> PathBuf {
-    let repo_root = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let dir_name = branch
-        .split('.')
-        .map(sanitize_fs_component)
-        .collect::<Vec<_>>()
-        .join(".");
-    let repo_name = repo_root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("repo");
-    repo_root
-        .parent()
-        .unwrap_or(repo_root.as_path())
-        .join(format!("{repo_name}.{dir_name}"))
 }
 
 pub fn create_from_placement_plan(
@@ -823,102 +830,6 @@ pub fn create_from_placement_plan(
     }
 }
 
-fn create_with_schema_internal(
-    repo: &Path,
-    short_name: &str,
-    base: Option<&str>,
-    branch_config: Option<&BranchNameConfig>,
-    sync_default_base: bool,
-) -> Result<CreateWorktreeResult, GitError> {
-    if sync_default_base {
-        if let Ok(default_branch) = get_default_branch(repo) {
-            let _ = sync_main(repo, &default_branch);
-        }
-    }
-
-    let remote_branch = format!("origin/{short_name}");
-    let has_remote_branch = rev_parse(repo, &remote_branch).is_ok();
-    let branch_name = if has_remote_branch {
-        short_name.to_string()
-    } else {
-        format_branch_name(short_name, branch_config, repo)?
-    };
-
-    let worktree_path = worktree_path_with_config(repo, short_name, branch_config);
-    if worktree_path.exists() {
-        return Err(GitError::CommandFailed {
-            command: "git worktree add".to_string(),
-            stderr: format!("worktree path already exists: {worktree_path:?}"),
-        });
-    }
-
-    if list_porcelain(repo)?
-        .into_iter()
-        .filter_map(|(_, branch)| branch)
-        .any(|branch| branch == branch_name)
-    {
-        return Err(GitError::CommandFailed {
-            command: "git worktree add".to_string(),
-            stderr: format!("branch already exists: {branch_name}"),
-        });
-    }
-    if has_remote_branch {
-        let mode = if branch_exists(repo, &branch_name)? {
-            WorktreeBranch::Existing
-        } else {
-            WorktreeBranch::Track {
-                remote: &remote_branch,
-            }
-        };
-        worktree_add(repo, &worktree_path, &branch_name, mode)?;
-        return Ok(CreateWorktreeResult {
-            path: worktree_path,
-            branch: branch_name,
-            base_branch: None,
-            base_commit: None,
-        });
-    }
-
-    if branch_exists(repo, &branch_name)? {
-        return Err(GitError::CommandFailed {
-            command: "git worktree add".to_string(),
-            stderr: format!("branch exists without worktree: {branch_name}"),
-        });
-    }
-
-    let default_branch = get_default_branch(repo)?;
-    let base_ref = base.unwrap_or(default_branch.as_str());
-    let base_branch = base.and_then(|value| {
-        if value != default_branch {
-            Some(value.to_string())
-        } else {
-            None
-        }
-    });
-    let base_commit = if base_branch.is_some() {
-        rev_parse(repo, base_ref).ok()
-    } else {
-        None
-    };
-
-    worktree_add(
-        repo,
-        &worktree_path,
-        &branch_name,
-        WorktreeBranch::New {
-            start_point: base_ref,
-        },
-    )?;
-    schedule_upstream_sync(worktree_path.clone(), branch_name.clone());
-
-    Ok(CreateWorktreeResult {
-        path: worktree_path,
-        branch: branch_name,
-        base_branch,
-        base_commit,
-    })
-}
-
 pub fn schedule_upstream_sync(worktree: PathBuf, branch: String) {
     thread::spawn(move || {
         // Don't block the caller on network/auth issues. Retry in the background.
@@ -953,34 +864,12 @@ pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), Gi
     Ok(())
 }
 
-pub fn preserve_worktree(
-    repo: &Path,
-    worktree: &Path,
-    suffix: Option<&str>,
-) -> Result<PathBuf, GitError> {
-    let ts = suffix
-        .map(|s| s.to_string())
-        .unwrap_or_else(generate_timestamp);
-    let name = worktree
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("worktree");
-    let new_path = worktree
-        .parent()
-        .unwrap_or(worktree)
-        .join(format!("{name}.{ts}"));
-    worktree_move(repo, worktree, &new_path)?;
-    Ok(new_path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_network_enrichment, plan_placement, worktree_path, worktree_path_with_config,
-        PlacementError, PlacementRequest, PlacementStrategy, StackBranch, WorktreeSegment,
-        WorktreeState,
+        apply_network_enrichment, plan_placement, worktree_path, PlacementError, PlacementRequest,
+        PlacementStrategy, WorktreeSegment, WorktreeState,
     };
-    use crate::engine::config::BranchNameConfig;
     use std::collections::HashSet;
     use std::path::Path;
     use std::process::Command;
@@ -994,35 +883,28 @@ mod tests {
             .output()
             .expect("git init");
         assert!(output.status.success());
+        // Deterministic author so branch projections don't depend on the host.
+        for (key, value) in [("user.name", "tester"), ("user.email", "t@example.com")] {
+            Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(["config", key, value])
+                .output()
+                .expect("git config");
+        }
         dir
     }
 
-    fn literal_branch_names() -> BranchNameConfig {
-        BranchNameConfig {
-            schema_: "{name}".to_string(),
-        }
-    }
-
     #[test]
-    fn worktree_path_sanitizes_wave_name_for_filesystem_component() {
-        let path = worktree_path(Path::new("/tmp/repo"), "feature/new*wave");
-        assert_eq!(path, Path::new("/tmp/repo.feature-new-wave"));
+    fn worktree_path_sanitizes_segment_for_filesystem() {
+        let path = worktree_path(Path::new("/tmp/repo"), "new*wave");
+        assert_eq!(path, Path::new("/tmp/repo.new-wave"));
     }
 
     #[test]
     fn worktree_path_uses_wave_fallback_for_empty_sanitized_component() {
         let path = worktree_path(Path::new("/tmp/repo"), "../..");
         assert_eq!(path, Path::new("/tmp/repo.wave"));
-    }
-
-    #[test]
-    fn worktree_path_extracts_wave_name_from_branch_style_input() {
-        let path = worktree_path_with_config(
-            Path::new("/tmp/repo"),
-            "jack-heart.mobile.20260225_1122",
-            None,
-        );
-        assert_eq!(path, Path::new("/tmp/repo.mobile"));
     }
 
     #[test]
@@ -1082,30 +964,22 @@ mod tests {
     }
 
     #[test]
-    fn stack_branch_derives_parent_and_child() {
-        let branch = StackBranch::parse("a.b.c", "main").expect("stack branch");
-        assert_eq!(branch.parent().as_deref(), Some("a.b"));
-        assert_eq!(branch.depth(), 3);
-        let segment = WorktreeSegment::parse("d").unwrap();
-        assert_eq!(branch.child(&segment), "a.b.c.d");
-    }
-
-    #[test]
-    fn default_placement_from_stack_creates_child_branch() {
+    fn stack_placement_creates_child_branch() {
         let repo = init_repo();
         let segment = WorktreeSegment::parse("child").unwrap();
-        let config = literal_branch_names();
         let plan = plan_placement(
             repo.path(),
-            Some("a.b"),
-            PlacementRequest::Default { segment },
-            Some(&config),
+            PlacementRequest::Stack {
+                parent: "a.b".to_string(),
+                segment,
+            },
         )
         .expect("plan placement");
 
-        assert_eq!(plan.branch, "a.b.child");
-        assert_eq!(plan.base_ref, "a.b");
-        assert_eq!(plan.parent_branch.as_deref(), Some("a.b"));
+        // Child of `a.b` under author `tester`: dir flat, branch author-scoped.
+        assert_eq!(plan.branch, "tester/a.b.child");
+        assert_eq!(plan.base_ref, "tester/a.b");
+        assert_eq!(plan.parent_branch.as_deref(), Some("tester/a.b"));
         assert_eq!(plan.stack_depth, 3);
         assert_eq!(plan.strategy, PlacementStrategy::CreateStackChild);
         let file_name = plan
@@ -1117,19 +991,13 @@ mod tests {
     }
 
     #[test]
-    fn main_placement_from_stack_creates_root_branch() {
+    fn main_placement_creates_root_branch() {
         let repo = init_repo();
         let segment = WorktreeSegment::parse("child").unwrap();
-        let config = literal_branch_names();
-        let plan = plan_placement(
-            repo.path(),
-            Some("a.b"),
-            PlacementRequest::Main { segment },
-            Some(&config),
-        )
-        .expect("plan placement");
+        let plan = plan_placement(repo.path(), PlacementRequest::Main { segment })
+            .expect("plan placement");
 
-        assert_eq!(plan.branch, "child");
+        assert_eq!(plan.branch, "tester/child");
         assert_eq!(plan.base_ref, "main");
         assert_eq!(plan.parent_branch, None);
         assert_eq!(plan.stack_depth, 1);

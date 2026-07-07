@@ -286,27 +286,6 @@ summaries:
 }
 
 // =============================================================================
-// Branch naming
-// =============================================================================
-
-#[test]
-fn config_branch_names() {
-    let temp = TempDir::new().unwrap();
-    write_config(
-        temp.path(),
-        r#"
-branch_names:
-  schema: "{user}.{words}.{date}"
-"#,
-    );
-
-    let config = with_clean_home(|| load_config(Some(temp.path())))
-        .unwrap()
-        .unwrap();
-    assert!(config.branch_names.is_some());
-}
-
-// =============================================================================
 // Land strategy
 // =============================================================================
 

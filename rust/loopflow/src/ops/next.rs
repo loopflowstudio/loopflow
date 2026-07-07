@@ -1,12 +1,10 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::engine::config::load_config_or_default;
 use crate::engine::git::{
     create_branch, current_branch, get_default_branch, push_with_upstream, sync_main,
 };
-use crate::engine::naming::{format_branch_name, generate_word_pair};
-use crate::engine::worktrees::{branch_exists, main_repo_root, wave_name_from_worktree};
+use crate::engine::worktrees::{fresh_stamped_branch, main_repo_root, wave_name_from_worktree};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
@@ -99,17 +97,7 @@ pub fn next_branch(
         .or_else(|| wave_name_from_worktree(repo))
         .unwrap_or(current.clone());
 
-    // Generate new branch using schema
-    let config = load_config_or_default(Some(repo));
-    let branch_config = config.branch_names.as_ref();
-    let mut new_branch = format_branch_name(&wave_name, branch_config, repo)
-        .map_err(|e| OpsError::Message(format!("failed to generate branch name: {e}")))?;
-
-    // If the generated name already exists (e.g. same-minute timestamp across next runs),
-    // append a word pair to ensure uniqueness and easier identification.
-    while branch_exists(repo, &new_branch)? {
-        new_branch = format!("{new_branch}.{}", generate_word_pair());
-    }
+    let new_branch = fresh_stamped_branch(repo, &wave_name)?;
 
     progress.status(&format!("Creating branch: {}", new_branch));
     create_branch(repo, &new_branch)?;
@@ -122,14 +110,7 @@ pub fn next_branch(
 /// next branch name (de-colliding with word pairs), create it in the
 /// worktree, push it with upstream. Returns the new branch name.
 pub fn advance_branch(worktree: &Path, wave_name: &str) -> OpsResult<String> {
-    let config = load_config_or_default(Some(worktree));
-    let branch_config = config.branch_names.as_ref();
-    let mut new_branch = format_branch_name(wave_name, branch_config, worktree)
-        .map_err(|e| OpsError::Message(format!("failed to generate branch name: {e}")))?;
-
-    while branch_exists(worktree, &new_branch)? {
-        new_branch = format!("{new_branch}.{}", generate_word_pair());
-    }
+    let new_branch = fresh_stamped_branch(worktree, wave_name)?;
 
     create_branch(worktree, &new_branch)?;
     push_with_upstream(worktree, "origin", &new_branch)?;

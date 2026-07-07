@@ -1,6 +1,8 @@
 use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, sync_main};
+use crate::engine::identity::WaveId;
+use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
     create_from_placement_plan, list_worktrees, main_repo_root, plan_placement,
     wave_name_from_worktree, wave_name_from_worktree_and_main, worktree_path, PlacementRequest,
@@ -24,7 +26,7 @@ use crate::ops::{
     rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
     release_tag, submit, AbandonOptions, BranchFilterOptions, BranchListOptions,
     BranchPruneOptions, CommitOptions, CronSpec, LandOptions, NextOptions, PrOptions, Progress,
-    RebaseOptions, RotationResult, SystemLaunchctl,
+    RebaseOptions, SystemLaunchctl,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -306,9 +308,8 @@ fn push_current(force: bool) -> Result<()> {
 
 fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
-    let result = match land(&repo_root, options, progress) {
-        Ok(result) => result,
+    match land(&repo_root, options, progress) {
+        Ok(_) => {}
         Err(OpsError::RebaseConflict { onto, detail }) => {
             let context = format!(
                 "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
@@ -316,22 +317,12 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
             progress.status("Launching rebase agent to resolve conflicts...");
             launch_step_agent(&repo_root, "rebase", Some(&context))?;
             progress.status("Retrying land after rebase...");
-            land(&repo_root, options, progress)?
+            land(&repo_root, options, progress)?;
         }
         Err(err) => return Err(err.into()),
     };
 
-    let cd_target = match &result.rotation {
-        Some(RotationResult::Advanced { new_path, .. }) => Some(new_path.clone()),
-        Some(RotationResult::Complete { .. }) => Some(main_repo),
-        None => None,
-    };
-    if let Some(target) = cd_target {
-        if !write_shell_directive(&format!("cd {}", target.display()))? {
-            println!("cd {}", target.display());
-        }
-    }
-
+    // The wave home stays put on land — no rotation, no cd.
     Ok(())
 }
 
@@ -866,13 +857,13 @@ fn run_worktree(cmd: &WtCommand) -> Result<()> {
     match cmd {
         WtCommand::Create {
             name,
-            base,
-            stack,
-            main,
-            fork,
+            child,
+            sibling: _,
             plan,
-        } => wt_create(name, base.as_deref(), stack.as_deref(), *main, *fork, *plan),
+        } => wt_create(name, child.as_deref(), *plan),
         WtCommand::Switch { name } => wt_switch(name),
+        WtCommand::Up => wt_up(),
+        WtCommand::Down { name } => wt_down(name.as_deref()),
         WtCommand::List { format, .. } => wt_list(format.as_deref()),
         WtCommand::Remove { name, force } => wt_remove(name, *force),
         WtCommand::Prune {
@@ -883,33 +874,16 @@ fn run_worktree(cmd: &WtCommand) -> Result<()> {
     }
 }
 
-fn wt_create(
-    name: &str,
-    base: Option<&str>,
-    stack: Option<&str>,
-    main: bool,
-    fork: bool,
-    dry_run: bool,
-) -> Result<()> {
+fn wt_create(name: &str, child: Option<&str>, dry_run: bool) -> Result<()> {
     let started = Instant::now();
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
-    let config = crate::engine::config::load_config(Some(&main_repo))
-        .ok()
-        .flatten();
-    let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
     let segment = WorktreeSegment::parse(name)?;
     let current = current_branch(&repo_root)?;
-    let request = if main {
-        PlacementRequest::Main { segment }
-    } else if fork {
-        PlacementRequest::Fork { segment }
-    } else if let Some(parent) = base {
-        PlacementRequest::Stack {
-            parent: parent.to_string(),
-            segment,
-        }
-    } else if let Some(parent) = stack {
+    // Sibling (the default) roots from the default branch. A child stacks under
+    // its parent — opt-in only via --child, so ad-hoc worktrees never nest off
+    // the current feature branch by accident.
+    let request = if let Some(parent) = child {
         let parent = if parent == "__current__" {
             current
                 .as_deref()
@@ -920,23 +894,19 @@ fn wt_create(
         };
         PlacementRequest::Stack { parent, segment }
     } else {
-        PlacementRequest::Default { segment }
+        PlacementRequest::Main { segment }
     };
 
     let default_branch = get_default_branch(&main_repo)?;
-    let current_for_plan = current.as_deref().filter(|branch| *branch != "HEAD");
     let sync_default_base = match &request {
-        PlacementRequest::Default { .. } => current_for_plan
-            .map(|branch| branch == default_branch)
-            .unwrap_or(true),
-        PlacementRequest::Main { .. } | PlacementRequest::Fork { .. } => true,
+        PlacementRequest::Main { .. } => true,
         PlacementRequest::Stack { .. } => false,
     };
     if sync_default_base {
         let _ = sync_main(&main_repo, &default_branch);
     }
 
-    let placement = plan_placement(&main_repo, current_for_plan, request, branch_config)?;
+    let placement = plan_placement(&main_repo, request)?;
 
     if dry_run {
         print_placement_plan(&placement);
@@ -1037,14 +1007,25 @@ fn wt_switch(name: &str) -> Result<()> {
     {
         exact_branch_match
     } else {
+        // Path-guessing only applies to a bare wave/dir name. A full `user/…`
+        // branch spec must resolve via an exact branch match (handled above) or
+        // the wave-name match below — never by landing in whatever worktree
+        // happens to occupy the guessed directory.
         let target = worktree_path(&main_repo, name);
-        if target.exists() {
+        if target.exists() && !name.contains('/') {
             target
         } else {
+            let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
             let mut matches = worktrees
                 .into_iter()
                 .filter(|wt| {
                     let wt_name = wave_name_from_worktree_and_main(&wt.path, &main_repo);
+                    // Match a chain leaf or wave name too, so `fix-auth` finds
+                    // the `…bugs.fix-auth…` worktree without the full chain.
+                    let id = wt
+                        .branch
+                        .as_deref()
+                        .and_then(|branch| WaveId::parse(branch, &user));
                     wt_name.as_deref() == Some(name)
                         || wt_name
                             .as_ref()
@@ -1054,6 +1035,10 @@ fn wt_switch(name: &str) -> Result<()> {
                             .path
                             .file_name()
                             .map(|n| n.to_string_lossy() == name)
+                            .unwrap_or(false)
+                        || id
+                            .as_ref()
+                            .map(|id| id.leaf() == name || id.wave_name() == name)
                             .unwrap_or(false)
                 })
                 .collect::<Vec<_>>();
@@ -1067,10 +1052,97 @@ fn wt_switch(name: &str) -> Result<()> {
         }
     };
 
+    cd_directive(&path)
+}
+
+fn cd_directive(path: &Path) -> Result<()> {
     if !write_shell_directive(&format!("cd {}", path.display()))? {
         println!("cd {}", path.display());
     }
     Ok(())
+}
+
+/// The parent branch of `branch`: its chain minus the last segment, or the
+/// default branch for a bare wave (or a branch that isn't a wave at all).
+fn parent_branch_of(branch: &str, user: &str, default_branch: &str) -> String {
+    WaveId::parse(branch, user)
+        .and_then(|id| id.parent())
+        .unwrap_or_else(|| default_branch.to_string())
+}
+
+/// `lf op wt up` — step to the parent worktree in the stack (toward main).
+fn wt_up() -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let main_repo = main_repo_root(&repo_root)?;
+    let default_branch = get_default_branch(&main_repo)?;
+    let current = current_branch(&repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
+    if current == default_branch {
+        return Err(anyhow!("already at the root ({default_branch})"));
+    }
+    let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
+    let parent = parent_branch_of(&current, &user, &default_branch);
+
+    let target = list_worktrees(&main_repo)?
+        .into_iter()
+        .find(|wt| wt.branch.as_deref() == Some(parent.as_str()))
+        .map(|wt| wt.path)
+        .ok_or_else(|| anyhow!("no worktree for parent branch '{parent}'"))?;
+    cd_directive(&target)
+}
+
+/// `lf op wt down [name]` — step to a child worktree (away from main). When
+/// there is more than one child, `name` picks it by leaf.
+fn wt_down(name: Option<&str>) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let main_repo = main_repo_root(&repo_root)?;
+    let default_branch = get_default_branch(&main_repo)?;
+    let current = current_branch(&repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
+    let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
+
+    let mut children: Vec<_> = list_worktrees(&main_repo)?
+        .into_iter()
+        .filter(|wt| {
+            let branch = match wt.branch.as_deref() {
+                Some(branch) if branch != current => branch,
+                _ => return false,
+            };
+            parent_branch_of(branch, &user, &default_branch) == current
+        })
+        .collect();
+
+    if let Some(name) = name {
+        children.retain(|wt| {
+            wt.branch
+                .as_deref()
+                .and_then(|branch| WaveId::parse(branch, &user))
+                .map(|id| id.leaf() == name)
+                .unwrap_or(false)
+        });
+    }
+
+    match children.len() {
+        0 => Err(anyhow!(
+            "no child worktree{}",
+            name.map(|n| format!(" named '{n}'")).unwrap_or_default()
+        )),
+        1 => cd_directive(&children.remove(0).path),
+        _ => {
+            let leaves: Vec<String> = children
+                .iter()
+                .filter_map(|wt| {
+                    wt.branch
+                        .as_deref()
+                        .and_then(|branch| WaveId::parse(branch, &user))
+                        .map(|id| id.leaf().to_string())
+                })
+                .collect();
+            Err(anyhow!(
+                "{} children — pick one: lf op wt down <{}>",
+                leaves.len(),
+                leaves.join("|")
+            ))
+        }
+    }
 }
 
 fn wt_list(format: Option<&str>) -> Result<()> {
@@ -1087,9 +1159,15 @@ fn wt_list(format: Option<&str>) -> Result<()> {
     }
 
     let c = Colors::new();
-    // Collect display info for all worktrees
+    let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
+
+    // Collect display info for all worktrees. `depth`/`sort_key` come from the
+    // branch's WaveId chain so children render indented under their parents.
     struct Row {
-        name: String,
+        depth: usize,
+        label: String,
+        stamp: Option<String>,
+        sort_key: String,
         is_current: bool,
         is_main: bool,
         merged: bool,
@@ -1100,19 +1178,31 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         diff_stat: String,
     }
 
-    let rows: Vec<Row> = worktrees
+    let mut rows: Vec<Row> = worktrees
         .iter()
         .map(|wt| {
             let is_main = wt.branch.as_deref() == Some(&default_branch);
-            let name = if is_main {
-                default_branch.clone()
+            let id = wt
+                .branch
+                .as_deref()
+                .and_then(|branch| WaveId::parse(branch, &user));
+            let (depth, label, stamp, sort_key) = if is_main {
+                (0, default_branch.clone(), None, String::new())
+            } else if let Some(id) = &id {
+                (
+                    id.depth(),
+                    id.leaf().to_string(),
+                    id.timestamp().map(str::to_string),
+                    id.chain_str(),
+                )
             } else {
-                wave_name_from_worktree(&wt.path).unwrap_or_else(|| {
+                let name = wave_name_from_worktree(&wt.path).unwrap_or_else(|| {
                     wt.path
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_else(|| "?".to_string())
-                })
+                });
+                (1, name.clone(), None, name)
             };
             let is_current = wt.path == repo_root;
             let diff_stat = if is_main {
@@ -1121,7 +1211,10 @@ fn wt_list(format: Option<&str>) -> Result<()> {
                 wt_diff_stat(&main_repo, wt.branch.as_deref(), &default_branch)
             };
             Row {
-                name,
+                depth,
+                label,
+                stamp,
+                sort_key,
                 is_current,
                 is_main,
                 merged: wt.merged,
@@ -1134,7 +1227,22 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         })
         .collect();
 
-    let max_name = rows.iter().map(|r| r.name.len()).max().unwrap_or(0);
+    // Main first (empty key), then a pre-order tree walk by chain.
+    rows.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+
+    // Displayed name = indent (one level per stacked tier) + leaf + worker stamp.
+    let display_name = |row: &Row| -> String {
+        let indent = "  ".repeat(row.depth.saturating_sub(1));
+        match &row.stamp {
+            Some(ts) => format!("{indent}{} {ts}", row.label),
+            None => format!("{indent}{}", row.label),
+        }
+    };
+    let max_name = rows
+        .iter()
+        .map(|r| display_name(r).len())
+        .max()
+        .unwrap_or(0);
 
     for row in &rows {
         let marker = if row.is_current { "*" } else { " " };
@@ -1176,7 +1284,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
 
         println!(
             "{marker} {name_color}{:<width$}{reset}  {status}{dirty_flag}{diff}",
-            row.name,
+            display_name(row),
             width = max_name,
             marker = marker,
             name_color = name_color,

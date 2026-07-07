@@ -1,6 +1,6 @@
 ---
 requires: code on branch
-produces: landed PR + rotated worktree
+produces: landed PR
 ---
 Land the current branch. Rebase, create/update the PR, and enable auto-merge.
 

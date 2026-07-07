@@ -10,6 +10,7 @@ pub mod fast_path;
 pub mod flow;
 pub mod fork;
 pub mod git;
+pub mod identity;
 pub mod launch;
 pub mod naming;
 pub mod platform;

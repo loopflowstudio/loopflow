@@ -8,7 +8,8 @@ use time::OffsetDateTime;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::engine::git;
-use crate::engine::worktrees::{main_repo_root, StackBranch};
+use crate::engine::identity::WaveId;
+use crate::engine::worktrees::main_repo_root;
 use crate::lfd::attention::{
     attention_id_for_queue_block, queue_block_attention_item_from_existing,
 };
@@ -340,7 +341,7 @@ pub(crate) async fn reconcile_wave_queue_with_ops(
         // actually Merged (not merely closed/superseded, whose changes never
         // reached main). This lfdb signal is content-independent, so a reworked
         // parent is caught where a git content-check would miss it.
-        let parent_landed = head_stack_parent_merged(&runs, &head, &default_branch, &live_snapshot);
+        let parent_landed = head_stack_parent_merged(&runs, &head, &live_snapshot);
         if let Err(conflict) = ops
             .ensure_branch_checked_out(worktree, &head.branch)
             .map_err(|err| QueueRebaseConflict { files: vec![err] })
@@ -456,14 +457,10 @@ fn queue_next_action(role: QueueRole, block: Option<&QueueBlock>, has_pr: bool) 
 /// True when the head's dotted stack parent has a run whose inferred status is
 /// `Merged` — the content-independent "parent PR merged" signal that tells the
 /// child to re-parent onto the default branch (even for a reworked parent).
-fn head_stack_parent_merged(
-    runs: &[Run],
-    head: &Run,
-    default_branch: &str,
-    live_snapshot: &LivePrSnapshot,
-) -> bool {
-    let Some(parent) = StackBranch::parse(&head.branch, default_branch).and_then(|s| s.parent())
-    else {
+fn head_stack_parent_merged(runs: &[Run], head: &Run, live_snapshot: &LivePrSnapshot) -> bool {
+    // The head branch is author-scoped (`jack/wave.child`), so `WaveId::parse`
+    // recovers the user from the branch itself; the fallback is never used.
+    let Some(parent) = WaveId::parse(&head.branch, "user").and_then(|id| id.parent()) else {
         return false;
     };
     runs.iter().any(|run| {
@@ -910,7 +907,7 @@ mod tests {
         // drop the parent's commits and rebase cleanly.
         let repo = TestRepo::new();
 
-        repo.create_branch("a.b");
+        repo.create_branch("jack/a.b");
         repo.create_file("shared.txt", "a-line-1\na-line-2\n");
         repo.stage_all();
         repo.commit("p1");
@@ -918,19 +915,19 @@ mod tests {
         repo.stage_all();
         repo.commit("p2");
 
-        repo.create_branch("a.b.c");
+        repo.create_branch("jack/a.b.c");
         repo.create_file("shared.txt", "a-line-1\na-line-2\na-line-3\nb-line\n");
         repo.stage_all();
         repo.commit("child work");
-        repo.push_new_branch("a.b.c");
+        repo.push_new_branch("jack/a.b.c");
 
-        // Squash-merge the parent into main; leave the local `a.b` ref dangling.
+        // Squash-merge the parent into main; leave the local `jack/a.b` ref dangling.
         repo.checkout("main");
-        git_out(repo.path(), &["merge", "--squash", "a.b"]);
+        git_out(repo.path(), &["merge", "--squash", "jack/a.b"]);
         git_out(repo.path(), &["commit", "-m", "squash merge a.b"]);
         repo.push();
 
-        repo.checkout("a.b.c");
+        repo.checkout("jack/a.b.c");
         RealQueueOps
             .rebase_onto_default(repo.path(), "main", true)
             .expect("queue rebase should drop merged parent and succeed");
@@ -944,7 +941,7 @@ mod tests {
         let diff = git_out(repo.path(), &["diff", "--name-only", "origin/main...HEAD"]);
         assert_eq!(diff, "shared.txt");
         // The merged parent's lingering local ref was pruned.
-        let branches = git_out(repo.path(), &["branch", "--list", "a.b"]);
+        let branches = git_out(repo.path(), &["branch", "--list", "jack/a.b"]);
         assert!(branches.is_empty(), "merged local parent should be pruned");
     }
 
@@ -958,26 +955,26 @@ mod tests {
         // parent, not auto-heal.
         let repo = TestRepo::new();
 
-        repo.create_branch("a.b");
+        repo.create_branch("jack/a.b");
         repo.create_file("feature.txt", "v1\n");
         repo.stage_all();
         repo.commit("feature v1");
-        repo.push_new_branch("a.b");
+        repo.push_new_branch("jack/a.b");
 
-        repo.create_branch("a.b.c");
+        repo.create_branch("jack/a.b.c");
         repo.create_file("feature.txt", "v1\nchild addition\n");
         repo.stage_all();
         repo.commit("child extends feature");
-        repo.push_new_branch("a.b.c");
+        repo.push_new_branch("jack/a.b.c");
 
         repo.checkout("main");
         repo.create_file("feature.txt", "v2 reworked\n");
         repo.stage_all();
         repo.commit("feature v2");
         repo.push();
-        git_out(repo.path(), &["push", "origin", "--delete", "a.b"]);
+        git_out(repo.path(), &["push", "origin", "--delete", "jack/a.b"]);
 
-        repo.checkout("a.b.c");
+        repo.checkout("jack/a.b.c");
         // parent_landed = true: lfdb reports the parent PR merged.
         let result = RealQueueOps.rebase_onto_default(repo.path(), "main", true);
         assert!(

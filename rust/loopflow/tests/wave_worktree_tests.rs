@@ -2,11 +2,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use loopflow::engine::config::BranchNameConfig;
 use loopflow::engine::git::{branch_rename, current_branch, worktree_move};
-use loopflow::engine::naming::sanitize_for_branch;
+use loopflow::engine::naming::{git_user, sanitize_for_branch};
 use loopflow::engine::worktrees::{
-    branch_exists, create_with_schema, run_worktree_path, worktree_path,
+    branch_exists, create_wave_worktree, short_run_id, worktree_path,
 };
 use loopflow::lfd::executor::{create_run_for_placement, ensure_wave_worktree, Placement};
 use loopflow::lfd::id::LfdId;
@@ -130,17 +129,15 @@ async fn run_worktree_follows_naming_convention() {
         .unwrap();
 
     let repo_name = repo.path().file_name().unwrap().to_string_lossy();
-    let expected = run_worktree_path(repo.path(), "review", run_id.as_str());
-    assert_eq!(
-        PathBuf::from(&run.worktree),
-        expected,
-        "worktree path should follow {{repo}}.{{wave_name}}.{{run_id}} convention"
+    let short = short_run_id(run_id.as_str());
+    let dir = PathBuf::from(&run.worktree);
+    assert!(
+        dir.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with(&format!("{repo_name}.review.{short}.")),
+        "worker dir should be {{repo}}.{{wave}}.{{run-id}}.{{ts}}: {dir:?}"
     );
-    assert!(PathBuf::from(&run.worktree)
-        .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .starts_with(&format!("{repo_name}.review.")));
 }
 
 #[tokio::test]
@@ -175,15 +172,18 @@ async fn fresh_placement_creates_run_scoped_worktree_off_default_branch() {
         .await
         .unwrap();
 
-    // Name carries ownership: <repo>.<wave>.<short-run-id>.
+    // Name carries ownership: <repo>.<wave>.<short-run-id>.<ts>.
     let repo_name = repo.path().file_name().unwrap().to_string_lossy();
-    let short_id: String = run_id.as_str().chars().take(8).collect();
+    let short_id = short_run_id(run_id.as_str());
     let worktree_name = Path::new(&run.worktree)
         .file_name()
         .unwrap()
         .to_string_lossy()
         .to_string();
-    assert_eq!(worktree_name, format!("{repo_name}.grind.{short_id}"));
+    assert!(
+        worktree_name.starts_with(&format!("{repo_name}.grind.{short_id}.")),
+        "worker dir should be {{repo}}.{{wave}}.{{run-id}}.{{ts}}: {worktree_name}"
+    );
     assert!(PathBuf::from(&run.worktree).exists());
 
     // Own branch, forked from the default branch tip.
@@ -259,10 +259,13 @@ async fn stack_placement_forks_from_parent_branch_with_lineage() {
     assert!(child_wt.join("stacked.txt").exists());
 
     // And the worktree still follows the worker naming scheme.
-    let short_id: String = child_id.as_str().chars().take(8).collect();
+    let short_id = short_run_id(child_id.as_str());
     let worktree_name = child_wt.file_name().unwrap().to_string_lossy().to_string();
     let repo_name = repo.path().file_name().unwrap().to_string_lossy();
-    assert_eq!(worktree_name, format!("{repo_name}.tower.{short_id}"));
+    assert!(
+        worktree_name.starts_with(&format!("{repo_name}.tower.{short_id}.")),
+        "worker dir should be {{repo}}.{{wave}}.{{run-id}}.{{ts}}: {worktree_name}"
+    );
 }
 
 #[tokio::test]
@@ -391,20 +394,20 @@ fn wave_rename_branch_exists_check() {
 }
 
 #[test]
-fn create_with_schema_uses_existing_remote_branch_and_wave_worktree_name() {
+fn create_wave_worktree_uses_existing_remote_branch() {
     let repo = TestRepo::new();
-    let branch = "jack-heart.mobile.20260225_1122";
+    // The wave's branch already lives on origin as <user>/mobile.
+    let branch = format!("{}/mobile", git_user(repo.path()).unwrap());
 
-    repo.create_branch(branch);
+    repo.create_branch(&branch);
     repo.create_file("mobile.txt", "mobile");
     repo.stage_all();
     repo.commit("mobile update");
-    repo.push_new_branch(branch);
+    repo.push_new_branch(&branch);
     repo.checkout("main");
-    run_git_ok(repo.path(), &["branch", "-D", branch]);
+    run_git_ok(repo.path(), &["branch", "-D", &branch]);
 
-    let branch_config = BranchNameConfig::default();
-    let result = create_with_schema(repo.path(), branch, None, Some(&branch_config)).unwrap();
+    let result = create_wave_worktree(repo.path(), "mobile", None, false).unwrap();
 
     assert_eq!(result.branch, branch);
     assert_eq!(result.path, worktree_path(repo.path(), "mobile"));

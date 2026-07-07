@@ -1,12 +1,15 @@
-use crate::engine::config::BranchNameConfig;
+//! Name primitives shared by the identity layer: author slug, word pairs for
+//! de-collision, timestamps, and branch-safe sanitization.
+//!
+//! Branch/worktree identity itself lives in [`crate::engine::identity`]. This
+//! module only supplies the raw pieces it composes.
+
 use crate::engine::error::GitError;
 use chrono::Local;
 use rand::prelude::IndexedRandom;
 use rand::Rng;
-use regex::Regex;
 use std::path::Path;
 use std::process::Command;
-use std::sync::Mutex;
 
 const MAGICAL: &[&str] = &[
     "aurora", "cascade", "crystal", "drift", "echo", "ember", "fern", "flume", "frost", "glade",
@@ -21,107 +24,8 @@ const MUSICAL: &[&str] = &[
     "sonata", "tempo", "trill", "tune", "verse", "waltz",
 ];
 
-/// Parsed components of a branch name according to the naming schema.
-#[derive(Debug, Clone, PartialEq)]
-pub struct BranchNameParts {
-    pub user: Option<String>,
-    pub name: String,
-    pub timestamp: Option<String>,
-    pub words: Option<String>,
-}
-
-fn placeholder_pattern(name: &str) -> &'static str {
-    match name {
-        "user" => "[a-z0-9_-]+",
-        "name" => "[a-z0-9._-]+",
-        "timestamp" | "ts" => "\\d{8}_\\d{4}",
-        "date" => "\\d{8}",
-        "words" => "[a-z]+-[a-z]+",
-        _ => "[a-z0-9._-]+",
-    }
-}
-
-type CompiledSchema = (Regex, Vec<String>);
-
-static SCHEMA_REGEX_CACHE: Mutex<Option<(String, CompiledSchema)>> = Mutex::new(None);
-
-/// Compile a schema string into a cached regex with named placeholder groups.
-fn compile_schema(schema: &str) -> Option<CompiledSchema> {
-    let mut cache = SCHEMA_REGEX_CACHE.lock().ok()?;
-    if let Some((ref cached, ref compiled)) = *cache {
-        if cached == schema {
-            return Some(compiled.clone());
-        }
-    }
-
-    let mut pattern = String::new();
-    let mut names = Vec::new();
-    let mut remaining = schema;
-    while let Some(open) = remaining.find('{') {
-        if open > 0 {
-            pattern.push_str(&regex::escape(&remaining[..open]));
-        }
-        let after = &remaining[open + 1..];
-        let close = after.find('}')?;
-        let name = &after[..close];
-        if name.is_empty() {
-            return None;
-        }
-        pattern.push_str(&format!("({})", placeholder_pattern(name)));
-        names.push(name.to_string());
-        remaining = &after[close + 1..];
-    }
-    if !remaining.is_empty() {
-        pattern.push_str(&regex::escape(remaining));
-    }
-    if names.is_empty() {
-        return None;
-    }
-
-    let regex = Regex::new(&format!("^{pattern}$")).ok()?;
-    let result = (regex, names);
-    *cache = Some((schema.to_string(), result.clone()));
-    Some(result)
-}
-
-/// Reverse-parse a branch name using the configured schema.
-/// Returns None if the branch doesn't match the schema pattern.
-pub fn parse_branch_name(
-    branch: &str,
-    config: Option<&BranchNameConfig>,
-) -> Option<BranchNameParts> {
-    let default = BranchNameConfig::default();
-    let config = config.unwrap_or(&default);
-
-    let (regex, placeholders) = compile_schema(config.schema_.as_str())?;
-    let captures = regex.captures(branch)?;
-    let mut user = None;
-    let mut name = None;
-    let mut timestamp = None;
-    let mut words = None;
-    for (i, ph) in placeholders.iter().enumerate() {
-        let value = captures.get(i + 1)?.as_str().to_string();
-        match ph.as_str() {
-            "user" => user = Some(value),
-            "name" => name = Some(value),
-            "timestamp" | "ts" | "date" => timestamp = Some(value),
-            "words" => words = Some(value),
-            _ => {}
-        }
-    }
-    Some(BranchNameParts {
-        user,
-        name: name?,
-        timestamp,
-        words,
-    })
-}
-
-/// Extract the wave name ({name} component) from a branch name.
-pub fn wave_name_from_branch(branch: &str, config: Option<&BranchNameConfig>) -> Option<String> {
-    parse_branch_name(branch, config).map(|parts| parts.name)
-}
-
+/// Reduce an arbitrary string to a branch-safe slug: lowercase alphanumerics,
+/// `-`, `_`, `.`, with runs of anything else collapsed to a single `-`.
 pub fn sanitize_for_branch(value: &str) -> String {
     let mut out = String::new();
     let mut last_was_dash = false;
@@ -158,7 +62,9 @@ pub fn sanitize_for_branch(value: &str) -> String {
     }
 }
 
-fn git_username(repo: &Path) -> Result<String, GitError> {
+/// The git author as a branch-safe slug, for the remote-branch author prefix.
+/// Falls back to `$USER`, then `"user"`.
+pub fn git_user(repo: &Path) -> Result<String, GitError> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -180,198 +86,49 @@ fn generate_word_pair_with_rng<R: Rng + ?Sized>(rng: &mut R) -> String {
     format!("{magical}-{musical}")
 }
 
+/// A `magical-musical` pair, e.g. `aurora-fugue`, for de-colliding names.
 pub fn generate_word_pair() -> String {
     let mut rng = rand::rng();
     generate_word_pair_with_rng(&mut rng)
 }
 
+/// The current local time as `YYYYMMDD_HHMM`.
 pub fn generate_timestamp() -> String {
     Local::now().format("%Y%m%d_%H%M").to_string()
-}
-
-fn generate_date() -> String {
-    Local::now().format("%Y%m%d").to_string()
-}
-
-pub fn format_branch_name(
-    short_name: &str,
-    config: Option<&BranchNameConfig>,
-    repo: &Path,
-) -> Result<String, GitError> {
-    let default = BranchNameConfig::default();
-    let config = config.unwrap_or(&default);
-
-    let schema = config.schema_.as_str();
-    if schema == "{name}" {
-        return Ok(sanitize_for_branch(short_name));
-    }
-
-    let user = git_username(repo)?;
-    let name = sanitize_for_branch(short_name);
-    let ts = generate_timestamp();
-    let date = generate_date();
-    let words = generate_word_pair();
-
-    let mut result = schema.replace("{name}", &name);
-    result = result.replace("{user}", &user);
-    result = result.replace("{timestamp}", &ts);
-    result = result.replace("{ts}", &ts);
-    result = result.replace("{date}", &date);
-    result = result.replace("{words}", &words);
-
-    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loopflow_test_support::TestRepo;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
     #[test]
     fn sanitize_for_branch_cleans_input() {
-        let cleaned = sanitize_for_branch("Jack Heart!!!");
-        assert_eq!(cleaned, "jack-heart");
+        assert_eq!(sanitize_for_branch("Jack Heart!!!"), "jack-heart");
     }
 
     #[test]
     fn sanitize_removes_special_chars() {
-        let cleaned = sanitize_for_branch("feat/my thing!");
-        assert_eq!(cleaned, "feat-my-thing");
+        assert_eq!(sanitize_for_branch("feat/my thing!"), "feat-my-thing");
     }
 
     #[test]
     fn sanitize_collapses_hyphens() {
-        let cleaned = sanitize_for_branch("a---b");
-        assert_eq!(cleaned, "a-b");
+        assert_eq!(sanitize_for_branch("a---b"), "a-b");
     }
 
     #[test]
     fn sanitize_trims_leading_trailing() {
-        let cleaned = sanitize_for_branch("-foo-");
-        assert_eq!(cleaned, "foo");
+        assert_eq!(sanitize_for_branch("-foo-"), "foo");
     }
 
     #[test]
-    fn parse_branch_name_parses_default_schema() {
-        let parts = parse_branch_name("jack-heart.mobile.20260225_1122", None).expect("parse");
-        assert_eq!(parts.user.as_deref(), Some("jack-heart"));
-        assert_eq!(parts.name, "mobile");
-        assert_eq!(parts.timestamp.as_deref(), Some("20260225_1122"));
-        assert_eq!(parts.words, None);
-    }
-
-    #[test]
-    fn parse_branch_name_with_words_in_custom_schema() {
-        let config = BranchNameConfig {
-            schema_: "{user}.{name}.{timestamp}.{words}".to_string(),
-        };
-        let parts = parse_branch_name(
-            "jack-heart.mobile.20260225_1122.aurora-fugue",
-            Some(&config),
-        )
-        .expect("parse branch");
-        assert_eq!(parts.user.as_deref(), Some("jack-heart"));
-        assert_eq!(parts.name, "mobile");
-        assert_eq!(parts.timestamp.as_deref(), Some("20260225_1122"));
-        assert_eq!(parts.words.as_deref(), Some("aurora-fugue"));
-    }
-
-    #[test]
-    fn parse_branch_name_supports_dots_in_name() {
-        let parts =
-            parse_branch_name("jack-heart.mobile.feature.20260225_1122", None).expect("parse");
-        assert_eq!(parts.name, "mobile.feature");
-        assert_eq!(parts.timestamp.as_deref(), Some("20260225_1122"));
-    }
-
-    #[test]
-    fn parse_branch_name_returns_none_for_non_matching_branch() {
-        assert_eq!(parse_branch_name("mobile", None), None);
-    }
-
-    #[test]
-    fn parse_branch_name_requires_timestamp_when_schema_requires_it() {
-        assert_eq!(parse_branch_name("jack-heart.mobile", None), None);
-    }
-
-    #[test]
-    fn parse_branch_name_supports_custom_schema() {
-        let config = BranchNameConfig {
-            schema_: "{name}".to_string(),
-        };
-        let parts = parse_branch_name("mobile", Some(&config)).expect("parse");
-        assert_eq!(parts.user, None);
-        assert_eq!(parts.name, "mobile");
-        assert_eq!(parts.timestamp, None);
-        assert_eq!(parts.words, None);
-    }
-
-    #[test]
-    fn format_branch_name_uses_default_schema_without_config() {
-        let repo = TestRepo::new();
-        let name = format_branch_name("feature", None, repo.path()).expect("format");
-        assert!(name.contains("feature"), "should include the short name");
-        assert!(
-            name.contains('.'),
-            "should use the default schema with separators"
-        );
-        assert_ne!(name, "feature", "should not pass through raw name");
-    }
-
-    #[test]
-    fn format_branch_name_with_schema() {
-        let repo = TestRepo::new();
-        let config = BranchNameConfig {
-            schema_: "{user}/{words}".to_string(),
-        };
-        let name = format_branch_name("feature", Some(&config), repo.path()).expect("format");
-        assert!(name.starts_with("jack/"));
-        let suffix = name.trim_start_matches("jack/");
-        assert!(suffix.contains('-'));
-    }
-
-    #[test]
-    fn format_branch_name_with_timestamp() {
-        let repo = TestRepo::new();
-        let config = BranchNameConfig {
-            schema_: "{ts}".to_string(),
-        };
-        let name = format_branch_name("feature", Some(&config), repo.path()).expect("format");
-        let parts: Vec<&str> = name.split('_').collect();
-        assert_eq!(parts.len(), 2);
-        assert_eq!(parts[0].len(), 8);
-        assert_eq!(parts[1].len(), 4);
-    }
-
-    #[test]
-    fn format_branch_name_with_date() {
-        let repo = TestRepo::new();
-        let config = BranchNameConfig {
-            schema_: "{date}".to_string(),
-        };
-        let name = format_branch_name("feature", Some(&config), repo.path()).expect("format");
-        assert_eq!(name.len(), 8);
-        assert!(name.chars().all(|c| c.is_ascii_digit()));
-    }
-
-    #[test]
-    fn format_branch_name_with_name() {
-        let repo = TestRepo::new();
-        let config = BranchNameConfig {
-            schema_: "{name}".to_string(),
-        };
-        let name = format_branch_name("My Feature!", Some(&config), repo.path()).expect("format");
-        assert_eq!(name, "my-feature");
-    }
-
-    #[test]
-    fn generate_word_pair_is_deterministic_with_rng() {
-        let mut rng = StdRng::seed_from_u64(42);
-        let pair = generate_word_pair_with_rng(&mut rng);
-        assert!(!pair.is_empty());
-        assert!(pair.contains('-'));
+    fn generate_timestamp_has_expected_shape() {
+        let ts = generate_timestamp();
+        let (date, time) = ts.split_once('_').expect("underscore-separated");
+        assert_eq!(date.len(), 8);
+        assert_eq!(time.len(), 4);
     }
 
     #[test]
@@ -385,10 +142,8 @@ mod tests {
 
     #[test]
     fn word_pairs_vary_with_different_seeds() {
-        let mut rng_a = StdRng::seed_from_u64(1);
-        let mut rng_b = StdRng::seed_from_u64(2);
-        let a = generate_word_pair_with_rng(&mut rng_a);
-        let b = generate_word_pair_with_rng(&mut rng_b);
+        let a = generate_word_pair_with_rng(&mut StdRng::seed_from_u64(1));
+        let b = generate_word_pair_with_rng(&mut StdRng::seed_from_u64(2));
         assert_ne!(a, b);
     }
 }

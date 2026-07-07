@@ -111,6 +111,86 @@ left GOAL.md; crons are the project's own rhythm.
   attention-navigation, wave-conducting, remote-connection, palette. The old
   native-multiplexer/native-chat direction is deleted, not tombstoned.
 
+## Next: the new-world wave viewer
+
+Jack: *"I want a wave viewer that shows me the GOAL.md content and for now the
+tasks in the associated project"* → *"make it work in the new world … build front
+end data structures to model Waves the right way"* → *"Wave will also have execs
+which are sessions you can directly take over or steer."*
+
+The current Swift `Wave` carries `goal: String` + `metrics: [String]` — the *old*
+world (objective + flat measures). The viewer must render the *new* ontology, so
+the frontend domain model mirrors flowloop's tiers.
+
+### The model (Swift, LoopflowCore)
+
+Three surfaces: **the aim** (objective), **the plan** (projects → KRs → tasks),
+**the ledger** (runs across it all).
+
+```swift
+struct Wave {
+    let name: String
+    let objective: String       // GOAL.md prose. `goal` renamed; `metrics` retired.
+    let projects: [Project]      // the plan: read / steer by chat
+    let runs: [Run]              // the ledger: chart/history across every project & task
+}
+
+struct Project: Identifiable {
+    let id: String               // slug from projects/<id>.md
+    let title: String
+    let summary: String?
+    let krs: [String]            // the Measures that left GOAL.md
+    let tasks: [Task]            // Linear issues (empty until wired)
+}
+
+struct Task: Identifiable {      // a Linear issue
+    let id: String
+    let title: String
+    let status: TaskStatus       // todo | inProgress | done
+    let pr: URL?
+}
+
+// Run  = lfd's EXISTING Run DTO (wave.rs ~L330): id, wave_id, flow, task, status,
+//        worktree, branch, started_at, ended_at, error, parent_run_id, … Reuse it.
+// Session = the live, attachable face of a running Run (TerminalSession, /attach).
+//        "A session is the live face of a run you can take the wheel of."
+```
+
+**Two interaction halves:** objective/projects/tasks = the conducting surface
+(read, steer by chat); runs = the ledger (chart/history), its live rows attachable
+as sessions (frame don't render). Vocabulary locked: **Run** = ledger entry
+(reuses lfd `Run`); **session** = a live run's attachable tmux; **exec** retired
+from the frontend (stays flowloop's word for *how* a run is born).
+
+### Data sources
+
+- objective, projects, KRs → `GOAL.md` + `projects/*.md` (lfd owns the read).
+- tasks → Linear via `lfd` pm (`ops/pm.rs`).
+- runs → lfd's existing `Run` records per `wave_id`; live rows carry a
+  `TerminalSession` for `/attach`.
+
+### Open modeling question (flowloop R1)
+
+Tasks map to *a project*, but a wave has one `linear_project` today, so tasks are
+one flat bucket, not yet per-`projects/*.md`. Slice 1 decision: model `tasks` on
+`Project` (right shape) but hang the flat Linear list at wave level / leave
+`Project.tasks` empty until R1 resolves — don't invent a fake per-project split.
+
+### Slices
+
+1. **Model + parser + viewer: the aim + the plan (local).** The `Wave/Project/
+   Task` structs + a reader turning `GOAL.md`/`projects/*.md` into `Wave/Project`;
+   viewer renders objective + projects + KRs. Reads files locally — no wire work.
+   **Demo: open Concerto, click the concerto wave, see the objective and five
+   projects with their KRs, rendered from the files we committed today.**
+2. **The ledger.** Render lfd's existing `Run` records for the wave as a
+   chart/history grouped by origin (project/task) and time; live rows attach as
+   sessions. Reuses the wire type that's already there.
+3. **Wire projects through `lfd`** as a DTO (Rust + Python + Swift mirrors +
+   `tests/fixtures/dto/`) so remote works, not just local files.
+4. **Tasks from Linear** — expose the wave's project issues through `lfd`; render
+   under the project.
+
 ## Still open
 
 1. **MEMORY curation** — server-owned; don't hand-edit. Trim the dated progress

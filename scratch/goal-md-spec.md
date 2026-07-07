@@ -11,6 +11,51 @@ Sequence: **P1** (this — anatomy + the diagnostic) → **A** (retrofit our wav
 
 ---
 
+## THE TASK — read this first, it's the point
+
+A prior run got the *structure* right and the *substance* wrong: it applied these
+section headers to the **old content** — kept vague objectives, *relabeled*
+output-metrics as "Key Results," and kept a dark-room metric ("≥20 unattended
+iterations") this spec says to kill. **That is the exact failure to avoid.** Your
+job is a **substantive rewrite of each charter, not a re-heading of what's there.**
+Moving old bullets under new titles is a failure, not a retrofit.
+
+**Priority (from Jack): spend the run on the charters, not the code.** The primary
+deliverable is **genuinely good, reframed `GOAL.md` files** for every wave. The
+supporting code (dropping `primary_flow`, migration, DTO mirror) is **secondary —
+rough is fine, Jack will do a production pass later.** Do NOT burn the run
+polishing migrations / DTOs / tests / build-cleanliness. Take a big hack at making
+the *charters* excellent. (Leave the tree free of conflict markers, but don't
+gold-plate.)
+
+**The done bar for every charter:** read it back and ask it the honest question —
+*could a mind reading this name its single most impactful next move, whole-body
+yes?* If not, you're not done. If moving old content under new headers wouldn't
+get you there (it won't), you haven't started.
+
+**The reframe recipe — apply to EVERY wave** (`goals`, `architecture`, `concerto`,
+`meta`, `systems`; read each wave's current `GOAL.md` *and* its `MEMORY.md` for
+what it actually does before you rewrite):
+- **Objective — REWRITE it.** Do not keep the original sentence. Give each wave a
+  *distinct, sharp* objective + vibe you could tell from any other wave's — its
+  real judgment prior. Generic-that-could-be-any-wave = failure.
+- **Key Results — REFRAME to outcomes, never relabel.** Every KR is an outcome
+  with a target (§4). **Kill** every output/codename/deliverable metric and every
+  dark-room metric (anything like "iterations ≥ N" that rewards busywork — delete
+  it, don't relabel it). Stage-appropriate (prototyping, not growth). If a wave's
+  true metric is genuinely unclear, write your best outcome-KR and flag it in
+  `scratch/questions.md` for Jack — don't paper over it.
+- **Cron — ADD it.** Every wave has recurring duties (reconcile the roadmap,
+  curate memory…). Declare them; never drop the section.
+- **Process — real routing judgment** (task sizing, which-flow-when), not a stub.
+- **Guardrails/scope** fold up into the Objective.
+
+**For `wave/goals/GOAL.md`: §5 below IS the target** — use that reframed charter.
+For the other four, do the *equivalent* substantive reframe from each wave's own
+reality.
+
+---
+
 ## 1. The core idea
 
 **GOAL.md is a wave's constitution — inward-facing, and paid every loop.** It is

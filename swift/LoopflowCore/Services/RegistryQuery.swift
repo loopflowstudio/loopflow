@@ -91,7 +91,6 @@ struct WaveSnapshot: Decodable {
     let status: String
     let paused: Bool
     let goal: String
-    let primaryFlow: String
     let repo: String
     let iteration: Int
     let workers: Int
@@ -103,7 +102,6 @@ struct WaveSnapshot: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, status, paused, goal, repo, iteration, workers, live, endpoint
-        case primaryFlow = "primary_flow"
         case activeRuns = "active_runs"
         case createdAt = "created_at"
         case parentWaveId = "parent_wave_id"
@@ -118,7 +116,6 @@ struct WaveSnapshot: Decodable {
             id: id,
             name: name,
             repo: repo,
-            flow: primaryFlow,
             goal: goal,
             status: WaveStatus(rawValue: status) ?? .idle,
             iteration: iteration,

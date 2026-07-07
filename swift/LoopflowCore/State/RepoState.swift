@@ -306,7 +306,6 @@ public final class RepoState {
                     id: "mock-wave-1",
                     name: "swift-falcon",
                     repo: repo,
-                    flow: "build",
                     direction: [],
                     area: ["src/auth"],
                     triggers: [Trigger(signal: .repo, flow: "integrate")],
@@ -323,7 +322,6 @@ public final class RepoState {
                     id: "mock-wave-2",
                     name: "crystal-melody",
                     repo: repo,
-                    flow: "build",
                     direction: ["clarity"],
                     area: ["src/api"],
                     triggers: [Trigger(signal: .repo, flow: "integrate")],
@@ -339,7 +337,6 @@ public final class RepoState {
                     id: "mock-wave-3",
                     name: "Quick fix",
                     repo: repo,
-                    flow: "debug",
                     direction: [],
                     area: ["."],
                     triggers: [],
@@ -354,7 +351,6 @@ public final class RepoState {
                     id: "mock-wave-4",
                     name: "Nightly polish",
                     repo: repo,
-                    flow: "polish",
                     direction: [],
                     area: ["."],
                     triggers: [Trigger(signal: .ciFailure, flow: "ci-fix")],
@@ -369,7 +365,6 @@ public final class RepoState {
                     id: "mock-wave-5",
                     name: "broken-deploy",
                     repo: repo,
-                    flow: "build",
                     direction: ["clarity"],
                     area: ["src/deploy"],
                     triggers: [],
@@ -845,7 +840,6 @@ public final class RepoState {
         _ wave: WaveViewModel,
         area: [String]? = nil,
         direction: [String]? = nil,
-        flow: String? = nil,
         status: WaveStatus? = nil,
         agent: String? = nil,
         stepAgents: [String: String]? = nil
@@ -853,7 +847,6 @@ public final class RepoState {
         try await optimistic(wave.id, mutation: { w in
             if let area { w.area = area }
             if let direction { w.direction = direction }
-            if let flow { w.flow = flow }
             if let status { w.status = status }
             if let agent { w.agent = agent.isEmpty ? nil : agent }
             if let stepAgents { w.stepAgents = stepAgents }
@@ -861,7 +854,6 @@ public final class RepoState {
             let config = WaveConfigUpdate(
                 area: area,
                 direction: direction,
-                flow: flow,
                 status: status,
                 agent: agent,
                 stepAgents: stepAgents

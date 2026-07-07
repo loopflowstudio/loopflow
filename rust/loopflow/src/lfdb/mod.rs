@@ -1382,7 +1382,7 @@ mod tests {
     use crate::lfd::types::{
         ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest, QueueBlock,
         QueueBlockReason, Repo, RepoEdge, RepoId, Run, RunStackStatus, RunStatus, Summary, Wave,
-        WaveStatus,
+        WaveStatus, DEFAULT_WAVE_FLOW,
     };
     use std::env;
     use time::OffsetDateTime;
@@ -1392,7 +1392,6 @@ mod tests {
         Wave {
             id: id.clone(),
             name: format!("wave-{id}"),
-            primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo: repo.to_string(),
@@ -1415,7 +1414,7 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             repo: wave.repo().to_string(),
-            flow: wave.primary_flow().clone(),
+            flow: DEFAULT_WAVE_FLOW.to_string(),
             task: None,
             direction: wave.direction().clone(),
             area: wave.area().clone(),
@@ -2284,7 +2283,7 @@ mod tests {
                     id: LfdId::new(),
                     wave_id: wave.id().clone(),
                     repo: wave.repo().to_string(),
-                    flow: wave.primary_flow().clone(),
+                    flow: DEFAULT_WAVE_FLOW.to_string(),
                     task: None,
                     direction: wave.direction().clone(),
                     area: wave.area().clone(),

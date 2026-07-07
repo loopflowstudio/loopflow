@@ -12,7 +12,6 @@ struct WaveRowViewTests {
     private func makeWave(
         name: String = "swift-falcon",
         area: [String] = ["src/"],
-        flow: String = "build",
         triggers: [Trigger] = [],
         hasDiff: Bool = false,
         diffStat: String? = nil
@@ -22,7 +21,6 @@ struct WaveRowViewTests {
                 id: "test-wave-id",
                 name: name,
                 repo: "/tmp/repo",
-                flow: flow,
                 area: area,
                 triggers: triggers,
                 status: .idle,

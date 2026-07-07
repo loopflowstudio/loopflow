@@ -6,7 +6,6 @@ public struct WaveConfigUpdate: Sendable {
     public var name: String?
     public var area: [String]?
     public var direction: [String]?
-    public var flow: String?
     public var goal: String?
     public var status: WaveStatus?
     public var agent: String?
@@ -16,7 +15,6 @@ public struct WaveConfigUpdate: Sendable {
         name: String? = nil,
         area: [String]? = nil,
         direction: [String]? = nil,
-        flow: String? = nil,
         goal: String? = nil,
         status: WaveStatus? = nil,
         agent: String? = nil,
@@ -25,7 +23,6 @@ public struct WaveConfigUpdate: Sendable {
         self.name = name
         self.area = area
         self.direction = direction
-        self.flow = flow
         self.goal = goal
         self.status = status
         self.agent = agent
@@ -830,7 +827,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
             repo: json["repo"] as? String ?? "",
-            flow: json["primary_flow"] as? String ?? "",
             goal: json["goal"] as! String,
             metrics: json["metrics"] as! [String],
             direction: normalizeStringList(json["direction"]),
@@ -855,13 +851,12 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    /// Update wave configuration (name, area, direction, flow, status, agent).
+    /// Update wave configuration (name, area, direction, status, agent).
     public func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave {
         var body: [String: Any] = [:]
         if let name = config.name { body["name"] = name }
         if let area = config.area { body["area"] = area }
         if let direction = config.direction { body["direction"] = direction }
-        if let flow = config.flow { body["flow"] = flow }
         if let goal = config.goal { body["goal"] = goal }
         if let status = config.status { body["status"] = status.rawValue }
         if let agent = config.agent { body["agent"] = agent }

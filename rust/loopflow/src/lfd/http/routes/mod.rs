@@ -23,7 +23,7 @@ use crate::lfd::http::dto::{
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
 use crate::lfd::queue::{project_queue_views, QueueRunView};
-use crate::lfd::types::{Run, Wave};
+use crate::lfd::types::{Run, Wave, DEFAULT_WAVE_FLOW};
 use crate::lfdb::{SharedStore, StoreError};
 use axum::http::StatusCode;
 use axum::Json;
@@ -81,7 +81,7 @@ pub async fn build_wave_dto(
         .map(|block| (block.run_id.clone(), block))
         .collect::<HashMap<_, _>>();
 
-    let flow_name = wave.primary_flow().clone();
+    let flow_name = DEFAULT_WAVE_FLOW.to_string();
     let flow_repo = wave.repo().to_string();
     let flow_steps = tokio::task::spawn_blocking(move || {
         flows::load_flow_steps(&flow_name, std::path::Path::new(&flow_repo)).unwrap_or_default()
@@ -152,7 +152,6 @@ pub async fn build_wave_dto(
         id: wave.id().to_string(),
         object: "wave".to_string(),
         name: wave.name().clone(),
-        primary_flow: wave.primary_flow().to_string(),
         goal: wave.goal().to_string(),
         metrics: wave.metrics().clone(),
         direction: wave.direction().clone(),
@@ -485,7 +484,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "wave-live-pr".to_string(),
-            primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo: repo.to_string(),
@@ -508,7 +506,7 @@ mod tests {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
             repo: wave.repo().to_string(),
-            flow: wave.primary_flow().clone(),
+            flow: DEFAULT_WAVE_FLOW.to_string(),
             task: None,
             direction: wave.direction().clone(),
             area: wave.area().clone(),

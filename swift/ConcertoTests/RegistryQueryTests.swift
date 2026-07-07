@@ -12,8 +12,8 @@ struct RegistryQueryTests {
     func wavesDecodeAndScope() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","primary_flow":"ship-roadmap","repo":"/tmp/repo-a","iteration":3,"workers":2,"active_runs":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
-          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","primary_flow":"build","repo":"/tmp/repo-b","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
+          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","iteration":3,"workers":2,"active_runs":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
+          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
         ]
         """
         let query = RegistryQuery { args, _ in
@@ -24,7 +24,6 @@ struct RegistryQueryTests {
         let waves = try await query.waves(repoPath: "/tmp/repo-a")
         #expect(waves.map(\.id) == ["goals"])
         #expect(waves[0].status == .running)
-        #expect(waves[0].flow == "ship-roadmap")
         #expect(waves[0].repo == "/tmp/repo-a")
     }
 
@@ -32,7 +31,7 @@ struct RegistryQueryTests {
     func statusMapsRunsAndAttention() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","primary_flow":"build","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
+          "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
           "mind":"turning",
           "runs":[{"id":"run-1","flow":"implement","task":"wire it","status":"running","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null}],
           "attention":[{"id":"att-1","kind":"interactive","status":"surfaced","title":"needs a human","summary":"review the design","run_id":"run-1","surfaced_at":"2026-07-06T00:00:00Z"}]

@@ -192,7 +192,6 @@ struct AreaTypeahead: View {
             id: "test",
             name: "test-wave",
             repo: "/Users/jack/src/loopflow",
-            flow: "design",
             direction: [],
             area: ["src/loopflow"]
         ),
@@ -205,4 +204,3 @@ struct AreaTypeahead: View {
     .frame(width: 400)
     .padding()
 }
-

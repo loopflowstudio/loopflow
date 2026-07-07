@@ -69,7 +69,6 @@ class Wave(BaseModel):
 
     id: str
     name: str
-    primary_flow: str
     goal: str
     metrics: list[str]
     workers: int

@@ -45,7 +45,7 @@ Roadmap items (Linear issues) move as-is — each one lands in exactly one child
    - Assign each Linear issue to exactly one child — no orphans
 
 4. Create the new waves
-   - `wave/<child>/GOAL.md` — fresh intent and metrics for each child; carry forward the primary flow; draw scope boundaries between siblings
+   - `wave/<child>/GOAL.md` — fresh intent, measures, and process judgment for each child; draw scope boundaries between siblings
    - `wave/<child>/MEMORY.md` — the decisions and context this child inherits
    - `lf op pm init --wave <child>` — connect each child's Linear project
    - Recreate the allocated items on each child's roadmap with `lf op pm update`, and close them on the parent (`lf op pm update --id <task> --status done` is for shipped work; for a move, recreate on the child and delete/close on the parent)

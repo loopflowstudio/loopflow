@@ -39,15 +39,24 @@ homepage:
         filename: "wave/auth/GOAL.md"
         content: |
           ---
-          primary_flow: build
-          metrics:
-            - one auth path across web and desktop
-            - auth startup under 200ms
+          workers: 2
           ---
+
+          ## Objective
 
           Unify authentication. Each loop, pick the next gap — duplicate token
           validation, session refresh, a slow startup path — dispatch a worker
           to close it, and record what shipped in memory.
+
+          ## Measures
+
+          - **Key Results**: one auth path across web and desktop.
+          - **Quality**: auth startup under 200ms.
+
+          ## Process
+
+          Use the build flow for implementation work; write a scratch design
+          first when a change crosses storage, tokens, or public auth behavior.
       - label: "A step"
         filename: ".lf/steps/implement.md"
         content: |

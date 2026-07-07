@@ -438,7 +438,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: "registry-wave".to_string(),
-            primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo: repo.to_string(),

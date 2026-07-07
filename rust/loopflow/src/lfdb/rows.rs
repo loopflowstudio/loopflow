@@ -62,7 +62,7 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 // -- Shared row mappers ------------------------------------------------------
 
 /// SELECT id, name, direction, area, paused, created_at, workers,
-///        primary_flow, goal, metrics, parent_wave_id,
+///        goal, metrics, parent_wave_id,
 ///        repo, worktree, branch, status, iteration, cycle_start_iteration
 pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
     let direction = parse_json_vec(&text(row, 2)?)?;
@@ -70,25 +70,23 @@ pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
     let paused = int(row, 4)? != 0;
     let created_at = unix_to_datetime(bigint(row, 5)?);
     let workers = int(row, 6)? as u32;
-    let primary_flow = text(row, 7)?;
     // Legacy rows predating migration 037 (goal NOT NULL DEFAULT) can hold
     // NULL; fall back to the same default so `lf ls`/reads stay robust.
-    let goal = opt_text(row, 8)?.unwrap_or_else(|| "ship-roadmap".to_string());
-    let metrics = parse_json_vec(&text(row, 9)?)?;
-    let parent_wave_id = opt_text(row, 10)?.map(LfdId::from_raw);
+    let goal = opt_text(row, 7)?.unwrap_or_else(|| "ship-roadmap".to_string());
+    let metrics = parse_json_vec(&text(row, 8)?)?;
+    let parent_wave_id = opt_text(row, 9)?.map(LfdId::from_raw);
 
     Ok(Wave {
         id: LfdId::from_raw(text(row, 0)?),
         name: text(row, 1)?,
-        primary_flow,
         goal,
         metrics,
-        repo: text(row, 11)?,
-        worktree: text(row, 12)?,
-        branch: text(row, 13)?,
-        status: WaveStatus::from_i32(int(row, 14)?),
-        iteration: int(row, 15)? as u32,
-        cycle_start_iteration: int(row, 16)? as u32,
+        repo: text(row, 10)?,
+        worktree: text(row, 11)?,
+        branch: text(row, 12)?,
+        status: WaveStatus::from_i32(int(row, 13)?),
+        iteration: int(row, 14)? as u32,
+        cycle_start_iteration: int(row, 15)? as u32,
         direction,
         area,
         paused,

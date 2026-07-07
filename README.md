@@ -16,13 +16,22 @@ A wave is a named agent with a goal. Two files author it:
 ```markdown
 <!-- wave/designer/GOAL.md -->
 ---
-primary_flow: build
-metrics:
-  - design reviews are complete
+workers: 2
 ---
+
+## Objective
 
 Keep the design system coherent. Each loop: read the roadmap, pick the next
 design task, dispatch a worker to build it, and fold what changed into memory.
+
+## Measures
+
+- **Quality**: design reviews are complete.
+
+## Process
+
+Use the build flow for implementation work; write a scratch design first when a
+change crosses component or product boundaries.
 ```
 
 Run the wave in your terminal:
@@ -69,7 +78,6 @@ Crons schedule supplementary flows on a wave — maintenance that runs independe
 ```markdown
 <!-- wave/governance/GOAL.md -->
 ---
-primary_flow: garden
 workers: 0
 crons:
   - flow: govern-identity

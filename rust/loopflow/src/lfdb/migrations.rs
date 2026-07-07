@@ -218,6 +218,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "052_wave_single_repo",
         sql: include_str!("migrations/052_wave_single_repo.sql"),
     },
+    Migration {
+        version: "053_drop_wave_primary_flow",
+        sql: include_str!("migrations/053_drop_wave_primary_flow.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the
@@ -228,6 +232,7 @@ const RENAME_CONVERGENCE_MIGRATIONS: &[&str] = &[
     "048_terminal_sessions_run_id",
     "049_runs_rename",
     "050_drop_trigger_organs",
+    "053_drop_wave_primary_flow",
 ];
 
 /// Per-migration failures that mean "the db is already in the target state":

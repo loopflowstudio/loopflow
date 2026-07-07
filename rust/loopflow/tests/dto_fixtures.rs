@@ -42,7 +42,6 @@ fn wave_fixture_carries_single_repo() {
 
     assert_eq!(wave.id, "wave_abc123");
     assert_eq!(wave.name, "engbot");
-    assert_eq!(wave.primary_flow, "build");
     assert_eq!(wave.status, "running");
     assert_eq!(wave.parent_wave_id.as_deref(), Some("wave_parent999"));
 

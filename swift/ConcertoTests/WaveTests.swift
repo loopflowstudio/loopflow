@@ -12,7 +12,6 @@ struct WaveModelTests {
         id: String = "test-id",
         name: String = "",
         repo: String = "/tmp/repo",
-        flow: String = "design",
         direction: [String] = [],
         area: [String] = [],
         triggers: [Trigger] = [],
@@ -28,7 +27,6 @@ struct WaveModelTests {
                 id: id,
                 name: name,
                 repo: repo,
-                flow: flow,
                 direction: direction,
                 area: area,
                 triggers: triggers,
@@ -51,25 +49,25 @@ struct WaveModelTests {
         #expect(wave.displayName == "swift-falcon")
     }
 
-    @Test("displayName generates from area and flow when name is empty")
+    @Test("displayName generates from area when name is empty")
     func displayNameGeneratesFromConfig() {
-        let wave = makeWave(flow: "build", area: ["src/auth"])
+        let wave = makeWave(area: ["src/auth"])
 
-        #expect(wave.displayName == "src/auth · build")
+        #expect(wave.displayName == "src/auth")
     }
 
     @Test("displayName shows 'root' for dot area")
     func displayNameRootForDotArea() {
-        let wave = makeWave(flow: "debug", area: ["."])
+        let wave = makeWave(area: ["."])
 
-        #expect(wave.displayName == "root · debug")
+        #expect(wave.displayName == "root")
     }
 
-    @Test("displayName shows default flow when empty")
+    @Test("displayName shows root when area is empty")
     func displayNameDefaultFlow() {
-        let wave = makeWave(flow: "", area: [])
+        let wave = makeWave(area: [])
 
-        #expect(wave.displayName == "root · default")
+        #expect(wave.displayName == "root")
     }
 
     // MARK: - Status Indicator
@@ -169,7 +167,6 @@ struct WaveModelTests {
                 id: "test",
                 name: "test",
                 repo: "/tmp/repo",
-                flow: "design",
                 direction: [],
                 area: [],
                 status: .idle,
@@ -192,17 +189,16 @@ struct WaveModelTests {
 
     // MARK: - Detail Text
 
-    @Test("detailText combines area, flow, and trigger signal")
+    @Test("detailText combines area and trigger signal")
     func detailTextCombines() {
         let wave = makeWave(
             id: "test",
             repo: "/tmp",
-            flow: "build",
             area: ["src/"],
             triggers: [Trigger(signal: .repo)]
         )
 
-        #expect(wave.detailText == "src/ · build · repo")
+        #expect(wave.detailText == "src/ · repo")
     }
 
     @Test("detailText omits trigger when none active")
@@ -210,11 +206,10 @@ struct WaveModelTests {
         let wave = makeWave(
             id: "test",
             repo: "/tmp",
-            flow: "debug",
             area: ["."]
         )
 
-        #expect(wave.detailText == ". · debug")
+        #expect(wave.detailText == ".")
     }
 
     @Test("displayFlow prefers active run flow")
@@ -230,7 +225,6 @@ struct WaveModelTests {
             api: Wave(
                 id: "wave-1",
                 repo: "/tmp/repo",
-                flow: "ship-roadmap",
                 area: ["."],
                 status: .running,
                 activeRun: run
@@ -254,7 +248,6 @@ struct WaveModelTests {
             api: Wave(
                 id: "wave-1",
                 repo: "/tmp/repo",
-                flow: "ship-roadmap",
                 status: .running,
                 flowSteps: ["ingest", "kickoff", "build"],
                 activeRun: run
@@ -264,8 +257,8 @@ struct WaveModelTests {
         #expect(wave.displayFlowSteps == ["design"])
     }
 
-    @Test("displayFlowSteps ignore equivalent active run flow formatting")
-    func displayFlowStepsIgnoreEquivalentRunFlowFormatting() {
+    @Test("displayFlowSteps trim active run flow")
+    func displayFlowStepsTrimActiveRunFlow() {
         let run = Run(
             id: "run-1",
             waveId: "wave-1",
@@ -277,16 +270,14 @@ struct WaveModelTests {
             api: Wave(
                 id: "wave-1",
                 repo: "/tmp/repo",
-                flow: "ship-roadmap",
                 status: .running,
                 flowSteps: ["ingest", "kickoff", "build"],
                 activeRun: run
             )
         )
 
-        #expect(wave.runFlowOverride == nil)
         #expect(wave.displayFlow == "ship-roadmap")
-        #expect(wave.displayFlowSteps == ["ingest", "kickoff", "build"])
+        #expect(wave.displayFlowSteps == ["ship-roadmap"])
     }
 
     // MARK: - Iteration Text
@@ -472,7 +463,6 @@ struct FlowStepProgressTests {
             api: Wave(
                 id: "wave-1",
                 repo: "/tmp/repo",
-                flow: "start",
                 status: .running,
                 flowSteps: ["ingest", "kickoff"],
                 activeRun: run
@@ -489,7 +479,6 @@ struct FlowStepProgressTests {
             api: Wave(
                 id: "wave-1",
                 repo: "/tmp/repo",
-                flow: "start",
                 status: .idle,
                 flowSteps: ["ingest", "kickoff"]
             )
@@ -521,7 +510,6 @@ struct FlowStepProgressTests {
             api: Wave(
                 id: "wave-1",
                 repo: "/tmp/repo",
-                flow: "build",
                 status: .running,
                 flowSteps: ["implement", "compress", "gate", "update-wave"],
                 activeRun: run0
@@ -531,7 +519,6 @@ struct FlowStepProgressTests {
             api: Wave(
                 id: "wave-1",
                 repo: "/tmp/repo",
-                flow: "build",
                 status: .running,
                 flowSteps: ["implement", "compress", "gate", "update-wave"],
                 activeRun: run1
@@ -558,7 +545,7 @@ struct WaveStoreReactivityTests {
         )
         let wave0 = WaveViewModel(
             api: Wave(
-                id: "wave-1", repo: "/tmp/repo", flow: "start", status: .running,
+                id: "wave-1", repo: "/tmp/repo", status: .running,
                 flowSteps: ["ingest", "kickoff"], activeRun: run0
             )
         )
@@ -573,7 +560,7 @@ struct WaveStoreReactivityTests {
         )
         let wave1 = WaveViewModel(
             api: Wave(
-                id: "wave-1", repo: "/tmp/repo", flow: "start", status: .running,
+                id: "wave-1", repo: "/tmp/repo", status: .running,
                 flowSteps: ["ingest", "kickoff"], activeRun: run1
             )
         )
@@ -592,7 +579,6 @@ struct ParseWaveFromJSONTests {
         let json: [String: Any] = [
             "id": "wave-1",
             "name": "ux",
-            "flow": "start",
             "goal": "ship-roadmap",
             "metrics": [],
             "direction": ["ux"],
@@ -634,7 +620,6 @@ struct ParseWaveFromJSONTests {
         let json: [String: Any] = [
             "id": "wave-1",
             "name": "ux",
-            "flow": "start",
             "goal": "ship-roadmap",
             "metrics": [],
             "status": "idle",

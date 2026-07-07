@@ -158,12 +158,15 @@ Wave intent lives in `wave/<name>/GOAL.md`:
 
 ```markdown
 ---
-primary_flow: build
-metrics:
-  - backlog is empty
 ---
 
+## Objective
+
 Run one loop iteration for this wave.
+
+## Measures
+
+- **Key Results**: backlog is empty.
 ```
 
 Run it with `lf wave shipper`.

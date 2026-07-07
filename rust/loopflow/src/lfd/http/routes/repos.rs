@@ -447,7 +447,6 @@ mod tests {
         Wave {
             id: LfdId::new(),
             name: name.to_string(),
-            primary_flow: "ship-roadmap".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo,

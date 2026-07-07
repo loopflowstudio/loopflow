@@ -17,5 +17,6 @@ keep the wave goal in view.
 - Escalate to the parent wave with `lf chat --parent` when the KR set is
   blocked by missing authority, missing credentials, or unclear strategy.
 
-The project oracle terminates this flowloop when every kr-labeled Linear item
-is completed.
+You decide the project is done by setting the bit, not by saying so: mark
+each genuinely-finished KR completed in Linear. The runner only reads the KR
+set back; it terminates when every kr-labeled item is completed.

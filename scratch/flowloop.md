@@ -47,15 +47,19 @@ Key consequences:
 
 ## 2. Termination: deterministic oracle, agentic everything-else
 
-**The heart of the design.** The flowloop chooses *moves*; it never decides it is
-*done*. The halt is `if (oracle) stop` where the oracle is non-agent ground truth:
+**The heart of the design.** The agent decides it is done — its skill states
+exactly how to decide — but the decision only counts by **setting a bit in the
+world**; the runner's halt is `if (bit) stop`, a deterministic read of what the
+agent set:
 
 - task → `gh pr view` says MERGED (later: + a prod-verification check)
 - project → the KR set reads all-done (KRs are measurable by definition)
-- wave → no oracle; the loop is the point
+- wave → no bit to set; the loop is the point
 
-The agent can't fake completion or dark-room its way out — GitHub/Linear/prod
-decide, not the model's self-report. The terminator is a **composable predicate**:
+The agent can't dark-room its way out — "done" in the transcript counts for
+nothing; only the bit (merged PR, completed KRs) does, and the moves that set
+it (submit, land, close KRs) are exactly the legible, reviewable ones. The
+terminator is a **composable predicate**:
 swap in `spend ≥ $N` for a budget-bounded explorer; AND them for "finish, but stop
 at $N either way."
 

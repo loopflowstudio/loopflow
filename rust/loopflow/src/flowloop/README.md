@@ -2,8 +2,9 @@
 
 A **flowloop** is a flow that is looped: the flow
 `clarify → pursue_goal → mutate`, repeated until a deterministic oracle says
-stop. The loop chooses *moves* with full agentic judgment; it never decides
-it is *done* — GitHub, Linear, or nothing at all decides that.
+stop. The agent decides it is done — its skill states exactly how — but the
+decision only counts by **setting a bit in the world** (merging the PR,
+completing the KRs), never by self-report. The runner just checks the bit.
 
 ```
 lf task <linear-item-id>     # run one roadmap task to a merged PR, bounded

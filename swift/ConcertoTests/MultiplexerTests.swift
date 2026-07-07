@@ -158,7 +158,6 @@ struct MultiplexerStoreTests {
                 id: id,
                 name: "Demo Wave",
                 repo: "/tmp/repo",
-                flow: "build",
                 direction: [],
                 area: ["."]
             )

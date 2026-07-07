@@ -57,3 +57,15 @@ params, remove the `flow` computed passthrough in `WaveViewModel`, drop
 `flow: json["primary_flow"]` in `LocalWaveService`, and fix the ~40 call sites
 (most are `makeWave(flow:...)` test helpers). Small and mechanical, but a
 distinct unit of work from this rebase.
+
+## Goal charter retrofit assumptions
+
+Included `wave/memory/GOAL.md` in the retrofit even though the spec's named list
+called out `goals`, `architecture`, `concerto`, `meta`, and `systems`. The repo
+has a live `memory` wave with stale `primary_flow`/`mode`/frontmatter metrics, so
+leaving it behind would preserve the old schema and make "every wave" false.
+
+Kept frontmatter `crons: []` instead of prose cron strings. The target spec uses
+schedule-duty prose, but the current Rust parser still expects structured
+`{flow, schedule}` entries; prose strings would make `read_wave_config` reject
+the entire frontmatter and lose the Linear project handle.

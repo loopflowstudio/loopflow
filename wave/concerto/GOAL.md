@@ -1,5 +1,5 @@
 ---
-workers: 0
+crons: []
 pm:
   provider: linear
   linear_project: '9ee88f2a-ef37-46c7-b201-d197db3ccae0'
@@ -7,31 +7,31 @@ pm:
 
 ## Objective
 
-Run one loop iteration for the Concerto wave.
-
-You are Concerto for macOS — the layer *above* the vendors' sessions, not a chat
-client. Concerto frames the work; the vendor (Claude Code, Codex, opencode) runs
-it inside an embedded terminal pane. You keep sessions alive across restarts and
-show wave state around them; you do not reimplement the vendors' chat.
-
-Read the roadmap, judge the Concerto surface against the metrics, and pick the
-next useful move: harden terminal launch and reattach, tighten multi-agent
-dispatch, make wave state legible around a live session, or polish the window
-into one daily surface. Dispatch the appropriate flow against it. The north: a
-conductor opens the app and the vendor's own session is right there — framed,
-never re-rendered. If no safe move remains, record the blocker instead of
-inventing work.
+You make Concerto the daily surface for conducting waves without stealing the
+vendor's instrument. The human should open the app and land immediately in the
+right wave, with the vendor's own TUI alive in the terminal and just enough state
+around it to choose the next move. Your judgment prior is frame, don't render:
+navigation, launch, reattach, attention, and repo context belong to Concerto;
+assistant turns and agent protocol stay with the CLI that produced them.
 
 ## Measures
 
-- **Key Results**: an embedded vendor session survives an app restart and reattaches cleanly.
-- **Key Results**: launching a session is one action from the wave view.
-- **Quality**: Concerto renders no assistant turns itself — the vendor's TUI owns the conversation.
-- **Quality**: wave state is visible around every live session, not buried a click away.
+- **Key Results**: a running wave session survives app restart and reattaches cleanly in 5/5 dogfood trials.
+- **Key Results**: from the wave list, launching or attaching the right vendor session takes one action.
+- **Key Results**: a new repo wave can be created, started, and observed from Concerto without opening a separate terminal.
+- **Quality**: Concerto never renders a native assistant chat for vendor turns; it frames the vendor TUI.
+- **Quality**: wave state, attention, branch/PR context, and terminal status are visible around every live session.
+- **Bounds**: no Swift-owned parallel tmux/session lifecycle when an `lf` or `lfd` session record can own it.
 - **Done means**: a landed PR of real product code, roadmap item closed and PR-linked.
+
+## Cron
+
+- `daily` -> open Concerto against a live loopflow wave, try the highest-friction path, and convert the first real failure into a task.
 
 ## Process
 
-Read the live roadmap, judge the surface against the measures, and dispatch the
-appropriate flow for the next useful move. Routing is prose judgment, not
-frontmatter.
+Read Linear, then dogfood the app before guessing. If the issue is a visual or
+ergonomic rough edge in an existing surface, implement directly and verify with
+the Swift test suite. If the issue crosses session ownership, `lfd` wire shape,
+or launch lifecycle, write the scratch design first. Reuse proven views and
+stores; reshape the working surface instead of rebuilding beside it.

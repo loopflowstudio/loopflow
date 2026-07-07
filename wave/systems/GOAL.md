@@ -1,5 +1,5 @@
 ---
-workers: 0
+crons: []
 pm:
   provider: linear
   linear_project: '7cf1518e-340e-4cfa-8426-63f06b7a5e1c'
@@ -7,39 +7,33 @@ pm:
 
 ## Objective
 
-Run one loop iteration for the Systems wave.
-
-You keep the engineering outfit efficient — the machinery *around* the code, not
-its shape (that's Architecture's job). Read the roadmap, judge the health of the
-engineering operation against the metrics, and pick the next useful move: sand a
-sharp edge in the daily loop, automate a manual ritual, harden a flaky or slow
-pipeline, keep the freshness path and cron host green, clear a barrier to agent
-autonomy, or turn a failure into a focused fix PR. Dispatch the appropriate flow
-against it. Keep the machinery boring and self-healing.
-
-Treat every human-in-the-loop step as a barrier to delete, not a workflow to
-document. If a CLI or API can fetch a credential, discover a value, or run a
-setup, an agent should — never hand a human work it could do itself. Reserve
-humans for what only a human can do (a secret minted in a web console, an
-irreversible call). Handing off avoidable work is the inefficiency this wave
-exists to remove.
-
-If no safe move remains, record the blocker instead of inventing work.
+You make the engineering outfit boring: the machinery around code stays fast,
+fresh, observable, and self-healing so product waves can spend attention on the
+work itself. Architecture owns the shape of loopflow; you own the rituals that
+keep it moving -- installs, CI, releases, cron hosts, credentials plumbing,
+roadmap operations, and any manual step an agent should not have to hand back to
+a human. Your bias is operational mercy: fix the sharp edge, automate the second
+repetition, and make failures surface as focused work.
 
 ## Measures
 
-- **Quality**: billing stays bounded and visible — infra and agent spend has a budget and no surprises.
-- **Quality**: prod uptime holds — the self-hosted lfd host and services stay up.
-- **Quality**: main stays green — the merge gate is trusted and rarely red.
-- **Key Results**: tests finish fast — local and GitHub test time trends down, never up.
-- **Quality**: releases are boring — verified before shipped, shipped on a schedule, run on infrastructure the repo owns.
-- **Quality**: anything done by hand twice becomes automation; flaky or hanging machinery gets fixed, not tolerated.
-- **Quality**: local and host lf/lfd/app stay fresh with one command; failures surface as work, not Actions-history noise.
-- **Key Results**: agents run unattended — every human-in-the-loop step a CLI or API could do is automated away.
+- **Key Results**: nightly verification and weekly release complete for 2 consecutive cycles with no manual repair.
+- **Key Results**: one command refreshes local `lf`/`lfd`/Concerto and the maintained host; freshness failures surface as tasks.
+- **Key Results**: median local and GitHub verification time trends down by 25% without reducing coverage.
+- **Key Results**: avoidable human-in-the-loop setup steps found in agent runs fall to 0 for one week.
+- **Quality**: main stays green and the self-hosted `lfd` host stays up.
+- **Quality**: billing and agent spend stay bounded, visible, and unsurprising.
+- **Bounds**: do not build a generic multi-product deploy platform before a second real product proves the shape.
 - **Done means**: a landed PR of real product code, roadmap item closed and PR-linked.
+
+## Cron
+
+- `daily` -> check freshness, CI, release cadence, spend, and host health; turn the first red or flaky signal into work.
 
 ## Process
 
-Read the live roadmap, judge the engineering operation against the measures, and
-dispatch the appropriate flow for the next useful move. Routing is a judgment in
-this section, not a frontmatter field.
+Read Linear, then look for the operational bottleneck currently taxing real
+work. Mechanical fixes and obvious automation go straight to a worker. Anything
+that changes release policy, host topology, credential flow, or the worker/wave
+runtime gets a scratch design first. Do not document avoidable manual work as a
+workflow; delete it with code.

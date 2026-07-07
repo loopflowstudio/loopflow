@@ -12,7 +12,6 @@ struct WaveStoreOptimisticTests {
         id: String = "wave-1",
         name: String = "original",
         status: WaveStatus = .idle,
-        flow: String = "build",
         area: [String] = ["src/"],
         direction: [String] = [],
         openPRCount: Int = 0,
@@ -24,7 +23,6 @@ struct WaveStoreOptimisticTests {
                 id: id,
                 name: name,
                 repo: "/tmp/repo",
-                flow: flow,
                 direction: direction,
                 area: area,
                 triggers: [],
@@ -86,20 +84,17 @@ struct WaveStoreOptimisticTests {
     @Test("applyOptimistic with multiple fields updates all")
     func applyOptimisticMultipleFields() {
         let store = WaveStore()
-        store.set(makeWave(flow: "build", area: ["src/"], direction: []))
+        store.set(makeWave(area: ["src/"], direction: []))
 
         let snapshot = store.applyOptimistic("wave-1") { w in
-            w.flow = "debug"
             w.area = ["lib/"]
             w.direction = ["ux"]
         }
 
         let wave = store.wave(for: "wave-1")!
-        #expect(wave.flow == "debug")
         #expect(wave.area == ["lib/"])
         #expect(wave.direction == ["ux"])
 
-        #expect(snapshot?.flow == "build")
         #expect(snapshot?.area == ["src/"])
         #expect(snapshot?.direction == [])
     }
@@ -107,11 +102,10 @@ struct WaveStoreOptimisticTests {
     @Test("rollback after multiple field mutation restores all fields")
     func rollbackRestoresAllFields() {
         let store = WaveStore()
-        store.set(makeWave(name: "original", flow: "build", area: ["src/"]))
+        store.set(makeWave(name: "original", area: ["src/"]))
 
         let snapshot = store.applyOptimistic("wave-1") { w in
             w.name = "renamed"
-            w.flow = "debug"
             w.area = ["lib/"]
         }
 
@@ -119,7 +113,6 @@ struct WaveStoreOptimisticTests {
 
         let wave = store.wave(for: "wave-1")!
         #expect(wave.name == "original")
-        #expect(wave.flow == "build")
         #expect(wave.area == ["src/"])
     }
 

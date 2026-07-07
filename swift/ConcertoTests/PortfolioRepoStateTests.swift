@@ -140,7 +140,6 @@ struct PortfolioRepoStateTests {
             id: id,
             name: id,
             repo: repoPath,
-            flow: "build",
             direction: [],
             area: ["."],
             triggers: [],

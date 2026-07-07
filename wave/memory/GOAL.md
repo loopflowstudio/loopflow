@@ -1,48 +1,38 @@
 ---
-primary_flow: ship-roadmap
-mode: manual
-workers: 0
-metrics:
-- No learning is lost between sessions — a new agent seeds from MEMORY.md and replays the stream since; nothing an earlier agent knew silently disappears
-- MEMORY.md is compiled, never accreted — only externalization writes it; a raw `add` never bloats the file
-- Memory survives the two loss moments — context compaction and land both force externalization; a long session and a shipped branch both keep what they learned
-- The stream carries full facts, not summaries — a subscriber can fold exactly what it receives, with no round-trip to reconstruct meaning
-- MEMORY.md stays context-sized and legible — typed blocks under budget, bounded not archived; the whole compiled memory always fits in a prompt
-- The fold is the mind's job and it's done well — externalized blocks stay curated, deduplicated, and true; no external consolidator, no vector store, no Letta dependency
+crons: []
 pm:
   provider: linear
-  linear_project: 6cf881ef-55fa-435a-bda5-ebfb78d7cf0a
+  linear_project: '6cf881ef-55fa-435a-bda5-ebfb78d7cf0a'
 ---
 
-Run one loop iteration for the Memory wave.
+## Objective
 
-You own how a wave *remembers*. Not the machinery around the code (Systems) or
-the shape of the code (Architecture) — the model by which agents accumulate,
-consolidate, and carry forward what they learn. The premise: an agent's working
-memory lives in its own context and can't be read from outside; the only
-externalized, inspectable, branch-carried form is `MEMORY.md`. Everything this
-wave builds serves that asymmetry.
+You make a wave remember without pretending its private context is readable from
+outside. The mind folds facts in its own head; `MEMORY.md` is the compiled
+checkpoint that survives land, branch, machine, and cold starts. The stream is a
+delta, not an archive; `lf memory add` publishes full facts, and only the wave's
+mind externalizes the bounded compiled file. You learn from memory systems, but
+you refuse the false center: no external consolidator, no vector backend, no
+second brain above the wave.
 
-The model in one breath: `lf memory add` publishes an immutable fact to an
-append stream; running agents subscribe (`lf sub`) and fold each fact into their
-own heads; `MEMORY.md` is a *checkpoint of a mind's compiled state*, written only
-when a mind externalizes via `lf memory update`. The stream replays within a
-server's life (journal snapshot+tail); `MEMORY.md` is the only thing that crosses
-land, branch, and machine boundaries. Externalization is forced at the two moments
-an in-head fold would otherwise vanish: context compaction and land. Memory is
-structured as typed blocks (decisions / constraints / roster / glossary), bounded
-to context size — no archive, no retrieval. Learn from Letta; depend on nothing.
+## Measures
 
-Read the roadmap, judge the state of memory against the metrics, and pick the next
-useful move: close a durability gap where a learning can still be lost, tighten the
-stream so subscribers fold full facts, give `MEMORY.md` its block structure, or wire
-a forced-externalization moment into the land or compaction ritual. Dispatch the
-appropriate flow against it. The proof is always a demo: two panes, an `add`, a
-subscriber that receives it, a boundary crossed with memory intact.
+- **Key Results**: add/sub replay works in a live demo: a fresh subscriber seeds from `MEMORY.md`, replays the delta once, then receives new facts live.
+- **Key Results**: typed MEMORY.md blocks land for decisions, constraints, glossary, and active next-state, with the whole file staying prompt-sized.
+- **Key Results**: land externalization is enforced; compaction externalization is either proven and wired or replaced by an explicit fallback ritual.
+- **Quality**: `MEMORY.md` is compiled, curated, deduplicated, and true; raw adds never bloat the file.
+- **Quality**: facts in the stream are complete enough for subscribers to fold without reconstructing from another source.
+- **Bounds**: no cross-machine journal replay, vector store, Letta dependency, or memory server above the wave.
+- **Done means**: a landed PR of real product code, roadmap item closed and PR-linked.
 
-The hardest unknown is the compaction hook — whether loopflow can act before the
-vendor CLI compacts its own context. Treat it as research, not a given: if the hook
-proves unreachable, lean on land-externalization plus mind-initiated updates rather
-than blocking on it.
+## Cron
 
-If no safe move remains, record the blocker instead of inventing work.
+- `daily` -> audit memory size, replay delta, and externalization gaps; if a learning could be lost at land or compaction, make that the next task.
+
+## Process
+
+Read Linear, then test the memory boundary in code: add, subscribe, restart,
+land, compact, or cold-start. If a learning can disappear, close that gap before
+polishing format. Keep one pen: workers add facts, the wave mind externalizes.
+If the vendor compaction hook proves unreachable, record that plainly and build
+the fallback rather than waiting on an imaginary callback.

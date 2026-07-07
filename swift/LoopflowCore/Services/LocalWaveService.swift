@@ -827,7 +827,6 @@ public struct WaveService: WaveServiceProtocol, @unchecked Sendable {
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
             repo: json["repo"] as? String ?? "",
-            flow: json["primary_flow"] as? String ?? "",
             goal: json["goal"] as! String,
             metrics: json["metrics"] as! [String],
             direction: normalizeStringList(json["direction"]),

@@ -201,7 +201,6 @@ public struct WaveCron: Sendable, Hashable, Codable, Identifiable {
 public struct Wave: Sendable, Identifiable, Hashable {
     public let id: String
     public var name: String
-    public var flow: String
     public var goal: String
     public var metrics: [String]
     public var direction: [String]
@@ -231,7 +230,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
         id: String,
         name: String = "",
         repo: String,
-        flow: String = "",
         goal: String = "ship-roadmap",
         metrics: [String] = [],
         direction: [String] = [],
@@ -257,7 +255,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.id = id
         self.name = name
         self.repo = repo
-        self.flow = flow
         self.goal = goal
         self.metrics = metrics
         self.direction = direction

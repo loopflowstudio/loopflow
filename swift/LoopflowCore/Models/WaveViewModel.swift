@@ -86,11 +86,6 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         set { api.repo = newValue }
     }
 
-    public var flow: String {
-        get { api.flow }
-        set { api.flow = newValue }
-    }
-
     public var direction: [String] {
         get { api.direction }
         set { api.direction = newValue }
@@ -148,7 +143,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var displayName: String {
         if !name.isEmpty { return name }
         let areaStr = area.first.map { $0 == "." ? "root" : $0 } ?? "root"
-        return "\(areaStr) · \(configuredFlow.isEmpty ? "default" : configuredFlow)"
+        return areaStr
     }
 
     /// First line of the vision section — the tagline.
@@ -216,25 +211,16 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         return runFlow.isEmpty ? nil : runFlow
     }
 
-    public var configuredFlow: String {
-        flow.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    public var runFlowOverride: String? {
-        guard let activeRunFlow, activeRunFlow != configuredFlow else { return nil }
-        return activeRunFlow
-    }
-
     public var displayFlow: String {
-        activeRunFlow ?? configuredFlow
+        activeRunFlow ?? ""
     }
 
     public var displayFlowSteps: [String] {
-        if let runFlowOverride { return [runFlowOverride] }
+        if let activeRunFlow { return [activeRunFlow] }
         if !flowSteps.isEmpty {
             return flowSteps
         }
-        return displayFlow.isEmpty ? [] : [displayFlow]
+        return []
     }
 
     public var openPRCount: Int { api.openPRCount }

@@ -1,7 +1,7 @@
 # GOAL.md — the wave charter (P1 design spec)
 
 The canonical design for `GOAL.md`, the durable charter that directs a persistent
-looping agent (a "wave"). Companion: `scratch/goal-md-research.md` (prior-art
+looping agent (a "wave"). Companion: `goal-md-research.md` (prior-art
 grounding — OKR / Scrum / AoR / agent-constitutions). This file is the decision;
 that one is the evidence.
 

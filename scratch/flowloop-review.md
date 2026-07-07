@@ -70,9 +70,29 @@ uv run python scripts/test.py
 run --all`) plus website (`cd website && uv run python dev.py test`): 1248 Rust
 tests passed under nextest, then 61 website tests passed with 3 skipped.
 
+Full matrix coverage:
+
+```bash
+uv run python scripts/test.py --all
+```
+
+The full matrix passed Python, Rust, website, Swift package tests, and e2e smoke
+before failing in Concerto's macOS UI harness. The failure reproduced with an
+isolated DerivedData directory:
+
+```bash
+cd swift && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' -derivedDataPath /tmp/loopflow-flowloop-gate-xcode CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+```
+
+Xcode built the app and reported the non-UI Swift suites passing, then failed
+to attach `ConcertoUITests-Runner`:
+
+```text
+Early unexpected exit, operation never finished bootstrapping
+Underlying Error: Test crashed with signal kill before establishing connection.
+```
+
 Skipped:
 
 - Live wave smoke / manual wave demo, because it requires Codex CLI auth,
   network, and token spend.
-- Swift, Concerto, Python, and e2e suites in changed-aware mode; this branch did
-  not touch their mapped paths.

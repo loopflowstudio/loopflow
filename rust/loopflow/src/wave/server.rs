@@ -7,7 +7,7 @@
 //! `127.0.0.1:<port>` and nothing else; `.wave-resident-token` beside it holds
 //! this boot's resident token (see [`crate::wave::wire`]).
 //!
-//! This module is VENDOR-FREE: the mind lives in the resident process
+//! This module is VENDOR-FREE: the flowloop lives in the resident process
 //! ([`crate::wave::resident`]), which publishes through the resident door
 //! (`/resident/attach`, `/resident/deltas`, `/resident/context` — token-gated)
 //! and listens on its own wave's `/events?inbox=true` subscription. The
@@ -34,10 +34,10 @@
 //!   `?channel=<name>` (exactly one channel), `?prefix=<name>` (that subtree),
 //!   default = the whole family. A name outside this wave's family is a 404.
 //!   Three event names:
-//!   - `state`: data is the mind-state name (`idle | turning | interrupting |
+//!   - `state`: data is the flowloop-state name (`idle | turning | interrupting |
 //!     failed`), sent once on subscribe (before the turn replay) and again on
 //!     every transition — the composer keys its verb off it. Primary channel
-//!     only — child channels have no mind, so a child-only subscription
+//!     only — child channels have no flowloop, so a child-only subscription
 //!     carries no `state` frames.
 //!   - `turn`: data is a `Turn` JSON; the thread replays on connect
 //!     (including the open turn), then streams live. A turn from a CHILD
@@ -84,7 +84,7 @@
 //!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
 //!   a no-op success), or `"say"` (an attributed emission — `lf chat`: a
 //!   worker report, child-wave escalation, or CLI FYI; lands in the thread
-//!   with its byline AND queues for the mind like a message). `text` may be
+//!   with its byline AND queues for the flowloop like a message). `text` may be
 //!   empty only for `interrupt` (400 otherwise). `from {session_id?, label}`
 //!   is required for `say` and rejected for every other op (400) — human
 //!   turns are unattributed by convention. `channel` is explicitly Optional:
@@ -93,8 +93,8 @@
 //!   work line's worktree is gone). On a child channel there is no resident:
 //!   steer degrades to a plain message, a bare interrupt is a no-op. `turn`
 //!   is the appended user `Turn`, or null for a bare interrupt (nothing was
-//!   said); `state` is the mind-state name when the request was accepted —
-//!   ops are applied by the mind asynchronously, so watch the stream's
+//!   said); `state` is the flowloop-state name when the request was accepted —
+//!   ops are applied by the flowloop asynchronously, so watch the stream's
 //!   `state` events for the outcome.
 //! - `POST /channels {name, run_id}` → `{turn}` — the dispatch notification
 //!   door: placed `lf` minted a work-line worktree and its channel
@@ -398,7 +398,7 @@ struct PostMemoryResponse {
 }
 
 /// `POST /messages` response. `turn` is the appended user turn; null for a
-/// bare interrupt, which appends nothing. `state` is the mind-state name at
+/// bare interrupt, which appends nothing. `state` is the flowloop-state name at
 /// acceptance time.
 #[derive(Debug, Serialize)]
 struct PostMessageResponse {
@@ -461,7 +461,7 @@ pub fn router(
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
     // `mind` is null until a resident has ever been spawned or attached —
-    // a dormant channel (`--no-flowloop`) has no mind to report on.
+    // a dormant channel (`--no-flowloop`) has no flowloop to report on.
     let mind = state
         .runtime
         .resident_expected()
@@ -509,7 +509,7 @@ async fn resident_attach_handler(
     if let Some(supervisor) = &state.supervisor {
         supervisor.on_attach(body.pid);
     }
-    // A fresh resident IS the revival: a failed mind goes idle on attach.
+    // A fresh resident IS the revival: a failed flowloop goes idle on attach.
     if matches!(state.runtime.mind_state(), MindState::Failed { .. }) {
         state
             .runtime
@@ -589,7 +589,7 @@ enum ExecVerdict {
 /// - `op auth` — credential rotation is never the escape hatch's job.
 /// - `wave …` — wave lifecycle (start / `--force` take-over / dormant serve).
 /// - `task …` — starts a long-running task flowloop; dispatch it from the
-///   wave mind, not through this unsandboxed exec door.
+///   wave flowloop, not through this unsandboxed exec door.
 /// - any flow / inline prompt WITHOUT `--dispatch` — that would run an
 ///   arbitrary LLM prompt unsandboxed in the outwave, the exact power this
 ///   door must not hand a leaked token.
@@ -838,7 +838,7 @@ fn first_line(content: &str) -> Option<String> {
 /// The unified `/events` SSE, scoped to one channel, a subtree, or (default)
 /// the whole family.
 ///
-/// The primary channel's replay-then-live shape is unchanged: the mind state,
+/// The primary channel's replay-then-live shape is unchanged: the flowloop state,
 /// the thread on connect (open turn included, status `running`), then live
 /// frames — `state` on every transition, `turn` ids repeating by design
 /// (every frame replaces the client's state for that (channel, id), so an

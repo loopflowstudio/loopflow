@@ -5,7 +5,7 @@
 //! per-machine, never committed): the wave channel's under the origin repo,
 //! a work-line channel's inside its own worktree (see
 //! [`crate::wave::channel`]). Every projection is a fold over it: the
-//! thread is the conversation events, the mind state is the last `MindState`
+//! thread is the conversation events, the flowloop state is the last `MindState`
 //! event, the message queue is `UserMessage`s not yet named in any
 //! `TurnStarted.answers` or `TurnSteered.answers`. Store is truth; the SSE
 //! broadcast bus is liveness.
@@ -21,7 +21,7 @@
 //! shared store — these are confirmed facts, not commands — and the in-flight
 //! view is their fold ([`fold_workers`]). `MemoryUpdated` and `MemoryAdded`
 //! are produced by the server's memory routes (`lf memory update`/`add` — the
-//! server holds MEMORY.md's pen). `ThreadStarted` is produced by the mind: the
+//! server holds MEMORY.md's pen). `ThreadStarted` is produced by the flowloop: the
 //! vendor thread id is its first durable act, journaled before the first turn.
 //! `ServerStarted` is appended once per boot, after replay — restarts are
 //! forensically visible in the record.
@@ -70,7 +70,7 @@ pub enum MessageOp {
     Interrupt,
     /// An attributed emission (`lf chat`): a worker report, child-wave
     /// escalation, or CLI FYI. Lands in the thread as an attributed statement
-    /// AND queues for the mind exactly like `Message` — same consumption
+    /// AND queues for the flowloop exactly like `Message` — same consumption
     /// machinery, `TurnStarted.answers` can name it.
     Say,
 }
@@ -216,7 +216,7 @@ pub enum EventKind {
         status: Lifecycle,
         usage: Usage,
     },
-    // -- mind lifecycle --
+    // -- flowloop lifecycle --
     ThreadStarted {
         vendor: String,
         thread_id: String,
@@ -460,7 +460,7 @@ impl Narrator {
                 ))
             }
             EventKind::ThreadStarted { vendor, thread_id } => {
-                info(format!("mind thread {vendor} {thread_id}"))
+                info(format!("flowloop thread {vendor} {thread_id}"))
             }
             EventKind::MindState { from, to, reason } => {
                 info(format!("state {} → {} ({reason})", from.name(), to.name()))
@@ -518,7 +518,7 @@ impl Narrator {
 }
 
 /// Flatten whitespace and cap at `max` chars (with an ellipsis when cut).
-/// Shared with the mind's heartbeat prompt, where the flattening keeps
+/// Shared with the flowloop's heartbeat prompt, where the flattening keeps
 /// multi-line worker tasks from breaking the one-line `<in_flight>` format.
 pub(crate) fn ellipsize(text: &str, max: usize) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -704,7 +704,7 @@ impl Journal {
     }
 }
 
-/// The thread and mind state materialized from a journal.
+/// The thread and flowloop state materialized from a journal.
 #[derive(Debug)]
 pub struct ThreadFold {
     /// User turns and finalized assistant turns, in commit order (user turns
@@ -716,7 +716,7 @@ pub struct ThreadFold {
     /// Last `MindState` transition's destination; `Idle` if none.
     pub state: MindState,
     /// Last `ThreadStarted`'s vendor thread id — the resume handle for the
-    /// mind's persistent vendor session.
+    /// flowloop's persistent vendor session.
     pub thread_id: Option<String>,
     /// User messages not named by any `TurnStarted.answers` or
     /// `TurnSteered.answers` (minus what `MessagesRequeued` restored); this
@@ -738,7 +738,7 @@ pub struct ThreadFold {
 }
 
 /// The thread-visible turn a `ChannelOpened` event materializes: a bylined
-/// statement, never queued for the mind (only `UserMessage` rows feed the
+/// statement, never queued for the flowloop (only `UserMessage` rows feed the
 /// pending queue). Shared by the fold and the live append so replay and the
 /// live thread agree byte for byte.
 pub fn channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
@@ -752,7 +752,7 @@ pub fn channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
 }
 
 /// The thread-visible turn a `RunCompleted` observation materializes: the
-/// worker's ending as a bylined statement, never queued for the mind (only
+/// worker's ending as a bylined statement, never queued for the flowloop (only
 /// `UserMessage` rows feed the pending queue). Covers the died-silently case
 /// — a worker that never reported still ends visibly, failure summary on the
 /// wire. Shared by the fold and the live append so replay and the live
@@ -1443,7 +1443,7 @@ mod tests {
             vendor: "codex".into(),
             thread_id: "thread-7f3a".into(),
         });
-        assert_eq!(n.line, "mind thread codex thread-7f3a");
+        assert_eq!(n.line, "flowloop thread codex thread-7f3a");
 
         let n = render(EventKind::RunObserved {
             run_id: "run-8c1d2e3f4a".into(),
@@ -1496,7 +1496,7 @@ mod tests {
     }
 
     /// `ChannelOpened` folds into a thread-visible bylined turn (never queued
-    /// for the mind) and its run id lands in the idempotence guard.
+    /// for the flowloop) and its run id lands in the idempotence guard.
     #[test]
     fn fold_materializes_channel_opened_as_a_dispatch_turn() {
         let events = vec![Event {
@@ -1515,7 +1515,7 @@ mod tests {
         assert_eq!(fold.turns[0].id, "turn-1");
         assert!(
             fold.pending_messages.is_empty(),
-            "a channel opening never queues for the mind"
+            "a channel opening never queues for the flowloop"
         );
         assert!(fold.opened_channel_runs.contains("run-7"));
     }
@@ -1652,7 +1652,11 @@ mod tests {
         assert_eq!(fold.turns.len(), 1);
         assert_eq!(fold.turns[0].role, ChatRole::User);
         assert_eq!(fold.turns[0].from.as_deref(), Some("worker"));
-        assert_eq!(fold.pending_messages.len(), 1, "say queues for the mind");
+        assert_eq!(
+            fold.pending_messages.len(),
+            1,
+            "say queues for the flowloop"
+        );
         assert_eq!(fold.pending_messages[0].op, MessageOp::Say);
         assert_eq!(
             fold.pending_messages[0]

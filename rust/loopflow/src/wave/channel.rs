@@ -7,7 +7,7 @@
 //! (`goals.148e0e02`) — and its journal lives IN THAT WORKTREE
 //! (`<worktree>/.lf/journal/waves/<channel>/journal.jsonl`): it travels with
 //! the branch and dies with it. Channels are conversations, not records — at
-//! land the mind curates the distilled story up (parent channel + wave
+//! land the flowloop curates the distilled story up (parent channel + wave
 //! memory) and the raw work-line journal dies with the worktree. FLAGGED,
 //! unbuilt: if lived experience misses raw records,
 //! `~/.lf/journal/<repo>/<worktree>` is the pre-named persistent archive.
@@ -15,7 +15,7 @@
 //! Names are topics, dots are the tree: `goals.148e0e02` is inside `goals`'s
 //! family; subscription is by name or prefix. The family head's server holds
 //! the pen for every child channel — single-writer per journal file, all
-//! pens in one process. Child channels have NO mind: they are pure streams
+//! pens in one process. Child channels have NO flowloop: they are pure streams
 //! (no `MindState`, no memory — a work line's notes are files; MEMORY.md is
 //! wave identity).
 
@@ -96,9 +96,9 @@ pub fn tagged_turn_json(channel: &str, turn: &ChatTurn) -> String {
 }
 
 /// A materialized child channel: the pen over its journal plus the thread
-/// fold. No mind, no memory, no inbox — deliveries land in the journal and
+/// fold. No flowloop, no memory, no inbox — deliveries land in the journal and
 /// the thread, and broadcast on the family bus; nothing consumes them here
-/// (consumption markers never cross journals, and a mindless channel has no
+/// (consumption markers never cross journals, and a flowloopless channel has no
 /// consumer).
 #[derive(Debug)]
 pub struct ChildChannel {
@@ -147,7 +147,7 @@ impl ChildChannel {
     }
 
     /// The thread as folded so far (finalized order; children have no open
-    /// mind turns).
+    /// flowloop turns).
     pub fn thread_snapshot(&self) -> Vec<ChatTurn> {
         self.inner
             .lock()
@@ -159,7 +159,7 @@ impl ChildChannel {
     /// Deliver one message to this channel: journal the `UserMessage`, commit
     /// the turn, and broadcast it tagged on the family bus. A bare interrupt
     /// is a no-op (`None`) — there is no resident to interrupt; `steer`
-    /// degrades to a plain message the same way a mindless queue would treat
+    /// degrades to a plain message the same way a flowloopless queue would treat
     /// it. Refuses (`Err`) when the worktree vanished between polls.
     pub fn deliver(
         &self,
@@ -297,7 +297,7 @@ mod tests {
         assert_eq!(frame.channel, "ship.abc");
         assert_eq!(frame.turn.id, turn.id);
 
-        // A bare interrupt is a no-op on a mindless channel.
+        // A bare interrupt is a no-op on a flowloopless channel.
         assert!(channel
             .deliver(&tx, MessageOp::Interrupt, "  ".into(), None)
             .expect("noop")

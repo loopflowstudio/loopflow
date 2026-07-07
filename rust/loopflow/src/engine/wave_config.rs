@@ -5,8 +5,8 @@ use std::path::Path;
 use tracing::warn;
 
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
-/// The wave's resident mind reads these and opens a system turn when a
-/// schedule comes due (`crate::wave::mind`) — no daemon poller, no table.
+/// The wave's resident flowloop reads these and opens a system pass when a
+/// schedule comes due (`crate::flowloop::wave`) — no daemon poller, no table.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WaveCronDef {
     pub flow: String,
@@ -35,9 +35,6 @@ pub struct WaveConfig {
     pub agent: Option<String>,
     pub step_agents: Option<HashMap<String, String>>,
     pub pm: Option<WavePmConfig>,
-    /// The wave's mind vendor (`codex` default; `claude`, `opencode`) — read
-    /// by the RESIDENT (`crate::wave::resident::resolve_mind_vendor`).
-    pub mind: Option<String>,
     /// The safety valve: `paused: true` in GOAL.md frontmatter tells the wave
     /// listener to refuse to START turns (message→turn, heartbeat, cron)
     /// while keeping the channel serving and queueing. File-first and re-read
@@ -238,7 +235,7 @@ mod tests {
         assert_eq!(pm.linear_project.as_deref(), Some("lin-123"));
     }
 
-    /// Crons live in GOAL.md frontmatter — the resident mind's schedule
+    /// Crons live in GOAL.md frontmatter — the resident flowloop's schedule
     /// source. Legacy `triggers:` keys are simply unknown fields now.
     #[test]
     fn read_wave_config_parses_crons_and_ignores_legacy_triggers() {

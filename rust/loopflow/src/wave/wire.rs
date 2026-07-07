@@ -1,5 +1,5 @@
 //! The resident wire: what crosses between the listener (the wave server,
-//! vendor-free — hear / check / fold / tell) and the resident (the mind, its
+//! vendor-free — hear / check / fold / tell) and the resident (the flowloop, its
 //! own `lf` process owning the vendor harness).
 //!
 //! Two directions, two transports:
@@ -11,7 +11,7 @@
 //!   DTO discipline, plus the consumption markers (`TurnOpened.answers`,
 //!   `TurnSteered.answers` — the RESIDENT decides what a turn answers; the
 //!   listener validates against its queue fold and journals), the resident's
-//!   reported mind state, and the vendor thread id. The single writer stays
+//!   reported flowloop state, and the vendor thread id. The single writer stays
 //!   with the listener: the resident never touches journal files.
 //! - **Listener → resident**: the resident consumes its own wave's `/events`
 //!   subscription with `?inbox=true` — `inbox` SSE frames ([`InboxFrame`])
@@ -101,12 +101,12 @@ pub enum ResidentDelta {
     /// re-delivers them. The claim rides first, the undo is explicit:
     /// at-most-once to the vendor, never a silent redelivery.
     MessagesRequeued { ids: Vec<String> },
-    /// The resident's reported mind state ([`ResidentStateTo`]). `Turning`
+    /// The resident's reported flowloop state ([`ResidentStateTo`]). `Turning`
     /// and the boundary `Idle` are DERIVED by the listener from
     /// `TurnOpened`/`TurnFinished`; only the transitions the turn deltas
     /// can't express ride here.
     MindState { to: ResidentStateTo, reason: String },
-    /// The vendor thread the mind runs on — its first durable act, journaled
+    /// The vendor thread the flowloop runs on — its first durable act, journaled
     /// by the listener before the first turn (borrowed-handle rule).
     ThreadStarted { vendor: String, thread_id: String },
 }
@@ -119,7 +119,7 @@ pub enum ResidentDelta {
 pub enum ResidentStateTo {
     /// Cancel fired for the open turn (cooperative interrupt in flight).
     Interrupting,
-    /// The mind itself died (harness terminal error, failure cap). The
+    /// The flowloop itself died (harness terminal error, failure cap). The
     /// resident reports this and exits; the listener's supervisor owns the
     /// respawn ladder from there.
     Failed,
@@ -156,7 +156,7 @@ pub struct AttachRequest {
 pub struct AttachResponse {
     /// The wave this listener serves — the resident refuses a mismatch.
     pub wave: String,
-    /// Last journaled vendor thread id — the mind's resume handle.
+    /// Last journaled vendor thread id — the flowloop's resume handle.
     pub thread_id: Option<String>,
 }
 

@@ -3,6 +3,7 @@ pub mod pass;
 pub mod project;
 pub mod run;
 pub mod task;
+pub mod wave;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {

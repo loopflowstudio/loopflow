@@ -167,7 +167,7 @@ pub enum Commands {
         /// Take over even if lfd reports another live wave-agent session
         #[arg(long)]
         force: bool,
-        /// Serve dormant: listener only, no resident (health reads mind: null)
+        /// Serve dormant: listener only, no resident (health reads mind: null until the wire field renames)
         #[arg(long, conflicts_with = "flowloop_only")]
         no_flowloop: bool,
         /// Run only the resident flowloop against an existing listener
@@ -206,7 +206,7 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show one wave's runs, attention, and (when live) mind state, from the
+    /// Show one wave's runs, attention, and (when live) flowloop state, from the
     /// registry. Defaults to the ambient wave (`LFD_WAVE_ID`).
     Status {
         /// Wave name (default: the ambient wave)
@@ -239,7 +239,7 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
-    /// Follow a wave's live event stream (turns, mind state, memory) until
+    /// Follow a wave's live event stream (turns, flowloop state, memory) until
     /// killed. Defaults to the invoking context's wave; exits 0 with a note
     /// when no wave resolves.
     Sub {

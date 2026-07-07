@@ -50,7 +50,7 @@
 pub(crate) mod channel;
 pub mod journal;
 pub(crate) mod memory;
-pub mod mind;
+
 pub(crate) mod registry;
 pub mod resident;
 pub mod runtime;
@@ -75,7 +75,7 @@ use crate::wave::runtime::WaveRuntime;
 
 /// Whether the listener spawns (and supervises) a resident.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MindPolicy {
+pub enum FlowloopPolicy {
     /// Spawn `lf wave <name> --flowloop-only` as a child and keep it alive
     /// (respawn ladder, immediate respawn on a human message).
     Spawn,
@@ -97,10 +97,10 @@ pub fn run(name: &str, force: bool, no_flowloop: bool, flowloop_only: bool) -> R
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let wave = resolve_wave_name(&main_repo, Some(name))
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
-    let mind = if no_flowloop {
-        MindPolicy::Dormant
+    let flowloop = if no_flowloop {
+        FlowloopPolicy::Dormant
     } else {
-        MindPolicy::Spawn
+        FlowloopPolicy::Spawn
     };
 
     let rt = tokio::runtime::Runtime::new()?;
@@ -111,7 +111,7 @@ pub fn run(name: &str, force: bool, no_flowloop: bool, flowloop_only: bool) -> R
             wave,
             registry_config,
             force,
-            mind,
+            flowloop,
             shutdown_signal(),
         )
         .await
@@ -185,7 +185,7 @@ fn resident_spawner(
             // wave's `/v0/exec`, unsandboxed in the outwave.
             .env(wire::SUBAGENT_TOKEN_ENV, &subagent_token)
             // The resident's children must resolve `lf` to this binary.
-            .env("PATH", mind::path_for_children())
+            .env("PATH", crate::flowloop::wave::path_for_children())
             .stdin(std::process::Stdio::null());
         // No kill_on_drop: shutdown stops the supervisor FIRST (so a TERM'd
         // resident's exit isn't journaled as a failure), then SIGTERMs the
@@ -199,7 +199,7 @@ fn resident_spawner(
 }
 
 /// Serve the wave until `shutdown` resolves. Vendor-free by construction:
-/// no harness, no vendor process — the resident (spawned per `mind`, or
+/// no harness, no vendor process — the resident (spawned per `flowloop`, or
 /// attached by hand) owns those. `registry_config` is `None` in tests that
 /// exercise the server without a registry store; `force` rides separately
 /// because the endpoint-file floor must honor it even when there is no
@@ -209,7 +209,7 @@ async fn serve(
     wave: String,
     registry_config: Option<registry::RegistryConfig>,
     force: bool,
-    mind: MindPolicy,
+    flowloop: FlowloopPolicy,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
     // File-level one-brain floor, before anything else: an existing pointer
@@ -248,7 +248,7 @@ async fn serve(
     let mut registration: Option<registry::Registration> = None;
     let mut registered: Option<(SharedStore, crate::lfd::id::LfdId)> = None;
     // Wave-session context handed to the spawned resident: a bare `lf`
-    // inside the mind self-registers under this wave with the listener's
+    // inside the flowloop self-registers under this wave with the listener's
     // session as its parent (see lf::session for the env contract).
     let mut session_env: Vec<(String, String)> = Vec::new();
     if let Some(config) = registry_config {
@@ -336,8 +336,8 @@ async fn serve(
     // The keeper's watch: resident liveness, respawn ladder, interrupt
     // janitor. Runs even dormant — the pen-side anti-wedges (janitor, attach
     // probe) never depend on who spawned the resident.
-    let spawner = match mind {
-        MindPolicy::Spawn => Some(resident_spawner(
+    let spawner = match flowloop {
+        FlowloopPolicy::Spawn => Some(resident_spawner(
             wave.clone(),
             repo_root.clone(),
             addr.to_string(),
@@ -345,12 +345,12 @@ async fn serve(
             subagent_door.mint(),
             session_env,
         )),
-        MindPolicy::Dormant => None,
+        FlowloopPolicy::Dormant => None,
     };
     // Build the supervisor before spawning so the attach door can hold its
     // handle: an attached resident (`--flowloop-only`) signals the keeper to
     // stand the respawn ladder down, so the deadline never spawns a second
-    // mind over it.
+    // flowloop over it.
     let supervisor = supervisor::Supervisor::new(
         runtime.clone(),
         door.clone(),
@@ -381,9 +381,9 @@ async fn serve(
     println!(
         "lf wave · {wave} · listener on http://{addr}{} \
          (Ctrl-C to stop, RUST_LOG=loopflow=debug for the firehose)",
-        match mind {
-            MindPolicy::Spawn => " · spawning resident",
-            MindPolicy::Dormant => " · dormant (--no-flowloop)",
+        match flowloop {
+            FlowloopPolicy::Spawn => " · spawning resident",
+            FlowloopPolicy::Dormant => " · dormant (--no-flowloop)",
         }
     );
 
@@ -448,7 +448,7 @@ mod tests {
         }
     }
 
-    /// Inject a finalized assistant turn, as a completed mind turn would land.
+    /// Inject a finalized assistant turn, as a completed flowloop turn would land.
     fn narrate(runtime: &WaveRuntime, text: &str) {
         runtime.append_finalized_turn(progress_turn(text), Vec::new());
     }
@@ -746,7 +746,7 @@ mod tests {
     /// or attached (`--no-flowloop` serves dormant), then carries the resident's
     /// state — a dead resident on a live channel reads `serving` + `failed`.
     #[tokio::test]
-    async fn health_splits_channel_liveness_from_the_mind() {
+    async fn health_splits_channel_liveness_from_the_flowloop() {
         let (base, runtime, _tmp) = boot().await;
         narrate(&runtime, "first");
 
@@ -758,7 +758,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body["status"], "serving", "status is channel liveness");
-        assert!(body["mind"].is_null(), "dormant channel has no mind");
+        assert!(body["mind"].is_null(), "dormant channel has no flowloop");
         assert_eq!(body["wave"], "ship");
         assert_eq!(body["turns"], 1);
 
@@ -812,7 +812,7 @@ mod tests {
         }
         assert!(!runtime.resident_expected());
 
-        // A failed mind + attach: the fresh resident IS the revival.
+        // A failed flowloop + attach: the fresh resident IS the revival.
         runtime.set_resident_expected();
         runtime.transition(
             crate::wave::state::MindState::Failed {
@@ -1139,7 +1139,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sse_state_events_track_the_mind_live() {
+    async fn sse_state_events_track_the_flowloop_live() {
         let (base, runtime, _tmp) = boot().await;
 
         // Subscribe while idle: the first frame is the current state.
@@ -1309,7 +1309,7 @@ mod tests {
         let events = journal::read_events(&child_journal);
         assert_eq!(events.len(), 1);
         // The report also folds UP: a child `say` forwards to the wave as
-        // attributed speech so the mind hears its workers (the report
+        // attributed speech so the flowloop hears its workers (the report
         // doctrine). The child journal keeps its own copy above.
         let forwarded = runtime.thread_snapshot();
         assert_eq!(forwarded.len(), 1, "the report reached the wave thread");
@@ -1477,7 +1477,7 @@ mod tests {
         assert!(!acc_one.contains("wave turn"), "no primary frames");
         assert!(
             !acc_one.contains("event: state"),
-            "no mind on a child channel"
+            "no flowloop on a child channel"
         );
 
         // A name outside the family is a 404.
@@ -1505,7 +1505,7 @@ mod tests {
                 "ship".into(),
                 None,
                 false,
-                MindPolicy::Dormant,
+                FlowloopPolicy::Dormant,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1573,7 +1573,7 @@ mod tests {
                 "ship".into(),
                 None,
                 false,
-                MindPolicy::Dormant,
+                FlowloopPolicy::Dormant,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1609,7 +1609,7 @@ mod tests {
                 "ship".into(),
                 None,
                 false,
-                MindPolicy::Dormant,
+                FlowloopPolicy::Dormant,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1627,7 +1627,7 @@ mod tests {
             "ship".into(),
             None,
             false,
-            MindPolicy::Dormant,
+            FlowloopPolicy::Dormant,
             async {
                 let _ = shutdown_rx2.await;
             },
@@ -1704,7 +1704,7 @@ mod tests {
                 "ship".into(),
                 Some(config),
                 false,
-                MindPolicy::Dormant,
+                FlowloopPolicy::Dormant,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1785,7 +1785,7 @@ mod tests {
                 force: false,
             }),
             false,
-            MindPolicy::Dormant,
+            FlowloopPolicy::Dormant,
             async {
                 let _ = shutdown_rx.await;
             },

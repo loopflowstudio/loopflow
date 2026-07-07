@@ -50,10 +50,9 @@ pub const RESPAWN_BACKOFF: [Duration; 3] = [
     Duration::from_secs(45 * 60),
 ];
 
-/// The listener-side interrupt janitor bound. Deliberately longer than the
-/// resident's own cooperative-cancel deadline (`mind::INTERRUPT_DEADLINE`):
-/// the resident force-closes through the wire first; this fires only when the
-/// resident is silent.
+/// The listener-side interrupt janitor bound. The resident kills the pass
+/// child and closes the turn through the wire immediately; this fires only
+/// when the resident is silent.
 pub const LISTENER_INTERRUPT_DEADLINE: Duration = Duration::from_secs(20);
 
 /// How often an attached (not spawned) resident's pid is probed.
@@ -104,7 +103,7 @@ async fn wait_child(child: &mut Option<Child>) -> std::io::Result<std::process::
 }
 
 /// Sleep until an optional deadline; `None` never fires. Shared with the
-/// mind's scheduler loop ([`crate::wave::mind`]).
+/// flowloop's scheduler loop ([`crate::flowloop::wave`]).
 pub(crate) async fn sleep_until_opt(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
@@ -155,7 +154,7 @@ pub struct Supervisor {
     /// Respawn attempts since the last completed turn — the ladder index.
     attempts: u32,
     /// The interrupt janitor's deadline; armed when an interrupt op arrives
-    /// with a turn live, cleared when the mind settles idle.
+    /// with a turn live, cleared when the flowloop settles idle.
     interrupt_at: Option<Instant>,
 }
 
@@ -528,7 +527,7 @@ mod tests {
         assert_eq!(respawn_delay(&[], 0), None, "empty ladder disables");
     }
 
-    /// A dying resident process is detected, journaled as a failed mind, and
+    /// A dying resident process is detected, journaled as a failed flowloop, and
     /// respawned on the ladder — process-level auto-revival.
     #[tokio::test]
     async fn resident_death_fails_the_mind_and_the_ladder_respawns() {
@@ -568,7 +567,7 @@ mod tests {
     }
 
     /// A resident dying mid-turn never leaves the journal dangling: the open
-    /// turn force-finalizes `Failed` before the mind is marked failed.
+    /// turn force-finalizes `Failed` before the flowloop is marked failed.
     #[tokio::test]
     async fn resident_death_closes_the_open_turn() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -673,7 +672,7 @@ mod tests {
 
     /// An attach through the door disarms an armed respawn: the attached
     /// resident IS the revival, and the deadline must not spawn a second
-    /// mind over it (nor overwrite its seat pid).
+    /// flowloop over it (nor overwrite its seat pid).
     #[tokio::test]
     async fn attach_disarms_the_respawn_ladder() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -751,7 +750,7 @@ mod tests {
     }
 
     /// An attached resident (no child handle) is probed by pid: a dead pid
-    /// fails the mind.
+    /// fails the flowloop.
     #[tokio::test]
     async fn attached_resident_death_is_detected_by_pid_probe() {
         let tmp = tempfile::tempdir().expect("tempdir");

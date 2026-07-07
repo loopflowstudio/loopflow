@@ -3,7 +3,7 @@
 //! The wave's mind runs on a persistent harness session
 //! ([`crate::harness`]) inside the RESIDENT process; its
 //! `ConversationEvent` stream is adapted into resident wire deltas (see
-//! [`crate::wave::mind::EventAdapter`] and [`crate::wave::wire`]) and folded
+//! [`crate::flowloop::wave::EventAdapter`] and [`crate::wave::wire`]) and folded
 //! by the listener's runtime into journaled, broadcast turns.
 //!
 //! Mapping:
@@ -43,7 +43,7 @@ pub struct ChatTurn {
     /// RFC 3339 timestamp of when the turn opened.
     pub created_at: String,
     /// Speaker label for attributed emissions (`lf chat` — worker reports,
-    /// child-wave escalations). Absent for the mind's own turns and plain
+    /// child-wave escalations). Absent for the flowloop's own turns and plain
     /// user turns.
     pub from: Option<String>,
 }

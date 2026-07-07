@@ -10,8 +10,8 @@
 //! - the open turn is a live snapshot grown from the same deltas the journal
 //!   records — served after the finalized thread and re-broadcast as it grows,
 //!   so subscribers watch a turn stream instead of minutes of silence;
-//! - the mind state is the last `MindState` event;
-//! - the vendor thread id is the last `ThreadStarted` event — the mind's
+//! - the flowloop state is the last `MindState` event;
+//! - the vendor thread id is the last `ThreadStarted` event — the flowloop's
 //!   resume handle;
 //! - the SSE broadcast is liveness only — a subscriber that lags resyncs from
 //!   the store.
@@ -50,7 +50,7 @@ use crate::wave::wire::{OpFrame, ResidentDelta, ResidentStateTo};
 /// of truth, so a dropped live turn is never lost.
 const TURN_BROADCAST_CAPACITY: usize = 256;
 
-/// Capacity of the live mind-state broadcast. Transitions are rare (a few per
+/// Capacity of the live flowloop-state broadcast. Transitions are rare (a few per
 /// turn); a lagged subscriber just resyncs from the next transition.
 const STATE_BROADCAST_CAPACITY: usize = 64;
 
@@ -133,7 +133,7 @@ pub enum InboxItem {
     Interrupt,
 }
 
-/// An atomic snapshot + live subscription over one wave: the thread and mind
+/// An atomic snapshot + live subscription over one wave: the thread and flowloop
 /// state as of one instant, plus receivers that carry exactly the frames sent
 /// after it (see [`WaveRuntime::subscribe_with_snapshot`]).
 #[derive(Debug)]
@@ -163,7 +163,7 @@ pub struct Subscription {
 }
 
 /// Everything that must stay mutually consistent: the journal (truth), the
-/// thread cache (fold of it), the open-turn snapshot, the mind state (last
+/// thread cache (fold of it), the open-turn snapshot, the flowloop state (last
 /// transition), and the vendor thread id (last `ThreadStarted`).
 #[derive(Debug)]
 struct Inner {
@@ -186,7 +186,7 @@ struct Inner {
     drop_deltas_until_opened: bool,
     state: MindState,
     thread_id: Option<String>,
-    /// Id of the mind's current or most recently committed assistant turn —
+    /// Id of the flowloop's current or most recently committed assistant turn —
     /// what `journal_steered` falls back to when the turn closed during the
     /// send (the thread's *last* turn at that point is usually the steer's
     /// own user turn, which must never be named as a consumer).
@@ -222,7 +222,7 @@ pub struct WaveRuntime {
     /// dot-descendants.
     channel_name: String,
     repo_root: PathBuf,
-    /// Journal + materialized thread + mind state, behind one lock so their
+    /// Journal + materialized thread + flowloop state, behind one lock so their
     /// orders never diverge.
     inner: Mutex<Inner>,
     /// Fans turn frames out to live SSE subscribers: open-turn snapshots as a
@@ -237,7 +237,7 @@ pub struct WaveRuntime {
     memory_tx: broadcast::Sender<String>,
     /// Fans `MemoryAdded` facts out to live SSE subscribers.
     memory_add_tx: broadcast::Sender<String>,
-    /// Durable shared brain (read-only here; the mind curates it deliberately).
+    /// Durable shared brain (read-only here; the flowloop curates it deliberately).
     memory: Memory,
     /// Fans resident-directed ops out to the resident's `/events?inbox=true`
     /// subscription and the supervisor. Liveness only — the journal's pending
@@ -245,7 +245,7 @@ pub struct WaveRuntime {
     inbox_tx: broadcast::Sender<InboxItem>,
     /// Whether a resident has ever been spawned for / attached to this
     /// listener. `/health` serves `mind: null` until then (a dormant channel
-    /// has no mind to report on).
+    /// has no flowloop to report on).
     resident_expected: AtomicBool,
     /// The channel family's child channels, materialized on demand. This
     /// server holds the pen for every one of them (single-writer per journal
@@ -270,7 +270,7 @@ impl WaveRuntime {
     /// Boot janitor: turns left open by a crash are finalized as `Failed`
     /// (appended to the journal, so the log itself is closed), the messages
     /// those turns had claimed are requeued (`MessagesRequeued` — a crashed
-    /// turn never answered them), and a non-idle mind state settles back to
+    /// turn never answered them), and a non-idle flowloop state settles back to
     /// `Idle`.
     ///
     /// # Errors
@@ -427,12 +427,12 @@ impl WaveRuntime {
         inner.thread.len() + usize::from(inner.open_turn.is_some())
     }
 
-    /// Current mind state, for `/health` and the composer.
+    /// Current flowloop state, for `/health` and the composer.
     pub fn mind_state(&self) -> MindState {
         self.inner().state.clone()
     }
 
-    /// The last journaled vendor thread id, if any — the mind's resume handle.
+    /// The last journaled vendor thread id, if any — the flowloop's resume handle.
     pub fn last_thread_id(&self) -> Option<String> {
         self.inner().thread_id.clone()
     }
@@ -574,7 +574,7 @@ impl WaveRuntime {
         self.inner().workers.iter().any(|w| w.run_id == run_id)
     }
 
-    /// Workers dispatched and not yet finished — folded into the mind's
+    /// Workers dispatched and not yet finished — folded into the flowloop's
     /// heartbeat seed as the `<in_flight>` section.
     pub fn in_flight_workers(&self) -> Vec<WorkerRecord> {
         self.inner()
@@ -589,7 +589,7 @@ impl WaveRuntime {
     //
     // The primary (wave) channel lives in `inner`, exactly as before —
     // mind-attached, hot path untouched. Child channels are pure streams
-    // (no mind, no memory), materialized on demand from their worktree
+    // (no flowloop, no memory), materialized on demand from their worktree
     // journals and folded separately; the family view folds upward through
     // the tagged `family_tx` bus. Consumption markers never cross journals.
 
@@ -638,9 +638,9 @@ impl WaveRuntime {
     /// appended (a bare interrupt).
     ///
     /// Fold-upward doctrine: a `say` on a child channel is a worker report —
-    /// the mind must hear it. The child journal keeps its record, AND the
+    /// the flowloop must hear it. The child journal keeps its record, AND the
     /// same speech lands on the primary channel attributed to the work line
-    /// ("[goals.148e] landed PR #42"), queued for the mind like any input;
+    /// ("[goals.148e] landed PR #42"), queued for the flowloop like any input;
     /// consumption is marked parent-side (it entered the parent's pending).
     pub fn deliver_to_channel(
         &self,
@@ -805,8 +805,8 @@ impl WaveRuntime {
         });
     }
 
-    /// Journal the vendor thread the mind runs on. The borrowed-handle rule:
-    /// this is the mind's first durable act, appended before its first turn.
+    /// Journal the vendor thread the flowloop runs on. The borrowed-handle rule:
+    /// this is the flowloop's first durable act, appended before its first turn.
     pub fn journal_thread_started(&self, vendor: &str, thread_id: &str) {
         let mut inner = self.inner();
         inner.journal.append(|_| EventKind::ThreadStarted {
@@ -816,7 +816,7 @@ impl WaveRuntime {
         inner.thread_id = Some(thread_id.to_string());
     }
 
-    /// Atomically snapshot the thread (including the open turn) and the mind
+    /// Atomically snapshot the thread (including the open turn) and the flowloop
     /// state, and subscribe to live frames for both. Every broadcast happens
     /// under the same lock as the append it reflects, so the receiver sees
     /// exactly the frames sent after this snapshot — no gap, no overlap, no
@@ -838,7 +838,7 @@ impl WaveRuntime {
         }
     }
 
-    /// Attempt a mind-state transition. Legal moves append a `MindState` event
+    /// Attempt a flowloop-state transition. Legal moves append a `MindState` event
     /// and apply; illegal moves are refused and logged — an illegal transition
     /// is a bug, never silently applied.
     pub fn transition(&self, to: MindState, reason: &str) -> bool {
@@ -882,7 +882,7 @@ impl WaveRuntime {
     /// the interrupt deadline expired with the resident silent, or the
     /// resident process died mid-turn. Journals `TurnFinished`, requeues what
     /// the turn had claimed (it never answered it), commits and broadcasts
-    /// the turn as accumulated so far, settles the mind to `Idle`, and arms
+    /// the turn as accumulated so far, settles the flowloop to `Idle`, and arms
     /// the drop guard: late wire deltas for the closed turn are ignored until
     /// the next `TurnOpened`. Returns whether there was an open turn to
     /// finalize.
@@ -913,7 +913,7 @@ impl WaveRuntime {
     /// `MessagesRequeued` and restore the pending fold, exactly what the fold
     /// replays. No live inbox re-broadcast — redelivery is the pending
     /// replay's job (the resident's next subscription), never a silent
-    /// double-send to a mind that may still hold its own copy.
+    /// double-send to a flowloop that may still hold its own copy.
     fn requeue_locked(&self, inner: &mut Inner, ids: &[MessageId]) {
         let restored = restore_pending(&mut inner.pending_messages, &inner.messages, ids);
         if restored.is_empty() {
@@ -938,10 +938,10 @@ impl WaveRuntime {
 
     /// Deliver one resident-directed op, uninterpreted by the caller: the
     /// door validates SHAPE (op names, text/`from` presence) and hands the op
-    /// here; what an op *means* lives in this runtime and the mind's
+    /// here; what an op *means* lives in this runtime and the flowloop's
     /// scheduler. A bare interrupt (empty text) journals nothing and appends
     /// no turn — `None`; every other delivery journals a `UserMessage`,
-    /// commits the user turn, and queues for the mind.
+    /// commits the user turn, and queues for the flowloop.
     pub fn deliver(
         &self,
         op: MessageOp,
@@ -957,7 +957,7 @@ impl WaveRuntime {
 
     /// Deliver a user message: append its `UserMessage` event (recording the
     /// op — intent), commit the user turn (id from the event's seq), and hand
-    /// it to the inbox for the mind's scheduler. Returns the stored user turn
+    /// it to the inbox for the flowloop's scheduler. Returns the stored user turn
     /// so the HTTP handler can echo it.
     pub fn deliver_user_message(&self, text: String, op: MessageOp) -> ChatTurn {
         self.deliver_message(text, op, None)
@@ -1005,8 +1005,8 @@ impl WaveRuntime {
     /// Record an already-finalized turn as its full event triple
     /// (`TurnStarted` + `TurnItem`s + `TurnFinished`) and commit it. Text
     /// becomes a `Message` item so the fold reproduces it. Does not touch the
-    /// mind state — this is for instantaneous turns (injected narration), not
-    /// mind turns.
+    /// flowloop state — this is for instantaneous turns (injected narration), not
+    /// flowloop turns.
     pub fn append_finalized_turn(&self, turn: ChatTurn, answers: Vec<MessageId>) -> ChatTurn {
         let mut inner = self.inner();
         let started = inner.journal.append(|seq| EventKind::TurnStarted {
@@ -1430,7 +1430,7 @@ mod tests {
         let rt = open_runtime(tmp.path());
         rt.append_finalized_turn(progress_turn("landed the parser"), Vec::new());
         // The journal carries raw history; MEMORY.md stays untouched until
-        // the mind curates it deliberately.
+        // the flowloop curates it deliberately.
         assert_eq!(rt.memory().read(), "");
     }
 
@@ -1454,7 +1454,7 @@ mod tests {
     }
 
     #[test]
-    fn deliver_say_journals_attribution_and_queues_for_the_mind() {
+    fn deliver_say_journals_attribution_and_queues_for_the_flowloop() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
         let mut rx = rt.subscribe_inbox();
@@ -1466,7 +1466,7 @@ mod tests {
         assert_eq!(turn.role, ChatRole::User);
         assert_eq!(turn.from.as_deref(), Some("worker"));
 
-        // Inbox: an attributed Say message the mind reacts to like any input.
+        // Inbox: an attributed Say message the flowloop reacts to like any input.
         let InboxItem::Message(msg) = rx.try_recv().expect("inbox item") else {
             panic!("expected a message inbox item");
         };
@@ -1638,7 +1638,7 @@ mod tests {
         assert_eq!(
             rt.mind_state().name(),
             "turning",
-            "mid-turn the mind is Turning"
+            "mid-turn the flowloop is Turning"
         );
         rt.apply_resident_delta(d_text("hello"));
         rt.apply_resident_delta(d_tool());
@@ -1829,7 +1829,7 @@ mod tests {
 
     /// Fold-upward doctrine: a `say` on a CHILD channel journals there AND
     /// lands on the primary channel's inbox as attributed speech, so the
-    /// mind's next turn can answer it. The child's own journal keeps its
+    /// flowloop's next turn can answer it. The child's own journal keeps its
     /// record; consumption is parent-side.
     /// Family membership compares against the SANITIZED wave name: a wave
     /// whose name sanitizes (`web/ui` → `web-ui`) mints `web-ui.<run>`
@@ -1995,7 +1995,7 @@ mod tests {
         let frame = frames.try_recv().expect("run-completed frame");
         assert_eq!(frame.turn.id, turn.id);
 
-        // Never queued for the mind (only UserMessage rows feed pending).
+        // Never queued for the flowloop (only UserMessage rows feed pending).
         assert!(rt.pending_messages().is_empty());
 
         // A restart folds the same turn back out of the journal, once.
@@ -2132,7 +2132,7 @@ mod tests {
     }
 
     /// A paused wave (GOAL.md `paused: true`) refuses to START a turn: the
-    /// TurnOpened is dropped, its would-be claims stay pending, and the mind
+    /// TurnOpened is dropped, its would-be claims stay pending, and the flowloop
     /// settles without a thread turn. Unpausing lets the next turn through.
     #[test]
     fn paused_wave_refuses_to_start_turns() {
@@ -2400,7 +2400,7 @@ mod tests {
         }
 
         // Consumption: the parent's queue holds its own message AND the
-        // forwarded report (so the mind answers it) — but NOT the plain
+        // forwarded report (so the flowloop answers it) — but NOT the plain
         // `message` to ship.b, which never folds up.
         let rt2 = WaveRuntime::open("ship".into(), origin.clone()).expect("reopen");
         let pending = rt2.pending_messages();

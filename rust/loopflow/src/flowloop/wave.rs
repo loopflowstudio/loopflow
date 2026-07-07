@@ -36,7 +36,7 @@
 //! # Failure
 //! A failed pass (spawn failure, nonzero exit, timeout) finishes its turn
 //! `Failed` and returns the flowloop to idle.
-//! [`MAX_CONSECUTIVE_TURN_FAILURES`] consecutive failures FAIL THE FLOWLOOP:
+//! [`MAX_CONSECUTIVE_PASS_FAILURES`] consecutive failures FAIL THE FLOWLOOP:
 //! the resident reports `MindState::Failed` over the wire and
 //! [`run_flowloop`] returns an error — the process exits nonzero and the
 //! LISTENER's supervisor owns revival (the process-level respawn ladder; a
@@ -73,9 +73,9 @@ use crate::wave::wire::{InFlightWorker, ResidentDelta, ResidentStateTo};
 /// the wave the rest of the time.
 pub const HEARTBEAT_IDLE: Duration = Duration::from_secs(4 * 60 * 60);
 
-/// Consecutive failed turns before the mind itself is declared failed and
+/// Consecutive failed turns before the flowloop itself is declared failed and
 /// the resident exits (the listener's supervisor revives by respawning).
-pub const MAX_CONSECUTIVE_TURN_FAILURES: u32 = 3;
+pub const MAX_CONSECUTIVE_PASS_FAILURES: u32 = 3;
 
 /// How far back a never-fired (or long-idle) cron schedule is checked: an
 /// occurrence within this window still fires; anything older is missed, not
@@ -94,7 +94,7 @@ const IN_FLIGHT_TASK_CHARS: usize = 80;
 
 /// The heartbeat nudge, plus a compact `<in_flight>` section when workers are
 /// grinding: one line per dispatched-not-finished worker, from the listener's
-/// `GET /resident/context` — the mind's orchestration turns see their workers
+/// `GET /resident/context` — the flowloop's orchestration turns see their workers
 /// without re-reading transcripts.
 pub fn heartbeat_prompt(workers: &[InFlightWorker]) -> String {
     if workers.is_empty() {
@@ -118,7 +118,7 @@ pub fn heartbeat_prompt(workers: &[InFlightWorker]) -> String {
 // -- Cron: the third deadline ------------------------------------------------
 
 /// The wave's cron lines, re-read from GOAL.md frontmatter on every deadline
-/// computation — editing the file reschedules a live mind, no restart.
+/// computation — editing the file reschedules a live flowloop, no restart.
 fn read_crons(origin_repo: &Path, wave: &str) -> Vec<WaveCronDef> {
     read_wave_config(origin_repo, wave)
         .and_then(|config| config.crons)
@@ -144,7 +144,7 @@ fn next_cron_fire(
     schedule.after(&check_from).next()
 }
 
-/// The system turn a due schedule opens — the mind dispatches the flow with
+/// The system turn a due schedule opens — the flowloop dispatches the flow with
 /// judgment, exactly like it acts on a heartbeat nudge.
 pub(crate) fn cron_prompt(due: &[WaveCronDef]) -> String {
     due.iter()
@@ -175,7 +175,7 @@ impl Default for FlowloopConfig {
     }
 }
 
-/// PATH for the mind's harness and every child the resident spawns: this
+/// PATH for the flowloop's harness and every child the resident spawns: this
 /// executable's directory first, so placed `lf` commands resolve to the binary
 /// running this resident, never whatever `lf` the user's shell happens to find.
 pub fn path_for_children() -> OsString {
@@ -206,7 +206,7 @@ fn wave_pass_seed(origin_repo: &Path, wave: &str, wake: &str) -> String {
 }
 
 /// The wave's rendered `GOAL.md` plus current memory, or a minimal-but-real
-/// fallback when there's no `GOAL.md` so the mind still has an identity.
+/// fallback when there's no `GOAL.md` so the flowloop still has an identity.
 fn build_goal_seed(repo: &Path, wave: &str, memory: &Memory) -> String {
     match load_goal(wave, repo) {
         Ok(goal) => {
@@ -231,13 +231,13 @@ fn build_goal_seed(repo: &Path, wave: &str, memory: &Memory) -> String {
     }
 }
 
-/// The coordinating-session discipline, promoted into the mind's system
-/// prompt: the mind orchestrates, it never grinds inline. Mind-specific rules
+/// The coordinating-session discipline, promoted into the flowloop's system
+/// prompt: the flowloop orchestrates, it never grinds inline. Mind-specific rules
 /// only — shared loopflow operating guidance is appended in
 /// [`wave_pass_seed`], not duplicated here.
 fn orchestration_discipline(wave: &str) -> String {
     format!(
-        "You are the mind of the '{wave}' wave — its long-running orchestrator.\n\
+        "You are the flowloop of the '{wave}' wave — its long-running orchestrator.\n\
          Discipline:\n\
          - Never grind inline. Read state, decide, dispatch work to subagents \
          via `lf <flow> \"<task>\" --wave {wave} --dispatch` (use \
@@ -574,9 +574,9 @@ impl WaveFlowloop {
         .await;
         self.idle_since = Instant::now();
         self.consecutive_failures += 1;
-        if self.consecutive_failures >= MAX_CONSECUTIVE_TURN_FAILURES {
+        if self.consecutive_failures >= MAX_CONSECUTIVE_PASS_FAILURES {
             self.fail(&format!(
-                "{MAX_CONSECUTIVE_TURN_FAILURES} consecutive wave-pass failures: {reason}"
+                "{MAX_CONSECUTIVE_PASS_FAILURES} consecutive wave-pass failures: {reason}"
             ))
             .await;
         }
@@ -1110,7 +1110,7 @@ mod tests {
             "{reason}"
         );
         assert!(
-            loop_.pass_count() >= MAX_CONSECUTIVE_TURN_FAILURES as usize,
+            loop_.pass_count() >= MAX_CONSECUTIVE_PASS_FAILURES as usize,
             "the cap took the full ladder"
         );
 

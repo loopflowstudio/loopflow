@@ -25,6 +25,13 @@ uv run python scripts/test.py
 
 Changed-aware validation selected Rust and website suites: 1248 Rust tests passed under nextest, then 61 website tests passed with 3 skipped.
 
+Full matrix validation with `uv run python scripts/test.py --all` passed Python,
+Rust, website, Swift package tests, and e2e smoke before failing in Concerto's
+macOS UI runner. Re-running Concerto with isolated DerivedData built the app and
+reported the non-UI Swift suites passing, then failed to bootstrap
+`ConcertoUITests-Runner` with `Early unexpected exit, operation never finished
+bootstrapping`.
+
 ## Intent
 
 This turns flowloop into the shared substrate for long-running agent work. Task, project, and wave tiers now use the same bounded pass pattern: the agent chooses moves inside each pass, while GitHub, Linear, or the wave's never-stop rule decide whether the loop is done.

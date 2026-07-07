@@ -1,8 +1,8 @@
-//! The resident: the wave's mind as its own `lf` process.
+//! The resident: the wave's flowloop as its own `lf` process.
 //!
 //! `lf wave <name> --flowloop-only` runs here. The resident owns everything
 //! vendor-shaped — the conversations harness, the scheduler
-//! ([`crate::wave::mind`]), the rendered GOAL.md seed — and NOTHING
+//! ([`crate::flowloop::wave`]), the rendered GOAL.md seed — and NOTHING
 //! pen-shaped: it never touches a journal file. Its two connections to the
 //! listener are the whole protocol (see [`crate::wave::wire`]):
 //!
@@ -13,7 +13,7 @@
 //!
 //! The worktree bootstrap lives HERE now (it moved out of the listener): the
 //! resident ensures and enters the wave's `<repo>.<wave>` sibling worktree —
-//! the mind never runs in the main checkout — while the listener serves from
+//! the flowloop never runs in the main checkout — while the listener serves from
 //! the origin repo.
 //!
 //! # Lifecycle
@@ -21,7 +21,7 @@
 //! token in env, or attached by hand against the discovery files. On listener
 //! death the subscription ends and the resident exits cleanly — its keeper is
 //! gone; whether anything restarts the pair is the human's arrangement
-//! (tmux, systemd). On mind failure the resident reports
+//! (tmux, systemd). On flowloop failure the resident reports
 //! `MindState::Failed` over the wire and exits nonzero — the listener's
 //! supervisor owns the respawn ladder.
 
@@ -32,13 +32,11 @@ use anyhow::{anyhow, bail, Context, Result};
 use tokio::sync::mpsc;
 
 use crate::engine::repo::find_repo_root;
-use crate::engine::wave_config::read_wave_config;
 use crate::engine::worktrees::{ensure_wave_worktree, main_repo_root};
-use crate::harness::canonical_harness;
+use crate::flowloop::wave::{path_for_children, run_flowloop, FlowloopConfig};
 use crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV;
 use crate::ops::util::resolve_wave_name;
 use crate::wave::journal::{MessageId, PendingMessage};
-use crate::wave::mind::{path_for_children, run_flowloop, FlowloopConfig};
 use crate::wave::runtime::InboxItem;
 use crate::wave::server;
 use crate::wave::subscription::stream_events;
@@ -48,7 +46,7 @@ use crate::wave::wire::{
 };
 
 /// `lf wave <name> --flowloop-only`: attach to the wave's live listener and be
-/// its mind until one of us dies.
+/// its flowloop until one of us dies.
 pub fn run(name: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
@@ -63,10 +61,10 @@ pub fn run(name: &str) -> Result<()> {
     )?;
 
     // Worktree bootstrap (moved here from the listener): ensure and enter
-    // the wave's worktree — the mind never runs in the main checkout.
-    let mind_cwd = wave_worktree(&main_repo, &wave)?;
-    if std::env::current_dir().ok().as_deref() != Some(mind_cwd.as_path()) {
-        std::env::set_current_dir(&mind_cwd)?;
+    // the wave's worktree — the flowloop never runs in the main checkout.
+    let flowloop_cwd = wave_worktree(&main_repo, &wave)?;
+    if std::env::current_dir().ok().as_deref() != Some(flowloop_cwd.as_path()) {
+        std::env::set_current_dir(&flowloop_cwd)?;
     }
     // Every child of this resident — the harness and anything it shells out
     // to — must resolve `lf` to the binary running this resident, not an
@@ -76,22 +74,22 @@ pub fn run(name: &str) -> Result<()> {
     println!(
         "lf wave · {wave} · resident flowloop · listener http://{endpoint} \
          · worktree {}",
-        mind_cwd.display()
+        flowloop_cwd.display()
     );
 
     let config = FlowloopConfig::default();
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(drive(
         ListenerClient::new(endpoint, token),
-        mind_cwd,
+        flowloop_cwd,
         main_repo,
         wave,
         config,
     ))
 }
 
-/// Attach, subscribe, and run the mind until the listener disappears (clean
-/// end) or the mind fails (error — the process exits nonzero and the
+/// Attach, subscribe, and run the flowloop until the listener disappears (clean
+/// end) or the flowloop fails (error — the process exits nonzero and the
 /// listener's supervisor takes it from there).
 pub async fn drive(
     client: ListenerClient,
@@ -163,24 +161,11 @@ fn resolve_attachment(
     Ok((endpoint, token))
 }
 
-/// The mind vendor, from `mind:` in the wave's GOAL.md frontmatter; codex
-/// when unset. An unknown name is an error, not a silent fallback.
-pub fn resolve_mind_vendor(origin: &Path, wave: &str) -> Result<String> {
-    let configured = read_wave_config(origin, wave).and_then(|config| config.mind);
-    let name = configured.unwrap_or_else(|| "codex".to_string());
-    canonical_harness(&name).map(str::to_string).ok_or_else(|| {
-        anyhow!(
-            "wave '{wave}' GOAL.md names an unknown mind vendor '{name}' \
-             (known: codex, claude, opencode)"
-        )
-    })
-}
-
 /// Follow the wave's `/events?inbox=true` stream, handing every inbox frame
-/// to the mind. One connection, no reconnect: when the stream ends the
+/// to the flowloop. One connection, no reconnect: when the stream ends the
 /// KEEPER is gone (shutdown, crash, or a restart that minted a new token) and
-/// this resident's tenancy is over — dropping `inbox_tx` closes the mind's
-/// inbox, which ends [`run_mind`] cleanly.
+/// this resident's tenancy is over — dropping `inbox_tx` closes the flowloop's
+/// inbox, which ends [`run_flowloop`] cleanly.
 pub async fn follow_inbox(endpoint: String, inbox_tx: mpsc::UnboundedSender<InboxItem>) {
     let result = stream_events(&endpoint, "?inbox=true", &mut |frame| {
         if frame.event != "inbox" {
@@ -399,29 +384,6 @@ mod tests {
         assert_eq!(token, "tok-env");
     }
 
-    #[test]
-    fn resolve_mind_vendor_reads_goal_frontmatter() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let dir = tmp.path().join("wave/ship");
-        std::fs::create_dir_all(&dir).unwrap();
-
-        // No GOAL.md at all: codex.
-        assert_eq!(resolve_mind_vendor(tmp.path(), "ship").unwrap(), "codex");
-
-        // GOAL.md without mind: codex.
-        std::fs::write(dir.join("GOAL.md"), "---\nworkers: 1\n---\nShip.\n").unwrap();
-        assert_eq!(resolve_mind_vendor(tmp.path(), "ship").unwrap(), "codex");
-
-        // mind: selects the harness (canonicalized).
-        std::fs::write(dir.join("GOAL.md"), "---\nmind: Claude\n---\nShip.\n").unwrap();
-        assert_eq!(resolve_mind_vendor(tmp.path(), "ship").unwrap(), "claude");
-
-        // An unknown vendor is an error, never a silent fallback.
-        std::fs::write(dir.join("GOAL.md"), "---\nmind: hal9000\n---\nShip.\n").unwrap();
-        let err = resolve_mind_vendor(tmp.path(), "ship").expect_err("unknown vendor");
-        assert!(err.to_string().contains("hal9000"), "{err}");
-    }
-
     /// The retry ladder: transient errors retry through the delays; fatal
     /// errors (the listener answered and refused) stop on the first attempt;
     /// exhausted transients give up after every rung.
@@ -532,7 +494,7 @@ mod tests {
     }
 
     /// The resident self-bootstraps the wave's `<repo>.<wave>` sibling
-    /// worktree: created on first boot, reused after — the mind never runs in
+    /// worktree: created on first boot, reused after — the flowloop never runs in
     /// the main checkout. (This moved here from the listener, which now
     /// serves from the origin repo.)
     #[test]

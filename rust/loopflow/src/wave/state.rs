@@ -1,17 +1,17 @@
-//! The mind's state machine.
+//! The flowloop's state machine.
 //!
-//! This machine is about the MIND only: workers grinding in the background are
-//! not a mind state (wave-level display is derived from `(mind_state,
-//! workers_in_flight)`). A failed *turn* is `TurnFinished { status: Failed }`
-//! and the mind returns to `Idle`; [`MindState::Failed`] is reserved for the
-//! mind itself (thread dead, retries exhausted).
+//! This machine is about the FLOWLOOP only: workers grinding in the
+//! background are not a flowloop state (wave-level display is derived from
+//! `(mind_state, workers_in_flight)`). A failed *pass* is
+//! `TurnFinished { status: Failed }` and the flowloop returns to `Idle`;
+//! [`MindState::Failed`] is reserved for the flowloop itself (consecutive
+//! pass failures — see [`crate::flowloop::wave`]).
 //!
-//! `Failed` is produced by the mind's scheduler (consecutive-failure cap or a
-//! terminal harness error — see [`super::mind`]); `Failed → Idle` fires when
-//! a user message revives the mind. `Interrupting` is produced by a user
-//! interrupt op (`Turning → Interrupting`, cooperative cancel) and is
-//! deadline-bounded: the mind's janitor force-finalizes the turn if the
-//! harness never delivers its terminal event (see `mind::INTERRUPT_DEADLINE`).
+//! `Failed → Idle` fires when a user message revives the flowloop.
+//! `Interrupting` is produced by a user interrupt op
+//! (`Turning → Interrupting`): the flowloop kills the pass child and
+//! finalizes the turn `Interrupted`; the listener's janitor
+//! (`supervisor::LISTENER_INTERRUPT_DEADLINE`) covers a resident gone silent.
 //!
 //! Transitions go through [`can_transition`]; an illegal move is a bug —
 //! logged and refused by the caller (see `WaveRuntime::transition`), never
@@ -20,18 +20,18 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Current state of the wave's mind. Serialized into journal `MindState`
+/// Current state of the wave's flowloop. Serialized into journal `MindState`
 /// events; internal persistence, not a wire DTO.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum MindState {
-    /// Thread alive, no turn in flight.
+    /// No pass in flight.
     Idle,
     /// One turn generating / tool-calling.
     Turning { turn_id: String },
     /// Cancel fired; cooperative → grace → kill.
     Interrupting { turn_id: String },
-    /// The mind itself is dead (retries exhausted); algedonic.
+    /// The flowloop itself is dead (retries exhausted); algedonic.
     Failed { reason: String },
 }
 
@@ -51,10 +51,10 @@ impl MindState {
 ///
 /// - `Idle → Turning`: a turn opens.
 /// - `Turning → Idle`: the turn finalized (completed, failed, or interrupted —
-///   turn failure is a `TurnFinished` status, not a mind failure).
+///   turn failure is a `TurnFinished` status, not a flowloop failure).
 /// - `Turning → Interrupting`: cancel fired for the *same* turn.
 /// - `Interrupting → Idle`: the interrupted turn finalized.
-/// - any live state `→ Failed`: the mind died.
+/// - any live state `→ Failed`: the flowloop died.
 /// - `Failed → Idle`: recovery (restart janitor / thread respawn).
 pub fn can_transition(from: &MindState, to: &MindState) -> bool {
     use MindState::*;

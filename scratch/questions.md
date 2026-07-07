@@ -1,12 +1,13 @@
 # Open assumptions
 
-- `lf task <linear-item-id>` is the public command. The three-phase flow is named
-  `task-pass` so it does not collide with the top-level `task` subcommand.
-- The v1a runner uses the existing wave registry for worker placement. A wave
-  must be registered before `lf task` can create its worker worktree.
-- Run 2 first draft implements the shared pass/oracle runtime, task refit,
-  project KR driver, Linear label reads, and the project/wave pass skills. The
-  live wave scheduler still runs through `wave/mind.rs`; replacing that resident
-  turn with `wave-pass` and doing the full mind-to-flowloop wire rename remains
-  the next slice because it crosses the listener, supervisor, DTO fixtures, and
-  Swift mirrors.
+- `lf task <linear-item-id>` is the public command; the three-phase flow is
+  named `task-pass` to avoid colliding with the subcommand. A wave must be
+  registered before `lf task` can place its worktree.
+- KR set = items labeled `kr` in the wave's Linear project; an empty set
+  refuses to start rather than reading as done. Richer KR representation is
+  deferred to project-tier wiring.
+- Wave conversion (`scratch/wave-conversion.md`) executive calls awaiting
+  review, not blocking: `HEARTBEAT_IDLE` → 4h for pass-based waves; the
+  thread reply is the `wave_mutate` phase's final text (builder verifies what
+  `lf -b` emits); `MindState` → `FlowloopState` DTO rename may split into an
+  immediate follow-up PR — the only permitted deferral.

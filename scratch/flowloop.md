@@ -173,7 +173,7 @@ Shared contracts (all non-wave flowloops):
 ## 4. Decisions locked
 
 1. **Flowloop is the noun; "mind" is retired — everywhere in the code.**
-   Renames land in run 2 (see `scratch/flowloop-run2.md` §3):
+   Renames land with the wave conversion (see `scratch/wave-conversion.md`):
    `wave/mind.rs` → `flowloop/wave.rs`, `run_mind` → `run_flowloop`,
    `MindEnd` → `FlowloopEnd`, `MindConfig` → `FlowloopConfig`, plus the
    comment/doc sweep; `MindState` (wire DTO) may split into a follow-up.
@@ -204,13 +204,17 @@ via `Submit`, terminates on the `gh` oracle, worktree self-prunes. Bounded:
 attempt/budget caps, **waiting ≠ thrashing**, non-convergence fingerprint,
 Blocked-exit escalates via `lf chat --parent`.
 
-Build order: **v1a** happy path (shipped: `lf task` + `flowloop/task.rs`) →
-**run 2** the runtime itself — tier-generic `flowloop/` module, the wave
-converted to run as a flowloop, the project tier built (unwired), the
-mind→flowloop rename sweep; see `scratch/flowloop-run2.md` → **v1b** fix loop
-(CI/rebase/review) → **v1c** unattended hardening → **v1d** surfacing (chat to
-the task flowloop; its execs visible as attachable tmux sessions; phase runs
-invisible).
+Build order:
+- **v1a** happy path — **shipped**: `lf task` + `flowloop/task.rs`.
+- **runtime** — **shipped**: tier-generic `flowloop/` (Tier, `run_pass`,
+  oracles, `FlowloopRun`), project driver + KR oracle (unwired), the full 3×3
+  skill matrix.
+- **wave conversion** — **NEXT MILESTONE**, `scratch/wave-conversion.md`: the
+  wave's turn becomes a `wave-pass` child (scheduler and chat shell stay) +
+  the mind→flowloop rename sweep. Nothing else rides this slice.
+- **v1b** fix loop (CI/rebase/review) → **v1c** unattended hardening →
+  **v1d** surfacing (chat to the task flowloop; its execs visible as
+  attachable tmux sessions; phase runs invisible).
 
 **v2+:** project tier wiring (the wave spawns projects; `lf project` or
 equivalent); chat review checkpoints; prod-verification oracle;

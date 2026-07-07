@@ -7,34 +7,38 @@ lf task <linear-item-id> --wave designer --max-passes 4 --wall-clock-secs 3600 -
 
 The command resolves the Linear item from the wave roadmap, creates a run-scoped worker worktree, runs bounded `task-pass` cycles, waits for the PR to merge, then comments the PR link on the Linear item and marks it done.
 
+Project flowloops are built as a library tier for the next wave-spawn slice. They read kr-labeled Linear items, run `project-pass` while any KR is open, and refuse to start when the KR set is empty.
+
 Validation:
 
 ```bash
+git diff --check main...HEAD
 cargo fmt --check
-cargo clippy -- -D warnings
-uv run python scripts/test.py
+cargo clippy -p loopflow -- -D warnings
+cargo test -p loopflow flowloop --no-fail-fast
+cargo test -p loopflow derived_tables_cover_commands_flags_and_aliases --no-fail-fast
+cargo run -q -p loopflow --bin lf -- task fake --max-turns 20 --help
+uv run python scripts/test.py --list
 ```
 
-Changed-aware validation ran Rust and website suites. Rust: `cargo nextest run --all` with 1,243 passed and 3 skipped. Website: 61 passed and 3 skipped.
-
-Full matrix: Python, Rust, website, Swift package, and e2e passed. Concerto failed outside this branch's touched surface: `KeyboardRouterTests.swift` chord-timeout assertion, multiple `VoiceInputServiceTests.swift` `.modelPreparationTimedOut` failures, and `ConcertoUITests-Runner` exited before bootstrapping.
+Changed-aware validation from `scripts/test.py --list` selects Rust and website suites for this branch.
 
 ## Intent
 
-This lands v1a of the task flowloop: one unattended command for turning a Linear roadmap item into a small PR lifecycle, with deterministic termination based on GitHub merge state instead of an agent claiming completion.
+This turns flowloop from a one-off task runner into a shared tier substrate. Tasks and projects now use the same pass runner, run lifecycle, and deterministic oracle pattern: the agent chooses moves inside each pass, while GitHub or Linear decides whether the loop is done.
 
 ## Assumptions
 
-The wave is already registered in the local run registry and has PM frontmatter pointing at a Linear project. GitHub CLI auth and Linear PM auth are available. Human-gated merge remains the default: `task_mutate` submits the PR, and the runner exits only after GitHub reports it merged.
+Waves are registered in the local run registry before task/project flowloops start. The PM provider is Linear, roadmap items expose labels, and GitHub CLI plus Linear auth are available locally. Human-gated merge remains the default for `lf task`: the runner exits only after GitHub reports the PR merged.
 
 ## Key decisions
 
-The task flowloop is a thin Rust runner outside the existing wave mind and outside the generic flow loop. Each pass is just `lf -b task-pass`, while Rust owns worktree placement, bounds, PR polling, run status, and Linear closeout.
+Tier behavior lives in builtin step text, not Rust branching. Rust binds each tier to a pass flow and oracle, then enforces bounds and records state.
 
-Bounds are explicit because `-b` means batch, not budget: max passes, per-pass timeout, wall-clock timeout, and optional `--max-turns`.
+The project KR oracle uses a `kr` Linear label for this slice. Empty KR sets fail fast because "no KRs" is an unclear project, not a completed one.
 
-Clean open PRs wait without consuming a pass. That keeps "waiting for merge" separate from "try another agent pass."
+Clean open task PRs wait without consuming another pass. Waiting for a human merge should not look like failed agent progress.
 
 ## Not included
 
-No project tier, wave-tier conversion, prod verification, budget accounting, or CI/review fix loop. v1a escalates on caps; smarter repair behavior is later flowloop hardening.
+This does not replace the live wave resident turn with `wave-pass`, rename the `MindState` wire surface, add `lf project`, or implement CI/review repair loops. Those are follow-on slices now that the shared runtime exists.

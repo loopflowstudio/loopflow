@@ -52,5 +52,14 @@ No project tier, wave-tier conversion, budget accounting, prod verification orac
 - `cargo test -p loopflow load_flow_finds_all_builtins --no-fail-fast`
 - `uv run python scripts/test.py --list`
 - `uv run python scripts/test.py`
+- `uv run python scripts/test.py --all`
 
 Changed-aware validation ran Rust and website suites. Rust ran `cargo nextest run --all`: 1,243 passed, 3 skipped. Website ran `cd website && uv run python dev.py test`: 61 passed, 3 skipped.
+
+Full-matrix validation passed Python, Rust, website, Swift package, and e2e. Concerto failed in the existing Swift/Concerto test surface:
+
+- `KeyboardRouterTests.swift`: `Chord timeout cancels pending chord`
+- `VoiceInputServiceTests.swift`: multiple tests timed out with `.modelPreparationTimedOut`
+- `ConcertoUITests-Runner`: early unexpected exit before bootstrapping
+
+No Swift or Concerto files changed in this branch.

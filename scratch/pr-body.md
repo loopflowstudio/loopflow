@@ -17,6 +17,8 @@ uv run python scripts/test.py
 
 Changed-aware validation ran Rust and website suites. Rust: `cargo nextest run --all` with 1,243 passed and 3 skipped. Website: 61 passed and 3 skipped.
 
+Full matrix: Python, Rust, website, Swift package, and e2e passed. Concerto failed outside this branch's touched surface: `KeyboardRouterTests.swift` chord-timeout assertion, multiple `VoiceInputServiceTests.swift` `.modelPreparationTimedOut` failures, and `ConcertoUITests-Runner` exited before bootstrapping.
+
 ## Intent
 
 This lands v1a of the task flowloop: one unattended command for turning a Linear roadmap item into a small PR lifecycle, with deterministic termination based on GitHub merge state instead of an agent claiming completion.

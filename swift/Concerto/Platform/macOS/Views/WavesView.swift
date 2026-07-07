@@ -65,7 +65,7 @@ struct WavesView: View {
 
     /// lfd's live waves for a repo, plus idle placeholders for any authored wave
     /// (a `<repo>/wave/<name>/GOAL.md` on disk) that isn't already live. Sorted
-    /// running-first, then by name.
+    /// attention-first, then by name.
     private func mergedWaves(for repo: PortfolioRepo) -> [WaveViewModel] {
         let live = repoStates[repo.path]?.waves ?? []
         let liveNames = Set(live.map(\.name))
@@ -93,9 +93,9 @@ struct WavesView: View {
 
     private static func statusPriority(_ status: WaveStatus) -> Int {
         switch status {
-        case .running: 0
+        case .failed: 0
         case .waiting: 1
-        case .failed: 2
+        case .running: 2
         case .paused: 3
         case .idle: 4
         }

@@ -144,9 +144,9 @@ final class PortfolioRepoState {
 
     private static func statusPriority(_ status: WaveStatus) -> Int {
         switch status {
-        case .running: 0
+        case .failed: 0
         case .waiting: 1
-        case .failed: 2
+        case .running: 2
         case .paused: 3
         case .idle: 4
         }

@@ -13,6 +13,10 @@ authored-on-disk placeholder rows. The Concerto wave charter was also restarted
 onto the objective-only GOAL.md shape, with five live project files carrying the
 measures that used to live in the charter.
 
+The wave list now sorts by attention priority (`failed`, `waiting`, `running`,
+then idle), matching the wave's navigation goal that blocking work must not be
+buried behind healthy running sessions.
+
 ## Key choices
 
 - Keep slice 1 local and file-first. The parser reads the wave directory
@@ -56,12 +60,18 @@ surface: plan on the left, live WaveChat on the right.
 
 - `swift test --package-path swift -Xswiftc -gnone --filter WavePlanParserTests`
   passed: 3 tests.
+- `swift test --package-path swift -Xswiftc -gnone --filter PortfolioRepoStateTests`
+  passed: 6 tests, including the attention-priority sort.
 - `uv run python scripts/test.py` passed changed-aware validation: Swift package
   suite, 304 tests.
 - `cd swift && xcodegen generate` passed.
-- `xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`
-  built and ran 309 passing tests, then failed because `ConcertoUITests-Runner`
-  exited early before bootstrapping XCTest in the headless environment.
+- First `xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`
+  hit stale DerivedData (`can't write output file` for `ConcertoUITests`).
+  `xcodebuild clean -project LoopflowSwift.xcodeproj -scheme Concerto` passed.
+- Retried `xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`:
+  built and ran 5 XCTest tests plus 304 Swift Testing tests, then failed because
+  `ConcertoUITests-Runner` exited early before bootstrapping XCTest in the
+  headless environment.
 - `cargo fmt --check` passed.
 - `cargo clippy -- -D warnings` passed.
 - `cargo test --all` passed.

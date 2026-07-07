@@ -41,6 +41,22 @@ struct PortfolioRepoStateTests {
         #expect(state.waves.map(\.id) == ["mine"])
     }
 
+    @Test("waves sort by attention priority")
+    func wavesSortByAttentionPriority() {
+        let repoURL = URL(fileURLWithPath: "/tmp/portfolio-priority")
+        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
+        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
+
+        state.applyConnectedWaves([
+            makeWave(id: "running", repoPath: repo.path, status: .running, diffStat: nil),
+            makeWave(id: "idle", repoPath: repo.path, status: .idle, diffStat: nil),
+            makeWave(id: "waiting", repoPath: repo.path, status: .waiting, diffStat: nil),
+            makeWave(id: "failed", repoPath: repo.path, status: .failed, diffStat: nil),
+        ])
+
+        #expect(state.waves.map(\.id) == ["failed", "waiting", "running", "idle"])
+    }
+
     @Test("wave agent session name mirrors lf tmux handle")
     func waveAgentSessionNameMirrorsLfTmuxHandle() {
         let name = PortfolioRepoState.waveAgentSessionName(

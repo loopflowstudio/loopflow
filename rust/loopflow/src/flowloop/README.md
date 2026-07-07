@@ -1,10 +1,11 @@
 # flowloop — the runtime for everything agentic
 
-A **flowloop** is a flow that is looped: the flow
-`clarify → pursue_goal → mutate`, repeated until a deterministic oracle says
-stop. The agent decides it is done — its skill states exactly how — but the
-decision only counts by **setting a bit in the world** (merging the PR,
-completing the KRs), never by self-report. The runner just checks the bit.
+A **flowloop** is a looping flow: `clarify → pursue_goal → mutate`, run
+again and again. The agent has **write access to a termination bit** —
+the merged PR, the completed KR set — and its skill states exactly how to
+decide when to set it. At the end of each pass the runner checks the bit and
+exits the loop when it reads set. Self-report counts for nothing; only the
+bit does.
 
 ```
 lf task <linear-item-id>     # run one roadmap task to a merged PR, bounded

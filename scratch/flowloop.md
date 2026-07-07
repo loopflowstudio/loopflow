@@ -5,10 +5,11 @@ The consolidated design from the 2026-07-06/07 sessions. Supersedes
 `worker-build-brief.md` and the recovered `wave/DATAMODEL.md` (#818). This is the
 single doc to build from.
 
-**Vocabulary:** a **flowloop** is *a flow that is looped* — the flow
-`clarify → pursue_goal → mutate`, repeated until its terminate arm fires. Every
-agentic long-running thing in loopflow is a flowloop; "mind" is retired as a
-noun (code renames in §4.1).
+**Vocabulary:** a **flowloop** is *a looping flow* —
+`clarify → pursue_goal → mutate`, run again and again. The agent has write
+access to a termination bit; the runner checks it at the end of each pass and
+exits when it reads set. Every agentic long-running thing in loopflow is a
+flowloop; "mind" is retired as a noun (code renames in §4.1).
 
 ---
 
@@ -18,7 +19,8 @@ Everything agentic is the **same flowloop runtime**. Flowloops differ on exactly
 **two axes**:
 
 1. **Ownership** — which concrete artifact/PM unit it owns and clarifies.
-2. **Stop-condition** — a **deterministic, non-agent oracle** that decides the halt.
+2. **Stop-condition** — a **termination bit** the agent has write access to,
+   deterministically checked at the end of each pass.
 
 The tiers form an OKR decomposition:
 
@@ -102,9 +104,9 @@ vague to compute from fixes the artifact before inventing downstream work — an
 escalating that to a human is just `clarify()` choosing the interactive branch.
 
 **Implementation & surfacing (decided):**
-- **A flowloop is a flow that is looped** — the flow (loopflow's existing
+- **A flowloop is a looping flow** — the flow (loopflow's existing
   primitive: a sequence of steps/skills) `clarify → pursue_goal → mutate`,
-  repeated until `mutate()`'s terminate arm fires. Each phase is a skill executed
+  repeated until the termination bit reads set at the pass boundary. Each phase is a skill executed
   **with `-b`** (budget/time-bounded, headless). The one new primitive is
   *loop-a-flow-until-terminator* — everything else is existing flow machinery.
   Nuance vs §7: what stays rejected is a Rust *move policy*; the flow
@@ -244,7 +246,7 @@ merge-queue batching/backoff, poison-PR dead-letter.
   root PR contains its whole subtree (gigantic top merges). Deferred opt-in;
   the project tier makes it unnecessary as a default.
 - **"Mind" as the noun** (and the interim `run_loop` idea) — settled on
-  **flowloop**: a flow that is looped.
+  **flowloop**: a looping flow.
 - **Raw-session attach as the task's HITL surface** — explored (the
   wave-chat/worker-session inversion), superseded: **chat is the interface to
   every flowloop; only execs are attachable tmux sessions.**

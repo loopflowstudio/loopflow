@@ -179,9 +179,29 @@ The spine Concerto builds toward (Jack, this session):
   implementation" law at the daemon layer; kills the two-code-path / three-mirror
   drift the DTO rule fights; shrinks local-vs-remote to "which lfd proxies."
 
-Scope boundary for this branch: build the viewer *toward* this (reads via `lf`,
-live via pubsub) — we do **not** migrate lfd's existing executor into `lf` here.
-That collapse is its own effort; flag, don't do it in the viewer branch.
+**The infra already moved; this branch is Swift catching up.** (Jack: "the infra
+is already going that direction, but we haven't really redone Swift's code to
+match.") The primitives exist on the Rust side:
+
+- `lf runs` (`lf/commands/runs.rs`) — `RunSummary`, trace, event-folding. The
+  daemon-less runs query is already there.
+- `lf sub` (`lf/commands/sub.rs`) — the pubsub subscribe (live events until
+  killed).
+- lfd exec door (`http/routes/exec.rs`, #825).
+
+Swift is one generation behind: `LocalWaveService` = *"load Wave and Run data
+from lfd daemon (HTTP)"* — `GET /waves` against `baseURL`, the old lfd-is-the-API
+model, on the old `goal`/`metrics` `Wave`; its `shellCommandRunner` hook sits
+unused. The gap to close:
+
+| | infra (there) | Swift (old) |
+|---|---|---|
+| query | `lf runs`, daemon-less lfdb reads | HTTP `GET` to lfd-as-API |
+| live | `lf sub` pubsub | polling / none |
+| model | Run + wave/project/task tiers | `goal` + `metrics: [String]` |
+
+Scope boundary: this branch redoes **Swift** to match. It does **not** migrate
+lfd's remaining executor into `lf` — that collapse is its own effort.
 
 ### Data sources (under the new spine)
 

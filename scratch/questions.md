@@ -26,6 +26,17 @@ already covers `waves()`, `status()`, `recentRuns()`; reroute the remaining
 WavesView, auth/connection) onto it and delete the HTTP service + its tests.
 Keep one implementation.
 
+## Diagnosis (filed under the Performance project — not pursued yet)
+
+**Slow repo-load = reads gated on the bundled daemon.** `WavesView.syncRepoStates`
+early-returns while `SharedDaemon.currentConnection == nil`, and
+`prepareConnectionIfNeeded` `await`s `SharedDaemon.manager.start()` first — so the
+wave list waits on lfd booting even though `RegistryQuery`/`lf ls` is daemon-less
+(it's already wired: `RegistryQueryLocal.shared`, WavesView:562). Fix when
+pursued: paint the list from `lf` immediately; start the bundled daemon in the
+background for pubsub only, never as a barrier before the first read. This is the
+"reads never block on lfd" KR's first instance.
+
 ## Minor (fold in)
 - `RunSnapshot.toRun` `area: "."` placeholder — drop the field from `Run` if the
   snapshot can't supply it.

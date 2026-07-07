@@ -173,7 +173,7 @@ Repo windows also have a **Flows** tab:
 - Expand a flow inline to see nested flows, xor branches, and loops
 - Click any flow or step to see every parent flow that uses it
 - Repo `.lf/flows/*.yaml` and `.lf/steps/*.md` overrides replace builtins in place and get repo-source styling
-- `LoopflowCore/Models/Catalog.swift` mirrors `GET /v0/catalog`; Concerto does not parse flow YAML on the client
+- `LoopflowCore/Models/Catalog.swift` mirrors the flow catalog DTO; registry reads go through `lf --json`
 
 ## Session quote replies (macOS)
 
@@ -216,10 +216,9 @@ Two patterns, intentionally different — split by durability (see
 `scratch/eventing.md`): durable facts are QUERIES, live motion is a per-wave
 stream. There is no machine-wide telemetry socket.
 
-1. **Registry queries** (`RegistryQuery`, `LocalWaveService.swift`)
+1. **Registry queries** (`RegistryQuery`)
    - Discovery + history: which waves exist (running and stopped), a wave's
-     runs, its attention — `lf ls/status/runs --json` over `lfdb`, or the
-     equivalent lfd HTTP reads
+     runs, its attention — `lf ls/status/runs --json` over `lfdb`
    - A point-in-time snapshot, re-run on a cadence; not a stream
 
 2. **Per-wave SSE** (`WaveChatConnection` in `WaveChatClient.swift`)

@@ -112,7 +112,7 @@ public protocol SessionService: Sendable {
     func getSession(_ id: String) async throws -> AgentSession
 }
 
-extension LocalWaveService: SessionService {}
+extension WaveService: SessionService {}
 
 public enum TurnState {
     case idle
@@ -158,7 +158,7 @@ public final class SessionState {
         sessionHarness: String = "claude",
         sessionRunId: String? = nil,
         sessionConfig: AgentSessionConfig,
-        waveService: any SessionService = LocalWaveService(),
+        waveService: any SessionService = WaveService(),
         userDefaults: UserDefaults = .standard
     ) {
         self.waveId = waveId

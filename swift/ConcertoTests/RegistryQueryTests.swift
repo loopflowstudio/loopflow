@@ -52,6 +52,31 @@ struct RegistryQueryTests {
         #expect(result.attention[0].kind == .interactive)
     }
 
+    @Test("lf status preserves completed and unknown run statuses")
+    func statusPreservesRunStatuses() async throws {
+        let json = """
+        {
+          "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
+          "mind":null,
+          "runs":[
+            {"id":"run-1","flow":"implement","task":null,"status":"completed","branch":"b","worktree":"/wt","started_at":"2026-07-06T00:00:00Z","ended_at":null,"error":null,"pr_url":null},
+            {"id":"run-2","flow":"gate","task":null,"status":"new-token","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null}
+          ],
+          "attention":[]
+        }
+        """
+        let query = RegistryQuery { _, _ in json }
+
+        let result = try await query.status(wave: "goals", waveId: "wave-1", cwd: nil)
+
+        #expect(result.runs[0].status == .completed)
+        #expect(result.runs[0].area == nil)
+        #expect(result.runs[0].createdAt != nil)
+        #expect(result.runs[1].status == .unknown("new-token"))
+        #expect(result.runs[1].status.displayName == "Unknown: new-token")
+        #expect(result.runs[1].createdAt == nil)
+    }
+
     @Test("lf runs decodes the ledger window")
     func runsDecode() async throws {
         let json = """
@@ -65,6 +90,12 @@ struct RegistryQueryTests {
         #expect(runs[0].wave == "goals")
         #expect(runs[0].status == "ok")
         #expect(runs[0].ended == 110)
+    }
+
+    @Test("run status accepts lf runs folded ok token")
+    func runStatusAcceptsFoldedOkToken() {
+        #expect(RunStatus(lfToken: "ok") == .ok)
+        #expect(RunStatus(lfToken: "escal.") == .escalated)
     }
 
     @Test("a failed lf query surfaces as an error")

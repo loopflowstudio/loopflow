@@ -4,17 +4,16 @@ import Testing
 
 @Suite("ServerConnection")
 struct ServerConnectionTests {
-    @Test("local connection uses HTTP")
-    func localConnectionURLs() {
+    @Test("local connection is local and displayable")
+    func localConnectionDisplay() {
         let connection = ServerConnection.local
 
-        #expect(connection.httpBaseURL.absoluteString == "http://127.0.0.1:2486")
         #expect(connection.isLocal)
         #expect(connection.displayName == "http://127.0.0.1:2486")
     }
 
-    @Test("TLS connection uses HTTPS")
-    func tlsConnectionURLs() {
+    @Test("TLS connection is not local")
+    func tlsConnectionIsRemote() {
         let connection = ServerConnection(
             host: "example.com",
             port: 443,
@@ -23,7 +22,6 @@ struct ServerConnectionTests {
             staticToken: "token"
         )
 
-        #expect(connection.httpBaseURL.absoluteString == "https://example.com:443")
         #expect(!connection.isLocal)
         #expect(connection.connectionKey == "example.com:443")
     }

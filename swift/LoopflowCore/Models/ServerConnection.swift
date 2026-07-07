@@ -34,21 +34,7 @@ public struct ServerConnection: Hashable, Sendable {
         "\(host):\(port)"
     }
 
-    public var httpBaseURL: URL {
-        makeURL(scheme: useTLS ? "https" : "http")
-    }
-
-    private func makeURL(scheme: String, path: String = "") -> URL {
-        var components = URLComponents()
-        components.scheme = scheme
-        components.host = host
-        components.port = port
-        components.path = path
-        return components.url ?? URL(string: "\(scheme)://127.0.0.1:2486\(path)")!
-    }
-
-    /// Used only for timeout tier selection.
-    /// Auth and TLS are always controlled by explicit fields.
+    /// Local bundled connections can skip remote-only auth/TLS handling.
     public var isLocal: Bool {
         host == "127.0.0.1" && !useTLS && authMode == .none
     }

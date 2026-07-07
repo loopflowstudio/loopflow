@@ -143,7 +143,7 @@ public struct CatalogAnd: Sendable, Codable, Hashable {
     public let synthesize: String?
 }
 
-/// Envelope for the `/v0/catalog` endpoint.
+/// Envelope for the flow catalog DTO.
 public struct CatalogResponse: Sendable, Codable {
     public let ok: Bool
     public let result: Catalog

@@ -3,22 +3,85 @@
 import Foundation
 import SwiftUI
 
-public enum RunStatus: String, Sendable, Codable {
+public enum RunStatus: Sendable, Codable, Hashable, RawRepresentable {
+    case unspecified
     case pending
     case running
     case waiting
     case completed
+    case ok
     case failed
-    case cancelled
+    case error
+    case escalated
+    case unknown(String)
+
+    public init?(rawValue: String) {
+        self = Self(lfToken: rawValue)
+    }
+
+    public init(lfToken: String) {
+        switch lfToken {
+        case "unspecified": self = .unspecified
+        case "pending": self = .pending
+        case "running": self = .running
+        case "waiting": self = .waiting
+        case "completed": self = .completed
+        case "ok": self = .ok
+        case "failed": self = .failed
+        case "error": self = .error
+        case "escal.": self = .escalated
+        default:
+            LoggingService.model("Unknown lf run status: \(lfToken)")
+            self = .unknown(lfToken)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .unspecified: return "unspecified"
+        case .pending: return "pending"
+        case .running: return "running"
+        case .waiting: return "waiting"
+        case .completed: return "completed"
+        case .ok: return "ok"
+        case .failed: return "failed"
+        case .error: return "error"
+        case .escalated: return "escal."
+        case .unknown(let value): return value
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self = Self(lfToken: try container.decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 
     public var color: Color {
         switch self {
         case .running: return .statusSuccess
         case .waiting: return .statusWarning
         case .pending: return .statusInfo
-        case .completed: return .statusNeutral
-        case .failed: return .statusError
-        case .cancelled: return .statusWarning
+        case .completed, .ok: return .statusNeutral
+        case .failed, .error: return .statusError
+        case .unspecified, .escalated, .unknown: return .statusWarning
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .unspecified: return "Unknown"
+        case .pending: return "Pending"
+        case .running: return "Running"
+        case .waiting: return "Waiting"
+        case .completed, .ok: return "Completed"
+        case .failed, .error: return "Failed"
+        case .escalated: return "Escalated"
+        case .unknown(let value): return "Unknown: \(value)"
         }
     }
 }
@@ -29,7 +92,7 @@ public struct Run: Sendable, Identifiable, Hashable {
 
     public let flow: String
     public let task: String?
-    public let area: String
+    public let area: String?
     public let repo: String
     public let direction: [String]
 
@@ -45,14 +108,14 @@ public struct Run: Sendable, Identifiable, Hashable {
 
     public var startedAt: Date?
     public var endedAt: Date?
-    public var createdAt: Date
+    public var createdAt: Date?
 
     public init(
         id: String,
         waveId: String?,
         flow: String,
         task: String? = nil,
-        area: String,
+        area: String? = nil,
         repo: String,
         direction: [String] = [],
         status: RunStatus = .pending,
@@ -65,7 +128,7 @@ public struct Run: Sendable, Identifiable, Hashable {
         pr: PullRequest? = nil,
         startedAt: Date? = nil,
         endedAt: Date? = nil,
-        createdAt: Date = Date()
+        createdAt: Date? = nil
     ) {
         self.id = id
         self.waveId = waveId
@@ -101,7 +164,7 @@ public extension Run {
     var relativeTime: String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
-        let reference = endedAt ?? startedAt ?? createdAt
+        let reference = endedAt ?? startedAt ?? createdAt ?? Date.distantPast
         return formatter.localizedString(for: reference, relativeTo: Date())
     }
 }

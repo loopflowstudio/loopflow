@@ -36,7 +36,7 @@ public final class AuthProviderStore {
         AuthProvider.allCases.map(status(for:))
     }
 
-    public func bindService(_ waveService: LocalWaveService) {
+    public func bindService(_ waveService: WaveService) {
         bindService(waveService as any AuthProviderService)
     }
 

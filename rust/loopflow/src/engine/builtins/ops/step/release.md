@@ -25,7 +25,7 @@ lf op release run <version>
 That command is responsible for:
 - checking there are merged PRs since the previous tag
 - bumping manifests and generating release notes
-- promoting `release/unreleased/` to `release/v<version>/` when a decisions ledger exists
+- promoting any staged `release/unreleased/` artifacts to `release/v<version>/`
 - archiving the generated root `RELEASE_NOTES.md` to `release/v<version>/NOTES.md`
 - creating and landing the release PR
 - waiting for merge queue completion

@@ -31,10 +31,10 @@ When target context is provided (target name, tag prefix, area scope), include o
 
 Lead with outcomes, not mechanisms.
 
-Good: “`lf op release run` now turns release decisions into versioned notes and archives the ledger for audit.”
+Good: “`lf op release run` now generates versioned notes from the merged PRs and archives them for audit.”
 Bad: “Updated release.rs and release_notes.md.”
 
-Do not paste `DECISIONS.md` wholesale. Do not dump PR titles verbatim. The release notes are the synthesis; the ledger remains archived separately.
+Do not dump PR titles verbatim. The release notes are the synthesis of what shipped and why, drawn from the PRs themselves.
 
 Skip internal refactors unless they affect what users experience or how operators run the system.
 

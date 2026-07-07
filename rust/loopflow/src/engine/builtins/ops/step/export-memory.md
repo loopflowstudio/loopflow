@@ -25,6 +25,17 @@ parent, or worker needs to know to act correctly without this run's context.
    - Merge duplicates; when facts conflict, prefer the newer fact and preserve
      the reason if it matters.
    - Keep it tight enough to seed the next mind directly.
+   - Organize into typed blocks — short `##` sections, each one kind of
+     knowledge. Good defaults to start from:
+     - **Decisions** — choices made and why (the reason is the durable part).
+     - **Constraints** — what must hold; what breaks if violated.
+     - **Glossary** — domain terms, names, and coinages the next mind needs.
+     - **How To** — procedures and recipes: how to run, build, test, deploy, or
+       debug the thing, distilled so the next mind doesn't re-derive them.
+
+     These are a starting vocabulary, not a schema — you own this file's shape.
+     Add a block the wave needs, drop one it doesn't, rename to fit. A bloated
+     block is a signal to split or prune, not to keep growing.
 4. Write the compiled result:
    - Prefer `lf memory update --wave <wave> --summary "compile MEMORY.md"` when
      a wave server is live.

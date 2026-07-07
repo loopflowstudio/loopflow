@@ -6,22 +6,19 @@ use std::path::Path;
 use std::sync::Arc;
 
 use loopflow::chat::turns::ChatRole;
-use loopflow::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
+use loopflow::chat::types::{ConversationItem, Lifecycle};
 use loopflow::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
-use loopflow::wave::mind::EventAdapter;
 use loopflow::wave::runtime::WaveRuntime;
 use loopflow::wave::server::{self, ResidentDoor, SubagentDoor};
 use loopflow::wave::state::MindState;
+use loopflow::wave::wire::ResidentDelta;
 
-/// One complete harness turn, as the codex driver would emit it: a command
-/// item, the final agent message, the turn completion, then trailing usage.
-fn codex_turn_events() -> Vec<ConversationEvent> {
+/// One complete resident turn, as the flowloop emits it after a pass: an
+/// item, the pass's reply text, usage, then the finalized boundary.
+fn resident_turn_deltas() -> Vec<ResidentDelta> {
     vec![
-        ConversationEvent::TurnStarted {
-            turn_id: "vt-1".into(),
-        },
-        ConversationEvent::ItemCompleted {
-            turn_id: "vt-1".into(),
+        ResidentDelta::TurnOpened { answers: vec![] },
+        ResidentDelta::TurnItem {
             item: ConversationItem::Command {
                 id: "item-0".into(),
                 command: vec!["cargo test".into()],
@@ -32,41 +29,26 @@ fn codex_turn_events() -> Vec<ConversationEvent> {
                 duration_ms: None,
             },
         },
-        ConversationEvent::ItemCompleted {
-            turn_id: "vt-1".into(),
-            item: ConversationItem::Message {
-                id: "item-1".into(),
-                text: "Implemented the feature.".into(),
-                phase: None,
-            },
+        ResidentDelta::TurnText {
+            text: "Implemented the feature.".into(),
         },
-        ConversationEvent::TurnCompleted {
-            turn_id: "vt-1".into(),
+        ResidentDelta::TurnUsage {
+            input_tokens: Some(10),
+            output_tokens: Some(5),
+            cache_read_tokens: None,
+        },
+        ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-        },
-        ConversationEvent::TurnUsage {
-            turn_id: "vt-1".into(),
-            usage: TurnUsage {
-                input_tokens: 10,
-                output_tokens: 5,
-                reasoning_tokens: None,
-                cache_read_tokens: None,
-                cache_write_tokens: None,
-                model: None,
-                cost_usd: None,
-            },
+            cost_usd: None,
         },
     ]
 }
 
-/// Run one harness turn through the production pipeline (EventAdapter →
-/// resident wire deltas → the listener's fold), as the resident door would.
-fn run_harness_turn(runtime: Arc<WaveRuntime>, events: &[ConversationEvent]) {
-    let mut adapter = EventAdapter::new();
-    for event in events {
-        for delta in adapter.feed(event) {
-            runtime.apply_resident_delta(delta);
-        }
+/// Run one resident turn through the production pipeline (resident wire
+/// deltas → the listener's fold), as the resident door would.
+fn run_resident_turn(runtime: Arc<WaveRuntime>, deltas: Vec<ResidentDelta>) {
+    for delta in deltas {
+        runtime.apply_resident_delta(delta);
     }
 }
 
@@ -88,7 +70,7 @@ async fn restart_replays_thread_and_turn_ids_continue() {
     let before = {
         let rt = open_wave(tmp.path());
         rt.deliver_user_message("please build the feature".into(), MessageOp::Message);
-        run_harness_turn(rt.clone(), &codex_turn_events());
+        run_resident_turn(rt.clone(), resident_turn_deltas());
         let before = rt.thread_snapshot();
         assert_eq!(before.len(), 2);
         before
@@ -117,7 +99,7 @@ async fn restart_replays_thread_and_turn_ids_continue() {
 async fn fold_of_journal_equals_the_turns_the_live_pipeline_built() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
-    run_harness_turn(rt.clone(), &codex_turn_events());
+    run_resident_turn(rt.clone(), resident_turn_deltas());
     let live = rt.thread_snapshot();
 
     // Independent fold of the raw journal — no runtime involved.

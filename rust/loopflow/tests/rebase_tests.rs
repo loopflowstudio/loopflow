@@ -158,6 +158,172 @@ fn rebase_stacked_branch_after_squash_merge() {
 }
 
 #[test]
+fn rebase_reparents_child_onto_main_when_parent_merged() {
+    // Parent `a.b` is squash-merged into main, but its local ref lingers at the
+    // pre-squash tip (a squash-merge deletes origin/a.b, not the local branch).
+    // The child `a.b.c` must re-parent onto main and carry ONLY its own change,
+    // not the parent's already-merged commits.
+    let repo = TestRepo::new();
+
+    repo.create_branch("a.b");
+    repo.create_file("p1.txt", "p1");
+    repo.stage_all();
+    repo.commit("p1");
+    repo.create_file("p2.txt", "p2");
+    repo.stage_all();
+    repo.commit("p2");
+
+    repo.create_branch("a.b.c");
+    repo.create_file("child.txt", "child");
+    repo.stage_all();
+    repo.commit("child work");
+
+    // Squash-merge the parent's two commits into main as a single commit.
+    repo.checkout("main");
+    git(repo.path(), &["merge", "--squash", "a.b"]);
+    git(repo.path(), &["commit", "-m", "squash merge a.b"]);
+    repo.push();
+    // Local `a.b` ref is left dangling at its pre-squash tip.
+
+    repo.checkout("a.b.c");
+    let plan = plan_rebase(repo.path(), None).expect("plan rebase");
+    // A merged parent is a dead base: re-parent onto the default branch.
+    assert_eq!(plan.base_ref, "origin/main");
+    assert!(
+        plan.fork_point.is_some(),
+        "should fork off the merged parent"
+    );
+    assert_eq!(plan.merged_parent.as_deref(), Some("a.b"));
+
+    rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+        },
+        &NullProgress,
+    )
+    .expect("re-parent onto main should succeed");
+
+    // The child's own change is present; the parent's merged content is present
+    // via main.
+    assert!(repo.path().join("child.txt").exists());
+    assert!(repo.path().join("p1.txt").exists());
+
+    // The child carries ONLY its own change relative to main — not the parent's
+    // now-merged commits.
+    let diff = git(repo.path(), &["diff", "--name-only", "origin/main...HEAD"]);
+    assert_eq!(diff, "child.txt", "child diff vs main is only its own file");
+    let commits_beyond = git(repo.path(), &["rev-list", "--count", "origin/main..HEAD"]);
+    assert_eq!(
+        commits_beyond, "1",
+        "only the child's commit sits above main"
+    );
+
+    // The merged parent's lingering local ref was pruned.
+    let branches = git(repo.path(), &["branch", "--list", "a.b"]);
+    assert!(branches.is_empty(), "merged local parent should be pruned");
+}
+
+#[test]
+fn rebase_reparents_child_when_reworked_parent_branch_deleted() {
+    // Parent `a.b` lands in a REWORKED form: main's content diverges from what
+    // the child stacked on, so no content-based merge check matches. The signal
+    // is purely "origin/a.b was deleted on merge" while local `a.b` lingers. The
+    // child (which touches unrelated files) must still re-parent onto main and
+    // carry ONLY its own change — never the stale parent's diverged content.
+    let repo = TestRepo::new();
+
+    repo.create_branch("a.b");
+    repo.create_file("feature.txt", "v1\n");
+    repo.stage_all();
+    repo.commit("feature v1");
+    repo.push_new_branch("a.b");
+
+    repo.create_branch("a.b.c");
+    repo.create_file("child.txt", "child\n");
+    repo.stage_all();
+    repo.commit("child work");
+
+    // Reworked land: main gets a divergent feature.txt = v2; origin/a.b deleted.
+    repo.checkout("main");
+    repo.create_file("feature.txt", "v2\n");
+    repo.stage_all();
+    repo.commit("feature v2 (reworked in review)");
+    repo.push();
+    git(repo.path(), &["push", "origin", "--delete", "a.b"]);
+
+    repo.checkout("a.b.c");
+    let plan = plan_rebase(repo.path(), None).expect("plan rebase");
+    assert_eq!(
+        plan.base_ref, "origin/main",
+        "reworked parent re-parents onto main, not the stale local a.b"
+    );
+    assert!(plan.fork_point.is_some());
+    assert_eq!(plan.merged_parent.as_deref(), Some("a.b"));
+
+    rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+        },
+        &NullProgress,
+    )
+    .expect("clean child re-parents cleanly onto reworked main");
+
+    let diff = git(repo.path(), &["diff", "--name-only", "origin/main...HEAD"]);
+    assert_eq!(diff, "child.txt", "child carries only its own change");
+    let feature = std::fs::read_to_string(repo.path().join("feature.txt")).expect("read feature");
+    assert_eq!(
+        feature, "v2\n",
+        "child inherits main's reworked content, not the stale parent's v1"
+    );
+    let branches = git(repo.path(), &["branch", "--list", "a.b"]);
+    assert!(branches.is_empty(), "stale local parent should be pruned");
+}
+
+#[test]
+fn rebase_surfaces_conflict_when_reworked_parent_overlaps_child() {
+    // Same reworked-parent land, but now the child's own commit touches the same
+    // lines the rework diverged on. Replaying the child onto main must SURFACE a
+    // conflict — the correct outcome — not silently rebase onto the dead parent.
+    let repo = TestRepo::new();
+
+    repo.create_branch("a.b");
+    repo.create_file("feature.txt", "v1\n");
+    repo.stage_all();
+    repo.commit("feature v1");
+    repo.push_new_branch("a.b");
+
+    repo.create_branch("a.b.c");
+    repo.create_file("feature.txt", "v1\nchild addition\n");
+    repo.stage_all();
+    repo.commit("child extends feature");
+
+    repo.checkout("main");
+    repo.create_file("feature.txt", "v2 reworked\n");
+    repo.stage_all();
+    repo.commit("feature v2");
+    repo.push();
+    git(repo.path(), &["push", "origin", "--delete", "a.b"]);
+
+    repo.checkout("a.b.c");
+    let result = rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+        },
+        &NullProgress,
+    );
+    assert!(
+        matches!(result, Err(OpsError::RebaseConflict { ref onto, .. }) if onto == "origin/main"),
+        "reworked parent overlapping the child must surface a conflict, got: {result:?}"
+    );
+}
+
+#[test]
 fn plan_rebase_classifies_dirty_scratch_only_branch_as_reset() {
     let repo = TestRepo::new();
     repo.create_branch("feature");
@@ -248,6 +414,8 @@ fn plan_rebase_uses_open_stack_parent() {
     repo.create_file("a.txt", "a");
     repo.stage_all();
     repo.commit("a");
+    // A genuinely-open parent keeps its branch on origin (pushed with a PR).
+    repo.push_new_branch("a");
     repo.create_branch("a.b");
 
     let plan = plan_rebase(repo.path(), None).expect("plan rebase");
@@ -256,4 +424,7 @@ fn plan_rebase_uses_open_stack_parent() {
     assert_eq!(plan.base_ref, "a");
     assert_eq!(plan.class, RebaseClass::StackParentOpen);
     assert_eq!(plan.strategy, RebaseStrategy::RebaseOntoParent);
+    // An open parent is not a merge: the child keeps stacking on it, unchanged.
+    assert!(plan.fork_point.is_none());
+    assert!(plan.merged_parent.is_none());
 }

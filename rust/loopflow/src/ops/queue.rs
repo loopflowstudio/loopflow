@@ -200,6 +200,7 @@ mod tests {
             &self,
             _worktree: &Path,
             _default_branch: &str,
+            _parent_landed: bool,
         ) -> Result<(), QueueRebaseConflict> {
             Ok(())
         }

@@ -692,6 +692,19 @@ pub fn is_squash_merged(repo: &Path, branch: &str, target: &str) -> Result<bool,
     Ok(result_tree == target_tree)
 }
 
+/// Return true if `branch` is already merged into `target`.
+///
+/// Covers both shapes a merge can take: a fast-forwardable ancestor (its
+/// commits live in `target`) and a squash-merge (its *changes* live in
+/// `target` even though its commits do not). A stacked child must re-parent
+/// onto the default branch once its parent is merged either way.
+pub fn is_merged_into(repo: &Path, branch: &str, target: &str) -> Result<bool, GitError> {
+    if is_ancestor(repo, branch, target)? {
+        return Ok(true);
+    }
+    is_squash_merged(repo, branch, target)
+}
+
 /// Find the fork point for a stacked branch whose parent was squash-merged.
 ///
 /// When branch B is stacked on A, and A gets squash-merged into `target`,

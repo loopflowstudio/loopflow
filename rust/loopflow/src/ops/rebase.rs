@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::engine::git::{
-    current_branch, fetch, get_default_branch, rebase, squash_merge_fork_point, sync_main,
+    current_branch, delete_local_branch, fetch, get_default_branch, is_merged_into, rebase,
+    rev_parse, squash_merge_fork_point, sync_main,
 };
 use crate::engine::worktrees::StackBranch;
 
@@ -45,6 +46,73 @@ pub struct RebasePlan {
     pub changed_files: Vec<PathBuf>,
     pub protected: bool,
     pub scratch_stashed: bool,
+    /// When the stack parent has already merged, the parent's tip commit. A
+    /// `rebase --onto <base_ref> <fork_point>` replays only the child's own
+    /// commits, dropping the parent's now-merged history.
+    pub fork_point: Option<String>,
+    /// A merged parent's local branch that is safe to prune once the child has
+    /// re-parented (present only when the lingering local ref still exists).
+    pub merged_parent: Option<String>,
+}
+
+/// Resolve a dotted stack parent to a usable ref: the local branch if it
+/// survives (a squash-merge deletes `origin/P` but leaves the local `P`),
+/// otherwise the remote-tracking ref.
+fn resolve_parent_ref(repo: &Path, parent: &str) -> Option<String> {
+    if ref_exists(repo, parent) {
+        return Some(parent.to_string());
+    }
+    let remote_parent = format!("origin/{parent}");
+    ref_exists(repo, &remote_parent).then_some(remote_parent)
+}
+
+/// The classic "GitHub deleted the head branch on merge" state: the parent's
+/// remote branch is gone while its local ref lingers. In loopflow's model a
+/// genuinely-open stacked parent keeps its `origin/P` (it was pushed with a
+/// PR), so `origin/P`'s absence means the parent landed — in whatever form,
+/// including a rework whose content no longer matches what the child stacked on.
+fn parent_deleted_on_remote(repo: &Path, parent: &str) -> bool {
+    ref_exists(repo, parent) && !ref_exists(repo, &format!("origin/{parent}"))
+}
+
+/// The fork point for re-parenting a stacked child onto the default branch when
+/// its parent has landed, plus the parent's local branch name if it lingers.
+///
+/// The child owns only its own commits: once the parent lands in ANY form, we
+/// replay the child's commits onto the default branch. "Landed" is detected
+/// content-independently — a caller-supplied signal (the daemon's lfdb
+/// `stack_status == Merged`), a fast-forward ancestor or squash-merge into the
+/// default branch, or the parent's remote branch having been deleted. This is
+/// deliberately broader than a content match: a *reworked* parent (its merged
+/// content diverges from the child's base) still counts as landed, so the child
+/// re-parents onto the default branch and never falls back to the stale local
+/// `P`. If the rework diverges from lines the child also touched, the replay
+/// conflicts — the correct outcome, surfaced to the caller, not auto-healed.
+///
+/// The fork point is the parent's tip, exact even for a multi-commit parent
+/// that `squash_merge_fork_point` (patch-id based) cannot detect.
+///
+/// Returns `None` only when the branch has no stack parent, or the parent is
+/// genuinely open (not landed) — the child keeps stacking on it, unchanged.
+pub(crate) fn merged_parent_fork_point(
+    repo: &Path,
+    branch: &str,
+    default_branch: &str,
+    parent_landed: bool,
+) -> Option<(String, Option<String>)> {
+    let stack = StackBranch::parse(branch, default_branch)?;
+    let parent = stack.parent()?;
+    let parent_ref = resolve_parent_ref(repo, &parent)?;
+    let default_ref = format!("origin/{default_branch}");
+    let landed = parent_landed
+        || is_merged_into(repo, &parent_ref, &default_ref).unwrap_or(false)
+        || parent_deleted_on_remote(repo, &parent);
+    if !landed {
+        return None;
+    }
+    let fork_point = rev_parse(repo, &parent_ref).ok()?;
+    let local_branch = ref_exists(repo, &parent).then_some(parent);
+    Some((fork_point, local_branch))
 }
 
 pub fn plan_rebase(repo: &Path, onto: Option<&str>) -> OpsResult<RebasePlan> {
@@ -52,14 +120,23 @@ pub fn plan_rebase(repo: &Path, onto: Option<&str>) -> OpsResult<RebasePlan> {
     let branch = current_branch(repo)?.unwrap_or_else(|| "HEAD".to_string());
     let stack = StackBranch::parse(&branch, &default_branch);
     let stack_parent = stack.as_ref().and_then(StackBranch::parent);
-    let parent_base_ref = stack_parent.as_deref().and_then(|parent| {
-        if ref_exists(repo, parent) {
-            Some(parent.to_string())
-        } else {
-            let remote_parent = format!("origin/{parent}");
-            ref_exists(repo, &remote_parent).then_some(remote_parent)
-        }
-    });
+    // A surviving parent ref is only a valid base while the parent is still
+    // open. Once the parent merges into the default branch, its ref is a dead
+    // tip: rebasing onto it drags the parent's already-merged commits back into
+    // the child. Detect the merge and re-parent onto the default branch instead.
+    // No daemon here: `parent_landed` is inferred from git alone (content merge
+    // or a deleted remote branch) inside merged_parent_fork_point.
+    let (fork_point, merged_parent) =
+        merged_parent_fork_point(repo, &branch, &default_branch, false)
+            .map(|(fork_point, local_branch)| (Some(fork_point), local_branch))
+            .unwrap_or((None, None));
+    let parent_base_ref = if fork_point.is_some() {
+        None
+    } else {
+        stack_parent
+            .as_deref()
+            .and_then(|parent| resolve_parent_ref(repo, parent))
+    };
     let base_ref = if let Some(onto) = onto {
         onto.to_string()
     } else if let Some(parent_base_ref) = parent_base_ref.as_ref() {
@@ -122,6 +199,8 @@ pub fn plan_rebase(repo: &Path, onto: Option<&str>) -> OpsResult<RebasePlan> {
         changed_files,
         protected,
         scratch_stashed,
+        fork_point,
+        merged_parent,
     })
 }
 
@@ -141,27 +220,31 @@ pub fn rebase_with_recovery(
         let _ = sync_main(repo, branch);
     }
 
-    // When a stacked branch's parent was squash-merged into the target,
-    // a plain rebase replays the parent's commits (already in target) and
-    // hits conflicts. Detect this and use --onto to skip them.
-    //
-    // TODO(stacking): this only covers a clean squash-merge. When the parent is
-    // *reworked* during land (its merged content diverges from what the child
-    // stacked on — a different design, CI fixups, edited squash), --onto still
-    // strands the child: mechanically the fork point may not match, and
-    // semantically the child's changes assume the pre-rework parent. A memory
-    // slice hit this — its parent merged as a redesigned version and the rebase
-    // replayed already-merged commits into GOAL.md/MEMORY.md conflicts. Interim
-    // policy: stacked worktrees just target main. Real fix (unresolved, systems
-    // wave): identity-preserving land for parents that have children, OR detect
-    // the rework and flag the stack for re-derivation instead of auto-rebasing.
-    let fork_point = squash_merge_fork_point(repo, &options.onto).unwrap_or(None);
+    // When a stacked branch's parent has landed, the child owns only its own
+    // commits: replay them onto the target via the parent's tip as the fork
+    // point (exact, even for a multi-commit parent). Fall back to the patch-id
+    // scan for non-stack squashes. A *reworked* parent (its merged content
+    // diverges from the child's base) is still landed — the child re-parents
+    // onto the target. If the rework diverges from lines the child also touched,
+    // the replay conflicts; that conflict propagates to the caller to resolve,
+    // rather than being swallowed or retried onto the stale parent.
+    let fork_point = plan
+        .fork_point
+        .clone()
+        .or_else(|| squash_merge_fork_point(repo, &options.onto).unwrap_or(None));
 
     progress.status(&format!("Rebasing onto {}...", options.onto));
     let result = rebase(repo, &options.onto, fork_point.as_deref())?;
     if result.success {
         if fork_point.is_some() {
-            progress.status("Skipped squash-merged parent commits");
+            progress.status("Skipped merged parent commits");
+        }
+        // The child has re-parented onto the default branch; the merged parent's
+        // lingering local ref is now a dead base — prune it so future rebases
+        // don't resolve it as an open parent. Best-effort: a ref still checked
+        // out in the parent's worktree can't be deleted, which is fine.
+        if let Some(parent) = plan.merged_parent.as_deref() {
+            let _ = delete_local_branch(repo, parent);
         }
         if options.push {
             crate::ops::commit::push_with_upstream_if_needed(repo)?;

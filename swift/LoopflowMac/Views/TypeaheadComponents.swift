@@ -1,7 +1,7 @@
 // TypeaheadComponents - shared building blocks for fish-style typeahead fields.
 
 import SwiftUI
-import LoopflowCore
+import Loopflow
 import AppKit
 
 // MARK: - Ghost Text Field (Fish-style autocomplete)

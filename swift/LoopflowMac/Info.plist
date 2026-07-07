@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>com.loopflow.concerto</string>
+    <string>com.loopflow.mac</string>
     <key>CFBundleName</key>
     <string>Loopflow</string>
     <key>CFBundleDisplayName</key>
     <string>Loopflow</string>
     <key>CFBundleExecutable</key>
-    <string>Concerto</string>
+    <string>Loopflow</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>
@@ -36,12 +36,12 @@
     <key>LSUIElement</key>
     <false/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Concerto needs to control terminal applications to open worktrees and run commands.</string>
+    <string>Loopflow needs to control terminal applications to open worktrees and run commands.</string>
     <key>NSAppleScriptEnabled</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Concerto uses the microphone for voice-to-text input.</string>
+    <string>Loopflow uses the microphone for voice-to-text input.</string>
     <key>OSAScriptingDefinition</key>
-    <string>Concerto.sdef</string>
+    <string>Loopflow.sdef</string>
 </dict>
 </plist>

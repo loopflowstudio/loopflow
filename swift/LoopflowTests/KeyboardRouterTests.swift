@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import Concerto
+@testable import LoopflowMac
 
 @MainActor
 @Suite("Keyboard Router")

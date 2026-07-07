@@ -2,8 +2,8 @@
 
 import Foundation
 import Testing
-@testable import Concerto
-@testable import LoopflowCore
+@testable import LoopflowMac
+@testable import Loopflow
 
 @MainActor
 @Suite("RunStore")

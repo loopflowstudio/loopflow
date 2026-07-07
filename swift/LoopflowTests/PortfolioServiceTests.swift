@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import Concerto
+@testable import LoopflowMac
 
 @Suite("Portfolio Service")
 struct PortfolioServiceTests {

@@ -1,7 +1,7 @@
 // AreaTypeahead - terminal-style path input with fish-style tab completion and chips.
 
 import SwiftUI
-import LoopflowCore
+import Loopflow
 
 struct AreaTypeahead: View {
     let wave: WaveViewModel

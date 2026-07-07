@@ -1,7 +1,6 @@
 // Portfolio repository entry for persistence.
 
 import Foundation
-import LoopflowCore
 
 struct PortfolioRepo: Codable, Identifiable, Hashable {
     let path: String

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import Concerto
+@testable import LoopflowMac
 
 @Suite("Credential socket file credential reader")
 struct CredentialSocketServerTests {

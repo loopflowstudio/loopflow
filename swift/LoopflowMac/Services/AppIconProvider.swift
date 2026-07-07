@@ -2,7 +2,7 @@
 
 import AppKit
 import SwiftUI
-import LoopflowCore
+import Loopflow
 
 struct AppIconProvider {
     static func icon(for app: AppIdentifier) -> NSImage? {

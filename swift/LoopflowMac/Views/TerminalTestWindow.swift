@@ -2,7 +2,7 @@
 // Access via Window menu > Terminal Test
 
 import SwiftUI
-import LoopflowCore
+import Loopflow
 
 struct TerminalTestWindow: View {
     @Environment(\.palette) private var palette

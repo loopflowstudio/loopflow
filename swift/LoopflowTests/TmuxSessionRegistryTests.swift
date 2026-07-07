@@ -1,5 +1,5 @@
 import Testing
-@testable import Concerto
+@testable import LoopflowMac
 
 @Suite("Tmux session registry")
 struct TmuxSessionRegistryTests {

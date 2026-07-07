@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 
-@testable import LoopflowCore
+@testable import Loopflow
 
 final class FileTokenProviderTests: XCTestCase {
     func testReadTokenReturnsTrimmedValue() {

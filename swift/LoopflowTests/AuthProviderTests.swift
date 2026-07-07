@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import LoopflowCore
+@testable import Loopflow
 
 @Suite("Auth provider models")
 struct AuthProviderModelTests {

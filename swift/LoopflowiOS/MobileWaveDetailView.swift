@@ -1,6 +1,6 @@
 #if os(iOS)
 import SwiftUI
-import LoopflowCore
+import Loopflow
 
 struct MobileWaveDetailView: View {
     private enum Tab: String, CaseIterable {

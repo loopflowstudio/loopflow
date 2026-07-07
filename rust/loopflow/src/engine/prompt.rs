@@ -210,8 +210,8 @@ pub enum PromptFormatMode {
 pub enum Surface {
     Cli,
     Ide,
-    ConcertoMac,
-    ConcertoIphone,
+    Mac,
+    Iphone,
     #[default]
     #[serde(other)]
     Headless,
@@ -236,8 +236,8 @@ impl std::str::FromStr for Surface {
         let surface = match value {
             "cli" => Self::Cli,
             "ide" => Self::Ide,
-            "concerto_mac" => Self::ConcertoMac,
-            "concerto_iphone" => Self::ConcertoIphone,
+            "mac" => Self::Mac,
+            "iphone" => Self::Iphone,
             _ => Self::Headless,
         };
         Ok(surface)
@@ -2273,8 +2273,8 @@ mod tests {
         for surface in [
             Surface::Cli,
             Surface::Ide,
-            Surface::ConcertoMac,
-            Surface::ConcertoIphone,
+            Surface::Mac,
+            Surface::Iphone,
         ] {
             let components = PromptComponents {
                 surface,

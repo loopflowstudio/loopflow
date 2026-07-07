@@ -1,5 +1,5 @@
 import Testing
-@testable import LoopflowCore
+@testable import Loopflow
 
 @Suite("AppPreferences")
 struct AppPreferencesTests {

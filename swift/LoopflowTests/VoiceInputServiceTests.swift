@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import LoopflowCore
+@testable import Loopflow
 
 @Suite("Voice Input Service")
 struct VoiceInputServiceTests {

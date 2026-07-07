@@ -4,7 +4,7 @@
 
 import Foundation
 import Testing
-@testable import LoopflowCore
+@testable import Loopflow
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {

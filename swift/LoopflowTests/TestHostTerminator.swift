@@ -3,7 +3,7 @@ import AppKit
 import Foundation
 import XCTest
 
-// The Concerto unit tests are hosted inside the Concerto GUI app. When the test
+// The Loopflow unit tests are hosted inside the Loopflow GUI app. When the test
 // bundle finishes, the app's SwiftUI/AppKit run loop keeps spinning, so
 // `xcodebuild test` never exits even though every test passed — the CI job then
 // hangs until it is force-killed.
@@ -19,11 +19,11 @@ import XCTest
 // and it fails after retrying. `NSApp.terminate` drains the run loop first, so
 // xcodebuild's IPC teardown completes and the run reports success (exit 0).
 //
-// Registered as the ConcertoTests bundle's NSPrincipalClass (see project.yml).
+// Registered as the LoopflowTests bundle's NSPrincipalClass (see project.yml).
 // XCTest instantiates the principal class once at bundle load, so registration
 // is guaranteed — unlike a lazily-initialized global that nothing references.
-@objc(ConcertoTestsPrincipal)
-final class ConcertoTestsPrincipal: NSObject, XCTestObservation {
+@objc(LoopflowTestsPrincipal)
+final class LoopflowTestsPrincipal: NSObject, XCTestObservation {
     override init() {
         super.init()
         XCTestObservationCenter.shared.addTestObserver(self)

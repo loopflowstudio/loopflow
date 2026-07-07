@@ -6,7 +6,7 @@
 
 import Foundation
 import Testing
-@testable import LoopflowCore
+@testable import Loopflow
 
 @MainActor
 @Suite("WaveChat streaming upsert")

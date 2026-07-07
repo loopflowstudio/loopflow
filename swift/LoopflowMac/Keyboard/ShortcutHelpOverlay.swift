@@ -1,5 +1,5 @@
 import SwiftUI
-import LoopflowCore
+import Loopflow
 
 struct ShortcutHelpOverlay: View {
     @Binding var isPresented: Bool

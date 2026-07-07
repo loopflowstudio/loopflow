@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import LoopflowCore
+@testable import Loopflow
 
 @Suite("WavePlanParser")
 struct WavePlanParserTests {
@@ -11,7 +11,7 @@ struct WavePlanParserTests {
 
         let waveDir = repoRoot
             .appendingPathComponent("wave", isDirectory: true)
-            .appendingPathComponent("concerto", isDirectory: true)
+            .appendingPathComponent("loopflow", isDirectory: true)
         let projectsDir = waveDir.appendingPathComponent("projects", isDirectory: true)
         try FileManager.default.createDirectory(at: projectsDir, withIntermediateDirectories: true)
 
@@ -22,7 +22,7 @@ struct WavePlanParserTests {
 
         ## Objective
 
-        Make Concerto the daily surface.
+        Make Loopflow the daily surface.
         Frame, don't render.
 
         ## Projects
@@ -48,9 +48,9 @@ struct WavePlanParserTests {
         """
         try project.write(to: projectsDir.appendingPathComponent("session-lifecycle.md"), atomically: true, encoding: .utf8)
 
-        let plan = try #require(WavePlanParser.parse(repoRoot: repoRoot, waveName: "concerto"))
+        let plan = try #require(WavePlanParser.parse(repoRoot: repoRoot, waveName: "loopflow"))
 
-        #expect(plan.objective == "Make Concerto the daily surface.\nFrame, don't render.")
+        #expect(plan.objective == "Make Loopflow the daily surface.\nFrame, don't render.")
         #expect(plan.projects.count == 1)
         #expect(plan.projects[0].id == "session-lifecycle")
         #expect(plan.projects[0].title == "Session lifecycle")
@@ -68,7 +68,7 @@ struct WavePlanParserTests {
 
         let projectsDir = repoRoot
             .appendingPathComponent("wave", isDirectory: true)
-            .appendingPathComponent("concerto", isDirectory: true)
+            .appendingPathComponent("loopflow", isDirectory: true)
             .appendingPathComponent("projects", isDirectory: true)
         try FileManager.default.createDirectory(at: projectsDir, withIntermediateDirectories: true)
 
@@ -83,7 +83,7 @@ struct WavePlanParserTests {
             encoding: .utf8
         )
 
-        let plan = try #require(WavePlanParser.parse(repoRoot: repoRoot, waveName: "concerto"))
+        let plan = try #require(WavePlanParser.parse(repoRoot: repoRoot, waveName: "loopflow"))
 
         #expect(plan.objective.isEmpty)
         #expect(plan.projects.map(\.id) == ["attention-navigation", "wave-conducting"])
@@ -94,7 +94,7 @@ struct WavePlanParserTests {
         let repoRoot = try makeTempRepo()
         defer { try? FileManager.default.removeItem(at: repoRoot) }
 
-        let plan = WavePlanParser.parse(repoRoot: repoRoot, waveName: "concerto")
+        let plan = WavePlanParser.parse(repoRoot: repoRoot, waveName: "loopflow")
 
         #expect(plan == nil)
     }

@@ -19,7 +19,7 @@ struct SnapshotService {
         }
     }
 
-    /// Snapshot the key window and save to /tmp/concerto-<timestamp>.png
+    /// Snapshot the key window and save to /tmp/loopflow-<timestamp>.png
     func snapshotKeyWindow() throws -> URL {
         guard let window = NSApp.keyWindow else {
             throw SnapshotError.noWindow
@@ -69,7 +69,7 @@ struct SnapshotService {
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let timestamp = formatter.string(from: Date())
 
-        return URL(fileURLWithPath: "/tmp/concerto-\(timestamp).png")
+        return URL(fileURLWithPath: "/tmp/loopflow-\(timestamp).png")
     }
 }
 

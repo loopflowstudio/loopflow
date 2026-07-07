@@ -1,7 +1,7 @@
 // Manages the tmux session backing a workspace shell.
 
 import Foundation
-import LoopflowCore
+import Loopflow
 
 @MainActor
 final class TmuxSession {

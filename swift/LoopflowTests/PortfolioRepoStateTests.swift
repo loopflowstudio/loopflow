@@ -1,7 +1,7 @@
 import Foundation
 import Testing
-@testable import Concerto
-@testable import LoopflowCore
+@testable import LoopflowMac
+@testable import Loopflow
 
 @MainActor
 @Suite("Portfolio Repo State")
@@ -61,10 +61,10 @@ struct PortfolioRepoStateTests {
     func waveAgentSessionNameMirrorsLfTmuxHandle() {
         let name = PortfolioRepoState.waveAgentSessionName(
             repoPath: "/Users/jack/src/loopflow",
-            waveName: "concerto"
+            waveName: "loopflow"
         )
 
-        #expect(name == "lf-loopflow-concerto")
+        #expect(name == "lf-loopflow-loopflow")
     }
 
     @Test("a worktree path names the same tmux session the launcher creates")

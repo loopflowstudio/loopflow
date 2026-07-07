@@ -1,137 +1,14 @@
 import SwiftUI
-import CoreText
-#if os(macOS)
 import AppKit
-#endif
-import LoopflowCore
+import Loopflow
 
-extension AppearanceMode {
-    static func resolvedTheme(
-        rawValue: String,
-        systemScheme: ColorScheme
-    ) -> (preferredScheme: ColorScheme?, palette: LoopflowPalette) {
-        let mode = AppearanceMode(rawValue: rawValue) ?? .system
-        let palette: LoopflowPalette
-
-        switch mode {
-        case .light:
-            palette = .light
-        case .dark:
-            palette = .dark
-        case .system:
-            palette = systemScheme == .dark ? .dark : .light
-        }
-
-        return (mode.colorScheme, palette)
-    }
-}
-
-private enum AppFontRegistration {
-    static func registerBundledFonts() {
-        guard let fontsDir = findFontsDirectory() else { return }
-
-        let fontFiles = [
-            "CormorantGaramond-Regular.otf",
-            "CormorantGaramond-Medium.otf",
-            "CormorantGaramond-SemiBold.otf",
-            "Lato-Regular.ttf",
-            "Lato-Bold.ttf",
-            "JetBrainsMono-Regular.ttf",
-        ]
-
-        for file in fontFiles {
-            let url = fontsDir.appendingPathComponent(file)
-            guard FileManager.default.fileExists(atPath: url.path) else { continue }
-            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-        }
-    }
-
-    private static func findFontsDirectory() -> URL? {
-        let fm = FileManager.default
-
-        // SPM resource bundle in Contents/Resources/ (release .app)
-        if let resourceURL = Bundle.main.resourceURL {
-            let spmBundle = resourceURL
-                .appendingPathComponent("LoopflowSwift_Concerto.bundle")
-                .appendingPathComponent("Fonts")
-            if fm.fileExists(atPath: spmBundle.path) {
-                return spmBundle
-            }
-        }
-
-        // SPM resource bundle adjacent to executable (dev builds via `swift run`)
-        let executableBundle = Bundle.main.bundleURL
-            .appendingPathComponent("LoopflowSwift_Concerto.bundle")
-            .appendingPathComponent("Fonts")
-        if fm.fileExists(atPath: executableBundle.path) {
-            return executableBundle
-        }
-
-        // Fonts directly in Resources/ (xcodegen builds)
-        if let resourceURL = Bundle.main.resourceURL {
-            let direct = resourceURL.appendingPathComponent("Fonts")
-            if fm.fileExists(atPath: direct.path) {
-                return direct
-            }
-        }
-
-        return nil
-    }
-}
-
-private enum AppRuntime {
-    static var isAutomatedTest: Bool {
-        let processInfo = ProcessInfo.processInfo
-        let environment = processInfo.environment
-        if environment["XCTestConfigurationFilePath"] != nil ||
-            environment["CONCERTO_UI_TEST_MODE"] != nil {
-            return true
-        }
-
-        let arguments = processInfo.arguments
-        return arguments.contains("-ui-test-mode") || arguments.contains("--snapshot")
-    }
-}
-
-private enum LaunchArguments {
-    static func repoURL() -> URL? {
-        let args = ProcessInfo.processInfo.arguments
-        guard let index = args.firstIndex(of: "--repo"), args.count > index + 1 else {
-            return nil
-        }
-        return URL(fileURLWithPath: args[index + 1])
-    }
-}
-
-private func bootstrapConcertoApp() {
-    AppFontRegistration.registerBundledFonts()
-    #if os(macOS)
-    // Enrich our own process PATH before any children spawn, so tools launched
-    // through Ghostty surfaces and `--noprofile --norc` shells can find tmux,
-    // git, and agent CLIs that live in Homebrew or ~/.local/bin.
-    enrichProcessPathForGUILaunch()
-    #endif
-    guard !AppRuntime.isAutomatedTest else { return }
-    Task {
-        try? await NotificationService.shared.requestAuthorization()
-    }
-    #if os(macOS)
-    Task { @MainActor in
-        SharedDaemon.eagerStart()
-    }
-    #endif
-}
-
-#if os(macOS)
 private func enrichProcessPathForGUILaunch() {
     let existing = ProcessInfo.processInfo.environment["PATH"]
     let enriched = GUIProcessEnvironment.enrichedPath(from: existing)
     guard enriched != existing else { return }
     setenv("PATH", enriched, 1)
 }
-#endif
 
-#if os(macOS)
 @MainActor
 private enum TmuxTerminationCleanup {
     private static var observer: NSObjectProtocol?
@@ -147,11 +24,9 @@ private enum TmuxTerminationCleanup {
         }
     }
 }
-#endif
 
-#if os(macOS)
 @main
-struct ConcertoApp: App {
+struct LoopflowApp: App {
     @State private var portfolioService = PortfolioService()
     @State private var keyboardRouter = KeyboardRouter()
     @Environment(\.openWindow) private var openWindow
@@ -162,7 +37,16 @@ struct ConcertoApp: App {
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
-        bootstrapConcertoApp()
+        bootstrapLoopflowApp()
+        // Enrich our own process PATH before any children spawn, so tools launched
+        // through Ghostty surfaces and `--noprofile --norc` shells can find tmux,
+        // git, and agent CLIs that live in Homebrew or ~/.local/bin.
+        enrichProcessPathForGUILaunch()
+        if !AppRuntime.isAutomatedTest {
+            Task { @MainActor in
+                SharedDaemon.eagerStart()
+            }
+        }
         TmuxTerminationCleanup.install()
     }
 
@@ -321,17 +205,3 @@ struct ConcertoApp: App {
         openWindow(id: "repo", value: url)
     }
 }
-#else
-@main
-struct ConcertoApp: App {
-    init() {
-        bootstrapConcertoApp()
-    }
-
-    var body: some Scene {
-        WindowGroup {
-            MobileRootView()
-        }
-    }
-}
-#endif

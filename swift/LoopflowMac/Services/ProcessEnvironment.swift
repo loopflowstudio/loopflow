@@ -1,7 +1,7 @@
-// Shared environment helpers for child processes spawned by the Concerto GUI.
+// Shared environment helpers for child processes spawned by the Loopflow GUI.
 //
 // GUI-launched apps inherit a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that
-// doesn't include Homebrew, ~/.local/bin, or ~/.cargo/bin. Anything Concerto
+// doesn't include Homebrew, ~/.local/bin, or ~/.cargo/bin. Anything Loopflow
 // shells out to — tmux, git, the bundled lfd — inherits that, so execvp can't
 // find user-installed binaries. Pipe child envs through `enrichedPath` so they
 // resolve the same binaries the user's shell would.

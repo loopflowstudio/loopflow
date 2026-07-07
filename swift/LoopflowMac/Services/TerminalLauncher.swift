@@ -3,7 +3,7 @@
 import AppKit
 import ApplicationServices
 import Foundation
-import LoopflowCore
+import Loopflow
 
 struct TerminalLauncher {
     enum LaunchError: LocalizedError {

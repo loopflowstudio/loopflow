@@ -1,6 +1,6 @@
 #if os(macOS)
 import SwiftUI
-import LoopflowCore
+import Loopflow
 
 /// One turn in a wave's conversation. A `user` turn is the operator's message
 /// (accent bar + selectable prose). An `assistant` turn renders its accumulated

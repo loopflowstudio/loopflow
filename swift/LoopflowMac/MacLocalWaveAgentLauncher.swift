@@ -1,13 +1,13 @@
 // Launches and probes the local `lf wave <name>` process backing a WaveChat pane.
 //
-// Concerto is a viewer, never a participant: launching a wave is the human's act
+// Loopflow is a viewer, never a participant: launching a wave is the human's act
 // through the same door as a terminal — a detached tmux session running
 // `lf wave <name>` with the wave's repo as cwd. The session belongs to tmux, not
-// to Concerto; quitting the app never kills a wave.
+// to Loopflow; quitting the app never kills a wave.
 
 #if os(macOS)
 import Foundation
-import LoopflowCore
+import Loopflow
 
 enum WaveLaunchError: LocalizedError, Equatable {
     case alreadyRunning(String)
@@ -41,7 +41,7 @@ enum LocalWaveAgentLauncher {
         ) != nil
     }
 
-    /// Start `lf wave <name>` in a detached tmux session so it outlives Concerto.
+    /// Start `lf wave <name>` in a detached tmux session so it outlives Loopflow.
     /// Refuses when the wave already has a tmux session or a live endpoint —
     /// the server enforces one brain per wave; we just avoid the doomed spawn.
     ///
@@ -135,9 +135,9 @@ enum LocalWaveAgentLauncher {
         ["tmux", "new-session", "-d", "-s", sessionName, "-c", repoPath, lfPath, "wave", waveName]
     }
 
-    /// Candidate lf binaries in trust order: the lf bundled inside Concerto.app
+    /// Candidate lf binaries in trust order: the lf bundled inside Loopflow.app
     /// (shipped next to the bundled lfd), each `lf` on the enriched PATH, then
-    /// `<origin>/target/release/lf` — the dev-tree build, for a Concerto pointed
+    /// `<origin>/target/release/lf` — the dev-tree build, for a Loopflow pointed
     /// at a loopflow checkout where the freshest lf is the one just compiled.
     static func lfCandidates(
         originRepo: String,
@@ -196,7 +196,7 @@ enum LocalWaveAgentLauncher {
         )
         guard !candidates.isEmpty else {
             throw WaveLaunchError.noUsableLf(
-                "Can't find an lf binary — not bundled with Concerto and not on PATH."
+                "Can't find an lf binary — not bundled with Loopflow and not on PATH."
             )
         }
         for candidate in candidates where probe(candidate) {

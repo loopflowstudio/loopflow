@@ -1,6 +1,6 @@
-# Concerto UX Design
+# Loopflow UX Design
 
-High-level user experience principles for the Concerto agent management UI.
+High-level user experience principles for the Loopflow agent management UI.
 
 ## Core Philosophy
 
@@ -48,8 +48,8 @@ New agents start here. The detail panel shows configuration requirements (area n
 
 1. Click **Start designing**
 2. Describe what you want to build
-3. Concerto starts a `design` agent session inline with repo-aware context
-4. The design session creates and configures the wave; Concerto picks it up on refresh
+3. Loopflow starts a `design` agent session inline with repo-aware context
+4. The design session creates and configures the wave; Loopflow picks it up on refresh
 
 ### Goals
 - Inline goals (typed ad-hoc) can be auto-saved after successful runs

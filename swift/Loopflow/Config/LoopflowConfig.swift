@@ -1,11 +1,11 @@
 import Foundation
 
-public struct ConcertoConfig: Codable {
+public struct LoopflowConfig: Codable {
     public var connection: RemoteConnectionConfig? = nil
     public var container: ContainerConfig? = nil
 }
 
-public struct ConcertoState: Codable, Equatable {
+public struct LoopflowState: Codable, Equatable {
     public var selectedRepoPath: String? = nil
 
     public init(selectedRepoPath: String? = nil) {
@@ -44,7 +44,7 @@ public struct RemoteConnectionConfig: Codable {
     }
 }
 
-extension ConcertoConfig {
+extension LoopflowConfig {
     public var seededConnection: ServerConnection? {
         guard let connection, !connection.isLoopbackHost else {
             return nil
@@ -53,8 +53,8 @@ extension ConcertoConfig {
     }
 }
 
-public func loadConcertoConfig(configURL: URL? = nil) -> ConcertoConfig? {
-    let resolvedURL = configURL ?? ConcertoConfig.defaultURL
+public func loadLoopflowConfig(configURL: URL? = nil) -> LoopflowConfig? {
+    let resolvedURL = configURL ?? LoopflowConfig.defaultURL
     guard
         let raw = try? String(contentsOf: resolvedURL, encoding: .utf8),
         !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -62,11 +62,11 @@ public func loadConcertoConfig(configURL: URL? = nil) -> ConcertoConfig? {
         return nil
     }
 
-    return parseConcertoConfig(raw)
+    return parseLoopflowConfig(raw)
 }
 
-public func loadConcertoState(stateURL: URL? = nil) -> ConcertoState? {
-    let resolvedURL = stateURL ?? ConcertoState.defaultURL
+public func loadLoopflowState(stateURL: URL? = nil) -> LoopflowState? {
+    let resolvedURL = stateURL ?? LoopflowState.defaultURL
     guard
         let raw = try? String(contentsOf: resolvedURL, encoding: .utf8),
         !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -74,11 +74,11 @@ public func loadConcertoState(stateURL: URL? = nil) -> ConcertoState? {
         return nil
     }
 
-    return parseConcertoState(raw)
+    return parseLoopflowState(raw)
 }
 
-public func saveConcertoState(_ state: ConcertoState, stateURL: URL? = nil) throws {
-    let resolvedURL = stateURL ?? ConcertoState.defaultURL
+public func saveLoopflowState(_ state: LoopflowState, stateURL: URL? = nil) throws {
+    let resolvedURL = stateURL ?? LoopflowState.defaultURL
     try FileManager.default.createDirectory(
         at: resolvedURL.deletingLastPathComponent(),
         withIntermediateDirectories: true
@@ -90,31 +90,31 @@ public func saveConcertoState(_ state: ConcertoState, stateURL: URL? = nil) thro
     try "selected_repo_path: \(selected)\n".write(to: resolvedURL, atomically: true, encoding: .utf8)
 }
 
-private extension ConcertoConfig {
+private extension LoopflowConfig {
     static var defaultURL: URL {
         URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent(".lf", isDirectory: true)
-            .appendingPathComponent("concerto.yaml", isDirectory: false)
+            .appendingPathComponent("loopflow.yaml", isDirectory: false)
     }
 }
 
-private extension ConcertoState {
+private extension LoopflowState {
     static var defaultURL: URL {
         URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent(".lf", isDirectory: true)
-            .appendingPathComponent("concerto-state.yaml", isDirectory: false)
+            .appendingPathComponent("loopflow-state.yaml", isDirectory: false)
     }
 }
 
-private func parseConcertoConfig(_ raw: String) -> ConcertoConfig {
+private func parseLoopflowConfig(_ raw: String) -> LoopflowConfig {
     let lines = raw.components(separatedBy: .newlines)
-    return ConcertoConfig(
+    return LoopflowConfig(
         connection: parseConnectionConfig(lines),
         container: parseContainerConfig(lines)
     )
 }
 
-private func parseConcertoState(_ raw: String) -> ConcertoState {
+private func parseLoopflowState(_ raw: String) -> LoopflowState {
     let lines = raw.components(separatedBy: .newlines)
     var selectedRepoPath: String?
 
@@ -132,7 +132,7 @@ private func parseConcertoState(_ raw: String) -> ConcertoState {
         }
     }
 
-    return ConcertoState(selectedRepoPath: selectedRepoPath)
+    return LoopflowState(selectedRepoPath: selectedRepoPath)
 }
 
 private func parseConnectionConfig(_ lines: [String]) -> RemoteConnectionConfig? {

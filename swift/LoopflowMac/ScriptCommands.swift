@@ -1,4 +1,4 @@
-// AppleScript command handlers for Concerto automation.
+// AppleScript command handlers for Loopflow automation.
 
 import Cocoa
 

@@ -3,8 +3,8 @@
 import SwiftUI
 import Testing
 import ViewInspector
-@testable import Concerto
-@testable import LoopflowCore
+@testable import LoopflowMac
+@testable import Loopflow
 
 @MainActor
 @Suite("Wave Row View")

@@ -11,7 +11,7 @@
 // pane.
 
 import SwiftUI
-import LoopflowCore
+import Loopflow
 
 enum RepoFilter: Hashable {
     case all
@@ -29,7 +29,7 @@ struct WavesView: View {
     /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
     /// window). Collapsed to its main worktree for reads — the on-disk `wave/`
     /// dir holds quick-launch templates that live on main by design, and lfd owns
-    /// the real waves. The `CONCERTO_DEV_WAVE_REPO` dev override reads the launched
+    /// the real waves. The `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched
     /// checkout AS-IS instead (see `resolveLaunchRepo`).
     var initialRepoPath: String? = nil
 
@@ -437,7 +437,7 @@ struct WavesView: View {
 
     /// Register the launch-provided repo so it shows in the rail, and return its
     /// read path for pre-selection. Production collapses to the main worktree; the
-    /// `CONCERTO_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS.
+    /// `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS.
     private func registerInitialRepoIfNeeded() async -> String? {
         guard let initialRepoPath, !didApplyInitialRepo else { return nil }
         if RepoState.uiTestMode() != nil { return nil }
@@ -453,13 +453,13 @@ struct WavesView: View {
     /// Resolve the launch-provided repo into its (read path, main path, rail label).
     /// Production reads the collapsed main worktree — the on-disk `wave/` dir is
     /// quick-launch templates that live on main by design, and lfd is the authority
-    /// for real waves. The `CONCERTO_DEV_WAVE_REPO` dev override (set by concerto-dev
+    /// for real waves. The `LOOPFLOW_DEV_WAVE_REPO` dev override (set by loopflow-dev
     /// on `run` / `run-debug`) instead reads the launched checkout AS-IS, so a dev
     /// launch enumerates its own worktree's waves. The rail label is always the
     /// collapsed main-repo name, so the rail stays clean and worktree-free.
     private nonisolated static func resolveLaunchRepo(_ initialPath: String) -> (path: String, mainPath: String, displayName: String) {
         let scanner = RepoScanner()
-        let dev = ProcessInfo.processInfo.environment["CONCERTO_DEV_WAVE_REPO"]
+        let dev = ProcessInfo.processInfo.environment["LOOPFLOW_DEV_WAVE_REPO"]
         let devOverride = (dev?.isEmpty == false) ? dev : nil
         let readURL = URL(fileURLWithPath: devOverride ?? initialPath)
         let mainURL = scanner.resolveMainWorktree(readURL)
@@ -470,7 +470,7 @@ struct WavesView: View {
     /// Source the rail directly from a `~/src` scan of main (non-worktree) repos,
     /// every time. A launch-provided `initialRepoPath` is merged in via
     /// `resolveLaunchRepo`: production reads its collapsed main worktree; the
-    /// `CONCERTO_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS
+    /// `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS
     /// (worktree included) as a single row labeled with the main-repo name.
     /// Runs the git/FS work off the main thread.
     private func refreshRepos() async {
@@ -654,7 +654,7 @@ struct WavesView: View {
     private func restoreStickyRepoSelectionIfNeeded() {
         guard !didRestoreStickyRepo else { return }
         didRestoreStickyRepo = true
-        guard let path = loadConcertoState()?.selectedRepoPath?.normalizedFilePath else { return }
+        guard let path = loadLoopflowState()?.selectedRepoPath?.normalizedFilePath else { return }
         guard repos.contains(where: { $0.path.normalizedFilePath == path }) else { return }
         selection = .repo(path)
     }
@@ -669,7 +669,7 @@ struct WavesView: View {
         }
 
         Task.detached {
-            try? saveConcertoState(ConcertoState(selectedRepoPath: selectedRepoPath))
+            try? saveLoopflowState(LoopflowState(selectedRepoPath: selectedRepoPath))
         }
     }
 

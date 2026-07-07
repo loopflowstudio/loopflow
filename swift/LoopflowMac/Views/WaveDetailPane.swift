@@ -1,9 +1,9 @@
 #if os(macOS)
 import SwiftUI
-import LoopflowCore
+import Loopflow
 
 /// The wave detail pane: a header over the local wave plan and live WaveChat
-/// transcript. The wave still runs in its own `lf wave` process; Concerto frames
+/// transcript. The wave still runs in its own `lf wave` process; Loopflow frames
 /// the objective and projects around the vendor-owned conversation.
 struct WaveDetailPane: View {
     let wave: WaveViewModel

@@ -1,9 +1,9 @@
 import Foundation
 import Testing
-@testable import LoopflowCore
+@testable import Loopflow
 
-@Suite("ConcertoConfig")
-struct ConcertoConfigTests {
+@Suite("LoopflowConfig")
+struct LoopflowConfigTests {
     @Test("loads remote connection from yaml")
     func loadsRemoteConnectionFromYAML() throws {
         let (configURL, cleanup) = makeConfigURL()
@@ -15,7 +15,7 @@ struct ConcertoConfigTests {
           port: 443
         """.write(to: configURL, atomically: true, encoding: .utf8)
 
-        let config = try #require(loadConcertoConfig(configURL: configURL))
+        let config = try #require(loadLoopflowConfig(configURL: configURL))
         let connection = try #require(config.connection)
         let serverConnection = connection.toServerConnection()
 
@@ -39,7 +39,7 @@ struct ConcertoConfigTests {
           token: "abc123secret"
         """.write(to: configURL, atomically: true, encoding: .utf8)
 
-        let config = try #require(loadConcertoConfig(configURL: configURL))
+        let config = try #require(loadLoopflowConfig(configURL: configURL))
         let connection = try #require(config.connection)
 
         #expect(connection.token == "abc123secret")
@@ -50,9 +50,9 @@ struct ConcertoConfigTests {
     func returnsNilWhenConfigMissing() {
         let configURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
-            .appendingPathComponent("concerto.yaml", isDirectory: false)
+            .appendingPathComponent("loopflow.yaml", isDirectory: false)
 
-        #expect(loadConcertoConfig(configURL: configURL) == nil)
+        #expect(loadLoopflowConfig(configURL: configURL) == nil)
     }
 
     @Test("returns nil when config file is empty")
@@ -62,7 +62,7 @@ struct ConcertoConfigTests {
 
         try " \n\t\n".write(to: configURL, atomically: true, encoding: .utf8)
 
-        #expect(loadConcertoConfig(configURL: configURL) == nil)
+        #expect(loadLoopflowConfig(configURL: configURL) == nil)
     }
 
     @Test("returns config with no connection when yaml has no connection key")
@@ -75,7 +75,7 @@ struct ConcertoConfigTests {
           host: lfd.example.com
         """.write(to: configURL, atomically: true, encoding: .utf8)
 
-        let config = try #require(loadConcertoConfig(configURL: configURL))
+        let config = try #require(loadLoopflowConfig(configURL: configURL))
         #expect(config.connection == nil)
     }
 
@@ -91,7 +91,7 @@ struct ConcertoConfigTests {
             port: 443
         """.write(to: configURL, atomically: true, encoding: .utf8)
 
-        let config = try #require(loadConcertoConfig(configURL: configURL))
+        let config = try #require(loadLoopflowConfig(configURL: configURL))
         #expect(config.connection == nil)
     }
 
@@ -109,7 +109,7 @@ struct ConcertoConfigTests {
             - ~/defaults
         """.write(to: configURL, atomically: true, encoding: .utf8)
 
-        let config = try #require(loadConcertoConfig(configURL: configURL))
+        let config = try #require(loadLoopflowConfig(configURL: configURL))
         let container = try #require(config.container)
         let mounts = try #require(container.mounts)
 
@@ -131,7 +131,7 @@ struct ConcertoConfigTests {
           somethingElse: value
         """.write(to: configURL, atomically: true, encoding: .utf8)
 
-        let config = try #require(loadConcertoConfig(configURL: configURL))
+        let config = try #require(loadLoopflowConfig(configURL: configURL))
         #expect(config.container == nil)
     }
 
@@ -144,7 +144,7 @@ struct ConcertoConfigTests {
         selected_repo_path: "/Users/jack/src/loopflow"
         """.write(to: stateURL, atomically: true, encoding: .utf8)
 
-        let state = try #require(loadConcertoState(stateURL: stateURL))
+        let state = try #require(loadLoopflowState(stateURL: stateURL))
         #expect(state.selectedRepoPath == "/Users/jack/src/loopflow")
     }
 
@@ -153,20 +153,20 @@ struct ConcertoConfigTests {
         let (stateURL, cleanup) = makeStateURL()
         defer { cleanup() }
 
-        try saveConcertoState(
-            ConcertoState(selectedRepoPath: "/Users/jack/src/loopflow.concerto"),
+        try saveLoopflowState(
+            LoopflowState(selectedRepoPath: "/Users/jack/src/loopflow.loopflow"),
             stateURL: stateURL
         )
 
-        let state = try #require(loadConcertoState(stateURL: stateURL))
-        #expect(state.selectedRepoPath == "/Users/jack/src/loopflow.concerto")
+        let state = try #require(loadLoopflowState(stateURL: stateURL))
+        #expect(state.selectedRepoPath == "/Users/jack/src/loopflow.loopflow")
     }
 
     private func makeConfigURL() -> (URL, () -> Void) {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let configURL = directory.appendingPathComponent("concerto.yaml", isDirectory: false)
+        let configURL = directory.appendingPathComponent("loopflow.yaml", isDirectory: false)
         let cleanup: () -> Void = {
             _ = try? FileManager.default.removeItem(at: directory)
         }
@@ -177,7 +177,7 @@ struct ConcertoConfigTests {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let stateURL = directory.appendingPathComponent("concerto-state.yaml", isDirectory: false)
+        let stateURL = directory.appendingPathComponent("loopflow-state.yaml", isDirectory: false)
         let cleanup: () -> Void = {
             _ = try? FileManager.default.removeItem(at: directory)
         }

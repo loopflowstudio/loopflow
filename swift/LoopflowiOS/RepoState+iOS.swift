@@ -1,6 +1,6 @@
 #if os(iOS)
 import Foundation
-import LoopflowCore
+import Loopflow
 
 extension RepoState {
     convenience init() {

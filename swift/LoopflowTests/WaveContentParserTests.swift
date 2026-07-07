@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import LoopflowCore
+@testable import Loopflow
 
 @Suite("WaveContentParser")
 struct WaveContentParserTests {
@@ -26,7 +26,7 @@ struct WaveContentParserTests {
         Start with the simplest flow that works.
 
         ## Goals
-        - Launch design from Concerto
+        - Launch design from Loopflow
         - Show roadmap status
 
         ## Risks
@@ -61,7 +61,7 @@ struct WaveContentParserTests {
         #expect(content?.vision?.contains("Build a delightful onboarding.") == true)
         #expect(content?.vision?.contains("### Not here") == true)
         #expect(content?.strategy == "Start with the simplest flow that works.")
-        #expect(content?.goals?.contains("Launch design from Concerto") == true)
+        #expect(content?.goals?.contains("Launch design from Loopflow") == true)
         #expect(content?.risks == "- Parser drift")
         #expect(content?.metrics == "- Time to first wave")
 

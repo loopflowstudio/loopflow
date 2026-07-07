@@ -4,7 +4,7 @@
 #if os(macOS)
 import Foundation
 import Testing
-@testable import Concerto
+@testable import LoopflowMac
 
 @Suite("Local wave launcher")
 struct LocalWaveAgentLauncherTests {
@@ -13,7 +13,7 @@ struct LocalWaveAgentLauncherTests {
     @Test("launch command is a detached tmux session at the wave's repo")
     func launchCommandShape() {
         let args = LocalWaveAgentLauncher.waveLaunchCommand(
-            lfPath: "/Applications/Concerto.app/Contents/MacOS/lf",
+            lfPath: "/Applications/Loopflow.app/Contents/MacOS/lf",
             sessionName: "lf-loopflow-goals",
             repoPath: "/Users/jack/src/loopflow",
             waveName: "goals"
@@ -23,7 +23,7 @@ struct LocalWaveAgentLauncherTests {
             "tmux", "new-session", "-d",
             "-s", "lf-loopflow-goals",
             "-c", "/Users/jack/src/loopflow",
-            "/Applications/Concerto.app/Contents/MacOS/lf", "wave", "goals",
+            "/Applications/Loopflow.app/Contents/MacOS/lf", "wave", "goals",
         ])
     }
 
@@ -33,13 +33,13 @@ struct LocalWaveAgentLauncherTests {
     func candidateOrder() {
         let candidates = LocalWaveAgentLauncher.lfCandidates(
             originRepo: "/Users/jack/src/loopflow",
-            bundled: URL(fileURLWithPath: "/Applications/Concerto.app/Contents/MacOS/lf"),
+            bundled: URL(fileURLWithPath: "/Applications/Loopflow.app/Contents/MacOS/lf"),
             pathEnv: "/missing/bin:/opt/homebrew/bin:/usr/local/bin",
             isExecutableFile: { $0 != "/missing/bin/lf" }
         )
 
         #expect(candidates == [
-            "/Applications/Concerto.app/Contents/MacOS/lf",
+            "/Applications/Loopflow.app/Contents/MacOS/lf",
             "/opt/homebrew/bin/lf",
             "/usr/local/bin/lf",
             "/Users/jack/src/loopflow/target/release/lf",
@@ -50,14 +50,14 @@ struct LocalWaveAgentLauncherTests {
     func probePassesFirstCandidate() throws {
         let resolved = try LocalWaveAgentLauncher.resolveWaveCapableLf(
             originRepo: "/Users/jack/src/loopflow",
-            bundled: URL(fileURLWithPath: "/Applications/Concerto.app/Contents/MacOS/lf"),
+            bundled: URL(fileURLWithPath: "/Applications/Loopflow.app/Contents/MacOS/lf"),
             pathEnv: "/usr/local/bin",
             isExecutableFile: { _ in true },
             probe: { _ in true },
             useCache: false
         )
 
-        #expect(resolved == "/Applications/Concerto.app/Contents/MacOS/lf")
+        #expect(resolved == "/Applications/Loopflow.app/Contents/MacOS/lf")
     }
 
     @Test("a stale PATH lf is rejected by the probe; the dev-tree build wins")

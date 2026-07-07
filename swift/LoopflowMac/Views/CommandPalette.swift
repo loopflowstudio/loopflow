@@ -2,7 +2,7 @@
 // Activated with Cmd+K or /.
 
 import SwiftUI
-import LoopflowCore
+import Loopflow
 
 struct PaletteAction: Identifiable {
     let id: String

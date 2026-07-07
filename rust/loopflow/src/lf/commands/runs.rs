@@ -18,7 +18,7 @@ const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
 
 /// `lf runs`: timeline of recent runs across every repo on this machine.
-/// `--json` emits the same window as a machine-readable array (Concerto's
+/// `--json` emits the same window as a machine-readable array (Loopflow's
 /// run-history snapshot) — the durable ledger the live `op` frames mirror.
 pub fn list(json: bool) -> Result<()> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
@@ -248,7 +248,7 @@ impl RunSummary {
 }
 
 /// `lf runs --json` entry: one folded run from the ledger. Wire type consumed
-/// by Concerto — every field required or explicitly Optional, no serde
+/// by Loopflow — every field required or explicitly Optional, no serde
 /// defaults. `started`/`ended` are unix seconds (the ledger's grain).
 #[derive(Debug, serde::Serialize)]
 struct RunLedgerEntry {

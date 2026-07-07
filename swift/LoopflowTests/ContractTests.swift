@@ -2,7 +2,7 @@
 
 import Foundation
 import Testing
-@testable import LoopflowCore
+@testable import Loopflow
 
 @Suite("Contract: Golden Fixtures")
 struct ContractTests {
@@ -10,7 +10,7 @@ struct ContractTests {
         // Navigate from this file to tests/fixtures/ at repo root.
         let thisFile = URL(fileURLWithPath: #filePath)
         let repoRoot = thisFile
-            .deletingLastPathComponent() // ConcertoTests/
+            .deletingLastPathComponent() // LoopflowTests/
             .deletingLastPathComponent() // swift/
             .deletingLastPathComponent() // repo root
         let path = repoRoot.appendingPathComponent("tests/fixtures/\(name)")

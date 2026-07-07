@@ -65,11 +65,11 @@ public final class ConnectionStore {
     }
 
     private let defaults: UserDefaults
-    private static let defaultsKey = "concerto.connectionSettings.v2"
-    private static let legacyDefaultsKey = "concerto.serverConnection.v1"
+    private static let defaultsKey = "loopflow.connectionSettings.v2"
+    private static let legacyDefaultsKey = "loopflow.serverConnection.v1"
     private let secretStore: ConnectionSecretStore
     private let pinStore: CertificatePinStore
-    private let configLoader: () -> ConcertoConfig?
+    private let configLoader: () -> LoopflowConfig?
 
     public var mode: ConnectionMode
     public var activeConnection: ServerConnection
@@ -84,7 +84,7 @@ public final class ConnectionStore {
             secretStore: secretStore,
             pinStore: pinStore,
             defaults: defaults,
-            configLoader: { loadConcertoConfig() }
+            configLoader: { loadLoopflowConfig() }
         )
     }
 
@@ -92,7 +92,7 @@ public final class ConnectionStore {
         secretStore: ConnectionSecretStore = .shared,
         pinStore: CertificatePinStore = .shared,
         defaults: UserDefaults = .standard,
-        configLoader: @escaping () -> ConcertoConfig?
+        configLoader: @escaping () -> LoopflowConfig?
     ) {
         self.secretStore = secretStore
         self.pinStore = pinStore
@@ -152,7 +152,7 @@ public final class ConnectionStore {
         configToken(for: connection) ?? connection.staticToken ?? secretStore.token(for: connection)
     }
 
-    /// Token from `~/.lf/concerto.yaml` for a matching remote host, read fresh on
+    /// Token from `~/.lf/loopflow.yaml` for a matching remote host, read fresh on
     /// each call so a rotated token is picked up without re-pasting into the app.
     /// Takes precedence over the keychain copy, which can go stale.
     private func configToken(for connection: ServerConnection) -> String? {
@@ -251,7 +251,7 @@ public final class ConnectionStore {
     private static func loadInitialState(
         defaults: UserDefaults,
         secretStore: ConnectionSecretStore,
-        configLoader: () -> ConcertoConfig?
+        configLoader: () -> LoopflowConfig?
     ) -> InitialState {
         if let loaded = loadSettings(from: defaults) {
             switch loaded {

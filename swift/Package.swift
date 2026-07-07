@@ -2,6 +2,9 @@
 
 import PackageDescription
 
+// SwiftPM builds the cross-platform `Loopflow` library and the macOS app
+// (`LoopflowMac`) — the `swift build` / `swift test` / CI path. The iOS app
+// (`LoopflowiOS`) is built through xcodegen + Xcode; see project.yml.
 let package = Package(
     name: "LoopflowSwift",
     platforms: [
@@ -9,8 +12,8 @@ let package = Package(
         .iOS(.v18),
     ],
     products: [
-        .library(name: "LoopflowCore", targets: ["LoopflowCore"]),
-        .executable(name: "Concerto", targets: ["Concerto"]),
+        .library(name: "Loopflow", targets: ["Loopflow"]),
+        .executable(name: "LoopflowMac", targets: ["LoopflowMac"]),
     ],
     dependencies: [
         .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.0"),
@@ -18,12 +21,15 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "LoopflowCore",
+            name: "Loopflow",
             dependencies: [
                 .product(name: "WhisperKit", package: "WhisperKit"),
             ],
-            path: "LoopflowCore",
-            exclude: ["Info.plist"]
+            path: "Loopflow",
+            exclude: ["Info.plist"],
+            resources: [
+                .copy("Fonts")
+            ]
         ),
         .binaryTarget(
             name: "GhosttyKit",
@@ -31,19 +37,25 @@ let package = Package(
             checksum: "b0e75385d69477d92f673962f2361642b1a22b228ad249036cbef53c0788a74d"
         ),
         .executableTarget(
-            name: "Concerto",
+            name: "LoopflowMac",
             dependencies: [
-                "LoopflowCore",
+                "Loopflow",
                 .product(name: "WhisperKit", package: "WhisperKit"),
                 .target(
                     name: "GhosttyKit",
                     condition: .when(platforms: [.macOS])
                 ),
             ],
-            path: "Concerto",
-            exclude: ["Info.plist", "Concerto.sdef", "Concerto.entitlements", "UX_DESIGN.md", "AppIcon.icns", "logo.svg", "dmg-background.png", "Services/Ghostty/README.md"],
-            resources: [
-                .copy("Fonts")
+            path: "LoopflowMac",
+            exclude: [
+                "Info.plist",
+                "Loopflow.sdef",
+                "Loopflow.entitlements",
+                "UX_DESIGN.md",
+                "AppIcon.icns",
+                "logo.svg",
+                "dmg-background.png",
+                "Services/Ghostty/README.md",
             ],
             swiftSettings: [
                 .define("GHOSTTY_ENABLED", .when(platforms: [.macOS])),
@@ -57,9 +69,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "ConcertoTests",
-            dependencies: ["Concerto", "LoopflowCore", "ViewInspector"],
-            path: "ConcertoTests"
+            name: "LoopflowTests",
+            dependencies: ["LoopflowMac", "Loopflow", "ViewInspector"],
+            path: "LoopflowTests"
         ),
     ]
 )

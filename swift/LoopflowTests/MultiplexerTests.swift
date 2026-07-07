@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import LoopflowCore
+@testable import Loopflow
 
 @Suite("MultiplexerLayout")
 struct MultiplexerLayoutTests {

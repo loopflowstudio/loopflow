@@ -4,16 +4,16 @@ final class ScreenshotPipelineTests: XCTestCase {
     @MainActor
     func testCapture() throws {
         let environment = ProcessInfo.processInfo.environment
-        let outputName = environment["CONCERTO_UI_TEST_NAME"] ?? "concerto-uitest"
-        let mode = environment["CONCERTO_UI_TEST_MODE"] ?? "mock-waves"
-        let delay = Double(environment["CONCERTO_UI_TEST_DELAY"] ?? "1.5") ?? 1.5
-        let selectBranch = environment["CONCERTO_UI_TEST_SELECT_BRANCH"]
+        let outputName = environment["LOOPFLOW_UI_TEST_NAME"] ?? "loopflow-uitest"
+        let mode = environment["LOOPFLOW_UI_TEST_MODE"] ?? "mock-waves"
+        let delay = Double(environment["LOOPFLOW_UI_TEST_DELAY"] ?? "1.5") ?? 1.5
+        let selectBranch = environment["LOOPFLOW_UI_TEST_SELECT_BRANCH"]
 
         let app = XCUIApplication()
         app.launchArguments += ["-ui-test-mode", mode]
-        app.launchEnvironment["CONCERTO_UI_TEST_MODE"] = mode
+        app.launchEnvironment["LOOPFLOW_UI_TEST_MODE"] = mode
         if let selectBranch {
-            app.launchEnvironment["CONCERTO_UI_TEST_SELECT_BRANCH"] = selectBranch
+            app.launchEnvironment["LOOPFLOW_UI_TEST_SELECT_BRANCH"] = selectBranch
         }
 
         app.launch()

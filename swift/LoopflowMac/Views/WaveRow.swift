@@ -2,7 +2,7 @@
 
 import SwiftUI
 import AppKit
-import LoopflowCore
+import Loopflow
 
 struct WaveRow: View {
     let wave: WaveViewModel

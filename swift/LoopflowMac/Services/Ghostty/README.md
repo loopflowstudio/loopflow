@@ -1,6 +1,6 @@
 # Ghostty Integration Guide
 
-This document explains how Ghostty's macOS app integrates libghostty into SwiftUI, serving as a reference for our Concerto embedded terminal.
+This document explains how Ghostty's macOS app integrates libghostty into SwiftUI, serving as a reference for our Loopflow embedded terminal.
 
 ## Architecture Overview
 
@@ -261,7 +261,7 @@ config.userdata = Unmanaged.passUnretained(self).toOpaque()
 let manager = Unmanaged<GhosttyManager>.fromOpaque(userdata!).takeUnretainedValue()
 ```
 
-## Our Integration (Concerto)
+## Our Integration (Loopflow)
 
 Components:
 
@@ -281,7 +281,7 @@ Features implemented:
 ## File Structure
 
 ```
-Concerto/Services/Ghostty/
+Loopflow/Services/Ghostty/
 ├── README.md           # This file
 ├── GhosttyManager.swift    # App-level wrapper (like Ghostty.App)
 ├── GhosttyTerminalView.swift # SwiftUI view (like SurfaceRepresentable)

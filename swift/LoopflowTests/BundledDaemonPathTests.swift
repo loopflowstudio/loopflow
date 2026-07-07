@@ -1,11 +1,11 @@
-// End-to-end checks that any process Concerto spawns — the bundled lfd and the
+// End-to-end checks that any process Loopflow spawns — the bundled lfd and the
 // tmux invocations driving the terminal panel — can actually find user-installed
 // binaries like tmux, which GUI-launched apps lose access to because their
 // inherited PATH is /usr/bin:/bin:/usr/sbin:/sbin.
 
 import Foundation
 import Testing
-@testable import Concerto
+@testable import LoopflowMac
 
 @Suite("GUI Process Environment")
 struct BundledDaemonPathTests {
@@ -39,7 +39,7 @@ struct BundledDaemonPathTests {
     }
 
     // Reproduces the exact failure mode the terminal panel hit in production:
-    // Concerto's TmuxSession spawns `/usr/bin/env tmux ...` with the GUI-minimal
+    // Loopflow's TmuxSession spawns `/usr/bin/env tmux ...` with the GUI-minimal
     // environment, so `env` can't find tmux and exits 127. With
     // GUIProcessEnvironment.enriched applied, the same invocation succeeds.
     @Test("env tmux works with enriched env, fails with the bare GUI env")
@@ -78,7 +78,7 @@ struct BundledDaemonPathTests {
     // Reproduces the Ghostty failure mode: once a surface is opened, Ghostty
     // spawns `/usr/bin/login -flp ... /bin/bash --noprofile --norc -c 'exec -l tmux ...'`.
     // The `--noprofile --norc` flags mean bash doesn't resource any login files,
-    // so PATH comes entirely from Concerto's own process environment. Under the
+    // so PATH comes entirely from Loopflow's own process environment. Under the
     // bare GUI PATH, `exec -l tmux` fails with "tmux: not found"; under our
     // enriched env it resolves.
     @Test("bash --noprofile --norc -c 'exec tmux' works with enriched env, fails with bare GUI env")

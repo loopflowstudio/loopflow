@@ -3,8 +3,8 @@
 import Foundation
 import SwiftUI
 import Testing
-@testable import Concerto
-@testable import LoopflowCore
+@testable import LoopflowMac
+@testable import Loopflow
 
 @Suite("Wave View Model")
 struct WaveModelTests {

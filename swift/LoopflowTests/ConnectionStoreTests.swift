@@ -1,7 +1,7 @@
 import Foundation
 import Testing
-@testable import Concerto
-@testable import LoopflowCore
+@testable import LoopflowMac
+@testable import Loopflow
 
 @MainActor
 @Suite("ConnectionStore")
@@ -63,8 +63,8 @@ struct ConnectionStoreTests {
         #expect(reloaded.configuredRemoteConnection?.host == "lfd.example.com")
     }
 
-    @Test("seeds remote mode from concerto config when defaults are empty")
-    func seedsFromConcertoConfig() {
+    @Test("seeds remote mode from loopflow config when defaults are empty")
+    func seedsFromLoopflowConfig() {
         let defaults = makeDefaults()
         let config = remoteConfig(host: "lfd.example.com")
 
@@ -77,8 +77,8 @@ struct ConnectionStoreTests {
         #expect(store.activeConnection.authMode == .staticToken)
     }
 
-    @Test("user defaults settings take priority over concerto config")
-    func userDefaultsWinsOverConcertoConfig() {
+    @Test("user defaults settings take priority over loopflow config")
+    func userDefaultsWinsOverLoopflowConfig() {
         let defaults = makeDefaults()
         let persisted = ServerConnection(
             host: "saved.example.com",
@@ -97,8 +97,8 @@ struct ConnectionStoreTests {
         #expect(reloaded.activeConnection.port == 443)
     }
 
-    @Test("concerto config seeds user defaults on first launch")
-    func concertoConfigPersistsAfterFirstLaunch() {
+    @Test("loopflow config seeds user defaults on first launch")
+    func loopflowConfigPersistsAfterFirstLaunch() {
         let defaults = makeDefaults()
         _ = makeStore(defaults: defaults, config: remoteConfig(host: "lfd.example.com"))
 
@@ -108,8 +108,8 @@ struct ConnectionStoreTests {
         #expect(reloaded.activeConnection.host == "lfd.example.com")
     }
 
-    @Test("concerto config token takes priority and rotates")
-    func concertoConfigTokenTakesPriorityAndRotates() {
+    @Test("loopflow config token takes priority and rotates")
+    func loopflowConfigTokenTakesPriorityAndRotates() {
         let defaults = makeDefaults()
         let connection = ServerConnection(
             host: "lfd.example.com",
@@ -128,8 +128,8 @@ struct ConnectionStoreTests {
         #expect(store.token(for: connection) == "rotated-token")
     }
 
-    @Test("concerto config token only applies to matching connection")
-    func concertoConfigTokenRequiresMatchingConnection() {
+    @Test("loopflow config token only applies to matching connection")
+    func loopflowConfigTokenRequiresMatchingConnection() {
         let defaults = makeDefaults()
         let connection = ServerConnection(
             host: "other.example.com",
@@ -146,8 +146,8 @@ struct ConnectionStoreTests {
         #expect(store.token(for: connection) == "connection-token")
     }
 
-    @Test("loopback concerto config is ignored")
-    func ignoresLoopbackConcertoConfig() {
+    @Test("loopback loopflow config is ignored")
+    func ignoresLoopbackLoopflowConfig() {
         for host in ["localhost", "127.0.0.1", "::1", " LOCALHOST "] {
             let defaults = makeDefaults()
             let config = remoteConfig(host: host)
@@ -165,15 +165,15 @@ struct ConnectionStoreTests {
         return defaults
     }
 
-    private func makeStore(defaults: UserDefaults, config: ConcertoConfig? = nil) -> ConnectionStore {
+    private func makeStore(defaults: UserDefaults, config: LoopflowConfig? = nil) -> ConnectionStore {
         makeStore(defaults: defaults, configLoader: { config })
     }
 
-    private func makeStore(defaults: UserDefaults, configLoader: @escaping () -> ConcertoConfig?) -> ConnectionStore {
+    private func makeStore(defaults: UserDefaults, configLoader: @escaping () -> LoopflowConfig?) -> ConnectionStore {
         ConnectionStore(defaults: defaults, configLoader: configLoader)
     }
 
-    private func remoteConfig(host: String, token: String? = nil) -> ConcertoConfig {
-        ConcertoConfig(connection: RemoteConnectionConfig(host: host, port: 443, token: token))
+    private func remoteConfig(host: String, token: String? = nil) -> LoopflowConfig {
+        LoopflowConfig(connection: RemoteConnectionConfig(host: host, port: 443, token: token))
     }
 }

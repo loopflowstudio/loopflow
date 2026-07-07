@@ -136,7 +136,7 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
 /// Kill every `lf-*` tmux session and clear stale wave endpoint pointers — the
 /// operator's fresh-start button.
 ///
-/// Concerto launches every wave server and worker as an `lf-`-prefixed tmux
+/// Loopflow launches every wave server and worker as an `lf-`-prefixed tmux
 /// session, so killing those takes down the wave minds too (tmux SIGHUPs the
 /// session's process group). Stale `.wave-endpoint` pointers under this repo's
 /// `wave/` are then removed so nothing dangles; lfd reconciles its own

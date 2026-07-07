@@ -1,6 +1,6 @@
 #if os(macOS)
 import SwiftUI
-import LoopflowCore
+import Loopflow
 
 /// WaveChat: the live conversation with a running `lf wave <name>`. Discovers the
 /// wave's chat server through its `.wave-endpoint` pointer, replays + streams the
@@ -143,7 +143,7 @@ struct WaveChatView: View {
     // MARK: - Not running (start the wave)
     //
     // The wave is a detached tmux session, launched here through the same door
-    // as a terminal: `lf wave <name>` at the wave's repo. Quitting Concerto
+    // as a terminal: `lf wave <name>` at the wave's repo. Quitting Loopflow
     // never touches it. After a launch, the connection's 1s endpoint poll picks
     // the wave up on its own — this view just waits for the phase to move.
 
@@ -230,7 +230,7 @@ struct WaveChatView: View {
     // The composer is verb-aware: it keys off the streamed mind state.
     // Idle + text → Send (op=message). Turning + text → Steer into the live
     // turn, with Interrupt & Send one click away. Turning + empty → Interrupt.
-    // Verb selection lives in `composerVerbs` (LoopflowCore), tested there.
+    // Verb selection lives in `composerVerbs` (Loopflow), tested there.
 
     private var isLive: Bool { connection?.phase == .live }
 

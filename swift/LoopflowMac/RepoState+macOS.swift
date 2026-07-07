@@ -1,6 +1,6 @@
 #if os(macOS)
 import Foundation
-import LoopflowCore
+import Loopflow
 
 @MainActor
 enum SharedDaemon {

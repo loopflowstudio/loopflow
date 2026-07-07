@@ -1,7 +1,7 @@
 import Testing
 import AppKit
-@testable import Concerto
-import LoopflowCore
+@testable import LoopflowMac
+import Loopflow
 
 @Suite("Ghostty terminal command")
 struct GhosttyTerminalViewTests {

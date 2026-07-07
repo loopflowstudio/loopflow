@@ -13,7 +13,7 @@ final class CredentialSocketServer: @unchecked Sendable {
     private var listenerFD: Int32 = -1
 
     static let defaultPath = FileManager.default.temporaryDirectory
-        .appendingPathComponent("concerto-auth-\(ProcessInfo.processInfo.processIdentifier).sock")
+        .appendingPathComponent("loopflow-auth-\(ProcessInfo.processInfo.processIdentifier).sock")
 
     init(
         socketPath: URL = CredentialSocketServer.defaultPath,

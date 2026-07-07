@@ -431,7 +431,7 @@ final class WhisperKitVoiceInputEngine: VoiceInputEngine, @unchecked Sendable {
         let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let modelsDirectory = applicationSupport
-            .appendingPathComponent("Concerto", isDirectory: true)
+            .appendingPathComponent("Loopflow", isDirectory: true)
             .appendingPathComponent("WhisperKitModels", isDirectory: true)
 
         try? FileManager.default.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)

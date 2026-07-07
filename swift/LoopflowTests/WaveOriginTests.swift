@@ -7,7 +7,7 @@
 #if os(macOS)
 import Foundation
 import Testing
-@testable import LoopflowCore
+@testable import Loopflow
 
 @Suite("Wave origin resolution")
 struct WaveOriginTests {

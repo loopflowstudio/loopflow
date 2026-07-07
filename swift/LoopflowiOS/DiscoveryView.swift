@@ -1,6 +1,6 @@
 #if os(iOS)
 import SwiftUI
-import LoopflowCore
+import Loopflow
 
 struct DiscoveryView: View {
     @Environment(RepoState.self) private var repoState

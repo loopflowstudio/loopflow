@@ -19,7 +19,7 @@ struct Args {
     #[arg(long)]
     step: Option<String>,
 
-    /// Prompt surface (headless/cli/concerto_mac/concerto_iphone)
+    /// Prompt surface (headless/cli/mac/iphone)
     #[arg(long)]
     surface: Option<Surface>,
 

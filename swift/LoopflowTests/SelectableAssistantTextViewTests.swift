@@ -1,8 +1,8 @@
 #if canImport(UIKit)
 import Testing
 import UIKit
-@testable import Concerto
-@testable import LoopflowCore
+@testable import LoopflowMac
+@testable import Loopflow
 
 @Suite("SelectableAssistantTextView styling")
 struct SelectableAssistantTextViewTests {

@@ -1,6 +1,6 @@
 #if os(macOS)
 import SwiftUI
-import LoopflowCore
+import Loopflow
 
 // Shared rendering pieces for WaveChat turns: fenced-code segmentation, the code
 // block + diff views, the streaming cursor, and a hover-reveal copy button.

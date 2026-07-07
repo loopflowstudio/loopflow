@@ -68,7 +68,7 @@ public enum LoggingService {
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         return base
             .appendingPathComponent("Logs")
-            .appendingPathComponent("Concerto")
+            .appendingPathComponent("Loopflow")
     }
 
     private static func logURL(for category: Category) -> URL {

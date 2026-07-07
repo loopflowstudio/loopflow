@@ -2,13 +2,13 @@ import Foundation
 import Security
 import Darwin
 import AppKit
-import LoopflowCore
+import Loopflow
 
 @MainActor
 @Observable
 final class BundledDaemonManager {
-    private static let bundledMarkerArgument = "--concerto-bundled"
-    private static let bundledContainerLabel = "com.loopflow.concerto.bundled=1"
+    private static let bundledMarkerArgument = "--loopflow-bundled"
+    private static let bundledContainerLabel = "com.loopflow.mac.bundled=1"
 
     enum DaemonState {
         case stopped
@@ -63,8 +63,8 @@ final class BundledDaemonManager {
     private(set) var state: DaemonState = .stopped
     private var startTask: Task<ServerConnection, Error>?
 
-    private static let preferNativeModeDefaultsKey = "concerto.bundledDaemon.preferNativeMode"
-    private static let connectWithPhoneDefaultsKey = "concerto.bundledDaemon.connectWithPhone"
+    private static let preferNativeModeDefaultsKey = "loopflow.bundledDaemon.preferNativeMode"
+    private static let connectWithPhoneDefaultsKey = "loopflow.bundledDaemon.connectWithPhone"
 
     static var prefersNativeMode: Bool {
         UserDefaults.standard.bool(forKey: preferNativeModeDefaultsKey)
@@ -132,7 +132,7 @@ final class BundledDaemonManager {
         if case .running = state,
            runningSettings == settings,
            let connection = runtimeConnection {
-            LoggingService.lfd("Concerto bundled lfd: \(connection.displayName)")
+            LoggingService.lfd("Loopflow bundled lfd: \(connection.displayName)")
             return connection
         }
 
@@ -182,7 +182,7 @@ final class BundledDaemonManager {
             try await waitForHealth()
             let connection = try requireRuntimeConnection()
             state = .running
-            LoggingService.lfd("Concerto bundled lfd: \(connection.displayName)")
+            LoggingService.lfd("Loopflow bundled lfd: \(connection.displayName)")
             return connection
         } catch {
             startTask = nil
@@ -268,7 +268,7 @@ final class BundledDaemonManager {
 
         let credentialServer = CredentialSocketServer()
         try credentialServer.start()
-        let containerName = "concerto-lfd-\(String(token.prefix(8)))"
+        let containerName = "loopflow-lfd-\(String(token.prefix(8)))"
         let docker = try dockerExecutableURL()
         cleanupBundledContainers(docker)
         let image = lfdContainerImage()
@@ -348,7 +348,7 @@ final class BundledDaemonManager {
     }
 
     private func lfdContainerImage() -> String {
-        let configured = loadConcertoConfig()?.container?.image?
+        let configured = loadLoopflowConfig()?.container?.image?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if let configured, !configured.isEmpty {
             return configured
@@ -407,12 +407,12 @@ final class BundledDaemonManager {
             "-p", portMapping,
             "-v", "\(srcPath.path):/workspace/src:ro",
             "-v", "/var/run/docker.sock:/var/run/docker.sock",
-            "-v", "concerto-lfd-data:/data",
-            "-v", "\(credentialSocketPath.path):/var/run/concerto-auth.sock:ro",
+            "-v", "loopflow-lfd-data:/data",
+            "-v", "\(credentialSocketPath.path):/var/run/loopflow-auth.sock:ro",
             "-e", "LFD_HTTP_ADDR=0.0.0.0:2486",
-            "-e", "LFD_DB_PATH=/data/concerto.db",
+            "-e", "LFD_DB_PATH=/data/loopflow.db",
             "-e", "LFD_AUTH_TOKEN=\(token)",
-            "-e", "LFD_CREDENTIAL_SOCKET=/var/run/concerto-auth.sock",
+            "-e", "LFD_CREDENTIAL_SOCKET=/var/run/loopflow-auth.sock",
             "-e", "LFD_DISABLE_WORKTREE_JANITOR=1",
             "-e", "LFD_MODE=container",
         ]
@@ -427,7 +427,7 @@ final class BundledDaemonManager {
             args += ["-v", "\(gitconfig.path):/root/.gitconfig:ro"]
         }
 
-        if let mounts = loadConcertoConfig()?.container?.mounts {
+        if let mounts = loadLoopflowConfig()?.container?.mounts {
             for mount in mounts {
                 let expandedPath = (mount.path as NSString).expandingTildeInPath
                 let mode = mount.readOnly ? "ro" : "rw"
@@ -489,14 +489,14 @@ final class BundledDaemonManager {
     private func sqlitePath() throws -> URL {
         let supportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first?
-            .appendingPathComponent("Concerto", isDirectory: true)
+            .appendingPathComponent("Loopflow", isDirectory: true)
             .appendingPathComponent("lfd", isDirectory: true)
         guard let supportRoot else {
             throw ManagerError.invalidRuntimeState
         }
 
         try FileManager.default.createDirectory(at: supportRoot, withIntermediateDirectories: true)
-        return supportRoot.appendingPathComponent("concerto.db", isDirectory: false)
+        return supportRoot.appendingPathComponent("loopflow.db", isDirectory: false)
     }
 
     private func generateSessionToken() throws -> String {

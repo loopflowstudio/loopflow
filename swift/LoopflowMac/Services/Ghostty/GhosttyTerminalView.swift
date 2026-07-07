@@ -3,7 +3,7 @@
 
 import SwiftUI
 import AppKit
-import LoopflowCore
+import Loopflow
 
 #if GHOSTTY_ENABLED
 import GhosttyKit

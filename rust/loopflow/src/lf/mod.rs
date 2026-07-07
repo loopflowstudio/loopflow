@@ -175,7 +175,7 @@ pub enum Commands {
     /// List every wave in the registry (running and stopped), marking which
     /// have a live server. Local-only query over the shared ledger.
     Ls {
-        /// Emit the wave snapshot as JSON (Concerto's dashboard snapshot)
+        /// Emit the wave snapshot as JSON (Loopflow's dashboard snapshot)
         #[arg(long)]
         json: bool,
     },

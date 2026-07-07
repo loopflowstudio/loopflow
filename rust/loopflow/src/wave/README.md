@@ -175,7 +175,7 @@ inherits ambient context by CHANNEL in its assembled prompt —
 
 ## Wire contract (snake_case, stable)
 
-The listener binds a loopback port. Concerto finds it via the discovery
+The listener binds a loopback port. Loopflow finds it via the discovery
 pointer, under the origin repo's `wave/<name>/`:
 
 ```

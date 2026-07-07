@@ -1,7 +1,7 @@
 #if canImport(UIKit)
 import SwiftUI
 import UIKit
-import LoopflowCore
+import Loopflow
 
 enum QuoteAction {
     case quoteReply(String)

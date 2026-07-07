@@ -32,7 +32,7 @@ struct RepoScanner {
 
     /// Collapse a candidate repo directory to its main worktree. A linked worktree
     /// resolves to the repo that owns the shared `.git` dir; a main repo (or any
-    /// non-git path) resolves to itself. Concerto targets the main repo, never a
+    /// non-git path) resolves to itself. Loopflow targets the main repo, never a
     /// worktree.
     func resolveMainWorktree(_ url: URL) -> URL {
         let process = Process()

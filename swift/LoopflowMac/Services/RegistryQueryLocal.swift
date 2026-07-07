@@ -4,7 +4,7 @@
 
 #if os(macOS)
 import Foundation
-import LoopflowCore
+import Loopflow
 
 enum RegistryQueryLocal {
     static let shared = RegistryQuery { args, cwd in

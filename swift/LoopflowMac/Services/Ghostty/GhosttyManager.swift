@@ -1,5 +1,5 @@
 // Manager for the embedded Ghostty terminal.
-// Wraps the libghostty C API for terminal embedding in Concerto.
+// Wraps the libghostty C API for terminal embedding in Loopflow.
 
 import Foundation
 import SwiftUI
@@ -77,7 +77,7 @@ final class GhosttyManager: ObservableObject {
 
     private func writeLoopflowConfig() -> String? {
         let tempDir = FileManager.default.temporaryDirectory
-        let configPath = tempDir.appendingPathComponent("concerto-ghostty-config")
+        let configPath = tempDir.appendingPathComponent("loopflow-ghostty-config")
         do {
             try Self.loopflowConfig.write(to: configPath, atomically: true, encoding: .utf8)
             return configPath.path

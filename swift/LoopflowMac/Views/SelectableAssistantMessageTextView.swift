@@ -1,7 +1,7 @@
 #if os(macOS)
 import SwiftUI
 import AppKit
-import LoopflowCore
+import Loopflow
 
 /// Selectable, autosizing prose for an assistant turn. Recovered from the
 /// conversations UI, trimmed to plain selection — the quote-reply machinery it

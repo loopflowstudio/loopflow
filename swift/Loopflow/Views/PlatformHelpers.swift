@@ -1,7 +1,6 @@
 #if os(macOS)
 import SwiftUI
 import AppKit
-import LoopflowCore
 
 let platformVoiceButtonSize: CGFloat = HitTarget.comfortable
 
@@ -38,7 +37,6 @@ extension View {
 #elseif canImport(UIKit)
 import SwiftUI
 import UIKit
-import LoopflowCore
 
 let platformVoiceButtonSize: CGFloat = HitTarget.touch
 

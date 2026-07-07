@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import Concerto
+@testable import LoopflowMac
 
 @Suite("CLIInstallManager")
 struct CLIInstallManagerTests {
@@ -62,7 +62,7 @@ struct CLIInstallManagerTests {
         try? FileManager.default.removeItem(at: root)
     }
 
-    @Test("uninstall only removes symlinks managed by Concerto")
+    @Test("uninstall only removes symlinks managed by Loopflow")
     func uninstallLeavesUnmanagedLinks() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

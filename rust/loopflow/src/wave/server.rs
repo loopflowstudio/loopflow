@@ -18,7 +18,7 @@
 //! by their ownership names (`goals.148e0e02`). It holds the pen for every
 //! child journal; doors are name-addressed.
 //!
-//! Wire contract (snake_case, stable — a Concerto worker builds against it):
+//! Wire contract (snake_case, stable — a Loopflow worker builds against it):
 //! - `GET /health` → `{status, mind, wave, turns, workers, uptime_seconds}`;
 //!   `status` is CHANNEL liveness — always `serving` while this process
 //!   answers; `mind` is the resident's state (`idle | turning | interrupting
@@ -1135,7 +1135,7 @@ pub async fn live_endpoint(repo_root: &Path, wave: &str) -> Option<String> {
     (body.get("wave").and_then(serde_json::Value::as_str) == Some(wave)).then_some(addr)
 }
 
-/// Publish the loopback endpoint so Concerto can find the server. Writes ONLY
+/// Publish the loopback endpoint so Loopflow can find the server. Writes ONLY
 /// `127.0.0.1:<port>` — a pointer, never message content.
 pub fn write_endpoint(
     repo_root: &Path,

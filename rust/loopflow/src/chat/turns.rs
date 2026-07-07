@@ -1,4 +1,4 @@
-//! Turn vocabulary: `ChatTurn`, the wire type Concerto consumes.
+//! Turn vocabulary: `ChatTurn`, the wire type Loopflow consumes.
 //!
 //! The wave's mind runs on a persistent harness session
 //! ([`crate::harness`]) inside the RESIDENT process; its
@@ -27,7 +27,7 @@ pub enum ChatRole {
 
 /// One turn in a wave chat — the unit the chat server streams.
 ///
-/// Wire type consumed by Concerto. Every field is required (no serde defaults):
+/// Wire type consumed by Loopflow. Every field is required (no serde defaults):
 /// the same shape round-trips through Rust and Swift.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatTurn {

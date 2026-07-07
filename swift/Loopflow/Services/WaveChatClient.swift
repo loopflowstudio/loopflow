@@ -16,7 +16,7 @@ public enum WaveChatError: Error, Sendable {
 /// Reads the discovery pointer a running wave writes under its `wave/<name>/` dir.
 ///
 /// Wave state lives at the wave's ORIGIN repo: a running wave publishes its
-/// endpoint to the main checkout even when Concerto was pointed at a worktree,
+/// endpoint to the main checkout even when Loopflow was pointed at a worktree,
 /// so `repoPath` goes through `WaveOrigin.resolve` before the read. Every
 /// consumer (chat discovery, the launcher's double-launch guard) shares this
 /// one resolution — guard and reader can't disagree.

@@ -263,7 +263,7 @@ public final class RepoState {
         if let index = args.firstIndex(of: "-ui-test-mode"), args.count > index + 1 {
             return UITestMode(rawValue: args[index + 1])
         }
-        if let mode = ProcessInfo.processInfo.environment["CONCERTO_UI_TEST_MODE"] {
+        if let mode = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_MODE"] {
             return UITestMode(rawValue: mode)
         }
         return nil
@@ -279,7 +279,7 @@ public final class RepoState {
         selectedWaveId = nil
         isLoading = false
         errorMessage = nil
-        let selectBranch = ProcessInfo.processInfo.environment["CONCERTO_UI_TEST_SELECT_BRANCH"]
+        let selectBranch = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_SELECT_BRANCH"]
 
         switch mode {
         case .emptyWorkspaces:

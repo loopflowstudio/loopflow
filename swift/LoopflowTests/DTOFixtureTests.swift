@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import LoopflowCore
+@testable import Loopflow
 
 /// Wire-shape fixture tests for DTOs mirrored across Rust / Python / Swift.
 ///

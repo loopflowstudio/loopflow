@@ -1,4 +1,4 @@
-import LoopflowCore
+import Loopflow
 
 extension RepoState {
     func deleteWaveAndCleanupTmux(_ wave: WaveViewModel) async throws {

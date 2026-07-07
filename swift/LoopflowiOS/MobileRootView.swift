@@ -1,7 +1,7 @@
 #if os(iOS)
 import SwiftUI
 import UIKit
-import LoopflowCore
+import Loopflow
 
 struct MobileRootView: View {
     @State private var repoState = RepoState()

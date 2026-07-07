@@ -226,7 +226,7 @@ impl Wave {
         Self {
             id,
             name,
-            goal: DEFAULT_WAVE_FLOW.to_string(),
+            goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo,
             worktree: String::new(),

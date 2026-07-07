@@ -3,7 +3,7 @@
 Each fixture pins one wire shape. Most are mirrored across three hand-written
 models — Rust (`rust/loopflow/tests/dto_fixtures.rs`), Python
 (`python/tests/test_dto_fixtures.py`), Swift
-(`swift/ConcertoTests/DTOFixtureTests.swift`) — so a drift in any mirror fails
+(`swift/LoopflowTests/DTOFixtureTests.swift`) — so a drift in any mirror fails
 one of the three suites. No serde/Pydantic/init defaults on DTOs: every absent
 field is a parse error or an explicit null.
 

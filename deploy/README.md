@@ -138,7 +138,7 @@ deploy/tailscale-lfd-host.sh status       # lfd + `tailscale serve` status
 deploy/tailscale-lfd-host.sh serve-off    # remove the front (leaves lfd running)
 ```
 
-For same-tailnet observation experiments, point Concerto at
+For same-tailnet observation experiments, point Loopflow at
 `https://<host>.<tailnet>.ts.net` (TLS on, port 443) with the bearer token from
 `LFD_AUTH_TOKEN`. This is not remote identity; SSH remains the operating path.
 
@@ -172,7 +172,7 @@ curl -f https://lfd.example.com/health
 curl -H "Authorization: Bearer $LFD_AUTH_TOKEN" https://lfd.example.com/status
 ```
 
-For same-tailnet observation experiments, point Concerto at the host and use the
+For same-tailnet observation experiments, point Loopflow at the host and use the
 bearer token from `LFD_AUTH_TOKEN`. There is no studio discovery path; each repo
 owns its deployment.
 

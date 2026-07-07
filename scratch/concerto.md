@@ -113,6 +113,8 @@ left GOAL.md; crons are the project's own rhythm.
 
 ## Next: the new-world wave viewer
 
+** THIS IS THE MOST IPORTANT THING TO BUILD WELL IN THIS BRANCH **
+
 Jack: *"I want a wave viewer that shows me the GOAL.md content and for now the
 tasks in the associated project"* → *"make it work in the new world … build front
 end data structures to model Waves the right way"* → *"Wave will also have execs

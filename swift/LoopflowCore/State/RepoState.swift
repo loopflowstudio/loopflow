@@ -1212,7 +1212,11 @@ public final class RepoState {
         }
 
         let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: wave.name, branch: wave.branch)
-        _ = waveStore.applyOptimistic(waveId) { $0.content = content }
+        let plan = WavePlanParser.parse(repoRoot: repoRoot, waveName: wave.name)
+        _ = waveStore.applyOptimistic(waveId) {
+            $0.content = content
+            $0.plan = plan
+        }
         waveStore.commitMutation(waveId)
     }
 
@@ -1240,7 +1244,8 @@ public final class RepoState {
     private func makeWaveViewModel(api wave: Wave) -> WaveViewModel {
         WaveViewModel(
             api: wave,
-            content: waveStore.wave(for: wave.id)?.content
+            content: waveStore.wave(for: wave.id)?.content,
+            plan: waveStore.wave(for: wave.id)?.plan
         )
     }
 }

@@ -90,7 +90,12 @@ final class PortfolioRepoState {
     func applyConnectedWaves(_ connectedWaves: [Wave]) {
         let filtered = connectedWaves
             .filter { $0.repo.normalizedFilePath == repoPath }
-            .map { WaveViewModel(api: $0) }
+            .map { wave in
+                WaveViewModel(
+                    api: wave,
+                    plan: WavePlanParser.parse(repoRoot: repo.url, waveName: wave.name)
+                )
+            }
         waves = Self.sortWaves(filtered)
     }
 

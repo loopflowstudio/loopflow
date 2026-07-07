@@ -86,7 +86,7 @@ struct WavesView: View {
             name: snapshot.name,
             repo: repoPath,
             status: snapshot.status
-        ))
+        ), plan: WavePlanParser.parse(repoRoot: URL(fileURLWithPath: repoPath), waveName: snapshot.name))
     }
 
     private static func statusPriority(_ status: WaveStatus) -> Int {

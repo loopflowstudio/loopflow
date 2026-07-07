@@ -18,8 +18,8 @@ second brain above the wave.
 ## Measures
 
 - **Key Results**: add/sub replay works in a live demo: a fresh subscriber seeds from `MEMORY.md`, replays the delta once, then receives new facts live.
-- **Key Results**: typed MEMORY.md blocks land for decisions, constraints, glossary, and active next-state, with the whole file staying prompt-sized.
-- **Key Results**: land externalization is enforced; compaction externalization is either proven and wired or replaced by an explicit fallback ritual.
+- **Key Results**: MEMORY.md answers "what's decided, what's constrained, what's in flight" at a glance — typed blocks — and stays prompt-sized as facts accumulate.
+- **Key Results**: no learning is lost across a land, branch, machine move, or compaction — the compiled checkpoint survives every boundary.
 - **Quality**: `MEMORY.md` is compiled, curated, deduplicated, and true; raw adds never bloat the file.
 - **Quality**: facts in the stream are complete enough for subscribers to fold without reconstructing from another source.
 - **Bounds**: no cross-machine journal replay, vector store, Letta dependency, or memory server above the wave.

@@ -120,10 +120,12 @@ fn release_notes_falls_back_when_agent_cli_is_missing() {
 
     let repo = TestRepo::new();
     git(&repo, &["tag", "v0.9.0"]);
+    // A staged unreleased artifact still gets promoted; it is no longer a
+    // decisions ledger and no longer injected into the notes.
     fs::create_dir_all(repo.path().join("release/unreleased")).unwrap();
     fs::write(
-        repo.path().join("release/unreleased/DECISIONS.md"),
-        "# Decisions\n\nUse deterministic notes in CI when the agent CLI is unavailable.\n",
+        repo.path().join("release/unreleased/CHANGES.md"),
+        "staged artifact\n",
     )
     .unwrap();
 
@@ -132,14 +134,16 @@ fn release_notes_falls_back_when_agent_cli_is_missing() {
 
     assert!(notes.starts_with("# v0.9.1\n\n"));
     assert!(notes.contains("_Generated mechanically for v0.9.1._"));
-    assert!(notes.contains("## Release decisions"));
+    // Notes synthesize from the merged PRs, not a central ledger.
     assert!(notes.contains("Make weekly release self-contained"));
-    assert!(notes.contains("Use deterministic notes in CI"));
+    assert!(!notes.contains("## Release decisions"));
     assert_eq!(
         fs::read_to_string(repo.path().join("release/v0.9.1/NOTES.md")).unwrap(),
         notes,
     );
+    // The unreleased dir was promoted to the version dir.
     assert!(!repo.path().join("release/unreleased").exists());
+    assert!(repo.path().join("release/v0.9.1/CHANGES.md").exists());
 }
 
 #[test]

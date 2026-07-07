@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde::Deserialize;
 use time::OffsetDateTime;
 
+use crate::flowloop::oracle::{poll_pr_oracle, worktree_clean, PrOracle, PrState};
+use crate::flowloop::pass::{check_wall_clock, escalate_parent, run_pass, PassOptions};
+use crate::flowloop::Tier;
 use crate::lfd::executor::{create_run_for_placement, Placement};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{PullRequest, Run, RunStatus};
@@ -14,7 +15,6 @@ use crate::lfdb::{open_existing_store, SharedStore};
 use crate::ops::pm::{pm_complete, pm_show, PmCompleteOptions, PmShowOptions};
 use crate::ops::{NullProgress, OpsError, OpsResult};
 
-const TASK_PASS_FLOW: &str = "task-pass";
 const DEFAULT_MAX_PASSES: u32 = 8;
 const DEFAULT_PASS_TIMEOUT_SECS: u64 = 60 * 30;
 const DEFAULT_WALL_CLOCK_SECS: u64 = 60 * 60 * 2;
@@ -61,31 +61,6 @@ impl TaskStatement {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PrState {
-    Open,
-    Merged,
-    Closed,
-}
-
-impl PrState {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Merged => "merged",
-            Self::Closed => "closed",
-        }
-    }
-}
-
-/// A PR the task loop is tracking. Absence (no PR yet) is `Option::None`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PrOracle {
-    number: u64,
-    url: String,
-    state: PrState,
-}
-
 pub fn run_task_loop(repo: &Path, options: &TaskLoopOptions) -> OpsResult<()> {
     let wave_name = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
@@ -110,7 +85,7 @@ pub fn run_task_loop(repo: &Path, options: &TaskLoopOptions) -> OpsResult<()> {
         let mut run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh, None)
             .await
             .map_err(|err| OpsError::Message(format!("failed to create task worktree: {err}")))?;
-        run.flow = TASK_PASS_FLOW.to_string();
+        run.flow = Tier::Task.pass_flow().to_string();
         run.task = Some(task.prompt());
         store
             .update_run(&run)
@@ -224,100 +199,25 @@ fn run_task_passes(
     Err(OpsError::Message(message))
 }
 
-fn check_wall_clock(started: Instant, wall_clock: Duration) -> OpsResult<()> {
-    if started.elapsed() >= wall_clock {
-        let message = format!(
-            "task flowloop exceeded wall-clock cap of {}s",
-            wall_clock.as_secs()
-        );
-        return Err(OpsError::Message(message));
-    }
-    Ok(())
-}
-
 fn run_task_pass(
     worktree: &Path,
     task: &TaskStatement,
     options: &TaskLoopOptions,
 ) -> OpsResult<()> {
-    let mut cmd = lf_command();
-    cmd.arg("-b");
-    if let Some(max_turns) = options.max_turns {
-        cmd.arg("--max-turns").arg(max_turns.to_string());
-    }
-    cmd.arg(TASK_PASS_FLOW);
-    cmd.arg(task.prompt());
-    cmd.current_dir(worktree);
-    let output = run_with_timeout(cmd, options.pass_timeout)?;
-    if !output.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: format!("lf -b {TASK_PASS_FLOW}"),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
-    }
+    run_pass(
+        worktree,
+        Tier::Task,
+        &task.prompt(),
+        &PassOptions {
+            timeout: options.pass_timeout,
+            max_turns: options.max_turns,
+        },
+    )?;
     Ok(())
 }
 
 fn closed_without_merging(pr: &PrOracle) -> OpsError {
     OpsError::Message(format!("{} was closed without merging", pr.url))
-}
-
-fn poll_pr_oracle(worktree: &Path, remembered_pr: Option<u64>) -> OpsResult<Option<PrOracle>> {
-    if let Some(number) = remembered_pr {
-        return poll_pr_by_number(worktree, number);
-    }
-    poll_current_branch_pr(worktree)
-}
-
-fn poll_current_branch_pr(worktree: &Path) -> OpsResult<Option<PrOracle>> {
-    let output = Command::new("gh")
-        .arg("pr")
-        .arg("view")
-        .arg("--json")
-        .arg("state,url,number")
-        .current_dir(worktree)
-        .output()?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    parse_pr_view_json(&output.stdout).map(Some)
-}
-
-fn poll_pr_by_number(worktree: &Path, number: u64) -> OpsResult<Option<PrOracle>> {
-    let output = Command::new("gh")
-        .arg("pr")
-        .arg("view")
-        .arg(number.to_string())
-        .arg("--json")
-        .arg("state,url,number")
-        .current_dir(worktree)
-        .output()?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    parse_pr_view_json(&output.stdout).map(Some)
-}
-
-#[derive(Debug, Deserialize)]
-struct GhPrView {
-    state: String,
-    url: String,
-    number: u64,
-}
-
-fn parse_pr_view_json(raw: &[u8]) -> OpsResult<PrOracle> {
-    let view: GhPrView = serde_json::from_slice(raw)
-        .map_err(|err| OpsError::Parse(format!("failed to parse gh pr view: {err}")))?;
-    let state = match view.state.as_str() {
-        "MERGED" => PrState::Merged,
-        "CLOSED" => PrState::Closed,
-        _ => PrState::Open,
-    };
-    Ok(PrOracle {
-        number: view.number,
-        url: view.url,
-        state,
-    })
 }
 
 fn close_task(worktree: &Path, wave: &str, task: &TaskStatement, pr: &PrOracle) -> OpsResult<()> {
@@ -355,129 +255,4 @@ fn update_run_pr(
             .await
             .map_err(|err| OpsError::Message(format!("failed to record task PR: {err}")))
     })
-}
-
-fn worktree_clean(worktree: &Path) -> OpsResult<bool> {
-    let output = Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(worktree)
-        .output()?;
-    if !output.status.success() {
-        return Err(OpsError::CommandFailed {
-            command: "git status --porcelain".to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
-    }
-    Ok(output.stdout.is_empty())
-}
-
-fn run_with_timeout(mut cmd: Command, timeout: Duration) -> OpsResult<std::process::Output> {
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = cmd.spawn()?;
-    let started = Instant::now();
-    loop {
-        if child.try_wait()?.is_some() {
-            return child.wait_with_output().map_err(OpsError::from);
-        }
-        if started.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(OpsError::Message(format!(
-                "task pass timed out after {}s",
-                timeout.as_secs()
-            )));
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-}
-
-fn escalate_parent(message: &str) {
-    let _ = lf_command()
-        .arg("chat")
-        .arg("--parent")
-        .arg(message)
-        .status();
-}
-
-fn lf_command() -> Command {
-    if let Ok(path) = std::env::current_exe() {
-        return Command::new(path);
-    }
-    Command::new("lf")
-}
-
-#[cfg(test)]
-mod tests {
-    use std::process::Command;
-    use std::time::{Duration, Instant};
-
-    use super::{check_wall_clock, parse_pr_view_json, run_with_timeout, PrOracle, PrState};
-
-    #[test]
-    fn pr_oracle_parses_merged() {
-        let oracle = parse_pr_view_json(
-            br#"{"number":12,"state":"MERGED","url":"https://github.test/pr/12"}"#,
-        )
-        .expect("oracle");
-
-        assert_eq!(
-            oracle,
-            PrOracle {
-                number: 12,
-                url: "https://github.test/pr/12".to_string(),
-                state: PrState::Merged,
-            }
-        );
-    }
-
-    #[test]
-    fn pr_oracle_parses_open() {
-        let oracle =
-            parse_pr_view_json(br#"{"number":7,"state":"OPEN","url":"https://github.test/pr/7"}"#)
-                .expect("oracle");
-
-        assert_eq!(
-            oracle,
-            PrOracle {
-                number: 7,
-                url: "https://github.test/pr/7".to_string(),
-                state: PrState::Open,
-            }
-        );
-    }
-
-    #[test]
-    fn pr_oracle_parses_closed() {
-        let oracle = parse_pr_view_json(
-            br#"{"number":8,"state":"CLOSED","url":"https://github.test/pr/8"}"#,
-        )
-        .expect("oracle");
-
-        assert_eq!(
-            oracle,
-            PrOracle {
-                number: 8,
-                url: "https://github.test/pr/8".to_string(),
-                state: PrState::Closed,
-            }
-        );
-    }
-
-    #[test]
-    fn wall_clock_cap_fires() {
-        let started = Instant::now() - Duration::from_secs(5);
-        let err = check_wall_clock(started, Duration::from_secs(1)).expect_err("cap");
-
-        assert!(err.to_string().contains("wall-clock cap"));
-    }
-
-    #[test]
-    fn pass_runner_kills_on_timeout() {
-        let mut cmd = Command::new("sh");
-        cmd.args(["-c", "sleep 2"]);
-
-        let err = run_with_timeout(cmd, Duration::from_millis(50)).expect_err("timeout");
-
-        assert!(err.to_string().contains("timed out"));
-    }
 }

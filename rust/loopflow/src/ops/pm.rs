@@ -795,6 +795,7 @@ mod tests {
             description: String::new(),
             rank: 0,
             completed: false,
+            labels: Vec::new(),
             assignee: Some("me".to_string()),
         });
         assert!(line.starts_with("open"));

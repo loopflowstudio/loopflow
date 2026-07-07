@@ -59,6 +59,7 @@ pub struct PmItem {
     pub description: String,
     pub rank: u32,
     pub completed: bool,
+    pub labels: Vec<String>,
     /// Provider user ID of the assignee, if any.
     pub assignee: Option<String>,
 }

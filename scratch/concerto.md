@@ -164,12 +164,33 @@ as sessions (frame don't render). Vocabulary locked: **Run** = ledger entry
 (reuses lfd `Run`); **session** = a live run's attachable tmux; **exec** retired
 from the frontend (stays flowloop's word for *how* a run is born).
 
-### Data sources
+### Architecture direction (2026-07-07) — `lf` / lfd / pubsub
 
-- objective, projects, KRs → `GOAL.md` + `projects/*.md` (lfd owns the read).
-- tasks → Linear via `lfd` pm (`ops/pm.rs`).
-- runs → lfd's existing `Run` records per `wave_id`; live rows carry a
-  `TerminalSession` for `/attach`.
+The spine Concerto builds toward (Jack, this session):
+
+- **`lf` is the single implementation.** It queries lfdb directly — *daemon-less*
+  local reads — and runs/executes commands. "Runs become an `lf` API" is the first
+  instance: `lf` gains a runs query surface over lfdb. Reads and actions are `lf`.
+- **lfd demotes to proxy + pubsub.** It (a) proxies `lf` over HTTP so remote looks
+  like local, and (b) subscribes to / streams new runs (pubsub). It is **not** how
+  things execute and **not** a parallel implementation. Concerto's *bundled* lfd
+  earns its keep solely as the pubsub pipe feeding the ledger.
+- **Why:** one implementation (`lf`), matching the repo's "keep one
+  implementation" law at the daemon layer; kills the two-code-path / three-mirror
+  drift the DTO rule fights; shrinks local-vs-remote to "which lfd proxies."
+
+Scope boundary for this branch: build the viewer *toward* this (reads via `lf`,
+live via pubsub) — we do **not** migrate lfd's existing executor into `lf` here.
+That collapse is its own effort; flag, don't do it in the viewer branch.
+
+### Data sources (under the new spine)
+
+- objective, projects, KRs → `GOAL.md` + `projects/*.md`. Daemon-less: read the
+  files directly (slice 1) → later a `lf wave show` query surface.
+- runs (the ledger) → a **`lf` runs query** over lfdb (pull) + **lfd pubsub** for
+  live new-run updates (push). Reuses lfd's existing `Run` shape; live rows carry
+  a `TerminalSession` for `/attach`.
+- tasks → Linear via `lf op pm` (which `lf` owns; lfd only proxies it).
 
 ### Open modeling question (flowloop R1)
 
@@ -185,13 +206,14 @@ one flat bucket, not yet per-`projects/*.md`. Slice 1 decision: model `tasks` on
    viewer renders objective + projects + KRs. Reads files locally — no wire work.
    **Demo: open Concerto, click the concerto wave, see the objective and five
    projects with their KRs, rendered from the files we committed today.**
-2. **The ledger.** Render lfd's existing `Run` records for the wave as a
-   chart/history grouped by origin (project/task) and time; live rows attach as
-   sessions. Reuses the wire type that's already there.
-3. **Wire projects through `lfd`** as a DTO (Rust + Python + Swift mirrors +
-   `tests/fixtures/dto/`) so remote works, not just local files.
-4. **Tasks from Linear** — expose the wave's project issues through `lfd`; render
-   under the project.
+2. **The ledger.** A `lf` runs query over lfdb (daemon-less pull) renders the
+   wave's `Run` records as a chart/history grouped by origin (project/task) and
+   time; the bundled lfd's pubsub pushes live new-run updates; live rows attach as
+   sessions. This is where "runs become an `lf` API" lands.
+3. **`lf` query surface for the aim + plan** — promote slice 1's direct file read
+   to a `lf wave show` query so remote (lfd-as-proxy) works, not just local files.
+4. **Tasks from Linear** — surface the wave's project issues via `lf op pm`;
+   render under the project.
 
 ## Still open
 

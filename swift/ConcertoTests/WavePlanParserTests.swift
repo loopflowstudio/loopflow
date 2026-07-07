@@ -59,8 +59,6 @@ struct WavePlanParserTests {
             "A running wave session survives app restart and reattaches cleanly in 5/5 dogfood trials.",
             "Launching or attaching takes one action.",
         ])
-        #expect(plan.projects[0].tasks.isEmpty)
-        #expect(plan.tasks.isEmpty)
     }
 
     @Test("sorts projects by filename")

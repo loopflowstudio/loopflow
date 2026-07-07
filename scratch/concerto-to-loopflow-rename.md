@@ -2,6 +2,18 @@
 
 Branch `jack-heart/concerto.loopflow-rename`, stacked on `jack-heart/concerto`.
 
+## Rebase note (2026-07-07)
+
+Parent branch `jack-heart/concerto` landed on main as a squash (`e6bca5e5`,
+"concerto: show objective and project plan"). Its tree is byte-identical to this
+branch's pre-rename tip `9c322bf5` except for scratch deletions, so replaying the
+wave-viewer commits would only re-conflict with already-landed work. Rebased with
+`git rebase --onto origin/main 9c322bf5` to drop those duplicates and replay only
+the 7 rename commits — clean, no conflicts. The rename shortened the `Surface`
+test array below rustfmt's width; fixed with `cargo fmt` in a follow-up commit.
+Full gate green (cargo build/fmt/clippy, Python 54, Swift build + 304 tests,
+website).
+
 ## Why
 
 Kill the "Concerto" app codename and the never-built "Symphonia" enterprise-library

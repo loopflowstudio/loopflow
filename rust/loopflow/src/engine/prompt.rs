@@ -2270,12 +2270,7 @@ mod tests {
 
     #[test]
     fn format_prompt_interactive_surfaces_have_no_preamble() {
-        for surface in [
-            Surface::Cli,
-            Surface::Ide,
-            Surface::Mac,
-            Surface::Iphone,
-        ] {
+        for surface in [Surface::Cli, Surface::Ide, Surface::Mac, Surface::Iphone] {
             let components = PromptComponents {
                 surface,
                 ..Default::default()

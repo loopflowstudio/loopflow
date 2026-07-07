@@ -1,5 +1,6 @@
 // LiveOutput - streaming read-only output view for agent runs.
 
+import Loopflow
 import SwiftUI
 
 struct LiveOutput: View {

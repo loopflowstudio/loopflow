@@ -1,5 +1,6 @@
 // Lightweight per-repo state for the portfolio dashboard.
 
+import Loopflow
 import Foundation
 
 @MainActor

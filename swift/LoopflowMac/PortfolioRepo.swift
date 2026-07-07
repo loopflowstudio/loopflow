@@ -1,5 +1,6 @@
 // Portfolio repository entry for persistence.
 
+import Loopflow
 import Foundation
 
 struct PortfolioRepo: Codable, Identifiable, Hashable {

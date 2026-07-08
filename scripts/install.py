@@ -322,7 +322,7 @@ def _sync_skills(lf_bin: Path) -> None:
     typer.echo("Syncing skills into ~/.claude and ~/.agents...")
     try:
         code = _stream_process(
-            [str(lf_bin), "op", "sync-skills", "--global", "--yes"], "skills", cwd=ROOT
+            [str(lf_bin), "op", "sync-skills", "--yes"], "skills", cwd=ROOT
         )
     except OSError as exc:
         typer.echo(f"skill sync failed ({exc}); binaries installed, skills unchanged", err=True)

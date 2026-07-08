@@ -187,7 +187,7 @@ def test_stage_binaries_errors_on_missing_cargo_output(
         install._stage_binaries(tmp_path / "local-bin")
 
 
-def test_sync_skills_runs_fresh_lf_with_global_yes(tmp_path: Path) -> None:
+def test_sync_skills_runs_fresh_lf_with_yes(tmp_path: Path) -> None:
     log = tmp_path / "sync.log"
     lf = tmp_path / "lf"
     lf.write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > {log}\nprintf 'synced\\n'\n")
@@ -195,7 +195,7 @@ def test_sync_skills_runs_fresh_lf_with_global_yes(tmp_path: Path) -> None:
 
     install._sync_skills(lf)
 
-    assert log.read_text() == "op sync-skills --global --yes\n"
+    assert log.read_text() == "op sync-skills --yes\n"
 
 
 def test_sync_skills_warns_without_failing_when_lf_cannot_run(

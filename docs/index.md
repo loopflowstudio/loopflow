@@ -45,7 +45,7 @@ tmux attach -t <name>  # watch one work
 
 Skills are atomic. Flows are how work actually gets done.
 
-**Linear flows** chain skills with automatic commits:
+**Linear flows** run a sequence of steps — each step names a skill, an op, or a flow — with automatic commits:
 ```
 design → implement → polish
 ```

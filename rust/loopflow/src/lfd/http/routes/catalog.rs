@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::engine::flow::FlowItem;
+use crate::engine::flow::Step;
 use crate::lfd::http::ApiResult;
 
 #[derive(Deserialize)]
@@ -17,7 +17,7 @@ pub struct FlowEntry {
     pub name: String,
     pub category: String,
     pub source: EntrySource,
-    pub items: Vec<FlowItem>,
+    pub items: Vec<Step>,
 }
 
 #[derive(Debug, Serialize)]
@@ -252,7 +252,7 @@ mod tests {
         assert_eq!(build_flow.source, EntrySource::Builtin);
         assert!(matches!(
             build_flow.items.first(),
-            Some(crate::engine::flow::FlowItem::Skill(skill)) if skill.name == "kickoff"
+            Some(crate::engine::flow::Step::Skill(skill)) if skill.name == "kickoff"
         ));
 
         let garden_flow = catalog

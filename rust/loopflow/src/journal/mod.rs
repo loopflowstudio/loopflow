@@ -299,7 +299,7 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
             .and_then(|argv| serde_json::to_string(argv).ok()),
         flow: event.flow.clone(),
         skill: event.skill.clone(),
-        skill_index: event.index.map(i64::from),
+        step_index: event.index.map(i64::from),
         error: event.error.clone(),
         input_tokens: usage.map(|u| u.input_tokens as i64),
         output_tokens: usage.map(|u| u.output_tokens as i64),

@@ -101,7 +101,7 @@ lf op pr                           # open PR
 | `qa` | Thorough quality assessment of the current branch |
 | `lint` | Run ruff, fix issues |
 
-### How skills chain
+### How steps chain
 
 | Skill | Reads | Writes |
 |------|-------|--------|
@@ -112,7 +112,7 @@ lf op pr                           # open PR
 
 ### Named flows
 
-Chain skills manually, or use a named flow:
+Chain skills manually, or use a named flow (a flow is a sequence of steps; each step names a skill, an op, or a subflow):
 
 ```bash
 lf design && lf implement && lf gate    # manual chain

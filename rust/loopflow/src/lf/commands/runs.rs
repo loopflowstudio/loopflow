@@ -140,7 +140,7 @@ pub fn trace(run_id: &str) -> Result<()> {
             event.flow.as_deref(),
         ) {
             ("skill", Some(skill), _) => {
-                format!("skill:{skill}:{}", event.skill_index.unwrap_or(0))
+                format!("skill:{skill}:{}", event.step_index.unwrap_or(0))
             }
             ("flow", _, flow) => format!("flow:{}", flow.unwrap_or("")),
             _ => continue,
@@ -442,7 +442,7 @@ mod tests {
             command: Some(r#"["lf","gate"]"#.to_string()),
             flow: None,
             skill: None,
-            skill_index: None,
+            step_index: None,
             error: None,
             input_tokens: None,
             output_tokens: None,

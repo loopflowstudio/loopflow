@@ -7,7 +7,7 @@ pub enum StoreError {
     #[error("run not found: {0}")]
     RunNotFound(String),
     #[error("skill run not found: {0}")]
-    SkillRunNotFound(String),
+    StepRunNotFound(String),
     #[error("store error: {0}")]
     Other(String),
 }

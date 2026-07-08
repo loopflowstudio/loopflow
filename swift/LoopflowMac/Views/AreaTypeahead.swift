@@ -195,7 +195,7 @@ struct AreaTypeahead: View {
             direction: [],
             area: ["src/loopflow"]
         ),
-        recentSkills: []
+        recentSteps: []
     )
 
     return AreaTypeahead(wave: wave) { _ in

@@ -221,7 +221,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var stackCount: Int
     public var activeRun: Run?
     public var pr: PullRequest?
-    public var flowSkills: [String]
+    public var flowSteps: [String]
     public var createdAt: Date?
     /// Parent wave in the chord tree. `nil` for a root wave.
     public var parentWaveId: String?
@@ -244,7 +244,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         remoteBranch: String? = nil,
         commits: [CommitEntry] = [],
         diffStat: String? = nil,
-        flowSkills: [String] = [],
+        flowSteps: [String] = [],
         openPRCount: Int = 0,
         stackCount: Int = 0,
         activeRun: Run? = nil,
@@ -273,7 +273,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.stackCount = stackCount
         self.activeRun = activeRun
         self.pr = pr
-        self.flowSkills = flowSkills
+        self.flowSteps = flowSteps
         self.createdAt = createdAt
         self.parentWaveId = parentWaveId
     }

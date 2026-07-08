@@ -17,7 +17,7 @@ struct WaveModelTests {
         triggers: [Trigger] = [],
         status: WaveStatus = .idle,
         iteration: Int = 0,
-        recentSkills: [SkillRun] = [],
+        recentSteps: [StepRun] = [],
         waitingReason: WaitingReason? = nil,
         diffStat: String? = nil,
         hasDiff: Bool = false
@@ -35,7 +35,7 @@ struct WaveModelTests {
                 diffStat: diffStat
             ),
             hasDiff: hasDiff,
-            recentSkills: recentSkills,
+            recentSteps: recentSteps,
             waitingReason: waitingReason
         )
     }
@@ -235,8 +235,8 @@ struct WaveModelTests {
         #expect(wave.detailText == ". · design")
     }
 
-    @Test("displayFlowSkills collapse to active run flow when override is running")
-    func displayFlowSkillsPreferActiveRunOverride() {
+    @Test("displayFlowSteps collapse to active run flow when override is running")
+    func displayFlowStepsPreferActiveRunOverride() {
         let run = Run(
             id: "run-1",
             waveId: "wave-1",
@@ -249,16 +249,16 @@ struct WaveModelTests {
                 id: "wave-1",
                 repo: "/tmp/repo",
                 status: .running,
-                flowSkills: ["ingest", "kickoff", "build"],
+                flowSteps: ["ingest", "kickoff", "build"],
                 activeRun: run
             )
         )
 
-        #expect(wave.displayFlowSkills == ["design"])
+        #expect(wave.displayFlowSteps == ["design"])
     }
 
-    @Test("displayFlowSkills trim active run flow")
-    func displayFlowSkillsTrimActiveRunFlow() {
+    @Test("displayFlowSteps trim active run flow")
+    func displayFlowStepsTrimActiveRunFlow() {
         let run = Run(
             id: "run-1",
             waveId: "wave-1",
@@ -271,13 +271,13 @@ struct WaveModelTests {
                 id: "wave-1",
                 repo: "/tmp/repo",
                 status: .running,
-                flowSkills: ["ingest", "kickoff", "build"],
+                flowSteps: ["ingest", "kickoff", "build"],
                 activeRun: run
             )
         )
 
         #expect(wave.displayFlow == "ship-roadmap")
-        #expect(wave.displayFlowSkills == ["ship-roadmap"])
+        #expect(wave.displayFlowSteps == ["ship-roadmap"])
     }
 
     // MARK: - Iteration Text
@@ -300,7 +300,7 @@ struct WaveModelTests {
 
     @Test("lastActivityAt returns nil when no recent skills")
     func lastActivityAtNilWithNoSkills() {
-        let wave = makeWave(id: "test", repo: "/tmp", recentSkills: [])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [])
 
         #expect(wave.lastActivityAt == nil)
     }
@@ -309,7 +309,7 @@ struct WaveModelTests {
     func lastActivityAtUsesEndedAt() {
         let startDate = Date().addingTimeInterval(-120)
         let endDate = Date().addingTimeInterval(-60)
-        let skill = SkillRun(
+        let skill = StepRun(
             id: "skill-1",
             skill: "implement",
             repo: "/tmp",
@@ -320,7 +320,7 @@ struct WaveModelTests {
             agent: "claude",
             runMode: "auto"
         )
-        let wave = makeWave(id: "test", repo: "/tmp", recentSkills: [skill])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [skill])
 
         #expect(wave.lastActivityAt == endDate)
     }
@@ -328,7 +328,7 @@ struct WaveModelTests {
     @Test("lastActivityAt falls back to startedAt when endedAt is nil")
     func lastActivityAtFallsBackToStartedAt() {
         let startDate = Date().addingTimeInterval(-120)
-        let skill = SkillRun(
+        let skill = StepRun(
             id: "skill-1",
             skill: "implement",
             repo: "/tmp",
@@ -339,21 +339,21 @@ struct WaveModelTests {
             agent: "claude",
             runMode: "auto"
         )
-        let wave = makeWave(id: "test", repo: "/tmp", recentSkills: [skill])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [skill])
 
         #expect(wave.lastActivityAt == startDate)
     }
 
     @Test("lastActivityDescription returns nil when no recent skills")
     func lastActivityDescriptionNilWithNoSkills() {
-        let wave = makeWave(id: "test", repo: "/tmp", recentSkills: [])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [])
 
         #expect(wave.lastActivityDescription == nil)
     }
 
     @Test("lastActivityDescription includes skill name")
     func lastActivityDescriptionIncludesSkillName() {
-        let skill = SkillRun(
+        let skill = StepRun(
             id: "skill-1",
             skill: "implement",
             repo: "/tmp",
@@ -364,7 +364,7 @@ struct WaveModelTests {
             agent: "claude",
             runMode: "auto"
         )
-        let wave = makeWave(id: "test", repo: "/tmp", recentSkills: [skill])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [skill])
         let description = wave.lastActivityDescription
 
         #expect(description != nil)
@@ -447,55 +447,55 @@ struct CombinePRsResultTests {
 }
 
 @Suite("Flow skill progress")
-struct FlowSkillProgressTests {
+struct FlowStepProgressTests {
 
-    @Test("skillIndex reflects active run skill_index")
-    func skillIndexFromActiveRun() {
+    @Test("stepIndex reflects active run step_index")
+    func stepIndexFromActiveRun() {
         let run = Run(
             id: "run-1",
             waveId: "wave-1",
             flow: "start",
             area: ".",
             repo: "/tmp/repo",
-            skillIndex: 1
+            stepIndex: 1
         )
         let wave = WaveViewModel(
             api: Wave(
                 id: "wave-1",
                 repo: "/tmp/repo",
                 status: .running,
-                flowSkills: ["ingest", "kickoff"],
+                flowSteps: ["ingest", "kickoff"],
                 activeRun: run
             )
         )
 
-        #expect(wave.skillIndex == 1)
-        #expect(wave.flowSkills == ["ingest", "kickoff"])
+        #expect(wave.stepIndex == 1)
+        #expect(wave.flowSteps == ["ingest", "kickoff"])
     }
 
-    @Test("skillIndex defaults to 0 when no active run")
-    func skillIndexDefaultsToZero() {
+    @Test("stepIndex defaults to 0 when no active run")
+    func stepIndexDefaultsToZero() {
         let wave = WaveViewModel(
             api: Wave(
                 id: "wave-1",
                 repo: "/tmp/repo",
                 status: .idle,
-                flowSkills: ["ingest", "kickoff"]
+                flowSteps: ["ingest", "kickoff"]
             )
         )
 
-        #expect(wave.skillIndex == 0)
+        #expect(wave.stepIndex == 0)
     }
 
-    @Test("skillIndex advances when active run updates")
-    func skillIndexAdvancesWithRun() {
+    @Test("stepIndex advances when active run updates")
+    func stepIndexAdvancesWithRun() {
         let run0 = Run(
             id: "run-1",
             waveId: "wave-1",
             flow: "build",
             area: ".",
             repo: "/tmp/repo",
-            skillIndex: 0
+            stepIndex: 0
         )
         let run1 = Run(
             id: "run-1",
@@ -503,7 +503,7 @@ struct FlowSkillProgressTests {
             flow: "build",
             area: ".",
             repo: "/tmp/repo",
-            skillIndex: 2
+            stepIndex: 2
         )
 
         let wave0 = WaveViewModel(
@@ -511,7 +511,7 @@ struct FlowSkillProgressTests {
                 id: "wave-1",
                 repo: "/tmp/repo",
                 status: .running,
-                flowSkills: ["implement", "compress", "gate", "update-wave"],
+                flowSteps: ["implement", "compress", "gate", "update-wave"],
                 activeRun: run0
             )
         )
@@ -520,13 +520,13 @@ struct FlowSkillProgressTests {
                 id: "wave-1",
                 repo: "/tmp/repo",
                 status: .running,
-                flowSkills: ["implement", "compress", "gate", "update-wave"],
+                flowSteps: ["implement", "compress", "gate", "update-wave"],
                 activeRun: run1
             )
         )
 
-        #expect(wave0.skillIndex == 0)
-        #expect(wave1.skillIndex == 2)
+        #expect(wave0.stepIndex == 0)
+        #expect(wave1.stepIndex == 2)
     }
 }
 
@@ -534,47 +534,47 @@ struct FlowSkillProgressTests {
 struct WaveStoreReactivityTests {
 
     @MainActor
-    @Test("WaveStore.set updates skillIndex when wave refreshed with new active run")
+    @Test("WaveStore.set updates stepIndex when wave refreshed with new active run")
     func storeReflectsUpdatedSkillIndex() {
         let store = WaveStore()
 
         // Initial wave at skill 0
         let run0 = Run(
             id: "run-1", waveId: "wave-1", flow: "start", area: ".", repo: "/tmp/repo",
-            skillIndex: 0
+            stepIndex: 0
         )
         let wave0 = WaveViewModel(
             api: Wave(
                 id: "wave-1", repo: "/tmp/repo", status: .running,
-                flowSkills: ["ingest", "kickoff"], activeRun: run0
+                flowSteps: ["ingest", "kickoff"], activeRun: run0
             )
         )
         store.set(wave0)
 
-        #expect(store.wave(for: "wave-1")?.skillIndex == 0)
+        #expect(store.wave(for: "wave-1")?.stepIndex == 0)
 
         // Simulate wave_updated event: re-fetch returns skill 1
         let run1 = Run(
             id: "run-1", waveId: "wave-1", flow: "start", area: ".", repo: "/tmp/repo",
-            skillIndex: 1
+            stepIndex: 1
         )
         let wave1 = WaveViewModel(
             api: Wave(
                 id: "wave-1", repo: "/tmp/repo", status: .running,
-                flowSkills: ["ingest", "kickoff"], activeRun: run1
+                flowSteps: ["ingest", "kickoff"], activeRun: run1
             )
         )
         store.set(wave1)
 
-        #expect(store.wave(for: "wave-1")?.skillIndex == 1)
-        #expect(store.wave(for: "wave-1")?.flowSkills == ["ingest", "kickoff"])
+        #expect(store.wave(for: "wave-1")?.stepIndex == 1)
+        #expect(store.wave(for: "wave-1")?.flowSteps == ["ingest", "kickoff"])
     }
 }
 
 @Suite("parseWaveFromJSON")
 struct ParseWaveFromJSONTests {
 
-    @Test("parses active_run with skill_index")
+    @Test("parses active_run with step_index")
     func parsesActiveRunSkillIndex() {
         let json: [String: Any] = [
             "id": "wave-1",
@@ -584,7 +584,7 @@ struct ParseWaveFromJSONTests {
             "direction": ["ux"],
             "area": ["."],
             "status": "running",
-            "flow_skills": ["ingest", "kickoff"],
+            "flow_steps": ["ingest", "kickoff"],
             "repo": "/tmp/repo",
             "iteration": 0,
             "open_pr_count": 3,
@@ -598,7 +598,7 @@ struct ParseWaveFromJSONTests {
                 "direction": ["ux"],
                 "area": ["."],
                 "iteration": 0,
-                "skill_index": 1,
+                "step_index": 1,
                 "status": "running",
                 "local_worktree": "/tmp/wt",
                 "remote_branch": "jack/ux"
@@ -607,15 +607,15 @@ struct ParseWaveFromJSONTests {
 
         let wave = WaveService.parseWaveFromJSON(json)
 
-        #expect(wave.flowSkills == ["ingest", "kickoff"])
+        #expect(wave.flowSteps == ["ingest", "kickoff"])
         #expect(wave.openPRCount == 3)
-        #expect(wave.activeRun?.skillIndex == 1)
+        #expect(wave.activeRun?.stepIndex == 1)
 
         let vm = WaveViewModel(api: wave)
-        #expect(vm.skillIndex == 1)
+        #expect(vm.stepIndex == 1)
     }
 
-    @Test("parses wave without active_run defaults skillIndex to 0")
+    @Test("parses wave without active_run defaults stepIndex to 0")
     func parsesWaveWithoutActiveRun() {
         let json: [String: Any] = [
             "id": "wave-1",
@@ -623,7 +623,7 @@ struct ParseWaveFromJSONTests {
             "goal": "ship-roadmap",
             "metrics": [],
             "status": "idle",
-            "flow_skills": ["ingest", "kickoff"],
+            "flow_steps": ["ingest", "kickoff"],
             "repo": "/tmp/repo",
             "iteration": 0,
             "open_pr_count": 0,
@@ -634,7 +634,7 @@ struct ParseWaveFromJSONTests {
         let wave = WaveService.parseWaveFromJSON(json)
         let vm = WaveViewModel(api: wave)
 
-        #expect(vm.skillIndex == 0)
+        #expect(vm.stepIndex == 0)
         #expect(wave.activeRun == nil)
     }
 }

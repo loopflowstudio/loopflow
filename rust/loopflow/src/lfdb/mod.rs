@@ -48,7 +48,7 @@ impl ForkRunStatus {
 pub struct ForkRun {
     pub id: LfdId,
     pub run_id: LfdId,
-    pub skill_index: u32,
+    pub step_index: u32,
     pub branch_index: u32,
     pub status: ForkRunStatus,
     pub worktree: String,
@@ -71,7 +71,7 @@ pub struct RunEventRow {
     pub command: Option<String>,
     pub flow: Option<String>,
     pub skill: Option<String>,
-    pub skill_index: Option<i64>,
+    pub step_index: Option<i64>,
     pub error: Option<String>,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
@@ -450,17 +450,17 @@ impl Store {
     pub async fn list_fork_runs(
         &self,
         run_id: &LfdId,
-        skill_index: u32,
+        step_index: u32,
     ) -> StoreResult<Vec<ForkRun>> {
-        ExecutionStore::list_fork_runs(self, run_id, skill_index).await
+        ExecutionStore::list_fork_runs(self, run_id, step_index).await
     }
 
     pub async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
         ExecutionStore::upsert_fork_run(self, fork_run).await
     }
 
-    pub async fn delete_fork_runs(&self, run_id: &LfdId, skill_index: u32) -> StoreResult<u32> {
-        ExecutionStore::delete_fork_runs(self, run_id, skill_index).await
+    pub async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
+        ExecutionStore::delete_fork_runs(self, run_id, step_index).await
     }
 
     pub async fn fail_orphaned_runs(&self) -> StoreResult<u32> {
@@ -658,10 +658,10 @@ pub trait RepoStore: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait ExecutionStore: Send + Sync {
-    async fn list_fork_runs(&self, run_id: &LfdId, skill_index: u32) -> StoreResult<Vec<ForkRun>>;
+    async fn list_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>>;
     async fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>>;
     async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()>;
-    async fn delete_fork_runs(&self, run_id: &LfdId, skill_index: u32) -> StoreResult<u32>;
+    async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32>;
 
     async fn fail_orphaned_runs(&self) -> StoreResult<u32>;
 }
@@ -1164,11 +1164,11 @@ impl RepoStore for Store {
 
 #[async_trait::async_trait]
 impl ExecutionStore for Store {
-    async fn list_fork_runs(&self, run_id: &LfdId, skill_index: u32) -> StoreResult<Vec<ForkRun>> {
+    async fn list_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>> {
         {
             let run_id = run_id.clone();
             run_sqlite(&self.sqlite, move |store| {
-                store.list_fork_runs(&run_id, skill_index)
+                store.list_fork_runs(&run_id, step_index)
             })
             .await
         }
@@ -1187,11 +1187,11 @@ impl ExecutionStore for Store {
         }
     }
 
-    async fn delete_fork_runs(&self, run_id: &LfdId, skill_index: u32) -> StoreResult<u32> {
+    async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
         {
             let run_id = run_id.clone();
             run_sqlite(&self.sqlite, move |store| {
-                store.delete_fork_runs(&run_id, skill_index)
+                store.delete_fork_runs(&run_id, step_index)
             })
             .await
         }
@@ -1419,7 +1419,7 @@ mod tests {
             direction: wave.direction().clone(),
             area: wave.area().clone(),
             iteration: 0,
-            skill_index: 0,
+            step_index: 0,
             status,
             worktree: "/repo".to_string(),
             branch: "main".to_string(),
@@ -1554,7 +1554,7 @@ mod tests {
         let fork_run = ForkRun {
             id: LfdId::new(),
             run_id: run.id.clone(),
-            skill_index: 0,
+            step_index: 0,
             branch_index: 0,
             status: ForkRunStatus::Pending,
             worktree: "/tmp/branch".to_string(),
@@ -2288,7 +2288,7 @@ mod tests {
                     direction: wave.direction().clone(),
                     area: wave.area().clone(),
                     iteration,
-                    skill_index: 0,
+                    step_index: 0,
                     status: RunStatus::Completed,
                     worktree: format!("/repo/live-pr/{iteration}"),
                     branch: format!("feature-{pr_number}"),

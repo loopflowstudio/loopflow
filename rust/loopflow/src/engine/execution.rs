@@ -7,8 +7,8 @@ use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
 
 use crate::engine::flow::{
-    build_xor_routing_suffix, load_skill, load_xor_path_items, ConcreteAnd, ConcreteItem,
-    ConcreteLoop, ConcreteOp, ConcreteSkill, ConcreteXor, Skill,
+    build_xor_routing_suffix, load_skill, load_xor_path_items, ConcreteAnd, ConcreteLoop,
+    ConcreteOp, ConcreteSkill, ConcreteStep, ConcreteXor, Skill,
 };
 
 pub const TEMP_XOR_ROUTE_STEP_NAME: &str = "xor-route";
@@ -96,7 +96,7 @@ pub trait SkillExecutor: Send + Sync {
         &self,
         _index: usize,
         _total: usize,
-        _item: &ConcreteItem,
+        _item: &ConcreteStep,
     ) -> Result<()> {
         Ok(())
     }
@@ -105,7 +105,7 @@ pub trait SkillExecutor: Send + Sync {
         &self,
         _index: usize,
         _total: usize,
-        _item: &ConcreteItem,
+        _item: &ConcreteStep,
     ) -> Result<()> {
         Ok(())
     }
@@ -139,7 +139,7 @@ impl<E> FlowEngine<E> {
 }
 
 impl<E: SkillExecutor> FlowEngine<E> {
-    pub async fn run(&self, items: &[ConcreteItem], start_index: usize) -> Result<FlowOutcome> {
+    pub async fn run(&self, items: &[ConcreteStep], start_index: usize) -> Result<FlowOutcome> {
         let mut cursor = ExecutionCursor {
             index: start_index,
             child: None,
@@ -149,7 +149,7 @@ impl<E: SkillExecutor> FlowEngine<E> {
 
     pub async fn run_with_cursor(
         &self,
-        items: &[ConcreteItem],
+        items: &[ConcreteStep],
         cursor: &mut ExecutionCursor,
     ) -> Result<FlowOutcome> {
         self.run_items(items, cursor, true).await
@@ -157,7 +157,7 @@ impl<E: SkillExecutor> FlowEngine<E> {
 
     fn run_items<'a>(
         &'a self,
-        items: &'a [ConcreteItem],
+        items: &'a [ConcreteStep],
         cursor: &'a mut ExecutionCursor,
         top_level: bool,
     ) -> BoxFuture<'a, Result<FlowOutcome>> {
@@ -200,26 +200,26 @@ impl<E: SkillExecutor> FlowEngine<E> {
 
     fn run_item<'a>(
         &'a self,
-        item: &'a ConcreteItem,
+        item: &'a ConcreteStep,
         cursor: &'a mut ExecutionCursor,
         ctx: ExecutionContext,
     ) -> BoxFuture<'a, Result<FlowOutcome>> {
         async move {
             match item {
-                ConcreteItem::Skill(skill) => self.run_concrete_skill(skill, ctx).await,
-                ConcreteItem::Op(ops) => {
+                ConcreteStep::Skill(skill) => self.run_concrete_skill(skill, ctx).await,
+                ConcreteStep::Op(ops) => {
                     self.executor.run_op(ops, ctx).await?;
                     Ok(FlowOutcome::Completed)
                 }
-                ConcreteItem::And(fork) => {
+                ConcreteStep::And(fork) => {
                     self.executor.run_and(fork, ctx).await?;
                     Ok(FlowOutcome::Completed)
                 }
-                ConcreteItem::Xor(branch) => self.run_xor(branch, cursor, ctx).await,
-                ConcreteItem::Or(_) => Err(anyhow!(
+                ConcreteStep::Xor(branch) => self.run_xor(branch, cursor, ctx).await,
+                ConcreteStep::Or(_) => Err(anyhow!(
                     "or (multi-select) execution is not yet implemented"
                 )),
-                ConcreteItem::Loop(body) => self.run_loop(body, cursor).await,
+                ConcreteStep::Loop(body) => self.run_loop(body, cursor).await,
             }
         }
         .boxed()
@@ -306,7 +306,7 @@ impl<E: SkillExecutor> FlowEngine<E> {
                     LoopCursorPhase::Body {
                         cursor: body_cursor,
                     } => {
-                        let outcome = self.run_items(&body.skills, body_cursor, false).await?;
+                        let outcome = self.run_items(&body.steps, body_cursor, false).await?;
                         if outcome == FlowOutcome::Waiting {
                             return Ok(FlowOutcome::Waiting);
                         }
@@ -396,7 +396,7 @@ pub fn xor_verdict_path(repo_root: &Path) -> PathBuf {
 }
 
 pub fn current_skill(
-    items: &[ConcreteItem],
+    items: &[ConcreteStep],
     cursor: &ExecutionCursor,
     repo_root: &Path,
 ) -> Result<Option<ConcreteSkill>> {
@@ -405,8 +405,8 @@ pub fn current_skill(
     };
 
     match item {
-        ConcreteItem::Skill(skill) => Ok(Some(skill.clone())),
-        ConcreteItem::Xor(branch) => {
+        ConcreteStep::Skill(skill) => Ok(Some(skill.clone())),
+        ConcreteStep::Xor(branch) => {
             let Some(NestedCursor::Xor {
                 selected,
                 cursor: path_cursor,
@@ -421,13 +421,13 @@ pub fn current_skill(
             let sub_items = load_xor_path_items(xor_path, repo_root)?;
             current_skill(&sub_items, path_cursor, repo_root)
         }
-        ConcreteItem::Loop(loop_body) => match cursor.child.as_deref() {
+        ConcreteStep::Loop(loop_body) => match cursor.child.as_deref() {
             Some(NestedCursor::Loop {
                 phase:
                     LoopCursorPhase::Body {
                         cursor: body_cursor,
                     },
-            }) => current_skill(&loop_body.skills, body_cursor, repo_root),
+            }) => current_skill(&loop_body.steps, body_cursor, repo_root),
             Some(NestedCursor::Loop {
                 phase:
                     LoopCursorPhase::ExitPath {
@@ -445,12 +445,12 @@ pub fn current_skill(
             }
             _ => Ok(None),
         },
-        ConcreteItem::Op(_) | ConcreteItem::And(_) | ConcreteItem::Or(_) => Ok(None),
+        ConcreteStep::Op(_) | ConcreteStep::And(_) | ConcreteStep::Or(_) => Ok(None),
     }
 }
 
 pub fn current_flow_parents(
-    items: &[ConcreteItem],
+    items: &[ConcreteStep],
     cursor: &ExecutionCursor,
     repo_root: &Path,
 ) -> Result<Vec<String>> {
@@ -459,18 +459,18 @@ pub fn current_flow_parents(
     }
 
     Ok(match items.get(cursor.index) {
-        Some(ConcreteItem::Skill(skill)) => skill.flow_parents.clone(),
-        Some(ConcreteItem::Op(ops)) => ops.flow_parents.clone(),
-        Some(ConcreteItem::And(and)) => and.flow_parents.clone(),
-        Some(ConcreteItem::Xor(branch)) => branch.flow_parents.clone(),
-        Some(ConcreteItem::Or(branch)) => branch.flow_parents.clone(),
-        Some(ConcreteItem::Loop(loop_body)) => loop_body.flow_parents.clone(),
+        Some(ConcreteStep::Skill(skill)) => skill.flow_parents.clone(),
+        Some(ConcreteStep::Op(ops)) => ops.flow_parents.clone(),
+        Some(ConcreteStep::And(and)) => and.flow_parents.clone(),
+        Some(ConcreteStep::Xor(branch)) => branch.flow_parents.clone(),
+        Some(ConcreteStep::Or(branch)) => branch.flow_parents.clone(),
+        Some(ConcreteStep::Loop(loop_body)) => loop_body.flow_parents.clone(),
         None => Vec::new(),
     })
 }
 
 pub fn advance_cursor_after_wait(
-    items: &[ConcreteItem],
+    items: &[ConcreteStep],
     cursor: &mut ExecutionCursor,
     repo_root: &Path,
 ) -> Result<()> {
@@ -479,12 +479,12 @@ pub fn advance_cursor_after_wait(
     };
 
     match item {
-        ConcreteItem::Skill(_) | ConcreteItem::Op(_) | ConcreteItem::And(_) => {
+        ConcreteStep::Skill(_) | ConcreteStep::Op(_) | ConcreteStep::And(_) => {
             cursor.child = None;
             cursor.index += 1;
             Ok(())
         }
-        ConcreteItem::Xor(branch) => {
+        ConcreteStep::Xor(branch) => {
             let Some(NestedCursor::Xor {
                 selected,
                 cursor: path_cursor,
@@ -506,7 +506,7 @@ pub fn advance_cursor_after_wait(
             }
             Ok(())
         }
-        ConcreteItem::Loop(loop_body) => {
+        ConcreteStep::Loop(loop_body) => {
             let Some(NestedCursor::Loop { phase }) = cursor.child.as_deref_mut() else {
                 return Err(anyhow!(
                     "cannot advance loop cursor before entering the loop body"
@@ -517,8 +517,8 @@ pub fn advance_cursor_after_wait(
                 LoopCursorPhase::Body {
                     cursor: body_cursor,
                 } => {
-                    advance_cursor_after_wait(&loop_body.skills, body_cursor, repo_root)?;
-                    if body_cursor.index >= loop_body.skills.len() {
+                    advance_cursor_after_wait(&loop_body.steps, body_cursor, repo_root)?;
+                    if body_cursor.index >= loop_body.steps.len() {
                         *phase = LoopCursorPhase::ExitRouter;
                     }
                     Ok(())
@@ -548,7 +548,7 @@ pub fn advance_cursor_after_wait(
                 )),
             }
         }
-        ConcreteItem::Or(_) => Err(anyhow!(
+        ConcreteStep::Or(_) => Err(anyhow!(
             "or (multi-select) execution is not yet implemented"
         )),
     }
@@ -662,14 +662,14 @@ mod tests {
 
         let executor = RecordingExecutor::new(repo.path().to_path_buf()).with_verdicts(&["ship"]);
         let engine = FlowEngine::new(executor.clone());
-        let items = vec![ConcreteItem::Xor(ConcreteXor {
+        let items = vec![ConcreteStep::Xor(ConcreteXor {
             router: None,
             paths: HashMap::from([(
                 "ship".to_string(),
                 XorPath {
                     flow: Some("branch".to_string()),
                     skill: None,
-                    skills: Vec::new(),
+                    steps: Vec::new(),
                     description: "ship it".to_string(),
                     direction: Vec::new(),
                 },
@@ -695,8 +695,8 @@ mod tests {
         let executor =
             RecordingExecutor::new(repo.path().to_path_buf()).with_verdicts(&["retry", "done"]);
         let engine = FlowEngine::new(executor.clone());
-        let items = vec![ConcreteItem::Loop(ConcreteLoop {
-            skills: vec![ConcreteItem::Skill(skill("body-skill"))],
+        let items = vec![ConcreteStep::Loop(ConcreteLoop {
+            steps: vec![ConcreteStep::Skill(skill("body-skill"))],
             exit: ConcreteXor {
                 router: None,
                 paths: HashMap::from([
@@ -705,7 +705,7 @@ mod tests {
                         XorPath {
                             flow: None,
                             skill: None,
-                            skills: Vec::new(),
+                            steps: Vec::new(),
                             description: "retry".to_string(),
                             direction: Vec::new(),
                         },
@@ -715,7 +715,7 @@ mod tests {
                         XorPath {
                             flow: None,
                             skill: None,
-                            skills: Vec::new(),
+                            steps: Vec::new(),
                             description: "done".to_string(),
                             direction: Vec::new(),
                         },
@@ -745,8 +745,8 @@ mod tests {
         let executor = RecordingExecutor::new(repo.path().to_path_buf()).with_wait("design");
         let engine = FlowEngine::new(executor.clone());
         let items = vec![
-            ConcreteItem::Skill(skill("design")),
-            ConcreteItem::Skill(skill("implement")),
+            ConcreteStep::Skill(skill("design")),
+            ConcreteStep::Skill(skill("implement")),
         ];
 
         let outcome = engine.run(&items, 0).await.expect("engine run");
@@ -764,14 +764,14 @@ mod tests {
         )
         .expect("write flow");
 
-        let items = vec![ConcreteItem::Xor(ConcreteXor {
+        let items = vec![ConcreteStep::Xor(ConcreteXor {
             router: None,
             paths: HashMap::from([(
                 "ship".to_string(),
                 XorPath {
                     flow: Some("branch".to_string()),
                     skill: None,
-                    skills: Vec::new(),
+                    steps: Vec::new(),
                     description: "ship it".to_string(),
                     direction: Vec::new(),
                 },
@@ -813,7 +813,7 @@ mod tests {
         let repo = tempdir().expect("tempdir");
         let executor = RecordingExecutor::new(repo.path().to_path_buf());
         let engine = FlowEngine::new(executor.clone());
-        let items = vec![ConcreteItem::Op(ConcreteOp {
+        let items = vec![ConcreteStep::Op(ConcreteOp {
             item: Op {
                 command: "sync".to_string(),
                 args: vec!["--fast".to_string()],

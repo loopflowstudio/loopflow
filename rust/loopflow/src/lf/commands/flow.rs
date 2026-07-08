@@ -7,7 +7,7 @@ use crate::engine::fork::{
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
 use crate::engine::{
-    expand_flow, xor_verdict_path, ConcreteAnd, ConcreteItem, ConcreteLoop, ConcreteXor,
+    expand_flow, xor_verdict_path, ConcreteAnd, ConcreteLoop, ConcreteStep, ConcreteXor,
     ExecutionContext, ExecutionSkill, Flow, FlowEngine, FlowOutcome, FlowProgress, SkillExecutor,
     SkillOutcome, TEMP_XOR_ROUTE_STEP_NAME,
 };
@@ -72,7 +72,7 @@ pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result
     result
 }
 
-fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem], repo: &Path) -> Result<()> {
+fn print_pipeline_header(flow_name: &str, items: &[ConcreteStep], repo: &Path) -> Result<()> {
     let colors = Colors::new();
     let lines = render_pipeline_lines(items, repo)?;
     let pipeline = lines
@@ -98,7 +98,7 @@ fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem], repo: &Path) -
     Ok(())
 }
 
-fn render_pipeline_lines(items: &[ConcreteItem], repo: &Path) -> Result<Vec<String>> {
+fn render_pipeline_lines(items: &[ConcreteStep], repo: &Path) -> Result<Vec<String>> {
     let mut lines = Vec::new();
     for item in items {
         lines.extend(render_pipeline_item(item, repo)?);
@@ -106,16 +106,16 @@ fn render_pipeline_lines(items: &[ConcreteItem], repo: &Path) -> Result<Vec<Stri
     Ok(lines)
 }
 
-fn render_pipeline_item(item: &ConcreteItem, repo: &Path) -> Result<Vec<String>> {
+fn render_pipeline_item(item: &ConcreteStep, repo: &Path) -> Result<Vec<String>> {
     match item {
-        ConcreteItem::Skill(skill) => Ok(vec![skill.skill.name.clone()]),
-        ConcreteItem::Op(ops) => Ok(vec![format!("op: {}", ops.item.display_name())]),
-        ConcreteItem::And(and) => {
+        ConcreteStep::Skill(skill) => Ok(vec![skill.skill.name.clone()]),
+        ConcreteStep::Op(ops) => Ok(vec![format!("op: {}", ops.item.display_name())]),
+        ConcreteStep::And(and) => {
             let mut lines = vec!["[and]".to_string()];
             let total_lines = and.branches.len() + 1;
             for (index, branch) in and.branches.iter().enumerate() {
                 let branch_chain = branch
-                    .skills
+                    .steps
                     .iter()
                     .map(|skill| skill.skill.name.as_str())
                     .collect::<Vec<_>>()
@@ -128,11 +128,11 @@ fn render_pipeline_item(item: &ConcreteItem, repo: &Path) -> Result<Vec<String>>
             lines.push(format!("{synth_prefix} synthesize → {synth_skill}"));
             Ok(lines)
         }
-        ConcreteItem::Xor(branch) => {
+        ConcreteStep::Xor(branch) => {
             render_branch_item("xor", branch, TEMP_XOR_ROUTE_STEP_NAME, repo)
         }
-        ConcreteItem::Or(branch) => render_branch_item("or", branch, "or-route", repo),
-        ConcreteItem::Loop(loop_def) => render_loop_pipeline(loop_def, repo),
+        ConcreteStep::Or(branch) => render_branch_item("or", branch, "or-route", repo),
+        ConcreteStep::Loop(loop_def) => render_loop_pipeline(loop_def, repo),
     }
 }
 
@@ -183,7 +183,7 @@ fn render_loop_pipeline(loop_def: &ConcreteLoop, repo: &Path) -> Result<Vec<Stri
     let mut lines = vec!["loop".to_string()];
 
     let mut body_lines = Vec::new();
-    for item in &loop_def.skills {
+    for item in &loop_def.steps {
         body_lines.extend(render_pipeline_item(item, repo)?);
     }
     lines.extend(prefix_nested_lines(&body_lines));
@@ -490,7 +490,7 @@ fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) ->
         worktrees.push(worktree.clone());
         tasks.push(ForkBranchTask {
             index,
-            skill_names: branch.skills.iter().map(|s| s.skill.name.clone()).collect(),
+            skill_names: branch.steps.iter().map(|s| s.skill.name.clone()).collect(),
             directions: branch.directions.clone(),
             worktree,
             branch_name,
@@ -695,7 +695,7 @@ fn relay_fork_logs<R: std::io::Read>(reader: R, branch_label: &str, stderr: bool
 #[cfg(test)]
 mod tests {
     use super::{render_pipeline_lines, write_temp_skill};
-    use crate::engine::{ConcreteItem, Flow};
+    use crate::engine::{ConcreteStep, Flow};
     use std::fs;
     use tempfile::tempdir;
     use tempfile::TempDir;
@@ -757,10 +757,10 @@ mod tests {
         let flow = Flow {
             name: "tend".to_string(),
             items: vec![
-                crate::engine::flow::FlowItem::Skill(crate::engine::flow::Skill::named(
+                crate::engine::flow::Step::Skill(crate::engine::flow::Skill::named(
                     "tend/scan-waves",
                 )),
-                crate::engine::flow::FlowItem::Xor(crate::engine::flow::XorDef {
+                crate::engine::flow::Step::Xor(crate::engine::flow::XorDef {
                     router: Some("tend/assess".to_string()),
                     paths: [
                         (
@@ -768,7 +768,7 @@ mod tests {
                             crate::engine::flow::XorPath {
                                 flow: Some("tend/tune".to_string()),
                                 skill: None,
-                                skills: Vec::new(),
+                                steps: Vec::new(),
                                 description: "Adjust the chord".to_string(),
                                 direction: Vec::new(),
                             },
@@ -778,7 +778,7 @@ mod tests {
                             crate::engine::flow::XorPath {
                                 flow: None,
                                 skill: None,
-                                skills: Vec::new(),
+                                steps: Vec::new(),
                                 description: "No-op".to_string(),
                                 direction: Vec::new(),
                             },
@@ -803,7 +803,7 @@ mod tests {
             ]
         );
 
-        assert!(matches!(items[1], ConcreteItem::Xor(_)));
+        assert!(matches!(items[1], ConcreteStep::Xor(_)));
     }
 
     #[test]
@@ -813,15 +813,15 @@ mod tests {
         // skills so expansion stays under test control.
         let flow = Flow {
             name: "demo-and".to_string(),
-            items: vec![crate::engine::flow::FlowItem::And {
+            items: vec![crate::engine::flow::Step::And {
                 branches: vec![
-                    crate::engine::flow::FlowItem::Skill(crate::engine::flow::Skill::named(
+                    crate::engine::flow::Step::Skill(crate::engine::flow::Skill::named(
                         "demo-branch-a",
                     )),
-                    crate::engine::flow::FlowItem::Skill(crate::engine::flow::Skill::named(
+                    crate::engine::flow::Step::Skill(crate::engine::flow::Skill::named(
                         "demo-branch-b",
                     )),
-                    crate::engine::flow::FlowItem::Skill(crate::engine::flow::Skill::named(
+                    crate::engine::flow::Step::Skill(crate::engine::flow::Skill::named(
                         "demo-branch-c",
                     )),
                 ],

@@ -83,8 +83,8 @@ pub async fn build_wave_dto(
 
     let flow_name = DEFAULT_WAVE_FLOW.to_string();
     let flow_repo = wave.repo().to_string();
-    let flow_skills = tokio::task::spawn_blocking(move || {
-        flows::load_flow_skills(&flow_name, std::path::Path::new(&flow_repo)).unwrap_or_default()
+    let flow_steps = tokio::task::spawn_blocking(move || {
+        flows::load_flow_steps(&flow_name, std::path::Path::new(&flow_repo)).unwrap_or_default()
     })
     .await
     .unwrap_or_default();
@@ -160,7 +160,7 @@ pub async fn build_wave_dto(
         skill_agents: wave_config.and_then(|config| config.skill_agents),
         created_at: format_datetime(wave.created_at()),
         status: wave.status().as_str().to_string(),
-        flow_skills,
+        flow_steps,
         has_stale_pr_state,
         workers: wave.workers(),
         repo: wave.repo.clone(),
@@ -443,7 +443,7 @@ mod tests {
             direction: Vec::new(),
             area: Vec::new(),
             iteration: 0,
-            skill_index: 0,
+            step_index: 0,
             status: RunStatus::Running,
             worktree: "/tmp/worktree".to_string(),
             branch: "feature".to_string(),
@@ -511,7 +511,7 @@ mod tests {
             direction: wave.direction().clone(),
             area: wave.area().clone(),
             iteration: pr_number,
-            skill_index: 0,
+            step_index: 0,
             status: RunStatus::Completed,
             worktree: "/tmp/worktree".to_string(),
             branch: format!("feature-{pr_number}"),

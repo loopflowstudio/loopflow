@@ -23,7 +23,7 @@ struct SkillSummary {
 #[derive(Debug, Serialize)]
 struct FlowSummary {
     name: String,
-    skills: Vec<String>,
+    steps: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,14 +73,14 @@ fn list_flows(repo: &Path) -> Vec<FlowSummary> {
         if flows.contains_key(&name) {
             continue;
         }
-        if let Some(skills) = load_flow_skills(&name, repo) {
+        if let Some(skills) = load_flow_steps(&name, repo) {
             flows.insert(name, skills);
         }
     }
 
     let mut result: Vec<FlowSummary> = flows
         .into_iter()
-        .map(|(name, skills)| FlowSummary { name, skills })
+        .map(|(name, steps)| FlowSummary { name, steps })
         .collect();
     result.sort_by(|a, b| a.name.cmp(&b.name));
     result
@@ -104,7 +104,7 @@ fn list_repo_flows(repo: &Path) -> Vec<(String, Vec<String>)> {
         let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        if let Some(skills) = load_flow_skills(name, repo) {
+        if let Some(skills) = load_flow_steps(name, repo) {
             result.push((name.to_string(), skills));
         }
     }
@@ -112,36 +112,36 @@ fn list_repo_flows(repo: &Path) -> Vec<(String, Vec<String>)> {
     result
 }
 
-pub(super) fn load_flow_skills(name: &str, repo: &Path) -> Option<Vec<String>> {
+pub(super) fn load_flow_steps(name: &str, repo: &Path) -> Option<Vec<String>> {
     let flow = crate::engine::flow::load_flow(name, repo).ok()?;
     let items = crate::engine::flow::expand_flow(&flow, repo).ok()?;
-    Some(extract_skill_names(&items))
+    Some(extract_step_names(&items))
 }
 
-fn extract_skill_names(items: &[crate::engine::flow::ConcreteItem]) -> Vec<String> {
+fn extract_step_names(items: &[crate::engine::flow::ConcreteStep]) -> Vec<String> {
     let mut names = Vec::new();
     for item in items {
         match item {
-            crate::engine::flow::ConcreteItem::Skill(skill) => {
+            crate::engine::flow::ConcreteStep::Skill(skill) => {
                 names.push(skill.skill.name.clone());
             }
-            crate::engine::flow::ConcreteItem::Op(ops) => {
+            crate::engine::flow::ConcreteStep::Op(ops) => {
                 names.push(ops.item.to_string());
             }
-            crate::engine::flow::ConcreteItem::And(and) => {
+            crate::engine::flow::ConcreteStep::And(and) => {
                 for branch in &and.branches {
-                    for skill in &branch.skills {
+                    for skill in &branch.steps {
                         names.push(skill.skill.name.clone());
                     }
                 }
             }
-            crate::engine::flow::ConcreteItem::Xor(_) => {
+            crate::engine::flow::ConcreteStep::Xor(_) => {
                 names.push("[xor]".to_string());
             }
-            crate::engine::flow::ConcreteItem::Or(_) => {
+            crate::engine::flow::ConcreteStep::Or(_) => {
                 names.push("[or]".to_string());
             }
-            crate::engine::flow::ConcreteItem::Loop(_) => {
+            crate::engine::flow::ConcreteStep::Loop(_) => {
                 names.push("[loop]".to_string());
             }
         }

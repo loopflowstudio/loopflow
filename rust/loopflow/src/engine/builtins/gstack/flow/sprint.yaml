@@ -4,7 +4,7 @@
     router: gstack/office-hours
     paths:
       autoplan:
-        skill: gstack/autoplan
+        step: gstack/autoplan
         description: "Auto-plan with minimal interaction"
       manual:
         flow: gstack/plan-manual

@@ -19,7 +19,7 @@ class Run(BaseModel):
     wave_id: str
     task: Optional[str] = None
     iteration: int
-    skill_index: int
+    step_index: int
     status: str
     local_worktree: str
     remote_branch: str
@@ -35,13 +35,13 @@ class CommitEntry(BaseModel):
     message: str
 
 
-class FlowSkill(BaseModel):
+class FlowStep(BaseModel):
     type: str
     name: str
 
     @classmethod
-    def from_raw(cls, value: Any) -> "FlowSkill":
-        if isinstance(value, FlowSkill):
+    def from_raw(cls, value: Any) -> "FlowStep":
+        if isinstance(value, FlowStep):
             return value
         if isinstance(value, dict):
             return cls.model_validate(value)
@@ -80,7 +80,7 @@ class Wave(BaseModel):
     commits: list[CommitEntry]
     open_pr_count: int
     stack_count: int
-    flow_skills: list[FlowSkill]
+    flow_steps: list[FlowStep]
     parent_wave_id: Optional[str]
     local_worktree: Optional[str] = None
     remote_branch: Optional[str] = None
@@ -89,14 +89,14 @@ class Wave(BaseModel):
     pr: Optional[PullRequest] = None
     created_at: Optional[datetime] = None
 
-    @field_validator("flow_skills", mode="before")
+    @field_validator("flow_steps", mode="before")
     @classmethod
-    def _parse_flow_skills(cls, value: Any) -> list[FlowSkill]:
+    def _parse_flow_steps(cls, value: Any) -> list[FlowStep]:
         if value in (None, ""):
             return []
         if not isinstance(value, list):
             return []
-        return [FlowSkill.from_raw(item) for item in value]
+        return [FlowStep.from_raw(item) for item in value]
 
 
 class Session(BaseModel):

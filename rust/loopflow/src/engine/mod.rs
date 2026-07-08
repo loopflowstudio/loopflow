@@ -41,9 +41,9 @@ pub use execution::{
 };
 pub use flow::{
     available_flow_names, expand_flow, load_direction, load_flow, load_goal, load_skill,
-    next_action, render_goal, ConcreteAnd, ConcreteAndBranch, ConcreteItem, ConcreteLoop,
-    ConcreteOp, ConcreteOr, ConcreteSkill, ConcreteXor, Direction, Flow, FlowAction, FlowItem,
-    Goal, GoalRenderContext, Op, OrDef, Skill, XorDef, XorPath,
+    next_action, render_goal, ConcreteAnd, ConcreteAndBranch, ConcreteLoop, ConcreteOp, ConcreteOr,
+    ConcreteSkill, ConcreteStep, ConcreteXor, Direction, Flow, FlowAction, Goal, GoalRenderContext,
+    Op, OrDef, Skill, Step, XorDef, XorPath,
 };
 pub use launch::{
     prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, PreparedLaunchPrompt,

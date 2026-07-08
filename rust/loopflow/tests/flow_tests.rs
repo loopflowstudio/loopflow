@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use loopflow::engine::flow::{ConcreteItem, FlowItem, Skill};
+use loopflow::engine::flow::{ConcreteStep, Skill, Step};
 use loopflow::engine::{expand_flow, load_flow};
 use tempfile::TempDir;
 
@@ -17,19 +17,19 @@ fn write_flow(repo: &Path, name: &str, content: &str) {
     fs::write(flows_dir.join(format!("{name}.yaml")), content).unwrap();
 }
 
-fn expand_named_flow(repo: &Path, name: &str) -> Vec<ConcreteItem> {
+fn expand_named_flow(repo: &Path, name: &str) -> Vec<ConcreteStep> {
     let flow = load_flow(name, repo).unwrap();
     expand_flow(&flow, repo).unwrap()
 }
 
-fn assert_skill_name(item: &ConcreteItem, expected: &str) {
+fn assert_skill_name(item: &ConcreteStep, expected: &str) {
     match item {
-        ConcreteItem::Skill(skill) => assert_eq!(skill.skill.name, expected),
+        ConcreteStep::Skill(skill) => assert_eq!(skill.skill.name, expected),
         other => panic!("expected skill {expected}, got {other:?}"),
     }
 }
 
-fn assert_skill_sequence(items: &[ConcreteItem], expected: &[&str]) {
+fn assert_skill_sequence(items: &[ConcreteStep], expected: &[&str]) {
     assert_eq!(items.len(), expected.len());
     for (item, skill_name) in items.iter().zip(expected) {
         assert_skill_name(item, skill_name);
@@ -45,7 +45,7 @@ fn flow_parsing_parity() {
         "sample",
         r#"
 - implement
-- skill:
+- step:
     name: review
     interactive: true
     direction: [ux, security]
@@ -57,7 +57,7 @@ fn flow_parsing_parity() {
     assert_eq!(flow.items.len(), 2);
     assert_eq!(
         flow.items[0],
-        FlowItem::Skill(Skill {
+        Step::Skill(Skill {
             name: "implement".to_string(),
             agent: None,
             default_agent: None,
@@ -70,7 +70,7 @@ fn flow_parsing_parity() {
     );
     assert_eq!(
         flow.items[1],
-        FlowItem::Skill(Skill {
+        Step::Skill(Skill {
             name: "review".to_string(),
             agent: None,
             default_agent: None,
@@ -93,12 +93,12 @@ fn golden_flows() {
         r#"
 - and:
     branches:
-      - skill: { name: implement }
-      - skill: { name: polish }
+      - step: { name: implement }
+      - step: { name: polish }
 - and:
     branches:
-      - skill: { name: quick }
-      - skill: { name: deep }
+      - step: { name: quick }
+      - step: { name: deep }
 - flow: nested
 "#,
     );
@@ -106,19 +106,19 @@ fn golden_flows() {
     let flow = load_flow("forked", repo).unwrap();
     assert_eq!(flow.items.len(), 3);
     match &flow.items[0] {
-        FlowItem::And { branches, .. } => {
+        Step::And { branches, .. } => {
             assert_eq!(branches.len(), 2);
         }
         _ => panic!("expected and"),
     }
     match &flow.items[1] {
-        FlowItem::And { branches, .. } => {
+        Step::And { branches, .. } => {
             assert_eq!(branches.len(), 2);
         }
         _ => panic!("expected and"),
     }
     match &flow.items[2] {
-        FlowItem::FlowRef(name) => {
+        Step::FlowRef(name) => {
             assert_eq!(name, "nested");
         }
         _ => panic!("expected flow ref"),
@@ -135,7 +135,7 @@ fn and_select_is_rejected() {
         r#"
 - and:
     branches:
-      - skill: { name: implement }
+      - step: { name: implement }
     select: all
 "#,
     );
@@ -167,8 +167,8 @@ fn flow_ref_parses_into_items() {
 
     let flow = load_flow("parent", repo).unwrap();
     assert_eq!(flow.items.len(), 2);
-    assert!(matches!(flow.items[0], FlowItem::FlowRef(_)));
-    assert!(matches!(flow.items[1], FlowItem::Skill(_)));
+    assert!(matches!(flow.items[0], Step::FlowRef(_)));
+    assert!(matches!(flow.items[1], Step::Skill(_)));
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn ops_item_parses_and_expands() {
     let flow = load_flow("ship-ish", repo).unwrap();
     assert_eq!(flow.items.len(), 2);
     match &flow.items[1] {
-        FlowItem::Op(item) => {
+        Step::Op(item) => {
             assert_eq!(item.command, "land");
             assert_eq!(item.args, vec!["--create-pr"]);
         }
@@ -195,7 +195,7 @@ fn ops_item_parses_and_expands() {
     }
 
     let expanded = expand_flow(&flow, repo).unwrap();
-    assert!(matches!(&expanded[1], ConcreteItem::Op(_)));
+    assert!(matches!(&expanded[1], ConcreteStep::Op(_)));
 }
 
 #[test]
@@ -221,7 +221,7 @@ fn expand_flow_tracks_parents() {
     let flow = load_flow("parent", repo).unwrap();
     let items = expand_flow(&flow, repo).unwrap();
     match &items[0] {
-        ConcreteItem::Skill(skill) => {
+        ConcreteStep::Skill(skill) => {
             assert_eq!(skill.skill.name, "implement");
             assert_eq!(skill.flow_parents, vec!["parent", "child"]);
         }
@@ -244,14 +244,14 @@ fn expand_flow_resolves_plain_string_as_subflow() {
     assert_eq!(items.len(), 3, "publish should expand into its sub-skills");
     assert_skill_name(&items[0], "review");
     match &items[1] {
-        ConcreteItem::Skill(s) => {
+        ConcreteStep::Skill(s) => {
             assert_eq!(s.skill.name, "skill-a");
             assert_eq!(s.flow_parents, vec!["parent", "publish"]);
         }
         _ => panic!("expected skill from publish sub-flow"),
     }
     match &items[2] {
-        ConcreteItem::Skill(s) => {
+        ConcreteStep::Skill(s) => {
             assert_eq!(s.skill.name, "skill-b");
             assert_eq!(s.flow_parents, vec!["parent", "publish"]);
         }
@@ -273,7 +273,7 @@ fn expand_flow_prefers_skill_over_single_skill_flow() {
 
     assert_eq!(items.len(), 1);
     match &items[0] {
-        ConcreteItem::Skill(s) => {
+        ConcreteStep::Skill(s) => {
             assert_eq!(s.skill.name, "review");
             assert_eq!(s.flow_parents, vec!["parent"]);
         }
@@ -288,7 +288,7 @@ fn builtin_deploy_uses_ops_land_item() {
 
     let items = expand_named_flow(repo, "deploy");
     assert!(!items.is_empty());
-    assert!(matches!(&items[1], ConcreteItem::Op(_)));
+    assert!(matches!(&items[1], ConcreteStep::Op(_)));
 }
 
 #[test]
@@ -303,7 +303,7 @@ fn builtin_garden_flow_structure() {
     assert_skill_name(&items[0], "scan");
     assert_skill_name(&items[1], "assess");
     match &items[2] {
-        ConcreteItem::Xor(xor_def) => {
+        ConcreteStep::Xor(xor_def) => {
             assert_eq!(xor_def.paths.len(), 2);
             assert!(xor_def.paths.contains_key("act"));
             assert!(xor_def.paths.contains_key("silence"));
@@ -339,7 +339,7 @@ fn builtin_build_or_silent_has_xor_branch() {
     // xor(build, silence) — the roadmap decision, no local ingest
     assert_eq!(items.len(), 1);
     match &items[0] {
-        ConcreteItem::Xor(xor_def) => {
+        ConcreteStep::Xor(xor_def) => {
             assert!(xor_def.paths.contains_key("build"));
             assert!(xor_def.paths.contains_key("silence"));
         }

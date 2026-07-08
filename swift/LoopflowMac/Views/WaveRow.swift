@@ -131,7 +131,7 @@ struct WaveRow: View {
 
     /// Accessibility-friendly description of activity (e.g., "implement, 2 minutes ago").
     private var activityAccessibilityLabel: String {
-        guard let skill = wave.recentSkills.first else { return "" }
+        guard let skill = wave.recentSteps.first else { return "" }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
         let time = formatter.localizedString(for: skill.endedAt ?? skill.startedAt, relativeTo: Date())

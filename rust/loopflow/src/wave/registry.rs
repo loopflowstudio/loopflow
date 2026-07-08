@@ -787,7 +787,7 @@ mod tests {
             direction: Vec::new(),
             area: Vec::new(),
             iteration: 0,
-            skill_index: 0,
+            step_index: 0,
             status: RunStatus::Running,
             worktree: "/tmp/repo.ship".to_string(),
             branch: "ship-branch".to_string(),

@@ -833,7 +833,7 @@ impl SqliteStore {
                 run.id,
                 run.wave_id,
                 run.iteration as i64,
-                run.skill_index as i64,
+                run.step_index as i64,
                 run.status.as_i32() as i64,
                 run.worktree,
                 run.branch,
@@ -869,7 +869,7 @@ impl SqliteStore {
             Self::sql(Query::UpdateRun),
             params![
                 run.iteration as i64,
-                run.skill_index as i64,
+                run.step_index as i64,
                 run.status.as_i32() as i64,
                 run.worktree,
                 run.branch,
@@ -1152,10 +1152,10 @@ impl SqliteStore {
         Ok(updated as u32)
     }
 
-    pub fn list_fork_runs(&self, run_id: &LfdId, skill_index: u32) -> StoreResult<Vec<ForkRun>> {
+    pub fn list_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(Self::sql(Query::ListForkRuns))?;
-        let rows = stmt.query_map(params![run_id, skill_index as i64], |row| {
+        let rows = stmt.query_map(params![run_id, step_index as i64], |row| {
             Ok(map_fork_run_row(row))
         })?;
         let mut runs = Vec::new();
@@ -1168,16 +1168,16 @@ impl SqliteStore {
     pub fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT fr.id, fr.run_id, fr.skill_index, fr.branch_index, fr.status, fr.worktree
+            "SELECT fr.id, fr.run_id, fr.step_index, fr.branch_index, fr.status, fr.worktree
              FROM fork_runs fr
              LEFT JOIN runs wr ON wr.id = fr.run_id
              WHERE fr.status IN (?1, ?2)
                AND (
                  wr.id IS NULL
                  OR wr.status NOT IN (?3, ?4, ?5)
-                 OR fr.skill_index != wr.skill_index
+                 OR fr.step_index != wr.step_index
                )
-             ORDER BY fr.run_id ASC, fr.skill_index ASC, fr.branch_index ASC",
+             ORDER BY fr.run_id ASC, fr.step_index ASC, fr.branch_index ASC",
         )?;
         let rows = stmt.query_map(
             params![
@@ -1203,7 +1203,7 @@ impl SqliteStore {
             params![
                 fork_run.id,
                 fork_run.run_id,
-                fork_run.skill_index as i64,
+                fork_run.step_index as i64,
                 fork_run.branch_index as i64,
                 fork_run.status as i32 as i64,
                 fork_run.worktree,
@@ -1212,11 +1212,11 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn delete_fork_runs(&self, run_id: &LfdId, skill_index: u32) -> StoreResult<u32> {
+    pub fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let deleted = conn.execute(
             Self::sql(Query::DeleteForkRuns),
-            params![run_id, skill_index as i64],
+            params![run_id, step_index as i64],
         )?;
         Ok(deleted as u32)
     }
@@ -1373,7 +1373,7 @@ impl SqliteStore {
         conn.execute(
             "INSERT INTO run_events (
                 run_id, seq, ts, repo, worktree, wave, node, event, command,
-                flow, skill, skill_index, error, input_tokens, output_tokens,
+                flow, skill, step_index, error, input_tokens, output_tokens,
                 cache_read_tokens, cost_usd, duration_secs
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
@@ -1388,7 +1388,7 @@ impl SqliteStore {
                 row.command,
                 row.flow,
                 row.skill,
-                row.skill_index,
+                row.step_index,
                 row.error,
                 row.input_tokens,
                 row.output_tokens,
@@ -1403,7 +1403,7 @@ impl SqliteStore {
     pub fn list_run_events_since(&self, since_unix: i64) -> StoreResult<Vec<RunEventRow>> {
         self.query_run_events(
             "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, skill_index, error, input_tokens, output_tokens,
+                    flow, skill, step_index, error, input_tokens, output_tokens,
                     cache_read_tokens, cost_usd, duration_secs
              FROM run_events WHERE ts >= ?1 ORDER BY ts, run_id, seq",
             params![since_unix],
@@ -1415,7 +1415,7 @@ impl SqliteStore {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
         self.query_run_events(
             "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, skill_index, error, input_tokens, output_tokens,
+                    flow, skill, step_index, error, input_tokens, output_tokens,
                     cache_read_tokens, cost_usd, duration_secs
              FROM run_events WHERE run_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
@@ -1442,7 +1442,7 @@ impl SqliteStore {
                 command: row.get(8)?,
                 flow: row.get(9)?,
                 skill: row.get(10)?,
-                skill_index: row.get(11)?,
+                step_index: row.get(11)?,
                 error: row.get(12)?,
                 input_tokens: row.get(13)?,
                 output_tokens: row.get(14)?,

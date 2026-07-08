@@ -69,9 +69,9 @@ public struct Skill: Sendable, Codable, Equatable, Identifiable {
 
 // MARK: - Skill Execution
 
-/// SkillRun represents a single execution of a skill.
-/// Schema matches Python's lfd/models.py SkillRun class.
-public struct SkillRun: Sendable, Identifiable, Codable, Hashable {
+/// StepRun represents a single execution of a skill.
+/// Schema matches Python's lfd/models.py StepRun class.
+public struct StepRun: Sendable, Identifiable, Codable, Hashable {
     public let id: String
     public let skill: String  // matches Python schema (was "prompt")
     public let repo: String

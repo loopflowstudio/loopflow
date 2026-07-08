@@ -18,7 +18,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var prURL: URL?
     public var prNumber: Int?
     public var prState: PRState?
-    public var recentSkills: [SkillRun]
+    public var recentSteps: [StepRun]
     public var prLimit: Int
     public var mergeMode: MergeMode
     public var pid: Int?
@@ -43,7 +43,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         prURL: URL? = nil,
         prNumber: Int? = nil,
         prState: PRState? = nil,
-        recentSkills: [SkillRun] = [],
+        recentSteps: [StepRun] = [],
         prLimit: Int = 5,
         mergeMode: MergeMode = .pr,
         pid: Int? = nil,
@@ -68,7 +68,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         self.prURL = prURL ?? activeRun?.pr?.url
         self.prNumber = prNumber ?? activeRun?.pr?.number
         self.prState = prState ?? activeRun?.pr?.state
-        self.recentSkills = recentSkills
+        self.recentSteps = recentSteps
         self.prLimit = prLimit
         self.mergeMode = mergeMode
         self.pid = pid
@@ -137,8 +137,8 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         set { api.createdAt = newValue }
     }
 
-    public var skillIndex: Int {
-        activeRun?.skillIndex ?? 0
+    public var stepIndex: Int {
+        activeRun?.stepIndex ?? 0
     }
 
     public var shortId: String { String(id.prefix(7)) }
@@ -186,7 +186,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     public var commits: [CommitEntry] { api.commits }
     public var diffStat: String? { api.diffStat }
-    public var flowSkills: [String] { api.flowSkills }
+    public var flowSteps: [String] { api.flowSteps }
     private var diffCounts: (additions: Int, deletions: Int)? {
         guard let diffStat else { return nil }
 
@@ -217,10 +217,10 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         activeRunFlow ?? ""
     }
 
-    public var displayFlowSkills: [String] {
+    public var displayFlowSteps: [String] {
         if let activeRunFlow { return [activeRunFlow] }
-        if !flowSkills.isEmpty {
-            return flowSkills
+        if !flowSteps.isEmpty {
+            return flowSteps
         }
         return []
     }
@@ -278,11 +278,11 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     }
 
     public var lastActivityAt: Date? {
-        recentSkills.first?.endedAt ?? recentSkills.first?.startedAt
+        recentSteps.first?.endedAt ?? recentSteps.first?.startedAt
     }
 
     public var lastActivityDescription: String? {
-        guard let skill = recentSkills.first else { return nil }
+        guard let skill = recentSteps.first else { return nil }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         let time = formatter.localizedString(for: skill.endedAt ?? skill.startedAt, relativeTo: Date())

@@ -1,15 +1,15 @@
 - kickoff
 - review-design
 - loop:
-    skills:
+    steps:
       - code
       - xor:
           paths:
             demo:
-              skill: demo
+              step: demo
               description: "Observable change — walk through the experience"
             code-review:
-              skill: code-review
+              step: code-review
               description: "Internal change — walk through the code"
     exit:
       router: gate

@@ -647,7 +647,7 @@ mod tests {
             direction: wave.direction().clone(),
             area: wave.area().clone(),
             iteration: stack_position,
-            skill_index: 0,
+            step_index: 0,
             status: RunStatus::Completed,
             worktree: ".".to_string(),
             branch: format!("feature-{pr_number}"),

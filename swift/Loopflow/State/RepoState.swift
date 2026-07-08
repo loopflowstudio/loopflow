@@ -137,7 +137,7 @@ public final class RepoState {
         }
         let repoRoot = currentRepo?.path() ?? FileManager.default.currentDirectoryPath
         let wave = waveStore.wave(for: waveId)
-        let sessionSkill = wave?.activeRun?.currentSkill ?? "design"
+        let sessionSkill = wave?.activeRun?.currentStep ?? "design"
         let state = SessionState(
             waveId: waveId,
             sessionConfig: AgentSessionConfig(
@@ -375,7 +375,7 @@ public final class RepoState {
                         repo: repo,
                         direction: ["clarity"],
                         status: .failed,
-                        currentSkill: "implement",
+                        currentStep: "implement",
                         error: "Build failed: missing dependency 'libcrypto'",
                         createdAt: Date().addingTimeInterval(-3600)
                     )
@@ -398,7 +398,7 @@ public final class RepoState {
                 status: .completed,
                 iteration: 1,
                 branch: "wave-auth-feature",
-                currentSkill: "gate",
+                currentStep: "gate",
                 pr: PullRequest(url: URL(string: "https://github.com/example/repo/pull/42")!, number: 42, state: .merged, title: "Add auth middleware"),
                 startedAt: Date().addingTimeInterval(-7200),
                 endedAt: Date().addingTimeInterval(-6600),
@@ -414,7 +414,7 @@ public final class RepoState {
                 status: .completed,
                 iteration: 2,
                 branch: "wave-auth-feature",
-                currentSkill: "gate",
+                currentStep: "gate",
                 pr: PullRequest(url: URL(string: "https://github.com/example/repo/pull/45")!, number: 45, state: .open, title: "Add OAuth token refresh"),
                 startedAt: Date().addingTimeInterval(-3600),
                 endedAt: Date().addingTimeInterval(-3000),
@@ -430,7 +430,7 @@ public final class RepoState {
                 status: .running,
                 iteration: 3,
                 branch: "wave-auth-feature",
-                currentSkill: "implement",
+                currentStep: "implement",
                 startedAt: Date().addingTimeInterval(-300),
                 createdAt: Date().addingTimeInterval(-300)
             ),
@@ -751,7 +751,7 @@ public final class RepoState {
         // Note: loadWaveContent is driven by the snapshot loop / selection — not duplicated here.
         switch newStatus {
         case .waiting:
-            let skill = wave.recentSkills.first?.skill ?? "skill"
+            let skill = wave.recentSteps.first?.skill ?? "skill"
             NotificationService.shared.notifyNeedsInteractive(
                 waveId: wave.id,
                 waveName: wave.displayName,
@@ -759,7 +759,7 @@ public final class RepoState {
             )
 
         case .failed:
-            let skill = wave.recentSkills.first?.skill ?? "unknown skill"
+            let skill = wave.recentSteps.first?.skill ?? "unknown skill"
             let message = "Error in \(skill)"
             NotificationService.shared.notifyError(
                 waveId: wave.id,

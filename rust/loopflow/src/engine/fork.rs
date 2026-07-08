@@ -35,7 +35,7 @@ pub struct ForkManifestSkill {
 pub struct ForkBranchExecutionPlan {
     pub index: usize,
     pub label: String,
-    pub skills: Vec<ConcreteSkill>,
+    pub steps: Vec<ConcreteSkill>,
     pub directions: Vec<String>,
 }
 
@@ -74,7 +74,7 @@ pub fn plan_fork_execution(
         let branch = branches
             .get(index)
             .ok_or_else(|| format!("fork selected branch {index}, but it does not exist"))?;
-        for skill in &branch.skills {
+        for skill in &branch.steps {
             if skill.skill.interactive.unwrap_or(false) {
                 return Err("interactive fork branches are not supported".to_string());
             }
@@ -83,7 +83,7 @@ pub fn plan_fork_execution(
             index,
             label: format!("fork-{index}"),
             directions: merge_directions(base_directions, &branch.directions),
-            skills: branch.skills.clone(),
+            steps: branch.steps.clone(),
         })
     };
 
@@ -123,7 +123,7 @@ mod tests {
 
     fn single_skill_branch(name: &str) -> ConcreteAndBranch {
         ConcreteAndBranch {
-            skills: vec![ConcreteSkill {
+            steps: vec![ConcreteSkill {
                 skill: Skill::named(name),
                 flow_parents: Vec::new(),
             }],
@@ -135,7 +135,7 @@ mod tests {
 
     fn multi_skill_branch(names: &[&str], directions: Vec<String>) -> ConcreteAndBranch {
         ConcreteAndBranch {
-            skills: names
+            steps: names
                 .iter()
                 .map(|name| ConcreteSkill {
                     skill: Skill::named(name),
@@ -156,8 +156,8 @@ mod tests {
         assert_eq!(planned.len(), 2);
         assert_eq!(planned[0].label, "fork-0");
         assert_eq!(planned[0].directions, vec!["base".to_string()]);
-        assert_eq!(planned[0].skills.len(), 1);
-        assert_eq!(planned[0].skills[0].skill.name, "a");
+        assert_eq!(planned[0].steps.len(), 1);
+        assert_eq!(planned[0].steps[0].skill.name, "a");
     }
 
     #[test]
@@ -169,7 +169,7 @@ mod tests {
         let base = vec!["base".to_string()];
         let planned = plan_fork_execution(&branches, &base).expect("planned");
         assert_eq!(planned.len(), 2);
-        assert_eq!(planned[0].skills.len(), 3);
+        assert_eq!(planned[0].steps.len(), 3);
         assert_eq!(planned[0].directions, vec!["base", "infra"]);
         assert_eq!(planned[1].directions, vec!["base", "ux"]);
     }
@@ -179,7 +179,7 @@ mod tests {
         let mut skill = Skill::named("a");
         skill.interactive = Some(true);
         let branches = vec![ConcreteAndBranch {
-            skills: vec![ConcreteSkill {
+            steps: vec![ConcreteSkill {
                 skill,
                 flow_parents: Vec::new(),
             }],

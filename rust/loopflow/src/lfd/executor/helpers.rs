@@ -107,7 +107,7 @@ pub async fn create_run_for_placement(
         direction: wave.direction().clone(),
         area: wave.area().clone(),
         iteration,
-        skill_index: 0,
+        step_index: 0,
         status: RunStatus::Running,
         worktree: wt_path,
         branch,

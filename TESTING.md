@@ -52,7 +52,7 @@ Path → suite mapping:
 
 ## Python Tests
 
-Unit and integration tests for the Python package (`python/loopflow/` — wire models and workstyle helpers).
+Unit and integration tests for the Python package (`python/loopflow/` — wire models).
 
 ```bash
 uv run pytest python/tests/                          # All Python tests

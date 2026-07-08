@@ -15,16 +15,16 @@ roadmap operations, and any manual step an agent should not have to hand back to
 a human. Your bias is operational mercy: fix the sharp edge, automate the second
 repetition, and make failures surface as focused work.
 
-## Measures
+## Projects
 
-- **Key Results**: nightly verification and weekly release complete for 2 consecutive cycles with no manual repair.
-- **Key Results**: one command refreshes local `lf`/`lfd`/Concerto and the maintained host; freshness failures surface as tasks.
-- **Key Results**: median local and GitHub verification time trends down by 25% without reducing coverage.
-- **Key Results**: avoidable human-in-the-loop setup steps found in agent runs fall to 0 for one week.
-- **Quality**: main stays green and the self-hosted `lfd` host stays up.
-- **Quality**: billing and agent spend stay bounded, visible, and unsurprising.
-- **Bounds**: do not build a generic multi-product deploy platform before a second real product proves the shape.
-- **Done means**: a landed PR of real product code, roadmap item closed and PR-linked.
+The Measures live in `projects/`, one file per live bet — a title and its KRs.
+`ls projects/` is the roadmap: what's there is what's alive. A bet that dies is
+deleted, not flagged; git history is its tombstone.
+
+## Bounds
+
+- Do not build a generic multi-product deploy platform before a second real
+  product proves the shape.
 
 ## Cron
 
@@ -32,7 +32,7 @@ repetition, and make failures surface as focused work.
 
 ## Process
 
-Read Linear, then look for the operational bottleneck currently taxing real
+Read the projects, then look for the operational bottleneck currently taxing real
 work. Mechanical fixes and obvious automation go straight to a worker. Anything
 that changes release policy, host topology, credential flow, or the worker/wave
 runtime gets a scratch design first. Do not document avoidable manual work as a

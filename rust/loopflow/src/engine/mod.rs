@@ -26,8 +26,9 @@ pub mod worktrees;
 
 pub use agent::{
     build_agent_command, build_claude_command, build_codex_command, build_gemini_command,
-    build_model_command, build_opencode_command, check_cli_available, launch_agent,
-    AgentCapabilities, AgentConfig, ClaudeArgs, DefaultRunner, LaunchResult, ProcessConfig, Runner,
+    build_model_command, build_opencode_command, check_cli_available, codex_permission_args,
+    launch_agent, workspace_add_dirs, AgentCapabilities, AgentConfig, ClaudeArgs, DefaultRunner,
+    LaunchResult, ProcessConfig, Runner,
 };
 pub use command::{run_command, CommandError};
 pub use config::{

@@ -118,7 +118,7 @@ Next:
   lf debug -c            # paste an error, fix it
   lf --list              # see all steps and flows
 
-  Download Concerto for visual wave management
+  Download Loopflow for visual wave management
   Run `lfd install` to set up the daemon for autonomous waves
 ```
 

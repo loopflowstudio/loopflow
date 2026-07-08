@@ -12,7 +12,7 @@ cargo test --all                       # Rust tests
 uv run pytest python/tests/            # Python tests
 cd website && uv run python dev.py test # Website tests
 swift test --package-path swift        # Swift package tests
-cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO  # Concerto UI
+cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO  # Loopflow UI
 tests/e2e/test_smoke.sh               # E2E smoke
 uv run pytest tests/regression/ -v     # nightly/weekly release gate
 ```
@@ -31,11 +31,11 @@ uv run python scripts/test.py --all    # run every suite (the full matrix)
 to the CI jobs above, and runs just those—fast suites first. Use it as the
 tight loop while iterating; run `--all` once before you ship.
 
-Slow suites (`concerto`, `e2e`) stay off in changed-mode even when
+Slow suites (`loopflow`, `e2e`) stay off in changed-mode even when
 their paths change—the run prints why and how to force them:
 
 ```bash
-uv run python scripts/test.py --concerto   # force the Concerto UI suite on
+uv run python scripts/test.py --loopflow   # force the Loopflow UI suite on
 uv run python scripts/test.py --base HEAD~5  # diff against a different ref
 ```
 
@@ -47,7 +47,7 @@ Path → suite mapping:
 | `python/`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
 | `swift/` | swift | `swift test --package-path swift -Xswiftc -gnone` |
-| `swift/Concerto/`, `swift/project.yml` | concerto *(slow)* | xcodegen + xcodebuild |
+| `swift/LoopflowMac/`, `swift/project.yml` | loopflow *(slow)* | xcodegen + xcodebuild |
 | lfd `http`/`store`, `tests/e2e/` | e2e *(slow)* | e2e + API smoke |
 
 ## Python Tests
@@ -81,14 +81,14 @@ swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by c
 swift test --package-path swift --filter SomeTestClass  # Filtered
 ```
 
-## Concerto UI Tests
+## Loopflow UI Tests
 
 UI tests for the macOS app. Requires Xcode and xcodegen.
 
 ```bash
 cd swift
 xcodegen generate
-xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+xcodebuild test -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```
 
 ## What CI Runs
@@ -102,7 +102,7 @@ See `.github/workflows/ci.yml`. Six parallel jobs:
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` |
 | `swift-test` | macos-15 | `swift test --package-path swift` |
-| `concerto-ui-test` | macos-15 | xcodegen + xcodebuild |
+| `loopflow-ui-test` | macos-15 | xcodegen + xcodebuild |
 
 All six must pass for PRs to merge.
 
@@ -161,8 +161,8 @@ Nightly package artifacts are verification only. They are uploaded for 14 days a
 `scripts/` contains runnable validation and demo scripts. Use these for branch validation and manual UI walkthroughs.
 
 ```bash
-uv run python scripts/concerto-dev.py run-debug     # build and launch lfd + Concerto (macOS)
-uv run python scripts/concerto-dev.py run-ios        # build and launch in iOS Simulator
+uv run python scripts/loopflow-dev.py run-debug     # build and launch lfd + Loopflow (macOS)
+uv run python scripts/loopflow-dev.py run-ios        # build and launch in iOS Simulator
 uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 boundary guardrails
 uv run python scripts/test_auth_live_contract.py --providers github,claude,codex  # live provider-auth contract + evidence capture
 uv run python scripts/test_remote_smoke.py --url https://lfd.example.com --token "$LFD_AUTH_TOKEN" --repo /remote/repo/path  # remote TLS smoke (repo required on fresh hosts)

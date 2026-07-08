@@ -148,7 +148,7 @@ stranded). Self-draining is the only one that scales with the recursion.
 - **Dispatch target:** `parent()` for fork + PR base (replaces Fresh→main).
 - **Retire rotation:** `lf op next`/`advance`, `next_wave_handler`,
   `combine_wave_handler` — the old ephemeral-rotation model. Touches the wire and
-  Concerto; stage on its own.
+  Loopflow; stage on its own.
 
 ## Open decisions (need Jack)
 

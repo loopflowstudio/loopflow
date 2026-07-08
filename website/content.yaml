@@ -4,10 +4,10 @@
 homepage:
   hero:
     tagline: "Coding agents that work in a team and build over time."
-    concerto_download_url: "https://downloads.loopflow.studio/LoopflowConcerto-latest.dmg"
+    loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 
   video:
-    poster: "/static/concerto-main.png"
+    poster: "/static/loopflow-main.png"
     src: null
 
   install:
@@ -30,7 +30,7 @@ homepage:
       - title: "Human control at shipping time"
         description: "Agents do the work; you decide whether to ship, iterate, or branch."
       - title: "Works across surfaces"
-        description: "The same wave runs in the terminal, headless automation, and Concerto with context intact."
+        description: "The same wave runs in the terminal, headless automation, and Loopflow with context intact."
 
   building_blocks:
     heading: "Building blocks"
@@ -85,12 +85,12 @@ homepage:
 
   products:
     heading: "Free and open source"
-    concerto:
-      name: "Concerto"
+    loopflow:
+      name: "Loopflow"
       note: "Mac and iOS"
       description: "Visual podium for running waves across branches and repos."
-      image: "/static/concerto-main.png"
-      image_alt: "Concerto showing active and idle waves"
+      image: "/static/loopflow-main.png"
+      image_alt: "Loopflow showing active and idle waves"
       details:
         - "Stay creative — interactive sessions where you play the lead part, not approve permissions"
         - "Arrange the symphony — create, configure, and launch waves visually"

@@ -232,7 +232,7 @@ agent: opencode:openai/gpt-4o            # any provider opencode supports
 
 ### Supported Harnesses
 
-Optional list of harnesses exposed in Concerto's model picker and settings.
+Optional list of harnesses exposed in Loopflow's model picker and settings.
 
 ```yaml
 supported_harnesses:

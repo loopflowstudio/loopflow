@@ -173,7 +173,7 @@ cargo fmt                     # Format code
 cargo clippy -- -D warnings   # Lint (warnings = errors)
 ```
 
-See TESTING.md for the full test suite (Python, Swift, Rust, Concerto UI). CI runs all.
+See TESTING.md for the full test suite (Python, Swift, Rust, Loopflow UI). CI runs all.
 
 # Code Organization
 

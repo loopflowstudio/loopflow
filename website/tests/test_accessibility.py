@@ -12,8 +12,7 @@ from playwright.sync_api import Page
 PAGES_TO_TEST = [
     "/",
     "/products",
-    "/concerto",
-    "/symphonia",
+    "/loopflow",
     "/team",
     "/docs",
     "/docs/config",

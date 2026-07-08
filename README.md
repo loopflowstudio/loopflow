@@ -265,7 +265,7 @@ lfd serve
 curl -s "http://127.0.0.1:2486/v0/catalog?repo=$(pwd)" | jq '.result.flows[] | {name, category, source}'
 ```
 
-Open **Flows** in Concerto to browse the same catalog visually. The left pane groups flows and steps by `build`, `govern`, and `ops`; the right pane shows every parent flow that uses the selected flow or step.
+Open **Flows** in Loopflow to browse the same catalog visually. The left pane groups flows and steps by `build`, `govern`, and `ops`; the right pane shows every parent flow that uses the selected flow or step.
 
 ### Branches (xor)
 
@@ -342,7 +342,7 @@ tmux attach -t <name>  # attach to one
 ```
 
 Read `wave/engbot/GOAL.md` and `wave/engbot/MEMORY.md` for a wave's state, or
-watch it in Concerto. To remove a wave, delete `wave/engbot/` and its worktree
+watch it in Loopflow. To remove a wave, delete `wave/engbot/` and its worktree
 (`lf op wt remove engbot`).
 
 ```bash

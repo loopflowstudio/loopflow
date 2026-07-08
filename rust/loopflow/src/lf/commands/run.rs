@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn skill_launch_seed_interactive_surfaces_have_no_preamble() {
-        for surface in [Surface::Cli, Surface::Ide, Surface::ConcertoMac] {
+        for surface in [Surface::Cli, Surface::Ide, Surface::Mac] {
             let seed = skill_launch_seed("claude", surface, "gate", None, false, &[]);
             assert!(seed.starts_with("/gate\n\n"));
             assert!(!seed.contains("Run mode"), "surface {surface:?}");

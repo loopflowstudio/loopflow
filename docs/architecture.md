@@ -39,7 +39,7 @@ Local CLI                 Daemon
         v                        v
 Git/PR/PM ops             Clients
                             lf CLI
-                            Concerto Swift app
+                            Loopflow Swift app
                             webhooks
 ```
 
@@ -55,7 +55,7 @@ Git/PR/PM ops             Clients
 | Roadmap item | Linear | `lf op pm` and wave flows |
 | Session | lfdb | `lf` runs and placement flags |
 | Run/event | lfdb | lfd HTTP/event stream |
-| Attention | lfdb | lfd + Concerto |
+| Attention | lfdb | lfd + Loopflow |
 
 ## CLI and Engine
 
@@ -95,14 +95,14 @@ is gone; self-hosted operations are SSH-first.
 
 ## Clients
 
-`lf` and Concerto read lfd state; webhooks push events in. The Python package
+`lf` and Loopflow read lfd state; webhooks push events in. The Python package
 is a library of wire models only.
 
 Important paths:
 
 - `python/loopflow/models.py`
 
-Concerto is the Swift app. It reads lfd state, renders waves and sessions, and
+Loopflow is the Swift app. It reads lfd state, renders waves and sessions, and
 provides native surfaces for attention, terminal workspaces, provider auth, and
 live output.
 
@@ -111,7 +111,7 @@ Important paths:
 - `swift/LoopflowCore/Models/`
 - `swift/LoopflowCore/State/`
 - `swift/LoopflowCore/Services/`
-- `swift/Concerto/Views/`
+- `swift/Loopflow/Views/`
 
 ## Wave Loop
 
@@ -151,13 +151,13 @@ Loopflow integrates with:
 - GitHub for PRs, webhook ingress translated to `lf` execs, and release workflows.
 - Linear and Notion for PM-backed wave roadmaps.
 - tmux and local processes for interactive sessions.
-- Swift/macOS services for Concerto and native host behavior.
+- Swift/macOS services for Loopflow and native host behavior.
 
 ## Where Complexity Collects
 
 - Context assembly: every agent session depends on it, and the sources span
   docs, prompts, skills, wave memory, scratch notes, and command arguments.
-- Session lifecycle: lfd, Concerto, tmux, and external agents must agree on
+- Session lifecycle: lfd, Loopflow, tmux, and external agents must agree on
   what is running, blocked, attachable, complete, or failed.
 - DTO parity: Rust, Python, Swift, and fixtures can drift unless changes are
   made as one contract update.

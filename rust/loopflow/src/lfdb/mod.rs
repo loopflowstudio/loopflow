@@ -1947,7 +1947,7 @@ mod tests {
 
     // When lfd restarts, `fail_orphaned_runs` marks in-flight runs as Failed.
     // Without also resetting the wave's own status, the wave stays visually
-    // "running" — the Concerto sidebar and buttons stay disabled forever even
+    // "running" — the Loopflow sidebar and buttons stay disabled forever even
     // though no executor is attached. Cover the reset here.
     #[tokio::test]
     async fn fail_orphaned_runs_resets_stuck_wave_status() {

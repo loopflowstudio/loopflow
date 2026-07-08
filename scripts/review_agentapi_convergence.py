@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--print-only",
         action="store_true",
-        help="Print manual walkthrough checklist without launching Concerto.",
+        help="Print manual walkthrough checklist without launching Loopflow.",
     )
     return parser.parse_args()
 
@@ -35,12 +35,12 @@ def print_checklist() -> None:
     print()
 
 
-def launch_concerto(repo_root: Path) -> int:
+def launch_loopflow(repo_root: Path) -> int:
     cmd = [
         "uv",
         "run",
         "python",
-        "scripts/concerto-dev.py",
+        "scripts/loopflow-dev.py",
         "run-debug",
         "--with-lfd",
     ]
@@ -57,7 +57,7 @@ def main() -> int:
     if args.print_only:
         return 0
 
-    return launch_concerto(repo_root)
+    return launch_loopflow(repo_root)
 
 
 if __name__ == "__main__":

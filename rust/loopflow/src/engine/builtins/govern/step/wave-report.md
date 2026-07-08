@@ -150,7 +150,7 @@ Gather:
 
 Interpret:
 - Items should serve the wave's stated vision. An item in the `pm` wave
-  that's really about Concerto UI belongs in `macos`.
+  that's really about Loopflow UI belongs in `macos`.
 - Items at the same priority tier should be independent enough to work
   in parallel. If item 2a blocks item 2b, that's a sequencing issue the
   report should surface.

@@ -210,8 +210,8 @@ pub enum PromptFormatMode {
 pub enum Surface {
     Cli,
     Ide,
-    ConcertoMac,
-    ConcertoIphone,
+    Mac,
+    Iphone,
     #[default]
     #[serde(other)]
     Headless,
@@ -236,8 +236,8 @@ impl std::str::FromStr for Surface {
         let surface = match value {
             "cli" => Self::Cli,
             "ide" => Self::Ide,
-            "concerto_mac" => Self::ConcertoMac,
-            "concerto_iphone" => Self::ConcertoIphone,
+            "mac" => Self::Mac,
+            "iphone" => Self::Iphone,
             _ => Self::Headless,
         };
         Ok(surface)
@@ -2270,12 +2270,7 @@ mod tests {
 
     #[test]
     fn format_prompt_interactive_surfaces_have_no_preamble() {
-        for surface in [
-            Surface::Cli,
-            Surface::Ide,
-            Surface::ConcertoMac,
-            Surface::ConcertoIphone,
-        ] {
+        for surface in [Surface::Cli, Surface::Ide, Surface::Mac, Surface::Iphone] {
             let components = PromptComponents {
                 surface,
                 ..Default::default()

@@ -8,7 +8,7 @@
 //!   ([`ensure_wave_row`] — a reachable store with no row for the wave gets
 //!   a minimal one, never an unregistered run), then writes itself a
 //!   `WaveAgent` session row (source `wave_server`, endpoint + pid in `env`)
-//!   so Concerto's agent tree shows the mind and one-brain enforcement has a
+//!   so Loopflow's agent tree shows the mind and one-brain enforcement has a
 //!   fact to key on. Before writing, [`register`] probes the wave's live
 //!   WaveAgent rows: a `wave_server` row whose pid is dead is a crashed
 //!   server — closed on the spot; a surviving live brain is a refusal naming
@@ -164,7 +164,7 @@ pub async fn ensure_wave_row(
     // wave's brain, not to silence a daemon (the ticker that read this column
     // died in the collapse). The safety valve now lives in GOAL.md
     // frontmatter, read file-first by the listener — a registry row born
-    // `paused: true` was a lie that only confused Concerto.
+    // `paused: true` was a lie that only confused Loopflow.
     wave.paused = read_wave_config(main_repo, name)
         .and_then(|config| config.paused)
         .unwrap_or(false);

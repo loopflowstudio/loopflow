@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.loopflow.mac</string>
+    <key>CFBundleName</key>
+    <string>Loopflow</string>
+    <key>CFBundleDisplayName</key>
+    <string>Loopflow</string>
+    <key>CFBundleExecutable</key>
+    <string>Loopflow</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>studio.loopflow.deeplink</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>loopflow</string>
+            </array>
+        </dict>
+    </array>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSUIElement</key>
+    <false/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Loopflow needs to control terminal applications to open worktrees and run commands.</string>
+    <key>NSAppleScriptEnabled</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Loopflow uses the microphone for voice-to-text input.</string>
+    <key>OSAScriptingDefinition</key>
+    <string>Loopflow.sdef</string>
+</dict>
+</plist>

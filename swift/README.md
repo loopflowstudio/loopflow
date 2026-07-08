@@ -1,4 +1,4 @@
-# Concerto — Swift Apps
+# Loopflow — Swift Apps
 
 Visual interface for loopflow. SwiftUI today on macOS, with iOS support staged in.
 
@@ -20,10 +20,10 @@ Visual interface for loopflow. SwiftUI today on macOS, with iOS support staged i
 
 ## Build System
 
-The `./dev` script is the primary build tool. It uses Swift Package Manager (`Package.swift`) for building and installs to `~/Applications/Concerto Dev.app` to preserve macOS permissions across rebuilds.
+The `./dev` script is the primary build tool. It uses Swift Package Manager (`Package.swift`) for building and installs to `~/Applications/Loopflow Dev.app` to preserve macOS permissions across rebuilds.
 
-Concerto bundles `lfd` and `lf` into the app bundle. By default, each opened repo starts a bundled `lfd` process with an ephemeral localhost port and token.
-Bundled macOS launches mark their child daemon/container processes so Concerto can reap stale instances on the next start and shut the bundled `lfd` down when the app exits.
+Loopflow bundles `lfd` and `lf` into the app bundle. By default, each opened repo starts a bundled `lfd` process with an ephemeral localhost port and token.
+Bundled macOS launches mark their child daemon/container processes so Loopflow can reap stale instances on the next start and shut the bundled `lfd` down when the app exits.
 
 ### Commands
 
@@ -42,8 +42,8 @@ Bundled macOS launches mark their child daemon/container processes so Concerto c
 
 Long-running dev commands tee stdout to stable files under `~/.lf/logs/dev/`:
 
-- `uv run python scripts/concerto-dev.py lfd` → `~/.lf/logs/dev/<repo>.lfd.log`
-- `uv run python scripts/concerto-dev.py run-debug` → `~/.lf/logs/dev/<repo>.concerto-run-debug.log`
+- `uv run python scripts/loopflow-dev.py lfd` → `~/.lf/logs/dev/<repo>.lfd.log`
+- `uv run python scripts/loopflow-dev.py run-debug` → `~/.lf/logs/dev/<repo>.loopflow-run-debug.log`
 
 ### Xcode Project
 
@@ -54,16 +54,16 @@ The `project.yml` (XcodeGen) generates `LoopflowSwift.xcodeproj` for Xcode devel
 xcodegen generate
 
 # Build with Xcode
-xcodebuild -scheme Concerto -destination 'platform=macOS' build
+xcodebuild -scheme LoopflowMac -destination 'platform=macOS' build
 ```
 
 ## Embedded Terminal (Ghostty)
 
-Concerto embeds Ghostty for terminal functionality.
+Loopflow embeds Ghostty for terminal functionality.
 
 - Ordinary typing stays on Ghostty's key-event path, so terminal apps see keystrokes instead of paste-like text injection
 - IME commit and explicit paste still use the text-input path
-- Concerto keeps only intentional pane-management shortcuts (`⌃⇧5`, `⌃⇧'`, `⇧⌘↩`, `⌘W`, `⌥⌘←/→`) above the terminal surface
+- Loopflow keeps only intentional pane-management shortcuts (`⌃⇧5`, `⌃⇧'`, `⇧⌘↩`, `⌘W`, `⌥⌘←/→`) above the terminal surface
 
 ### Building Ghostty
 
@@ -80,31 +80,31 @@ brew install zig
 cd vendor/ghostty && zig build -Doptimize=ReleaseFast
 ```
 
-See `Concerto/Services/Ghostty/README.md` for integration details.
+See `LoopflowMac/Services/Ghostty/README.md` for integration details.
 
 ## Architecture
 
-- `LoopflowCore/State/RepoState.swift` — shared app orchestrator for waves, connection, and stores
-- `LoopflowCore/State/*.swift` — shared state containers (`WaveStore`, `RunStore`, `WorktreeStore`, `ConnectionStore`, `OutputBuffer`, `SessionState`)
-- `LoopflowCore/Models` + `LoopflowCore/Services` — shared API models and transport/services
-- `Concerto/Views` — mixed-platform views shared between iOS and macOS (`LiveOutput`, `WaveSessionView`)
-- `Concerto/Platform/macOS` — macOS-only views, services, and keyboard handling
-- `Concerto/Platform/iOS` — iOS-only views (`DiscoveryView`, `MobileWaveDetailView`, `MobileWaveListView`)
-- `Concerto/Platform/macOS/Services/Ghostty` — embedded terminal integration (macOS-only)
+- `Loopflow/State/RepoState.swift` — shared app orchestrator for waves, connection, and stores
+- `Loopflow/State/*.swift` — shared state containers (`WaveStore`, `RunStore`, `WorktreeStore`, `ConnectionStore`, `OutputBuffer`, `SessionState`)
+- `Loopflow/Models` + `Loopflow/Services` — shared API models and transport/services
+- `Loopflow/Views` — mixed-platform views shared between iOS and macOS (`LiveOutput`, `WaveSessionView`)
+- `LoopflowMac` — macOS-only views, services, and keyboard handling
+- `LoopflowiOS` — iOS-only views (`DiscoveryView`, `MobileWaveDetailView`, `MobileWaveListView`)
+- `LoopflowMac/Services/Ghostty` — embedded terminal integration (macOS-only)
 
 ## Multiplatform Boundary Rules
 
 Use these rules for every new Swift change. The goal is low long-term `#if` footprint.
 
-### 1) Put shared logic in LoopflowCore
+### 1) Put shared logic in Loopflow
 
-- Shared models, state, and reusable views live in `LoopflowCore`.
-- `LoopflowCore` must not import AppKit, Carbon, Ghostty, or other macOS-only frameworks.
+- Shared models, state, and reusable views live in `Loopflow`.
+- `Loopflow` must not import AppKit, Carbon, Ghostty, or other macOS-only frameworks.
 
 ### 2) Keep platform code in shell files
 
-- Put macOS-only code under `Concerto/Platform/macOS/` (or existing macOS-specific folders such as `Services/Ghostty/`).
-- Put iOS-only code under `Concerto/Platform/iOS/`.
+- Put macOS-only code under `LoopflowMac/` (or existing macOS-specific folders such as `Services/Ghostty/`).
+- Put iOS-only code under `LoopflowiOS/`.
 - Prefer whole-file platform splits over inline branching.
 
 ### 3) Minimize `#if` usage
@@ -136,7 +136,7 @@ Define the capability in shared code, implement it in platform shell code.
 
 ## Portfolio Dashboard
 
-Concerto launches into a portfolio window instead of a single welcome panel:
+Loopflow launches into a portfolio window instead of a single welcome panel:
 
 - Each repo appears as a card with live wave status, blocked count, and diff totals
 - Click a repo to open its repo-scoped wave list
@@ -173,7 +173,7 @@ Repo windows also have a **Flows** tab:
 - Expand a flow inline to see nested flows, xor branches, and loops
 - Click any flow or step to see every parent flow that uses it
 - Repo `.lf/flows/*.yaml` and `.lf/steps/*.md` overrides replace builtins in place and get repo-source styling
-- `LoopflowCore/Models/Catalog.swift` mirrors the flow catalog DTO; registry reads go through `lf --json`
+- `Loopflow/Models/Catalog.swift` mirrors the flow catalog DTO; registry reads go through `lf --json`
 
 ## Session quote replies (macOS)
 
@@ -189,10 +189,10 @@ Open the prototype gallery from **Debug → Reply Demo** (`⇧⌘R`).
 - Press and hold to record only while held
 - Partial transcript appears under the composer while recording
 - Final transcript is inserted into the composer for manual edit + send
-- On macOS 26+/iOS 26+, Concerto uses Apple Dictation (`SpeechAnalyzer` + `DictationTranscriber`)
-- On macOS 15–25/iOS 18–25, Concerto falls back to WhisperKit `tiny`
+- On macOS 26+/iOS 26+, Loopflow uses Apple Dictation (`SpeechAnalyzer` + `DictationTranscriber`)
+- On macOS 15–25/iOS 18–25, Loopflow falls back to WhisperKit `tiny`
 - Voice warmup runs at app launch to preinstall/prepare speech assets in the background
-- If microphone permission is denied, Concerto shows an inline settings shortcut
+- If microphone permission is denied, Loopflow shows an inline settings shortcut
 
 ## Keyboard Shortcuts
 
@@ -238,10 +238,10 @@ The Secrets group (Doppler) expands inline when connected to show project/config
 
 Connection settings support two modes:
 
-- **Bundled** (default): Concerto starts one bundled `lfd` process automatically.
-- **Remote**: Concerto connects to an externally managed `lfd`.
+- **Bundled** (default): Loopflow starts one bundled `lfd` process automatically.
+- **Remote**: Loopflow connects to an externally managed `lfd`.
 
-On first launch (before any saved connection settings), Concerto also checks `~/.lf/concerto.yaml`:
+On first launch (before any saved connection settings), Loopflow also checks `~/.lf/loopflow.yaml`:
 
 ```yaml
 connection:
@@ -250,7 +250,7 @@ connection:
   token: "paste-token-here"
 ```
 
-If present, it seeds remote mode from that host/port (TLS + static-token auth). When `token` is set, Concerto reads it fresh from the file for matching host/port requests so token rotation does not require re-pasting through Settings. Without `token`, Concerto falls back to Keychain via the existing `<host>:<port>` account mapping.
+If present, it seeds remote mode from that host/port (TLS + static-token auth). When `token` is set, Loopflow reads it fresh from the file for matching host/port requests so token rotation does not require re-pasting through Settings. Without `token`, Loopflow falls back to Keychain via the existing `<host>:<port>` account mapping.
 
 In bundled mode, Settings also supports optional CLI symlink install for `lf` + `lfd` (for `~/.local/bin` or `/usr/local/bin`).
 
@@ -263,5 +263,5 @@ In bundled mode, Settings also supports optional CLI symlink install for `lf` + 
 Or via Xcode:
 ```bash
 xcodegen generate
-xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+xcodebuild test -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```

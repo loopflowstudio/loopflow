@@ -9,14 +9,14 @@ local: ~/src/loopflow-demos
 
 screenshots:
   # Main dashboard - shows sidebar with grouped waves
-  - name: concerto-main
+  - name: loopflow-main
     type: snapshot
     window_size: [1200, 800]
     mock_loops: true
     directions: [conductor, listener]
 
   # Running wave selected - detail view
-  - name: concerto-wave-running
+  - name: loopflow-wave-running
     type: snapshot
     window_size: [1200, 800]
     mock_loops: true
@@ -24,7 +24,7 @@ screenshots:
     directions: [conductor, improviser]
 
   # Waiting wave selected - needs interaction
-  - name: concerto-wave-waiting
+  - name: loopflow-wave-waiting
     type: snapshot
     window_size: [1200, 800]
     mock_loops: true
@@ -32,7 +32,7 @@ screenshots:
     directions: [conductor, listener]
 
   # Empty state - no waves, Quick Experiment visible
-  - name: concerto-empty
+  - name: loopflow-empty
     type: snapshot
     window_size: [1200, 800]
     mock_loops: true
@@ -40,7 +40,7 @@ screenshots:
     directions: [improviser]
 
   # Failed wave selected - error state
-  - name: concerto-wave-failed
+  - name: loopflow-wave-failed
     type: snapshot
     window_size: [1200, 800]
     mock_loops: true
@@ -48,7 +48,7 @@ screenshots:
     directions: [conductor, listener]
 
   # Runs tab - wave history with PRs
-  - name: concerto-wave-runs
+  - name: loopflow-wave-runs
     type: snapshot
     window_size: [1200, 800]
     mock_loops: true
@@ -57,18 +57,18 @@ screenshots:
     directions: [conductor, listener]
 
   # UI test captures (flow-focused, slower)
-  - name: concerto-main-uitest
+  - name: loopflow-main-uitest
     type: uitest
     ui_test_mode: mock-waves
     ui_test_delay: 2
 
-  - name: concerto-wave-running-uitest
+  - name: loopflow-wave-running-uitest
     type: uitest
     ui_test_mode: mock-waves
     ui_test_select_branch: wave-auth-feature
     ui_test_delay: 2
 
-  - name: concerto-wave-waiting-uitest
+  - name: loopflow-wave-waiting-uitest
     type: uitest
     ui_test_mode: mock-waves
     ui_test_select_branch: wave-api-refactor

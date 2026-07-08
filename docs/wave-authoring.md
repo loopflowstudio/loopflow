@@ -113,7 +113,7 @@ The resident mind reads `crons:` directly from this frontmatter and opens a syst
 lf design: plan infrastructure hardening for the daemon
 ```
 
-The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, `lf wave <name>` runs them and Concerto picks them up; connect the roadmap with `lf op pm init` and add tasks with `lf op pm update`.
+The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, `lf wave <name>` runs them and Loopflow picks them up; connect the roadmap with `lf op pm init` and add tasks with `lf op pm update`.
 
 **Write by hand.** Sometimes an editor is faster. Create the files, push, done.
 
@@ -150,7 +150,7 @@ tmux ls                     # the wave agent and every worker it launched
 tmux attach -t <name>       # jump into one; agent output lives here
 ```
 
-In **Concerto**, a wave's detail view groups its live work — the wave agent session, worker runs, PR state, and anything needing your attention.
+In **Loopflow**, a wave's detail view groups its live work — the wave agent session, worker runs, PR state, and anything needing your attention.
 
 ### Crons
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Validate Stage 02: Mobile Action Buttons
-# Runs automated checks, then launches Concerto for manual walkthrough.
+# Runs automated checks, then launches Loopflow for manual walkthrough.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -45,7 +45,7 @@ fi
 
 echo "=== Manual walkthrough ==="
 echo ""
-echo "The following will launch Concerto in debug mode."
+echo "The following will launch Loopflow in debug mode."
 echo "Once running, verify:"
 echo ""
 echo "  1. Open a wave chat session (any wave)"
@@ -59,7 +59,7 @@ echo "  7. Start typing in the composer → buttons clear"
 echo "  8. New agent turn starts → buttons clear"
 echo "  9. End session → buttons clear"
 echo ""
-echo "Press Enter to launch Concerto, or Ctrl-C to skip."
+echo "Press Enter to launch Loopflow, or Ctrl-C to skip."
 read -r
 
-exec uv run python scripts/concerto-dev.py run-debug
+exec uv run python scripts/loopflow-dev.py run-debug

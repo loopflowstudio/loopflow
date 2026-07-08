@@ -92,7 +92,7 @@ Run one loop iteration for the governance wave.
 lfd install                      # one-time: install daemon
 ```
 
-Or run manually: `lfd serve`. Watch progress in Concerto.
+Or run manually: `lfd serve`. Watch progress in Loopflow.
 
 ## Managing Waves
 

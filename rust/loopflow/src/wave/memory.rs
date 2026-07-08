@@ -9,7 +9,7 @@
 //! publishes a replayable fact without accreting raw bullets into this file.
 //! Direct file edits are for serverless waves only (the mind's file tools
 //! editing a worktree copy while seeds read the origin's was a live bug). It
-//! is a plain Markdown file — not an IPC channel. Concerto never reads it; the
+//! is a plain Markdown file — not an IPC channel. Loopflow never reads it; the
 //! thread is the live surface.
 
 use std::path::{Path, PathBuf};

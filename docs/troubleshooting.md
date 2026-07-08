@@ -9,7 +9,7 @@ Common issues and solutions.
 
 ## lfd daemon not running
 
-**Symptom:** Concerto shows no daemon, or `curl http://127.0.0.1:2486/health` fails.
+**Symptom:** Loopflow shows no daemon, or `curl http://127.0.0.1:2486/health` fails.
 
 Check if installed:
 
@@ -84,12 +84,12 @@ If restoring those edits conflicts, the stash is left in place for manual recove
 
 ## Loop stuck in WAITING
 
-**Symptom:** Concerto shows a wave in WAITING state.
+**Symptom:** Loopflow shows a wave in WAITING state.
 
 The loop hit its PR limit. Options:
 
 1. Review and merge outstanding PRs
-2. Adjust the wave runtime settings in Concerto
+2. Adjust the wave runtime settings in Loopflow
 3. Land accumulated work: see [Waves](waves.md) for loop management
 
 ## Context too large

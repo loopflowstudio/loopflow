@@ -570,7 +570,7 @@ pub struct GatherContextOpts {
 }
 
 pub enum PromptFormatMode { Full, Context, Task }
-pub enum Surface { Cli, ConcertoMac, ConcertoIphone, Headless }
+pub enum Surface { Cli, Mac, Iphone, Headless }
 pub enum DiffTier { UnifiedDiff, StatOnly, None }
 
 pub struct PromptComponents {

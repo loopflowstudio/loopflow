@@ -5,7 +5,7 @@
 //! knows — running and stopped alike (`list_waves(None)`) — and marks which
 //! have a live server answering; `lf status <wave>` reports one wave's runs,
 //! attention, and (when live) its mind state. Both are pure readers over the
-//! shared SQLite ledger; `--json` is the machine-readable snapshot Concerto's
+//! shared SQLite ledger; `--json` is the machine-readable snapshot Loopflow's
 //! dashboard reads. A live wave has an endpoint you can subscribe to for
 //! motion (`GET /events`); a stopped one is a row with no endpoint — visible,
 //! inert, restartable.
@@ -22,7 +22,7 @@ use crate::wave::journal::short_id;
 use crate::wave::server::live_endpoint;
 
 /// One wave's registry snapshot — the `lf ls` row and the `wave` field of
-/// `lf status`. Wire type consumed by Concerto: every field is required or
+/// `lf status`. Wire type consumed by Loopflow: every field is required or
 /// explicitly Optional, no serde defaults.
 #[derive(Debug, Serialize)]
 pub struct WaveSnapshot {

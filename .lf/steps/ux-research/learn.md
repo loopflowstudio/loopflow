@@ -9,7 +9,7 @@ loop and not a one-off.
 ## Update three durable files
 
 **1. `scratch/ux-research/design-guidelines.md`** — what we now believe about
-Concerto's UX. Append this loop's learnings as dated entries. A good guideline
+Loopflow's UX. Append this loop's learnings as dated entries. A good guideline
 is a claim we'd defend and design against next time (e.g. "Status must carry its
 *reason*, not just a word"). Cite the loop and the evidence. If this loop
 *contradicts* an earlier guideline, don't delete it silently — mark it revised

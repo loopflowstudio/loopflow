@@ -1,0 +1,186 @@
+import Foundation
+import Testing
+@testable import Loopflow
+
+@Suite("LoopflowConfig")
+struct LoopflowConfigTests {
+    @Test("loads remote connection from yaml")
+    func loadsRemoteConnectionFromYAML() throws {
+        let (configURL, cleanup) = makeConfigURL()
+        defer { cleanup() }
+
+        try """
+        connection:
+          host: lfd.example.com
+          port: 443
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let config = try #require(loadLoopflowConfig(configURL: configURL))
+        let connection = try #require(config.connection)
+        let serverConnection = connection.toServerConnection()
+
+        #expect(connection.host == "lfd.example.com")
+        #expect(connection.port == 443)
+        #expect(serverConnection.useTLS)
+        #expect(serverConnection.authMode == .staticToken)
+        #expect(connection.token == nil)
+        #expect(serverConnection.staticToken == nil)
+    }
+
+    @Test("parses token into the server connection")
+    func parsesTokenIntoServerConnection() throws {
+        let (configURL, cleanup) = makeConfigURL()
+        defer { cleanup() }
+
+        try """
+        connection:
+          host: mini.tailnet.ts.net
+          port: 443
+          token: "abc123secret"
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let config = try #require(loadLoopflowConfig(configURL: configURL))
+        let connection = try #require(config.connection)
+
+        #expect(connection.token == "abc123secret")
+        #expect(connection.toServerConnection().staticToken == "abc123secret")
+    }
+
+    @Test("returns nil when config file is missing")
+    func returnsNilWhenConfigMissing() {
+        let configURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("loopflow.yaml", isDirectory: false)
+
+        #expect(loadLoopflowConfig(configURL: configURL) == nil)
+    }
+
+    @Test("returns nil when config file is empty")
+    func returnsNilWhenConfigEmpty() throws {
+        let (configURL, cleanup) = makeConfigURL()
+        defer { cleanup() }
+
+        try " \n\t\n".write(to: configURL, atomically: true, encoding: .utf8)
+
+        #expect(loadLoopflowConfig(configURL: configURL) == nil)
+    }
+
+    @Test("returns config with no connection when yaml has no connection key")
+    func returnsConfigWithoutConnectionWhenMissingKey() throws {
+        let (configURL, cleanup) = makeConfigURL()
+        defer { cleanup() }
+
+        try """
+        somethingElse:
+          host: lfd.example.com
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let config = try #require(loadLoopflowConfig(configURL: configURL))
+        #expect(config.connection == nil)
+    }
+
+    @Test("ignores nested connection key")
+    func ignoresNestedConnectionKey() throws {
+        let (configURL, cleanup) = makeConfigURL()
+        defer { cleanup() }
+
+        try """
+        profile:
+          connection:
+            host: lfd.example.com
+            port: 443
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let config = try #require(loadLoopflowConfig(configURL: configURL))
+        #expect(config.connection == nil)
+    }
+
+    @Test("parses container mounts and image")
+    func parsesContainerMountsAndImage() throws {
+        let (configURL, cleanup) = makeConfigURL()
+        defer { cleanup() }
+
+        try """
+        container:
+          image: loopflow/lfd:dev
+          mounts:
+            - ~/Documents/specs:ro
+            - ~/data:rw
+            - ~/defaults
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let config = try #require(loadLoopflowConfig(configURL: configURL))
+        let container = try #require(config.container)
+        let mounts = try #require(container.mounts)
+
+        #expect(container.image == "loopflow/lfd:dev")
+        #expect(mounts == [
+            ExtraMount(path: "~/Documents/specs", readOnly: true),
+            ExtraMount(path: "~/data", readOnly: false),
+            ExtraMount(path: "~/defaults", readOnly: true),
+        ])
+    }
+
+    @Test("returns nil container when missing keys")
+    func returnsNilContainerWhenMissingKeys() throws {
+        let (configURL, cleanup) = makeConfigURL()
+        defer { cleanup() }
+
+        try """
+        container:
+          somethingElse: value
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let config = try #require(loadLoopflowConfig(configURL: configURL))
+        #expect(config.container == nil)
+    }
+
+    @Test("loads sticky selected repo state")
+    func loadsStickySelectedRepoState() throws {
+        let (stateURL, cleanup) = makeStateURL()
+        defer { cleanup() }
+
+        try """
+        selected_repo_path: "/Users/jack/src/loopflow"
+        """.write(to: stateURL, atomically: true, encoding: .utf8)
+
+        let state = try #require(loadLoopflowState(stateURL: stateURL))
+        #expect(state.selectedRepoPath == "/Users/jack/src/loopflow")
+    }
+
+    @Test("saves sticky selected repo state")
+    func savesStickySelectedRepoState() throws {
+        let (stateURL, cleanup) = makeStateURL()
+        defer { cleanup() }
+
+        try saveLoopflowState(
+            LoopflowState(selectedRepoPath: "/Users/jack/src/loopflow.loopflow"),
+            stateURL: stateURL
+        )
+
+        let state = try #require(loadLoopflowState(stateURL: stateURL))
+        #expect(state.selectedRepoPath == "/Users/jack/src/loopflow.loopflow")
+    }
+
+    private func makeConfigURL() -> (URL, () -> Void) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let configURL = directory.appendingPathComponent("loopflow.yaml", isDirectory: false)
+        let cleanup: () -> Void = {
+            _ = try? FileManager.default.removeItem(at: directory)
+        }
+        return (configURL, cleanup)
+    }
+
+    private func makeStateURL() -> (URL, () -> Void) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("loopflow-state.yaml", isDirectory: false)
+        let cleanup: () -> Void = {
+            _ = try? FileManager.default.removeItem(at: directory)
+        }
+        return (stateURL, cleanup)
+    }
+}

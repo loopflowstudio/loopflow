@@ -1,23 +1,23 @@
-# Concerto Design Principles
+# Loopflow Design Principles
 
-Design research for the Concerto app—a visual interface for conducting AI coding agents.
+Design research for the Loopflow app—a visual interface for conducting AI coding agents.
 
 ## What to Build
 
-A design system and UX philosophy for Concerto that embodies "musically inspired UX for conducting agents"—keeping humans in flow while orchestrating AI.
+A design system and UX philosophy for Loopflow that embodies "musically inspired UX for conducting agents"—keeping humans in flow while orchestrating AI.
 
 ---
 
-## The Concerto Metaphor
+## The Loopflow Metaphor
 
-From loopflowstudio: The "Concerto" is an engineer who seeks balance between **craft and throughput**. They reject the false dichotomy between speed and quality. The conductor metaphor implies:
+From loopflowstudio: The "Loopflow" is an engineer who seeks balance between **craft and throughput**. They reject the false dichotomy between speed and quality. The conductor metaphor implies:
 
 - **Human in the loop, not out of it** — watch, interrupt, resume
 - **Arranging harmony** — multiple agents working together toward a unified outcome
-- **Intentionality** — the concerto shapes the music; agents play the notes
+- **Intentionality** — the loopflow shapes the music; agents play the notes
 - **Flow state** — the tool disappears; the work remains
 
-> "The Concerto wants craft AND throughput, not either/or."
+> "The Loopflow wants craft AND throughput, not either/or."
 
 ---
 
@@ -27,7 +27,7 @@ From loopflowstudio: The "Concerto" is an engineer who seeks balance between **c
 
 **"Creators need an immediate connection to what they create."**
 
-Any delay in the feedback loop between thinking and seeing means ideas that will never exist. For Concerto:
+Any delay in the feedback loop between thinking and seeing means ideas that will never exist. For Loopflow:
 
 - Show agent progress in real-time, not after completion
 - Stream output as it happens
@@ -42,7 +42,7 @@ Any delay in the feedback loop between thinking and seeing means ideas that will
 
 Notion achieves "effortless hierarchy"—clean and minimal at its core, but infinitely composable. Stripe's docs optimize for the "happy path" while making depth accessible.
 
-For Concerto:
+For Loopflow:
 - Default view shows only what's needed: task, status, branch
 - Complexity reveals on demand: logs, diffs, context files
 - Don't front-load configuration; let users discover features through use
@@ -54,7 +54,7 @@ For Concerto:
 
 Linear and Figma prove that performance is not a technical metric but a product feature. Speed enables flow state.
 
-For Concerto:
+For Loopflow:
 - Optimistic UI updates—show results before server confirmation
 - Keyboard-first navigation (see Cmd+K below)
 - Prefetch likely next states
@@ -68,7 +68,7 @@ For Concerto:
 
 Linear's Cmd+K design: every action searchable, shortcuts discoverable, no mouse required for power users.
 
-For Concerto:
+For Loopflow:
 - `Cmd+K` opens global command palette
 - All actions have keyboard shortcuts
 - Shortcuts displayed alongside actions in menus
@@ -80,7 +80,7 @@ For Concerto:
 
 Linear refuses to build Jira-level complexity. fast.ai embeds best practices so users don't have to configure them.
 
-For Concerto:
+For Loopflow:
 - One good workflow, not infinite configuration
 - Strong defaults that work immediately
 - Don't ask users to make decisions they don't care about
@@ -94,7 +94,7 @@ For Concerto:
 
 Cursor provides three tiers: Tab (local), Cmd+K (scoped), Agent (autonomous). Each has appropriate safeguards.
 
-For Concerto:
+For Loopflow:
 - Quick actions: single-task launches, inline status
 - Standard mode: task execution with streaming output
 - Agent mode: multi-step pipelines with checkpoints
@@ -106,7 +106,7 @@ For Concerto:
 
 Cursor's Plan Mode decouples reasoning from execution. Matuschak warns against tools that collect without compounding.
 
-For Concerto:
+For Loopflow:
 - Show what the agent will do before it does it
 - Display context being sent to the LLM
 - Make costs visible (tokens, time, API calls)
@@ -118,7 +118,7 @@ For Concerto:
 
 The interface should be invisible. Users engage with their work, not with design decisions.
 
-For Concerto:
+For Loopflow:
 - Minimize chrome; maximize content
 - No decorative elements that don't aid comprehension
 - The app should feel like "nothing"—just you and your agents
@@ -132,7 +132,7 @@ For Concerto:
 
 fast.ai removes gatekeeping while respecting intelligence. Paper by FiftyThree provided five brushes and nine colors—constraints that liberated creativity.
 
-For Concerto:
+For Loopflow:
 - Get users to a working result immediately
 - Don't require understanding to start using
 - Provide thoughtful constraints that focus creative energy
@@ -146,7 +146,7 @@ For Concerto:
 
 When something is wrong, don't just tell them—give them a button to fix it. Empty states, error states, and disconnected states should all offer the next step.
 
-For Concerto:
+For Loopflow:
 - "Connect lfd" not "lfd not connected"
 - "Create workspace" not "No workspaces found"
 - "Install Claude Code" not "Claude Code not found"
@@ -160,7 +160,7 @@ For Concerto:
 
 Stripe treats documentation as product. Apple obsesses over details users will never consciously notice.
 
-For Concerto:
+For Loopflow:
 - Pixel-perfect alignment
 - Considered typography (the burgundy + serif of loopflowstudio)
 - Animations that feel physical and natural
@@ -368,7 +368,7 @@ Color.accentColor   // interactive elements
 @Environment(\.accessibilityHighContrastEnabled) var highContrast
 ```
 
-- One accent color per view (burgundy #722f37 for Concerto)
+- One accent color per view (burgundy #722f37 for Loopflow)
 - Use semantic colors over hardcoded values
 - Support both light and dark via `colorScheme`
 - Test with Increase Contrast accessibility setting
@@ -451,7 +451,7 @@ ScrollViewReader { proxy in
 The musical metaphor suggests specific design decisions:
 
 ### 1. Real-Time Feedback
-A conductor sees and hears the orchestra in real-time. The Concerto app must stream agent output live—not after completion.
+A conductor sees and hears the orchestra in real-time. The Loopflow app must stream agent output live—not after completion.
 
 ### 2. Gesture-Based Control
 Conductors communicate through gesture: tempo, dynamics, cues. Consider:
@@ -460,19 +460,19 @@ Conductors communicate through gesture: tempo, dynamics, cues. Consider:
 - Quick taps to start/stop/pause
 
 ### 3. Score as Artifact
-The score (prompt file) is the authoritative source. The conductor interprets it, but the score persists. In Concerto:
+The score (prompt file) is the authoritative source. The conductor interprets it, but the score persists. In Loopflow:
 - Prompts are files, not ephemeral chat
 - Design docs capture intent
 - Everything is versioned
 
 ### 4. Sections Working Together
-An orchestra has sections (strings, brass, woodwinds) that must harmonize. In Concerto:
+An orchestra has sections (strings, brass, woodwinds) that must harmonize. In Loopflow:
 - Multiple agents can run in parallel
 - Status shows what each "section" is doing
 - The conductor (user) coordinates the whole
 
 ### 5. Rehearsal vs. Performance
-Conductors have different modes: rehearsal (exploratory, can stop) vs. performance (committed). In Concerto:
+Conductors have different modes: rehearsal (exploratory, can stop) vs. performance (committed). In Loopflow:
 - Interactive mode = rehearsal (interrupt, redirect)
 - Auto mode = performance (run to completion)
 
@@ -599,7 +599,7 @@ These would require rewriting if guessed wrong:
 1. **Performance budget**: All interactions must complete in <100ms
 2. **Keyboard-first**: Every action must be keyboard-accessible
 3. **Real-time streaming**: Output must stream, not batch
-4. **Single-window focus**: Concerto is the cockpit, not a dashboard
+4. **Single-window focus**: Loopflow is the cockpit, not a dashboard
 5. **Prompt-file authority**: UI reflects files, not replaces them
 
 ---
@@ -622,12 +622,12 @@ cat scratch/designprinciples.md | head -100
 
 ## Design System Implementation
 
-Concerto implements a formal design system in `DesignSystem.swift`. Use these patterns for consistency.
+Loopflow implements a formal design system in `DesignSystem.swift`. Use these patterns for consistency.
 
 ### Spacing Scale (4pt base)
 
 ```swift
-import Concerto
+import Loopflow
 
 // Use semantic spacing, not arbitrary values
 .padding(.horizontal, Spacing.lg)  // 16pt
@@ -767,7 +767,7 @@ Color.statusInfo     // blue
 
 ### Keyboard Navigation
 
-Concerto is keyboard-first. All actions are accessible via keyboard.
+Loopflow is keyboard-first. All actions are accessible via keyboard.
 
 **Global Shortcuts (menu bar):**
 

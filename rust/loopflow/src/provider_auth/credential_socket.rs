@@ -80,7 +80,7 @@ impl CredentialSocketClient {
         }
     }
 
-    /// Fetch credential for a provider from the Concerto-hosted Unix socket.
+    /// Fetch credential for a provider from the Loopflow-hosted Unix socket.
     pub async fn get_credential(
         &self,
         provider: &str,

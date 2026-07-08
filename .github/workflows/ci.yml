@@ -106,7 +106,7 @@ jobs:
       - name: Check Swift multiplatform boundaries
         run: uv run python scripts/check_swift_multiplatform_boundaries.py
 
-  concerto-ui-test:
+  loopflow-ui-test:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -119,19 +119,19 @@ jobs:
         uses: actions/cache@v4
         with:
           path: swift/DerivedData
-          key: concerto-dd-${{ runner.os }}-${{ hashFiles('swift/Package.resolved', 'swift/project.yml') }}
+          key: loopflow-dd-${{ runner.os }}-${{ hashFiles('swift/Package.resolved', 'swift/project.yml') }}
           restore-keys: |
-            concerto-dd-${{ runner.os }}-
-      - name: Build Concerto for testing (compile check)
+            loopflow-dd-${{ runner.os }}-
+      - name: Build Loopflow for testing (compile check)
         # The hosted test *run* is redundant: swift-test runs these same suites
-        # un-hosted. This job's only unique signal is that the Concerto app
+        # un-hosted. This job's only unique signal is that the Loopflow app
         # target compiles. build-for-testing gives that without launching the
         # app, so there is no test-host run loop to hang on — deterministically
         # no hang, unlike relying on the app to terminate itself.
         run: |
           xcodebuild build-for-testing \
             -project LoopflowSwift.xcodeproj \
-            -scheme Concerto \
+            -scheme LoopflowMac \
             -destination platform=macOS \
             -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO \
@@ -150,7 +150,7 @@ jobs:
       - website-test
       - e2e-smoke
       - swift-test
-      - concerto-ui-test
+      - loopflow-ui-test
     steps:
       - name: Aggregate test results
         env:
@@ -161,7 +161,7 @@ jobs:
           WEBSITE_TEST: ${{ needs.website-test.result }}
           E2E_SMOKE: ${{ needs.e2e-smoke.result }}
           SWIFT_TEST: ${{ needs.swift-test.result }}
-          CONCERTO_UI_TEST: ${{ needs.concerto-ui-test.result }}
+          LOOPFLOW_UI_TEST: ${{ needs.loopflow-ui-test.result }}
         run: |
           failures=0
 
@@ -189,6 +189,6 @@ jobs:
           check_result "website-test" "$WEBSITE_TEST"
           check_result "e2e-smoke" "$E2E_SMOKE"
           check_result "swift-test" "$SWIFT_TEST"
-          check_result "concerto-ui-test" "$CONCERTO_UI_TEST"
+          check_result "loopflow-ui-test" "$LOOPFLOW_UI_TEST"
 
           exit "$failures"

@@ -100,7 +100,7 @@ When `scratch/` holds a proposal and no wave exists yet, create one:
 
 ### GOAL.md
 
-`GOAL.md` anchors the wave's identity. Concerto parses it for the UI.
+`GOAL.md` anchors the wave's identity. Loopflow parses it for the UI.
 
 **Frontmatter:**
 

@@ -91,7 +91,7 @@ def test_bump_patch_version_groups_long_commit_lists_without_dropping_commits(tm
     subjects = [
         "deploy: add native host updater",
         "lfd: persist remote token file",
-        "concerto: improve portfolio status",
+        "loopflow: improve portfolio status",
         "lf: hand off steps through vendor skills",
         "build(deps): bump serde from 1.0.0 to 1.0.1 (#1)",
     ]
@@ -122,7 +122,7 @@ def test_bump_patch_version_groups_long_commit_lists_without_dropping_commits(tm
     assert "Commits are grouped by theme instead of truncated" in notes
     assert "## Release and self-hosting infrastructure" in notes
     assert "## Authentication and remote execution" in notes
-    assert "## Concerto and user surfaces" in notes
+    assert "## Loopflow and user surfaces" in notes
     assert "## Agent workflows and developer tooling" in notes
     assert "## Dependency updates" in notes
     assert "serde 1.0.0 → 1.0.1" in notes
@@ -240,7 +240,7 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "--no-wave" in bootstrap_help.stderr
     assert "setup-private-client.sh" in private_client_help.stderr
     assert "--token-file PATH" in private_client_help.stderr
-    assert "--no-concerto" in private_client_help.stderr
+    assert "--no-loopflow" in private_client_help.stderr
     assert "native-lfd-host.sh" in native_host_help.stderr
     assert (
         "install|install-update-agent|update|restart|status|logs|health|serve"
@@ -343,7 +343,7 @@ def test_self_hosted_server_primitives_are_documented_and_runnable():
     assert "Host is required. Pass --host or set LFD_HOST." in private_client
     assert "LFD_URL" in private_client
     assert "loopflow.connection.token" in private_client
-    assert "concerto.connectionSettings.v2" in private_client
+    assert "loopflow.connectionSettings.v2" in private_client
     assert "alias lfdhost='ssh" in private_client
     assert '"$LFD_URL/v0/waves"' in private_client
     assert 'curl -fsS -H "Authorization: Bearer $LFD_TOKEN" "$LFD_URL/status"' in private_client
@@ -432,10 +432,10 @@ def test_release_dmg_build_has_timeouts_and_unbuffered_logs():
     build_dmg = release["jobs"]["build-dmg"]
     steps = build_dmg["steps"]
     commands = "\n".join(step.get("run", "") for step in steps)
-    script = (ROOT / "scripts/release-concerto.py").read_text()
+    script = (ROOT / "scripts/release-loopflow.py").read_text()
 
     assert build_dmg["timeout-minutes"] == "45"
-    assert "python3 -u scripts/release-concerto.py" in commands
+    assert "python3 -u scripts/release-loopflow.py" in commands
     assert any(
         step.get("name") == "Build, sign, and notarize DMG" and step.get("timeout-minutes") == "35"
         for step in steps

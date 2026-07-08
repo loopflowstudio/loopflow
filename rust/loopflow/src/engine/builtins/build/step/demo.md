@@ -42,7 +42,7 @@ Run things. Show output. Let the human react.
 
 The demo is the center of the session, not a preamble to code review. Spend time here. If something surprising happens — good or bad — follow that thread.
 
-For UI changes: launch the environment (check `scripts/` for existing launchers like `concerto-dev.py`). Print a short walkthrough checklist, then let the human explore.
+For UI changes: launch the environment (check `scripts/` for existing launchers like `loopflow-dev.py`). Print a short walkthrough checklist, then let the human explore.
 
 For CLI/library changes: run the commands, show the output. Before/after when it helps.
 

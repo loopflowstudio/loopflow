@@ -146,7 +146,7 @@ http_security:
 
 ## Query waves
 
-The daemon serves reads to Concerto and `lf`. Examples below use `$LFD_ADDR`:
+The daemon serves reads to Loopflow and `lf`. Examples below use `$LFD_ADDR`:
 
 ```bash
 export LFD_ADDR=http://127.0.0.1:2486
@@ -178,7 +178,7 @@ curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.flows[] | {name, catego
 curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.steps[] | select(.name=="gate")'
 ```
 
-`/v0/catalog` returns the resolved flow + step catalog that Concerto uses for the **Flows** tab. Pass `repo=/path/to/repo` to merge builtin definitions with repo-local `.lf/flows/*.yaml` and `.lf/steps/*.md` overrides. Omit `repo` to inspect the builtin catalog only.
+`/v0/catalog` returns the resolved flow + step catalog that Loopflow uses for the **Flows** tab. Pass `repo=/path/to/repo` to merge builtin definitions with repo-local `.lf/flows/*.yaml` and `.lf/steps/*.md` overrides. Omit `repo` to inspect the builtin catalog only.
 
 ## Sessions API
 

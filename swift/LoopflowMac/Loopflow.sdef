@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<dictionary title="Loopflow Terminology">
+    <suite name="Loopflow Suite" code="CNRT" description="Loopflow scripting commands">
+        <command name="capture screenshot" code="CNRTcapt" description="Capture Loopflow window screenshot and save to repository">
+            <cocoa class="Loopflow.CaptureScreenshotCommand"/>
+            <direct-parameter type="text" description="Repository path for saving screenshot"/>
+            <result type="text" description="Path to saved screenshot"/>
+        </command>
+    </suite>
+</dictionary>

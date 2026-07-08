@@ -75,7 +75,7 @@ Study `wave/systems/GOAL.md` and `wave/architecture/GOAL.md` — both hit all fi
 
 1. **Identity by contrast.** State what the wave is *and what it is not*, ideally
    against a sibling. "Systems owns the machinery around the code; Architecture
-   owns the shape of the code." "Concerto frames the vendor's session; it
+   owns the shape of the code." "Loopflow frames the vendor's session; it
    does not render chat." A named boundary is what stops a looping agent from
    sprawling into every adjacent wave's work.
 
@@ -140,13 +140,13 @@ Directions are orthogonal to steps and areas. A direction applies to any task in
 
 ```
 Step = what you're doing (implement, review, design)
-Area = where you're working (src/api/, swift/Concerto/)
+Area = where you're working (src/api/, swift/Loopflow/)
 Direction = which users you're trying to serve
 ```
 
 **Don't couple to steps.** "When reviewing code, ask..." ties the direction to `review`. The same concerns apply whether you're reviewing, implementing, or designing.
 
-**Don't couple to areas.** "When working on Concerto..." ties the direction to a specific codebase. User patterns like conductor/improviser/listener exist in any product with parallel work.
+**Don't couple to areas.** "When working on Loopflow..." ties the direction to a specific codebase. User patterns like conductor/improviser/listener exist in any product with parallel work.
 
 ### How directions apply
 
@@ -174,7 +174,7 @@ You're reviewing src/auth/. The security direction means you're optimizing for s
 
 ```markdown
 # Bad: coupled to step and area
-When reviewing Concerto code, ask:
+When reviewing Loopflow code, ask:
 - Can I tell what needs attention?
 
 # Good: intent + questions

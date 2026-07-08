@@ -19,7 +19,7 @@ alias lfdhost="ssh $LFD_SSH_USER@$LFD_HOST"
 | Client URL | `http://<tailscale-host-or-ip>:2486` |
 | Auth | Local capability token on the host; `Authorization: Bearer $LFD_AUTH_TOKEN` only for deliberate non-loopback clients |
 
-Use HTTP over Tailscale for the first cut. Tailscale provides the encrypted private network; `lfd` still requires the bearer token for non-loopback requests. This avoids Caddy internal-CA setup blocking Concerto, Codex, or Claude-driven sessions. Caddy/TLS can remain available for public or polished remote access later.
+Use HTTP over Tailscale for the first cut. Tailscale provides the encrypted private network; `lfd` still requires the bearer token for non-loopback requests. This avoids Caddy internal-CA setup blocking Loopflow, Codex, or Claude-driven sessions. Caddy/TLS can remain available for public or polished remote access later.
 
 Remote identity and user auth are M3 future work. Until then, operate the host
 over SSH and treat the bearer token as a host-local capability, not a user
@@ -78,10 +78,10 @@ curl -H "Authorization: Bearer $LFD_TOKEN" "$LFD_URL/v0/waves"
 The setup script writes:
 
 - `~/.lf/private-host.env` with `LFD_HOST`, `LFD_SSH_USER`, `LFD_URL`, `LFD_TOKEN`, and an `lfdhost` SSH alias
-- Concerto remote connection settings in `com.loopflow.concerto`
-- Concerto token in Keychain service `loopflow.connection.token`, account `<host>:2486`
+- Loopflow remote connection settings in `com.loopflow.mac`
+- Loopflow token in Keychain service `loopflow.connection.token`, account `<host>:2486`
 
-Open Concerto after running the script to observe the host daemon from the same
+Open Loopflow after running the script to observe the host daemon from the same
 tailnet. This is not remote identity or a product remote-access path; operate
 the host over SSH.
 
@@ -95,7 +95,7 @@ mkdir -p ~/src/loopflow/wave/root
 echo "Drive this repo's roadmap." > ~/src/loopflow/wave/root/GOAL.md
 ```
 
-Concerto remote repo actions use the repo paths on the host. Remote terminal and IDE launches use SSH:
+Loopflow remote repo actions use the repo paths on the host. Remote terminal and IDE launches use SSH:
 
 ```bash
 lfdhost

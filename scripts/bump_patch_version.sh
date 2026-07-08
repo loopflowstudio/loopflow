@@ -81,10 +81,10 @@ sections = [
         ),
     ),
     (
-        "Concerto and user surfaces",
+        "Loopflow and user surfaces",
         lambda subject: any(
             marker in subject.lower()
-            for marker in ("concerto", "desktop", "mobile", "portfolio", "website")
+            for marker in ("loopflow", "desktop", "mobile", "portfolio", "website")
         ),
     ),
     (

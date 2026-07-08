@@ -20,11 +20,10 @@ MAC_ONLY_IMPORTS = {
     "GhosttyKit",
 }
 
-APP_WIRING_FILES = {
-    "swift/Concerto/ConcertoApp.swift",
-}
-
-PLATFORM_PREFIXES = ("swift/Concerto/Platform/",)
+# The shared library must build on every platform; the per-platform app targets
+# are single-platform shells where `#if` and platform-only imports are expected.
+SHARED_PREFIX = "swift/Loopflow/"
+PLATFORM_PREFIXES = ("swift/LoopflowMac/", "swift/LoopflowiOS/")
 
 
 def _resolve_main_ref() -> str:
@@ -90,12 +89,19 @@ def _is_whole_file_platform_gate(path: str) -> bool:
     return code[0].startswith("#if ") and code[-1] == "#endif"
 
 
-def _check_loopflowcore_imports() -> list[str]:
+def _check_shared_imports() -> list[str]:
     violations: list[str] = []
-    diff_text = _run_git_diff("swift/LoopflowCore")
+    # Diff the whole swift/ tree (not just the shared dir) so git can pair a
+    # moved file with its old path — a narrow pathspec hides the rename and
+    # reports every line of a moved file as newly added.
+    diff_text = _run_git_diff("swift")
 
     for file_path, line in _parse_added_lines(diff_text):
-        if not file_path.startswith("swift/LoopflowCore/") or not file_path.endswith(".swift"):
+        if not file_path.startswith(SHARED_PREFIX) or not file_path.endswith(".swift"):
+            continue
+        # A wholly platform-gated file compiles empty off-platform, so its
+        # platform-only imports are safe.
+        if _is_whole_file_platform_gate(file_path):
             continue
         match = re.match(r"\s*import\s+([A-Za-z0-9_]+)", line)
         if not match:
@@ -109,9 +115,10 @@ def _check_loopflowcore_imports() -> list[str]:
 
 def _platform_if_has_fallback(path: str, if_line: str) -> bool:
     """A shared-code `#if os(...)` is multiplatform-safe when balanced by an
-    `#else`, so both platforms compile. Locate the block opened by `if_line` and
-    report whether it carries an `#else` at the same nesting depth. A fallback-
-    less split (the real hazard: a symbol undefined off-platform) returns False.
+    `#else`/`#elseif`, so both platforms compile. Locate the block opened by
+    `if_line` and report whether it carries a fallback at the same nesting depth.
+    A fallback-less split (the real hazard: a symbol undefined off-platform)
+    returns False.
     """
     file_path = REPO_ROOT / path
     if not file_path.exists():
@@ -131,7 +138,7 @@ def _platform_if_has_fallback(path: str, if_line: str) -> bool:
             depth -= 1
             if depth == 0:
                 return False
-        elif stripped.startswith("#else") and depth == 1:
+        elif (stripped.startswith("#else") or stripped.startswith("#elseif")) and depth == 1:
             return True
     return False
 
@@ -146,20 +153,24 @@ def _check_new_if_boundaries() -> list[str]:
         if not re.match(r"\s*#if\b", line):
             continue
 
-        if file_path.startswith("swift/LoopflowCore/"):
+        # Single-platform app shells: `#if` is expected.
+        if file_path.startswith(PLATFORM_PREFIXES):
+            continue
+
+        if file_path.startswith(SHARED_PREFIX):
             # canImport is a capability check, not a platform split — allow it.
             if re.match(r"\s*#if\s+canImport\(", line):
                 continue
-            # A platform split with an `#else` fallback stays buildable on every
-            # target; only fallback-less splits break the shared build.
-            if re.match(r"\s*#if\s+!?os\(", line) and _platform_if_has_fallback(file_path, line):
+            # Any `#if` balanced by an `#else`/`#elseif` compiles on every target
+            # (covers os() splits and build-config gates like `#if SWIFT_PACKAGE`);
+            # so does a wholly platform-gated file (empty off-platform).
+            if _platform_if_has_fallback(file_path, line):
                 continue
-            violations.append(f"{file_path}: new `#if` in LoopflowCore shared code")
+            if _is_whole_file_platform_gate(file_path):
+                continue
+            violations.append(f"{file_path}: new `#if` in shared code")
             continue
-        if file_path in APP_WIRING_FILES:
-            continue
-        if file_path.startswith(PLATFORM_PREFIXES):
-            continue
+
         if _is_whole_file_platform_gate(file_path):
             continue
 
@@ -169,7 +180,7 @@ def _check_new_if_boundaries() -> list[str]:
 
 
 def main() -> int:
-    violations = [*_check_loopflowcore_imports(), *_check_new_if_boundaries()]
+    violations = [*_check_shared_imports(), *_check_new_if_boundaries()]
 
     if not violations:
         print("Swift multiplatform boundary checks passed.")
@@ -178,7 +189,7 @@ def main() -> int:
     print("Swift multiplatform boundary checks failed:\n")
     for violation in violations:
         print(f"- {violation}")
-    print("\nAllowed: app wiring, Platform/ shell files, or whole-file platform gates.")
+    print("\nAllowed: single-platform app shells, or whole-file platform gates.")
     return 1
 
 

@@ -31,16 +31,20 @@ DEFAULT_INSTALL_DIR = Path.home() / ".local" / "bin"
 APPLICATIONS_DIR = Path("/Applications")
 LOCAL_BIN = ROOT / "local-bin"
 APP_NAME = "Loopflow"
-LEGACY_APP_NAME = "Loopflow Concerto"
+# Pre-rename bundle name, removed on upgrade so /Applications keeps one copy.
+LEGACY_APP_NAME = "Concerto"
+# SwiftPM executable product; the library owns the bare `Loopflow` name, so the
+# app binary is built as `LoopflowMac` and renamed to APP_NAME inside the bundle.
+SWIFT_APP_PRODUCT = "LoopflowMac"
 BUILD_STAGES = ("wheel", "cargo", "swift")
 
 
-# --- Bundle spec (single source of truth for Concerto.app layout) ---
+# --- Bundle spec (single source of truth for Loopflow.app layout) ---
 
 
 @dataclass(frozen=True)
 class BundleSpec:
-    """Paths that define the Concerto.app bundle."""
+    """Paths that define the Loopflow.app bundle."""
 
     app_path: Path
     executables: tuple[Path, ...]
@@ -60,7 +64,15 @@ class BundleSpec:
         return self.contents_dir / "Resources"
 
     def macos_binaries(self) -> tuple[Path, ...]:
-        return tuple(self.macos_dir / executable.name for executable in self.executables)
+        return tuple(self.macos_dir / _bundle_binary_name(executable) for executable in self.executables)
+
+
+def _bundle_binary_name(executable: Path) -> str:
+    """Name an executable takes inside the bundle: the app binary ships as
+    APP_NAME (matching CFBundleExecutable); auxiliary tools keep their names."""
+    if executable.name == SWIFT_APP_PRODUCT:
+        return APP_NAME
+    return executable.name
 
 
 def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
@@ -69,14 +81,14 @@ def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
     return BundleSpec(
         app_path=root / "local-bin" / f"{APP_NAME}.app",
         executables=(
-            swift / ".build" / "release" / "Concerto",
+            swift / ".build" / "release" / "LoopflowMac",
             cargo_release / "lf",
             cargo_release / "lfd",
         ),
-        info_plist=swift / "Concerto" / "Info.plist",
+        info_plist=swift / "LoopflowMac" / "Info.plist",
         resources=(
-            swift / "Concerto" / "Concerto.sdef",
-            swift / "Concerto" / "AppIcon.icns",
+            swift / "LoopflowMac" / "Loopflow.sdef",
+            swift / "LoopflowMac" / "AppIcon.icns",
         ),
     )
 
@@ -169,16 +181,16 @@ def _build_cli_binaries() -> None:
     )
 
 
-def _build_concerto() -> None:
+def _build_loopflow() -> None:
     swift_dir = ROOT / "swift"
     if not swift_dir.exists():
         raise StageError(f"swift directory not found: {swift_dir}")
-    typer.echo("Building Concerto (swift release)...")
+    typer.echo("Building Loopflow (swift release)...")
     _run_or_raise(["swift", "build", "-c", "release"], "swift", cwd=swift_dir)
 
 
 def _run_parallel_builds(skip: set[str]) -> None:
-    stages = {"wheel": _build_wheel, "cargo": _build_binaries, "swift": _build_concerto}
+    stages = {"wheel": _build_wheel, "cargo": _build_binaries, "swift": _build_loopflow}
     active = {name: fn for name, fn in stages.items() if name not in skip}
     if not active:
         typer.echo("All build stages skipped.")
@@ -345,10 +357,10 @@ def _promote(local_bin: Path, install_dir: Path, applications_dir: Path = APPLIC
     shutil.copytree(local_bin / f"{APP_NAME}.app", app_dst, symlinks=True)
 
 
-# --- Concerto bundle ---
+# --- Loopflow bundle ---
 
 
-def _install_concerto(spec: BundleSpec, version: str) -> None:
+def _install_loopflow(spec: BundleSpec, version: str) -> None:
     if spec.app_path.exists():
         shutil.rmtree(spec.app_path)
 
@@ -356,7 +368,7 @@ def _install_concerto(spec: BundleSpec, version: str) -> None:
     spec.resources_dir.mkdir(parents=True)
 
     for executable in spec.executables:
-        _atomic_install(executable, spec.macos_dir / executable.name)
+        _atomic_install(executable, spec.macos_dir / _bundle_binary_name(executable))
 
     installed_plist = spec.contents_dir / spec.info_plist.name
     shutil.copy(spec.info_plist, installed_plist)
@@ -419,7 +431,7 @@ def _codesign_identity() -> str:
 def _verify_bundle_layout(spec: BundleSpec) -> None:
     """Mirror Bundle.main.url(forAuxiliaryExecutable:) expectations.
 
-    Checks every executable that Concerto will look up in Contents/MacOS/:
+    Checks every executable that Loopflow will look up in Contents/MacOS/:
     it must exist, be executable, and be a Mach-O binary that includes the
     current architecture. Catches missing files, wrong-arch copies, and
     non-executable placeholders before we hand the bundle to codesign.
@@ -614,7 +626,7 @@ def local(
 
         typer.echo(f"Staging lf/lfd + {APP_NAME}.app (v{version}) into {LOCAL_BIN}...")
         _stage_binaries(LOCAL_BIN)
-        _install_concerto(spec, version)
+        _install_loopflow(spec, version)
         typer.echo(f"Built {spec.app_path}")
 
         if use:

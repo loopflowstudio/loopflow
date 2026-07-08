@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::engine::{check_cli_available, LaunchTarget};
+use crate::engine::{check_cli_available, codex_permission_args, workspace_add_dirs, LaunchTarget};
 
 pub fn find_repo_root() -> Result<PathBuf> {
     crate::engine::repo::find_repo_root()
@@ -91,8 +91,11 @@ fn build_session_command(
                 args.push("-c".to_string());
                 args.push(format!("model=\"{model}\""));
             }
-            args.push("--sandbox".to_string());
-            args.push("workspace-write".to_string());
+            for dir in workspace_add_dirs(worktree) {
+                args.push("--add-dir".to_string());
+                args.push(dir.to_string_lossy().to_string());
+            }
+            args.extend(codex_permission_args(Some(worktree), false, false));
             args.push(prompt.to_string());
             Ok(SessionCommand {
                 program: "codex".to_string(),
@@ -105,6 +108,10 @@ fn build_session_command(
             if let Some(model) = model {
                 args.push("--model".to_string());
                 args.push(model.to_string());
+            }
+            for dir in workspace_add_dirs(worktree) {
+                args.push("--add-dir".to_string());
+                args.push(dir.to_string_lossy().to_string());
             }
             args.push(prompt.to_string());
             Ok(SessionCommand {
@@ -193,29 +200,93 @@ mod tests {
         values.iter().map(|value| value.to_string()).collect()
     }
 
+    fn git_worktree_fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let main = tmp.path().join("repo");
+        let worktree = tmp.path().join("repo.feature");
+        std::fs::create_dir(&main).expect("create repo dir");
+        std::fs::write(main.join("README.md"), "hello\n").expect("write file");
+
+        git(&main, &["init", "-b", "main"]);
+        git(&main, &["config", "user.email", "test@example.com"]);
+        git(&main, &["config", "user.name", "Test User"]);
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-m", "init"]);
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature",
+                worktree.to_str().expect("utf8 worktree"),
+            ],
+        );
+
+        (tmp, main, worktree)
+    }
+
+    fn git(repo: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git -C {} {} failed:\n{}",
+            repo.display(),
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     #[test]
-    fn session_launch_tui_codex_sets_worktree_model_sandbox_and_prompt() {
+    fn session_launch_tui_codex_sets_worktree_model_and_prompt() {
         let launch =
             build_session_launch(LaunchTarget::Tui, "codex", Some("o3"), &path(), "fix it")
                 .expect("build launch");
 
+        assert_eq!(launch.command.program, "codex");
+        assert_eq!(launch.command.cwd, path());
+        assert!(launch.command.args.starts_with(&args(&[
+            "-C",
+            "/tmp/loop flow",
+            "-c",
+            "model=\"o3\""
+        ])));
         assert_eq!(
-            launch.command,
-            SessionCommand {
-                program: "codex".to_string(),
-                args: args(&[
-                    "-C",
-                    "/tmp/loop flow",
-                    "-c",
-                    "model=\"o3\"",
-                    "--sandbox",
-                    "workspace-write",
-                    "fix it",
-                ]),
-                cwd: path(),
-            }
+            launch.command.args.last().map(String::as_str),
+            Some("fix it")
+        );
+        assert_eq!(
+            launch.command.args.contains(&"--sandbox".to_string()),
+            crate::engine::codex_permission_args(Some(&path()), false, false)
+                .contains(&"--sandbox".to_string())
         );
         assert_eq!(launch.ide_url, None);
+    }
+
+    #[test]
+    fn session_launch_tui_codex_adds_main_repo_for_worktree_metadata() {
+        let (_tmp, main, worktree) = git_worktree_fixture();
+
+        let launch = build_session_launch(LaunchTarget::Tui, "codex", None, &worktree, "fix it")
+            .expect("build launch");
+
+        let idx = launch
+            .command
+            .args
+            .iter()
+            .position(|arg| arg == "--add-dir")
+            .expect("add-dir flag");
+        assert_eq!(
+            PathBuf::from(&launch.command.args[idx + 1])
+                .canonicalize()
+                .unwrap(),
+            main.canonicalize().unwrap()
+        );
     }
 
     #[test]
@@ -238,6 +309,33 @@ mod tests {
             }
         );
         assert_eq!(launch.ide_url, None);
+    }
+
+    #[test]
+    fn session_launch_tui_claude_adds_main_repo_for_worktree_metadata() {
+        let (_tmp, main, worktree) = git_worktree_fixture();
+
+        let launch = build_session_launch(
+            LaunchTarget::Tui,
+            "claude",
+            Some("sonnet"),
+            &worktree,
+            "fix it",
+        )
+        .expect("build launch");
+
+        let idx = launch
+            .command
+            .args
+            .iter()
+            .position(|arg| arg == "--add-dir")
+            .expect("add-dir flag");
+        assert_eq!(
+            PathBuf::from(&launch.command.args[idx + 1])
+                .canonicalize()
+                .unwrap(),
+            main.canonicalize().unwrap()
+        );
     }
 
     #[test]

@@ -4,7 +4,10 @@
 //! supported coding agent. Output can be captured or streamed.
 
 use std::collections::BTreeMap;
+use std::env;
+use std::fs;
 use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, Mutex, OnceLock};
@@ -167,6 +170,250 @@ pub struct AgentCapabilities {
     pub chrome: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CodexSandboxMode {
+    ReadOnly,
+    WorkspaceWrite,
+    DangerFullAccess,
+}
+
+impl CodexSandboxMode {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "read-only" => Some(Self::ReadOnly),
+            "workspace-write" => Some(Self::WorkspaceWrite),
+            "danger-full-access" => Some(Self::DangerFullAccess),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CodexApprovalPolicy {
+    Untrusted,
+    OnRequest,
+    OnFailure,
+    Never,
+}
+
+impl CodexApprovalPolicy {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "untrusted" => Some(Self::Untrusted),
+            "on-request" => Some(Self::OnRequest),
+            "on-failure" => Some(Self::OnFailure),
+            "never" => Some(Self::Never),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct CodexPermissionConfig {
+    sandbox: Option<CodexSandboxMode>,
+    approval: Option<CodexApprovalPolicy>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClaudePermissionMode {
+    AcceptEdits,
+    Auto,
+    BypassPermissions,
+    Manual,
+    DontAsk,
+    Plan,
+}
+
+impl ClaudePermissionMode {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "acceptEdits" => Some(Self::AcceptEdits),
+            "auto" => Some(Self::Auto),
+            "bypassPermissions" => Some(Self::BypassPermissions),
+            "manual" => Some(Self::Manual),
+            "dontAsk" => Some(Self::DontAsk),
+            "plan" => Some(Self::Plan),
+            _ => None,
+        }
+    }
+}
+
+fn read_codex_permission_config(cwd: Option<&Path>) -> CodexPermissionConfig {
+    let mut config = CodexPermissionConfig::default();
+    for path in codex_config_paths(cwd) {
+        let Ok(contents) = fs::read_to_string(&path) else {
+            continue;
+        };
+        config = merge_codex_permission_config(config, parse_codex_permission_config(&contents));
+    }
+    config
+}
+
+fn codex_config_paths(cwd: Option<&Path>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    if let Some(home) = env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
+    {
+        paths.push(home.join("config.toml"));
+    }
+
+    if let Some(cwd) = cwd {
+        let mut ancestors: Vec<PathBuf> = cwd.ancestors().map(Path::to_path_buf).collect();
+        ancestors.reverse();
+        for ancestor in ancestors {
+            paths.push(ancestor.join(".codex").join("config.toml"));
+        }
+    }
+
+    paths
+}
+
+fn parse_codex_permission_config(contents: &str) -> CodexPermissionConfig {
+    let mut config = CodexPermissionConfig::default();
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            break;
+        }
+        if let Some(value) = parse_toml_string_assignment(line, "sandbox_mode") {
+            config.sandbox = CodexSandboxMode::parse(&value);
+        } else if let Some(value) = parse_toml_string_assignment(line, "approval_policy") {
+            config.approval = CodexApprovalPolicy::parse(&value);
+        }
+    }
+    config
+}
+
+fn parse_toml_string_assignment(line: &str, key: &str) -> Option<String> {
+    let (left, right) = line.split_once('=')?;
+    if left.trim() != key {
+        return None;
+    }
+    let value = right.split('#').next()?.trim();
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .map(str::to_string)
+}
+
+fn merge_codex_permission_config(
+    base: CodexPermissionConfig,
+    overlay: CodexPermissionConfig,
+) -> CodexPermissionConfig {
+    CodexPermissionConfig {
+        sandbox: overlay.sandbox.or(base.sandbox),
+        approval: overlay.approval.or(base.approval),
+    }
+}
+
+pub fn codex_permission_args(
+    cwd: Option<&Path>,
+    auto: bool,
+    skip_permissions: bool,
+) -> Vec<String> {
+    if skip_permissions {
+        return vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
+    }
+
+    let config = read_codex_permission_config(cwd);
+    codex_permission_args_for_config(config, auto, skip_permissions)
+}
+
+fn codex_permission_args_for_config(
+    config: CodexPermissionConfig,
+    auto: bool,
+    skip_permissions: bool,
+) -> Vec<String> {
+    if skip_permissions {
+        return vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
+    }
+
+    let mut args = Vec::new();
+    if config.sandbox < Some(CodexSandboxMode::WorkspaceWrite) {
+        if config.sandbox.is_some() {
+            eprintln!(
+                "warning: Codex config sandbox_mode is less permissive than Loopflow's workspace-write default; launching with --sandbox workspace-write"
+            );
+        }
+        args.push("--sandbox".to_string());
+        args.push("workspace-write".to_string());
+    }
+
+    if auto && config.approval < Some(CodexApprovalPolicy::Never) {
+        if config.approval.is_some() {
+            eprintln!(
+                "warning: Codex config approval_policy is less permissive than Loopflow's non-interactive default; launching with --ask-for-approval never"
+            );
+        }
+        args.push("--ask-for-approval".to_string());
+        args.push("never".to_string());
+    }
+
+    args
+}
+
+fn read_claude_permission_mode(cwd: Option<&Path>) -> Option<ClaudePermissionMode> {
+    let mut mode = None;
+    for path in claude_settings_paths(cwd) {
+        let Ok(contents) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Some(next) = parse_claude_permission_mode(&contents) {
+            mode = Some(next);
+        }
+    }
+    mode
+}
+
+fn claude_settings_paths(cwd: Option<&Path>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".claude").join("settings.json"));
+    }
+
+    if let Some(cwd) = cwd {
+        let mut ancestors: Vec<PathBuf> = cwd.ancestors().map(Path::to_path_buf).collect();
+        ancestors.reverse();
+        for ancestor in ancestors {
+            paths.push(ancestor.join(".claude").join("settings.json"));
+            paths.push(ancestor.join(".claude").join("settings.local.json"));
+        }
+    }
+
+    paths
+}
+
+fn parse_claude_permission_mode(contents: &str) -> Option<ClaudePermissionMode> {
+    let json: serde_json::Value = serde_json::from_str(contents).ok()?;
+    json.get("permissions")
+        .and_then(|permissions| permissions.get("defaultMode"))
+        .and_then(serde_json::Value::as_str)
+        .and_then(ClaudePermissionMode::parse)
+}
+
+fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: bool) -> bool {
+    if skip_permissions {
+        return true;
+    }
+    if !auto {
+        return false;
+    }
+
+    let mode = read_claude_permission_mode(cwd);
+    if mode == Some(ClaudePermissionMode::BypassPermissions) {
+        return false;
+    }
+    if mode.is_some() {
+        eprintln!(
+            "warning: Claude permissions.defaultMode is less permissive than Loopflow's non-interactive default; launching with --dangerously-skip-permissions"
+        );
+    }
+    true
+}
+
 /// Common Claude CLI arguments shared across engine and session paths.
 ///
 /// Both `build_claude_command` (engine one-shot) and the session harness
@@ -180,6 +427,8 @@ pub struct ClaudeArgs {
     pub system_prompt: Option<String>,
     /// System prompt file for `--append-system-prompt-file` (takes precedence over text).
     pub system_prompt_file: Option<std::path::PathBuf>,
+    /// Additional directories the harness may access.
+    pub add_dirs: Vec<PathBuf>,
     /// Skip permission prompts.
     pub skip_permissions: bool,
     /// Max turn budget.
@@ -229,6 +478,15 @@ impl ClaudeArgs {
             }
         }
 
+        if !self.add_dirs.is_empty() {
+            args.push("--add-dir".to_string());
+            args.extend(
+                self.add_dirs
+                    .iter()
+                    .map(|dir| dir.to_string_lossy().to_string()),
+            );
+        }
+
         if self.skip_permissions {
             args.push("--dangerously-skip-permissions".to_string());
         }
@@ -267,7 +525,16 @@ pub fn build_claude_session_turn_args(
         model: config.agent.as_deref().and_then(ClaudeArgs::resolve_model),
         system_prompt: Some(system_prompt_with_structured_replies(config)),
         system_prompt_file: None,
-        skip_permissions: config.skip_permissions,
+        add_dirs: config
+            .cwd
+            .as_deref()
+            .map(workspace_add_dirs)
+            .unwrap_or_default(),
+        skip_permissions: claude_skip_permissions(
+            config.cwd.as_deref(),
+            true,
+            config.skip_permissions,
+        ),
         max_turns: config.max_turns,
         stream: true,
         chrome: false,
@@ -310,7 +577,51 @@ pub fn build_codex_thread_start_params(
         );
     }
 
+    if launch.skip_permissions {
+        params.insert(
+            "approvalPolicy".to_string(),
+            serde_json::Value::String("never".to_string()),
+        );
+        params.insert(
+            "sandbox".to_string(),
+            serde_json::Value::String("danger-full-access".to_string()),
+        );
+    } else {
+        let config = read_codex_permission_config(launch.cwd.as_deref());
+        if config.sandbox < Some(CodexSandboxMode::WorkspaceWrite) {
+            params.insert(
+                "sandbox".to_string(),
+                serde_json::Value::String("workspace-write".to_string()),
+            );
+        }
+        if config.approval < Some(CodexApprovalPolicy::Never) {
+            params.insert(
+                "approvalPolicy".to_string(),
+                serde_json::Value::String("never".to_string()),
+            );
+        }
+    }
+
     params
+}
+
+/// Extra workspace roots agents need for Git worktree metadata.
+pub fn workspace_add_dirs(cwd: &Path) -> Vec<PathBuf> {
+    let Ok(main_repo) = crate::engine::worktrees::main_repo_root(cwd) else {
+        return Vec::new();
+    };
+    if paths_equal(cwd, &main_repo) {
+        Vec::new()
+    } else {
+        vec![main_repo]
+    }
+}
+
+fn paths_equal(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
 }
 
 /// Build Claude CLI command.
@@ -326,7 +637,16 @@ pub fn build_claude_command(
         model: model_variant.map(str::to_string),
         system_prompt: Some(system_prompt_with_structured_replies(launch)),
         system_prompt_file: process.context_file.clone(),
-        skip_permissions: process.auto || launch.skip_permissions,
+        add_dirs: launch
+            .cwd
+            .as_deref()
+            .map(workspace_add_dirs)
+            .unwrap_or_default(),
+        skip_permissions: claude_skip_permissions(
+            launch.cwd.as_deref(),
+            process.auto,
+            launch.skip_permissions,
+        ),
         max_turns: launch.max_turns,
         stream: process.auto && process.stream,
         chrome: capabilities.chrome,
@@ -373,19 +693,27 @@ pub fn build_codex_command(
         cmd.push(cwd.to_string_lossy().to_string());
     }
 
+    if !launch.skip_permissions {
+        for dir in launch
+            .cwd
+            .as_deref()
+            .map(workspace_add_dirs)
+            .unwrap_or_default()
+        {
+            cmd.push("--add-dir".to_string());
+            cmd.push(dir.to_string_lossy().to_string());
+        }
+    }
+
     if process.stream {
         cmd.push("--json".to_string());
     }
 
-    if launch.skip_permissions {
-        cmd.push("--dangerously-bypass-approvals-and-sandbox".to_string());
-    } else if process.auto {
-        // --full-auto = sandboxed workspace-write + auto-approve safe operations.
-        cmd.push("--full-auto".to_string());
-    } else {
-        cmd.push("--sandbox".to_string());
-        cmd.push("workspace-write".to_string());
-    }
+    cmd.extend(codex_permission_args(
+        launch.cwd.as_deref(),
+        process.auto,
+        launch.skip_permissions,
+    ));
 
     cmd
 }
@@ -934,11 +1262,124 @@ mod tests {
         }
     }
 
+    fn git_worktree_fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let main = tmp.path().join("repo");
+        let worktree = tmp.path().join("repo.feature");
+        std::fs::create_dir(&main).expect("create repo dir");
+        std::fs::write(main.join("README.md"), "hello\n").expect("write file");
+
+        git(&main, &["init", "-b", "main"]);
+        git(&main, &["config", "user.email", "test@example.com"]);
+        git(&main, &["config", "user.name", "Test User"]);
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-m", "init"]);
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature",
+                worktree.to_str().expect("utf8 worktree"),
+            ],
+        );
+
+        (tmp, main, worktree)
+    }
+
+    fn git(repo: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git -C {} {} failed:\n{}",
+            repo.display(),
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     fn auto_process() -> ProcessConfig {
         ProcessConfig {
             auto: true,
             ..Default::default()
         }
+    }
+
+    fn assert_arg_pair(args: &[String], flag: &str, value: &str) {
+        let idx = args
+            .iter()
+            .position(|arg| arg == flag)
+            .unwrap_or_else(|| panic!("{flag} flag"));
+        assert_eq!(args[idx + 1], value);
+    }
+
+    #[test]
+    fn parse_codex_permission_config_reads_top_level_policy() {
+        let config = parse_codex_permission_config(
+            r#"
+model = "gpt-5.5"
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+
+[projects."/tmp/repo"]
+trust_level = "trusted"
+"#,
+        );
+
+        assert_eq!(config.sandbox, Some(CodexSandboxMode::DangerFullAccess));
+        assert_eq!(config.approval, Some(CodexApprovalPolicy::Never));
+    }
+
+    #[test]
+    fn codex_permission_args_supply_loopflow_floor_when_unset() {
+        let args = codex_permission_args_for_config(CodexPermissionConfig::default(), true, false);
+
+        assert_arg_pair(&args, "--sandbox", "workspace-write");
+        assert_arg_pair(&args, "--ask-for-approval", "never");
+    }
+
+    #[test]
+    fn codex_permission_args_do_not_downgrade_danger_full_access() {
+        let args = codex_permission_args_for_config(
+            CodexPermissionConfig {
+                sandbox: Some(CodexSandboxMode::DangerFullAccess),
+                approval: Some(CodexApprovalPolicy::Never),
+            },
+            true,
+            false,
+        );
+
+        assert!(!args.contains(&"--sandbox".to_string()));
+        assert!(!args.contains(&"--ask-for-approval".to_string()));
+    }
+
+    #[test]
+    fn codex_permission_args_raise_less_permissive_config_to_floor() {
+        let args = codex_permission_args_for_config(
+            CodexPermissionConfig {
+                sandbox: Some(CodexSandboxMode::ReadOnly),
+                approval: Some(CodexApprovalPolicy::OnRequest),
+            },
+            true,
+            false,
+        );
+
+        assert_arg_pair(&args, "--sandbox", "workspace-write");
+        assert_arg_pair(&args, "--ask-for-approval", "never");
+    }
+
+    #[test]
+    fn parse_claude_permission_mode_reads_default_mode() {
+        assert_eq!(
+            parse_claude_permission_mode(r#"{"permissions":{"defaultMode":"bypassPermissions"}}"#),
+            Some(ClaudePermissionMode::BypassPermissions)
+        );
     }
 
     #[test]
@@ -954,6 +1395,24 @@ mod tests {
         };
         let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
         assert!(cmd.contains(&"--print".to_string()));
+        assert_eq!(
+            cmd.contains(&"--dangerously-skip-permissions".to_string()),
+            claude_skip_permissions(None, true, false)
+        );
+    }
+
+    #[test]
+    fn build_claude_command_yolo() {
+        let launch = AgentConfig {
+            skip_permissions: true,
+            ..default_launch()
+        };
+        let process = ProcessConfig {
+            auto: true,
+            stream: false,
+            ..Default::default()
+        };
+        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
         assert!(cmd.contains(&"--dangerously-skip-permissions".to_string()));
     }
 
@@ -994,6 +1453,39 @@ mod tests {
     }
 
     #[test]
+    fn build_claude_command_adds_main_repo_for_worktree_metadata() {
+        let (_tmp, main, worktree) = git_worktree_fixture();
+        let launch = AgentConfig {
+            cwd: Some(worktree),
+            ..default_launch()
+        };
+        let process = auto_process();
+
+        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
+        let idx = cmd
+            .iter()
+            .position(|arg| arg == "--add-dir")
+            .expect("add-dir flag");
+        assert_eq!(
+            PathBuf::from(&cmd[idx + 1]).canonicalize().unwrap(),
+            main.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn build_claude_command_omits_add_dir_for_main_repo() {
+        let (_tmp, main, _worktree) = git_worktree_fixture();
+        let launch = AgentConfig {
+            cwd: Some(main),
+            ..default_launch()
+        };
+        let process = auto_process();
+
+        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
+        assert!(!cmd.contains(&"--add-dir".to_string()));
+    }
+
+    #[test]
     fn build_codex_command_auto() {
         let launch = AgentConfig {
             skip_permissions: false,
@@ -1005,10 +1497,17 @@ mod tests {
             ..Default::default()
         };
         let cmd = build_codex_command(&launch, &process, None);
+        let policy_args = codex_permission_args(None, true, false);
         assert!(cmd.contains(&"exec".to_string()));
-        assert!(cmd.contains(&"--full-auto".to_string()));
-        assert!(!cmd.contains(&"--sandbox".to_string()));
-        assert!(!cmd.contains(&"--ask-for-approval".to_string()));
+        assert!(!cmd.contains(&"--full-auto".to_string()));
+        assert_eq!(
+            cmd.contains(&"--sandbox".to_string()),
+            policy_args.contains(&"--sandbox".to_string())
+        );
+        assert_eq!(
+            cmd.contains(&"--ask-for-approval".to_string()),
+            policy_args.contains(&"--ask-for-approval".to_string())
+        );
         assert!(!cmd.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
     }
 
@@ -1029,6 +1528,45 @@ mod tests {
             "interactive mode should not use 'exec'"
         );
         assert!(!cmd.contains(&"--full-auto".to_string()));
+        assert_eq!(
+            cmd.contains(&"--sandbox".to_string()),
+            codex_permission_args(None, false, false).contains(&"--sandbox".to_string())
+        );
+    }
+
+    #[test]
+    fn build_codex_command_adds_main_repo_for_worktree_metadata() {
+        let (_tmp, main, worktree) = git_worktree_fixture();
+        let launch = AgentConfig {
+            cwd: Some(worktree),
+            skip_permissions: false,
+            ..default_launch()
+        };
+        let process = auto_process();
+
+        let cmd = build_codex_command(&launch, &process, None);
+        let idx = cmd
+            .iter()
+            .position(|arg| arg == "--add-dir")
+            .expect("add-dir flag");
+        assert_eq!(
+            PathBuf::from(&cmd[idx + 1]).canonicalize().unwrap(),
+            main.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn build_codex_command_omits_add_dir_for_main_repo() {
+        let (_tmp, main, _worktree) = git_worktree_fixture();
+        let launch = AgentConfig {
+            cwd: Some(main),
+            skip_permissions: false,
+            ..default_launch()
+        };
+        let process = auto_process();
+
+        let cmd = build_codex_command(&launch, &process, None);
+        assert!(!cmd.contains(&"--add-dir".to_string()));
     }
 
     #[test]
@@ -1286,6 +1824,7 @@ mod tests {
             model: Some("sonnet".to_string()),
             system_prompt: Some("Be brief".to_string()),
             system_prompt_file: None,
+            add_dirs: vec!["/tmp/repo".into()],
             skip_permissions: true,
             max_turns: Some(10),
             stream: true,
@@ -1297,6 +1836,8 @@ mod tests {
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"sonnet".to_string()));
         assert!(args.contains(&"--append-system-prompt".to_string()));
+        assert!(args.contains(&"--add-dir".to_string()));
+        assert!(args.contains(&"/tmp/repo".to_string()));
         assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(args.contains(&"--max-turns".to_string()));
         assert!(args.contains(&"10".to_string()));
@@ -1399,9 +1940,14 @@ mod tests {
             directive_relay: None,
         };
         let args = build_claude_session_turn_args("hello", &config, None);
+        assert_eq!(args[0], "-p");
+        assert_eq!(args[1], "hello");
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"stream-json".to_string()));
+        assert!(args.contains(&"--verbose".to_string()));
         assert_eq!(
-            args,
-            vec!["-p", "hello", "--output-format", "stream-json", "--verbose"]
+            args.contains(&"--dangerously-skip-permissions".to_string()),
+            claude_skip_permissions(Some(Path::new("/tmp")), true, false)
         );
     }
 

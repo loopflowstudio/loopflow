@@ -254,7 +254,7 @@ private struct ActionRow: View {
             PaletteAction("Open IDE", icon: "curlybraces", shortcut: "I") {},
             PaletteAction("View Diff", icon: "doc.text.magnifyingglass", shortcut: "D") {},
             PaletteAction("Create PR", icon: "arrow.triangle.pull", shortcut: "P") {},
-            PaletteAction("Run Step", icon: "play.fill", shortcut: "R") {},
+            PaletteAction("Run Skill", icon: "play.fill", shortcut: "R") {},
             PaletteAction("Focus Prompt", icon: "text.cursor", shortcut: "⌘L") {},
         ]
     )

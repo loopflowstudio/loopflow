@@ -253,7 +253,7 @@ pub fn release_notes(
     let prs = merged_prs_since(&main_repo, &resolved_prev_tag, &target)?;
 
     progress.status("Generating narrative release notes...");
-    run_release_notes_step(&main_repo, &version, &resolved_prev_tag, &prs, &target)?;
+    run_release_notes_stage(&main_repo, &version, &resolved_prev_tag, &prs, &target)?;
 
     let notes = fs::read_to_string(main_repo.join("RELEASE_NOTES.md"))?;
     Ok(notes)
@@ -386,7 +386,7 @@ fn prepare_release_in_worktree(
         "Generating release notes for {}...",
         target_tag(target, version)
     ));
-    run_release_notes_step(wt_path, version, prev_tag, merged_prs, target)?;
+    run_release_notes_stage(wt_path, version, prev_tag, merged_prs, target)?;
 
     progress.status("Committing release changes...");
     let _ = commit_workflow(
@@ -435,7 +435,7 @@ struct ReleaseNotesContext {
     previous_release_notes: Option<String>,
 }
 
-fn run_release_notes_step(
+fn run_release_notes_stage(
     repo: &Path,
     version: &str,
     prev_tag: &str,
@@ -484,7 +484,7 @@ fn run_release_notes_step(
 
     if !repo.join("RELEASE_NOTES.md").exists() {
         return Err(OpsError::Message(
-            "release-notes step did not write RELEASE_NOTES.md".to_string(),
+            "release-notes skill did not write RELEASE_NOTES.md".to_string(),
         ));
     }
 

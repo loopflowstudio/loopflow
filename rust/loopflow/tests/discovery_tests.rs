@@ -5,10 +5,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use loopflow::engine::builtins::{builtin_flow_names, builtin_step_names};
-use loopflow::engine::{load_flow, load_step};
+use loopflow::engine::builtins::{builtin_flow_names, builtin_skill_names};
+use loopflow::engine::{load_flow, load_skill};
 use loopflow::lf::discovery::{
-    builtin_step_description, builtin_steps, discover_step, discover_target, list_all_steps,
+    builtin_skill_description, builtin_skills, discover_skill, discover_target, list_all_skills,
     list_directions, list_user_flows, Target, BUILTIN_FLOW_CATEGORIES, BUILTIN_STEP_CATEGORIES,
 };
 use tempfile::TempDir;
@@ -85,25 +85,25 @@ fn write_executable(path: &Path, content: &str) {
 }
 
 #[test]
-fn discover_builtin_steps() {
+fn discover_builtin_skills() {
     let _home = HomeGuard::new();
-    let builtins = builtin_steps();
-    let (_user, _global, builtin_only, _skills) = list_all_steps(None);
-    for step in builtins {
-        assert!(builtin_only.contains(&step));
+    let builtins = builtin_skills();
+    let (_user, _global, builtin_only, _skills) = list_all_skills(None);
+    for skill in builtins {
+        assert!(builtin_only.contains(&skill));
     }
 }
 
 #[test]
-fn discover_repo_steps() {
+fn discover_repo_skills() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().expect("repo");
-    let steps_dir = repo.path().join(".lf/steps");
-    std::fs::create_dir_all(&steps_dir).expect("create steps dir");
-    std::fs::write(steps_dir.join("custom.md"), "# custom").expect("write step");
+    let skills_dir = repo.path().join(".lf/skills");
+    std::fs::create_dir_all(&skills_dir).expect("create skills dir");
+    std::fs::write(skills_dir.join("custom.md"), "# custom").expect("write skill");
 
-    let (user_steps, _global, _builtin_only, _skills) = list_all_steps(Some(repo.path()));
-    assert!(user_steps.contains(&"custom".to_string()));
+    let (user_skills, _global, _builtin_only, _skills) = list_all_skills(Some(repo.path()));
+    assert!(user_skills.contains(&"custom".to_string()));
 }
 
 #[test]
@@ -114,13 +114,13 @@ fn discover_repo_flows() {
     std::fs::create_dir_all(&flows_dir).expect("create flows dir");
     std::fs::write(
         flows_dir.join("ship.yaml"),
-        "steps:\n  - implement\n  - gate\n",
+        "skills:\n  - implement\n  - gate\n",
     )
     .expect("write flow");
 
     let flows = list_user_flows(repo.path());
     let flow = flows.iter().find(|f| f.name == "ship").expect("flow");
-    assert_eq!(flow.step_names, vec!["implement", "gate"]);
+    assert_eq!(flow.skill_names, vec!["implement", "gate"]);
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
     router: gstack/office-hours
     paths:
       autoplan:
-        step: gstack/autoplan
+        skill: gstack/autoplan
         description: "Auto-plan with minimal interaction"
       manual:
         flow: gstack/plan-manual
@@ -145,9 +145,9 @@ fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
 - implement
 - and:
     branches:
-      - step: gstack/pr-review
-      - step: gstack/cso
-      - step: gstack/codex
+      - skill: gstack/pr-review
+      - skill: gstack/cso
+      - skill: gstack/codex
     synthesize: gstack/review-synthesize
 "#,
     )
@@ -159,7 +159,7 @@ fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
         .find(|f| f.name == "gstack-sprint")
         .expect("flow");
     assert_eq!(
-        flow.step_names,
+        flow.skill_names,
         vec![
             "gstack/office-hours",
             "[xor]",
@@ -176,15 +176,15 @@ fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
 }
 
 #[test]
-fn repo_step_shadows_builtin() {
+fn repo_skill_shadows_builtin() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().expect("repo");
-    let steps_dir = repo.path().join(".lf/steps");
-    std::fs::create_dir_all(&steps_dir).expect("create steps dir");
-    std::fs::write(steps_dir.join("review.md"), "# review").expect("write step");
+    let skills_dir = repo.path().join(".lf/skills");
+    std::fs::create_dir_all(&skills_dir).expect("create skills dir");
+    std::fs::write(skills_dir.join("review.md"), "# review").expect("write skill");
 
-    let (user_steps, _global, builtin_only, _skills) = list_all_steps(Some(repo.path()));
-    assert!(user_steps.contains(&"review".to_string()));
+    let (user_skills, _global, builtin_only, _skills) = list_all_skills(Some(repo.path()));
+    assert!(user_skills.contains(&"review".to_string()));
     assert!(!builtin_only.contains(&"review".to_string()));
 }
 
@@ -208,11 +208,11 @@ fn discover_directions() {
 }
 
 #[test]
-fn discover_target_finds_step() {
+fn discover_target_finds_skill() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().expect("repo");
-    let target = discover_target(repo.path(), "debug").expect("should find builtin step");
-    assert!(matches!(target, Target::Step(_)));
+    let target = discover_target(repo.path(), "debug").expect("should find builtin skill");
+    assert!(matches!(target, Target::Skill(_)));
 }
 
 #[test]
@@ -233,24 +233,24 @@ fn discover_target_errors_for_unknown() {
 }
 
 #[test]
-fn categorized_listing_includes_known_steps() {
-    let builtins = builtin_steps();
-    for (_category, steps) in BUILTIN_STEP_CATEGORIES {
-        for step in *steps {
+fn categorized_listing_includes_known_skills() {
+    let builtins = builtin_skills();
+    for (_category, skills) in BUILTIN_STEP_CATEGORIES {
+        for skill in *skills {
             assert!(
-                builtins.contains(*step),
-                "category includes unknown step: {step}"
+                builtins.contains(*skill),
+                "category includes unknown skill: {skill}"
             );
         }
     }
 }
 
-/// Every builtin step file on disk must appear in exactly one category and
-/// must resolve via `discover_step`. New files are picked up automatically by
-/// `build.rs`; this test guards against a step existing in the binary but not
+/// Every builtin skill file on disk must appear in exactly one category and
+/// must resolve via `discover_skill`. New files are picked up automatically by
+/// `build.rs`; this test guards against a skill existing in the binary but not
 /// in the list output.
 #[test]
-fn every_builtin_step_is_categorized_and_discoverable() {
+fn every_builtin_skill_is_categorized_and_discoverable() {
     let tmp = TempDir::new().expect("tempdir");
 
     let categorized: std::collections::HashMap<&str, &str> = BUILTIN_STEP_CATEGORIES
@@ -258,35 +258,37 @@ fn every_builtin_step_is_categorized_and_discoverable() {
         .flat_map(|(cat, names)| names.iter().map(move |n| (*n, *cat)))
         .collect();
 
-    for name in builtin_step_names() {
+    for name in builtin_skill_names() {
         // Appears in exactly one category.
         assert!(
             categorized.contains_key(name),
-            "builtin step {name} is missing from BUILTIN_STEP_CATEGORIES",
+            "builtin skill {name} is missing from BUILTIN_STEP_CATEGORIES",
         );
 
         // Resolves by exact name.
-        let step = discover_step(tmp.path(), name)
-            .unwrap_or_else(|err| panic!("builtin step {name} did not resolve: {err}"));
+        let skill = discover_skill(tmp.path(), name)
+            .unwrap_or_else(|err| panic!("builtin skill {name} did not resolve: {err}"));
         assert!(
-            step.content
+            skill
+                .content
                 .as_deref()
                 .map(|c| !c.is_empty())
                 .unwrap_or(false),
-            "builtin step {name} loaded with empty content"
+            "builtin skill {name} loaded with empty content"
         );
 
         // Has a description (frontmatter or first prose line).
-        let desc = builtin_step_description(name);
+        let desc = builtin_skill_description(name);
         assert!(
             !desc.is_empty(),
-            "builtin step {name} has no description (add a `description:` frontmatter \
+            "builtin skill {name} has no description (add a `description:` frontmatter \
              field or a leading prose line)"
         );
     }
 
     // Every category entry must be a known builtin — no phantom names.
-    let known: std::collections::HashSet<&'static str> = builtin_step_names().into_iter().collect();
+    let known: std::collections::HashSet<&'static str> =
+        builtin_skill_names().into_iter().collect();
     for (_cat, names) in BUILTIN_STEP_CATEGORIES {
         for name in *names {
             assert!(
@@ -328,14 +330,14 @@ fn every_builtin_flow_is_categorized_and_loadable() {
     }
 }
 
-/// Bare-name fallback: a step in a namespaced builtin must also resolve by its
-/// short name when no core step / other namespaced step shares that short name.
+/// Bare-name fallback: a skill in a namespaced builtin must also resolve by its
+/// short name when no core skill / other namespaced skill shares that short name.
 #[test]
-fn namespaced_steps_resolve_by_bare_name_when_unique() {
+fn namespaced_skills_resolve_by_bare_name_when_unique() {
     let tmp = TempDir::new().expect("tempdir");
     // office-hours lives only in gstack; it must also work as a bare name.
-    let bare = load_step("office-hours", tmp.path()).expect("bare name resolves");
-    let qualified = load_step("gstack/office-hours", tmp.path()).expect("qualified resolves");
+    let bare = load_skill("office-hours", tmp.path()).expect("bare name resolves");
+    let qualified = load_skill("gstack/office-hours", tmp.path()).expect("qualified resolves");
     assert_eq!(bare.name, qualified.name);
 }
 
@@ -345,11 +347,11 @@ fn namespaced_steps_resolve_by_bare_name_when_unique() {
 fn bare_name_prefers_core_over_namespaced() {
     let tmp = TempDir::new().expect("tempdir");
     // `debug` exists in core (build/) and in gstack/. Bare name → core.
-    let step = discover_step(tmp.path(), "debug").expect("debug resolves");
-    assert_eq!(step.name, "debug");
+    let skill = discover_skill(tmp.path(), "debug").expect("debug resolves");
+    assert_eq!(skill.name, "debug");
     match discover_target(tmp.path(), "debug").expect("debug resolves via target") {
-        Target::Step(s) => assert_eq!(s.name, "debug"),
-        Target::Flow(f) => panic!("expected Step, got Flow {}", f.name),
+        Target::Skill(s) => assert_eq!(s.name, "debug"),
+        Target::Flow(f) => panic!("expected Skill, got Flow {}", f.name),
     }
 }
 
@@ -372,7 +374,7 @@ fn npx_skills_are_listed_from_cache_and_loopflow_skipped() {
     )
     .expect("write loopflow marker skill");
 
-    let (_user, _global, _builtin, external) = list_all_steps(Some(repo.path()));
+    let (_user, _global, _builtin, external) = list_all_skills(Some(repo.path()));
     assert!(external.contains(&("npx/explain-code".to_string(), "npx skills".to_string())));
     assert!(
         !external.iter().any(|(name, _)| name == "npx/design"),
@@ -410,8 +412,8 @@ exit 1
 
     let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
 
-    let step = discover_step(repo.path(), "npx/explain-code").expect("load npx skill");
-    assert!(step
+    let skill = discover_skill(repo.path(), "npx/explain-code").expect("load npx skill");
+    assert!(skill
         .content
         .as_deref()
         .is_some_and(|content| content.contains("Loaded from add")));
@@ -457,8 +459,8 @@ exit 1
 
     let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
 
-    let step = discover_step(repo.path(), "npx/deep-research").expect("load npx skill");
-    assert!(step
+    let skill = discover_skill(repo.path(), "npx/deep-research").expect("load npx skill");
+    assert!(skill
         .content
         .as_deref()
         .is_some_and(|content| content.contains("Loaded from find fallback")));
@@ -507,8 +509,8 @@ exit 1
 
     let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
 
-    let step = discover_step(repo.path(), "npx/skill-creator").expect("load qualified npx skill");
-    assert!(step
+    let skill = discover_skill(repo.path(), "npx/skill-creator").expect("load qualified npx skill");
+    assert!(skill
         .content
         .as_deref()
         .is_some_and(|content| content.contains("Loaded via qualified format")));

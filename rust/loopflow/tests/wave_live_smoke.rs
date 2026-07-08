@@ -1,5 +1,5 @@
 //! Live smoke for the full two-process wave topology: a real `lf wave`
-//! listener that spawns a real resident (`lf wave --mind-only`), which runs
+//! listener that spawns a real resident (`lf wave --flowloop-only`), which runs
 //! the real codex app-server.
 //!
 //! Ignored by default: it needs the codex CLI on PATH, ChatGPT auth, and
@@ -97,12 +97,12 @@ async fn wave_two_process_live_smoke() {
     };
     let base = format!("http://{addr}");
 
-    // The resident attaches and its vendor thread starts: mind reports.
+    // The resident attaches: the flowloop reports.
     poll_json(
-        "resident attached (mind reported)",
+        "resident attached (flowloop reported)",
         &format!("{base}/health"),
         Duration::from_secs(120),
-        |body| body["status"] == "serving" && body["mind"] == "idle",
+        |body| body["status"] == "serving" && body["flowloop"] == "idle",
     )
     .await;
 

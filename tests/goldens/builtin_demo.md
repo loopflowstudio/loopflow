@@ -53,9 +53,9 @@ or by land.
 
 ## Delegate Work
 
-Dispatch an `lf` flow or step for real implementation work. A dispatched child
+Dispatch an `lf` flow or skill for real implementation work. A dispatched child
 inherits loopflow context: operating guidance, scratch notes, explicit docs,
-wave context, and step instructions. Inline edits in the coordinating session do not, and they
+wave context, and skill instructions. Inline edits in the coordinating session do not, and they
 bloat the transcript with work that belongs in a child.
 
 Inside a Wave loop, dispatch with:
@@ -67,7 +67,7 @@ lf <flow> "<task>" --wave <wave> --dispatch
 This spawns the child as its own attachable tmux session — not an inline
 shell-out — so it's independently monitorable and steerable. List live
 sessions with `tmux ls` and drop into one with `tmux attach -t <name>` to
-answer an interactive step.
+answer an interactive skill.
 
 Inline edits are only for trivial fixes smaller than the cost of dispatching.
 When you do one, say why. Keep the coordinating session about decisions,
@@ -82,10 +82,10 @@ they came in: when a human's message reaches you, reply in your own turn
 text. Everything proactive goes through `lf`:
 
 - `lf chat "<note>"` - report outcomes, FYIs, and blockers to the wave's
-  thread; the post wakes the wave's mind like any message. One short
+  thread; the post wakes the wave's flowloop like any message. One short
   paragraph: what landed, links, anything surprising. Pipe stdin for longer.
 - `lf chat --parent "<report>"` - escalate to the parent wave.
-- `lf sub` - listen to your wave: follow its live events (turns, mind state,
+- `lf sub` - listen to your wave: follow its live events (turns, flowloop state,
   memory) until killed. Workers may run it in a background terminal to
   receive steering mid-task. Outside a wave it exits silently.
 - `lf memory add "<fact>"` - record a durable learning. `lf memory update`
@@ -141,8 +141,8 @@ such as dropping tables or deleting branches.
 
 ## Adaptation
 
-When you learn something repo-specific, write it into `.lf/`: adapt a step
-(`.lf/steps/<name>.md`), a direction (`.lf/directions/<name>.md`), or config
+When you learn something repo-specific, write it into `.lf/`: adapt a skill
+(`.lf/skills/<name>.md`), a direction (`.lf/directions/<name>.md`), or config
 (`.lf/config.yaml`). Commit `.lf/` changes alongside
 the work so they stay transparent and reviewable.
 
@@ -156,9 +156,9 @@ If something is genuinely ambiguous, note your assumption in `scratch/questions.
 
 No rendering environment. Output is logged, not displayed.
 
-The step.
+The skill.
 
-<lf:step:demo>
+<lf:skill:demo>
 Walk the human through experiencing what changed, then decide together what's next.
 
 ## Orientation
@@ -241,4 +241,4 @@ When a script isn't needed (pure backend, no observable change), say so — and 
 
 When demo patterns emerge for this repo (specific launch scripts, common verification flows, preferred demo formats), update `.lf/steps/` or repo docs so future demos start prepared.
 
-</lf:step:demo>
+</lf:skill:demo>

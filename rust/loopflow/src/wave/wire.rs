@@ -1,5 +1,5 @@
 //! The resident wire: what crosses between the listener (the wave server,
-//! vendor-free — hear / check / fold / tell) and the resident (the mind, its
+//! vendor-free — hear / check / fold / tell) and the resident (the flowloop, its
 //! own `lf` process owning the vendor harness).
 //!
 //! Two directions, two transports:
@@ -11,7 +11,7 @@
 //!   DTO discipline, plus the consumption markers (`TurnOpened.answers`,
 //!   `TurnSteered.answers` — the RESIDENT decides what a turn answers; the
 //!   listener validates against its queue fold and journals), the resident's
-//!   reported mind state, and the vendor thread id. The single writer stays
+//!   reported flowloop state, and the vendor thread id. The single writer stays
 //!   with the listener: the resident never touches journal files.
 //! - **Listener → resident**: the resident consumes its own wave's `/events`
 //!   subscription with `?inbox=true` — `inbox` SSE frames ([`InboxFrame`])
@@ -30,9 +30,9 @@
 //! ([`RESIDENT_TOKEN_HEADER`]): the listener generates it at bind, passes it
 //! to a spawned resident via [`RESIDENT_TOKEN_ENV`], and writes it to
 //! `wave/<name>/.wave-resident-token` beside the endpoint pointer for
-//! attached residents (`lf wave <name> --mind-only`) — the same
+//! attached residents (`lf wave <name> --flowloop-only`) — the same
 //! filesystem-trust domain as the discovery file. This is a stopgap: when a
-//! human (or a remote mind) can hold the resident seat, the token becomes a
+//! human (or a remote flowloop) can hold the resident seat, the token becomes a
 //! credential the gatekeeper issues, not a file the repo trusts.
 
 use serde::{Deserialize, Serialize};
@@ -101,17 +101,14 @@ pub enum ResidentDelta {
     /// re-delivers them. The claim rides first, the undo is explicit:
     /// at-most-once to the vendor, never a silent redelivery.
     MessagesRequeued { ids: Vec<String> },
-    /// The resident's reported mind state ([`ResidentStateTo`]). `Turning`
+    /// The resident's reported flowloop state ([`ResidentStateTo`]). `Turning`
     /// and the boundary `Idle` are DERIVED by the listener from
     /// `TurnOpened`/`TurnFinished`; only the transitions the turn deltas
     /// can't express ride here.
-    MindState { to: ResidentStateTo, reason: String },
-    /// The vendor thread the mind runs on — its first durable act, journaled
-    /// by the listener before the first turn (borrowed-handle rule).
-    ThreadStarted { vendor: String, thread_id: String },
+    FlowloopState { to: ResidentStateTo, reason: String },
 }
 
-/// Destination of a reported [`ResidentDelta::MindState`] transition. The
+/// Destination of a reported [`ResidentDelta::FlowloopState`] transition. The
 /// listener supplies the turn id for `Interrupting` (the current open turn —
 /// the resident never learns journal-minted ids).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,7 +116,7 @@ pub enum ResidentDelta {
 pub enum ResidentStateTo {
     /// Cancel fired for the open turn (cooperative interrupt in flight).
     Interrupting,
-    /// The mind itself died (harness terminal error, failure cap). The
+    /// The flowloop itself died (harness terminal error, failure cap). The
     /// resident reports this and exits; the listener's supervisor owns the
     /// respawn ladder from there.
     Failed,
@@ -142,7 +139,7 @@ pub struct PostDeltasResponse {
 
 /// `POST /resident/attach` request: the resident's first call. Registers the
 /// resident's pid for liveness (the listener probes attached residents; a
-/// spawned child is watched by process exit) and revives a `failed` mind
+/// spawned child is watched by process exit) and revives a `failed` flowloop
 /// state — a fresh resident IS the revival.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AttachRequest {
@@ -156,8 +153,6 @@ pub struct AttachRequest {
 pub struct AttachResponse {
     /// The wave this listener serves — the resident refuses a mismatch.
     pub wave: String,
-    /// Last journaled vendor thread id — the mind's resume handle.
-    pub thread_id: Option<String>,
 }
 
 /// `GET /resident/context` response: the pre-turn snapshot the resident folds
@@ -166,7 +161,6 @@ pub struct AttachResponse {
 /// cadence stale.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContextResponse {
-    pub thread_id: Option<String>,
     pub in_flight: Vec<InFlightWorker>,
 }
 
@@ -196,7 +190,7 @@ pub struct InboxFrame {
 /// 1:1 (`<node>.<event>`) so the durable ledger row and the live frame carry
 /// the same shape — a client folds `lf runs` history and live `op` frames with
 /// one code path. The base model emits run-grain kinds (`run.started`,
-/// `run.completed`, `run.errored`); step/flow granularity is future work, so
+/// `run.completed`, `run.errored`); skill/flow granularity is future work, so
 /// `kind` stays a free-form string like the ledger's `node`/`event` columns.
 ///
 /// Live-only: the past is a ledger query (`lf runs`), never a stream — nothing
@@ -257,13 +251,9 @@ mod tests {
             ResidentDelta::MessagesRequeued {
                 ids: vec!["msg-3".into()],
             },
-            ResidentDelta::MindState {
+            ResidentDelta::FlowloopState {
                 to: ResidentStateTo::Failed,
                 reason: "harness disconnected".into(),
-            },
-            ResidentDelta::ThreadStarted {
-                vendor: "codex".into(),
-                thread_id: "thread-abc".into(),
             },
         ];
         for delta in deltas {
@@ -282,9 +272,8 @@ mod tests {
             serde_json::json!({ "kind": "turn_opened" }),
             serde_json::json!({ "kind": "turn_finished", "cost_usd": null }),
             serde_json::json!({ "kind": "turn_text" }),
-            serde_json::json!({ "kind": "mind_state", "to": "failed" }),
+            serde_json::json!({ "kind": "flowloop_state", "to": "failed" }),
             serde_json::json!({ "kind": "messages_requeued" }),
-            serde_json::json!({ "kind": "thread_started", "vendor": "codex" }),
         ] {
             assert!(
                 serde_json::from_value::<ResidentDelta>(bad.clone()).is_err(),

@@ -6,22 +6,19 @@ use std::path::Path;
 use std::sync::Arc;
 
 use loopflow::chat::turns::ChatRole;
-use loopflow::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
+use loopflow::chat::types::{ConversationItem, Lifecycle};
 use loopflow::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
-use loopflow::wave::mind::EventAdapter;
 use loopflow::wave::runtime::WaveRuntime;
 use loopflow::wave::server::{self, ResidentDoor, SubagentDoor};
-use loopflow::wave::state::MindState;
+use loopflow::wave::state::FlowloopState;
+use loopflow::wave::wire::ResidentDelta;
 
-/// One complete harness turn, as the codex driver would emit it: a command
-/// item, the final agent message, the turn completion, then trailing usage.
-fn codex_turn_events() -> Vec<ConversationEvent> {
+/// One complete resident turn, as the flowloop emits it after a pass: an
+/// item, the pass's reply text, usage, then the finalized boundary.
+fn resident_turn_deltas() -> Vec<ResidentDelta> {
     vec![
-        ConversationEvent::TurnStarted {
-            turn_id: "vt-1".into(),
-        },
-        ConversationEvent::ItemCompleted {
-            turn_id: "vt-1".into(),
+        ResidentDelta::TurnOpened { answers: vec![] },
+        ResidentDelta::TurnItem {
             item: ConversationItem::Command {
                 id: "item-0".into(),
                 command: vec!["cargo test".into()],
@@ -32,41 +29,26 @@ fn codex_turn_events() -> Vec<ConversationEvent> {
                 duration_ms: None,
             },
         },
-        ConversationEvent::ItemCompleted {
-            turn_id: "vt-1".into(),
-            item: ConversationItem::Message {
-                id: "item-1".into(),
-                text: "Implemented the feature.".into(),
-                phase: None,
-            },
+        ResidentDelta::TurnText {
+            text: "Implemented the feature.".into(),
         },
-        ConversationEvent::TurnCompleted {
-            turn_id: "vt-1".into(),
+        ResidentDelta::TurnUsage {
+            input_tokens: Some(10),
+            output_tokens: Some(5),
+            cache_read_tokens: None,
+        },
+        ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-        },
-        ConversationEvent::TurnUsage {
-            turn_id: "vt-1".into(),
-            usage: TurnUsage {
-                input_tokens: 10,
-                output_tokens: 5,
-                reasoning_tokens: None,
-                cache_read_tokens: None,
-                cache_write_tokens: None,
-                model: None,
-                cost_usd: None,
-            },
+            cost_usd: None,
         },
     ]
 }
 
-/// Run one harness turn through the production pipeline (EventAdapter →
-/// resident wire deltas → the listener's fold), as the resident door would.
-fn run_harness_turn(runtime: Arc<WaveRuntime>, events: &[ConversationEvent]) {
-    let mut adapter = EventAdapter::new();
-    for event in events {
-        for delta in adapter.feed(event) {
-            runtime.apply_resident_delta(delta);
-        }
+/// Run one resident turn through the production pipeline (resident wire
+/// deltas → the listener's fold), as the resident door would.
+fn run_resident_turn(runtime: Arc<WaveRuntime>, deltas: Vec<ResidentDelta>) {
+    for delta in deltas {
+        runtime.apply_resident_delta(delta);
     }
 }
 
@@ -88,7 +70,7 @@ async fn restart_replays_thread_and_turn_ids_continue() {
     let before = {
         let rt = open_wave(tmp.path());
         rt.deliver_user_message("please build the feature".into(), MessageOp::Message);
-        run_harness_turn(rt.clone(), &codex_turn_events());
+        run_resident_turn(rt.clone(), resident_turn_deltas());
         let before = rt.thread_snapshot();
         assert_eq!(before.len(), 2);
         before
@@ -101,7 +83,7 @@ async fn restart_replays_thread_and_turn_ids_continue() {
         before,
         "restart keeps the full thread"
     );
-    assert_eq!(rt.mind_state(), MindState::Idle);
+    assert_eq!(rt.flowloop_state(), FlowloopState::Idle);
 
     // And new turn ids continue the journal's seq domain monotonically.
     let max_before = before.iter().map(|t| turn_seq(&t.id)).max().unwrap();
@@ -117,7 +99,7 @@ async fn restart_replays_thread_and_turn_ids_continue() {
 async fn fold_of_journal_equals_the_turns_the_live_pipeline_built() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
-    run_harness_turn(rt.clone(), &codex_turn_events());
+    run_resident_turn(rt.clone(), resident_turn_deltas());
     let live = rt.thread_snapshot();
 
     // Independent fold of the raw journal — no runtime involved.
@@ -153,9 +135,9 @@ async fn crashed_open_turn_is_finalized_failed_on_reboot() {
                 phase: None,
             },
         });
-        journal.append(|_| EventKind::MindState {
-            from: MindState::Idle,
-            to: MindState::Turning {
+        journal.append(|_| EventKind::FlowloopState {
+            from: FlowloopState::Idle,
+            to: FlowloopState::Turning {
                 turn_id: "turn-1".into(),
             },
             reason: "turn opened".into(),
@@ -171,7 +153,11 @@ async fn crashed_open_turn_is_finalized_failed_on_reboot() {
         "janitor closed the crash tail"
     );
     assert_eq!(thread[0].text, "half a thought");
-    assert_eq!(rt.mind_state(), MindState::Idle, "janitor settled the mind");
+    assert_eq!(
+        rt.flowloop_state(),
+        FlowloopState::Idle,
+        "janitor settled the flowloop"
+    );
 }
 
 #[tokio::test]
@@ -201,40 +187,27 @@ async fn corrupt_trailing_line_is_tolerated_on_reboot() {
 }
 
 #[tokio::test]
-async fn thread_started_survives_a_restart() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    {
-        let rt = open_wave(tmp.path());
-        assert_eq!(rt.last_thread_id(), None);
-        rt.journal_thread_started("codex", "thread-abc");
-    }
-    // The resume handle is a fold of the journal, like everything else.
-    let rt = open_wave(tmp.path());
-    assert_eq!(rt.last_thread_id().as_deref(), Some("thread-abc"));
-}
-
-#[tokio::test]
-async fn illegal_mind_transition_is_refused() {
+async fn illegal_flowloop_transition_is_refused() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
 
     assert!(!rt.transition(
-        MindState::Interrupting {
+        FlowloopState::Interrupting {
             turn_id: "turn-1".into()
         },
         "nothing to interrupt"
     ));
-    assert_eq!(rt.mind_state(), MindState::Idle, "state untouched");
+    assert_eq!(rt.flowloop_state(), FlowloopState::Idle, "state untouched");
     // Refused moves leave no trace in the journal.
     let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("open journal");
     assert!(events.is_empty());
 }
 
 /// `/health` splits channel liveness (`status`, always `serving`) from the
-/// resident's condition (`mind`: null while no resident was ever spawned or
-/// attached, then the mind-state name).
+/// resident's condition (`flowloop`: null while no resident was ever spawned or
+/// attached, then the flowloop-state name).
 #[tokio::test]
-async fn health_reports_channel_liveness_and_the_mind_state() {
+async fn health_reports_channel_liveness_and_the_flowloop_state() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
 
@@ -258,7 +231,10 @@ async fn health_reports_channel_liveness_and_the_mind_state() {
         .await
         .unwrap();
     assert_eq!(body["status"], "serving");
-    assert!(body["mind"].is_null(), "no resident yet: a dormant channel");
+    assert!(
+        body["flowloop"].is_null(),
+        "no resident yet: a dormant channel"
+    );
 
     rt.set_resident_expected();
     let body: serde_json::Value = reqwest::get(format!("http://{addr}/health"))
@@ -267,10 +243,10 @@ async fn health_reports_channel_liveness_and_the_mind_state() {
         .json()
         .await
         .unwrap();
-    assert_eq!(body["mind"], "idle");
+    assert_eq!(body["flowloop"], "idle");
 
     rt.transition(
-        MindState::Turning {
+        FlowloopState::Turning {
             turn_id: "turn-1".into(),
         },
         "test turn",
@@ -282,5 +258,5 @@ async fn health_reports_channel_liveness_and_the_mind_state() {
         .await
         .unwrap();
     assert_eq!(body["status"], "serving", "channel liveness is constant");
-    assert_eq!(body["mind"], "turning");
+    assert_eq!(body["flowloop"], "turning");
 }

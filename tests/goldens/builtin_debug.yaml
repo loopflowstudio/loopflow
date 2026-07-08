@@ -1,6 +1,6 @@
 name: builtin_debug
 repo: tests/parity/fixtures/basic
-step: debug
+skill: debug
 surface: headless
 directions: []
 docs: []

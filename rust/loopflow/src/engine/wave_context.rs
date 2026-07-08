@@ -183,7 +183,7 @@ fn query_repo_git_info(repo_root: &Path) -> RepoGitInfo {
 
 /// Map a wave id from the env to its name through the shared store. The
 /// store API is async and context assembly is sync (sometimes already inside
-/// a runtime — flow steps), so the lookup runs on a scratch thread. No store
+/// a runtime — flow skills), so the lookup runs on a scratch thread. No store
 /// or unknown id → `None`, and resolution falls back to the worktree.
 fn wave_name_for_id(id: &str) -> Option<String> {
     let id: crate::lfd::id::LfdId = id.parse().ok()?;
@@ -369,7 +369,7 @@ fn journal_turns(origin: &Path, wave: &str) -> Option<Vec<ChatTurn>> {
 }
 
 /// Blocking GET on a scratch thread: context assembly is sync but sometimes
-/// already runs inside a tokio runtime (flow steps), where `reqwest::blocking`
+/// already runs inside a tokio runtime (flow skills), where `reqwest::blocking`
 /// panics — the same reason [`wave_name_for_id`] hops threads. Bounded by
 /// [`LIVE_READ_TIMEOUT`] per phase (connect, whole request).
 fn http_get(url: String) -> Option<String> {

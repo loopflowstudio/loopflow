@@ -8,7 +8,7 @@
 //!   ([`ensure_wave_row`] — a reachable store with no row for the wave gets
 //!   a minimal one, never an unregistered run), then writes itself a
 //!   `WaveAgent` session row (source `wave_server`, endpoint + pid in `env`)
-//!   so Loopflow's agent tree shows the mind and one-brain enforcement has a
+//!   so Loopflow's agent tree shows the flowloop and one-brain enforcement has a
 //!   fact to key on. Before writing, [`register`] probes the wave's live
 //!   WaveAgent rows: a `wave_server` row whose pid is dead is a crashed
 //!   server — closed on the spot; a surviving live brain is a refusal naming
@@ -67,7 +67,7 @@ async fn tmux_session_exists(session_name: &str) -> anyhow::Result<bool> {
 }
 
 /// How often the observer re-reads the store between turns. Modest by
-/// design: the mind also refreshes right before every turn it takes.
+/// design: the flowloop also refreshes right before every turn it takes.
 pub const POLL_CADENCE: Duration = Duration::from_secs(10);
 
 /// Everything registration needs: the opened store, the wave's row, and this
@@ -76,7 +76,7 @@ pub const POLL_CADENCE: Duration = Duration::from_secs(10);
 pub struct RegistryConfig {
     pub store: SharedStore,
     pub wave: Wave,
-    /// The worktree the server (and its mind) runs in.
+    /// The worktree the server (and its flowloop) runs in.
     pub cwd: String,
     pub pid: u32,
     /// Take over from an existing live wave-agent session.
@@ -223,7 +223,7 @@ pub async fn register(config: &RegistryConfig, endpoint: &str) -> StoreResult<Re
         run_id: None,
         parent_session_id: None,
         session_use: SessionUse::WaveAgent,
-        step: "mind".to_string(),
+        skill: "flowloop".to_string(),
         agent: "lf".to_string(),
         cwd: config.cwd.clone(),
         argv: vec![
@@ -732,7 +732,7 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::WaveAgent,
-            step: "mind".to_string(),
+            skill: "flowloop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
             argv: vec!["lf".to_string(), "wave".to_string(), wave.name().clone()],
@@ -761,7 +761,7 @@ mod tests {
             run_id: Some(run_id.clone()),
             parent_session_id: None,
             session_use: SessionUse::Worker,
-            step: "dispatch:implement".to_string(),
+            skill: "dispatch:implement".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
             argv: Vec::new(),

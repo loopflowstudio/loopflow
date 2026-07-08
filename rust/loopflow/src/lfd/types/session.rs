@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 
 use crate::lfd::id::LfdId;
 
-pub const TMUX_TERMINAL_SOURCE: &str = "wave_step_tmux";
+pub const TMUX_TERMINAL_SOURCE: &str = "wave_skill_tmux";
 pub const PALETTE_TERMINAL_SOURCE: &str = "palette";
 /// A bare `lf` invocation that self-registered from inside a wave context.
 /// Not tmux-backed: the process lives inside an ancestor's terminal, so
@@ -15,7 +15,7 @@ pub const PALETTE_TERMINAL_SOURCE: &str = "palette";
 pub const LF_CLI_SOURCE: &str = "lf_cli";
 /// A self-registered `lf wave` server: the process is owned by the wave
 /// server, not launched by lfd. The session row records the running server
-/// (endpoint + pid in `env`) so Loopflow sees the mind and one-brain
+/// (endpoint + pid in `env`) so Loopflow sees the flowloop and one-brain
 /// enforcement has a fact to key on.
 pub const WAVE_SERVER_SOURCE: &str = "wave_server";
 
@@ -157,7 +157,7 @@ pub struct Session {
     pub parent_session_id: Option<LfdId>,
     #[serde(rename = "use")]
     pub session_use: SessionUse,
-    pub step: String,
+    pub skill: String,
     pub agent: String,
     pub cwd: String,
     #[serde(default)]
@@ -249,12 +249,12 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::Palette,
-            step: "design".to_string(),
+            skill: "design".to_string(),
             agent: "claude".to_string(),
             cwd: "/tmp/repo".to_string(),
             argv: vec!["lf".to_string(), "design".to_string()],
             env: Default::default(),
-            source: "wave_step".to_string(),
+            source: "wave_skill".to_string(),
             tmux_name: "lf-test-branch".to_string(),
             status,
             attached_at: None,

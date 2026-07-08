@@ -372,7 +372,7 @@ mod tests {
             } else {
                 SessionUse::WaveAgent
             },
-            step: "design".to_string(),
+            skill: "design".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo".to_string(),
             argv: vec!["lf".to_string(), "design".to_string()],

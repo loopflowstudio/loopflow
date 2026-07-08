@@ -1,10 +1,17 @@
 {
-  "attach_request": { "pid": 43210 },
-  "attach_response": { "wave": "ship", "thread_id": "thread-0199a" },
+  "attach_request": {
+    "pid": 43210
+  },
+  "attach_response": {
+    "wave": "ship"
+  },
   "context_response": {
-    "thread_id": "thread-0199a",
     "in_flight": [
-      { "run_id": "lfdrun_01HNX7XYZ0AZ1B2C3D4E5F6G7H", "flow": "implement", "task": "Wire the endpoint." }
+      {
+        "run_id": "lfdrun_01HNX7XYZ0AZ1B2C3D4E5F6G7H",
+        "flow": "implement",
+        "task": "Wire the endpoint."
+      }
     ]
   }
 }

@@ -173,8 +173,8 @@ struct WaveContentParserTests {
         It has multiple lines of detail.
 
         ## Plan
-        - Step one
-        - Step two
+        - Skill one
+        - Skill two
         """
         try roadmapWithContent.write(
             to: waveDir.appendingPathComponent("01-feature-alpha.md"),

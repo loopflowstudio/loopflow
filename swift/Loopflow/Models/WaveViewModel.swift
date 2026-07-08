@@ -104,9 +104,9 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         set { api.agent = newValue }
     }
 
-    public var stepAgents: [String: String]? {
-        get { api.stepAgents }
-        set { api.stepAgents = newValue }
+    public var skillAgents: [String: String]? {
+        get { api.skillAgents }
+        set { api.skillAgents = newValue }
     }
 
     public var triggers: [Trigger] {
@@ -282,10 +282,10 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     }
 
     public var lastActivityDescription: String? {
-        guard let step = recentSteps.first else { return nil }
+        guard let skill = recentSteps.first else { return nil }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
-        let time = formatter.localizedString(for: step.endedAt ?? step.startedAt, relativeTo: Date())
-        return "\(step.step) \(time)"
+        let time = formatter.localizedString(for: skill.endedAt ?? skill.startedAt, relativeTo: Date())
+        return "\(skill.skill) \(time)"
     }
 }

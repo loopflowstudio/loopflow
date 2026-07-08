@@ -298,8 +298,8 @@ struct WaveModelTests {
 
     // MARK: - Activity Tracking
 
-    @Test("lastActivityAt returns nil when no recent steps")
-    func lastActivityAtNilWithNoSteps() {
+    @Test("lastActivityAt returns nil when no recent skills")
+    func lastActivityAtNilWithNoSkills() {
         let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [])
 
         #expect(wave.lastActivityAt == nil)
@@ -309,9 +309,9 @@ struct WaveModelTests {
     func lastActivityAtUsesEndedAt() {
         let startDate = Date().addingTimeInterval(-120)
         let endDate = Date().addingTimeInterval(-60)
-        let step = StepRun(
-            id: "step-1",
-            step: "implement",
+        let skill = StepRun(
+            id: "skill-1",
+            skill: "implement",
             repo: "/tmp",
             worktree: "/tmp/wt",
             status: "completed",
@@ -320,7 +320,7 @@ struct WaveModelTests {
             agent: "claude",
             runMode: "auto"
         )
-        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [step])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [skill])
 
         #expect(wave.lastActivityAt == endDate)
     }
@@ -328,9 +328,9 @@ struct WaveModelTests {
     @Test("lastActivityAt falls back to startedAt when endedAt is nil")
     func lastActivityAtFallsBackToStartedAt() {
         let startDate = Date().addingTimeInterval(-120)
-        let step = StepRun(
-            id: "step-1",
-            step: "implement",
+        let skill = StepRun(
+            id: "skill-1",
+            skill: "implement",
             repo: "/tmp",
             worktree: "/tmp/wt",
             status: "running",
@@ -339,23 +339,23 @@ struct WaveModelTests {
             agent: "claude",
             runMode: "auto"
         )
-        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [step])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [skill])
 
         #expect(wave.lastActivityAt == startDate)
     }
 
-    @Test("lastActivityDescription returns nil when no recent steps")
-    func lastActivityDescriptionNilWithNoSteps() {
+    @Test("lastActivityDescription returns nil when no recent skills")
+    func lastActivityDescriptionNilWithNoSkills() {
         let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [])
 
         #expect(wave.lastActivityDescription == nil)
     }
 
-    @Test("lastActivityDescription includes step name")
-    func lastActivityDescriptionIncludesStepName() {
-        let step = StepRun(
-            id: "step-1",
-            step: "implement",
+    @Test("lastActivityDescription includes skill name")
+    func lastActivityDescriptionIncludesSkillName() {
+        let skill = StepRun(
+            id: "skill-1",
+            skill: "implement",
             repo: "/tmp",
             worktree: "/tmp/wt",
             status: "completed",
@@ -364,7 +364,7 @@ struct WaveModelTests {
             agent: "claude",
             runMode: "auto"
         )
-        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [step])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [skill])
         let description = wave.lastActivityDescription
 
         #expect(description != nil)
@@ -446,7 +446,7 @@ struct CombinePRsResultTests {
     }
 }
 
-@Suite("Flow step progress")
+@Suite("Flow skill progress")
 struct FlowStepProgressTests {
 
     @Test("stepIndex reflects active run step_index")
@@ -535,10 +535,10 @@ struct WaveStoreReactivityTests {
 
     @MainActor
     @Test("WaveStore.set updates stepIndex when wave refreshed with new active run")
-    func storeReflectsUpdatedStepIndex() {
+    func storeReflectsUpdatedSkillIndex() {
         let store = WaveStore()
 
-        // Initial wave at step 0
+        // Initial wave at skill 0
         let run0 = Run(
             id: "run-1", waveId: "wave-1", flow: "start", area: ".", repo: "/tmp/repo",
             stepIndex: 0
@@ -553,7 +553,7 @@ struct WaveStoreReactivityTests {
 
         #expect(store.wave(for: "wave-1")?.stepIndex == 0)
 
-        // Simulate wave_updated event: re-fetch returns step 1
+        // Simulate wave_updated event: re-fetch returns skill 1
         let run1 = Run(
             id: "run-1", waveId: "wave-1", flow: "start", area: ".", repo: "/tmp/repo",
             stepIndex: 1
@@ -575,7 +575,7 @@ struct WaveStoreReactivityTests {
 struct ParseWaveFromJSONTests {
 
     @Test("parses active_run with step_index")
-    func parsesActiveRunStepIndex() {
+    func parsesActiveRunSkillIndex() {
         let json: [String: Any] = [
             "id": "wave-1",
             "name": "ux",
@@ -721,11 +721,11 @@ struct WaveStatusTests {
 @Suite("InteractiveSession")
 struct InteractiveSessionTests {
 
-    @Test("command returns step without prompt")
+    @Test("command returns skill without prompt")
     func commandWithoutPrompt() {
         let session = InteractiveSession(
             waveId: "wave-1",
-            step: "design",
+            skill: "design",
             worktreePath: "/tmp/wt"
         )
         #expect(session.command == "lf design && lf op commit --push")
@@ -735,7 +735,7 @@ struct InteractiveSessionTests {
     func commandWithPrompt() {
         let session = InteractiveSession(
             waveId: "wave-1",
-            step: "design",
+            skill: "design",
             worktreePath: "/tmp/wt",
             prompt: "add rate limiting"
         )
@@ -746,7 +746,7 @@ struct InteractiveSessionTests {
     func commandEscapesSingleQuotes() {
         let session = InteractiveSession(
             waveId: "wave-1",
-            step: "debug",
+            skill: "debug",
             worktreePath: "/tmp/wt",
             prompt: "fix the user's auth flow"
         )
@@ -757,7 +757,7 @@ struct InteractiveSessionTests {
     func commandHandlesSpecialChars() {
         let session = InteractiveSession(
             waveId: "wave-1",
-            step: "implement",
+            skill: "implement",
             worktreePath: "/tmp/wt",
             prompt: "add $HOME expansion & pipes | redirects > /dev/null"
         )

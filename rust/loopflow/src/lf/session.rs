@@ -101,9 +101,9 @@ pub fn classify_run_context(
 /// early error) records a failure, and Ctrl+C reports via the interrupt-hook
 /// machinery. Returns `None` — with zero noise — outside wave contexts and
 /// when the machine has no registry store (or the write fails).
-pub fn register_run(step: &str, agent: &str, argv: &[String]) -> Option<RunSession> {
+pub fn register_run(skill: &str, agent: &str, argv: &[String]) -> Option<RunSession> {
     let repo_root = crate::lf::commands::util::find_repo_root().ok();
-    register_run_in(repo_root.as_deref(), step, agent, argv)
+    register_run_in(repo_root.as_deref(), skill, agent, argv)
 }
 
 /// The body of [`register_run`], a function of the repo the run executes in
@@ -111,7 +111,7 @@ pub fn register_run(step: &str, agent: &str, argv: &[String]) -> Option<RunSessi
 /// they never touch the developer's real registry).
 fn register_run_in(
     repo_root: Option<&Path>,
-    step: &str,
+    skill: &str,
     agent: &str,
     argv: &[String],
 ) -> Option<RunSession> {
@@ -138,7 +138,7 @@ fn register_run_in(
     let session = block_on(register_session(
         wave,
         parent_session_id,
-        step.to_string(),
+        skill.to_string(),
         agent.to_string(),
         argv.to_vec(),
     ))??;
@@ -255,7 +255,7 @@ impl SessionHandle {
 async fn register_session(
     wave: AmbientWaveRef,
     mut parent_session_id: Option<LfdId>,
-    step: String,
+    skill: String,
     agent: String,
     argv: Vec<String>,
 ) -> Option<RunSession> {
@@ -285,7 +285,7 @@ async fn register_session(
         run_id: None,
         parent_session_id,
         session_use: SessionUse::Worker,
-        step,
+        skill,
         agent,
         cwd: std::env::current_dir()
             .map(|cwd| cwd.display().to_string())
@@ -479,7 +479,7 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: crate::lfd::types::SessionUse::WaveAgent,
-            step: "mind".to_string(),
+            skill: "flowloop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo".to_string(),
             argv: Vec::new(),
@@ -517,7 +517,7 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: crate::lfd::types::SessionUse::Worker,
-            step: "dispatch:implement".to_string(),
+            skill: "dispatch:implement".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo".to_string(),
             argv: Vec::new(),
@@ -624,7 +624,7 @@ mod tests {
         assert_eq!(stored.status, SessionStatus::Running);
         assert_eq!(stored.wave_id, *wave.id());
         assert_eq!(stored.parent_session_id, None, "root-parented");
-        assert_eq!(stored.step, "design");
+        assert_eq!(stored.skill, "design");
         // Descendants chain off the new session.
         assert_eq!(
             std::env::var(super::SESSION_ID_ENV).as_deref(),
@@ -682,7 +682,7 @@ mod tests {
         assert_eq!(stored.wave_id, *wave.id());
         assert_eq!(stored.parent_session_id, Some(parent));
         assert_eq!(stored.argv, argv);
-        assert_eq!(stored.step, "design");
+        assert_eq!(stored.skill, "design");
         assert_eq!(stored.source, "lf_cli");
         // Descendants chain off the new session.
         assert_eq!(

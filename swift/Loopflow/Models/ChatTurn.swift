@@ -131,7 +131,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     public let items: [ConversationItem]
     public let createdAt: String
     /// Speaker label for attributed emissions (`lf chat` — worker reports,
-    /// child-wave escalations). Absent (`nil`) for the mind's own turns and
+    /// child-wave escalations). Absent (`nil`) for the flowloop's own turns and
     /// plain user turns; mirrors Rust `ChatTurn.from`.
     public let from: String?
 

@@ -309,11 +309,11 @@ to the surface (terminal, desktop, mobile). You control context and quality thro
 curl -fsSL https://loopflow.studio/install.sh | sh && lf init
 
 ## Commands
-lf <step>           Run a step (design, implement, review, etc.)
+lf <skill>           Run a skill (design, implement, review, etc.)
 lf debug -c         Fix error from clipboard
 lf op pr            Create PR from current branch
 lf op wt create X   Create worktree for feature X
-lf wave X           Start wave X's server (its resident mind)
+lf wave X           Start wave X's server (its resident flowloop)
 lf q worker run X --flow build --task "..."   Dispatch a PR-producing worker
 lf chat -w X "..."  Post into wave X's thread
 
@@ -324,7 +324,7 @@ Wave agent: coordinates — reads roadmap and memory, decides the next move,
   dispatches workers, folds results back into memory. Rarely writes code itself.
 Worker: a scoped agent a wave dispatches to run a flow and open a PR; inherits
   the wave's GOAL.md and MEMORY.md.
-Step: a prompt that runs a coding agent. Flow: a sequence of steps.
+Skill: a prompt that runs a coding agent. Flow: a sequence of skills.
 Direction: composable quality definitions that shape agent judgment.
 Roadmap: the wave's work queue, provider-backed (e.g. Linear).
 
@@ -338,7 +338,7 @@ Roadmap: the wave's work queue, provider-backed (e.g. Linear).
 
 ## Configuration
 Config file: .lf/config.yaml
-Steps: .lf/steps/*.md or .claude/commands/*.md
+Skills: .lf/skills/*.md or .claude/commands/*.md
 Directions: .lf/directions/*.md
 Memory: wave/*/MEMORY.md (per-wave, auto-managed)
 
@@ -973,7 +973,7 @@ def get():
                 Div(
                     Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo"),
                     H1("Install"),
-                    P("Read the steps. Try the CLI. Decide with evidence.", cls="tagline"),
+                    P("Read the skills. Try the CLI. Decide with evidence.", cls="tagline"),
                     Div(
                         H2("CLI"),
                         P(
@@ -991,13 +991,13 @@ def get():
                         ),
                         P("macOS · Claude Code, Codex, or Gemini CLI", cls="system-req"),
                         Div(
-                            P("Then:", cls="next-step-label"),
+                            P("Then:", cls="next-skill-label"),
                             Pre(
                                 Code("cd your-project\nlf init\nlf design"),
-                                cls="install-code next-steps",
+                                cls="install-code next-skills",
                                 tabindex="0",
                             ),
-                            cls="next-steps-wrapper",
+                            cls="next-skills-wrapper",
                         ),
                         cls="install-option",
                         style="max-width: 420px; margin: 0 auto;",

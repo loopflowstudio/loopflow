@@ -78,14 +78,14 @@ struct AttentionStoreTests {
     @Test("context decodes interactive from kind")
     func parsesInteractiveContext() {
         let context: [String: Any] = [
-            "step": "code/design",
+            "skill": "code/design",
             "session_id": "ts-123",
             "design_path": "scratch/my-branch.md",
             "mutation_summary": "- Rebalance the backlog",
         ]
         let parsed = AttentionItem.context(kind: .interactive, json: context)
         if case .interactive(let ctx) = parsed {
-            #expect(ctx.step == "code/design")
+            #expect(ctx.skill == "code/design")
             #expect(ctx.sessionId == "ts-123")
             #expect(ctx.designPath == "scratch/my-branch.md")
             #expect(ctx.mutationSummary == "- Rebalance the backlog")
@@ -97,12 +97,12 @@ struct AttentionStoreTests {
     @Test("context decodes algedonic from kind")
     func parsesAlgedonicContext() {
         let context: [String: Any] = [
-            "step": "implement",
+            "skill": "implement",
             "error": "agent crashed",
         ]
         let parsed = AttentionItem.context(kind: .algedonic, json: context)
         if case .algedonic(let ctx) = parsed {
-            #expect(ctx.step == "implement")
+            #expect(ctx.skill == "implement")
             #expect(ctx.error == "agent crashed")
         } else {
             Issue.record("Expected algedonic context, got \(parsed)")
@@ -115,7 +115,7 @@ struct AttentionStoreTests {
         #expect(AttentionKind(rawValue: "code_review") == .interactive)
         #expect(AttentionKind(rawValue: "calibration") == .interactive)
         #expect(AttentionKind(rawValue: "queue_failure") == .algedonic)
-        #expect(AttentionKind(rawValue: "step_failure") == .algedonic)
+        #expect(AttentionKind(rawValue: "skill_failure") == .algedonic)
         #expect(AttentionKind(rawValue: "interactive") == .interactive)
         #expect(AttentionKind(rawValue: "algedonic") == .algedonic)
     }
@@ -125,9 +125,9 @@ struct AttentionStoreTests {
         let json: [String: Any] = [
             "id": "attn-legacy",
             "wave_id": "wave-1",
-            "kind": "step_failure",
+            "kind": "skill_failure",
             "status": "surfaced",
-            "title": "Step failed",
+            "title": "Skill failed",
             "summary": "error",
             "context": ["error": "boom"] as [String: Any],
             "surfaced_at": ISO8601DateFormatter().string(from: now),

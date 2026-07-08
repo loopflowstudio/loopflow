@@ -34,7 +34,7 @@ tmux attach -t <name>  # watch one work
 | Where you are | What to read |
 |---|---|
 | Just installed, want to try it | [Try It](#try-it) above, then [Get Started](getting-started.md) |
-| Building features with steps and flows | [Get Started → Build Features](getting-started.md#build-features) |
+| Building features with skills and flows | [Get Started → Build Features](getting-started.md#build-features) |
 | Ready to automate with waves | [Wave Authoring](wave-authoring.md) |
 | Understanding how the pieces fit | [Architecture](architecture.md) |
 | Running agents on a server | [Get Started → Go Remote](getting-started.md#go-remote) |
@@ -43,9 +43,9 @@ tmux attach -t <name>  # watch one work
 
 ## Why Flows?
 
-Steps are atomic. Flows are how work actually gets done.
+Skills are atomic. Flows are how work actually gets done.
 
-**Linear flows** chain steps with automatic commits:
+**Linear flows** run a sequence of steps — each step names a skill, an op, or a flow — with automatic commits:
 ```
 design → implement → polish
 ```
@@ -71,14 +71,14 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 
 | Atom | What it does | File |
 |------|--------------|------|
-| **Step** | Runs a prompt with assembled context | `.lf/steps/*.md` |
-| **Flow** | Chains steps together | `.lf/flows/*.yaml` |
+| **Skill** | Runs a prompt with assembled context | `.lf/skills/*.md` |
+| **Flow** | Chains skills together | `.lf/flows/*.yaml` |
 | **Goal** | A wave's intent and loop prompt | `wave/<name>/GOAL.md` |
 | **Memory** | What a wave remembers between loops | `wave/<name>/MEMORY.md` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
 | **Cron** | Scheduled supplementary flow | goal frontmatter |
 
-A wave is a named agent with a goal. Everything that defines it — goal, memory, routing judgment, crons — is authored in the repo. Crons live in `GOAL.md` frontmatter and are fired by the wave's resident mind. lfd serves wave status and live sessions to clients.
+A wave is a named agent with a goal. Everything that defines it — goal, memory, routing judgment, crons — is authored in the repo. Crons live in `GOAL.md` frontmatter and are fired by the wave's resident flowloop. lfd serves wave status and live sessions to clients.
 
 ```markdown
 ---
@@ -100,12 +100,12 @@ Read the roadmap, pick the next useful move, and dispatch the appropriate flow.
 
 ---
 
-## Step
+## Skill
 
 A markdown file that tells the coding agent what to do.
 
 ```markdown
-# .lf/steps/audit.md
+# .lf/skills/audit.md
 
 Audit auth changes on this branch.
 Check for:
@@ -117,16 +117,16 @@ Fix any issues you find.
 ```
 
 ```bash
-lf audit                      # run the step
+lf audit                      # run the skill
 lf audit: focus on auth       # pass arguments
 ```
 
-Steps run to completion. Built-ins: `debug`, `design`, `implement`, `gate`, `qa`, `lint`.
+Skills run to completion. Built-ins: `debug`, `design`, `implement`, `gate`, `qa`, `lint`.
 
-**Where to put steps:** `.lf/steps/` is canonical. Symlink for Claude Code compatibility:
+**Where to put skills:** `.lf/skills/` is canonical. Symlink for Claude Code compatibility:
 
 ```bash
-ln -s ../.lf/steps .claude/commands
+ln -s ../.lf/skills .claude/commands
 ```
 
 ### Token compression
@@ -145,7 +145,7 @@ Release systems, long-running waves, and handoffs should compress source materia
 
 ## Flow
 
-Chains steps together with commits between them.
+Chains skills together with commits between them.
 
 ```yaml
 # .lf/flows/ship-api.yaml
@@ -193,7 +193,7 @@ direction adds code-model rigor. Stack them to get both.
 
 ## Docs
 
-Repo docs are not auto-injected. A step sees only the essentials (see [What's Auto-Included](#whats-auto-included)); prefetch anything else with `--docs` — a file, a glob, or a directory:
+Repo docs are not auto-injected. A skill sees only the essentials (see [What's Auto-Included](#whats-auto-included)); prefetch anything else with `--docs` — a file, a glob, or a directory:
 
 ```bash
 lf gate --docs VISUAL_DESIGN.md      # one doc
@@ -210,13 +210,13 @@ Point `--docs` at what a task actually needs, and let `AGENTS.md` point at the r
 ```
 .lf/                      # Repo config and extensions
   config.yaml             # Model, context defaults
-  steps/                  # Step prompts (preferred)
+  skills/                  # Skill prompts (preferred)
   directions/             # Judgment and intent
   flows/                  # Flow definitions
-.claude/commands/         # Steps (Claude Code compatible)
+.claude/commands/         # Skills (Claude Code compatible)
 scratch/                  # PR scratchpad (cleared on merge)
 wave/                     # Wave plans (persists)
-~/.lf/                    # Global config and steps
+~/.lf/                    # Global config and skills
 ```
 
 ### scratch/ vs wave/
@@ -232,7 +232,7 @@ wave/                     # Wave plans (persists)
 
 ### What's Auto-Included
 
-Every step sees your agent doc (`AGENTS.md` / `CLAUDE.md` / `STYLE.md`), `LOOPFLOW.md`, `scratch/`, and `wave/`. Nothing else — pull in extra docs with `--docs`, branch file bodies with `--diff-files`, and raw patches with `--diff`.
+Every skill sees your agent doc (`AGENTS.md` / `CLAUDE.md` / `STYLE.md`), `LOOPFLOW.md`, `scratch/`, and `wave/`. Nothing else — pull in extra docs with `--docs`, branch file bodies with `--diff-files`, and raw patches with `--diff`.
 
 ---
 

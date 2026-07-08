@@ -2,20 +2,20 @@ use std::time::SystemTime;
 
 #[derive(Debug, Clone)]
 pub enum EngineEvent {
-    StepStarted {
+    SkillStarted {
         run_id: String,
-        step: String,
+        skill: String,
         timestamp: SystemTime,
     },
-    StepCompleted {
+    SkillCompleted {
         run_id: String,
-        step: String,
+        skill: String,
         exit_code: i32,
         timestamp: SystemTime,
     },
-    StepFailed {
+    SkillFailed {
         run_id: String,
-        step: String,
+        skill: String,
         error: String,
         timestamp: SystemTime,
     },

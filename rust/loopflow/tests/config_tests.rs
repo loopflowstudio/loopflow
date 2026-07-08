@@ -201,11 +201,11 @@ direction:
 }
 
 // =============================================================================
-// Interactive steps
+// Interactive skills
 // =============================================================================
 
 #[test]
-fn config_interactive_step_list() {
+fn config_interactive_skill_list() {
     let temp = TempDir::new().unwrap();
     write_config(
         temp.path(),

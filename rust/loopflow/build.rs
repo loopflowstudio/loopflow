@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Category directories whose step/flow names are registered flat (no prefix).
+/// Category directories whose skill/flow names are registered flat (no prefix).
 /// Everything else is a namespaced category: names are stored as `<cat>/<name>`.
 /// Core categories share one flat namespace and must not collide with each other.
 const CORE_CATEGORIES: &[&str] = &["build", "govern", "ops"];
@@ -17,15 +17,15 @@ fn main() {
     let builtins_dir = manifest_dir.join("src/engine/builtins");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
 
-    // Builtins live at `<cat>/<kind>/*.ext`. Steps and flows from CORE_CATEGORIES
-    // are registered flat; steps and flows from other categories are registered
+    // Builtins live at `<cat>/<kind>/*.ext`. Skills and flows from CORE_CATEGORIES
+    // are registered flat; skills and flows from other categories are registered
     // as `<cat>/<name>` and are also reachable by bare name when unambiguous.
     generate_kind_map(
         &builtins_dir,
-        "step",
+        "skill",
         "md",
         "BUILTIN_STEPS",
-        &out_dir.join("builtin_steps.rs"),
+        &out_dir.join("builtin_skills.rs"),
     );
 
     generate_kind_map(
@@ -52,10 +52,10 @@ fn main() {
     );
     generate_category_map(
         &builtins_dir,
-        "step",
+        "skill",
         "md",
         "BUILTIN_STEP_CATEGORIES",
-        &out_dir.join("builtin_step_categories.rs"),
+        &out_dir.join("builtin_skill_categories.rs"),
     );
 
     generate_map(

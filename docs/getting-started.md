@@ -40,7 +40,7 @@ lf debug -c
 Tokens: 8,247
 
 system         4,892 ████
-step           1,854 █
+skill           1,854 █
 scratch          867 ▏
 clipboard        634 ▏
 ```
@@ -91,9 +91,9 @@ lf gate                            # ship-ready check
 lf op pr                           # open PR
 ```
 
-### Steps chain
+### Skills chain
 
-| Step | What it does |
+| Skill | What it does |
 |------|--------------|
 | `design` | Explore the problem, write spec to `scratch/<branch>.md` |
 | `implement` | Read spec, build it |
@@ -103,7 +103,7 @@ lf op pr                           # open PR
 
 ### How steps chain
 
-| Step | Reads | Writes |
+| Skill | Reads | Writes |
 |------|-------|--------|
 | design | — | `scratch/<branch>.md` |
 | implement | `scratch/<branch>.md` | code |
@@ -112,7 +112,7 @@ lf op pr                           # open PR
 
 ### Named flows
 
-Chain steps manually, or use a named flow:
+Chain skills manually, or use a named flow (a flow is a sequence of steps; each step names a skill, an op, or a subflow):
 
 ```bash
 lf design && lf implement && lf gate    # manual chain
@@ -121,18 +121,18 @@ lf build                                # full design → code → demo/review �
 
 Flows automate the handoffs. `build` runs kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy.
 
-### Custom steps
+### Custom skills
 
-Add your own in `.lf/steps/`:
+Add your own in `.lf/skills/`:
 
 ```markdown
-# .lf/steps/audit.md
+# .lf/skills/audit.md
 Check this branch for security issues.
 Focus on input validation and auth boundaries.
 ```
 
 ```bash
-lf audit    # runs your custom step
+lf audit    # runs your custom skill
 ```
 
 ### Shipping
@@ -148,7 +148,7 @@ lf op land    # submit to merge queue
 
 Ready to automate? Waves run your workflows continuously.
 
-`lf` steps are manual building blocks. A wave is a named agent that runs them for you — reading a roadmap, dispatching workers to build each item, watching their PRs, and looping.
+`lf` skills are manual building blocks. A wave is a named agent that runs them for you — reading a roadmap, dispatching workers to build each item, watching their PRs, and looping.
 
 Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter sets machine config such as `workers:`, `crons:`, and `pm:`), then run the agent:
 
@@ -175,7 +175,7 @@ Stop a wave with Ctrl-C in its `lf wave` session.
 2. Expand `build` → `build`.
 3. Click `gate` to see every parent flow that reaches it.
 
-`lfd` serves the same resolved catalog at `/v0/catalog?repo=/path/to/repo`, including builtin definitions and any `.lf/flows/*.yaml` or `.lf/steps/*.md` overrides in the repo.
+`lfd` serves the same resolved catalog at `/v0/catalog?repo=/path/to/repo`, including builtin definitions and any `.lf/flows/*.yaml` or `.lf/skills/*.md` overrides in the repo.
 
 You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
 
@@ -224,7 +224,7 @@ Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`.
 
 | Key | Action |
 |-----|--------|
-| `prefix+l r` | Run step/wave |
+| `prefix+l r` | Run skill/wave |
 | `prefix+l s` | Stop |
 | `prefix+l o` | Open logs |
 | `prefix+l w` | Pick wave/worktree |

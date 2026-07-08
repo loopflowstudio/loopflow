@@ -50,7 +50,7 @@ pub fn kill_child_if_running() {
 /// delivers SIGHUP — see the ctrlc `termination` feature in Cargo.toml) and
 /// calls `std::process::exit`, which skips Rust destructors, so anything that
 /// must be torn down on interrupt (e.g. the wave server's discovery pointer,
-/// the mind's codex process group) registers a hook here.
+/// the flowloop's pass process group) registers a hook here.
 #[allow(clippy::type_complexity)]
 static INTERRUPT_HOOKS: OnceLock<Mutex<Vec<Box<dyn Fn() + Send>>>> = OnceLock::new();
 
@@ -1099,7 +1099,7 @@ mod tests {
 
     #[test]
     fn build_codex_command_without_context_file() {
-        // Skill-launched steps clear the system prompt, so no context file is
+        // Skill-launched skills clear the system prompt, so no context file is
         // written. Codex must not receive an empty `model_instructions_file`.
         let launch = default_launch();
         let process = ProcessConfig {

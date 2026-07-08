@@ -17,7 +17,7 @@ Agents are organized by how urgently they need human attention:
 
 ### 1. Needs Attention (Blocked)
 Agent is stopped and cannot proceed without human input.
-- Interactive step waiting for response
+- Interactive skill waiting for response
 - Error requiring acknowledgment
 - **Visual**: Orange/red indicator, shown first in sidebar
 
@@ -29,7 +29,7 @@ Agent has work ready for human review. Work can continue (agents commit to agent
 
 ### 3. Active (Running)
 Agent is working autonomously, no attention needed.
-- Executing flow steps
+- Executing flow skills
 - Making commits to agent-main
 - **Visual**: Blue running indicator, third section
 
@@ -67,7 +67,7 @@ Agents have four dimensions, configured in order:
 
 1. **Area** - Which folders the agent works on (required to run)
 2. **Goal** - What the agent should accomplish (inline text or preset)
-3. **Flow** - Which steps to execute (ship, debug, etc.)
+3. **Flow** - Which skills to execute (ship, debug, etc.)
 4. **Trigger** - When to run (once, loop, watch, cron)
 
 Area is required before running. Other dimensions have sensible defaults.
@@ -97,17 +97,17 @@ When an agent is selected:
 - **Header**: Name, status, area/flow/trigger summary
 - **Content Section**: Vision, goals, risks, and roadmap progress parsed from `wave/<name>/README.md` and numbered roadmap files
 - **Config Section** (idle): Area picker, goal selector, flow picker, run button
-- **Progress Section** (active): Current step, live output
+- **Progress Section** (active): Current skill, live output
 - **Files Section**: Changed files with diff stats
 
 ## Future Considerations
 
-### Interactive Step Handling
-When a flow hits an interactive step:
+### Interactive Skill Handling
+When a flow hits an interactive skill:
 1. Agent status changes to "blocked"
 2. Bubbles to top of sidebar
 3. Detail panel shows what input is needed
-4. After responding, option to save interaction as reusable step
+4. After responding, option to save interaction as reusable skill
 
 ### Execution History
 - Separate concept from flow definitions

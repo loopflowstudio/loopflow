@@ -1,9 +1,9 @@
 //! `lf chat` — post a message into a wave's thread through its live server.
 //!
-//! The speech surface of the one-door calling convention: minds, workers,
+//! The speech surface of the one-door calling convention: flowloops, workers,
 //! humans, and scripts all emit through the same verb. The message POSTs to
 //! the target wave's server as the `say` op — it lands in the thread as an
-//! attributed statement AND wakes the mind like any input (queued, coalesced,
+//! attributed statement AND wakes the flowloop like any input (queued, coalesced,
 //! answered).
 //!
 //! # Targeting (by CHANNEL name — dots are the tree)
@@ -415,7 +415,7 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::WaveAgent,
-            step: "mind".to_string(),
+            skill: "flowloop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
             argv: vec!["lf".to_string(), "wave".to_string(), wave.name().clone()],
@@ -658,7 +658,7 @@ mod tests {
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "blocked on the schema");
         assert_eq!(thread[0].from.as_deref(), Some("wave concerto"));
-        // …its mind was woken with the same attributed input…
+        // …its flowloop was woken with the same attributed input…
         let InboxItem::Message(msg) = parent_inbox.try_recv().expect("inbox item") else {
             panic!("expected message inbox item");
         };
@@ -760,7 +760,7 @@ mod tests {
 
         // The whole door: POST with the channel field lands in the child
         // journal, and a `say` also folds up to the wave thread (the report
-        // reaches the mind).
+        // reaches the flowloop).
         let mut body = serde_json::json!({
             "op": "say",
             "text": "child-bound",

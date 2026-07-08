@@ -157,7 +157,7 @@ pub async fn build_wave_dto(
         direction: wave.direction().clone(),
         area: wave.area().clone(),
         agent: wave_config.as_ref().and_then(|config| config.agent.clone()),
-        step_agents: wave_config.and_then(|config| config.step_agents),
+        skill_agents: wave_config.and_then(|config| config.skill_agents),
         created_at: format_datetime(wave.created_at()),
         status: wave.status().as_str().to_string(),
         flow_steps,

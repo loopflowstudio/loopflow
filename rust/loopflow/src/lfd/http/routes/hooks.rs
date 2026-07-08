@@ -7,11 +7,11 @@
 //! facts plus explicit `lf` commands where that is the real contract.
 //!
 //! - **check_run failure** → `lf chat --wave <wave> "CI failed: …"` — the
-//!   wave's mind decides whether and how to dispatch a fix.
+//!   wave's flowloop decides whether and how to dispatch a fix.
 //! - **PR merged** → `lf op queue reconcile --wave <wave>` — the queue verb
 //!   owns stack-status inference and promotion.
 //! - **push to main** → `lf chat --wave <wave> "main moved: …"` for every
-//!   wave in the repo — the mind decides to rebase/integrate with judgment.
+//!   wave in the repo — the flowloop decides to rebase/integrate with judgment.
 //!
 //! Execs are spawned detached; a wave whose server is down bounces the chat
 //! with exit ≠ 0 — logged at warn and, for CI failures, the dedupe key is NOT

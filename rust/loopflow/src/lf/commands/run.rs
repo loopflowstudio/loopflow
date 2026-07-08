@@ -14,17 +14,17 @@ use std::path::PathBuf;
 use std::time::Instant;
 use tracing::{debug, info, instrument, trace, warn};
 
-/// Unified entry point for running steps, inline prompts, or interactive chat.
+/// Unified entry point for running skills, inline prompts, or interactive chat.
 ///
-/// | step    | message | behavior                              |
+/// | skill    | message | behavior                              |
 /// |---------|---------|---------------------------------------|
-/// | Some    | None    | Run named step                        |
+/// | Some    | None    | Run named skill                        |
 /// | None    | Some    | Run inline prompt                     |
-/// | Some    | Some    | Run step with message as extra context |
+/// | Some    | Some    | Run skill with message as extra context |
 /// | None    | None    | Interactive chat                      |
-#[instrument(skip(cli), fields(step = ?step, has_message = message.is_some()))]
-pub fn run(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
-    let mut built = build_prompt(step, message, cli)?;
+#[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
+pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
+    let mut built = build_prompt(skill, message, cli)?;
 
     // Try fast-path: run the command before spinning up an agent.
     if let Some(ref cmd) = built.fast_path {
@@ -69,12 +69,12 @@ struct PromptBuild {
     prompt: String,
     harness: String,
     model: Option<String>,
-    step_name: Option<String>,
+    skill_name: Option<String>,
     log_name: String,
     fast_path: Option<String>,
 }
 
-fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
+fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
     let start = Instant::now();
     let repo_root = find_repo_root()?;
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
@@ -92,21 +92,24 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
     );
 
     let discover_start = Instant::now();
-    let discovered_step = if let Some(step_name) = step {
-        Some(crate::lf::discovery::discover_step(&repo_root, step_name)?)
+    let discovered_skill = if let Some(skill_name) = skill {
+        Some(crate::lf::discovery::discover_skill(
+            &repo_root, skill_name,
+        )?)
     } else {
         None
     };
     debug!(
         elapsed_ms = discover_start.elapsed().as_millis(),
-        "discovered step"
+        "discovered skill"
     );
 
-    if let Some(ref s) = discovered_step {
-        debug!(s.name, s.interactive, "discovered step");
+    if let Some(ref s) = discovered_skill {
+        debug!(s.name, s.interactive, "discovered skill");
     }
 
-    let is_interactive = is_interactive_run(cli, &config, discovered_step.as_ref(), step, message);
+    let is_interactive =
+        is_interactive_run(cli, &config, discovered_skill.as_ref(), skill, message);
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
@@ -122,8 +125,8 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         &config,
         LaunchPromptInput {
             repo_root: repo_root.clone(),
-            step: step.map(|value| value.to_string()),
-            resolved_step: discovered_step.clone(),
+            skill: skill.map(|value| value.to_string()),
+            resolved_skill: discovered_skill.clone(),
             surface,
             directions: cli.direction.clone(),
             docs: cli.docs.clone(),
@@ -132,7 +135,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
             no_loopflow: cli.no_loopflow,
             agent: cli.model.clone(),
             cwd: Some(repo_root.clone()),
-            max_turns: None,
+            max_turns: cli.max_turns,
             yolo_mode: cli.yolo || config.yolo,
             include_config_directions: !cli.no_direction,
             source_overrides: ContextSourceOverrides {
@@ -156,11 +159,11 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         .expect("prepare_launch_prompt always sets agent");
     let (harness, model) = parse_agent(&agent);
 
-    let step_name = discovered_step
+    let skill_name = discovered_skill
         .as_ref()
-        .map(|step| step.name.clone())
-        .or_else(|| step.map(|value| value.to_string()));
-    let log_name = step_name
+        .map(|skill| skill.name.clone())
+        .or_else(|| skill.map(|value| value.to_string()));
+    let log_name = skill_name
         .as_deref()
         .unwrap_or(if message.is_some() { "inline" } else { "chat" })
         .to_string();
@@ -173,15 +176,15 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
     };
 
-    let fast_path = discovered_step.as_ref().and_then(|s| s.fast_path.clone());
+    let fast_path = discovered_skill.as_ref().and_then(|s| s.fast_path.clone());
     let mut agent_config = prepared.config;
     let mut prompt = prepared.prompt;
     // Both headless and interactive runs hand off via the vendor skill seed —
     // skills fire under `claude -p` / `codex exec`, verified on-machine. The seed
     // carries the surface run-mode preamble (`surface.instructions()`), so the
     // headless warning ("no user present, decide and keep moving") still lands.
-    if let Some(step_name) = step_name.as_deref() {
-        if should_launch_via_skill(step_name) {
+    if let Some(skill_name) = skill_name.as_deref() {
+        if should_launch_via_skill(skill_name) {
             let sync_start = Instant::now();
             crate::engine::sync_skills(&SkillSyncOptions::default())?;
             debug!(
@@ -191,7 +194,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
             prompt = skill_launch_seed(
                 &harness,
                 surface,
-                step_name,
+                skill_name,
                 message,
                 prepared.components.operate,
                 &crate::engine::prompt::format_wave_context_sections(&prepared.components),
@@ -200,8 +203,8 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
             agent_config.task_prompt = prompt.clone();
         } else {
             warn!(
-                step = step_name,
-                "external skill step uses assembled prompt fallback"
+                skill = skill_name,
+                "external skill skill uses assembled prompt fallback"
             );
         }
     }
@@ -217,7 +220,7 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
         prompt,
         harness,
         model,
-        step_name,
+        skill_name,
         log_name,
         fast_path,
     })
@@ -226,32 +229,32 @@ fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<
 fn is_interactive_run(
     cli: &Cli,
     config: &Config,
-    discovered_step: Option<&crate::engine::Step>,
-    step: Option<&str>,
+    discovered_skill: Option<&crate::engine::Skill>,
+    skill: Option<&str>,
     message: Option<&str>,
 ) -> bool {
     cli.tui
         || cli.ide
         || cli.interactive
         || (!cli.batch
-            && (discovered_step
-                .and_then(|step| step.interactive)
+            && (discovered_skill
+                .and_then(|skill| skill.interactive)
                 .unwrap_or(false)
-                || step
-                    .map(|step_name| config.interactive.contains(&step_name.to_string()))
+                || skill
+                    .map(|skill_name| config.interactive.contains(&skill_name.to_string()))
                     .unwrap_or(false)
-                || (step.is_none() && message.is_none())))
+                || (skill.is_none() && message.is_none())))
 }
 
-fn should_launch_via_skill(step_name: &str) -> bool {
-    !step_name.starts_with("npx/") && !step_name.starts_with("rams/")
+fn should_launch_via_skill(skill_name: &str) -> bool {
+    !skill_name.starts_with("npx/") && !skill_name.starts_with("rams/")
 }
 
 /// Build the launch seed for a vendor skill handoff: the skill invocation,
 /// system-safe instruction sections, the ambient wave sections (a run born
 /// inside a wave inherits the wave's memory and recent chat — hard-capped,
 /// and empty outside a wave), and optional user message. Orientation now
-/// lives in the step bodies themselves, and the step body loads from the
+/// lives in the skill bodies themselves, and the skill body loads from the
 /// synced skill on invoke, so this stays small enough for the GUI deep-link
 /// cap.
 ///
@@ -261,7 +264,7 @@ fn should_launch_via_skill(step_name: &str) -> bool {
 fn skill_launch_seed(
     harness: &str,
     surface: Surface,
-    step_name: &str,
+    skill_name: &str,
     message: Option<&str>,
     loopflow: bool,
     wave_sections: &[String],
@@ -273,7 +276,7 @@ fn skill_launch_seed(
         ..Default::default()
     };
     let system_sections = crate::engine::prompt::format_system_sections(&system_components);
-    let mut seed = format!("{sigil}{step_name}\n\n{}", system_sections.join("\n\n"));
+    let mut seed = format!("{sigil}{skill_name}\n\n{}", system_sections.join("\n\n"));
     for section in wave_sections {
         seed.push_str("\n\n");
         seed.push_str(section);
@@ -301,7 +304,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
         None
     };
     let command = format_reproducible_command(
-        built.step_name.as_deref(),
+        built.skill_name.as_deref(),
         &direction_names,
         built.components.wave.as_deref(),
         &cli.docs,
@@ -320,7 +323,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 
 fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     // `--tui` / `--ide` force a handoff and override the repo default; an
-    // interactive step with neither flag uses `session.launch`.
+    // interactive skill with neither flag uses `session.launch`.
     let forced_target = if cli.ide {
         Some(LaunchTarget::Ide)
     } else if cli.tui {
@@ -360,7 +363,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         "wrote prompt log"
     );
 
-    // Skill-launched steps clear the system prompt (the seed carries everything
+    // Skill-launched skills clear the system prompt (the seed carries everything
     // in the task prompt). Don't write or pass a context file in that case: codex
     // treats an empty `model_instructions_file` as an error.
     let context_file_start = Instant::now();
@@ -384,7 +387,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     process.context_file = context_file;
     process.stream_format = StreamFormat::Human(use_color);
 
-    // Set up directive relay so agent steps can issue shell directives
+    // Set up directive relay so agent skills can issue shell directives
     // (e.g. `cd` after `lf op land` rotates worktrees).
     let directive_file = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
     let mut agent_config = built.agent_config.clone();
@@ -458,28 +461,28 @@ fn relay_directives(relay: &std::path::Path, target: &str) {
     }
 }
 
-pub fn split_step_args(args: &[String]) -> Result<(String, Vec<String>)> {
-    let first = args.first().ok_or_else(|| anyhow!("no step specified"))?;
+pub fn split_skill_args(args: &[String]) -> Result<(String, Vec<String>)> {
+    let first = args.first().ok_or_else(|| anyhow!("no skill specified"))?;
 
-    let mut step = first.clone();
-    let step_args = args.iter().skip(1).cloned().collect::<Vec<_>>();
+    let mut skill = first.clone();
+    let skill_args = args.iter().skip(1).cloned().collect::<Vec<_>>();
 
-    // Trailing colon is a separator: `implement: add auth` → step="implement"
-    if let Some(stripped) = step.strip_suffix(':') {
-        step = stripped.to_string();
+    // Trailing colon is a separator: `implement: add auth` → skill="implement"
+    if let Some(stripped) = skill.strip_suffix(':') {
+        skill = stripped.to_string();
     }
 
-    if step.is_empty() {
-        return Err(anyhow!("no step specified"));
+    if skill.is_empty() {
+        return Err(anyhow!("no skill specified"));
     }
 
-    Ok((step, step_args))
+    Ok((skill, skill_args))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_interactive_run, should_launch_via_skill, skill_launch_seed, split_step_args};
-    use crate::engine::{Config, Step, Surface};
+    use super::{is_interactive_run, should_launch_via_skill, skill_launch_seed, split_skill_args};
+    use crate::engine::{Config, Skill, Surface};
     use crate::lf::Cli;
     use clap::Parser;
 
@@ -492,23 +495,23 @@ mod tests {
     }
 
     #[test]
-    fn interactive_step_counts_as_interactive_without_force_flag() {
+    fn interactive_skill_counts_as_interactive_without_force_flag() {
         let cli = Cli::parse_from(["lf", "design"]);
         let config = Config::default();
-        let mut step = Step::named("design");
-        step.interactive = Some(true);
+        let mut skill = Skill::named("design");
+        skill.interactive = Some(true);
 
         assert!(is_interactive_run(
             &cli,
             &config,
-            Some(&step),
+            Some(&skill),
             Some("design"),
             None
         ));
     }
 
     #[test]
-    fn skill_launch_seed_starts_with_slash_step_and_message() {
+    fn skill_launch_seed_starts_with_slash_skill_and_message() {
         let seed = skill_launch_seed(
             "claude",
             Surface::Cli,
@@ -518,7 +521,7 @@ mod tests {
             &[],
         );
         assert!(seed.starts_with("/implement\n\n"));
-        // Orientation now lives in the step body, not the seed.
+        // Orientation now lives in the skill body, not the seed.
         assert!(!seed.contains("<lf:orientation>"));
         assert!(seed.contains("<lf:message>\nbuild auth\n</lf:message>"));
     }
@@ -597,37 +600,37 @@ mod tests {
     }
 
     #[test]
-    fn external_skill_steps_keep_assembled_prompt_fallback() {
+    fn external_skill_skills_keep_assembled_prompt_fallback() {
         assert!(!should_launch_via_skill("npx/vercel-labs/deep-research"));
         assert!(!should_launch_via_skill("rams/rams"));
         assert!(should_launch_via_skill("implement"));
     }
 
     #[test]
-    fn split_step_args_handles_trailing_colon() {
+    fn split_skill_args_handles_trailing_colon() {
         let args = vec![
             "implement:".to_string(),
             "add".to_string(),
             "logs".to_string(),
         ];
-        let (step, rest) = split_step_args(&args).expect("split args");
-        assert_eq!(step, "implement");
+        let (skill, rest) = split_skill_args(&args).expect("split args");
+        assert_eq!(skill, "implement");
         assert_eq!(rest, vec!["add".to_string(), "logs".to_string()]);
     }
 
     #[test]
-    fn split_step_args_preserves_namespaced_step() {
+    fn split_skill_args_preserves_namespaced_skill() {
         let args = vec!["npx/explain-code".to_string()];
-        let (step, rest) = split_step_args(&args).expect("split args");
-        assert_eq!(step, "npx/explain-code");
+        let (skill, rest) = split_skill_args(&args).expect("split args");
+        assert_eq!(skill, "npx/explain-code");
         assert!(rest.is_empty());
     }
 
     #[test]
-    fn split_step_args_preserves_namespaced_step_with_args() {
+    fn split_skill_args_preserves_namespaced_skill_with_args() {
         let args = vec!["gstack/office-hours".to_string(), "auth flow".to_string()];
-        let (step, rest) = split_step_args(&args).expect("split args");
-        assert_eq!(step, "gstack/office-hours");
+        let (skill, rest) = split_skill_args(&args).expect("split args");
+        assert_eq!(skill, "gstack/office-hours");
         assert_eq!(rest, vec!["auth flow".to_string()]);
     }
 }

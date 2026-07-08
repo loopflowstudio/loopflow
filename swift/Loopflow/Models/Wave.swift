@@ -119,7 +119,7 @@ public enum WaitingReason: Sendable, Hashable {
 public struct InteractiveSession: Sendable, Identifiable {
     public let id: String
     public let waveId: String
-    public let step: String
+    public let skill: String
     public let worktreePath: String
     public let prompt: String?
     public let startedAt: Date
@@ -127,23 +127,23 @@ public struct InteractiveSession: Sendable, Identifiable {
     public init(
         id: String = UUID().uuidString,
         waveId: String,
-        step: String,
+        skill: String,
         worktreePath: String,
         prompt: String? = nil,
         startedAt: Date = Date()
     ) {
         self.id = id
         self.waveId = waveId
-        self.step = step
+        self.skill = skill
         self.worktreePath = worktreePath
         self.prompt = prompt
         self.startedAt = startedAt
     }
 
     /// Build the shell command to run this session.
-    /// Runs the step, then auto-commits and pushes when the agent exits.
+    /// Runs the skill, then auto-commits and pushes when the agent exits.
     public var command: String {
-        var cmd = "lf \(step)"
+        var cmd = "lf \(skill)"
         if let prompt = prompt {
             cmd += " \(shellEscape(prompt))"
         }
@@ -206,7 +206,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var direction: [String]
     public var area: [String]
     public var agent: String?
-    public var stepAgents: [String: String]?
+    public var skillAgents: [String: String]?
     public var triggers: [Trigger]
     public var crons: [WaveCron]
     public var status: WaveStatus
@@ -235,7 +235,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         direction: [String] = [],
         area: [String] = [],
         agent: String? = nil,
-        stepAgents: [String: String]? = nil,
+        skillAgents: [String: String]? = nil,
         triggers: [Trigger] = [],
         crons: [WaveCron] = [],
         status: WaveStatus = .idle,
@@ -260,7 +260,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.direction = direction
         self.area = area
         self.agent = agent
-        self.stepAgents = stepAgents
+        self.skillAgents = skillAgents
         self.triggers = triggers
         self.crons = crons
         self.status = status

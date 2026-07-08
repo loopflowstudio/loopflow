@@ -7,13 +7,13 @@ pub mod session;
 
 #[derive(Parser, Debug)]
 #[command(name = "lf")]
-#[command(about = "Run steps and flows with coding agents")]
+#[command(about = "Run skills and flows with coding agents")]
 #[command(version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
-    /// List available steps and flows
+    /// List available skills and flows
     #[arg(short, long)]
     pub list: bool,
 
@@ -86,6 +86,10 @@ pub struct Cli {
     #[arg(long = "no-diff", overrides_with = "diff")]
     pub no_diff: bool,
 
+    /// Maximum agent turns for this invocation
+    #[arg(long = "max-turns")]
+    pub max_turns: Option<u32>,
+
     /// Wave name for wave/ scoping
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
     pub wave: Option<String>,
@@ -154,7 +158,7 @@ pub enum Commands {
     },
     /// Start a wave: a long-lived listener (journal, doors, live events over
     /// a loopback HTTP port; discovery via `wave/<name>/.wave-endpoint`)
-    /// that spawns and supervises the wave's mind as a resident child
+    /// that spawns and supervises the wave's flowloop as a resident child
     /// process.
     #[command(name = "wave")]
     Wave {
@@ -163,12 +167,39 @@ pub enum Commands {
         /// Take over even if lfd reports another live wave-agent session
         #[arg(long)]
         force: bool,
-        /// Serve dormant: listener only, no resident (health reads mind: null)
-        #[arg(long, conflicts_with = "mind_only")]
-        no_mind: bool,
-        /// Run only the resident (the mind) against an existing listener
-        #[arg(long, conflicts_with = "no_mind")]
-        mind_only: bool,
+        /// Serve dormant: listener only, no resident (health reads flowloop: null)
+        #[arg(long, conflicts_with = "flowloop_only")]
+        no_flowloop: bool,
+        /// Run only the resident flowloop against an existing listener
+        #[arg(long, conflicts_with = "no_flowloop")]
+        flowloop_only: bool,
+    },
+    /// Run a task as a bounded flowloop: loop task until the PR merges
+    Task {
+        /// What to do — free text; the flow's skills clarify it into a design
+        /// doc and drive one small PR to merged
+        seed: String,
+        /// Loop a different flow (any flow is loopable)
+        #[arg(long = "flow", default_value = "task")]
+        flow: String,
+        /// Wave name (default: inferred from the current worktree/branch)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Maximum passes before escalation
+        #[arg(long = "max-passes", default_value_t = 8)]
+        max_passes: u32,
+        /// Per-pass timeout in seconds
+        #[arg(long = "pass-timeout-secs", default_value_t = 1800)]
+        pass_timeout_secs: u64,
+        /// Overall timeout in seconds
+        #[arg(long = "wall-clock-secs", default_value_t = 7200)]
+        wall_clock_secs: u64,
+        /// Poll interval for the loop file's recheck predicate
+        #[arg(long = "poll-secs", default_value_t = 60)]
+        poll_secs: u64,
+        /// Maximum agent turns per pass
+        #[arg(long = "max-turns")]
+        max_turns: Option<u32>,
     },
     /// Show token usage by repo and provider (from a running lfd)
     Usage,
@@ -179,7 +210,7 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show one wave's runs, attention, and (when live) mind state, from the
+    /// Show one wave's runs, attention, and (when live) flowloop state, from the
     /// registry. Defaults to the ambient wave (`LFD_WAVE_ID`).
     Status {
         /// Wave name (default: the ambient wave)
@@ -194,7 +225,7 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Reconstruct one run from the local ledger: steps, durations, tokens, prompt logs
+    /// Reconstruct one run from the local ledger: skills, durations, tokens, prompt logs
     Trace {
         /// Run id from `lf runs` (a unique prefix is enough)
         run_id: String,
@@ -212,7 +243,7 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
-    /// Follow a wave's live event stream (turns, mind state, memory) until
+    /// Follow a wave's live event stream (turns, flowloop state, memory) until
     /// killed. Defaults to the invoking context's wave; exits 0 with a note
     /// when no wave resolves.
     Sub {
@@ -253,7 +284,24 @@ pub enum Commands {
         #[arg(last = true)]
         cmd: Vec<String>,
     },
-    /// External: step/flow name (when no subcommand matches)
+    /// Run a flow by name — the explicit form; bare flow names that collide
+    /// with subcommands (`task`, `wave`) are only reachable this way
+    Flow {
+        /// Flow name
+        name: String,
+        /// Message for the flow
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+    },
+    /// Run a skill (skill) by name — the explicit form
+    Skill {
+        /// Skill name
+        name: String,
+        /// Message for the skill
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+    },
+    /// External: skill/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -374,7 +422,7 @@ pub enum OpsCommand {
     },
     /// Update local main to match origin
     Sync,
-    /// Compile loopflow steps into your home vendor Skills directories
+    /// Compile loopflow skills into your home vendor Skills directories
     #[command(name = "sync-skills")]
     SyncSkills {
         /// Confirm writes under ~/ without prompting
@@ -438,7 +486,7 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: PmCommand,
     },
-    /// Provider authentication for local lf steps and ops
+    /// Provider authentication for local lf skills and ops
     Auth {
         #[command(subcommand)]
         cmd: AuthCommand,
@@ -464,7 +512,7 @@ pub enum CronCommand {
         /// Wave name passed to `lf <flow> --wave <wave>`
         #[arg(short = 'w', long = "wave")]
         wave: String,
-        /// Flow or step name to run
+        /// Flow or skill name to run
         #[arg(long = "flow")]
         flow: String,
         /// Schedule expression. v0 supports `daily`.
@@ -478,7 +526,7 @@ pub enum CronCommand {
         /// Wave name passed to `lf <flow> --wave <wave>`
         #[arg(short = 'w', long = "wave")]
         wave: String,
-        /// Flow or step name to remove
+        /// Flow or skill name to remove
         #[arg(long = "flow")]
         flow: String,
     },

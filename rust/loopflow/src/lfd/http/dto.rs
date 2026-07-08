@@ -78,7 +78,7 @@ pub struct WaveDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub step_agents: Option<HashMap<String, String>>,
+    pub skill_agents: Option<HashMap<String, String>>,
     pub created_at: Option<String>,
     /// Wave-level status rolled up over `repos` (see `Wave::status`).
     pub status: String,
@@ -211,7 +211,7 @@ pub struct SessionDto {
     pub parent_session_id: Option<String>,
     #[serde(rename = "use")]
     pub session_use: String,
-    pub step: String,
+    pub skill: String,
     pub agent: String,
     pub cwd: String,
     pub argv: Vec<String>,
@@ -233,7 +233,7 @@ pub fn session_dto(session: Session) -> SessionDto {
         run_id: session.run_id.map(|value| value.to_string()),
         parent_session_id: session.parent_session_id.map(|value| value.to_string()),
         session_use: session.session_use.as_str().to_string(),
-        step: session.step,
+        skill: session.skill,
         agent: session.agent,
         cwd: session.cwd,
         argv: session.argv,
@@ -525,7 +525,7 @@ mod contract_tests {
             direction: Vec::new(),
             area: Vec::new(),
             agent: None,
-            step_agents: None,
+            skill_agents: None,
             status: "idle".to_string(),
             workers: 1,
             created_at: None,

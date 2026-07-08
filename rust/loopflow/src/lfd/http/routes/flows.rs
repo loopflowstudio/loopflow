@@ -12,7 +12,7 @@ pub struct ListFlowsQuery {
 }
 
 #[derive(Debug, Serialize)]
-struct StepSummary {
+struct SkillSummary {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     agent: Option<String>,
@@ -29,7 +29,7 @@ struct FlowSummary {
 #[derive(Debug, Serialize)]
 struct FlowsResult {
     flows: Vec<FlowSummary>,
-    steps: Vec<StepSummary>,
+    skills: Vec<SkillSummary>,
     directions: Vec<String>,
     supported_harnesses: Vec<String>,
 }
@@ -45,7 +45,7 @@ pub async fn list_flows_handler(Query(query): Query<ListFlowsQuery>) -> ApiResul
     let repo_path = PathBuf::from(repo);
 
     let flows = list_flows(&repo_path);
-    let steps = list_steps(&repo_path);
+    let skills = list_skills(&repo_path);
     let directions = crate::lf::discovery::list_directions(Some(&repo_path));
     let supported_harnesses =
         crate::engine::config::load_config_or_default(Some(&repo_path)).supported_harnesses;
@@ -54,7 +54,7 @@ pub async fn list_flows_handler(Query(query): Query<ListFlowsQuery>) -> ApiResul
         ok: true,
         result: FlowsResult {
             flows,
-            steps,
+            skills,
             directions,
             supported_harnesses,
         },
@@ -64,8 +64,8 @@ pub async fn list_flows_handler(Query(query): Query<ListFlowsQuery>) -> ApiResul
 fn list_flows(repo: &Path) -> Vec<FlowSummary> {
     let mut flows: HashMap<String, Vec<String>> = HashMap::new();
 
-    for (name, steps) in list_repo_flows(repo) {
-        flows.insert(name, steps);
+    for (name, skills) in list_repo_flows(repo) {
+        flows.insert(name, skills);
     }
 
     for name in crate::engine::builtins::builtin_flow_names() {
@@ -73,8 +73,8 @@ fn list_flows(repo: &Path) -> Vec<FlowSummary> {
         if flows.contains_key(&name) {
             continue;
         }
-        if let Some(steps) = load_flow_steps(&name, repo) {
-            flows.insert(name, steps);
+        if let Some(skills) = load_flow_steps(&name, repo) {
+            flows.insert(name, skills);
         }
     }
 
@@ -104,8 +104,8 @@ fn list_repo_flows(repo: &Path) -> Vec<(String, Vec<String>)> {
         let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        if let Some(steps) = load_flow_steps(name, repo) {
-            result.push((name.to_string(), steps));
+        if let Some(skills) = load_flow_steps(name, repo) {
+            result.push((name.to_string(), skills));
         }
     }
 
@@ -118,30 +118,30 @@ pub(super) fn load_flow_steps(name: &str, repo: &Path) -> Option<Vec<String>> {
     Some(extract_step_names(&items))
 }
 
-fn extract_step_names(items: &[crate::engine::flow::ConcreteItem]) -> Vec<String> {
+fn extract_step_names(items: &[crate::engine::flow::ConcreteStep]) -> Vec<String> {
     let mut names = Vec::new();
     for item in items {
         match item {
-            crate::engine::flow::ConcreteItem::Step(step) => {
-                names.push(step.step.name.clone());
+            crate::engine::flow::ConcreteStep::Skill(skill) => {
+                names.push(skill.skill.name.clone());
             }
-            crate::engine::flow::ConcreteItem::Op(ops) => {
+            crate::engine::flow::ConcreteStep::Op(ops) => {
                 names.push(ops.item.to_string());
             }
-            crate::engine::flow::ConcreteItem::And(and) => {
+            crate::engine::flow::ConcreteStep::And(and) => {
                 for branch in &and.branches {
-                    for step in &branch.steps {
-                        names.push(step.step.name.clone());
+                    for skill in &branch.steps {
+                        names.push(skill.skill.name.clone());
                     }
                 }
             }
-            crate::engine::flow::ConcreteItem::Xor(_) => {
+            crate::engine::flow::ConcreteStep::Xor(_) => {
                 names.push("[xor]".to_string());
             }
-            crate::engine::flow::ConcreteItem::Or(_) => {
+            crate::engine::flow::ConcreteStep::Or(_) => {
                 names.push("[or]".to_string());
             }
-            crate::engine::flow::ConcreteItem::Loop(_) => {
+            crate::engine::flow::ConcreteStep::Loop(_) => {
                 names.push("[loop]".to_string());
             }
         }
@@ -149,14 +149,14 @@ fn extract_step_names(items: &[crate::engine::flow::ConcreteItem]) -> Vec<String
     names
 }
 
-fn list_steps(repo: &Path) -> Vec<StepSummary> {
-    let mut names: HashSet<String> = crate::engine::builtins::builtin_step_names()
+fn list_skills(repo: &Path) -> Vec<SkillSummary> {
+    let mut names: HashSet<String> = crate::engine::builtins::builtin_skill_names()
         .into_iter()
         .map(|name| name.to_string())
         .collect();
 
-    let steps_dir = repo.join(".lf/steps");
-    if let Ok(entries) = std::fs::read_dir(steps_dir) {
+    let skills_dir = repo.join(".lf/skills");
+    if let Ok(entries) = std::fs::read_dir(skills_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("md") {
@@ -168,22 +168,22 @@ fn list_steps(repo: &Path) -> Vec<StepSummary> {
         }
     }
 
-    let mut list: Vec<StepSummary> = names
+    let mut list: Vec<SkillSummary> = names
         .into_iter()
-        .map(|name| load_step_summary(repo, name))
+        .map(|name| load_skill_summary(repo, name))
         .collect();
     list.sort_by(|a, b| a.name.cmp(&b.name));
     list
 }
 
-fn load_step_summary(repo: &Path, name: String) -> StepSummary {
-    match crate::engine::flow::load_step(&name, repo) {
-        Ok(step) => StepSummary {
+fn load_skill_summary(repo: &Path, name: String) -> SkillSummary {
+    match crate::engine::flow::load_skill(&name, repo) {
+        Ok(skill) => SkillSummary {
             name,
-            agent: step.agent,
-            default_agent: step.default_agent,
+            agent: skill.agent,
+            default_agent: skill.default_agent,
         },
-        Err(_) => StepSummary {
+        Err(_) => SkillSummary {
             name,
             agent: None,
             default_agent: None,

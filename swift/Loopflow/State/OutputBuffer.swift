@@ -125,10 +125,10 @@ public final class OutputBuffer {
 
     // MARK: - Interactive Sessions
 
-    public func launchInteractiveSession(waveId: String, step: String, worktreePath: String, prompt: String? = nil) {
+    public func launchInteractiveSession(waveId: String, skill: String, worktreePath: String, prompt: String? = nil) {
         interactiveSession = InteractiveSession(
             waveId: waveId,
-            step: step,
+            skill: skill,
             worktreePath: worktreePath,
             prompt: prompt
         )

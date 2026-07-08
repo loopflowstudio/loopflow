@@ -24,8 +24,8 @@ def main() -> None:
             "--repo",
             str(ROOT / case["repo"]),
         ]
-        if case.get("step"):
-            cmd.extend(["--step", case["step"]])
+        if case.get("skill"):
+            cmd.extend(["--skill", case["skill"]])
         if case.get("surface"):
             cmd.extend(["--surface", case["surface"]])
         if case.get("no_loopflow"):

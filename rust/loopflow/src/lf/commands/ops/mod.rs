@@ -13,7 +13,7 @@ use crate::engine::{
     SkillSyncOptions, Surface,
 };
 use crate::lf::commands::util::find_repo_root;
-use crate::lf::discovery::discover_step;
+use crate::lf::discovery::discover_skill;
 use crate::lf::output::Colors;
 use crate::lf::{
     BranchFilterArgs, BranchesCommand, CronCommand, OpsCommand, PmCommand, QueueCommand,
@@ -137,7 +137,7 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
 /// operator's fresh-start button.
 ///
 /// Loopflow launches every wave server and worker as an `lf-`-prefixed tmux
-/// session, so killing those takes down the wave minds too (tmux SIGHUPs the
+/// session, so killing those takes down the wave flowloops too (tmux SIGHUPs the
 /// session's process group). Stale `.wave-endpoint` pointers under this repo's
 /// `wave/` are then removed so nothing dangles; lfd reconciles its own
 /// registry rows on next boot.
@@ -281,7 +281,7 @@ fn rebase_current(onto: Option<&str>, plan_only: bool, progress: &impl Progress)
                 "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
             );
             progress.status("Launching rebase agent to resolve conflicts...");
-            launch_step_agent(&repo_root, "rebase", Some(&context))
+            launch_skill_agent(&repo_root, "rebase", Some(&context))
         }
         Err(err) => Err(err.into()),
     }
@@ -315,7 +315,7 @@ fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
                 "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
             );
             progress.status("Launching rebase agent to resolve conflicts...");
-            launch_step_agent(&repo_root, "rebase", Some(&context))?;
+            launch_skill_agent(&repo_root, "rebase", Some(&context))?;
             progress.status("Retrying land after rebase...");
             land(&repo_root, options, progress)?;
         }
@@ -338,7 +338,7 @@ fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()>
                 "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
             );
             progress.status("Launching rebase agent to resolve conflicts...");
-            launch_step_agent(&repo_root, "rebase", Some(&context))?;
+            launch_skill_agent(&repo_root, "rebase", Some(&context))?;
             progress.status("Retrying submit after rebase...");
             submit(&repo_root, options, progress)?;
             progress.status("Ready to land — click merge on the PR once checks pass.");
@@ -370,7 +370,7 @@ fn open_pr(
                 "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
             );
             progress.status("Launching rebase agent to resolve conflicts...");
-            launch_step_agent(&repo_root, "rebase", Some(&context))?;
+            launch_skill_agent(&repo_root, "rebase", Some(&context))?;
             progress.status("Retrying PR creation after rebase...");
             create_or_update_pr(
                 &repo_root,
@@ -1070,7 +1070,7 @@ fn parent_branch_of(branch: &str, user: &str, default_branch: &str) -> String {
         .unwrap_or_else(|| default_branch.to_string())
 }
 
-/// `lf op wt up` — step to the parent worktree in the stack (toward main).
+/// `lf op wt up` — skill to the parent worktree in the stack (toward main).
 fn wt_up() -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
@@ -1090,7 +1090,7 @@ fn wt_up() -> Result<()> {
     cd_directive(&target)
 }
 
-/// `lf op wt down [name]` — step to a child worktree (away from main). When
+/// `lf op wt down [name]` — skill to a child worktree (away from main). When
 /// there is more than one child, `name` picks it by leaf.
 fn wt_down(name: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
@@ -1661,15 +1661,15 @@ const SHELL_INSTALL_LINE_BASH: &str =
     "if command -v lf >/dev/null 2>&1; then eval \"$(command lf op shell init bash)\"; fi";
 
 // ==========================================================================
-// Step agent fallback
+// Skill agent fallback
 // ==========================================================================
 
-/// Launch an agent with a named step when an ops command needs judgment.
+/// Launch an agent with a named skill when an ops command needs judgment.
 ///
 /// Used when mechanical operations hit a situation that requires agent
 /// reasoning — e.g., rebase conflicts that need conflict resolution.
-fn launch_step_agent(repo_root: &Path, step_name: &str, context: Option<&str>) -> Result<()> {
-    let step = discover_step(repo_root, step_name)?;
+fn launch_skill_agent(repo_root: &Path, skill_name: &str, context: Option<&str>) -> Result<()> {
+    let skill = discover_skill(repo_root, skill_name)?;
     let config = load_config_or_default(Some(repo_root));
 
     let message = context.map(|value| value.to_string());
@@ -1677,8 +1677,8 @@ fn launch_step_agent(repo_root: &Path, step_name: &str, context: Option<&str>) -
         &config,
         LaunchPromptInput {
             repo_root: repo_root.to_path_buf(),
-            step: Some(step_name.to_string()),
-            resolved_step: Some(step),
+            skill: Some(skill_name.to_string()),
+            resolved_skill: Some(skill),
             surface: Surface::Headless,
             message,
             cwd: Some(repo_root.to_path_buf()),
@@ -1705,7 +1705,7 @@ fn launch_step_agent(repo_root: &Path, step_name: &str, context: Option<&str>) -
         return Err(anyhow!(
             "agent exited with code {} while resolving {}",
             result.exit_code,
-            step_name,
+            skill_name,
         ));
     }
     Ok(())
@@ -1971,7 +1971,7 @@ fn doctor(brewfile: bool) -> Result<()> {
     // Repo status
     if let Some(ref root) = repo_root {
         let lf_dir = root.join(".lf");
-        if lf_dir.join("steps").is_dir() || lf_dir.join("flows").is_dir() {
+        if lf_dir.join("skills").is_dir() || lf_dir.join("flows").is_dir() {
             println!("✓ task files found");
         } else {
             println!("- no task files (run: lf init)");

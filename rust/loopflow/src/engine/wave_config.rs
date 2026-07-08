@@ -5,8 +5,8 @@ use std::path::Path;
 use tracing::warn;
 
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
-/// The wave's resident mind reads these and opens a system turn when a
-/// schedule comes due (`crate::wave::mind`) — no daemon poller, no table.
+/// The wave's resident flowloop reads these and opens a system pass when a
+/// schedule comes due (`crate::flowloop::wave`) — no daemon poller, no table.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WaveCronDef {
     pub flow: String,
@@ -33,11 +33,8 @@ pub struct WaveConfig {
     pub direction: Option<Vec<String>>,
     pub metrics: Option<Vec<String>>,
     pub agent: Option<String>,
-    pub step_agents: Option<HashMap<String, String>>,
+    pub skill_agents: Option<HashMap<String, String>>,
     pub pm: Option<WavePmConfig>,
-    /// The wave's mind vendor (`codex` default; `claude`, `opencode`) — read
-    /// by the RESIDENT (`crate::wave::resident::resolve_mind_vendor`).
-    pub mind: Option<String>,
     /// The safety valve: `paused: true` in GOAL.md frontmatter tells the wave
     /// listener to refuse to START turns (message→turn, heartbeat, cron)
     /// while keeping the channel serving and queueing. File-first and re-read
@@ -138,17 +135,17 @@ fn remove_or_set_string(map: &mut Mapping, field: &str, value: Option<String>) {
     }
 }
 
-fn remove_or_set_step_agents(
+fn remove_or_set_skill_agents(
     map: &mut Mapping,
-    step_agents: Option<HashMap<String, String>>,
+    skill_agents: Option<HashMap<String, String>>,
 ) -> Result<(), String> {
-    let key = Value::String("step_agents".to_string());
-    match step_agents {
-        Some(step_agents) if !step_agents.is_empty() => {
+    let key = Value::String("skill_agents".to_string());
+    match skill_agents {
+        Some(skill_agents) if !skill_agents.is_empty() => {
             map.insert(
                 key,
-                serde_yaml_ng::to_value(step_agents)
-                    .map_err(|err| format!("failed to encode step_agents: {err}"))?,
+                serde_yaml_ng::to_value(skill_agents)
+                    .map_err(|err| format!("failed to encode skill_agents: {err}"))?,
             );
         }
         Some(_) => {
@@ -186,11 +183,11 @@ pub fn update_wave_agent_config(
     repo: &Path,
     name: &str,
     agent: Option<String>,
-    step_agents: Option<HashMap<String, String>>,
+    skill_agents: Option<HashMap<String, String>>,
 ) -> Result<(), String> {
     update_wave_goal_config(repo, name, |map| {
         remove_or_set_string(map, "agent", agent);
-        remove_or_set_step_agents(map, step_agents)
+        remove_or_set_skill_agents(map, skill_agents)
     })
 }
 
@@ -238,7 +235,7 @@ mod tests {
         assert_eq!(pm.linear_project.as_deref(), Some("lin-123"));
     }
 
-    /// Crons live in GOAL.md frontmatter — the resident mind's schedule
+    /// Crons live in GOAL.md frontmatter — the resident flowloop's schedule
     /// source. Legacy `triggers:` keys are simply unknown fields now.
     #[test]
     fn read_wave_config_parses_crons_and_ignores_legacy_triggers() {
@@ -289,7 +286,7 @@ mod tests {
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert_eq!(config.agent.as_deref(), Some("codex:o3"));
         assert_eq!(
-            config.step_agents,
+            config.skill_agents,
             Some(HashMap::from([(
                 "implement".to_string(),
                 "claude:sonnet".to_string(),
@@ -304,7 +301,7 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\narea: ['.']\nagent: codex:o3\nstep_agents:\n  implement: claude:sonnet\n---\nDrive the work.\n",
+            "---\narea: ['.']\nagent: codex:o3\nskill_agents:\n  implement: claude:sonnet\n---\nDrive the work.\n",
         )
         .expect("write");
 
@@ -318,7 +315,7 @@ mod tests {
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert!(config.agent.is_none());
-        assert!(config.step_agents.is_none());
+        assert!(config.skill_agents.is_none());
         assert_eq!(config.area, None);
     }
 }

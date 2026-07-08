@@ -231,7 +231,7 @@ impl SqliteStore {
             run_id: row.get(2)?,
             parent_session_id: row.get(3)?,
             session_use,
-            step: row.get(5)?,
+            skill: row.get(5)?,
             agent: row.get(6)?,
             cwd: row.get(7)?,
             argv,
@@ -469,7 +469,7 @@ impl SqliteStore {
     }
 
     const TERMINAL_SESSION_COLS: &str =
-        "id, wave_id, run_id, parent_session_id, session_use, step, agent, cwd, argv, env, source, tmux_name, status, \
+        "id, wave_id, run_id, parent_session_id, session_use, skill, agent, cwd, argv, env, source, tmux_name, status, \
          completion_token, created_at, attached_at, started_at, completed_at";
 
     pub fn create_control_session(&self, session: &Session) -> StoreResult<()> {
@@ -486,7 +486,7 @@ impl SqliteStore {
                 session.run_id,
                 session.parent_session_id,
                 session.session_use.as_str(),
-                session.step,
+                session.skill,
                 session.agent,
                 session.cwd,
                 serde_json::to_string(&session.argv)?,
@@ -623,7 +623,7 @@ impl SqliteStore {
                  run_id = ?3,
                  parent_session_id = ?4,
                  session_use = ?5,
-                 step = ?6,
+                 skill = ?6,
                  agent = ?7,
                  cwd = ?8,
                  argv = ?9,
@@ -643,7 +643,7 @@ impl SqliteStore {
                 session.run_id,
                 session.parent_session_id,
                 session.session_use.as_str(),
-                session.step,
+                session.skill,
                 session.agent,
                 session.cwd,
                 serde_json::to_string(&session.argv)?,
@@ -1373,7 +1373,7 @@ impl SqliteStore {
         conn.execute(
             "INSERT INTO run_events (
                 run_id, seq, ts, repo, worktree, wave, node, event, command,
-                flow, step, step_index, error, input_tokens, output_tokens,
+                flow, skill, step_index, error, input_tokens, output_tokens,
                 cache_read_tokens, cost_usd, duration_secs
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
@@ -1387,7 +1387,7 @@ impl SqliteStore {
                 row.event,
                 row.command,
                 row.flow,
-                row.step,
+                row.skill,
                 row.step_index,
                 row.error,
                 row.input_tokens,
@@ -1403,7 +1403,7 @@ impl SqliteStore {
     pub fn list_run_events_since(&self, since_unix: i64) -> StoreResult<Vec<RunEventRow>> {
         self.query_run_events(
             "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, step, step_index, error, input_tokens, output_tokens,
+                    flow, skill, step_index, error, input_tokens, output_tokens,
                     cache_read_tokens, cost_usd, duration_secs
              FROM run_events WHERE ts >= ?1 ORDER BY ts, run_id, seq",
             params![since_unix],
@@ -1415,7 +1415,7 @@ impl SqliteStore {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
         self.query_run_events(
             "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, step, step_index, error, input_tokens, output_tokens,
+                    flow, skill, step_index, error, input_tokens, output_tokens,
                     cache_read_tokens, cost_usd, duration_secs
              FROM run_events WHERE run_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
@@ -1441,7 +1441,7 @@ impl SqliteStore {
                 event: row.get(7)?,
                 command: row.get(8)?,
                 flow: row.get(9)?,
-                step: row.get(10)?,
+                skill: row.get(10)?,
                 step_index: row.get(11)?,
                 error: row.get(12)?,
                 input_tokens: row.get(13)?,

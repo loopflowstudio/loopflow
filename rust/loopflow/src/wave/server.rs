@@ -7,7 +7,7 @@
 //! `127.0.0.1:<port>` and nothing else; `.wave-resident-token` beside it holds
 //! this boot's resident token (see [`crate::wave::wire`]).
 //!
-//! This module is VENDOR-FREE: the mind lives in the resident process
+//! This module is VENDOR-FREE: the flowloop lives in the resident process
 //! ([`crate::wave::resident`]), which publishes through the resident door
 //! (`/resident/attach`, `/resident/deltas`, `/resident/context` — token-gated)
 //! and listens on its own wave's `/events?inbox=true` subscription. The
@@ -19,12 +19,12 @@
 //! child journal; doors are name-addressed.
 //!
 //! Wire contract (snake_case, stable — a Loopflow worker builds against it):
-//! - `GET /health` → `{status, mind, wave, turns, workers, uptime_seconds}`;
+//! - `GET /health` → `{status, flowloop, wave, turns, workers, uptime_seconds}`;
 //!   `status` is CHANNEL liveness — always `serving` while this process
-//!   answers; `mind` is the resident's state (`idle | turning | interrupting
+//!   answers; `flowloop` is the resident's state (`idle | turning | interrupting
 //!   | failed`), or null while no resident has ever been spawned or attached
-//!   (`--no-mind` serves dormant); a served channel whose resident died reads
-//!   `status: "serving", mind: "failed"`. `workers` counts this wave's
+//!   (`--no-flowloop` serves dormant); a served channel whose resident died reads
+//!   `status: "serving", flowloop: "failed"`. `workers` counts this wave's
 //!   observed in-flight worker runs.
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
 //!   `running`), if one is in progress, after the finalized thread. Optional
@@ -34,10 +34,10 @@
 //!   `?channel=<name>` (exactly one channel), `?prefix=<name>` (that subtree),
 //!   default = the whole family. A name outside this wave's family is a 404.
 //!   Three event names:
-//!   - `state`: data is the mind-state name (`idle | turning | interrupting |
+//!   - `state`: data is the flowloop-state name (`idle | turning | interrupting |
 //!     failed`), sent once on subscribe (before the turn replay) and again on
 //!     every transition — the composer keys its verb off it. Primary channel
-//!     only — child channels have no mind, so a child-only subscription
+//!     only — child channels have no flowloop, so a child-only subscription
 //!     carries no `state` frames.
 //!   - `turn`: data is a `Turn` JSON; the thread replays on connect
 //!     (including the open turn), then streams live. A turn from a CHILD
@@ -68,13 +68,13 @@
 //!     stream is byte-identical to the pre-resident wire.
 //! - The resident door (token-gated via the `x-lf-resident-token` header —
 //!   401 without this boot's token):
-//!   - `POST /resident/attach {pid}` → `{wave, thread_id}` — registers the
-//!     resident's pid for liveness and revives a `failed` mind (a fresh
+//!   - `POST /resident/attach {pid}` → `{wave}` — registers the
+//!     resident's pid for liveness and revives a `failed` flowloop (a fresh
 //!     resident IS the revival).
 //!   - `POST /resident/deltas {deltas: [...]}` → `{accepted}` — ordered turn
 //!     deltas, applied to the journal fold
 //!     ([`WaveRuntime::apply_resident_delta`]).
-//!   - `GET /resident/context` → `{thread_id, in_flight}` — the pre-turn
+//!   - `GET /resident/context` → `{in_flight}` — the pre-turn
 //!     snapshot; serving it freshens the store observations (one poll).
 //! - `POST /messages {op, text, from?, channel?}` → `{turn, state}`. `op` is
 //!   required — `"message"` (human speech steers a live steer-capable turn;
@@ -84,7 +84,7 @@
 //!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
 //!   a no-op success), or `"say"` (an attributed emission — `lf chat`: a
 //!   worker report, child-wave escalation, or CLI FYI; lands in the thread
-//!   with its byline AND queues for the mind like a message). `text` may be
+//!   with its byline AND queues for the flowloop like a message). `text` may be
 //!   empty only for `interrupt` (400 otherwise). `from {session_id?, label}`
 //!   is required for `say` and rejected for every other op (400) — human
 //!   turns are unattributed by convention. `channel` is explicitly Optional:
@@ -93,8 +93,8 @@
 //!   work line's worktree is gone). On a child channel there is no resident:
 //!   steer degrades to a plain message, a bare interrupt is a no-op. `turn`
 //!   is the appended user `Turn`, or null for a bare interrupt (nothing was
-//!   said); `state` is the mind-state name when the request was accepted —
-//!   ops are applied by the mind asynchronously, so watch the stream's
+//!   said); `state` is the flowloop-state name when the request was accepted —
+//!   ops are applied by the flowloop asynchronously, so watch the stream's
 //!   `state` events for the outcome.
 //! - `POST /channels {name, run_id}` → `{turn}` — the dispatch notification
 //!   door: placed `lf` minted a work-line worktree and its channel
@@ -140,7 +140,7 @@ use crate::wave::channel::tagged_turn_json;
 use crate::wave::journal::{Attribution, MessageOp, PendingMessage};
 use crate::wave::registry::{process_alive, StoreObserver};
 use crate::wave::runtime::{InboxItem, WaveRuntime};
-use crate::wave::state::MindState;
+use crate::wave::state::FlowloopState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
     AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, OpFrame,
@@ -293,12 +293,12 @@ impl SubagentDoor {
 #[derive(Debug, Serialize)]
 struct HealthBody {
     /// Channel liveness: always `"serving"` while this process answers. The
-    /// resident's condition is `mind` — a served channel whose resident died
-    /// is `status: "serving", mind: "failed"`.
+    /// resident's condition is `flowloop` — a served channel whose resident
+    /// died is `status: "serving", flowloop: "failed"`.
     status: String,
-    /// Resident (mind) state name, or null for a channel with no resident
-    /// (a dormant `--no-mind` channel, or before any resident attaches).
-    mind: Option<String>,
+    /// Resident flowloop state name, or null for a channel with no resident
+    /// (a dormant `--no-flowloop` channel, or before any resident attaches).
+    flowloop: Option<String>,
     wave: String,
     turns: usize,
     /// Workers observed in flight for this wave (dispatch is daemonless —
@@ -398,7 +398,7 @@ struct PostMemoryResponse {
 }
 
 /// `POST /messages` response. `turn` is the appended user turn; null for a
-/// bare interrupt, which appends nothing. `state` is the mind-state name at
+/// bare interrupt, which appends nothing. `state` is the flowloop-state name at
 /// acceptance time.
 #[derive(Debug, Serialize)]
 struct PostMessageResponse {
@@ -460,15 +460,15 @@ pub fn router(
 }
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
-    // `mind` is null until a resident has ever been spawned or attached —
-    // a dormant channel (`--no-mind`) has no mind to report on.
-    let mind = state
+    // `flowloop` is null until a resident has ever been spawned or attached —
+    // a dormant channel (`--no-flowloop`) has no flowloop to report on.
+    let flowloop = state
         .runtime
         .resident_expected()
-        .then(|| state.runtime.mind_state().name().to_string());
+        .then(|| state.runtime.flowloop_state().name().to_string());
     Json(HealthBody {
         status: "serving".to_string(),
-        mind,
+        flowloop,
         wave: state.runtime.name().to_string(),
         turns: state.runtime.thread_len(),
         workers: state.runtime.in_flight_workers().len(),
@@ -485,7 +485,7 @@ async fn resident_attach_handler(
     Json(body): Json<AttachRequest>,
 ) -> Result<Json<AttachResponse>, (StatusCode, String)> {
     state.resident.authorize(&headers)?;
-    // Seat exclusivity: one mind per wave. A live seat already probed alive
+    // Seat exclusivity: one flowloop per wave. A live seat already probed alive
     // refuses the attach naming it — a second resident would split-brain the
     // wire. A dead/absent seat is free (takeover after a crash rides the same
     // door; the supervisor's own seat probe frees a dead pid on its cadence).
@@ -509,16 +509,15 @@ async fn resident_attach_handler(
     if let Some(supervisor) = &state.supervisor {
         supervisor.on_attach(body.pid);
     }
-    // A fresh resident IS the revival: a failed mind goes idle on attach.
-    if matches!(state.runtime.mind_state(), MindState::Failed { .. }) {
+    // A fresh resident IS the revival: a failed flowloop goes idle on attach.
+    if matches!(state.runtime.flowloop_state(), FlowloopState::Failed { .. }) {
         state
             .runtime
-            .transition(MindState::Idle, "resident attached");
+            .transition(FlowloopState::Idle, "resident attached");
     }
     tracing::info!(pid = body.pid, "resident attached");
     Ok(Json(AttachResponse {
         wave: state.runtime.name().to_string(),
-        thread_id: state.runtime.last_thread_id(),
     }))
 }
 
@@ -555,10 +554,7 @@ async fn resident_context_handler(
             task: worker.task,
         })
         .collect();
-    Ok(Json(ContextResponse {
-        thread_id: state.runtime.last_thread_id(),
-        in_flight,
-    }))
+    Ok(Json(ContextResponse { in_flight }))
 }
 
 /// The verb policy's ruling on one argv: run it, or refuse it naming the verb.
@@ -582,12 +578,14 @@ enum ExecVerdict {
 /// - `op …` EXCEPT `op auth` — git/GitHub/pm/release/queue: the commit-and-land path.
 /// - `chat`, `memory` — a worker reporting up and curating wave memory.
 /// - the read verbs `ls`/`status`/`runs`/`sub`/`trace`/`usage` — inspection.
-/// - the dispatch path: a flow/step run or an inline prompt carrying
+/// - the dispatch path: a flow/skill run or an inline prompt carrying
 ///   `--dispatch`, which lands in a FRESH sandboxed worktree.
 ///
 /// Rejected:
 /// - `op auth` — credential rotation is never the escape hatch's job.
 /// - `wave …` — wave lifecycle (start / `--force` take-over / dormant serve).
+/// - `task …` — starts a long-running task flowloop; dispatch it from the
+///   wave flowloop, not through this unsandboxed exec door.
 /// - any flow / inline prompt WITHOUT `--dispatch` — that would run an
 ///   arbitrary LLM prompt unsandboxed in the outwave, the exact power this
 ///   door must not hand a leaked token.
@@ -620,7 +618,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         | Some(Commands::Sub { .. })
         | Some(Commands::Trace { .. })
         | Some(Commands::Usage) => ExecVerdict::Allow,
-        // A flow/step run or an inline prompt: allowed only when it will land
+        // A flow/skill run or an inline prompt: allowed only when it will land
         // in a sandboxed worktree (`--dispatch`), never run in the outwave.
         Some(Commands::External(parts)) => {
             if cli.dispatch {
@@ -628,6 +626,13 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
             } else {
                 let flow = parts.first().cloned().unwrap_or_else(|| "flow".to_string());
                 ExecVerdict::Deny(flow)
+            }
+        }
+        Some(Commands::Flow { name, .. }) | Some(Commands::Skill { name, .. }) => {
+            if cli.dispatch {
+                ExecVerdict::Allow
+            } else {
+                ExecVerdict::Deny(name.clone())
             }
         }
         Some(Commands::Inline { .. }) => {
@@ -638,6 +643,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
             }
         }
         Some(Commands::Wave { .. }) => ExecVerdict::Deny("wave".to_string()),
+        Some(Commands::Task { .. }) => ExecVerdict::Deny("task".to_string()),
         // `lf ssh` forwards the local credential bundle to a remote host and
         // runs an arbitrary command there — the exact power a leaked token
         // must not reach.
@@ -753,7 +759,7 @@ async fn messages_handler(
         .map_err(|err| (StatusCode::NOT_FOUND, err.to_string()))?;
     Ok(Json(PostMessageResponse {
         turn,
-        state: state.runtime.mind_state().name().to_string(),
+        state: state.runtime.flowloop_state().name().to_string(),
     }))
 }
 
@@ -835,7 +841,7 @@ fn first_line(content: &str) -> Option<String> {
 /// The unified `/events` SSE, scoped to one channel, a subtree, or (default)
 /// the whole family.
 ///
-/// The primary channel's replay-then-live shape is unchanged: the mind state,
+/// The primary channel's replay-then-live shape is unchanged: the flowloop state,
 /// the thread on connect (open turn included, status `running`), then live
 /// frames — `state` on every transition, `turn` ids repeating by design
 /// (every frame replaces the client's state for that (channel, id), so an
@@ -1054,7 +1060,7 @@ fn tagged_turn_event(channel: &str, turn: &ChatTurn) -> Event {
         .data(tagged_turn_json(channel, turn))
 }
 
-fn state_event(state: &MindState) -> Event {
+fn state_event(state: &FlowloopState) -> Event {
     Event::default().event("state").data(state.name())
 }
 
@@ -1168,7 +1174,7 @@ pub fn resident_token_path(repo_root: &Path, wave: &str) -> PathBuf {
 }
 
 /// Publish this boot's resident token so an attached resident (`lf wave
-/// <name> --mind-only`) can present it — the same filesystem-trust domain as
+/// <name> --flowloop-only`) can present it — the same filesystem-trust domain as
 /// the endpoint pointer. Owner-only on unix.
 pub fn write_resident_token(repo_root: &Path, wave: &str, token: &str) -> std::io::Result<()> {
     let path = resident_token_path(repo_root, wave);
@@ -1184,7 +1190,7 @@ pub fn write_resident_token(repo_root: &Path, wave: &str, token: &str) -> std::i
     Ok(())
 }
 
-/// Read the current resident token, for `--mind-only` attachment.
+/// Read the current resident token, for `--flowloop-only` attachment.
 pub fn read_resident_token(repo_root: &Path, wave: &str) -> Option<String> {
     let token = std::fs::read_to_string(resident_token_path(repo_root, wave)).ok()?;
     let token = token.trim().to_string();

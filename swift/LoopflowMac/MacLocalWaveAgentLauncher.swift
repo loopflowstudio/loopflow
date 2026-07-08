@@ -103,8 +103,8 @@ enum LocalWaveAgentLauncher {
     /// The `wave` a server at `endpoint` reports on `GET /health`, or nil when
     /// nothing answers within 2s (mirrors Rust `ENDPOINT_PROBE_TIMEOUT`).
     /// Probe contract: the guard keys on the `wave` field only. `/health`'s
-    /// `status` is channel liveness (`serving`) and `mind` is the resident's
-    /// state — a wave whose mind failed still answers here and still blocks a
+    /// `status` is channel liveness (`serving`) and `flowloop` is the resident's
+    /// state — a wave whose flowloop failed still answers here and still blocks a
     /// second launch, which is correct: the channel is live.
     static func healthWaveName(endpoint: String) -> String? {
         guard let url = URL(string: "http://\(endpoint)/health") else { return nil }
@@ -168,7 +168,7 @@ enum LocalWaveAgentLauncher {
     /// so every candidate is capability-probed before it's trusted.
     ///
     /// The probe is `lf help wave`, NOT `lf wave --help`: lf's arg reorderer
-    /// treats an unknown `wave` as a step name, so `lf wave --help` prints the
+    /// treats an unknown `wave` as a skill name, so `lf wave --help` prints the
     /// root help and exits 0 even on a build without the subcommand. `lf help
     /// wave` exits 0 only when the subcommand exists (verified against both a
     /// stale and a wave-capable build), and clap answers it without touching

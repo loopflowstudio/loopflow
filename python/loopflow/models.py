@@ -49,15 +49,15 @@ class FlowStep(BaseModel):
             for prefix in ("op:",):
                 if value.startswith(prefix):
                     return cls(type="op", name=value.split(":", 1)[1].strip())
-            for marker, step_type in (
+            for marker, skill_type in (
                 ("[branch]", "branch"),
                 ("[fork]", "fork"),
                 ("[loop]", "loop"),
             ):
                 if value == marker:
-                    return cls(type=step_type, name=step_type)
-            return cls(type="step", name=value)
-        raise TypeError(f"Unsupported flow step value: {value!r}")
+                    return cls(type=skill_type, name=skill_type)
+            return cls(type="skill", name=value)
+        raise TypeError(f"Unsupported flow skill value: {value!r}")
 
 
 class Wave(BaseModel):
@@ -106,7 +106,7 @@ class Session(BaseModel):
     run_id: Optional[str]
     parent_session_id: Optional[str]
     session_use: str = Field(alias="use")
-    step: str
+    skill: str
     agent: str
     cwd: str
     argv: list[str]

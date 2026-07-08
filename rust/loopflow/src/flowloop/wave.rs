@@ -1,0 +1,1229 @@
+//! The resident's flowloop: the wave tier of the flowloop runtime,
+//! scheduled by events, publishing through the wire.
+//!
+//! This runs INSIDE THE RESIDENT PROCESS (`lf wave <name> --flowloop-only`,
+//! see [`crate::wave::resident`]) — never in the listener. A turn is one
+//! `wave` flow (`wave_clarify → wave_pursue → wave_mutate`) run as a
+//! bounded headless child in the wave home; continuity is GOAL.md + memory +
+//! the chat journal riding every pass's seed, never a vendor thread.
+//! Everything the flowloop does surfaces as [`ResidentDelta`]s sent through
+//! the listener's resident door, where the journal, the open-turn snapshot,
+//! SSE broadcast, and `FlowloopState` transitions live.
+//!
+//! # Scheduling
+//! Input is the wave's `/events?inbox=true` subscription, parsed into
+//! [`InboxItem`]s by the resident:
+//! - **Message while idle** → a pass starts now; the `TurnOpened` delta's
+//!   `answers` names the message plus anything already queued.
+//! - **Message while a pass runs** → queued (append-and-coalesce, never
+//!   rejected); one boundary pass drains the whole queue. Steering is
+//!   fold-at-boundary by design — there is no mid-pass injection.
+//! - **Interrupt while a pass runs** → the child is killed and the turn
+//!   closes `Interrupted`; non-empty interrupt text queues for the next pass.
+//! - **Interrupt while idle** → no-op; text, if any, queues like a message.
+//! - **Heartbeat**: idle for [`HEARTBEAT_IDLE`] with an empty queue → a
+//!   progress pass carrying a compact nudge plus the `<in_flight>` fold
+//!   fetched from `GET /resident/context`.
+//! - **Cron**: the wave's `crons:` frontmatter (GOAL.md, re-read at every
+//!   deadline computation so edits land without a restart) arms a third
+//!   deadline; a due schedule opens a system pass ("cron due: <flow> —
+//!   dispatch it") exactly like the heartbeat nudge. Crons only fire while
+//!   idle — a schedule that comes due mid-pass fires at the boundary (within
+//!   [`CRON_GRACE`]).
+//!
+//! The select is `biased` toward the inbox.
+//!
+//! # Failure
+//! A failed pass (spawn failure, nonzero exit, timeout) finishes its turn
+//! `Failed` and returns the flowloop to idle.
+//! [`MAX_CONSECUTIVE_PASS_FAILURES`] consecutive failures FAIL THE FLOWLOOP:
+//! the resident reports `FlowloopState::Failed` over the wire and
+//! [`run_flowloop`] returns an error — the process exits nonzero and the
+//! LISTENER's supervisor owns revival (the process-level respawn ladder; a
+//! human message respawns immediately). A dead flowloop is a dead process —
+//! there is no in-process limbo. The listener disappearing (send failure,
+//! inbox closed) ends the residency cleanly instead: `Ok(())`.
+
+use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+
+use anyhow::{anyhow, Result};
+use chrono::{DateTime, Utc};
+use tokio::sync::mpsc;
+use tokio::time::Instant;
+
+use crate::chat::types::Lifecycle;
+use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
+use crate::engine::wave_config::{read_wave_config, WaveCronDef};
+use crate::flowloop::pass::lf_command;
+use crate::wave::journal::{ellipsize, MessageId, MessageOp, PendingMessage};
+use crate::wave::memory::Memory;
+use crate::wave::resident::ListenerClient;
+use crate::wave::runtime::InboxItem;
+use crate::wave::supervisor::sleep_until_opt;
+use crate::wave::wire::{InFlightWorker, ResidentDelta, ResidentStateTo};
+
+/// How long the flowloop sits idle (empty queue, no pass) before a
+/// heartbeat pass. Each heartbeat burns a full three-phase `wave`, so
+/// the quiet-wave cadence is deliberately coarse; messages and crons drive
+/// the wave the rest of the time.
+pub const HEARTBEAT_IDLE: Duration = Duration::from_secs(4 * 60 * 60);
+
+/// Consecutive failed turns before the flowloop itself is declared failed and
+/// the resident exits (the listener's supervisor revives by respawning).
+pub const MAX_CONSECUTIVE_PASS_FAILURES: u32 = 3;
+
+/// How far back a never-fired (or long-idle) cron schedule is checked: an
+/// occurrence within this window still fires; anything older is missed, not
+/// replayed. Mirrors the dead daemon poller's grace so a wave that was down
+/// over its weekly schedule still runs it on revival.
+pub const CRON_GRACE: chrono::Duration = chrono::Duration::hours(24);
+
+/// Compact nudge for heartbeat passes (the pass seed carries goal and
+/// memory; the nudge only names the wake).
+const HEARTBEAT_PROMPT: &str = "Heartbeat: re-read your goal and memory, then take the next \
+     orchestration skill. If nothing needs doing, say so in one line.";
+
+/// Longest task excerpt carried per worker in the `<in_flight>` section —
+/// enough to recognize the dispatch, token-lean by design.
+const IN_FLIGHT_TASK_CHARS: usize = 80;
+
+/// The heartbeat nudge, plus a compact `<in_flight>` section when workers are
+/// grinding: one line per dispatched-not-finished worker, from the listener's
+/// `GET /resident/context` — the flowloop's orchestration turns see their workers
+/// without re-reading transcripts.
+pub fn heartbeat_prompt(workers: &[InFlightWorker]) -> String {
+    if workers.is_empty() {
+        return HEARTBEAT_PROMPT.to_string();
+    }
+    let mut prompt = String::from(HEARTBEAT_PROMPT);
+    prompt.push_str("\n\n<in_flight>\n");
+    for worker in workers {
+        // Whitespace-flattened, so a multi-line task can't break the
+        // one-line-per-worker format.
+        let task = ellipsize(&worker.task, IN_FLIGHT_TASK_CHARS);
+        prompt.push_str(&format!(
+            "- run {} · {}: {} · running\n",
+            worker.run_id, worker.flow, task
+        ));
+    }
+    prompt.push_str("</in_flight>");
+    prompt
+}
+
+// -- Cron: the third deadline ------------------------------------------------
+
+/// The wave's cron lines, re-read from GOAL.md frontmatter on every deadline
+/// computation — editing the file reschedules a live flowloop, no restart.
+fn read_crons(origin_repo: &Path, wave: &str) -> Vec<WaveCronDef> {
+    read_wave_config(origin_repo, wave)
+        .and_then(|config| config.crons)
+        .unwrap_or_default()
+}
+
+/// Identity of one cron line for last-fired bookkeeping: the schedule and
+/// flow together, so editing either resets the line's history.
+fn cron_key(cron: &WaveCronDef) -> String {
+    format!("{} {}", cron.schedule, cron.flow)
+}
+
+/// The next fire time for one schedule: the first occurrence after
+/// `last_fired` (or `now - CRON_GRACE` for a line that never fired).
+/// Unparseable schedules never fire.
+fn next_cron_fire(
+    schedule: &str,
+    last_fired: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    let schedule = cron::Schedule::from_str(schedule).ok()?;
+    let check_from = last_fired.unwrap_or(now - CRON_GRACE);
+    schedule.after(&check_from).next()
+}
+
+/// The system turn a due schedule opens — the flowloop dispatches the flow with
+/// judgment, exactly like it acts on a heartbeat nudge.
+pub(crate) fn cron_prompt(due: &[WaveCronDef]) -> String {
+    due.iter()
+        .map(|cron| format!("cron due: {} — dispatch it", cron.flow))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Flowloop knobs. `Default` is production: 4-hour heartbeat, 30-minute
+/// pass timeout.
+#[derive(Debug, Clone)]
+pub struct FlowloopConfig {
+    /// Idle window before a heartbeat `wave`.
+    pub heartbeat_idle: Duration,
+    /// Per-pass wall-clock timeout.
+    pub pass_timeout: Duration,
+    /// Maximum agent turns forwarded to each phase run.
+    pub max_turns: Option<u32>,
+}
+
+impl Default for FlowloopConfig {
+    fn default() -> Self {
+        Self {
+            heartbeat_idle: HEARTBEAT_IDLE,
+            pass_timeout: Duration::from_secs(30 * 60),
+            max_turns: Some(20),
+        }
+    }
+}
+
+/// PATH for the flowloop's harness and every child the resident spawns: this
+/// executable's directory first, so placed `lf` commands resolve to the binary
+/// running this resident, never whatever `lf` the user's shell happens to find.
+pub fn path_for_children() -> OsString {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    else {
+        return inherited;
+    };
+    let paths = std::iter::once(exe_dir).chain(std::env::split_paths(&inherited));
+    std::env::join_paths(paths).unwrap_or(inherited)
+}
+
+/// One pass's seed: the rendered goal seed, the orchestration discipline,
+/// the shared loopflow operating document (pass seeds bypass context
+/// assembly, so the `<lf:loopflow>` section is appended here), and the
+/// wake that opened the pass. Reads GOAL.md and MEMORY.md from the ORIGIN
+/// repo (reads are free; writes go through the listener's doors).
+fn wave_pass_seed(origin_repo: &Path, wave: &str, wake: &str) -> String {
+    let memory = Memory::for_wave(origin_repo, wave);
+    let seed = build_goal_seed(origin_repo, wave, &memory);
+    format!(
+        "{seed}\n\n{}\n\n{}\n\n<wake>\n{wake}\n</wake>",
+        orchestration_discipline(wave),
+        crate::engine::prompt::loopflow_section()
+    )
+}
+
+/// The wave's rendered `GOAL.md` plus current memory, or a minimal-but-real
+/// fallback when there's no `GOAL.md` so the flowloop still has an identity.
+fn build_goal_seed(repo: &Path, wave: &str, memory: &Memory) -> String {
+    match load_goal(wave, repo) {
+        Ok(goal) => {
+            let ctx = GoalRenderContext {
+                flows: available_flow_names(repo),
+                memory: memory.read(),
+            };
+            render_goal(&goal, &ctx)
+        }
+        Err(_) => {
+            let mem = memory.read();
+            let mem_block = if mem.trim().is_empty() {
+                "(memory is empty)".to_string()
+            } else {
+                mem
+            };
+            format!(
+                "You are the agent of the '{wave}' wave. Drive the wave's goal \
+                 forward.\n\nCurrent memory:\n{mem_block}"
+            )
+        }
+    }
+}
+
+/// The coordinating-session discipline, promoted into the flowloop's system
+/// prompt: the flowloop orchestrates, it never grinds inline. Wave-specific rules
+/// only — shared loopflow operating guidance is appended in
+/// [`wave_pass_seed`], not duplicated here.
+fn orchestration_discipline(wave: &str) -> String {
+    format!(
+        "You are the flowloop of the '{wave}' wave — its long-running orchestrator.\n\
+         Discipline:\n\
+         - Never grind inline. Read state, decide, dispatch work to subagents \
+         via `lf <flow> \"<task>\" --wave {wave} --dispatch` (use \
+         `--stack <run-id>` for dependent work or `--fork` for independent work), curate what you learn into memory, and answer the \
+         human.\n\
+         - Exception: trivial, single-file, sub-minute work is done inline \
+         without dispatch; dispatch is for real units of work.\n\
+         - Keep turns short — decisions and dispatches, not implementation.\n\
+         - Trust worker summaries; never re-read worker transcripts.\n\
+         - A human message is steering: answer it directly and adjust course \
+         before returning to the goal."
+    )
+}
+
+// -- The scheduler --
+
+/// Why the flowloop ended.
+enum FlowloopEnd {
+    /// The listener is gone (send failed / inbox closed): the keeper died or
+    /// was replaced. Clean exit — nothing to revive on this side.
+    ListenerGone,
+    /// The flowloop itself failed (reported over the wire before ending).
+    /// The resident exits nonzero; the listener's supervisor respawns.
+    Failed(String),
+}
+
+/// How a pass child is spawned — a seam so tests can substitute a stub
+/// process for the real `lf -b wave` invocation.
+type SpawnPass =
+    Box<dyn Fn(&Path, &str, Option<u32>) -> std::io::Result<tokio::process::Child> + Send>;
+
+/// Run the wave flowloop until the listener disappears (`Ok`) or the
+/// flowloop fails (`Err`, after reporting `FlowloopState::Failed` over the wire).
+///
+/// # Errors
+/// Flowloop failure only — the caller exits the process nonzero so the
+/// listener's supervisor sees a dead resident.
+pub async fn run_flowloop(
+    client: ListenerClient,
+    inbox_rx: mpsc::UnboundedReceiver<InboxItem>,
+    cwd: PathBuf,
+    origin_repo: PathBuf,
+    wave: String,
+    config: FlowloopConfig,
+) -> Result<()> {
+    let spawn_pass: SpawnPass = Box::new(spawn_wave_pass);
+    run_flowloop_with(client, inbox_rx, cwd, origin_repo, wave, config, spawn_pass).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_flowloop_with(
+    client: ListenerClient,
+    mut inbox_rx: mpsc::UnboundedReceiver<InboxItem>,
+    cwd: PathBuf,
+    origin_repo: PathBuf,
+    wave: String,
+    config: FlowloopConfig,
+    spawn_pass: SpawnPass,
+) -> Result<()> {
+    let mut flowloop = WaveFlowloop {
+        client,
+        cwd,
+        origin_repo,
+        wave,
+        config,
+        queue: Vec::new(),
+        seen: HashSet::new(),
+        spawn_pass,
+        consecutive_failures: 0,
+        idle_since: Instant::now(),
+        cron_last_fired: HashMap::new(),
+        end: None,
+    };
+
+    while flowloop.end.is_none() {
+        if !flowloop.queue.is_empty() {
+            flowloop.start_queued_pass(&mut inbox_rx).await;
+            continue;
+        }
+        let heartbeat_at = flowloop.heartbeat_deadline();
+        let cron_at = flowloop.cron_deadline();
+        tokio::select! {
+            biased;
+            item = inbox_rx.recv() => {
+                match item {
+                    Some(item) => flowloop.on_inbox(item).await,
+                    None => flowloop.end = Some(FlowloopEnd::ListenerGone),
+                }
+            }
+            _ = sleep_until_opt(cron_at), if cron_at.is_some() => {
+                flowloop.on_cron(&mut inbox_rx).await;
+            }
+            _ = sleep_until_opt(Some(heartbeat_at)) => {
+                flowloop.on_heartbeat(&mut inbox_rx).await;
+            }
+        }
+    }
+
+    match flowloop.end {
+        Some(FlowloopEnd::Failed(reason)) => Err(anyhow!(reason)),
+        _ => Ok(()),
+    }
+}
+
+struct WaveFlowloop {
+    client: ListenerClient,
+    cwd: PathBuf,
+    origin_repo: PathBuf,
+    wave: String,
+    config: FlowloopConfig,
+    spawn_pass: SpawnPass,
+    queue: Vec<PendingMessage>,
+    seen: HashSet<MessageId>,
+    consecutive_failures: u32,
+    idle_since: Instant,
+    cron_last_fired: HashMap<String, DateTime<Utc>>,
+    end: Option<FlowloopEnd>,
+}
+
+impl WaveFlowloop {
+    fn heartbeat_deadline(&self) -> Instant {
+        self.idle_since + self.config.heartbeat_idle
+    }
+
+    fn cron_deadline(&self) -> Option<Instant> {
+        let now = Utc::now();
+        let next = read_crons(&self.origin_repo, &self.wave)
+            .iter()
+            .filter_map(|cron| {
+                next_cron_fire(
+                    &cron.schedule,
+                    self.cron_last_fired.get(&cron_key(cron)).copied(),
+                    now,
+                )
+            })
+            .min()?;
+        let wait = (next - now).to_std().unwrap_or(Duration::ZERO);
+        Some(Instant::now() + wait)
+    }
+
+    async fn on_inbox(&mut self, item: InboxItem) {
+        match item {
+            InboxItem::Message(message) => {
+                // Idle: every op just queues — an interrupt has no pass to
+                // cancel, so it seeds the next one like any other message.
+                if self.seen.insert(message.id.clone()) {
+                    self.queue.push(message);
+                }
+            }
+            InboxItem::Interrupt => {}
+        }
+    }
+
+    async fn on_heartbeat(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
+        let workers = self.fetch_in_flight().await;
+        if self.end.is_some() {
+            return;
+        }
+        let prompt = heartbeat_prompt(&workers);
+        self.run_pass(prompt, Vec::new(), inbox_rx).await;
+    }
+
+    async fn on_cron(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
+        let now = Utc::now();
+        let due: Vec<WaveCronDef> = read_crons(&self.origin_repo, &self.wave)
+            .into_iter()
+            .filter(|cron| {
+                next_cron_fire(
+                    &cron.schedule,
+                    self.cron_last_fired.get(&cron_key(cron)).copied(),
+                    now,
+                )
+                .is_some_and(|fire_at| fire_at <= now)
+            })
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+        for cron in &due {
+            self.cron_last_fired.insert(cron_key(cron), now);
+        }
+        let prompt = cron_prompt(&due);
+        self.run_pass(prompt, Vec::new(), inbox_rx).await;
+    }
+
+    async fn start_queued_pass(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
+        let messages = std::mem::take(&mut self.queue);
+        let answers: Vec<MessageId> = messages.iter().map(|m| m.id.clone()).collect();
+        let content = messages
+            .iter()
+            .map(|m| match &m.from {
+                Some(from) => format!("[{}] {}", from.label, m.text),
+                None => m.text.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        self.run_pass(content, answers, inbox_rx).await;
+    }
+
+    async fn run_pass(
+        &mut self,
+        wake: String,
+        answers: Vec<MessageId>,
+        inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
+    ) {
+        self.fetch_in_flight().await;
+        if self.end.is_some() {
+            return;
+        }
+        let seed = wave_pass_seed(&self.origin_repo, &self.wave, &wake);
+        let answers = answers.into_iter().map(|id| id.0).collect();
+        self.send(vec![ResidentDelta::TurnOpened { answers }]).await;
+        if self.end.is_some() {
+            return;
+        }
+
+        let child = match (self.spawn_pass)(&self.cwd, &seed, self.config.max_turns) {
+            Ok(child) => child,
+            Err(err) => {
+                self.finish_failed_pass(&format!("failed to spawn wave: {err:#}"))
+                    .await;
+                return;
+            }
+        };
+        let mut wait_task = tokio::spawn(async move { child.wait_with_output().await });
+        let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
+        loop {
+            tokio::select! {
+                biased;
+                item = inbox_rx.recv() => {
+                    match item {
+                        Some(InboxItem::Interrupt) => {
+                            self.interrupt_child(&mut wait_task).await;
+                            return;
+                        }
+                        Some(InboxItem::Message(message)) if message.op == MessageOp::Interrupt => {
+                            if self.seen.insert(message.id.clone()) {
+                                self.queue.push(message);
+                            }
+                            self.interrupt_child(&mut wait_task).await;
+                            return;
+                        }
+                        Some(item) => self.on_inbox(item).await,
+                        None => {
+                            self.end = Some(FlowloopEnd::ListenerGone);
+                            wait_task.abort();
+                            return;
+                        }
+                    }
+                }
+                _ = &mut timeout => {
+                    wait_task.abort();
+                    self.finish_failed_pass(&format!(
+                        "wave timed out after {}s",
+                        self.config.pass_timeout.as_secs()
+                    )).await;
+                    return;
+                }
+                result = &mut wait_task => {
+                    match result {
+                        Ok(output) => self.on_pass_output(output).await,
+                        Err(err) => {
+                            self.finish_failed_pass(&format!("wave wait task failed: {err:#}"))
+                                .await;
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    async fn on_pass_output(&mut self, result: std::io::Result<std::process::Output>) {
+        match result {
+            Ok(output) if output.status.success() => {
+                self.consecutive_failures = 0;
+                self.ship_output(output).await;
+                self.send(vec![ResidentDelta::TurnFinished {
+                    status: Lifecycle::Completed,
+                    cost_usd: None,
+                }])
+                .await;
+                self.idle_since = Instant::now();
+            }
+            Ok(output) => {
+                self.ship_output(output).await;
+                self.finish_failed_pass("wave exited nonzero").await;
+            }
+            Err(err) => {
+                self.finish_failed_pass(&format!("wave wait failed: {err:#}"))
+                    .await;
+            }
+        }
+    }
+
+    async fn ship_output(&mut self, output: std::process::Output) {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let text = match (stdout.trim(), stderr.trim()) {
+            ("", "") => String::new(),
+            (out, "") => out.to_string(),
+            ("", err) => err.to_string(),
+            (out, err) => format!("{out}\n\nstderr:\n{err}"),
+        };
+        if !text.is_empty() {
+            self.send(vec![ResidentDelta::TurnText { text }]).await;
+        }
+    }
+
+    async fn interrupt_child(
+        &mut self,
+        wait_task: &mut tokio::task::JoinHandle<std::io::Result<std::process::Output>>,
+    ) {
+        self.send(vec![ResidentDelta::FlowloopState {
+            to: ResidentStateTo::Interrupting,
+            reason: "user interrupt".to_string(),
+        }])
+        .await;
+        wait_task.abort();
+        self.consecutive_failures = 0;
+        self.send(vec![ResidentDelta::TurnFinished {
+            status: Lifecycle::Interrupted,
+            cost_usd: None,
+        }])
+        .await;
+        self.idle_since = Instant::now();
+    }
+
+    async fn finish_failed_pass(&mut self, reason: &str) {
+        self.send(vec![ResidentDelta::TurnFinished {
+            status: Lifecycle::Failed,
+            cost_usd: None,
+        }])
+        .await;
+        self.idle_since = Instant::now();
+        self.consecutive_failures += 1;
+        if self.consecutive_failures >= MAX_CONSECUTIVE_PASS_FAILURES {
+            self.fail(&format!(
+                "{MAX_CONSECUTIVE_PASS_FAILURES} consecutive wave failures: {reason}"
+            ))
+            .await;
+        }
+    }
+
+    async fn fetch_in_flight(&mut self) -> Vec<InFlightWorker> {
+        match self.client.context().await {
+            Ok(context) => context.in_flight,
+            Err(err) => {
+                tracing::info!(
+                    error = %format!("{err:#}"),
+                    "listener unreachable; ending residency"
+                );
+                self.end = Some(FlowloopEnd::ListenerGone);
+                Vec::new()
+            }
+        }
+    }
+
+    async fn send(&mut self, deltas: Vec<ResidentDelta>) {
+        if self.end.is_some() || deltas.is_empty() {
+            return;
+        }
+        if let Err(err) = self.client.send_deltas(deltas).await {
+            tracing::info!(
+                error = %format!("{err:#}"),
+                "listener unreachable; ending residency"
+            );
+            self.end = Some(FlowloopEnd::ListenerGone);
+        }
+    }
+
+    async fn fail(&mut self, reason: &str) {
+        if self.end.is_some() {
+            return;
+        }
+        tracing::error!(
+            wave = self.wave,
+            reason,
+            "wave flowloop failed; reporting and exiting"
+        );
+        self.send(vec![ResidentDelta::FlowloopState {
+            to: ResidentStateTo::Failed,
+            reason: reason.to_string(),
+        }])
+        .await;
+        if self.end.is_none() {
+            self.end = Some(FlowloopEnd::Failed(reason.to_string()));
+        }
+    }
+}
+
+fn spawn_wave_pass(
+    cwd: &Path,
+    seed: &str,
+    max_turns: Option<u32>,
+) -> std::io::Result<tokio::process::Child> {
+    let mut command = tokio::process::Command::from(lf_command());
+    command.arg("-b");
+    if let Some(max_turns) = max_turns {
+        command.arg("--max-turns").arg(max_turns.to_string());
+    }
+    command
+        .arg("flow")
+        .arg("wave")
+        .arg(seed)
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    command.spawn()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    use crate::chat::turns::{ChatRole, ChatTurn};
+    use crate::wave::journal::{journal_path, Attribution, EventKind, Journal};
+    use crate::wave::runtime::WaveRuntime;
+    use crate::wave::server::{self, ResidentDoor};
+    use crate::wave::state::FlowloopState;
+
+    /// The rig: a REAL listener (runtime + router with the resident door)
+    /// and a resident (subscription follower + `run_flowloop_with` and a
+    /// stub pass spawner) connected by HTTP. Every pass is a real `sh -c`
+    /// child, so pass lifecycles are real processes with real exits; the
+    /// spawner records each pass's seed so tests can assert on wakes.
+    struct TestFlowloop {
+        runtime: Arc<WaveRuntime>,
+        seeds: Arc<Mutex<Vec<String>>>,
+        flowloop: tokio::task::JoinHandle<Result<()>>,
+        /// The listener half runs on its OWN tokio runtime so a test can
+        /// kill it for real: shutting the runtime down drops the accept loop
+        /// AND every per-connection task (axum spawns those detached), which
+        /// is what an actual dead listener process looks like on the wire.
+        listener: Option<tokio::runtime::Runtime>,
+        _tmp: tempfile::TempDir,
+    }
+
+    impl Drop for TestFlowloop {
+        fn drop(&mut self) {
+            if let Some(rt) = self.listener.take() {
+                // Non-blocking teardown; dropping a runtime inline would
+                // panic inside the async test.
+                rt.shutdown_background();
+            }
+        }
+    }
+
+    impl TestFlowloop {
+        fn journal_events(&self) -> Vec<EventKind> {
+            let path = journal_path(self.runtime.repo_root(), "ship");
+            let (_, events) = Journal::open(&path).expect("read journal");
+            events.into_iter().map(|e| e.kind).collect()
+        }
+
+        fn pass_count(&self) -> usize {
+            self.seeds.lock().unwrap().len()
+        }
+
+        fn seed(&self, index: usize) -> String {
+            self.seeds.lock().unwrap()[index].clone()
+        }
+    }
+
+    fn test_config(heartbeat: Duration) -> FlowloopConfig {
+        FlowloopConfig {
+            heartbeat_idle: heartbeat,
+            pass_timeout: Duration::from_secs(5),
+            max_turns: None,
+        }
+    }
+
+    /// Boot with a far-away heartbeat; `script` is what every pass runs.
+    fn boot(
+        heartbeat: Duration,
+        script: &'static str,
+    ) -> impl std::future::Future<Output = TestFlowloop> {
+        boot_in(tempfile::tempdir().expect("tempdir"), heartbeat, script)
+    }
+
+    async fn boot_in(
+        tmp: tempfile::TempDir,
+        heartbeat: Duration,
+        script: &'static str,
+    ) -> TestFlowloop {
+        boot_with(tmp, test_config(heartbeat), script).await
+    }
+
+    async fn boot_with(
+        tmp: tempfile::TempDir,
+        config: FlowloopConfig,
+        script: &'static str,
+    ) -> TestFlowloop {
+        // The listener half: runtime + HTTP surface with the resident door,
+        // served from a dedicated tokio runtime (see TestFlowloop::listener).
+        let runtime =
+            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
+        let door = ResidentDoor::new("test-token");
+        let std_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        std_listener.set_nonblocking(true).unwrap();
+        let addr = std_listener.local_addr().unwrap();
+        let app = server::router(
+            runtime.clone(),
+            door,
+            server::SubagentDoor::new(),
+            None,
+            None,
+        );
+        let listener = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("listener runtime");
+        listener.spawn(async move {
+            let tcp = tokio::net::TcpListener::from_std(std_listener).expect("adopt listener");
+            axum::serve(tcp, app).await.ok();
+        });
+
+        // The resident half: attach, subscribe, run the flowloop over the
+        // wire with a stub spawner in place of `lf -b wave`.
+        let client = ListenerClient::new(addr.to_string(), "test-token".to_string());
+        let attach = client.attach(std::process::id()).await.expect("attach");
+        assert_eq!(attach.wave, "ship");
+        let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
+        tokio::spawn(crate::wave::resident::follow_inbox(
+            addr.to_string(),
+            inbox_tx,
+        ));
+
+        let seeds = Arc::new(Mutex::new(Vec::new()));
+        let spawn_seeds = seeds.clone();
+        let spawn_pass: SpawnPass = Box::new(move |cwd, seed, _max_turns| {
+            spawn_seeds.lock().unwrap().push(seed.to_string());
+            let mut command = tokio::process::Command::new("sh");
+            command
+                .arg("-c")
+                .arg(script)
+                .current_dir(cwd)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            command.spawn()
+        });
+        let flowloop = tokio::spawn(run_flowloop_with(
+            client,
+            inbox_rx,
+            tmp.path().to_path_buf(),
+            tmp.path().to_path_buf(),
+            "ship".into(),
+            config,
+            spawn_pass,
+        ));
+        TestFlowloop {
+            runtime,
+            seeds,
+            flowloop,
+            listener: Some(listener),
+            _tmp: tmp,
+        }
+    }
+
+    async fn wait_for(what: &str, cond: impl Fn() -> bool) {
+        for _ in 0..500 {
+            if cond() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("condition not met in time: {what}");
+    }
+
+    fn started_answers(events: &[EventKind]) -> Vec<Vec<MessageId>> {
+        events
+            .iter()
+            .filter_map(|kind| match kind {
+                EventKind::TurnStarted { answers, .. } => Some(answers.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn message_id(turn: &ChatTurn) -> MessageId {
+        let seq = turn.id.strip_prefix("turn-").expect("user turn id");
+        MessageId(format!("msg-{seq}"))
+    }
+
+    fn wake_of(seed: &str) -> String {
+        let start = seed.find("<wake>\n").expect("seed has a wake") + "<wake>\n".len();
+        let end = seed.find("\n</wake>").expect("seed closes the wake");
+        seed[start..end].to_string()
+    }
+
+    #[test]
+    fn path_for_children_starts_with_this_executables_dir() {
+        let exe_dir = std::env::current_exe()
+            .expect("current exe")
+            .parent()
+            .expect("exe has a dir")
+            .to_path_buf();
+        let path = path_for_children();
+        let first = std::env::split_paths(&path).next().expect("PATH non-empty");
+        assert_eq!(
+            first, exe_dir,
+            "the flowloop's PATH resolves `lf` to this build first"
+        );
+    }
+
+    #[test]
+    fn wave_pass_seed_carries_goal_loopflow_and_wake() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let goal_dir = tmp.path().join("wave/ship");
+        std::fs::create_dir_all(&goal_dir).expect("goal dir");
+        std::fs::write(goal_dir.join("GOAL.md"), "Ship the thing.").expect("goal");
+
+        let seed = wave_pass_seed(tmp.path(), "ship", "hello from chat");
+
+        assert!(seed.contains("Ship the thing."));
+        assert!(seed.contains("<lf:loopflow>"));
+        assert!(seed.contains("<wake>\nhello from chat\n</wake>"));
+        assert_eq!(
+            FlowloopConfig::default().heartbeat_idle,
+            Duration::from_secs(4 * 60 * 60)
+        );
+    }
+
+    // -- Scheduling, over the full wire --
+
+    #[tokio::test]
+    async fn message_while_idle_starts_a_pass_answering_it() {
+        let loop_ = boot(Duration::from_secs(600), "echo hi!").await;
+        let user_turn = loop_
+            .runtime
+            .deliver_user_message("hello wave".into(), MessageOp::Message);
+        wait_for("pass spawned", || loop_.pass_count() == 1).await;
+        assert_eq!(wake_of(&loop_.seed(0)), "hello wave");
+
+        wait_for("assistant turn", || {
+            loop_.runtime.thread_snapshot().iter().any(|t| {
+                t.role == ChatRole::Assistant
+                    && t.status == Lifecycle::Completed
+                    && t.text.contains("hi!")
+            })
+        })
+        .await;
+
+        let answers = started_answers(&loop_.journal_events());
+        assert_eq!(answers, vec![vec![message_id(&user_turn)]]);
+    }
+
+    /// A say emission wakes the flowloop like a message: the next pass's
+    /// wake carries the byline and its `TurnStarted.answers` consumes the id.
+    #[tokio::test]
+    async fn say_wakes_the_flowloop_and_is_consumed_by_the_next_pass() {
+        let loop_ = boot(Duration::from_secs(600), "echo noted").await;
+        let turn = loop_.runtime.deliver_say(
+            "implement run-1 finished: PR #7, one surprise".into(),
+            Attribution {
+                session_id: Some("sess-1".into()),
+                label: "worker".into(),
+            },
+        );
+        wait_for("pass spawned", || loop_.pass_count() == 1).await;
+        assert_eq!(
+            wake_of(&loop_.seed(0)),
+            "[worker] implement run-1 finished: PR #7, one surprise",
+            "the pass wake carries the byline"
+        );
+
+        wait_for("turn journaled", || {
+            !started_answers(&loop_.journal_events()).is_empty()
+        })
+        .await;
+        assert_eq!(
+            started_answers(&loop_.journal_events())[0],
+            vec![message_id(&turn)],
+            "the say emission is consumed like any queued message"
+        );
+    }
+
+    /// Messages landing mid-pass queue — never rejected, never injected —
+    /// and one boundary pass drains the whole queue.
+    #[tokio::test]
+    async fn messages_during_a_pass_coalesce_into_one_boundary_pass() {
+        let loop_ = boot(Duration::from_secs(600), "sleep 0.4; echo done").await;
+        loop_
+            .runtime
+            .deliver_user_message("first".into(), MessageOp::Message);
+        wait_for("pass 1 spawned", || loop_.pass_count() == 1).await;
+
+        // Two messages land mid-pass: queued, never rejected. Give the SSE
+        // hop time to reach the flowloop before the pass exits (the biased
+        // select then guarantees they're queued before the boundary drains).
+        let m2 = loop_
+            .runtime
+            .deliver_user_message("second".into(), MessageOp::Message);
+        let m3 = loop_
+            .runtime
+            .deliver_user_message("third".into(), MessageOp::Message);
+
+        // One boundary pass drains the whole queue.
+        wait_for("boundary pass spawned", || loop_.pass_count() == 2).await;
+        let wake = wake_of(&loop_.seed(1));
+        assert!(wake.contains("second") && wake.contains("third"));
+
+        wait_for("second TurnStarted journaled", || {
+            started_answers(&loop_.journal_events()).len() == 2
+        })
+        .await;
+        let answers = started_answers(&loop_.journal_events());
+        assert_eq!(answers[1], vec![message_id(&m2), message_id(&m3)]);
+    }
+
+    // -- Cron: the third deadline --
+
+    fn write_goal_with_crons(tmp: &std::path::Path, crons_yaml: &str) {
+        let dir = tmp.join("wave/ship");
+        std::fs::create_dir_all(&dir).expect("wave dir");
+        std::fs::write(
+            dir.join("GOAL.md"),
+            format!("---\ncrons:\n{crons_yaml}---\nShip.\n"),
+        )
+        .expect("write GOAL.md");
+    }
+
+    #[test]
+    fn next_cron_fire_honors_grace_last_fired_and_garbage() {
+        let now = Utc::now();
+
+        // Never fired, hourly schedule: an occurrence within the 24h grace
+        // window is due (fire_at <= now).
+        let due = next_cron_fire("0 0 * * * *", None, now).expect("hourly parses");
+        assert!(due <= now, "an occurrence inside the grace window is due");
+
+        // Fired moments ago: the next occurrence is in the future.
+        let fired = next_cron_fire("0 0 * * * *", Some(now), now).expect("hourly parses");
+        assert!(fired > now, "a just-fired schedule waits for the next slot");
+
+        // Garbage never fires.
+        assert!(next_cron_fire("not-a-cron", None, now).is_none());
+    }
+
+    #[test]
+    fn cron_prompt_names_each_due_flow() {
+        let due = vec![
+            WaveCronDef {
+                flow: "qa".into(),
+                schedule: "* * * * * *".into(),
+            },
+            WaveCronDef {
+                flow: "wave-polish".into(),
+                schedule: "0 0 0 * * Mon *".into(),
+            },
+        ];
+        assert_eq!(
+            cron_prompt(&due),
+            "cron due: qa — dispatch it\ncron due: wave-polish — dispatch it"
+        );
+    }
+
+    /// A due schedule in GOAL.md frontmatter opens a system pass while idle.
+    #[tokio::test]
+    async fn cron_due_opens_a_system_pass() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Every second: due immediately at boot (grace window), and the
+        // heartbeat is far away so the first pass is the cron's.
+        write_goal_with_crons(tmp.path(), "  - flow: qa\n    schedule: '* * * * * *'\n");
+        let loop_ = boot_in(tmp, Duration::from_secs(600), "echo ok").await;
+
+        wait_for("cron pass spawned", || loop_.pass_count() >= 1).await;
+        assert_eq!(wake_of(&loop_.seed(0)), "cron due: qa — dispatch it");
+    }
+
+    /// A schedule with no occurrence between the grace window and now stays
+    /// quiet — no pass spawns.
+    #[tokio::test]
+    async fn cron_not_due_stays_quiet() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_goal_with_crons(
+            tmp.path(),
+            "  - flow: qa\n    schedule: '0 0 0 1 1 * 2099'\n",
+        );
+        let loop_ = boot_in(tmp, Duration::from_secs(600), "echo ok").await;
+
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(loop_.pass_count(), 0, "nothing due, nothing fired");
+    }
+
+    #[tokio::test]
+    async fn heartbeat_fires_when_idle_and_not_while_a_pass_runs() {
+        let loop_ = boot(Duration::from_millis(50), "sleep 0.3; echo beat").await;
+        // Quiet wave: the heartbeat starts a progress pass with the nudge.
+        wait_for("heartbeat pass", || loop_.pass_count() == 1).await;
+        assert_eq!(wake_of(&loop_.seed(0)), HEARTBEAT_PROMPT);
+
+        // While the pass runs (0.3s against a 50ms heartbeat), no further
+        // heartbeat fires.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(loop_.pass_count(), 1, "no heartbeat while a pass runs");
+
+        // After the boundary, idle resumes and the next heartbeat fires.
+        wait_for("next heartbeat", || loop_.pass_count() >= 2).await;
+    }
+
+    #[tokio::test]
+    async fn heartbeat_carries_in_flight_workers_when_present() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Journal the observations before the flowloop boots so the first
+        // heartbeat deterministically sees them (served by /resident/context).
+        {
+            let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+            assert!(runtime.journal_run_observed(
+                "run-7",
+                "sess-7",
+                "implement",
+                "wire the observation tail",
+            ));
+            assert!(runtime.journal_run_observed("run-8", "sess-8", "design", "next item"));
+            // Multi-line task: must flatten to one line in the prompt.
+            assert!(runtime.journal_run_observed(
+                "run-9",
+                "sess-9",
+                "design",
+                "multi-line task\n  with an indented second line",
+            ));
+            assert!(runtime.journal_run_completed(
+                "run-8",
+                crate::wave::journal::WorkerOutcome::Completed,
+                "landed",
+            ));
+        }
+
+        let loop_ = boot_in(tmp, Duration::from_millis(50), "echo ok").await;
+        wait_for("heartbeat pass", || loop_.pass_count() == 1).await;
+        let wake = wake_of(&loop_.seed(0));
+        assert!(wake.starts_with(HEARTBEAT_PROMPT));
+        assert!(wake.contains("<in_flight>"), "in-flight section present");
+        assert!(wake.contains("run run-7 · implement: wire the observation tail · running"));
+        assert!(
+            !wake.contains("run-8"),
+            "finished workers are not in flight"
+        );
+        assert!(
+            wake.contains(
+                "run run-9 · design: multi-line task with an indented second line · running"
+            ),
+            "multi-line tasks flatten to one in-flight line"
+        );
+    }
+
+    // -- Failure and teardown --
+
+    /// The failure cap ends the RESIDENT: `run_flowloop` returns an error
+    /// after reporting `FlowloopState::Failed` over the wire. No in-process limbo
+    /// — revival is the listener supervisor's respawn (tested in
+    /// supervisor.rs).
+    #[tokio::test]
+    async fn failure_cap_reports_failed_and_exits_the_resident() {
+        let mut loop_ = boot(Duration::from_millis(30), "exit 1").await;
+        // Heartbeats keep opening passes; every pass exits nonzero.
+        wait_for("flowloop failed", || {
+            matches!(loop_.runtime.flowloop_state(), FlowloopState::Failed { .. })
+        })
+        .await;
+        let FlowloopState::Failed { reason } = loop_.runtime.flowloop_state() else {
+            unreachable!()
+        };
+        assert!(reason.contains("consecutive wave failures"), "{reason}");
+        assert!(
+            loop_.pass_count() >= MAX_CONSECUTIVE_PASS_FAILURES as usize,
+            "the cap took the full ladder"
+        );
+
+        // …and the resident's loop ends with that error (process exits 1).
+        let outcome = tokio::time::timeout(Duration::from_secs(5), &mut loop_.flowloop)
+            .await
+            .expect("flowloop task ends")
+            .expect("flowloop task not cancelled");
+        let err = outcome.expect_err("flowloop failure is an error exit");
+        assert!(err.to_string().contains("consecutive wave failures"));
+    }
+
+    /// A pass overrunning its timeout is killed and finishes its turn
+    /// `Failed` — one failure, not a flowloop death.
+    #[tokio::test]
+    async fn pass_timeout_kills_the_child_and_fails_the_turn() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let config = FlowloopConfig {
+            heartbeat_idle: Duration::from_secs(600),
+            pass_timeout: Duration::from_millis(100),
+            max_turns: None,
+        };
+        let loop_ = boot_with(tmp, config, "sleep 30").await;
+        loop_
+            .runtime
+            .deliver_user_message("go".into(), MessageOp::Message);
+        wait_for("pass spawned", || loop_.pass_count() == 1).await;
+
+        wait_for("turn failed", || {
+            loop_
+                .runtime
+                .thread_snapshot()
+                .iter()
+                .any(|t| t.role == ChatRole::Assistant && t.status == Lifecycle::Failed)
+        })
+        .await;
+        wait_for("back to idle", || {
+            loop_.runtime.flowloop_state() == FlowloopState::Idle
+        })
+        .await;
+    }
+
+    /// An interrupt mid-pass kills the child and finalizes the turn
+    /// `Interrupted`; the journal walks Turning → Interrupting → Idle.
+    #[tokio::test]
+    async fn interrupt_kills_the_pass_and_finalizes_the_turn_interrupted() {
+        let loop_ = boot(Duration::from_secs(600), "sleep 30").await;
+        loop_
+            .runtime
+            .deliver_user_message("start".into(), MessageOp::Message);
+        wait_for("pass spawned", || loop_.pass_count() == 1).await;
+        wait_for("turning", || {
+            loop_.runtime.flowloop_state().name() == "turning"
+        })
+        .await;
+
+        loop_.runtime.deliver_interrupt();
+        wait_for("idle again", || {
+            loop_.runtime.flowloop_state() == FlowloopState::Idle
+        })
+        .await;
+
+        // The turn is a well-formed interrupted record, and the journal
+        // walked Turning → Interrupting → Idle.
+        let thread = loop_.runtime.thread_snapshot();
+        assert_eq!(
+            thread.last().unwrap().status,
+            Lifecycle::Interrupted,
+            "partial turn finalized as a value, not a crash"
+        );
+        let path: Vec<(String, String)> = loop_
+            .journal_events()
+            .iter()
+            .filter_map(|kind| match kind {
+                EventKind::FlowloopState { from, to, .. } => {
+                    Some((from.name().to_string(), to.name().to_string()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            path,
+            vec![
+                ("idle".to_string(), "turning".to_string()),
+                ("turning".to_string(), "interrupting".to_string()),
+                ("interrupting".to_string(), "idle".to_string()),
+            ]
+        );
+    }
+
+    /// The listener disappearing ends the residency CLEANLY: the subscription
+    /// closes, `run_flowloop` returns Ok — the keeper is gone, nothing to
+    /// revive from this side (tmux/systemd restarts are the human's
+    /// arrangement).
+    #[tokio::test]
+    async fn listener_death_ends_the_resident_cleanly() {
+        let mut loop_ = boot(Duration::from_secs(600), "echo ok").await;
+
+        // Kill the listener for real: its runtime goes down, every live
+        // connection with it.
+        loop_
+            .listener
+            .take()
+            .expect("listener alive")
+            .shutdown_background();
+        // A killed listener is indistinguishable from a restarting one until
+        // the retry ladder (LISTENER_RETRY_DELAYS, ~15s) exhausts — so clean
+        // exit takes the full ladder by design. Timeout must clear it with CI
+        // headroom.
+        let outcome = tokio::time::timeout(Duration::from_secs(30), &mut loop_.flowloop)
+            .await
+            .expect("flowloop task ends after listener death")
+            .expect("flowloop task not cancelled");
+        assert!(
+            outcome.is_ok(),
+            "listener death is a clean exit: {outcome:?}"
+        );
+    }
+}

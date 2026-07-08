@@ -38,10 +38,10 @@ fn make_commit(dir: &Path, message: &str) {
         .expect("git commit");
 }
 
-fn write_step(repo: &Path, name: &str, content: &str) {
-    let steps_dir = repo.join(".lf/steps");
-    fs::create_dir_all(&steps_dir).unwrap();
-    fs::write(steps_dir.join(format!("{name}.md")), content).unwrap();
+fn write_skill(repo: &Path, name: &str, content: &str) {
+    let skills_dir = repo.join(".lf/skills");
+    fs::create_dir_all(&skills_dir).unwrap();
+    fs::write(skills_dir.join(format!("{name}.md")), content).unwrap();
 }
 
 fn write_direction(repo: &Path, name: &str, content: &str) {
@@ -65,17 +65,17 @@ fn render_prompt(components: GatheredContext) -> String {
 // =============================================================================
 
 #[test]
-fn gather_context_with_step() {
+fn gather_context_with_skill() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
 
-    write_step(repo, "implement", "Build the feature described above.");
+    write_skill(repo, "implement", "Build the feature described above.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -88,8 +88,8 @@ fn gather_context_with_step() {
     })
     .unwrap();
 
-    assert!(components.step.is_some());
-    assert!(components.step.as_ref().unwrap().content.is_some());
+    assert!(components.skill.is_some());
+    assert!(components.skill.as_ref().unwrap().content.is_some());
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn gather_context_with_inline_prompt() {
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: None,
+        skill: None,
         message: Some("Fix the bug in main.rs".to_string()),
         operate: false,
         surface: Surface::Cli,
@@ -114,8 +114,8 @@ fn gather_context_with_inline_prompt() {
     })
     .unwrap();
 
-    // No step when using inline
-    assert!(components.step.is_none());
+    // No skill when using inline
+    assert!(components.skill.is_none());
 }
 
 #[test]
@@ -124,14 +124,14 @@ fn gather_context_with_directions() {
     let repo = temp.path();
     init_repo(repo);
 
-    write_step(repo, "review", "Review the code.");
+    write_skill(repo, "review", "Review the code.");
     write_direction(repo, "concise", "Be brief and direct.");
     write_direction(repo, "security", "Focus on security issues.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("review".to_string()),
+        skill: Some("review".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -152,12 +152,12 @@ fn gather_context_expands_builtin_direction_group() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
-    write_step(repo, "review", "Review the code.");
+    write_skill(repo, "review", "Review the code.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("review".to_string()),
+        skill: Some("review".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -186,14 +186,14 @@ fn gather_context_expands_user_direction_group() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
-    write_step(repo, "review", "Review the code.");
+    write_skill(repo, "review", "Review the code.");
     write_direction_group(repo, "mygroup", "alpha", "Alpha direction");
     write_direction_group(repo, "mygroup", "beta", "Beta direction");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("review".to_string()),
+        skill: Some("review".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -228,12 +228,12 @@ fn gather_context_includes_explicit_readme_docs_target() {
     init_repo(repo);
 
     fs::write(repo.join("README.md"), "# Project\nThis is a test.").unwrap();
-    write_step(repo, "implement", "Do work.");
+    write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -267,12 +267,12 @@ fn gather_context_includes_scratch_docs() {
         "# Design\nArchitecture notes.",
     )
     .unwrap();
-    write_step(repo, "implement", "Do work.");
+    write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -306,12 +306,12 @@ fn gather_context_with_wave() {
 
     fs::create_dir_all(repo.join("wave/auth")).unwrap();
     fs::write(repo.join("wave/auth/README.md"), "# Auth Wave\nBuild auth.").unwrap();
-    write_step(repo, "implement", "Do work.");
+    write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -336,12 +336,12 @@ fn gather_context_preserves_surface() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
-    write_step(repo, "debug", "Fix it.");
+    write_skill(repo, "debug", "Fix it.");
     make_commit(repo, "initial");
 
     let auto = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("debug".to_string()),
+        skill: Some("debug".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -356,7 +356,7 @@ fn gather_context_preserves_surface() {
 
     let interactive = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("debug".to_string()),
+        skill: Some("debug".to_string()),
         message: None,
         operate: false,
         surface: Surface::Cli,
@@ -378,17 +378,17 @@ fn gather_context_preserves_surface() {
 // =============================================================================
 
 #[test]
-fn format_prompt_includes_step_content() {
+fn format_prompt_includes_skill_content() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
 
-    write_step(repo, "implement", "Build the feature now.");
+    write_skill(repo, "implement", "Build the feature now.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -411,12 +411,12 @@ fn format_prompt_includes_auto_mode_header() {
     let repo = temp.path();
     init_repo(repo);
 
-    write_step(repo, "implement", "Do work.");
+    write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -439,13 +439,13 @@ fn format_prompt_includes_directions() {
     let repo = temp.path();
     init_repo(repo);
 
-    write_step(repo, "review", "Review code.");
+    write_skill(repo, "review", "Review code.");
     write_direction(repo, "concise", "Be brief.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("review".to_string()),
+        skill: Some("review".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -474,12 +474,12 @@ fn format_prompt_includes_wave_context() {
         "# Payments\nStripe integration.",
     )
     .unwrap();
-    write_step(repo, "implement", "Do work.");
+    write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -543,12 +543,12 @@ fn wave_filtering_includes_only_specified_wave() {
     let repo = temp.path();
     init_repo(repo);
     setup_multi_wave_repo(repo);
-    write_step(repo, "implement", "Do work.");
+    write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -599,12 +599,12 @@ fn wave_filtering_excludes_all_waves_when_no_wave() {
     let repo = temp.path();
     init_repo(repo);
     setup_multi_wave_repo(repo);
-    write_step(repo, "implement", "Do work.");
+    write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -645,13 +645,13 @@ fn wave_filtering_handles_nonexistent_wave() {
     let repo = temp.path();
     init_repo(repo);
     setup_multi_wave_repo(repo);
-    write_step(repo, "implement", "Do work.");
+    write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
     // Specifying a wave that doesn't exist should not fail
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -711,12 +711,12 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
     )
     .unwrap();
 
-    write_step(repo, "implement", "Do work.");
+    write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -763,12 +763,12 @@ fn wave_memory_is_loaded_separately_from_wave_docs() {
         "- keep tests focused on behavior",
     )
     .unwrap();
-    write_step(repo, "implement", "Do work.");
+    write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         message: None,
         operate: false,
         surface: Surface::Headless,
@@ -857,12 +857,12 @@ fn run_outside_any_wave_assembles_neither_section() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
-    write_step(repo, "implement", "Do work.");
+    write_skill(repo, "implement", "Do work.");
     make_commit(repo, "initial");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        step: Some("implement".to_string()),
+        skill: Some("implement".to_string()),
         ..Default::default()
     })
     .unwrap();

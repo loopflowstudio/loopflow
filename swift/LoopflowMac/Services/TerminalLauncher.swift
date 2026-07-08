@@ -101,9 +101,9 @@ struct TerminalLauncher {
         NSWorkspace.shared.open(url)
     }
 
-    /// Launch a loopflow step in the terminal at the given repo path.
-    func launchStep(_ step: String, terminal: TerminalApp, at repo: URL) throws {
-        try launchTerminal(terminal, at: repo, command: "lf \(step)")
+    /// Launch a loopflow skill in the terminal at the given repo path.
+    func launchSkill(_ skill: String, terminal: TerminalApp, at repo: URL) throws {
+        try launchTerminal(terminal, at: repo, command: "lf \(skill)")
     }
 
     // MARK: - Terminal Launchers

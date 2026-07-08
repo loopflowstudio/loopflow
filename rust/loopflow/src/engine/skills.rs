@@ -37,12 +37,12 @@ enum Vendor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct StepSource {
+struct SkillSource {
     name: String,
     content: String,
 }
 
-/// Compile loopflow steps (builtins + `~/.lf/`) into the user's personal home
+/// Compile loopflow skills (builtins + `~/.lf/`) into the user's personal home
 /// agent skill directories (`~/.claude/skills`, `~/.agents/skills`). Skills
 /// never land inside a working repo — the home dirs are the sole target.
 pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadError> {
@@ -50,11 +50,11 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
         .global_home
         .clone()
         .or_else(dirs::home_dir)
-        .ok_or_else(|| LoadError::InvalidStep("home directory not found".to_string()))?;
+        .ok_or_else(|| LoadError::InvalidSkill("home directory not found".to_string()))?;
 
-    let global_steps = collect_global_steps(&home)?;
-    let mut resolved = collect_builtin_steps();
-    resolved.extend(global_steps);
+    let global_skills = collect_global_skills(&home)?;
+    let mut resolved = collect_builtin_skills();
+    resolved.extend(global_skills);
 
     let mut report = SkillSyncReport::default();
     write_targets(
@@ -77,14 +77,14 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
     Ok(report)
 }
 
-fn collect_builtin_steps() -> BTreeMap<String, StepSource> {
-    builtins::builtin_step_names()
+fn collect_builtin_skills() -> BTreeMap<String, SkillSource> {
+    builtins::builtin_skill_names()
         .into_iter()
         .filter_map(|name| {
-            builtins::get_builtin_step(name).map(|content| {
+            builtins::get_builtin_skill(name).map(|content| {
                 (
                     name.to_string(),
-                    StepSource {
+                    SkillSource {
                         name: name.to_string(),
                         content: content.to_string(),
                     },
@@ -94,24 +94,27 @@ fn collect_builtin_steps() -> BTreeMap<String, StepSource> {
         .collect()
 }
 
-fn collect_global_steps(home: &Path) -> Result<BTreeMap<String, StepSource>, LoadError> {
-    let mut steps = BTreeMap::new();
-    collect_step_dir(&home.join(".lf/steps"), &mut steps)?;
-    collect_step_dir(&home.join(".claude/commands"), &mut steps)?;
-    Ok(steps)
+fn collect_global_skills(home: &Path) -> Result<BTreeMap<String, SkillSource>, LoadError> {
+    let mut skills = BTreeMap::new();
+    collect_skill_dir(&home.join(".lf/skills"), &mut skills)?;
+    collect_skill_dir(&home.join(".claude/commands"), &mut skills)?;
+    Ok(skills)
 }
 
-fn collect_step_dir(dir: &Path, steps: &mut BTreeMap<String, StepSource>) -> Result<(), LoadError> {
+fn collect_skill_dir(
+    dir: &Path,
+    skills: &mut BTreeMap<String, SkillSource>,
+) -> Result<(), LoadError> {
     if !dir.is_dir() {
         return Ok(());
     }
 
     for path in markdown_files(dir)? {
-        let Some(name) = step_name_from_path(dir, &path) else {
+        let Some(name) = skill_name_from_path(dir, &path) else {
             continue;
         };
         let content = fs::read_to_string(&path)?;
-        steps.insert(name.clone(), StepSource { name, content });
+        skills.insert(name.clone(), SkillSource { name, content });
     }
     Ok(())
 }
@@ -142,7 +145,7 @@ fn collect_markdown_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), Lo
     Ok(())
 }
 
-fn step_name_from_path(root: &Path, path: &Path) -> Option<String> {
+fn skill_name_from_path(root: &Path, path: &Path) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
     let mut without_extension = relative.to_path_buf();
     without_extension.set_extension("");
@@ -156,18 +159,18 @@ fn step_name_from_path(root: &Path, path: &Path) -> Option<String> {
 }
 
 fn write_targets(
-    steps: &BTreeMap<String, StepSource>,
+    skills: &BTreeMap<String, SkillSource>,
     target_root: &Path,
     vendor: Vendor,
     prune: bool,
     report: &mut SkillSyncReport,
 ) -> Result<(), LoadError> {
     fs::create_dir_all(target_root)?;
-    let desired: BTreeSet<String> = steps.keys().cloned().collect();
+    let desired: BTreeSet<String> = skills.keys().cloned().collect();
 
-    for step in steps.values() {
-        let path = skill_path(target_root, &step.name);
-        let content = render_skill(step, vendor);
+    for skill in skills.values() {
+        let path = skill_path(target_root, &skill.name);
+        let content = render_skill(skill, vendor);
         if fs::read_to_string(&path).ok().as_deref() == Some(content.as_str()) {
             continue;
         }
@@ -180,7 +183,7 @@ fn write_targets(
 
     if prune {
         for path in generated_skill_files(target_root)? {
-            let Some(name) = skill_name_from_path(target_root, &path) else {
+            let Some(name) = synced_skill_name_from_path(target_root, &path) else {
                 continue;
             };
             if desired.contains(&name) {
@@ -195,16 +198,16 @@ fn write_targets(
     Ok(())
 }
 
-fn render_skill(step: &StepSource, vendor: Vendor) -> String {
+fn render_skill(skill: &SkillSource, vendor: Vendor) -> String {
     let (original_frontmatter, body) =
-        split_frontmatter(&step.content).unwrap_or_else(|| (String::new(), step.content.clone()));
-    let description = skill_description(&original_frontmatter, &body, &step.name);
+        split_frontmatter(&skill.content).unwrap_or_else(|| (String::new(), skill.content.clone()));
+    let description = skill_description(&original_frontmatter, &body, &skill.name);
 
     let mut frontmatter = Vec::new();
-    frontmatter.push(format!("name: {}", yaml_string(&step.name)));
+    frontmatter.push(format!("name: {}", yaml_string(&skill.name)));
     frontmatter.push(format!("description: {}", yaml_string(&description)));
     frontmatter.push(LOOPFLOW_MARKER.to_string());
-    frontmatter.push(format!("loopflow-step: {}", yaml_string(&step.name)));
+    frontmatter.push(format!("loopflow-skill: {}", yaml_string(&skill.name)));
     if vendor == Vendor::Claude {
         frontmatter.push("disable-model-invocation: true".to_string());
     }
@@ -225,7 +228,7 @@ fn skill_description(frontmatter: &str, body: &str, name: &str) -> String {
         }
     }
 
-    first_prose_line(body).unwrap_or_else(|| format!("Run the loopflow {name} step."))
+    first_prose_line(body).unwrap_or_else(|| format!("Run the loopflow {name} skill."))
 }
 
 fn first_line(value: &str) -> String {
@@ -300,7 +303,7 @@ fn is_loopflow_generated(path: &Path) -> bool {
         .any(|line| line.trim() == LOOPFLOW_MARKER)
 }
 
-fn skill_name_from_path(root: &Path, skill_file: &Path) -> Option<String> {
+fn synced_skill_name_from_path(root: &Path, skill_file: &Path) -> Option<String> {
     let dir = skill_file.parent()?;
     Some(
         dir.strip_prefix(root)
@@ -349,11 +352,11 @@ mod tests {
     #[test]
     fn sync_skills_writes_home_targets_with_marker() {
         let home = TempDir::new().unwrap();
-        let steps = home.path().join(".lf/steps");
-        fs::create_dir_all(&steps).unwrap();
+        let skills = home.path().join(".lf/skills");
+        fs::create_dir_all(&skills).unwrap();
         fs::write(
-            steps.join("local.md"),
-            "---\nagent: codex:o3\n---\nLocal step summary.\n\nDo it.\n",
+            skills.join("local.md"),
+            "---\nagent: codex:o3\n---\nLocal skill summary.\n\nDo it.\n",
         )
         .unwrap();
 
@@ -368,9 +371,9 @@ mod tests {
             .any(|path| path.ends_with(".agents/skills/local/SKILL.md")));
 
         let claude = fs::read_to_string(home.path().join(".claude/skills/local/SKILL.md")).unwrap();
-        assert!(claude.contains("description: Local step summary."));
+        assert!(claude.contains("description: Local skill summary."));
         assert!(claude.contains("loopflow: true"));
-        assert!(claude.contains("loopflow-step: local"));
+        assert!(claude.contains("loopflow-skill: local"));
         assert!(claude.contains("disable-model-invocation: true"));
         assert!(!claude.contains("agent: codex:o3"));
         assert!(claude.contains("Do it."));
@@ -380,12 +383,12 @@ mod tests {
     }
 
     #[test]
-    fn sync_skills_compiles_builtin_steps() {
+    fn sync_skills_compiles_builtin_skills() {
         let home = TempDir::new().unwrap();
 
         let report = sync_skills(&options_for(&home)).unwrap();
 
-        // Builtin steps are always compiled, even with an empty home.
+        // Builtin skills are always compiled, even with an empty home.
         assert!(!report.written.is_empty());
         assert!(report
             .written
@@ -396,9 +399,9 @@ mod tests {
     #[test]
     fn sync_skills_never_writes_under_a_repo() {
         let home = TempDir::new().unwrap();
-        let steps = home.path().join(".lf/steps");
-        fs::create_dir_all(&steps).unwrap();
-        fs::write(steps.join("global-only.md"), "Global only.\n").unwrap();
+        let skills = home.path().join(".lf/skills");
+        fs::create_dir_all(&skills).unwrap();
+        fs::write(skills.join("global-only.md"), "Global only.\n").unwrap();
 
         let report = sync_skills(&options_for(&home)).unwrap();
 

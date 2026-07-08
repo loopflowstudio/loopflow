@@ -11,7 +11,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use crate::engine::error::CoreError;
-use crate::engine::flow::{expand_direction_names, load_direction, load_step, Direction, Step};
+use crate::engine::flow::{expand_direction_names, load_direction, load_skill, Direction, Skill};
 use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::types::RepoId;
 use once_cell::sync::Lazy;
@@ -23,7 +23,7 @@ use tracing::{debug, warn};
 /// Source of a context document or context token bucket.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DocumentSource {
-    Step,
+    Skill,
     Direction,
     Scratch,
     Wave,
@@ -77,7 +77,7 @@ pub struct ContextBreakdown {
     pub documents: Vec<DocumentEntry>,
     pub system_tokens: usize,
     /// Display metadata
-    pub step_name: Option<String>,
+    pub skill_name: Option<String>,
     pub direction_names: Vec<String>,
     pub diff_tier: DiffTier,
     pub diff_file_count: usize,
@@ -163,8 +163,8 @@ pub struct GatherSpec {
 #[derive(Debug, Clone, Default)]
 pub struct GatherContextOpts {
     pub repo_root: PathBuf,
-    pub step: Option<String>,
-    /// User message (positional args after step/flow name, or inline prompt)
+    pub skill: Option<String>,
+    /// User message (positional args after skill/flow name, or inline prompt)
     pub message: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
@@ -251,7 +251,7 @@ pub struct PromptComponents {
     pub docs: Vec<Document>,
     pub diff: Option<String>,
     pub diff_files: Vec<Document>,
-    pub step: Option<Step>,
+    pub skill: Option<Skill>,
     pub repo_root: String,
     pub clipboard: Option<String>,
     pub directions: Vec<Direction>,
@@ -263,7 +263,7 @@ pub struct PromptComponents {
     pub wave_chat: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
-    /// User message (positional args after step/flow name)
+    /// User message (positional args after skill/flow name)
     pub message: Option<String>,
     /// How diff context was tiered
     pub diff_tier: DiffTier,
@@ -390,11 +390,11 @@ pub fn measure_context(components: &PromptComponents) -> ContextBreakdown {
         ..Default::default()
     };
 
-    if let Some(ref step) = components.step {
-        if let Some(ref content) = step.content {
-            breakdown.add_source_tokens(DocumentSource::Step, count_tokens(content));
+    if let Some(ref skill) = components.skill {
+        if let Some(ref content) = skill.content {
+            breakdown.add_source_tokens(DocumentSource::Skill, count_tokens(content));
         }
-        breakdown.step_name = Some(step.name.clone());
+        breakdown.skill_name = Some(skill.name.clone());
     }
 
     for dir in &components.directions {
@@ -489,19 +489,22 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     let start = Instant::now();
     let repo_root = &opts.repo_root;
 
-    // Load step
-    let step_start = Instant::now();
-    let step = match &opts.step {
-        Some(step_name) => Some(load_step(step_name, repo_root)?),
+    // Load skill
+    let skill_start = Instant::now();
+    let skill = match &opts.skill {
+        Some(skill_name) => Some(load_skill(skill_name, repo_root)?),
         None => None,
     };
-    debug!(elapsed_ms = step_start.elapsed().as_millis(), "loaded step");
+    debug!(
+        elapsed_ms = skill_start.elapsed().as_millis(),
+        "loaded skill"
+    );
 
     // Load directions
     let directions_start = Instant::now();
     let mut direction_names = Vec::new();
-    if let Some(ref step) = step {
-        direction_names.extend(step.directions.clone());
+    if let Some(ref skill) = skill {
+        direction_names.extend(skill.directions.clone());
     }
     direction_names.extend(opts.directions.clone());
     let expanded_names = expand_direction_names(&direction_names, repo_root);
@@ -536,7 +539,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
             DocumentSource::Summary => summaries.push(doc),
             DocumentSource::WaveMemory => wave_memory = Some(doc),
             DocumentSource::Diff => diff_files.push(doc),
-            DocumentSource::Step | DocumentSource::Direction | DocumentSource::Clipboard => {}
+            DocumentSource::Skill | DocumentSource::Direction | DocumentSource::Clipboard => {}
         }
     }
     dedup_documents(&mut diff_files);
@@ -604,7 +607,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         docs,
         diff,
         diff_files,
-        step,
+        skill,
         repo_root: repo_root.to_string_lossy().to_string(),
         clipboard,
         directions,
@@ -1664,7 +1667,7 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
 
 /// The one loopflow operating document (including the Speak vocabulary) as a
 /// prompt section. Emitted exactly once per prompt: assembled prompts get it
-/// from [`format_system_sections`]; the wave mind's prompt bypasses assembly
+/// from [`format_system_sections`]; the wave flowloop's seed bypasses assembly
 /// and appends the same section itself.
 pub fn loopflow_section() -> String {
     format!(
@@ -1790,15 +1793,15 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
     parts
 }
 
-/// Format step tag.
-fn format_step_tag(step: &Step) -> String {
-    if let Some(ref content) = step.content {
+/// Format skill tag.
+fn format_skill_tag(skill: &Skill) -> String {
+    if let Some(ref content) = skill.content {
         format!(
-            "<lf:step:{}>\n{}\n</lf:step:{}>",
-            step.name, content, step.name
+            "<lf:skill:{}>\n{}\n</lf:skill:{}>",
+            skill.name, content, skill.name
         )
     } else {
-        format!("<lf:step:{}>\n</lf:step:{}>", step.name, step.name)
+        format!("<lf:skill:{}>\n</lf:skill:{}>", skill.name, skill.name)
     }
 }
 
@@ -1878,9 +1881,9 @@ pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> R
                 ));
             }
 
-            // Task sections: step, message
-            if let Some(ref step) = components.step {
-                parts.push(format!("The step.\n\n{}", format_step_tag(step)));
+            // Task sections: skill, message
+            if let Some(ref skill) = components.skill {
+                parts.push(format!("The skill.\n\n{}", format_skill_tag(skill)));
             }
 
             if let Some(ref message) = components.message {
@@ -1913,8 +1916,8 @@ pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> R
         PromptFormatMode::Task => {
             let mut parts = Vec::new();
 
-            if let Some(ref step) = components.step {
-                parts.push(format_step_tag(step));
+            if let Some(ref skill) = components.skill {
+                parts.push(format_skill_tag(skill));
             }
 
             if let Some(ref message) = components.message {
@@ -1932,7 +1935,7 @@ pub fn format_context_prompt(components: &PromptComponents) -> String {
     format_prompt(PromptFormatMode::Context, components).into_string()
 }
 
-/// Format task prompt for user message (step + free text).
+/// Format task prompt for user message (skill + free text).
 pub fn format_task_prompt(components: &PromptComponents) -> String {
     format_prompt(PromptFormatMode::Task, components).into_string()
 }
@@ -1951,7 +1954,7 @@ pub fn format_claude_system_prompt(components: &PromptComponents) -> String {
     parts.join("\n\n")
 }
 
-/// Format task prompt for Claude (includes content sections + clipboard + step + message).
+/// Format task prompt for Claude (includes content sections + clipboard + skill + message).
 pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
     let mut parts = format_content_sections(components);
 
@@ -1963,8 +1966,8 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
         ));
     }
 
-    if let Some(ref step) = components.step {
-        parts.push(format_step_tag(step));
+    if let Some(ref skill) = components.skill {
+        parts.push(format_skill_tag(skill));
     }
 
     if let Some(ref message) = components.message {
@@ -1979,7 +1982,7 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
 /// Durable: `~/.lf/logs/<repo>/<worktree>/<file>` — survives worktree deletion.
 ///
-/// File format: `{timestamp}-{run_id}-{flow_parents}.{step}.md`, with the
+/// File format: `{timestamp}-{run_id}-{flow_parents}.{skill}.md`, with the
 /// `{run_id}` segment present only when `LF_RUN_ID` is set (daemon-dispatched
 /// runs) — it joins the log to the run's journal and token-usage records.
 ///
@@ -1987,7 +1990,7 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
 pub fn write_prompt_log(
     repo_root: &Path,
     prompt: &str,
-    step_name: &str,
+    skill_name: &str,
     flow_parents: Option<&[String]>,
 ) -> Result<PathBuf, CoreError> {
     let prompts_dir = repo_root.join(".lf/prompts");
@@ -1995,13 +1998,13 @@ pub fn write_prompt_log(
     ensure_gitignore_entry(repo_root, ".lf/prompts/")?;
 
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    // Replace / with . so namespaced steps (e.g., garden/scan) don't create subdirectories.
-    let safe_step = step_name.replace('/', ".");
+    // Replace / with . so namespaced skills (e.g., garden/scan) don't create subdirectories.
+    let safe_skill = skill_name.replace('/', ".");
     let name_part = match flow_parents {
         Some(parents) if !parents.is_empty() => {
-            format!("{}.{}", parents.join("."), safe_step)
+            format!("{}.{}", parents.join("."), safe_skill)
         }
-        _ => safe_step,
+        _ => safe_skill,
     };
     let run_part = std::env::var(crate::journal::LF_RUN_ID_ENV)
         .ok()
@@ -2067,12 +2070,12 @@ fn format_files(docs: &[Document]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::flow::{Direction, Step};
+    use crate::engine::flow::{Direction, Skill};
     use std::path::{Path, PathBuf};
 
     fn init_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::create_dir_all(dir.path().join(".lf/steps")).expect("create steps");
+        std::fs::create_dir_all(dir.path().join(".lf/skills")).expect("create skills");
         std::fs::create_dir_all(dir.path().join(".lf/directions")).expect("create directions");
         dir
     }
@@ -2251,13 +2254,13 @@ mod tests {
         assert!(!prompt.contains("lf chat"));
     }
 
-    /// A bare flow/step run's assembled prompt carries the one loopflow
+    /// A bare flow/skill run's assembled prompt carries the one loopflow
     /// operating document, including the speech vocabulary.
     #[test]
     fn assembled_prompt_carries_loopflow_document_once() {
         let components = PromptComponents {
             operate: true,
-            step: Some(Step::named("implement")),
+            skill: Some(Skill::named("implement")),
             ..Default::default()
         };
 
@@ -2527,9 +2530,9 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_with_step() {
+    fn format_prompt_with_skill() {
         let components = PromptComponents {
-            step: Some(Step {
+            skill: Some(Skill {
                 name: "implement".to_string(),
                 content: Some("Implement the feature described.".to_string()),
                 agent: None,
@@ -2543,16 +2546,16 @@ mod tests {
         };
 
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:step:implement>"));
+        assert!(prompt.contains("<lf:skill:implement>"));
         assert!(prompt.contains("Implement the feature described."));
-        assert!(prompt.contains("</lf:step:implement>"));
-        assert!(prompt.contains("The step."));
+        assert!(prompt.contains("</lf:skill:implement>"));
+        assert!(prompt.contains("The skill."));
     }
 
     #[test]
-    fn format_prompt_with_step_no_content() {
+    fn format_prompt_with_skill_no_content() {
         let components = PromptComponents {
-            step: Some(Step {
+            skill: Some(Skill {
                 name: "review".to_string(),
                 content: None,
                 agent: None,
@@ -2566,8 +2569,8 @@ mod tests {
         };
 
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:step:review>"));
-        assert!(prompt.contains("</lf:step:review>"));
+        assert!(prompt.contains("<lf:skill:review>"));
+        assert!(prompt.contains("</lf:skill:review>"));
     }
 
     #[test]
@@ -2652,7 +2655,7 @@ mod tests {
                 content: "Be concise.".to_string(),
                 source: PathBuf::from(".lf/directions/concise.md"),
             }],
-            step: Some(Step {
+            skill: Some(Skill {
                 name: "implement".to_string(),
                 content: Some("Implement it.".to_string()),
                 agent: None,
@@ -2676,14 +2679,14 @@ mod tests {
         let diff_pos = prompt.find("<lf:diff>").unwrap();
         let direction_pos = prompt.find("<lf:direction:concise>").unwrap();
         let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
-        let step_pos = prompt.find("<lf:step:implement>").unwrap();
+        let skill_pos = prompt.find("<lf:skill:implement>").unwrap();
 
         assert!(auto_pos < wave_pos);
         assert!(wave_pos < docs_pos);
         assert!(docs_pos < diff_pos);
         assert!(diff_pos < direction_pos);
         assert!(direction_pos < clipboard_pos);
-        assert!(clipboard_pos < step_pos);
+        assert!(clipboard_pos < skill_pos);
     }
 
     #[test]
@@ -2831,7 +2834,7 @@ mod tests {
         let repo = init_repo();
         write_file(repo.path(), "src/lib.rs", "pub fn foo() {}");
         write_file(repo.path(), ".lf/config.yaml", "model: claude");
-        write_file(repo.path(), ".lf/steps/debug.md", "# Debug step");
+        write_file(repo.path(), ".lf/skills/debug.md", "# Debug skill");
 
         let files = gather_all_text_files(repo.path()).expect("gather files");
 
@@ -2971,20 +2974,20 @@ mod tests {
         let repo = temp.path();
 
         // Create minimal structure
-        std::fs::create_dir_all(repo.join(".lf/steps")).expect("create .lf/steps");
-        std::fs::write(repo.join(".lf/steps/test.md"), "Test step content").expect("write step");
+        std::fs::create_dir_all(repo.join(".lf/skills")).expect("create .lf/skills");
+        std::fs::write(repo.join(".lf/skills/test.md"), "Test skill content").expect("write skill");
 
         let opts = GatherContextOpts {
             repo_root: repo.to_path_buf(),
-            step: Some("test".to_string()),
+            skill: Some("test".to_string()),
             ..Default::default()
         };
 
         let result = gather_context(&opts);
         assert!(result.is_ok());
         let components = result.unwrap();
-        assert!(components.step.is_some());
-        assert_eq!(components.step.as_ref().unwrap().name, "test");
+        assert!(components.skill.is_some());
+        assert_eq!(components.skill.as_ref().unwrap().name, "test");
     }
 
     #[test]
@@ -3070,11 +3073,11 @@ mod tests {
     }
 
     #[test]
-    fn directions_from_step_and_cli_combined() {
+    fn directions_from_skill_and_cli_combined() {
         let repo = init_repo();
         write_file(
             repo.path(),
-            ".lf/steps/impl.md",
+            ".lf/skills/impl.md",
             r#"---
 directions:
   - thorough
@@ -3087,7 +3090,7 @@ directions:
 
         let opts = GatherContextOpts {
             repo_root: repo.path().to_path_buf(),
-            step: Some("impl".to_string()),
+            skill: Some("impl".to_string()),
             directions: vec!["fast".to_string()],
             ..Default::default()
         };
@@ -3189,7 +3192,7 @@ directions:
 
         assert!(!gitignore_path.exists());
 
-        write_prompt_log(repo.path(), "test", "step", None).unwrap();
+        write_prompt_log(repo.path(), "test", "skill", None).unwrap();
 
         assert!(gitignore_path.exists());
         let content = fs::read_to_string(&gitignore_path).unwrap();
@@ -3216,7 +3219,7 @@ directions:
         let gitignore_path = repo.path().join(".gitignore");
         fs::write(&gitignore_path, "target/\n.lf/prompts/\n").unwrap();
 
-        write_prompt_log(repo.path(), "test", "step", None).unwrap();
+        write_prompt_log(repo.path(), "test", "skill", None).unwrap();
 
         let content = fs::read_to_string(&gitignore_path).unwrap();
         // Should not duplicate the entry
@@ -3229,7 +3232,7 @@ directions:
         let gitignore_path = repo.path().join(".gitignore");
         fs::write(&gitignore_path, "target/\nnode_modules/\n").unwrap();
 
-        write_prompt_log(repo.path(), "test", "step", None).unwrap();
+        write_prompt_log(repo.path(), "test", "skill", None).unwrap();
 
         let content = fs::read_to_string(&gitignore_path).unwrap();
         assert!(content.contains("target/"));
@@ -3242,10 +3245,10 @@ directions:
     // ==========================================================================
 
     #[test]
-    fn format_context_prompt_excludes_step() {
+    fn format_context_prompt_excludes_skill() {
         let components = PromptComponents {
             surface: Surface::Headless,
-            step: Some(Step {
+            skill: Some(Skill {
                 name: "implement".to_string(),
                 content: Some("Implement the feature.".to_string()),
                 agent: None,
@@ -3259,8 +3262,8 @@ directions:
         };
 
         let context = format_context_prompt(&components);
-        // Should NOT include step content
-        assert!(!context.contains("<lf:step:implement>"));
+        // Should NOT include skill content
+        assert!(!context.contains("<lf:skill:implement>"));
         assert!(!context.contains("Implement the feature."));
         // Should include surface instructions
         assert!(context.contains("Run mode is headless"));
@@ -3281,7 +3284,7 @@ directions:
                 source: PathBuf::from(".lf/directions/concise.md"),
             }],
             clipboard: Some("Error message".to_string()),
-            step: Some(Step {
+            skill: Some(Skill {
                 name: "debug".to_string(),
                 content: Some("Fix the error.".to_string()),
                 agent: None,
@@ -3302,8 +3305,8 @@ directions:
         // Should include directions (context, not task)
         assert!(context.contains("<lf:direction:concise>"));
         assert!(context.contains("Be concise."));
-        // Should NOT include step (goes in task prompt)
-        assert!(!context.contains("<lf:step:debug>"));
+        // Should NOT include skill (goes in task prompt)
+        assert!(!context.contains("<lf:skill:debug>"));
         assert!(!context.contains("Fix the error."));
     }
 
@@ -3324,9 +3327,9 @@ directions:
     // ==========================================================================
 
     #[test]
-    fn format_task_prompt_returns_step_content() {
+    fn format_task_prompt_returns_skill_content() {
         let components = PromptComponents {
-            step: Some(Step {
+            skill: Some(Skill {
                 name: "implement".to_string(),
                 content: Some("Implement the feature.".to_string()),
                 agent: None,
@@ -3340,13 +3343,13 @@ directions:
         };
 
         let task = format_task_prompt(&components);
-        assert!(task.contains("<lf:step:implement>"));
+        assert!(task.contains("<lf:skill:implement>"));
         assert!(task.contains("Implement the feature."));
-        assert!(task.contains("</lf:step:implement>"));
+        assert!(task.contains("</lf:skill:implement>"));
     }
 
     #[test]
-    fn format_task_prompt_empty_when_no_step_or_message() {
+    fn format_task_prompt_empty_when_no_skill_or_message() {
         let components = PromptComponents::default();
         let task = format_task_prompt(&components);
         assert!(task.is_empty());
@@ -3363,9 +3366,9 @@ directions:
     }
 
     #[test]
-    fn format_task_prompt_message_with_step() {
+    fn format_task_prompt_message_with_skill() {
         let components = PromptComponents {
-            step: Some(Step {
+            skill: Some(Skill {
                 name: "debug".to_string(),
                 content: Some("Debug the error.".to_string()),
                 agent: None,
@@ -3379,14 +3382,14 @@ directions:
             ..Default::default()
         };
         let task = format_task_prompt(&components);
-        assert!(task.contains("<lf:step:debug>"));
+        assert!(task.contains("<lf:skill:debug>"));
         assert!(task.contains("login page crashes"));
     }
 
     #[test]
-    fn format_task_prompt_step_without_content() {
+    fn format_task_prompt_skill_without_content() {
         let components = PromptComponents {
-            step: Some(Step {
+            skill: Some(Skill {
                 name: "review".to_string(),
                 content: None,
                 agent: None,
@@ -3400,8 +3403,8 @@ directions:
         };
 
         let task = format_task_prompt(&components);
-        assert!(task.contains("<lf:step:review>"));
-        assert!(task.contains("</lf:step:review>"));
+        assert!(task.contains("<lf:skill:review>"));
+        assert!(task.contains("</lf:skill:review>"));
     }
 
     // ==========================================================================

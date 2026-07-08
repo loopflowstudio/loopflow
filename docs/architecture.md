@@ -5,7 +5,7 @@ title: Architecture
 
 # Architecture
 
-Loopflow turns repo-authored intent into persistent agent work. Steps and flows
+Loopflow turns repo-authored intent into persistent agent work. Skills and flows
 run one job. Waves keep working: they remember, dispatch workers, respond to
 messages in their thread, surface attention, and leave an auditable trail.
 
@@ -14,7 +14,7 @@ messages in their thread, surface attention, and leave an auditable trail.
 ```text
 Authoring layer
   README.md, docs/
-  .lf/steps/*.md
+  .lf/skills/*.md
   .lf/flows/*.yaml
   .lf/directions/*.md
   wave/<name>/GOAL.md
@@ -47,10 +47,10 @@ Git/PR/PM ops             Clients
 
 | Concept | Stored in | Runtime owner |
 |---|---|---|
-| Step | `.lf/steps/` and built-ins | `engine` |
+| Skill | `.lf/skills/` and built-ins | `engine` |
 | Flow | `.lf/flows/` and built-ins | `engine` |
 | Direction | `.lf/directions/` | `engine` prompt assembly |
-| Wave goal | `wave/<name>/GOAL.md` | `lf wave` server + resident mind |
+| Wave goal | `wave/<name>/GOAL.md` | `lf wave` server + resident flowloop |
 | Wave memory | `wave/<name>/MEMORY.md` | wave agent |
 | Roadmap item | Linear | `lf op pm` and wave flows |
 | Session | lfdb | `lf` runs and placement flags |
@@ -59,7 +59,7 @@ Git/PR/PM ops             Clients
 
 ## CLI and Engine
 
-`lf` is the local command runner. It resolves a step or flow, assembles context,
+`lf` is the local command runner. It resolves a skill or flow, assembles context,
 launches the configured coding agent, and runs ops such as commit, rebase, PR,
 PM sync, and release.
 
@@ -71,7 +71,7 @@ Important paths:
 - `rust/loopflow/src/ops/`
 
 The engine owns the common language: prompts, flows, forks, worktrees, built-in
-steps, skills, structured replies, and launch behavior. Ops wrap concrete
+skills, skills, structured replies, and launch behavior. Ops wrap concrete
 side-effectful workflows around git, PRs, PM providers, and release artifacts.
 
 ## Daemon
@@ -119,7 +119,7 @@ Important paths:
 1. Read GOAL.md, MEMORY.md, roadmap, and relevant docs.
 2. Assess current wave state and messages in the thread.
 3. Pick one move: study, ingest, dispatch, unblock, review, or wait.
-4. Run a step or flow, often by dispatching a worker.
+4. Run a skill or flow, often by dispatching a worker.
 5. Record events, update PM/repo state, and surface attention.
 6. Loop when mode, a `GOAL.md` cron, or an incoming message asks for another pass.
 ```

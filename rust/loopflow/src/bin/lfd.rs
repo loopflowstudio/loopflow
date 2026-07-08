@@ -157,7 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The one surviving background loop: provider token refresh. The push
     // bridge, journal tailer, and /ws aggregate are gone — discovery is a query
     // and each wave streams its own motion. Webhooks exec `lf`; cron lives in
-    // the wave's mind.
+    // the wave's flowloop.
     let token_refresh_handle =
         loopflow::lfd::triggers::spawn_token_refresh(store.clone(), cancel.clone());
 

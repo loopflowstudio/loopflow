@@ -44,8 +44,8 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
     assert not any(term in commands for term in forbidden)
 
 
-def test_token_compress_step_is_documented_as_preserving_information():
-    step = (ROOT / "rust/loopflow/src/engine/builtins/ops/step/token-compress.md").read_text()
+def test_token_compress_skill_is_documented_as_preserving_information():
+    step = (ROOT / "rust/loopflow/src/engine/builtins/ops/skill/token-compress.md").read_text()
     docs = (ROOT / "docs/index.md").read_text()
     readme = (ROOT / "README.md").read_text()
 

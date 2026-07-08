@@ -92,7 +92,7 @@ lf cron remove --wave memory --flow export-memory
 | Flag | Description |
 |------|-------------|
 | `-w, --wave NAME` | Wave name passed to the scheduled command |
-| `--flow NAME` | Flow or step to run |
+| `--flow NAME` | Flow or skill to run |
 | `--schedule daily` | Daily schedule (default) |
 
 ## lf op next
@@ -114,7 +114,7 @@ lf op advance                # wave inferred from the worktree
 lf op advance --wave shipper
 ```
 
-Generates the wave's next schema-named branch (de-colliding with a word pair if taken), creates it in the worktree, and pushes it with upstream set. Unlike `lf op next`, it doesn't commit or rebase — it's the branch rotation a recurring wave (or its mind) runs after landing.
+Generates the wave's next schema-named branch (de-colliding with a word pair if taken), creates it in the worktree, and pushes it with upstream set. Unlike `lf op next`, it doesn't commit or rebase — it's the branch rotation a recurring wave (or its flowloop) runs after landing.
 
 | Flag | Description |
 |------|-------------|
@@ -156,7 +156,7 @@ lf op release status             # workflow + GitHub Release status
 
 Keep release-cycle rationale in `release/unreleased/DECISIONS.md` when you want narrative-first notes. `lf op release notes` and the full release workflow promote it to `release/v<version>/`, use `DECISIONS.md` as the intent source, use merged PRs/diffs as the shipped-behavior source, and archive the generated root `RELEASE_NOTES.md` to `release/v<version>/NOTES.md`. If the ledger is absent, Loopflow falls back to merged PR history.
 
-Headless release automation does not require a runner-local agent CLI. If the `release-notes` step cannot start Claude, Codex, or OpenCode, Loopflow writes deterministic notes from the same release context and keeps the archive contract intact.
+Headless release automation does not require a runner-local agent CLI. If the `release-notes` skill cannot start Claude, Codex, or OpenCode, Loopflow writes deterministic notes from the same release context and keeps the archive contract intact.
 
 ---
 

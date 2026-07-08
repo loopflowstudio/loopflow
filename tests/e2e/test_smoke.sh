@@ -27,12 +27,12 @@
   git commit --allow-empty -m "init" >/dev/null
   git push -u origin main >/dev/null
 
-  mkdir -p .lf/steps
-  echo "# Test" > .lf/steps/debug.md
+  mkdir -p .lf/skills
+  echo "# Test" > .lf/skills/debug.md
 
   cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf-prompt -- \
     --repo "$repo_dir" \
-    --step debug \
+    --skill debug \
     --surface headless \
     --diff-files false \
     --diff false \

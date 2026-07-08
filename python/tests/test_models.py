@@ -51,8 +51,8 @@ class TestWaveModel:
         assert wave.commits[0].sha == "a1b2c3d"
         assert wave.commits[0].message == "implement: add retry logic"
         assert wave.diff_stat == " 3 files changed, 42 insertions(+), 7 deletions(-)"
-        assert [step.type for step in wave.flow_steps] == ["step", "step", "step", "step"]
-        assert [step.name for step in wave.flow_steps] == [
+        assert [skill.type for skill in wave.flow_steps] == ["skill", "skill", "skill", "skill"]
+        assert [skill.name for skill in wave.flow_steps] == [
             "review",
             "iterate",
             "build",
@@ -77,7 +77,7 @@ class TestWaveModel:
     def test_flow_steps_parse_ops_items(self):
         data = {**WAVE_MINIMAL, "flow_steps": ["implement", "op: land --create-pr"]}
         wave = Wave.model_validate(data)
-        assert [step.type for step in wave.flow_steps] == ["step", "op"]
+        assert [skill.type for skill in wave.flow_steps] == ["skill", "op"]
         assert wave.flow_steps[1].name == "land --create-pr"
 
 

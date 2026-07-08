@@ -1,13 +1,11 @@
 {
   "deltas": [
     {
-      "kind": "thread_started",
-      "vendor": "codex",
-      "thread_id": "thread-0199a"
-    },
-    {
       "kind": "turn_opened",
-      "answers": ["msg-4", "msg-5"]
+      "answers": [
+        "msg-4",
+        "msg-5"
+      ]
     },
     {
       "kind": "turn_text",
@@ -37,19 +35,23 @@
     },
     {
       "kind": "turn_steered",
-      "answers": ["msg-6"]
+      "answers": [
+        "msg-6"
+      ]
     },
     {
       "kind": "messages_requeued",
-      "ids": ["msg-6"]
+      "ids": [
+        "msg-6"
+      ]
     },
     {
-      "kind": "mind_state",
+      "kind": "flowloop_state",
       "to": "interrupting",
       "reason": "user interrupt"
     },
     {
-      "kind": "mind_state",
+      "kind": "flowloop_state",
       "to": "failed",
       "reason": "harness disconnected: codex_disconnected"
     }

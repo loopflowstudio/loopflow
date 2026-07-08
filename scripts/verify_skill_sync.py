@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify loopflow step-to-Skill sync and optional live vendor invocation."""
+"""Verify loopflow skill-to-Skill sync and optional live vendor invocation."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def lf_command(repo_root: Path) -> list[str]:
 
 
 def write_probe_step(repo: Path) -> None:
-    step_dir = repo / ".lf" / "steps"
+    step_dir = repo / ".lf" / "skills"
     step_dir.mkdir(parents=True)
     (step_dir / "lfprobe.md").write_text(
         "---\ninteractive: false\n---\n"

@@ -5,7 +5,7 @@ title: lfd Daemon Reference
 
 # lfd Daemon Reference
 
-`lfd` runs the loopflow daemon: the HTTP read surface, session registry, GitHub webhook ingress translated to `lf` execs, provider token refresh, and worktree cleanup. It dispatches no agent work; each wave's resident mind and ordinary `lf --dispatch` / `--stack` / `--fork` invocations own agent execution.
+`lfd` runs the loopflow daemon: the HTTP read surface, session registry, GitHub webhook ingress translated to `lf` execs, provider token refresh, and worktree cleanup. It dispatches no agent work; each wave's resident flowloop and ordinary `lf --dispatch` / `--stack` / `--fork` invocations own agent execution.
 
 ## Run Native lfd
 
@@ -175,17 +175,17 @@ Run it with `lf wave shipper`.
 
 ```bash
 curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.flows[] | {name, category, source}'
-curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.steps[] | select(.name=="gate")'
+curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.skills[] | select(.name=="gate")'
 ```
 
-`/v0/catalog` returns the resolved flow + step catalog that Loopflow uses for the **Flows** tab. Pass `repo=/path/to/repo` to merge builtin definitions with repo-local `.lf/flows/*.yaml` and `.lf/steps/*.md` overrides. Omit `repo` to inspect the builtin catalog only.
+`/v0/catalog` returns the resolved flow + skill catalog that Loopflow uses for the **Flows** tab. Pass `repo=/path/to/repo` to merge builtin definitions with repo-local `.lf/flows/*.yaml` and `.lf/skills/*.md` overrides. Omit `repo` to inspect the builtin catalog only.
 
 ## Sessions API
 
 List live sessions:
 
 ```bash
-curl -s "$LFD_ADDR/v0/sessions?active_only=true" | jq '.data[] | {id, wave_id, step, source, status, tmux_name}'
+curl -s "$LFD_ADDR/v0/sessions?active_only=true" | jq '.data[] | {id, wave_id, skill, source, status, tmux_name}'
 ```
 
 Create a palette session:
@@ -227,7 +227,7 @@ Webhooks translate inward as `lf` execs. The current demo path keeps CI and
 main-push events as attributed chat notifications; durable facts plus explicit
 commands are the long-term coordination shape.
 
-- check_run failure → `lf chat --wave <wave> "CI failed: …"` (the wave's mind decides how to fix)
+- check_run failure → `lf chat --wave <wave> "CI failed: …"` (the wave's flowloop decides how to fix)
 - PR merged → `lf op queue reconcile --wave <wave>`
 - push to main → `lf chat --wave <wave> "main moved: …"` for each wave in the repo
 

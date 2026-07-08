@@ -254,7 +254,7 @@ def _looks_like_loopflow(binary: Path) -> bool:
         )
     except (subprocess.SubprocessError, OSError):
         return False
-    return "Run steps and flows with coding agents" in result.stdout
+    return "Run skills and flows with coding agents" in result.stdout
 
 
 def _resolve_install_dir() -> Path:
@@ -313,7 +313,7 @@ def _install_cli_binaries(install_dir: Path) -> None:
 
 
 def _sync_skills(lf_bin: Path) -> None:
-    """Mirror loopflow steps into ~/.claude/skills and ~/.agents/skills (codex).
+    """Mirror loopflow skills into ~/.claude/skills and ~/.agents/skills (codex).
 
     Runs after the binary install so the freshly built `lf` regenerates the
     global skill catalog. A failure here doesn't fail the install—the binaries
@@ -338,7 +338,7 @@ def _promote(local_bin: Path, install_dir: Path, applications_dir: Path = APPLIC
     """Make this worktree's build the active one.
 
     Symlinks lf/lfd from the resolved bin dir to local-bin/ (so rebuilds take
-    effect with no extra step) and copies Loopflow.app into /Applications.
+    effect with no extra skill) and copies Loopflow.app into /Applications.
     """
     install_dir.mkdir(parents=True, exist_ok=True)
     for name in ("lf", "lfd"):

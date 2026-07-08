@@ -9,7 +9,7 @@ public struct WaveConfigUpdate: Sendable {
     public var goal: String?
     public var status: WaveStatus?
     public var agent: String?
-    public var stepAgents: [String: String]?
+    public var skillAgents: [String: String]?
 
     public init(
         name: String? = nil,
@@ -18,7 +18,7 @@ public struct WaveConfigUpdate: Sendable {
         goal: String? = nil,
         status: WaveStatus? = nil,
         agent: String? = nil,
-        stepAgents: [String: String]? = nil
+        skillAgents: [String: String]? = nil
     ) {
         self.name = name
         self.area = area
@@ -26,7 +26,7 @@ public struct WaveConfigUpdate: Sendable {
         self.goal = goal
         self.status = status
         self.agent = agent
-        self.stepAgents = stepAgents
+        self.skillAgents = skillAgents
     }
 }
 
@@ -61,7 +61,7 @@ public struct WaveService: @unchecked Sendable {
 
     public func fetchCatalog(repo: String? = nil) async throws -> Catalog {
         _ = repo
-        return Catalog(flows: [], steps: [])
+        return Catalog(flows: [], skills: [])
     }
 
     public func listAuthProviders() async throws -> [AuthProviderStatus] {
@@ -208,7 +208,7 @@ public struct WaveService: @unchecked Sendable {
         let lfDir = url.appendingPathComponent(".lf", isDirectory: true)
         return WaveFlowsResult(
             flows: Self.listNamedMarkdown(in: lfDir.appendingPathComponent("flows", isDirectory: true), type: .flow)
-                + Self.listNamedMarkdown(in: lfDir.appendingPathComponent("steps", isDirectory: true), type: .step),
+                + Self.listNamedMarkdown(in: lfDir.appendingPathComponent("skills", isDirectory: true), type: .skill),
             directions: Self.listNames(in: lfDir.appendingPathComponent("directions", isDirectory: true))
         )
     }
@@ -266,7 +266,7 @@ public struct WaveService: @unchecked Sendable {
 
     private static func listNamedMarkdown(in directory: URL, type: FlowType) -> [Flow] {
         listNames(in: directory).map { name in
-            Flow(name: name, steps: [Step(prompt: name)], type: type)
+            Flow(name: name, skills: [Skill(prompt: name)], type: type)
         }
     }
 
@@ -332,7 +332,7 @@ public extension WaveService {
             direction: normalizeStringList(json["direction"]),
             area: normalizeStringList(json["area"]),
             agent: json["agent"] as? String,
-            stepAgents: normalizeStringMap(json["step_agents"]),
+            skillAgents: normalizeStringMap(json["skill_agents"]),
             triggers: parseTriggers(json["triggers"]),
             crons: parseCrons(json["crons"]),
             status: WaveStatus(rawValue: normalizedStatus) ?? .idle,
@@ -354,7 +354,7 @@ public extension WaveService {
     static func parseSessionFromJSON(_ json: [String: Any]) -> Session? {
         guard let id = json["id"] as? String,
               let waveId = json["wave_id"] as? String,
-              let step = json["step"] as? String,
+              let skill = json["skill"] as? String,
               let useRaw = json["use"] as? String,
               let sessionUse = SessionUse(rawValue: useRaw),
               let agent = json["agent"] as? String,
@@ -376,7 +376,7 @@ public extension WaveService {
             runId: json["run_id"] as? String,
             parentSessionId: json["parent_session_id"] as? String,
             sessionUse: sessionUse,
-            step: step,
+            skill: skill,
             agent: agent,
             cwd: cwd,
             argv: argv,
@@ -412,7 +412,7 @@ public extension WaveService {
             stepIndex: normalizeInt(json["step_index"]),
             worktree: json["local_worktree"] as? String,
             branch: json["remote_branch"] as? String,
-            currentStep: json["current_step"] as? String,
+            currentStep: json["current_skill"] as? String,
             error: json["error"] as? String,
             pr: parsePullRequest(json["pr"]),
             startedAt: parseDate(json["started_at"]),

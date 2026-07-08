@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::engine::flow::FlowItem;
+use crate::engine::flow::Step;
 use crate::lfd::http::ApiResult;
 
 #[derive(Deserialize)]
@@ -17,11 +17,11 @@ pub struct FlowEntry {
     pub name: String,
     pub category: String,
     pub source: EntrySource,
-    pub items: Vec<FlowItem>,
+    pub items: Vec<Step>,
 }
 
 #[derive(Debug, Serialize)]
-pub struct StepEntry {
+pub struct SkillEntry {
     pub name: String,
     pub category: String,
     pub source: EntrySource,
@@ -41,7 +41,7 @@ pub enum EntrySource {
 #[derive(Debug, Serialize)]
 pub struct CatalogResult {
     pub flows: Vec<FlowEntry>,
-    pub steps: Vec<StepEntry>,
+    pub skills: Vec<SkillEntry>,
 }
 
 #[derive(Debug, Serialize)]
@@ -54,11 +54,11 @@ pub async fn catalog_handler(Query(query): Query<CatalogQuery>) -> ApiResult<Cat
     let repo_path = PathBuf::from(query.repo.unwrap_or_default());
 
     let flows = collect_flows(&repo_path);
-    let steps = collect_steps(&repo_path);
+    let skills = collect_skills(&repo_path);
 
     Ok(Json(CatalogResponse {
         ok: true,
-        result: CatalogResult { flows, steps },
+        result: CatalogResult { flows, skills },
     }))
 }
 
@@ -120,16 +120,16 @@ fn load_flow_entry(
     })
 }
 
-fn collect_steps(repo: &Path) -> Vec<StepEntry> {
+fn collect_skills(repo: &Path) -> Vec<SkillEntry> {
     let builtin_categories: HashMap<&str, String> =
         crate::engine::builtins::BUILTIN_STEP_CATEGORIES
             .iter()
             .flat_map(|(cat, names)| names.iter().map(move |name| (*name, cat.to_string())))
             .collect();
 
-    let repo_overrides = list_repo_md_stems(&repo.join(".lf/steps"));
+    let repo_overrides = list_repo_md_stems(&repo.join(".lf/skills"));
 
-    let mut entries: Vec<StepEntry> = Vec::new();
+    let mut entries: Vec<SkillEntry> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
     for name in builtin_categories.keys() {
@@ -140,13 +140,13 @@ fn collect_steps(repo: &Path) -> Vec<StepEntry> {
             } else {
                 EntrySource::Builtin
             };
-            entries.push(build_step_entry(&name, repo, source, &builtin_categories));
+            entries.push(build_skill_entry(&name, repo, source, &builtin_categories));
         }
     }
 
     for name in &repo_overrides {
         if seen.insert(name.clone()) {
-            entries.push(build_step_entry(
+            entries.push(build_skill_entry(
                 name,
                 repo,
                 EntrySource::Repo,
@@ -159,28 +159,28 @@ fn collect_steps(repo: &Path) -> Vec<StepEntry> {
     entries
 }
 
-fn build_step_entry(
+fn build_skill_entry(
     name: &str,
     repo: &Path,
     source: EntrySource,
     builtin_categories: &HashMap<&str, String>,
-) -> StepEntry {
+) -> SkillEntry {
     let category = builtin_categories
         .get(name)
         .cloned()
         .unwrap_or_else(|| "Repo".to_string());
     let description = {
-        let d = crate::lf::discovery::builtin_step_description(name);
+        let d = crate::lf::discovery::builtin_skill_description(name);
         if d.is_empty() {
             None
         } else {
             Some(d)
         }
     };
-    let interactive = crate::engine::flow::load_step(name, repo)
+    let interactive = crate::engine::flow::load_skill(name, repo)
         .ok()
-        .and_then(|step| step.interactive);
-    StepEntry {
+        .and_then(|skill| skill.interactive);
+    SkillEntry {
         name: name.to_string(),
         category,
         source,
@@ -235,7 +235,7 @@ mod tests {
         let temp = TempDir::new().expect("tempdir");
         CatalogResult {
             flows: collect_flows(temp.path()),
-            steps: collect_steps(temp.path()),
+            skills: collect_skills(temp.path()),
         }
     }
 
@@ -252,7 +252,7 @@ mod tests {
         assert_eq!(build_flow.source, EntrySource::Builtin);
         assert!(matches!(
             build_flow.items.first(),
-            Some(crate::engine::flow::FlowItem::Step(step)) if step.name == "kickoff"
+            Some(crate::engine::flow::Step::Skill(skill)) if skill.name == "kickoff"
         ));
 
         let garden_flow = catalog
@@ -264,32 +264,32 @@ mod tests {
     }
 
     #[test]
-    fn catalog_includes_step_categories_with_descriptions() {
+    fn catalog_includes_skill_categories_with_descriptions() {
         let catalog = build_catalog();
 
-        let scan_step = catalog
-            .steps
+        let scan_skill = catalog
+            .skills
             .iter()
             .find(|entry| entry.name == "scan")
-            .expect("scan step present");
-        assert_eq!(scan_step.category, "Govern");
-        assert_eq!(scan_step.source, EntrySource::Builtin);
+            .expect("scan skill present");
+        assert_eq!(scan_skill.category, "Govern");
+        assert_eq!(scan_skill.source, EntrySource::Builtin);
         // Description comes from scan.md's first prose line (after frontmatter).
         assert!(
-            scan_step
+            scan_skill
                 .description
                 .as_deref()
                 .unwrap_or("")
                 .starts_with("Read the territory"),
             "unexpected description: {:?}",
-            scan_step.description
+            scan_skill.description
         );
 
-        let implement_step = catalog
-            .steps
+        let implement_skill = catalog
+            .skills
             .iter()
             .find(|entry| entry.name == "implement")
-            .expect("implement step present");
-        assert_eq!(implement_step.category, "Build");
+            .expect("implement skill present");
+        assert_eq!(implement_skill.category, "Build");
     }
 }

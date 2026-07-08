@@ -117,7 +117,7 @@ public final class RepoState {
 
     public var showingFlows = false
 
-    /// Fetch the flow + step catalog for the currently selected repo.
+    /// Fetch the flow + skill catalog for the currently selected repo.
     public func fetchCatalog() async throws -> Catalog {
         let repo = currentRepo?.path
         return try await waveService.fetchCatalog(repo: repo)
@@ -137,11 +137,11 @@ public final class RepoState {
         }
         let repoRoot = currentRepo?.path() ?? FileManager.default.currentDirectoryPath
         let wave = waveStore.wave(for: waveId)
-        let sessionStep = wave?.activeRun?.currentStep ?? "design"
+        let sessionSkill = wave?.activeRun?.currentStep ?? "design"
         let state = SessionState(
             waveId: waveId,
             sessionConfig: AgentSessionConfig(
-                step: sessionStep,
+                skill: sessionSkill,
                 repoRoot: repoRoot,
                 directions: wave?.direction ?? [],
                 area: wave?.area.first,
@@ -705,7 +705,7 @@ public final class RepoState {
     }
 
     private func statusSnapshot(for waveId: String) async throws
-        -> (runs: [Run], attention: [AttentionItem], mind: String?) {
+        -> (runs: [Run], attention: [AttentionItem], flowloop: String?) {
         guard let registryQuery,
               let wave = waveStore.wave(for: waveId)
         else {
@@ -751,16 +751,16 @@ public final class RepoState {
         // Note: loadWaveContent is driven by the snapshot loop / selection — not duplicated here.
         switch newStatus {
         case .waiting:
-            let step = wave.recentSteps.first?.step ?? "step"
+            let skill = wave.recentSteps.first?.skill ?? "skill"
             NotificationService.shared.notifyNeedsInteractive(
                 waveId: wave.id,
                 waveName: wave.displayName,
-                step: step
+                skill: skill
             )
 
         case .failed:
-            let step = wave.recentSteps.first?.step ?? "unknown step"
-            let message = "Error in \(step)"
+            let skill = wave.recentSteps.first?.skill ?? "unknown skill"
+            let message = "Error in \(skill)"
             NotificationService.shared.notifyError(
                 waveId: wave.id,
                 waveName: wave.displayName,
@@ -851,21 +851,21 @@ public final class RepoState {
         direction: [String]? = nil,
         status: WaveStatus? = nil,
         agent: String? = nil,
-        stepAgents: [String: String]? = nil
+        skillAgents: [String: String]? = nil
     ) async throws {
         try await optimistic(wave.id, mutation: { w in
             if let area { w.area = area }
             if let direction { w.direction = direction }
             if let status { w.status = status }
             if let agent { w.agent = agent.isEmpty ? nil : agent }
-            if let stepAgents { w.stepAgents = stepAgents }
+            if let skillAgents { w.skillAgents = skillAgents }
         }) {
             let config = WaveConfigUpdate(
                 area: area,
                 direction: direction,
                 status: status,
                 agent: agent,
-                stepAgents: stepAgents
+                skillAgents: skillAgents
             )
             _ = try await self.waveService.updateWave(wave.id, config: config)
         }

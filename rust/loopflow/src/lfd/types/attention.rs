@@ -5,7 +5,7 @@ use time::OffsetDateTime;
 use crate::lfd::id::LfdId;
 
 /// Two attention paths:
-/// - `Interactive`: `lf` is at a step that needs a human. Created and resolved by `lf` via API.
+/// - `Interactive`: `lf` is at a skill that needs a human. Created and resolved by `lf` via API.
 /// - `Algedonic`: something is wrong and the system is escalating. Created by daemon policy
 ///   (queue blocks) or by `lf` when an agent decides to escalate. Routes through the wave
 ///   hierarchy — child wave escalates to parent, only root escalates to human.
@@ -35,7 +35,7 @@ impl std::str::FromStr for AttentionKind {
             "algedonic" => Ok(Self::Algedonic),
             // Accept legacy kind strings during migration.
             "design_review" | "code_review" | "calibration" => Ok(Self::Interactive),
-            "queue_failure" | "step_failure" => Ok(Self::Algedonic),
+            "queue_failure" | "skill_failure" => Ok(Self::Algedonic),
             _ => Err(format!("unknown attention kind: {value}")),
         }
     }

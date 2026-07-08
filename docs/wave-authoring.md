@@ -98,10 +98,10 @@ Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels l
 |-------|-------------|
 | `workers` | Parallelism for dispatched work. `0` means "don't auto-dispatch" |
 | `agent` | Preferred agent harness/model |
-| `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident mind |
+| `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident flowloop |
 | `pm.linear_project` | Linear project id backing the wave's roadmap (written by `lf op pm init`) |
 
-The resident mind reads `crons:` directly from this frontmatter and opens a system turn when a schedule comes due; edits land without a restart. See [Crons](waves.md#crons).
+The resident flowloop reads `crons:` directly from this frontmatter and opens a system pass when a schedule comes due; edits land without a restart. See [Crons](waves.md#crons).
 
 ---
 
@@ -154,7 +154,7 @@ In **Loopflow**, a wave's detail view groups its live work — the wave agent se
 
 ### Crons
 
-Crons live in `GOAL.md` frontmatter; the wave's resident mind fires each due schedule as a system turn and dispatches the flow with judgment. `workers: 0` is valid for a wave that only runs scheduled flows:
+Crons live in `GOAL.md` frontmatter; the wave's resident flowloop fires each due schedule as a system pass and dispatches the flow with judgment. `workers: 0` is valid for a wave that only runs scheduled flows:
 
 ```markdown
 <!-- wave/governance/GOAL.md -->

@@ -8,7 +8,7 @@ use serde_yaml_ng::Value;
 use crate::engine::error::LoadError;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Step {
+pub struct Skill {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
@@ -26,7 +26,7 @@ pub struct Step {
     pub fast_path: Option<String>,
 }
 
-impl Step {
+impl Skill {
     pub fn named(name: &str) -> Self {
         Self {
             name: name.to_string(),
@@ -43,11 +43,11 @@ impl Step {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "data")]
-pub enum FlowItem {
-    Step(Step),
+pub enum Step {
+    Skill(Skill),
     Op(Op),
     And {
-        branches: Vec<FlowItem>,
+        branches: Vec<Step>,
         #[serde(skip_serializing_if = "Option::is_none")]
         synthesize: Option<String>,
     },
@@ -82,8 +82,8 @@ impl std::fmt::Display for Op {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct XorDef {
-    /// Optional router step. If set, this step runs first and writes the
-    /// verdict. Path descriptions are appended to the step's prompt as routing
+    /// Optional router skill. If set, this skill runs first and writes the
+    /// verdict. Path descriptions are appended to the skill's prompt as routing
     /// instructions. If absent, a generic routing agent is used.
     pub router: Option<String>,
     pub paths: HashMap<String, XorPath>,
@@ -91,16 +91,16 @@ pub struct XorDef {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LoopDef {
-    pub steps: Vec<FlowItem>,
+    pub steps: Vec<Step>,
     pub exit: XorDef,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct XorPath {
     pub flow: Option<String>,
-    pub step: Option<String>,
+    pub skill: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub steps: Vec<Step>,
+    pub steps: Vec<Skill>,
     pub description: String,
     #[serde(default)]
     pub direction: Vec<String>,
@@ -116,9 +116,9 @@ pub type ConcreteOr = ConcreteXor;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FlowAction {
-    RunStep { step: ConcreteStep },
+    RunSkill { skill: ConcreteSkill },
     RunOps { ops: ConcreteOp },
-    WaitInteractive { step: ConcreteStep },
+    WaitInteractive { skill: ConcreteSkill },
     And { fork: ConcreteAnd },
     Xor { branch: ConcreteXor },
     Or { branch: ConcreteOr },
@@ -129,7 +129,7 @@ pub enum FlowAction {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Flow {
     pub name: String,
-    pub items: Vec<FlowItem>,
+    pub items: Vec<Step>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,28 +144,28 @@ pub struct GoalRenderContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConcreteStep {
-    pub step: Step,
+pub struct ConcreteSkill {
+    pub skill: Skill,
     pub flow_parents: Vec<String>,
 }
 
-impl ConcreteStep {
+impl ConcreteSkill {
     pub fn display_path(&self) -> String {
         let mut parts = self.flow_parents.clone();
         if let Some(last) = parts.last() {
-            let fork_label = format!("and/{}", self.step.name);
+            let fork_label = format!("and/{}", self.skill.name);
             if last == &fork_label {
                 return parts.join(" ");
             }
         }
-        parts.push(self.step.name.clone());
+        parts.push(self.skill.name.clone());
         parts.join(" ")
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConcreteAndBranch {
-    pub steps: Vec<ConcreteStep>,
+    pub steps: Vec<ConcreteSkill>,
     pub flow_parents: Vec<String>,
     pub label: String,
     pub directions: Vec<String>,
@@ -187,7 +187,7 @@ pub struct ConcreteXor {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConcreteLoop {
-    pub steps: Vec<ConcreteItem>,
+    pub steps: Vec<ConcreteStep>,
     pub exit: ConcreteXor,
     pub flow_parents: Vec<String>,
 }
@@ -199,8 +199,8 @@ pub struct ConcreteOp {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConcreteItem {
-    Step(ConcreteStep),
+pub enum ConcreteStep {
+    Skill(ConcreteSkill),
     Op(ConcreteOp),
     And(ConcreteAnd),
     Xor(ConcreteXor),
@@ -215,24 +215,24 @@ pub struct Direction {
     pub source: PathBuf,
 }
 
-pub fn next_action(items: &[ConcreteItem], step_index: usize) -> FlowAction {
+pub fn next_action(items: &[ConcreteStep], step_index: usize) -> FlowAction {
     let item = match items.get(step_index) {
         Some(item) => item,
         None => return FlowAction::Complete,
     };
     match item.clone() {
-        ConcreteItem::Step(step) => {
-            if step.step.interactive.unwrap_or(false) {
-                FlowAction::WaitInteractive { step }
+        ConcreteStep::Skill(skill) => {
+            if skill.skill.interactive.unwrap_or(false) {
+                FlowAction::WaitInteractive { skill }
             } else {
-                FlowAction::RunStep { step }
+                FlowAction::RunSkill { skill }
             }
         }
-        ConcreteItem::Op(ops) => FlowAction::RunOps { ops },
-        ConcreteItem::And(fork) => FlowAction::And { fork },
-        ConcreteItem::Xor(branch) => FlowAction::Xor { branch },
-        ConcreteItem::Or(branch) => FlowAction::Or { branch },
-        ConcreteItem::Loop(body) => FlowAction::Loop { body },
+        ConcreteStep::Op(ops) => FlowAction::RunOps { ops },
+        ConcreteStep::And(fork) => FlowAction::And { fork },
+        ConcreteStep::Xor(branch) => FlowAction::Xor { branch },
+        ConcreteStep::Or(branch) => FlowAction::Or { branch },
+        ConcreteStep::Loop(body) => FlowAction::Loop { body },
     }
 }
 
@@ -310,7 +310,7 @@ pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
 
 /// Like `load_flow`, but resolves only exact-name matches in the builtin
 /// catalog — no bare-name fallback across namespaced flows. Used when
-/// expanding an already-loaded flow so a bare step name like `review` can't
+/// expanding an already-loaded flow so a bare skill name like `review` can't
 /// accidentally expand into `gstack/review`.
 pub fn load_flow_strict(name: &str, repo: &Path) -> Result<Flow, LoadError> {
     load_flow_inner(name, repo, false)
@@ -335,11 +335,11 @@ fn load_flow_inner(name: &str, repo: &Path, allow_bare_fallback: bool) -> Result
                 let builtin = crate::engine::builtins::get_builtin_flow(key)
                     .expect("builtin flow lookup should succeed");
                 (key.to_string(), builtin.to_string())
-            } else if load_step(name, repo).is_ok() {
-                // Auto-wrap a step name as a single-step flow.
+            } else if load_skill(name, repo).is_ok() {
+                // Auto-wrap a skill name as a single-skill flow.
                 return Ok(Flow {
                     name: name.to_string(),
-                    items: vec![FlowItem::Step(Step::named(name))],
+                    items: vec![Step::Skill(Skill::named(name))],
                 });
             } else {
                 return Err(LoadError::FlowNotFound(name.to_string()));
@@ -363,39 +363,39 @@ fn name_as_static_key(name: &str) -> Option<&'static str> {
         .find(|k| *k == name)
 }
 
-pub fn expand_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteItem>, LoadError> {
+pub fn expand_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteStep>, LoadError> {
     expand_with_chain(flow, repo, vec![flow.name.clone()], 0)
 }
 
-pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
+pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
     // Try file-based lookup first (repo-local, then global)
-    if let Ok(step_path) = find_step_path(name, repo) {
-        return load_step_from_path(name, &step_path);
+    if let Ok(skill_path) = find_skill_path(name, repo) {
+        return load_skill_from_path(name, &skill_path);
     }
 
-    // Fall back to built-in steps — exact match, then unique bare-name match
+    // Fall back to built-in skills — exact match, then unique bare-name match
     // across namespaces (so `office-hours` resolves to `gstack/office-hours`).
-    if let Some(key) = crate::engine::builtins::resolve_builtin_step(name) {
-        let content = crate::engine::builtins::get_builtin_step(key)
-            .expect("resolve_builtin_step returned a known key");
-        return step_from_content(key, content);
+    if let Some(key) = crate::engine::builtins::resolve_builtin_skill(name) {
+        let content = crate::engine::builtins::get_builtin_skill(key)
+            .expect("resolve_builtin_skill returned a known key");
+        return skill_from_content(key, content);
     }
 
     // Fall back to .agents/skills/<name>/SKILL.md (user-installed, not loopflow-injected)
     if let Some(content) = load_agent_skill(name, repo) {
-        return step_from_content(name, &content);
+        return skill_from_content(name, &content);
     }
 
-    Err(LoadError::StepNotFound(name.to_string()))
+    Err(LoadError::SkillNotFound(name.to_string()))
 }
 
-pub(crate) fn load_step_from_path(name: &str, step_path: &Path) -> Result<Step, LoadError> {
-    let content = fs::read_to_string(step_path)?;
-    step_from_content(name, &content)
+pub(crate) fn load_skill_from_path(name: &str, skill_path: &Path) -> Result<Skill, LoadError> {
+    let content = fs::read_to_string(skill_path)?;
+    skill_from_content(name, &content)
 }
 
 #[derive(Debug, Default)]
-struct StepFrontmatter {
+struct SkillFrontmatter {
     agent: Option<String>,
     default_agent: Option<String>,
     directions: Vec<String>,
@@ -404,19 +404,19 @@ struct StepFrontmatter {
     fast_path: Option<String>,
 }
 
-fn parse_step_frontmatter(content: &str) -> Result<(StepFrontmatter, String), LoadError> {
+fn parse_skill_frontmatter(content: &str) -> Result<(SkillFrontmatter, String), LoadError> {
     let Some((frontmatter, body)) = split_frontmatter(content) else {
-        return Ok((StepFrontmatter::default(), content.to_string()));
+        return Ok((SkillFrontmatter::default(), content.to_string()));
     };
 
     let value: Value = serde_yaml_ng::from_str(&frontmatter)
-        .map_err(|err| LoadError::InvalidStep(err.to_string()))?;
+        .map_err(|err| LoadError::InvalidSkill(err.to_string()))?;
     Ok((parse_frontmatter_value(&value), body))
 }
 
-fn step_from_content(name: &str, content: &str) -> Result<Step, LoadError> {
-    let (frontmatter, body) = parse_step_frontmatter(content)?;
-    Ok(Step {
+fn skill_from_content(name: &str, content: &str) -> Result<Skill, LoadError> {
+    let (frontmatter, body) = parse_skill_frontmatter(content)?;
+    Ok(Skill {
         name: name.to_string(),
         agent: frontmatter.agent,
         default_agent: frontmatter.default_agent,
@@ -440,10 +440,10 @@ pub(crate) fn split_frontmatter(content: &str) -> Option<(String, String)> {
     Some((frontmatter.to_string(), body))
 }
 
-fn parse_frontmatter_value(value: &Value) -> StepFrontmatter {
+fn parse_frontmatter_value(value: &Value) -> SkillFrontmatter {
     let map = match value.as_mapping() {
         Some(map) => map,
-        None => return StepFrontmatter::default(),
+        None => return SkillFrontmatter::default(),
     };
 
     let agent = parse_optional_string(map, "agent");
@@ -454,7 +454,7 @@ fn parse_frontmatter_value(value: &Value) -> StepFrontmatter {
     let fast_path =
         parse_optional_string(map, "fast-path").or_else(|| parse_optional_string(map, "fast_path"));
 
-    StepFrontmatter {
+    SkillFrontmatter {
         agent,
         default_agent,
         directions: parse_directions_field(map),
@@ -628,16 +628,16 @@ fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     Err(LoadError::FlowNotFound(name.to_string()))
 }
 
-fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    // Namespaced steps: "gstack/office-hours" → <dir>/.lf/steps/gstack/office-hours.md
+fn find_skill_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
+    // Namespaced skills: "gstack/office-hours" → <dir>/.lf/skills/gstack/office-hours.md
     // Check repo first, then home (so users can override namespaced builtins).
-    if let Some((prefix, step_name)) = name.split_once('/') {
-        let repo_ns = markdown_path(&repo.join(".lf/steps").join(prefix), step_name);
+    if let Some((prefix, skill_name)) = name.split_once('/') {
+        let repo_ns = markdown_path(&repo.join(".lf/skills").join(prefix), skill_name);
         if repo_ns.exists() {
             return Ok(repo_ns);
         }
         if let Some(home) = home_dir() {
-            let home_ns = markdown_path(&home.join(".lf/steps").join(prefix), step_name);
+            let home_ns = markdown_path(&home.join(".lf/skills").join(prefix), skill_name);
             if home_ns.exists() {
                 return Ok(home_ns);
             }
@@ -646,7 +646,7 @@ fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
 
     // 1. Check repo-local paths
     if let Some(path) = first_existing_path([
-        markdown_path(&repo.join(".lf/steps"), name),
+        markdown_path(&repo.join(".lf/skills"), name),
         markdown_path(&repo.join(".claude/commands"), name),
     ]) {
         return Ok(path);
@@ -655,14 +655,14 @@ fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     // 2. Check global paths
     if let Some(home) = home_dir() {
         if let Some(path) = first_existing_path([
-            markdown_path(&home.join(".lf/steps"), name),
+            markdown_path(&home.join(".lf/skills"), name),
             markdown_path(&home.join(".claude/commands"), name),
         ]) {
             return Ok(path);
         }
     }
 
-    Err(LoadError::StepNotFound(name.to_string()))
+    Err(LoadError::SkillNotFound(name.to_string()))
 }
 
 fn find_goal_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
@@ -747,22 +747,19 @@ fn key(s: &str) -> Value {
     Value::String(s.to_string())
 }
 
-fn parse_flow_items(value: &Value) -> Result<Vec<FlowItem>, LoadError> {
+fn parse_flow_items(value: &Value) -> Result<Vec<Step>, LoadError> {
     parse_flow_items_with_options(value, true)
 }
 
-fn parse_flow_items_with_options(
-    value: &Value,
-    allow_loop: bool,
-) -> Result<Vec<FlowItem>, LoadError> {
+fn parse_flow_items_with_options(value: &Value, allow_loop: bool) -> Result<Vec<Step>, LoadError> {
     match value {
         Value::Sequence(seq) => seq
             .iter()
             .map(|item| parse_flow_item_with_options(item, allow_loop))
             .collect(),
         Value::Mapping(map) => {
-            if let Some(steps) = map.get(key("steps")) {
-                return parse_flow_items_with_options(steps, allow_loop);
+            if let Some(skills) = map.get(key("steps")) {
+                return parse_flow_items_with_options(skills, allow_loop);
             }
             Err(LoadError::InvalidFlow(
                 "flow root must be a list".to_string(),
@@ -774,9 +771,9 @@ fn parse_flow_items_with_options(
     }
 }
 
-fn parse_flow_item_with_options(value: &Value, allow_loop: bool) -> Result<FlowItem, LoadError> {
+fn parse_flow_item_with_options(value: &Value, allow_loop: bool) -> Result<Step, LoadError> {
     match value {
-        Value::String(name) => Ok(FlowItem::Step(Step::named(name))),
+        Value::String(name) => Ok(Step::Skill(Skill::named(name))),
         Value::Mapping(map) => parse_flow_mapping_with_options(map, allow_loop),
         _ => Err(LoadError::InvalidFlow(
             "flow item must be string or mapping".to_string(),
@@ -787,9 +784,9 @@ fn parse_flow_item_with_options(value: &Value, allow_loop: bool) -> Result<FlowI
 fn parse_flow_mapping_with_options(
     map: &serde_yaml_ng::Mapping,
     allow_loop: bool,
-) -> Result<FlowItem, LoadError> {
-    if let Some(step_value) = map.get(key("step")) {
-        return Ok(FlowItem::Step(parse_step_value(step_value)?));
+) -> Result<Step, LoadError> {
+    if let Some(skill_value) = map.get(key("step")) {
+        return Ok(Step::Skill(parse_skill_value(skill_value)?));
     }
     if let Some(flow_value) = map.get(key("flow")) {
         return parse_flow_ref_value(flow_value);
@@ -815,11 +812,11 @@ fn parse_flow_mapping_with_options(
         return parse_loop_value(loop_value);
     }
     Err(LoadError::InvalidFlow(
-        "flow item mapping must include step, op, flow, and, xor, or, or loop".to_string(),
+        "flow item mapping must include skill, op, flow, and, xor, or, or loop".to_string(),
     ))
 }
 
-fn parse_op_value(value: &Value, field_name: &str) -> Result<FlowItem, LoadError> {
+fn parse_op_value(value: &Value, field_name: &str) -> Result<Step, LoadError> {
     let raw = value
         .as_str()
         .ok_or_else(|| LoadError::InvalidFlow(format!("{field_name} value must be string")))?
@@ -840,12 +837,12 @@ fn parse_op_value(value: &Value, field_name: &str) -> Result<FlowItem, LoadError
         .to_string();
     let args = parts.map(ToString::to_string).collect();
 
-    Ok(FlowItem::Op(Op { command, args }))
+    Ok(Step::Op(Op { command, args }))
 }
 
-fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
+fn parse_skill_value(value: &Value) -> Result<Skill, LoadError> {
     match value {
-        Value::String(name) => Ok(Step::named(name)),
+        Value::String(name) => Ok(Skill::named(name)),
         Value::Mapping(map) => {
             let name = match map.get(key("name")) {
                 Some(Value::String(name)) => name.to_string(),
@@ -860,7 +857,7 @@ fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
             let action_style = parse_optional_string(map, "action_style");
             let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
             let directions = parse_directions_field(map);
-            Ok(Step {
+            Ok(Skill {
                 name,
                 agent,
                 default_agent,
@@ -877,14 +874,14 @@ fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
     }
 }
 
-fn parse_and_value(value: &Value) -> Result<FlowItem, LoadError> {
+fn parse_and_value(value: &Value) -> Result<Step, LoadError> {
     let map = value
         .as_mapping()
         .ok_or_else(|| LoadError::InvalidFlow("and must be mapping".to_string()))?;
 
     // Three formats:
     // 1. Explicit branches: and: { branches: [...] }
-    // 2. Step shorthand:    and: { step: "reduce", drafts: [...] }
+    // 2. Skill shorthand:    and: { skill: "reduce", drafts: [...] }
     // 3. Flow shorthand:    and: { flow: "build", drafts: [...] }
     let branches = if let Some(branches_value) = map.get(key("branches")) {
         match branches_value {
@@ -901,7 +898,7 @@ fn parse_and_value(value: &Value) -> Result<FlowItem, LoadError> {
     } else if let Some(name_value) = map.get(key("step")).or_else(|| map.get(key("flow"))) {
         let name = name_value
             .as_str()
-            .ok_or_else(|| LoadError::InvalidFlow("and step/flow must be string".to_string()))?;
+            .ok_or_else(|| LoadError::InvalidFlow("and skill/flow must be string".to_string()))?;
         parse_and_drafts(map, name)?
     } else {
         return Err(LoadError::InvalidFlow(
@@ -924,17 +921,17 @@ fn parse_and_value(value: &Value) -> Result<FlowItem, LoadError> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    Ok(FlowItem::And {
+    Ok(Step::And {
         branches,
         synthesize,
     })
 }
 
-/// Parse and-drafts for the step/flow shorthand format.
-fn parse_and_drafts(map: &serde_yaml_ng::Mapping, name: &str) -> Result<Vec<FlowItem>, LoadError> {
+/// Parse and-drafts for the skill/flow shorthand format.
+fn parse_and_drafts(map: &serde_yaml_ng::Mapping, name: &str) -> Result<Vec<Step>, LoadError> {
     let drafts = map
         .get(key("drafts"))
-        .ok_or_else(|| LoadError::InvalidFlow("and with step/flow requires drafts".to_string()))?;
+        .ok_or_else(|| LoadError::InvalidFlow("and with skill/flow requires drafts".to_string()))?;
     let drafts_seq = drafts
         .as_sequence()
         .ok_or_else(|| LoadError::InvalidFlow("and drafts must be list".to_string()))?;
@@ -945,35 +942,35 @@ fn parse_and_drafts(map: &serde_yaml_ng::Mapping, name: &str) -> Result<Vec<Flow
             .as_mapping()
             .ok_or_else(|| LoadError::InvalidFlow("and draft must be mapping".to_string()))?;
         let directions = parse_directions_field(draft_map);
-        branches.push(FlowItem::Step(Step {
+        branches.push(Step::Skill(Skill {
             directions,
-            ..Step::named(name)
+            ..Skill::named(name)
         }));
     }
     Ok(branches)
 }
 
 /// Parse an and-branch item. Unlike `parse_flow_item`, this handles
-/// `direction:` as a sibling key for both `step:` and `flow:` branches.
-fn parse_and_branch_item(value: &Value) -> Result<FlowItem, LoadError> {
+/// `direction:` as a sibling key for both `skill:` and `flow:` branches.
+fn parse_and_branch_item(value: &Value) -> Result<Step, LoadError> {
     match value {
-        Value::String(name) => Ok(FlowItem::Step(Step::named(name))),
+        Value::String(name) => Ok(Step::Skill(Skill::named(name))),
         Value::Mapping(map) => {
             let directions = parse_directions_field(map);
-            if let Some(step_value) = map.get(key("step")) {
-                let mut step = parse_step_value(step_value)?;
-                if !directions.is_empty() && step.directions.is_empty() {
-                    step.directions = directions;
+            if let Some(skill_value) = map.get(key("step")) {
+                let mut skill = parse_skill_value(skill_value)?;
+                if !directions.is_empty() && skill.directions.is_empty() {
+                    skill.directions = directions;
                 }
-                return Ok(FlowItem::Step(step));
+                return Ok(Step::Skill(skill));
             }
             if let Some(flow_value) = map.get(key("flow")) {
                 let name = flow_value.as_str().ok_or_else(|| {
                     LoadError::InvalidFlow("and branch flow must be string".to_string())
                 })?;
-                return Ok(FlowItem::Step(Step {
+                return Ok(Step::Skill(Skill {
                     directions,
-                    ..Step::named(name)
+                    ..Skill::named(name)
                 }));
             }
             if map.get(key("and")).is_some() {
@@ -991,18 +988,18 @@ fn parse_and_branch_item(value: &Value) -> Result<FlowItem, LoadError> {
     }
 }
 
-fn parse_xor_value(value: &Value) -> Result<FlowItem, LoadError> {
+fn parse_xor_value(value: &Value) -> Result<Step, LoadError> {
     let map = value
         .as_mapping()
         .ok_or_else(|| LoadError::InvalidFlow("xor must be mapping".to_string()))?;
-    Ok(FlowItem::Xor(parse_xor_def(map, "xor")?))
+    Ok(Step::Xor(parse_xor_def(map, "xor")?))
 }
 
-fn parse_or_value(value: &Value) -> Result<FlowItem, LoadError> {
+fn parse_or_value(value: &Value) -> Result<Step, LoadError> {
     let map = value
         .as_mapping()
         .ok_or_else(|| LoadError::InvalidFlow("or must be mapping".to_string()))?;
-    parse_xor_def(map, "or").map(FlowItem::Or)
+    parse_xor_def(map, "or").map(Step::Or)
 }
 
 fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, LoadError> {
@@ -1031,12 +1028,12 @@ fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, Loa
         })?;
 
         let flow = parse_optional_string(path_map, "flow");
-        let step = parse_optional_string(path_map, "step");
-        let steps = parse_xor_path_steps(path_map, key_str, kind_prefix)?;
+        let skill = parse_optional_string(path_map, "step");
+        let skills = parse_xor_path_skills(path_map, key_str, kind_prefix)?;
 
         let target_count = usize::from(flow.is_some())
-            + usize::from(step.is_some())
-            + usize::from(!steps.is_empty());
+            + usize::from(skill.is_some())
+            + usize::from(!skills.is_empty());
         if target_count > 1 {
             return Err(LoadError::InvalidFlow(format!(
                 "{kind_prefix} path '{key_str}' cannot have more than one of flow, step, or steps"
@@ -1055,8 +1052,8 @@ fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, Loa
             key_str.to_string(),
             XorPath {
                 flow,
-                step,
-                steps,
+                skill,
+                steps: skills,
                 description,
                 direction,
             },
@@ -1068,18 +1065,18 @@ fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, Loa
     Ok(XorDef { router, paths })
 }
 
-fn parse_loop_value(value: &Value) -> Result<FlowItem, LoadError> {
+fn parse_loop_value(value: &Value) -> Result<Step, LoadError> {
     let map = value
         .as_mapping()
         .ok_or_else(|| LoadError::InvalidFlow("loop must be mapping".to_string()))?;
 
-    let steps_value = map
+    let skills_value = map
         .get(key("steps"))
-        .ok_or_else(|| LoadError::InvalidFlow("loop must have steps".to_string()))?;
-    let steps = parse_flow_items_with_options(steps_value, false)?;
-    if steps.is_empty() {
+        .ok_or_else(|| LoadError::InvalidFlow("loop must have skills".to_string()))?;
+    let skills = parse_flow_items_with_options(skills_value, false)?;
+    if skills.is_empty() {
         return Err(LoadError::InvalidFlow(
-            "loop must have at least one step".to_string(),
+            "loop must have at least one skill".to_string(),
         ));
     }
 
@@ -1096,7 +1093,10 @@ fn parse_loop_value(value: &Value) -> Result<FlowItem, LoadError> {
         ));
     }
 
-    Ok(FlowItem::Loop(LoopDef { steps, exit }))
+    Ok(Step::Loop(LoopDef {
+        steps: skills,
+        exit,
+    }))
 }
 
 /// Validate that flows referenced by xor paths can be loaded and expanded.
@@ -1151,16 +1151,16 @@ pub fn read_xor_verdict(verdict_path: &Path, xor_def: &ConcreteXor) -> Result<St
     Ok(selected)
 }
 
-pub fn load_xor_path_items(or_path: &XorPath, repo: &Path) -> Result<Vec<ConcreteItem>, LoadError> {
+pub fn load_xor_path_items(or_path: &XorPath, repo: &Path) -> Result<Vec<ConcreteStep>, LoadError> {
     if let Some(ref flow_name) = or_path.flow {
         let flow = load_flow(flow_name, repo)?;
         return expand_flow(&flow, repo);
     }
 
-    if let Some(ref step_name) = or_path.step {
-        let step = load_step(step_name, repo)?;
-        return Ok(vec![ConcreteItem::Step(ConcreteStep {
-            step,
+    if let Some(ref skill_name) = or_path.skill {
+        let skill = load_skill(skill_name, repo)?;
+        return Ok(vec![ConcreteStep::Skill(ConcreteSkill {
+            skill,
             flow_parents: Vec::new(),
         })]);
     }
@@ -1169,9 +1169,9 @@ pub fn load_xor_path_items(or_path: &XorPath, repo: &Path) -> Result<Vec<Concret
         return Ok(or_path
             .steps
             .iter()
-            .map(|step| {
-                ConcreteItem::Step(ConcreteStep {
-                    step: resolve_step_reference(step, repo),
+            .map(|skill| {
+                ConcreteStep::Skill(ConcreteSkill {
+                    skill: resolve_skill_reference(skill, repo),
                     flow_parents: Vec::new(),
                 })
             })
@@ -1194,43 +1194,43 @@ fn expand_branch_def(
     })
 }
 
-fn parse_xor_path_steps(
+fn parse_xor_path_skills(
     map: &serde_yaml_ng::Mapping,
     path_name: &str,
     kind: &str,
-) -> Result<Vec<Step>, LoadError> {
+) -> Result<Vec<Skill>, LoadError> {
     let Some(value) = map.get(key("steps")) else {
         return Ok(Vec::new());
     };
 
     let Value::Sequence(items) = value else {
         return Err(LoadError::InvalidFlow(format!(
-            "{kind} path '{path_name}' steps must be a list"
+            "{kind} path '{path_name}' skills must be a list"
         )));
     };
 
     items
         .iter()
         .map(|item| match item {
-            Value::String(name) => Ok(Step::named(name)),
-            Value::Mapping(step_map) => {
-                if let Some(step_value) = step_map.get(key("step")) {
-                    return parse_step_value(step_value);
+            Value::String(name) => Ok(Skill::named(name)),
+            Value::Mapping(skill_map) => {
+                if let Some(skill_value) = skill_map.get(key("step")) {
+                    return parse_skill_value(skill_value);
                 }
-                parse_step_value(item)
+                parse_skill_value(item)
             }
             _ => Err(LoadError::InvalidFlow(format!(
-                "{kind} path '{path_name}' steps must contain only step items"
+                "{kind} path '{path_name}' skills must contain only skill items"
             ))),
         })
         .collect()
 }
 
-fn parse_flow_ref_value(value: &Value) -> Result<FlowItem, LoadError> {
+fn parse_flow_ref_value(value: &Value) -> Result<Step, LoadError> {
     let name = value
         .as_str()
         .ok_or_else(|| LoadError::InvalidFlow("flow ref must be string".to_string()))?;
-    Ok(FlowItem::FlowRef(name.to_string()))
+    Ok(Step::FlowRef(name.to_string()))
 }
 
 fn parse_string_list(value: Option<&Value>) -> Vec<String> {
@@ -1250,28 +1250,28 @@ fn parse_optional_string(map: &serde_yaml_ng::Mapping, field: &str) -> Option<St
         .map(ToString::to_string)
 }
 
-fn resolve_step_reference(step: &Step, repo: &Path) -> Step {
-    if step.content.is_some() {
-        return step.clone();
+fn resolve_skill_reference(skill: &Skill, repo: &Path) -> Skill {
+    if skill.content.is_some() {
+        return skill.clone();
     }
 
-    let Ok(mut resolved) = load_step(&step.name, repo) else {
-        return step.clone();
+    let Ok(mut resolved) = load_skill(&skill.name, repo) else {
+        return skill.clone();
     };
 
-    if let Some(agent) = &step.agent {
+    if let Some(agent) = &skill.agent {
         resolved.agent = Some(agent.clone());
     }
-    if let Some(default_agent) = &step.default_agent {
+    if let Some(default_agent) = &skill.default_agent {
         resolved.default_agent = Some(default_agent.clone());
     }
-    if !step.directions.is_empty() {
-        resolved.directions = step.directions.clone();
+    if !skill.directions.is_empty() {
+        resolved.directions = skill.directions.clone();
     }
-    if let Some(action_style) = &step.action_style {
+    if let Some(action_style) = &skill.action_style {
         resolved.action_style = Some(action_style.clone());
     }
-    if let Some(interactive) = step.interactive {
+    if let Some(interactive) = skill.interactive {
         resolved.interactive = Some(interactive);
     }
 
@@ -1283,7 +1283,7 @@ fn expand_with_chain(
     repo: &Path,
     chain: Vec<String>,
     depth: usize,
-) -> Result<Vec<ConcreteItem>, LoadError> {
+) -> Result<Vec<ConcreteStep>, LoadError> {
     const MAX_DEPTH: usize = 5;
     if depth > MAX_DEPTH {
         return Err(LoadError::InvalidFlow(format!(
@@ -1294,25 +1294,25 @@ fn expand_with_chain(
     let mut items = Vec::new();
     for item in &flow.items {
         match item {
-            FlowItem::Step(step) => {
-                // A plain string in flow YAML is parsed as Step, but it might
-                // actually be a sub-flow name. If the step has no inline content,
+            Step::Skill(skill) => {
+                // A plain string in flow YAML is parsed as Skill, but it might
+                // actually be a sub-flow name. If the skill has no inline content,
                 // check if a flow with this name exists and expand it.
-                if let Some(nested) = try_load_multi_step_flow(step, repo, &chain) {
+                if let Some(nested) = try_load_multi_skill_flow(skill, repo, &chain) {
                     items.extend(expand_with_chain(
                         &nested,
                         repo,
-                        chain_with(&chain, &step.name),
+                        chain_with(&chain, &skill.name),
                         depth + 1,
                     )?);
                     continue;
                 }
-                items.push(ConcreteItem::Step(ConcreteStep {
-                    step: resolve_step_reference(step, repo),
+                items.push(ConcreteStep::Skill(ConcreteSkill {
+                    skill: resolve_skill_reference(skill, repo),
                     flow_parents: chain.clone(),
                 }));
             }
-            FlowItem::FlowRef(name) => {
+            Step::FlowRef(name) => {
                 if chain.contains(name) {
                     return Err(LoadError::InvalidFlow(format!(
                         "flow cycle detected: {} -> {name}",
@@ -1327,31 +1327,31 @@ fn expand_with_chain(
                     depth + 1,
                 )?);
             }
-            FlowItem::Op(item) => {
-                items.push(ConcreteItem::Op(ConcreteOp {
+            Step::Op(item) => {
+                items.push(ConcreteStep::Op(ConcreteOp {
                     item: item.clone(),
                     flow_parents: chain.clone(),
                 }));
             }
-            FlowItem::And {
+            Step::And {
                 branches,
                 synthesize,
             } => {
                 let fork = expand_and(branches, synthesize.clone(), repo, &chain, depth)?;
-                items.push(ConcreteItem::And(fork));
+                items.push(ConcreteStep::And(fork));
             }
-            FlowItem::Xor(branch_def) => {
-                items.push(ConcreteItem::Xor(expand_branch_def(
+            Step::Xor(branch_def) => {
+                items.push(ConcreteStep::Xor(expand_branch_def(
                     branch_def, repo, &chain,
                 )?));
             }
-            FlowItem::Or(or_def) => {
-                items.push(ConcreteItem::Or(expand_branch_def(or_def, repo, &chain)?));
+            Step::Or(or_def) => {
+                items.push(ConcreteStep::Or(expand_branch_def(or_def, repo, &chain)?));
             }
-            FlowItem::Loop(loop_def) => {
-                let steps = expand_items_with_chain(&loop_def.steps, repo, &chain, depth)?;
-                items.push(ConcreteItem::Loop(ConcreteLoop {
-                    steps,
+            Step::Loop(loop_def) => {
+                let skills = expand_items_with_chain(&loop_def.steps, repo, &chain, depth)?;
+                items.push(ConcreteStep::Loop(ConcreteLoop {
+                    steps: skills,
                     exit: expand_branch_def(&loop_def.exit, repo, &chain)?,
                     flow_parents: chain.clone(),
                 }));
@@ -1363,11 +1363,11 @@ fn expand_with_chain(
 }
 
 fn expand_items_with_chain(
-    flow_items: &[FlowItem],
+    flow_items: &[Step],
     repo: &Path,
     chain: &[String],
     depth: usize,
-) -> Result<Vec<ConcreteItem>, LoadError> {
+) -> Result<Vec<ConcreteStep>, LoadError> {
     let flow = Flow {
         name: chain.last().cloned().unwrap_or_else(|| "flow".to_string()),
         items: flow_items.to_vec(),
@@ -1376,7 +1376,7 @@ fn expand_items_with_chain(
 }
 
 fn expand_and(
-    branches: &[FlowItem],
+    branches: &[Step],
     synthesize: Option<String>,
     repo: &Path,
     chain: &[String],
@@ -1394,72 +1394,72 @@ fn expand_and(
 }
 
 fn expand_and_branch(
-    branch: &FlowItem,
+    branch: &Step,
     repo: &Path,
     chain: &[String],
     depth: usize,
 ) -> Result<ConcreteAndBranch, LoadError> {
     match branch {
-        FlowItem::Step(step) => {
-            // A step name in a fork branch might actually reference a flow.
+        Step::Skill(skill) => {
+            // A skill name in a fork branch might actually reference a flow.
             // Try loading it as a flow first (same resolution as expand_with_chain).
-            if let Some(branch) = try_expand_step_as_flow(step, repo, chain, depth)? {
+            if let Some(branch) = try_expand_skill_as_flow(skill, repo, chain, depth)? {
                 return Ok(branch);
             }
-            let resolved = resolve_step_reference(step, repo);
-            let flow_parents = and_branch_parents(chain, &step.name);
+            let resolved = resolve_skill_reference(skill, repo);
+            let flow_parents = and_branch_parents(chain, &skill.name);
             Ok(ConcreteAndBranch {
-                steps: vec![ConcreteStep {
-                    step: resolved,
+                steps: vec![ConcreteSkill {
+                    skill: resolved,
                     flow_parents: flow_parents.clone(),
                 }],
                 flow_parents,
-                label: step.name.clone(),
-                directions: step.directions.clone(),
+                label: skill.name.clone(),
+                directions: skill.directions.clone(),
             })
         }
-        FlowItem::FlowRef(name) => {
+        Step::FlowRef(name) => {
             let nested = load_flow(name, repo)?;
             expand_flow_ref_branch(name, &[], &nested, repo, chain, depth)
         }
-        FlowItem::Op(_) => Err(LoadError::InvalidFlow(
+        Step::Op(_) => Err(LoadError::InvalidFlow(
             "and branches cannot contain ops items".to_string(),
         )),
-        FlowItem::And { .. } => Err(LoadError::InvalidFlow(
+        Step::And { .. } => Err(LoadError::InvalidFlow(
             "and branches cannot contain nested and constructs".to_string(),
         )),
-        FlowItem::Xor(_) => Err(LoadError::InvalidFlow(
+        Step::Xor(_) => Err(LoadError::InvalidFlow(
             "and branches cannot contain xor constructs".to_string(),
         )),
-        FlowItem::Or(_) => Err(LoadError::InvalidFlow(
+        Step::Or(_) => Err(LoadError::InvalidFlow(
             "and branches cannot contain or constructs".to_string(),
         )),
-        FlowItem::Loop(_) => Err(LoadError::InvalidFlow(
+        Step::Loop(_) => Err(LoadError::InvalidFlow(
             "and branches cannot contain loop constructs".to_string(),
         )),
     }
 }
 
-/// Check whether a loaded flow is a genuine multi-step flow vs a single step
+/// Check whether a loaded flow is a genuine multi-skill flow vs a single skill
 /// auto-wrapped by `load_flow`. Returns `true` if the flow should be expanded.
-fn is_multi_step_flow(flow: &Flow, step_name: &str) -> bool {
+fn is_multi_skill_flow(flow: &Flow, skill_name: &str) -> bool {
     flow.items.len() > 1
         || flow
             .items
             .first()
-            .map(|i| !matches!(i, FlowItem::Step(s) if s.name == step_name))
+            .map(|i| !matches!(i, Step::Skill(s) if s.name == skill_name))
             .unwrap_or(false)
 }
 
-fn try_load_multi_step_flow(step: &Step, repo: &Path, chain: &[String]) -> Option<Flow> {
-    if step.content.is_some() || chain.contains(&step.name) {
+fn try_load_multi_skill_flow(skill: &Skill, repo: &Path, chain: &[String]) -> Option<Flow> {
+    if skill.content.is_some() || chain.contains(&skill.name) {
         return None;
     }
 
-    // Strict resolution inside an expanding flow: a bare step name like `review`
+    // Strict resolution inside an expanding flow: a bare skill name like `review`
     // must not auto-escalate to `gstack/review`. Only exact-key matches.
-    let flow = load_flow_strict(&step.name, repo).ok()?;
-    is_multi_step_flow(&flow, &step.name).then_some(flow)
+    let flow = load_flow_strict(&skill.name, repo).ok()?;
+    is_multi_skill_flow(&flow, &skill.name).then_some(flow)
 }
 
 fn chain_with(chain: &[String], name: &str) -> Vec<String> {
@@ -1472,22 +1472,23 @@ fn and_branch_parents(chain: &[String], name: &str) -> Vec<String> {
     chain_with(chain, &format!("and/{name}"))
 }
 
-/// Try to expand a step name as a flow reference. Returns `Some(branch)` if
-/// the name resolves to a multi-step flow, `None` if it's just a step.
-fn try_expand_step_as_flow(
-    step: &Step,
+/// Try to expand a skill name as a flow reference. Returns `Some(branch)` if
+/// the name resolves to a multi-skill flow, `None` if it's just a skill.
+fn try_expand_skill_as_flow(
+    skill: &Skill,
     repo: &Path,
     chain: &[String],
     depth: usize,
 ) -> Result<Option<ConcreteAndBranch>, LoadError> {
-    let Some(nested) = try_load_multi_step_flow(step, repo, chain) else {
+    let Some(nested) = try_load_multi_skill_flow(skill, repo, chain) else {
         return Ok(None);
     };
-    let branch = expand_flow_ref_branch(&step.name, &step.directions, &nested, repo, chain, depth)?;
+    let branch =
+        expand_flow_ref_branch(&skill.name, &skill.directions, &nested, repo, chain, depth)?;
     Ok(Some(branch))
 }
 
-/// Expand a flow reference into a multi-step fork branch.
+/// Expand a flow reference into a multi-skill fork branch.
 fn expand_flow_ref_branch(
     name: &str,
     directions: &[String],
@@ -1498,59 +1499,59 @@ fn expand_flow_ref_branch(
 ) -> Result<ConcreteAndBranch, LoadError> {
     let nested_chain = chain_with(chain, name);
     let nested_items = expand_with_chain(nested, repo, nested_chain, depth + 1)?;
-    let steps = extract_and_branch_steps(name, &nested_items)?;
+    let skills = extract_and_branch_skills(name, &nested_items)?;
     let flow_parents = and_branch_parents(chain, name);
     Ok(ConcreteAndBranch {
-        steps,
+        steps: skills,
         flow_parents,
         label: name.to_string(),
         directions: directions.to_vec(),
     })
 }
 
-/// Extract concrete steps from expanded flow items for an and-branch.
-/// Rejects nested and constructs — only sequential steps are allowed within branches.
-fn extract_and_branch_steps(
+/// Extract concrete skills from expanded flow items for an and-branch.
+/// Rejects nested and constructs — only sequential skills are allowed within branches.
+fn extract_and_branch_skills(
     flow_name: &str,
-    items: &[ConcreteItem],
-) -> Result<Vec<ConcreteStep>, LoadError> {
-    let mut steps = Vec::new();
+    items: &[ConcreteStep],
+) -> Result<Vec<ConcreteSkill>, LoadError> {
+    let mut skills = Vec::new();
     for item in items {
         match item {
-            ConcreteItem::Step(s) => steps.push(s.clone()),
-            ConcreteItem::Op(_) => {
+            ConcreteStep::Skill(s) => skills.push(s.clone()),
+            ConcreteStep::Op(_) => {
                 return Err(LoadError::InvalidFlow(format!(
                     "and-branch flow ref '{flow_name}' contains an ops item"
                 )))
             }
-            ConcreteItem::And(_) => {
+            ConcreteStep::And(_) => {
                 return Err(LoadError::InvalidFlow(format!(
                     "and-branch flow ref '{flow_name}' contains a nested and construct"
                 )))
             }
-            ConcreteItem::Xor(_) => {
+            ConcreteStep::Xor(_) => {
                 return Err(LoadError::InvalidFlow(format!(
                     "and-branch flow ref '{flow_name}' contains a xor construct"
                 )))
             }
-            ConcreteItem::Or(_) => {
+            ConcreteStep::Or(_) => {
                 return Err(LoadError::InvalidFlow(format!(
                     "and-branch flow ref '{flow_name}' contains an or construct"
                 )))
             }
-            ConcreteItem::Loop(_) => {
+            ConcreteStep::Loop(_) => {
                 return Err(LoadError::InvalidFlow(format!(
                     "and-branch flow ref '{flow_name}' contains a loop construct"
                 )))
             }
         }
     }
-    if steps.is_empty() {
+    if skills.is_empty() {
         return Err(LoadError::InvalidFlow(format!(
-            "and-branch flow ref '{flow_name}' expands to zero steps"
+            "and-branch flow ref '{flow_name}' expands to zero skills"
         )));
     }
-    Ok(steps)
+    Ok(skills)
 }
 
 /// Home directory for global lookups. Can be overridden for testing.
@@ -1564,15 +1565,15 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn load_step_finds_repo_local_step() {
+    fn load_skill_finds_repo_local_skill() {
         let tmp = TempDir::new().unwrap();
-        let steps_dir = tmp.path().join(".lf/steps");
-        fs::create_dir_all(&steps_dir).unwrap();
-        fs::write(steps_dir.join("mystep.md"), "# My Step\nDo the thing.").unwrap();
+        let skills_dir = tmp.path().join(".lf/skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+        fs::write(skills_dir.join("myskill.md"), "# My Skill\nDo the thing.").unwrap();
 
-        let step = load_step("mystep", tmp.path()).unwrap();
-        assert_eq!(step.name, "mystep");
-        assert!(step.content.unwrap().contains("Do the thing"));
+        let skill = load_skill("myskill", tmp.path()).unwrap();
+        assert_eq!(skill.name, "myskill");
+        assert!(skill.content.unwrap().contains("Do the thing"));
     }
 
     #[test]
@@ -1659,59 +1660,59 @@ mod tests {
     }
 
     #[test]
-    fn load_step_rejects_legacy_colon_form() {
+    fn load_skill_rejects_legacy_colon_form() {
         let tmp = TempDir::new().unwrap();
-        let steps_dir = tmp.path().join(".lf/steps/gstack");
-        fs::create_dir_all(&steps_dir).unwrap();
+        let skills_dir = tmp.path().join(".lf/skills/gstack");
+        fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
-            steps_dir.join("office-hours.md"),
+            skills_dir.join("office-hours.md"),
             "---\ninteractive: false\n---\n# Office Hours\nDo the thing.\n",
         )
         .unwrap();
 
         // The colon form is no longer accepted; users must use `/`.
-        let err = load_step("gstack:office-hours", tmp.path()).unwrap_err();
-        assert!(matches!(err, LoadError::StepNotFound(_)));
+        let err = load_skill("gstack:office-hours", tmp.path()).unwrap_err();
+        assert!(matches!(err, LoadError::SkillNotFound(_)));
     }
 
     #[test]
-    fn load_step_finds_namespaced_step_with_slash() {
+    fn load_skill_finds_namespaced_skill_with_slash() {
         let tmp = TempDir::new().unwrap();
-        let steps_dir = tmp.path().join(".lf/steps/gstack");
-        fs::create_dir_all(&steps_dir).unwrap();
+        let skills_dir = tmp.path().join(".lf/skills/gstack");
+        fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
-            steps_dir.join("office-hours.md"),
+            skills_dir.join("office-hours.md"),
             "---\ninteractive: false\n---\n# Office Hours\nDo the thing.\n",
         )
         .unwrap();
 
-        let step = load_step("gstack/office-hours", tmp.path()).unwrap();
-        assert_eq!(step.name, "gstack/office-hours");
-        assert_eq!(step.interactive, Some(false));
-        assert!(step.content.unwrap().contains("Do the thing"));
+        let skill = load_skill("gstack/office-hours", tmp.path()).unwrap();
+        assert_eq!(skill.name, "gstack/office-hours");
+        assert_eq!(skill.interactive, Some(false));
+        assert!(skill.content.unwrap().contains("Do the thing"));
     }
 
     #[test]
-    fn load_step_finds_builtin_step() {
-        // Builtin steps like "debug", "implement" should be available everywhere
+    fn load_skill_finds_builtin_skill() {
+        // Builtin skills like "debug", "implement" should be available everywhere
         let tmp = TempDir::new().unwrap();
 
-        let result = load_step("debug", tmp.path());
+        let result = load_skill("debug", tmp.path());
         assert!(
             result.is_ok(),
-            "builtin 'debug' step should be found: {:?}",
+            "builtin 'debug' skill should be found: {:?}",
             result.err()
         );
     }
 
     #[test]
-    fn load_step_finds_all_builtins() {
+    fn load_skill_finds_all_builtins() {
         let tmp = TempDir::new().unwrap();
-        for name in crate::engine::builtins::builtin_step_names() {
-            let result = load_step(name, tmp.path());
+        for name in crate::engine::builtins::builtin_skill_names() {
+            let result = load_skill(name, tmp.path());
             assert!(
                 result.is_ok(),
-                "builtin '{}' step should be found: {:?}",
+                "builtin '{}' skill should be found: {:?}",
                 name,
                 result.err()
             );
@@ -1719,112 +1720,112 @@ mod tests {
     }
 
     #[test]
-    fn load_step_parses_frontmatter_agent() {
+    fn load_skill_parses_frontmatter_agent() {
         let tmp = TempDir::new().unwrap();
-        let steps_dir = tmp.path().join(".lf/steps");
-        fs::create_dir_all(&steps_dir).unwrap();
+        let skills_dir = tmp.path().join(".lf/skills");
+        fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
-            steps_dir.join("fast.md"),
+            skills_dir.join("fast.md"),
             r#"---
 agent: claude:haiku
 ---
-# Fast Step
+# Fast Skill
 Do it quickly.
 "#,
         )
         .unwrap();
 
-        let step = load_step("fast", tmp.path()).unwrap();
-        assert_eq!(step.agent, Some("claude:haiku".to_string()));
+        let skill = load_skill("fast", tmp.path()).unwrap();
+        assert_eq!(skill.agent, Some("claude:haiku".to_string()));
     }
 
     #[test]
-    fn load_step_parses_frontmatter_default_agent() {
+    fn load_skill_parses_frontmatter_default_agent() {
         let tmp = TempDir::new().unwrap();
-        let steps_dir = tmp.path().join(".lf/steps");
-        fs::create_dir_all(&steps_dir).unwrap();
+        let skills_dir = tmp.path().join(".lf/skills");
+        fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
-            steps_dir.join("fast.md"),
+            skills_dir.join("fast.md"),
             r#"---
 default_agent: gemini:2.5-pro
 ---
-# Fast Step
+# Fast Skill
 Do it quickly.
 "#,
         )
         .unwrap();
 
-        let step = load_step("fast", tmp.path()).unwrap();
-        assert_eq!(step.default_agent, Some("gemini:2.5-pro".to_string()));
+        let skill = load_skill("fast", tmp.path()).unwrap();
+        assert_eq!(skill.default_agent, Some("gemini:2.5-pro".to_string()));
     }
 
     #[test]
-    fn load_step_parses_frontmatter_interactive() {
+    fn load_skill_parses_frontmatter_interactive() {
         let tmp = TempDir::new().unwrap();
-        let steps_dir = tmp.path().join(".lf/steps");
-        fs::create_dir_all(&steps_dir).unwrap();
+        let skills_dir = tmp.path().join(".lf/skills");
+        fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
-            steps_dir.join("design.md"),
+            skills_dir.join("design.md"),
             r#"---
 interactive: true
 ---
-# Design Step
+# Design Skill
 Design the feature.
 "#,
         )
         .unwrap();
 
-        let step = load_step("design", tmp.path()).unwrap();
-        assert_eq!(step.interactive, Some(true));
+        let skill = load_skill("design", tmp.path()).unwrap();
+        assert_eq!(skill.interactive, Some(true));
     }
 
     #[test]
-    fn load_step_parses_frontmatter_action_style() {
+    fn load_skill_parses_frontmatter_action_style() {
         let tmp = TempDir::new().unwrap();
-        let steps_dir = tmp.path().join(".lf/steps");
-        fs::create_dir_all(&steps_dir).unwrap();
+        let skills_dir = tmp.path().join(".lf/skills");
+        fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
-            steps_dir.join("design.md"),
+            skills_dir.join("design.md"),
             r#"---
 action_style: exploratory
 ---
-# Design Step
+# Design Skill
 Design the feature.
 "#,
         )
         .unwrap();
 
-        let step = load_step("design", tmp.path()).unwrap();
-        assert_eq!(step.action_style.as_deref(), Some("exploratory"));
+        let skill = load_skill("design", tmp.path()).unwrap();
+        assert_eq!(skill.action_style.as_deref(), Some("exploratory"));
     }
 
     #[test]
-    fn load_step_includes_frontmatter_directions() {
+    fn load_skill_includes_frontmatter_directions() {
         let tmp = TempDir::new().unwrap();
-        let steps_dir = tmp.path().join(".lf/steps");
-        fs::create_dir_all(&steps_dir).unwrap();
+        let skills_dir = tmp.path().join(".lf/skills");
+        fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
-            steps_dir.join("careful.md"),
+            skills_dir.join("careful.md"),
             r#"---
 directions:
   - thorough
   - tested
 ---
-# Careful Step
+# Careful Skill
 Be careful.
 "#,
         )
         .unwrap();
 
-        let step = load_step("careful", tmp.path()).unwrap();
-        assert_eq!(step.directions, vec!["thorough", "tested"]);
+        let skill = load_skill("careful", tmp.path()).unwrap();
+        assert_eq!(skill.directions, vec!["thorough", "tested"]);
     }
 
     #[test]
-    fn load_step_not_found_error_message() {
+    fn load_skill_not_found_error_message() {
         let tmp = TempDir::new().unwrap();
 
-        let result = load_step("nonexistent", tmp.path());
+        let result = load_skill("nonexistent", tmp.path());
         assert!(result.is_err());
 
         let err = result.unwrap_err();
@@ -1864,7 +1865,7 @@ Be careful.
     }
 
     #[test]
-    fn load_step_falls_back_to_agent_skills() {
+    fn load_skill_falls_back_to_agent_skills() {
         let tmp = TempDir::new().unwrap();
         let skill_dir = tmp.path().join(".agents/skills/my-tool");
         fs::create_dir_all(&skill_dir).unwrap();
@@ -1874,9 +1875,9 @@ Be careful.
         )
         .unwrap();
 
-        let step = load_step("my-tool", tmp.path()).unwrap();
-        assert_eq!(step.name, "my-tool");
-        assert!(step.content.unwrap().contains("Do the thing."));
+        let skill = load_skill("my-tool", tmp.path()).unwrap();
+        assert_eq!(skill.name, "my-tool");
+        assert!(skill.content.unwrap().contains("Do the thing."));
     }
 
     #[test]
@@ -1896,10 +1897,10 @@ Be careful.
     }
 
     #[test]
-    fn next_action_marks_interactive_steps_as_wait() {
+    fn next_action_marks_interactive_skills_as_wait() {
         let flow = Flow {
             name: "demo".to_string(),
-            items: vec![FlowItem::Step(Step {
+            items: vec![Step::Skill(Skill {
                 name: "design".to_string(),
                 agent: None,
                 default_agent: None,
@@ -1918,53 +1919,53 @@ Be careful.
     }
 
     #[test]
-    fn expand_flow_resolves_interactive_from_step_frontmatter() {
-        // A bare step name reference in a flow should pick up interactive: true
-        // from the step file's frontmatter, not remain None.
+    fn expand_flow_resolves_interactive_from_skill_frontmatter() {
+        // A bare skill name reference in a flow should pick up interactive: true
+        // from the skill file's frontmatter, not remain None.
         let tmp = TempDir::new().unwrap();
-        let steps_dir = tmp.path().join(".lf/steps");
-        fs::create_dir_all(&steps_dir).unwrap();
+        let skills_dir = tmp.path().join(".lf/skills");
+        fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
-            steps_dir.join("my-design.md"),
+            skills_dir.join("my-design.md"),
             "---\ninteractive: true\n---\nDesign it.",
         )
         .unwrap();
 
         let flow = Flow {
             name: "test-flow".to_string(),
-            items: vec![FlowItem::Step(Step::named("my-design"))],
+            items: vec![Step::Skill(Skill::named("my-design"))],
         };
         let items = expand_flow(&flow, tmp.path()).unwrap();
         assert_eq!(items.len(), 1);
         let action = next_action(&items, 0);
         assert!(
             matches!(action, FlowAction::WaitInteractive { .. }),
-            "bare step reference should resolve interactive from frontmatter"
+            "bare skill reference should resolve interactive from frontmatter"
         );
     }
 
     #[test]
-    fn expand_flow_resolves_builtin_interactive_step() {
-        // The builtin "design" step has interactive: true in its frontmatter.
+    fn expand_flow_resolves_builtin_interactive_skill() {
+        // The builtin "design" skill has interactive: true in its frontmatter.
         // A flow referencing it by name should produce WaitInteractive.
         let tmp = TempDir::new().unwrap();
         let flow = Flow {
             name: "test-flow".to_string(),
-            items: vec![FlowItem::Step(Step::named("design"))],
+            items: vec![Step::Skill(Skill::named("design"))],
         };
         let items = expand_flow(&flow, tmp.path()).unwrap();
         let design = items
             .iter()
-            .find(|item| matches!(item, ConcreteItem::Step(s) if s.step.name == "design"));
+            .find(|item| matches!(item, ConcreteStep::Skill(s) if s.skill.name == "design"));
         assert!(
             design.is_some(),
-            "expanded flow should contain a design step"
+            "expanded flow should contain a design skill"
         );
-        if let Some(ConcreteItem::Step(step)) = design {
+        if let Some(ConcreteStep::Skill(skill)) = design {
             assert_eq!(
-                step.step.interactive,
+                skill.skill.interactive,
                 Some(true),
-                "builtin design step should have interactive: true after expansion"
+                "builtin design skill should have interactive: true after expansion"
             );
         }
     }
@@ -1990,38 +1991,38 @@ Be careful.
             );
             for item in expanded.unwrap() {
                 match item {
-                    ConcreteItem::Step(step) => {
-                        let result = load_step(&step.step.name, tmp.path());
+                    ConcreteStep::Skill(skill) => {
+                        let result = load_skill(&skill.skill.name, tmp.path());
                         assert!(
                             result.is_ok(),
-                            "builtin flow '{}' references missing step '{}': {:?}",
+                            "builtin flow '{}' references missing skill '{}': {:?}",
                             name,
-                            step.step.name,
+                            skill.skill.name,
                             result.err()
                         );
                     }
-                    ConcreteItem::And(fork) => {
+                    ConcreteStep::And(fork) => {
                         for branch in &fork.branches {
-                            for step in &branch.steps {
-                                let result = load_step(&step.step.name, tmp.path());
+                            for skill in &branch.steps {
+                                let result = load_skill(&skill.skill.name, tmp.path());
                                 assert!(
                                     result.is_ok(),
-                                    "builtin flow '{}' and references missing step '{}': {:?}",
+                                    "builtin flow '{}' and references missing skill '{}': {:?}",
                                     name,
-                                    step.step.name,
+                                    skill.skill.name,
                                     result.err()
                                 );
                             }
                         }
                     }
-                    ConcreteItem::Op(ops) => {
+                    ConcreteStep::Op(ops) => {
                         assert!(
                             !ops.item.command.is_empty(),
                             "builtin flow '{}' contains empty ops command",
                             name
                         );
                     }
-                    ConcreteItem::Xor(branch) => {
+                    ConcreteStep::Xor(branch) => {
                         for (path_key, path) in &branch.paths {
                             if let Some(ref flow_name) = path.flow {
                                 let result = load_flow(flow_name, tmp.path());
@@ -2033,7 +2034,7 @@ Be careful.
                             }
                         }
                     }
-                    ConcreteItem::Or(branch) => {
+                    ConcreteStep::Or(branch) => {
                         for (path_key, path) in &branch.paths {
                             if let Some(ref flow_name) = path.flow {
                                 let result = load_flow(flow_name, tmp.path());
@@ -2045,8 +2046,8 @@ Be careful.
                             }
                         }
                     }
-                    ConcreteItem::Loop(loop_item) => {
-                        // Loop body steps are validated during expansion
+                    ConcreteStep::Loop(loop_item) => {
+                        // Loop body skills are validated during expansion
                         assert!(
                             !loop_item.steps.is_empty(),
                             "builtin flow '{}' has empty loop body",
@@ -2059,7 +2060,7 @@ Be careful.
     }
 
     #[test]
-    fn parse_and_step_drafts_shorthand() {
+    fn parse_and_skill_drafts_shorthand() {
         let yaml = r#"
 - review
 - and:
@@ -2076,15 +2077,15 @@ Be careful.
 
         // Second item should be a Fork with 3 branches
         match &items[1] {
-            FlowItem::And { branches, .. } => {
+            Step::And { branches, .. } => {
                 assert_eq!(branches.len(), 3);
                 for branch in branches {
                     match branch {
-                        FlowItem::Step(step) => {
-                            assert_eq!(step.name, "reduce");
-                            assert_eq!(step.directions.len(), 1);
+                        Step::Skill(skill) => {
+                            assert_eq!(skill.name, "reduce");
+                            assert_eq!(skill.directions.len(), 1);
                         }
-                        _ => panic!("expected Step branch"),
+                        _ => panic!("expected Skill branch"),
                     }
                 }
             }
@@ -2093,7 +2094,7 @@ Be careful.
     }
 
     #[test]
-    fn parse_step_mapping_accepts_plural_directions_key() {
+    fn parse_skill_mapping_accepts_plural_directions_key() {
         let yaml = r#"
 - step:
     name: implement
@@ -2104,11 +2105,11 @@ Be careful.
         assert_eq!(items.len(), 1);
 
         match &items[0] {
-            FlowItem::Step(step) => {
-                assert_eq!(step.name, "implement");
-                assert_eq!(step.directions, vec!["designer", "product-engineer"]);
+            Step::Skill(skill) => {
+                assert_eq!(skill.name, "implement");
+                assert_eq!(skill.directions, vec!["designer", "product-engineer"]);
             }
-            other => panic!("expected Step, got {other:?}"),
+            other => panic!("expected Skill, got {other:?}"),
         }
     }
 
@@ -2122,7 +2123,7 @@ Be careful.
         assert_eq!(items.len(), 1);
 
         match &items[0] {
-            FlowItem::Op(item) => {
+            Step::Op(item) => {
                 assert_eq!(item.command, "land");
                 assert_eq!(item.args, vec!["--create-pr"]);
             }
@@ -2132,7 +2133,7 @@ Be careful.
 
     #[test]
     fn next_action_returns_ops_action() {
-        let items = vec![ConcreteItem::Op(ConcreteOp {
+        let items = vec![ConcreteStep::Op(ConcreteOp {
             item: Op {
                 command: "rebase".to_string(),
                 args: Vec::new(),
@@ -2247,7 +2248,7 @@ Be careful.
     }
 
     #[test]
-    fn next_action_marks_missing_steps_as_complete() {
+    fn next_action_marks_missing_skills_as_complete() {
         let flow = Flow {
             name: "demo".to_string(),
             items: Vec::new(),
@@ -2274,15 +2275,15 @@ Be careful.
         assert_eq!(items.len(), 1);
 
         match &items[0] {
-            FlowItem::And { branches, .. } => {
+            Step::And { branches, .. } => {
                 assert_eq!(branches.len(), 3);
                 for (i, branch) in branches.iter().enumerate() {
                     match branch {
-                        FlowItem::Step(step) => {
-                            assert_eq!(step.name, "build");
-                            assert_eq!(step.directions.len(), 1);
+                        Step::Skill(skill) => {
+                            assert_eq!(skill.name, "build");
+                            assert_eq!(skill.directions.len(), 1);
                         }
-                        _ => panic!("expected Step branch at index {i}"),
+                        _ => panic!("expected Skill branch at index {i}"),
                     }
                 }
             }
@@ -2305,7 +2306,7 @@ Be careful.
         assert_eq!(items.len(), 1);
 
         match &items[0] {
-            FlowItem::And {
+            Step::And {
                 branches,
                 synthesize,
             } => {
@@ -2327,7 +2328,7 @@ Be careful.
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();
         match &items[0] {
-            FlowItem::And { synthesize, .. } => {
+            Step::And { synthesize, .. } => {
                 assert!(synthesize.is_none());
             }
             _ => panic!("expected And item"),
@@ -2335,7 +2336,7 @@ Be careful.
     }
 
     #[test]
-    fn parse_and_explicit_branches_with_flow_and_step() {
+    fn parse_and_explicit_branches_with_flow_and_skill() {
         let yaml = r#"
 - and:
     branches:
@@ -2349,23 +2350,23 @@ Be careful.
         assert_eq!(items.len(), 1);
 
         match &items[0] {
-            FlowItem::And { branches, .. } => {
+            Step::And { branches, .. } => {
                 assert_eq!(branches.len(), 2);
                 // First branch: flow ref "build" with direction "infra"
                 match &branches[0] {
-                    FlowItem::Step(step) => {
-                        assert_eq!(step.name, "build");
-                        assert_eq!(step.directions, vec!["infra"]);
+                    Step::Skill(skill) => {
+                        assert_eq!(skill.name, "build");
+                        assert_eq!(skill.directions, vec!["infra"]);
                     }
-                    _ => panic!("expected Step branch"),
+                    _ => panic!("expected Skill branch"),
                 }
-                // Second branch: step "review" with direction "ux"
+                // Second branch: skill "review" with direction "ux"
                 match &branches[1] {
-                    FlowItem::Step(step) => {
-                        assert_eq!(step.name, "review");
-                        assert_eq!(step.directions, vec!["ux"]);
+                    Step::Skill(skill) => {
+                        assert_eq!(skill.name, "review");
+                        assert_eq!(skill.directions, vec!["ux"]);
                     }
-                    _ => panic!("expected Step branch"),
+                    _ => panic!("expected Skill branch"),
                 }
             }
             _ => panic!("expected And item"),
@@ -2373,36 +2374,36 @@ Be careful.
     }
 
     #[test]
-    fn expand_fork_multi_step_flow_ref() {
+    fn expand_fork_multi_skill_flow_ref() {
         let tmp = TempDir::new().unwrap();
         let flows_dir = tmp.path().join(".lf/flows");
-        let steps_dir = tmp.path().join(".lf/steps");
+        let skills_dir = tmp.path().join(".lf/skills");
         fs::create_dir_all(&flows_dir).unwrap();
-        fs::create_dir_all(&steps_dir).unwrap();
+        fs::create_dir_all(&skills_dir).unwrap();
 
-        // Create a multi-step flow
+        // Create a multi-skill flow
         fs::write(
             flows_dir.join("multi.yaml"),
-            "- step-a\n- step-b\n- step-c\n",
+            "- skill-a\n- skill-b\n- skill-c\n",
         )
         .unwrap();
-        fs::write(steps_dir.join("step-a.md"), "Step A").unwrap();
-        fs::write(steps_dir.join("step-b.md"), "Step B").unwrap();
-        fs::write(steps_dir.join("step-c.md"), "Step C").unwrap();
+        fs::write(skills_dir.join("skill-a.md"), "Skill A").unwrap();
+        fs::write(skills_dir.join("skill-b.md"), "Skill B").unwrap();
+        fs::write(skills_dir.join("skill-c.md"), "Skill C").unwrap();
 
         let flow = Flow {
             name: "test".to_string(),
-            items: vec![FlowItem::And {
+            items: vec![Step::And {
                 branches: vec![
-                    FlowItem::Step(Step {
+                    Step::Skill(Skill {
                         name: "multi".to_string(),
                         directions: vec!["infra".to_string()],
-                        ..Step::named("multi")
+                        ..Skill::named("multi")
                     }),
-                    FlowItem::Step(Step {
+                    Step::Skill(Skill {
                         name: "multi".to_string(),
                         directions: vec!["ux".to_string()],
-                        ..Step::named("multi")
+                        ..Skill::named("multi")
                     }),
                 ],
                 synthesize: None,
@@ -2412,14 +2413,14 @@ Be careful.
         assert_eq!(items.len(), 1);
 
         match &items[0] {
-            ConcreteItem::And(fork) => {
+            ConcreteStep::And(fork) => {
                 assert_eq!(fork.branches.len(), 2);
-                // Each branch should have 3 steps from the "multi" flow
+                // Each branch should have 3 skills from the "multi" flow
                 for branch in &fork.branches {
-                    assert_eq!(branch.steps.len(), 3, "branch should have 3 steps");
-                    assert_eq!(branch.steps[0].step.name, "step-a");
-                    assert_eq!(branch.steps[1].step.name, "step-b");
-                    assert_eq!(branch.steps[2].step.name, "step-c");
+                    assert_eq!(branch.steps.len(), 3, "branch should have 3 skills");
+                    assert_eq!(branch.steps[0].skill.name, "skill-a");
+                    assert_eq!(branch.steps[1].skill.name, "skill-b");
+                    assert_eq!(branch.steps[2].skill.name, "skill-c");
                     assert_eq!(branch.label, "multi");
                 }
                 assert_eq!(fork.branches[0].directions, vec!["infra"]);
@@ -2430,25 +2431,25 @@ Be careful.
     }
 
     #[test]
-    fn expand_fork_single_step_unchanged() {
+    fn expand_fork_single_skill_unchanged() {
         let tmp = TempDir::new().unwrap();
-        let steps_dir = tmp.path().join(".lf/steps");
-        fs::create_dir_all(&steps_dir).unwrap();
-        fs::write(steps_dir.join("reduce.md"), "Reduce things.").unwrap();
+        let skills_dir = tmp.path().join(".lf/skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+        fs::write(skills_dir.join("reduce.md"), "Reduce things.").unwrap();
 
         let flow = Flow {
             name: "test".to_string(),
-            items: vec![FlowItem::And {
+            items: vec![Step::And {
                 branches: vec![
-                    FlowItem::Step(Step {
+                    Step::Skill(Skill {
                         name: "reduce".to_string(),
                         directions: vec!["infra".to_string()],
-                        ..Step::named("reduce")
+                        ..Skill::named("reduce")
                     }),
-                    FlowItem::Step(Step {
+                    Step::Skill(Skill {
                         name: "reduce".to_string(),
                         directions: vec!["ux".to_string()],
-                        ..Step::named("reduce")
+                        ..Skill::named("reduce")
                     }),
                 ],
                 synthesize: None,
@@ -2458,12 +2459,12 @@ Be careful.
         assert_eq!(items.len(), 1);
 
         match &items[0] {
-            ConcreteItem::And(fork) => {
+            ConcreteStep::And(fork) => {
                 assert_eq!(fork.branches.len(), 2);
-                // Each branch should have exactly 1 step
+                // Each branch should have exactly 1 skill
                 for branch in &fork.branches {
-                    assert_eq!(branch.steps.len(), 1, "single-step branch");
-                    assert_eq!(branch.steps[0].step.name, "reduce");
+                    assert_eq!(branch.steps.len(), 1, "single-skill branch");
+                    assert_eq!(branch.steps[0].skill.name, "reduce");
                 }
             }
             _ => panic!("expected And item"),
@@ -2474,33 +2475,33 @@ Be careful.
     fn expand_fork_rejects_nested_fork_in_flow_ref() {
         let tmp = TempDir::new().unwrap();
         let flows_dir = tmp.path().join(".lf/flows");
-        let steps_dir = tmp.path().join(".lf/steps");
+        let skills_dir = tmp.path().join(".lf/skills");
         fs::create_dir_all(&flows_dir).unwrap();
-        fs::create_dir_all(&steps_dir).unwrap();
+        fs::create_dir_all(&skills_dir).unwrap();
 
         // Create a flow that contains an and construct
         fs::write(
             flows_dir.join("has-and.yaml"),
             r#"
-- step-a
+- skill-a
 - and:
-    step: step-b
+    step: skill-b
     drafts:
       - direction: x
       - direction: y
 "#,
         )
         .unwrap();
-        fs::write(steps_dir.join("step-a.md"), "Step A").unwrap();
-        fs::write(steps_dir.join("step-b.md"), "Step B").unwrap();
+        fs::write(skills_dir.join("skill-a.md"), "Skill A").unwrap();
+        fs::write(skills_dir.join("skill-b.md"), "Skill B").unwrap();
 
         let flow = Flow {
             name: "test".to_string(),
-            items: vec![FlowItem::And {
-                branches: vec![FlowItem::Step(Step {
+            items: vec![Step::And {
+                branches: vec![Step::Skill(Skill {
                     name: "has-and".to_string(),
                     directions: vec!["infra".to_string()],
-                    ..Step::named("has-and")
+                    ..Skill::named("has-and")
                 })],
                 synthesize: None,
             }],
@@ -2533,11 +2534,11 @@ Be careful.
         assert_eq!(items.len(), 3);
 
         match &items[2] {
-            FlowItem::Xor(branch) => {
+            Step::Xor(branch) => {
                 assert_eq!(branch.paths.len(), 2);
                 let fix = &branch.paths["fix"];
                 assert_eq!(fix.flow.as_deref(), Some("qa-fix"));
-                assert!(fix.step.is_none());
+                assert!(fix.skill.is_none());
                 assert_eq!(fix.description, "Blocking issues found, fix before deploy");
                 let deploy = &branch.paths["deploy"];
                 assert_eq!(deploy.flow.as_deref(), Some("deploy"));
@@ -2548,7 +2549,7 @@ Be careful.
     }
 
     #[test]
-    fn parse_xor_with_step_path() {
+    fn parse_xor_with_skill_path() {
         let yaml = r#"
 - xor:
     paths:
@@ -2564,13 +2565,13 @@ Be careful.
         assert_eq!(items.len(), 1);
 
         match &items[0] {
-            FlowItem::Xor(branch) => {
+            Step::Xor(branch) => {
                 let skip = &branch.paths["skip"];
-                assert_eq!(skip.step.as_deref(), Some("gate"));
+                assert_eq!(skip.skill.as_deref(), Some("gate"));
                 assert!(skip.flow.is_none());
                 let full = &branch.paths["full"];
                 assert_eq!(full.flow.as_deref(), Some("build"));
-                assert!(full.step.is_none());
+                assert!(full.skill.is_none());
             }
             other => panic!("expected Xor, got {other:?}"),
         }
@@ -2590,7 +2591,7 @@ Be careful.
         let items = parse_flow_items(&value).unwrap();
 
         match &items[0] {
-            FlowItem::Xor(branch) => {
+            Step::Xor(branch) => {
                 let careful = &branch.paths["careful"];
                 assert_eq!(careful.direction, vec!["care", "clarity"]);
             }
@@ -2599,7 +2600,7 @@ Be careful.
     }
 
     #[test]
-    fn parse_xor_rejects_both_flow_and_step() {
+    fn parse_xor_rejects_both_flow_and_skill() {
         let yaml = r#"
 - xor:
     paths:
@@ -2653,7 +2654,7 @@ Be careful.
     }
 
     #[test]
-    fn parse_xor_accepts_inline_steps() {
+    fn parse_xor_accepts_inline_skills() {
         let yaml = r#"
 - xor:
     paths:
@@ -2668,12 +2669,12 @@ Be careful.
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();
 
-        let FlowItem::Xor(xor_def) = &items[0] else {
+        let Step::Xor(xor_def) = &items[0] else {
             panic!("expected xor item");
         };
         let tune = &xor_def.paths["tune"];
         assert_eq!(tune.flow, None);
-        assert_eq!(tune.step, None);
+        assert_eq!(tune.skill, None);
         assert_eq!(tune.steps.len(), 2);
         assert_eq!(tune.steps[0].name, "implement");
         assert_eq!(tune.steps[1].name, "review");
@@ -2702,8 +2703,8 @@ Be careful.
         let flow = Flow {
             name: "test-or".to_string(),
             items: vec![
-                FlowItem::Step(Step::named("gate")),
-                FlowItem::Xor(XorDef {
+                Step::Skill(Skill::named("gate")),
+                Step::Xor(XorDef {
                     router: None,
                     paths: {
                         let mut m = HashMap::new();
@@ -2711,7 +2712,7 @@ Be careful.
                             "fix".to_string(),
                             XorPath {
                                 flow: Some("build".to_string()),
-                                step: None,
+                                skill: None,
                                 steps: Vec::new(),
                                 description: "Fix it".to_string(),
                                 direction: Vec::new(),
@@ -2725,10 +2726,10 @@ Be careful.
 
         let items = expand_flow(&flow, tmp.path()).unwrap();
         assert_eq!(items.len(), 2);
-        assert!(matches!(&items[0], ConcreteItem::Step(_)));
-        assert!(matches!(&items[1], ConcreteItem::Xor(_)));
+        assert!(matches!(&items[0], ConcreteStep::Skill(_)));
+        assert!(matches!(&items[1], ConcreteStep::Xor(_)));
 
-        if let ConcreteItem::Xor(branch) = &items[1] {
+        if let ConcreteStep::Xor(branch) = &items[1] {
             assert_eq!(branch.paths.len(), 1);
             assert_eq!(branch.paths["fix"].description, "Fix it");
         }
@@ -2736,7 +2737,7 @@ Be careful.
 
     #[test]
     fn next_action_returns_xor_action() {
-        let items = vec![ConcreteItem::Xor(ConcreteXor {
+        let items = vec![ConcreteStep::Xor(ConcreteXor {
             router: None,
             paths: {
                 let mut m = HashMap::new();
@@ -2744,7 +2745,7 @@ Be careful.
                     "a".to_string(),
                     XorPath {
                         flow: Some("build".to_string()),
-                        step: None,
+                        skill: None,
                         steps: Vec::new(),
                         description: "Path A".to_string(),
                         direction: Vec::new(),
@@ -2769,7 +2770,7 @@ Be careful.
             "zeta".to_string(),
             XorPath {
                 flow: None,
-                step: None,
+                skill: None,
                 steps: Vec::new(),
                 description: "Last".to_string(),
                 direction: Vec::new(),
@@ -2779,7 +2780,7 @@ Be careful.
             "alpha".to_string(),
             XorPath {
                 flow: None,
-                step: None,
+                skill: None,
                 steps: Vec::new(),
                 description: "First".to_string(),
                 direction: Vec::new(),
@@ -2808,7 +2809,7 @@ Be careful.
             "known".to_string(),
             XorPath {
                 flow: None,
-                step: None,
+                skill: None,
                 steps: Vec::new(),
                 description: "Known".to_string(),
                 direction: Vec::new(),
@@ -2833,7 +2834,7 @@ Be careful.
         let items = load_xor_path_items(
             &XorPath {
                 flow: None,
-                step: None,
+                skill: None,
                 steps: Vec::new(),
                 description: "Silence".to_string(),
                 direction: Vec::new(),
@@ -2849,14 +2850,14 @@ Be careful.
     }
 
     #[test]
-    fn load_xor_path_items_expands_inline_steps() {
+    fn load_xor_path_items_expands_inline_skills() {
         let tmp = TempDir::new().unwrap();
         let items = load_xor_path_items(
             &XorPath {
                 flow: None,
-                step: None,
-                steps: vec![Step::named("design"), Step::named("gate")],
-                description: "Inline steps".to_string(),
+                skill: None,
+                steps: vec![Skill::named("design"), Skill::named("gate")],
+                description: "Inline skills".to_string(),
                 direction: Vec::new(),
             },
             tmp.path(),
@@ -2865,12 +2866,12 @@ Be careful.
 
         assert_eq!(items.len(), 2);
         match &items[0] {
-            ConcreteItem::Step(step) => assert_eq!(step.step.name, "design"),
-            other => panic!("expected step, got {other:?}"),
+            ConcreteStep::Skill(skill) => assert_eq!(skill.skill.name, "design"),
+            other => panic!("expected skill, got {other:?}"),
         }
         match &items[1] {
-            ConcreteItem::Step(step) => assert_eq!(step.step.name, "gate"),
-            other => panic!("expected step, got {other:?}"),
+            ConcreteStep::Skill(skill) => assert_eq!(skill.skill.name, "gate"),
+            other => panic!("expected skill, got {other:?}"),
         }
     }
 
@@ -2909,15 +2910,15 @@ Be careful.
         let items = parse_flow_items(&value).unwrap();
         assert_eq!(items.len(), 1);
 
-        let FlowItem::Or(or_def) = &items[0] else {
+        let Step::Or(or_def) = &items[0] else {
             panic!("expected Or item, got {:?}", items[0]);
         };
         assert_eq!(or_def.router.as_deref(), Some("triage"));
         assert_eq!(or_def.paths.len(), 3);
         assert_eq!(or_def.paths["fix"].flow.as_deref(), Some("code"));
-        assert_eq!(or_def.paths["refactor"].step.as_deref(), Some("compress"));
+        assert_eq!(or_def.paths["refactor"].skill.as_deref(), Some("compress"));
         assert!(or_def.paths["deploy"].flow.is_none());
-        assert!(or_def.paths["deploy"].step.is_none());
+        assert!(or_def.paths["deploy"].skill.is_none());
     }
 
     #[test]
@@ -2926,8 +2927,8 @@ Be careful.
         let flow = Flow {
             name: "test-or".to_string(),
             items: vec![
-                FlowItem::Step(Step::named("gate")),
-                FlowItem::Or(OrDef {
+                Step::Skill(Skill::named("gate")),
+                Step::Or(OrDef {
                     router: None,
                     paths: {
                         let mut m = HashMap::new();
@@ -2935,7 +2936,7 @@ Be careful.
                             "fix".to_string(),
                             XorPath {
                                 flow: None,
-                                step: Some("implement".to_string()),
+                                skill: Some("implement".to_string()),
                                 steps: vec![],
                                 description: "Fix it".to_string(),
                                 direction: vec![],
@@ -2948,10 +2949,10 @@ Be careful.
         };
         let items = expand_flow(&flow, tmp.path()).unwrap();
         assert_eq!(items.len(), 2);
-        assert!(matches!(&items[0], ConcreteItem::Step(_)));
-        assert!(matches!(&items[1], ConcreteItem::Or(_)));
+        assert!(matches!(&items[0], ConcreteStep::Skill(_)));
+        assert!(matches!(&items[1], ConcreteStep::Or(_)));
 
-        if let ConcreteItem::Or(branch) = &items[1] {
+        if let ConcreteStep::Or(branch) = &items[1] {
             assert_eq!(branch.paths.len(), 1);
             assert_eq!(branch.paths["fix"].description, "Fix it");
         }

@@ -27,7 +27,7 @@ pub struct JanitorReport {
     pub errors: u32,
 }
 
-// -- Workspace file helpers (used by `lf` fork steps) ------------------------
+// -- Workspace file helpers (used by `lf` fork skills) ------------------------
 
 pub(crate) fn write_workspace_file(cwd: &Path, relative_path: &str, content: &[u8]) -> Result<()> {
     let path = cwd.join(relative_path);

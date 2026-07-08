@@ -163,7 +163,7 @@ def test_verify_bundle_rejects_non_macho(monkeypatch: pytest.MonkeyPatch, tmp_pa
 def test_install_loopflow_fails_when_codesign_verify_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Signing smoke step: if `codesign --verify` rejects the bundle,
+    """Signing smoke skill: if `codesign --verify` rejects the bundle,
     _install_loopflow must raise instead of silently proceeding.
     """
     root = tmp_path / "repo"

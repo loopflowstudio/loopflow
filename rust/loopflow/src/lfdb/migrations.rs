@@ -222,6 +222,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "053_drop_wave_primary_flow",
         sql: include_str!("migrations/053_drop_wave_primary_flow.sql"),
     },
+    Migration {
+        version: "054_step_to_skill",
+        sql: include_str!("migrations/054_step_to_skill.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the

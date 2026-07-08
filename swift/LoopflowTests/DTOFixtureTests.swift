@@ -14,7 +14,7 @@ struct DTOFixtureTests {
         let json = try loadFixture("session.json")
         let session = try #require(WaveService.parseSessionFromJSON(json))
 
-        #expect(session.step == "ship")
+        #expect(session.skill == "ship")
         #expect(session.agent == "codex")
         #expect(session.source == "palette")
         #expect(session.sessionUse == .palette)

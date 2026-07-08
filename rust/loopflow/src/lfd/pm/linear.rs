@@ -51,6 +51,11 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
         assignee {
           id
         }
+        labels {
+          nodes {
+            name
+          }
+        }
         state {
           type
         }
@@ -466,6 +471,8 @@ struct IssueNode {
     #[serde(default)]
     assignee: Option<IdNode>,
     #[serde(default)]
+    labels: LabelConnection,
+    #[serde(default)]
     state: Option<WorkflowStateRef>,
 }
 
@@ -482,9 +489,26 @@ impl IssueNode {
             description: self.description.unwrap_or_default(),
             rank,
             completed,
+            labels: self
+                .labels
+                .nodes
+                .into_iter()
+                .map(|label| label.name)
+                .collect(),
             assignee: self.assignee.map(|assignee| assignee.id),
         }
     }
+}
+
+#[derive(Default, Deserialize)]
+struct LabelConnection {
+    #[serde(default)]
+    nodes: Vec<LabelNode>,
+}
+
+#[derive(Deserialize)]
+struct LabelNode {
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -696,6 +720,7 @@ mod tests {
                                     "prioritySortOrder": 10.0,
                                     "sortOrder": 10.0,
                                     "assignee": { "id": "user-1" },
+                                    "labels": { "nodes": [{ "name": "kr" }] },
                                     "state": { "type": "unstarted" }
                                 },
                                 {
@@ -704,6 +729,7 @@ mod tests {
                                     "description": "two",
                                     "prioritySortOrder": 0.0,
                                     "sortOrder": 0.0,
+                                    "labels": { "nodes": [] },
                                     "state": { "type": "completed" }
                                 }
                             ],
@@ -732,6 +758,7 @@ mod tests {
         assert_eq!(items[0].id, "issue-2");
         assert!(items[0].completed);
         assert_eq!(items[1].assignee.as_deref(), Some("user-1"));
+        assert_eq!(items[1].labels, vec!["kr"]);
         let requests = requests.lock().await;
         assert_eq!(requests.len(), 1);
         assert_eq!(

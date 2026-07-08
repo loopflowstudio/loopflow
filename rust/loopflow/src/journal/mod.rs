@@ -122,7 +122,7 @@ fn clear_usage() {
 pub enum LfNode {
     Run,
     Flow,
-    Step,
+    Skill,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -140,7 +140,7 @@ pub struct LfEventFields {
     pub worktree: Option<String>,
     pub command: Option<Vec<String>>,
     pub flow: Option<String>,
-    pub step: Option<String>,
+    pub skill: Option<String>,
     pub index: Option<u32>,
     pub error: Option<String>,
     pub signal: Option<String>,
@@ -162,7 +162,7 @@ pub struct LfEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flow: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub step: Option<String>,
+    pub skill: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub index: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -236,7 +236,7 @@ fn try_emit(
         worktree: fields.worktree,
         command: fields.command,
         flow: fields.flow,
-        step: fields.step,
+        skill: fields.skill,
         index: fields.index,
         error: fields.error,
         signal: fields.signal,
@@ -274,11 +274,11 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
             event.event,
             LfEventType::Completed | LfEventType::Errored | LfEventType::Escalated
         );
-    let is_step_boundary = matches!(event.node, LfNode::Step)
+    let is_skill_boundary = matches!(event.node, LfNode::Skill)
         && matches!(event.event, LfEventType::Completed | LfEventType::Errored);
-    // Terminal run rows carry the run's totals; step boundaries carry a
-    // cumulative snapshot so a reader can diff consecutive steps.
-    let usage = if is_terminal_run || is_step_boundary {
+    // Terminal run rows carry the run's totals; skill boundaries carry a
+    // cumulative snapshot so a reader can diff consecutive skills.
+    let usage = if is_terminal_run || is_skill_boundary {
         snapshot_usage()
     } else {
         None
@@ -298,7 +298,7 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
             .as_ref()
             .and_then(|argv| serde_json::to_string(argv).ok()),
         flow: event.flow.clone(),
-        step: event.step.clone(),
+        skill: event.skill.clone(),
         step_index: event.index.map(i64::from),
         error: event.error.clone(),
         input_tokens: usage.map(|u| u.input_tokens as i64),
@@ -348,7 +348,7 @@ fn node_name(node: LfNode) -> &'static str {
     match node {
         LfNode::Run => "run",
         LfNode::Flow => "flow",
-        LfNode::Step => "step",
+        LfNode::Skill => "skill",
     }
 }
 
@@ -714,13 +714,13 @@ mod tests {
             let event = LfEvent {
                 run_id: run_id.clone(),
                 ts: time::OffsetDateTime::now_utc(),
-                node: LfNode::Step,
+                node: LfNode::Skill,
                 event: LfEventType::Errored,
                 wave_name: Some("meta".to_string()),
                 worktree: Some(run_dir.display().to_string()),
                 command: None,
                 flow: Some("garden".to_string()),
-                step: Some(format!("writer-{writer}-{index}")),
+                skill: Some(format!("writer-{writer}-{index}")),
                 index: Some(index as u32),
                 error: Some(format!(
                     "writer-{writer}-event-{index}:{}",
@@ -787,7 +787,7 @@ mod tests {
     }
 
     #[test]
-    fn journal_writes_run_flow_and_step_events_in_wave_worktree() {
+    fn journal_writes_run_flow_and_skill_events_in_wave_worktree() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
         let worktree = repo.create_wave_worktree("runtime");
@@ -810,20 +810,20 @@ mod tests {
         );
         emit(
             &worktree,
-            LfNode::Step,
+            LfNode::Skill,
             LfEventType::Started,
             LfEventFields {
-                step: Some("implement".to_string()),
+                skill: Some("implement".to_string()),
                 index: Some(0),
                 ..LfEventFields::default()
             },
         );
         emit(
             &worktree,
-            LfNode::Step,
+            LfNode::Skill,
             LfEventType::Completed,
             LfEventFields {
-                step: Some("implement".to_string()),
+                skill: Some("implement".to_string()),
                 index: Some(0),
                 ..LfEventFields::default()
             },
@@ -849,8 +849,8 @@ mod tests {
         assert_eq!(events[0].wave_name.as_deref(), Some("runtime"));
         assert_eq!(events[1].node, LfNode::Flow);
         assert_eq!(events[1].flow.as_deref(), Some("build"));
-        assert_eq!(events[2].node, LfNode::Step);
-        assert_eq!(events[2].step.as_deref(), Some("implement"));
+        assert_eq!(events[2].node, LfNode::Skill);
+        assert_eq!(events[2].skill.as_deref(), Some("implement"));
         assert_eq!(events[2].index, Some(0));
         assert_eq!(events[3].event, LfEventType::Completed);
         assert_eq!(events[4].node, LfNode::Flow);

@@ -1,4 +1,4 @@
-use crate::engine::{Flow, LoadError, Step};
+use crate::engine::{Flow, LoadError, Skill};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -10,61 +10,61 @@ use tracing::debug;
 const SKILL_FILE_NAME: &str = "SKILL.md";
 
 // =============================================================================
-// Auto-dispatch: step or flow
+// Auto-dispatch: skill or flow
 // =============================================================================
 
 #[derive(Debug)]
 pub enum Target {
-    Step(Step),
+    Skill(Skill),
     Flow(Flow),
 }
 
-/// Discover a step or flow by name. Tries step lookup first, falls back to flow.
+/// Discover a skill or flow by name. Tries skill lookup first, falls back to flow.
 pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
-    let step_error = match discover_step(repo, name) {
-        Ok(step) => return Ok(Target::Step(step)),
+    let skill_error = match discover_skill(repo, name) {
+        Ok(skill) => return Ok(Target::Skill(skill)),
         Err(err) => err,
     };
 
     if !matches!(
-        step_error.downcast_ref::<LoadError>(),
-        Some(LoadError::StepNotFound(_))
+        skill_error.downcast_ref::<LoadError>(),
+        Some(LoadError::SkillNotFound(_))
     ) {
-        return Err(step_error);
+        return Err(skill_error);
     }
 
     match crate::engine::load_flow(name, repo) {
         Ok(flow) => Ok(Target::Flow(flow)),
         Err(LoadError::FlowNotFound(_)) => Err(anyhow::anyhow!(
-            "step or flow not found: {name}. Run `lf --list` to see available steps."
+            "skill or flow not found: {name}. Run `lf --list` to see available skills."
         )),
         Err(err) => Err(err.into()),
     }
 }
 
 // =============================================================================
-// Built-in step metadata for formatted listing
+// Built-in skill metadata for formatted listing
 // =============================================================================
 
 pub use crate::engine::builtins::BUILTIN_STEP_CATEGORIES;
 
-/// All builtin step names (from BUILTIN_STEP_CATEGORIES).
-pub fn builtin_steps() -> HashSet<String> {
+/// All builtin skill names (from BUILTIN_STEP_CATEGORIES).
+pub fn builtin_skills() -> HashSet<String> {
     BUILTIN_STEP_CATEGORIES
         .iter()
-        .flat_map(|(_, steps)| steps.iter().map(|s| (*s).to_string()))
+        .flat_map(|(_, skills)| skills.iter().map(|s| (*s).to_string()))
         .collect()
 }
 
-/// One-line description for a builtin step, derived from its file's frontmatter
+/// One-line description for a builtin skill, derived from its file's frontmatter
 /// or leading prose.
-pub fn builtin_step_description(name: &str) -> String {
-    crate::engine::builtins::builtin_step_description(name)
+pub fn builtin_skill_description(name: &str) -> String {
+    crate::engine::builtins::builtin_skill_description(name)
 }
 
-/// Check if a step is interactive by loading it via the engine.
-pub fn is_step_interactive(repo: &Path, name: &str) -> bool {
-    crate::engine::load_step(name, repo)
+/// Check if a skill is interactive by loading it via the engine.
+pub fn is_skill_interactive(repo: &Path, name: &str) -> bool {
+    crate::engine::load_skill(name, repo)
         .map(|s| s.interactive.unwrap_or(false))
         .unwrap_or(false)
 }
@@ -173,7 +173,7 @@ fn normalize_skill_name(dir_name: &str) -> String {
 }
 
 /// List all external skills as (prefixed_name, source_name) tuples.
-pub fn list_all_skills(sources: &[SkillSource]) -> Vec<(String, String)> {
+pub fn list_external_skills(sources: &[SkillSource]) -> Vec<(String, String)> {
     let mut skills = Vec::new();
     for source in sources {
         for skill_name in &source.skills {
@@ -186,20 +186,20 @@ pub fn list_all_skills(sources: &[SkillSource]) -> Vec<(String, String)> {
 }
 
 // =============================================================================
-// Step discovery (user, global, builtin, external skills)
+// Skill discovery (user, global, builtin, external skills)
 // =============================================================================
 
-/// Discover a step by name. Tries the engine first (user paths → core builtins
+/// Discover a skill by name. Tries the engine first (user paths → core builtins
 /// → namespaced builtins → bare-name fallback), then falls back to `npx/<name>`
 /// live fetch.
-pub fn discover_step(repo: &Path, name: &str) -> Result<Step> {
-    match crate::engine::load_step(name, repo) {
-        Ok(step) => Ok(step),
-        Err(LoadError::StepNotFound(_)) => {
-            if let Some(step) = find_external_skill(name, Some(repo)) {
-                Ok(step)
+pub fn discover_skill(repo: &Path, name: &str) -> Result<Skill> {
+    match crate::engine::load_skill(name, repo) {
+        Ok(skill) => Ok(skill),
+        Err(LoadError::SkillNotFound(_)) => {
+            if let Some(skill) = find_external_skill(name, Some(repo)) {
+                Ok(skill)
             } else {
-                Err(LoadError::StepNotFound(name.to_string()).into())
+                Err(LoadError::SkillNotFound(name.to_string()).into())
             }
         }
         Err(err) => Err(err.into()),
@@ -207,8 +207,8 @@ pub fn discover_step(repo: &Path, name: &str) -> Result<Step> {
 }
 
 /// Resolve an external skill reference like `npx/vercel-labs/deep-research` or
-/// `rams/rams` to a Step.
-fn find_external_skill(name: &str, repo: Option<&Path>) -> Option<Step> {
+/// `rams/rams` to a Skill.
+fn find_external_skill(name: &str, repo: Option<&Path>) -> Option<Skill> {
     let (prefix, skill_name) = name.split_once('/')?;
     let sources = discover_skill_sources(repo);
 
@@ -241,7 +241,7 @@ fn find_npx_skill(
     skill_name: &str,
     repo: Option<&Path>,
     cache_path: Option<&Path>,
-) -> Option<Step> {
+) -> Option<Skill> {
     let repo_root = repo?;
     let cache_dir = cache_path
         .map(Path::to_path_buf)
@@ -321,10 +321,10 @@ fn find_cached_npx_skill(cache_dir: &Path, skill_name: &str) -> Option<PathBuf> 
     None
 }
 
-fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Step> {
+fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Skill> {
     let content = std::fs::read_to_string(prompt_path).ok()?;
 
-    Some(Step {
+    Some(Skill {
         name: name.to_string(),
         content: Some(content),
         agent: None,
@@ -520,17 +520,17 @@ fn find_skill_prompt_path(source: &SkillSource, skill_name: &str) -> Option<Path
     }
 }
 
-/// List repo-local steps (.lf/steps/, .claude/commands/).
-pub fn list_user_steps(repo: &Path) -> Vec<String> {
-    list_md_stems(&[repo.join(".lf/steps"), repo.join(".claude/commands")])
+/// List repo-local skills (.lf/skills/, .claude/commands/).
+pub fn list_user_skills(repo: &Path) -> Vec<String> {
+    list_md_stems(&[repo.join(".lf/skills"), repo.join(".claude/commands")])
 }
 
-/// List global steps (~/.lf/steps/, ~/.claude/commands/).
-pub fn list_global_steps() -> Vec<String> {
+/// List global skills (~/.lf/skills/, ~/.claude/commands/).
+pub fn list_global_skills() -> Vec<String> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
     };
-    list_md_stems(&[home.join(".lf/steps"), home.join(".claude/commands")])
+    list_md_stems(&[home.join(".lf/skills"), home.join(".claude/commands")])
 }
 
 /// Collect sorted, deduplicated `.md` file stems from the given directories.
@@ -553,24 +553,24 @@ fn list_md_stems(dirs: &[PathBuf]) -> Vec<String> {
     sorted
 }
 
-/// Structured result from list_all_steps.
-pub type StepListResult = (Vec<String>, Vec<String>, Vec<String>, Vec<(String, String)>);
+/// Structured result from list_all_skills.
+pub type SkillListResult = (Vec<String>, Vec<String>, Vec<String>, Vec<(String, String)>);
 
-/// Return (user_steps, global_steps, builtin_only_steps, external_skills).
+/// Return (user_skills, global_skills, builtin_only_skills, external_skills).
 ///
-/// User steps include any that override builtins or globals.
-/// Global steps are from ~/.claude/commands/ not overridden by repo-local.
-/// Builtin-only steps are builtins not overridden by user or global steps.
+/// User skills include any that override builtins or globals.
+/// Global skills are from ~/.claude/commands/ not overridden by repo-local.
+/// Builtin-only skills are builtins not overridden by user or global skills.
 /// External skills are (prefixed_name, source_name) tuples from skill sources.
-pub fn list_all_steps(repo: Option<&Path>) -> StepListResult {
-    let builtins = builtin_steps();
+pub fn list_all_skills(repo: Option<&Path>) -> SkillListResult {
+    let builtins = builtin_skills();
     let user: HashSet<String> = repo
-        .map(|r| list_user_steps(r).into_iter().collect())
+        .map(|r| list_user_skills(r).into_iter().collect())
         .unwrap_or_default();
-    let global: HashSet<String> = list_global_steps().into_iter().collect();
+    let global: HashSet<String> = list_global_skills().into_iter().collect();
 
     let sources = discover_skill_sources(repo);
-    let external_skills = list_all_skills(&sources);
+    let external_skills = list_external_skills(&sources);
 
     // Collect skill names that are handled by external sources (to exclude from global)
     let mut external_skill_names = HashSet::new();
@@ -581,7 +581,7 @@ pub fn list_all_steps(repo: Option<&Path>) -> StepListResult {
         }
     }
 
-    // Global steps not overridden by repo-local or handled by external sources
+    // Global skills not overridden by repo-local or handled by external sources
     let global_only: Vec<String> = global
         .difference(&user)
         .filter(|s| !external_skill_names.contains(*s))
@@ -673,7 +673,7 @@ pub fn builtin_flow_descriptions() -> HashMap<String, String> {
         .collect()
 }
 
-/// Format a flow's YAML content as a human-readable step chain (e.g., "implement → compress → gate").
+/// Format a flow's YAML content as a human-readable skill chain (e.g., "implement → compress → gate").
 /// Uses the same recursive extractor as user-defined flows, so builtin flows
 /// show their interior (loop bodies, xor branches) in `lf -l` too.
 fn format_flow_description(yaml_content: &str) -> String {
@@ -682,7 +682,7 @@ fn format_flow_description(yaml_content: &str) -> String {
         Err(_) => return String::new(),
     };
 
-    extract_step_names_from_value(&value).join(" → ")
+    extract_skill_names_from_value(&value).join(" → ")
 }
 
 /// All builtin flow names (from BUILTIN_FLOW_CATEGORIES).
@@ -694,16 +694,16 @@ pub fn builtin_flows() -> HashSet<String> {
 }
 
 // =============================================================================
-// Flow discovery and step chain extraction
+// Flow discovery and skill chain extraction
 // =============================================================================
 
 #[derive(Debug)]
 pub struct FlowInfo {
     pub name: String,
-    pub step_names: Vec<String>,
+    pub skill_names: Vec<String>,
 }
 
-/// List user-defined flows with their step names for display.
+/// List user-defined flows with their skill names for display.
 pub fn list_user_flows(repo: &Path) -> Vec<FlowInfo> {
     let mut flows = Vec::new();
 
@@ -739,16 +739,16 @@ fn collect_flows_from_dir(dir: &Path, prefix: Option<&str>, flows: &mut Vec<Flow
                         Some(p) => format!("{p}-{stem}"),
                         None => stem,
                     };
-                    let step_names = extract_flow_step_names(&path);
-                    flows.push(FlowInfo { name, step_names });
+                    let skill_names = extract_flow_skill_names(&path);
+                    flows.push(FlowInfo { name, skill_names });
                 }
             }
         }
     }
 }
 
-/// Extract step names from a flow file for display in the chain.
-fn extract_flow_step_names(path: &Path) -> Vec<String> {
+/// Extract skill names from a flow file for display in the chain.
+fn extract_flow_skill_names(path: &Path) -> Vec<String> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
@@ -759,10 +759,10 @@ fn extract_flow_step_names(path: &Path) -> Vec<String> {
         Err(_) => return Vec::new(),
     };
 
-    extract_step_names_from_value(&value)
+    extract_skill_names_from_value(&value)
 }
 
-fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
+fn extract_skill_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
     let mut names = Vec::new();
 
     match value {
@@ -771,22 +771,22 @@ fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
         }
         serde_yaml_ng::Value::Sequence(seq) => {
             for item in seq {
-                names.extend(extract_step_names_from_value(item));
+                names.extend(extract_skill_names_from_value(item));
             }
         }
         serde_yaml_ng::Value::Mapping(map) => {
             let initial_len = names.len();
-            // Check for "steps" key first (common flow structure)
-            if let Some(steps) = map.get(serde_yaml_ng::Value::String("steps".to_string())) {
-                return extract_step_names_from_value(steps);
+            // Check for "skills" key first (common flow structure)
+            if let Some(skills) = map.get(serde_yaml_ng::Value::String("skills".to_string())) {
+                return extract_skill_names_from_value(skills);
             }
-            // Check for "step" key (step definition)
-            if let Some(step) = map.get(serde_yaml_ng::Value::String("step".to_string())) {
-                if let serde_yaml_ng::Value::String(name) = step {
+            // Check for "skill" key (skill definition)
+            if let Some(skill) = map.get(serde_yaml_ng::Value::String("skill".to_string())) {
+                if let serde_yaml_ng::Value::String(name) = skill {
                     names.push(name.clone());
-                } else if let serde_yaml_ng::Value::Mapping(step_map) = step {
+                } else if let serde_yaml_ng::Value::Mapping(skill_map) = skill {
                     if let Some(serde_yaml_ng::Value::String(name)) =
-                        step_map.get(serde_yaml_ng::Value::String("name".to_string()))
+                        skill_map.get(serde_yaml_ng::Value::String("name".to_string()))
                     {
                         names.push(name.clone());
                     }
@@ -820,11 +820,11 @@ fn extract_step_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
             }
             if names.len() == initial_len {
                 for (key, value) in map {
-                    // Prose metadata, not steps.
+                    // Prose metadata, not skills.
                     if key.as_str() == Some("description") {
                         continue;
                     }
-                    names.extend(extract_step_names_from_value(value));
+                    names.extend(extract_skill_names_from_value(value));
                 }
             }
         }
@@ -840,10 +840,10 @@ fn extract_and_preview(value: &serde_yaml_ng::Value) -> Vec<String> {
         return names;
     };
 
-    if let Some(serde_yaml_ng::Value::String(step)) =
+    if let Some(serde_yaml_ng::Value::String(skill)) =
         map.get(serde_yaml_ng::Value::String("synthesize".to_string()))
     {
-        names.push(step.clone());
+        names.push(skill.clone());
     }
 
     names
@@ -854,9 +854,9 @@ fn extract_branch_preview(value: &serde_yaml_ng::Value) -> Vec<String> {
         return Vec::new();
     };
 
-    for key in ["branches", "steps", "paths", "exit"] {
+    for key in ["branches", "skills", "paths", "exit"] {
         if let Some(nested) = map.get(serde_yaml_ng::Value::String(key.to_string())) {
-            let extracted = extract_step_names_from_value(nested);
+            let extracted = extract_skill_names_from_value(nested);
             if !extracted.is_empty() {
                 return extracted;
             }
@@ -873,21 +873,21 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn discover_step_loads_user_namespaced_override() {
+    fn discover_skill_loads_user_namespaced_override() {
         let tmp = TempDir::new().expect("tempdir");
-        let steps_dir = tmp.path().join(".lf/steps/gstack");
-        fs::create_dir_all(&steps_dir).expect("create namespaced steps dir");
+        let skills_dir = tmp.path().join(".lf/skills/gstack");
+        fs::create_dir_all(&skills_dir).expect("create namespaced skills dir");
         fs::write(
-            steps_dir.join("office-hours.md"),
+            skills_dir.join("office-hours.md"),
             "---\ninteractive: false\ndirections: [gstack]\n---\n# user override\n",
         )
-        .expect("write step");
+        .expect("write skill");
 
-        let step = discover_step(tmp.path(), "gstack/office-hours").expect("discover step");
+        let skill = discover_skill(tmp.path(), "gstack/office-hours").expect("discover skill");
 
-        assert_eq!(step.interactive, Some(false));
-        assert_eq!(step.directions, vec!["gstack".to_string()]);
-        assert!(step
+        assert_eq!(skill.interactive, Some(false));
+        assert_eq!(skill.directions, vec!["gstack".to_string()]);
+        assert!(skill
             .content
             .as_deref()
             .expect("content")
@@ -895,9 +895,9 @@ mod tests {
     }
 
     #[test]
-    fn discover_step_rejects_legacy_colon_form() {
+    fn discover_skill_rejects_legacy_colon_form() {
         let tmp = TempDir::new().expect("tempdir");
-        let err = discover_step(tmp.path(), "gstack:office-hours").unwrap_err();
+        let err = discover_skill(tmp.path(), "gstack:office-hours").unwrap_err();
         assert!(err.to_string().contains("not found"));
     }
 

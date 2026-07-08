@@ -1,6 +1,6 @@
 name: basic
 repo: tests/parity/fixtures/basic
-step: test
+skill: test
 surface: headless
 directions: []
 docs: []

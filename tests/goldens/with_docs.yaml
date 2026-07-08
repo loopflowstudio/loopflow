@@ -1,6 +1,6 @@
 name: with_docs
 repo: tests/parity/fixtures/with_docs
-step: test
+skill: test
 surface: headless
 directions: []
 docs:

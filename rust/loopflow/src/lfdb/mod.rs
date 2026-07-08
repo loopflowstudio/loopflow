@@ -4,7 +4,7 @@
 //! ([`Store`] and its per-domain traits).
 //!
 //! The persisted domain types still live in `crate::lfd::types` for now; the
-//! type split is a later, non-mechanical step.
+//! type split is a later, non-mechanical skill.
 //!
 
 use std::path::PathBuf;
@@ -55,7 +55,7 @@ pub struct ForkRun {
 }
 
 /// One row of the machine-grain run ledger (`run_events`): a lifecycle event
-/// for a run, flow, or step, written directly by `lf` (and by `lfd`) into the
+/// for a run, flow, or skill, written directly by `lf` (and by `lfd`) into the
 /// local store. Token/cost fields are populated on terminal run events when
 /// the stream reported them.
 #[derive(Debug, Clone, PartialEq)]
@@ -70,7 +70,7 @@ pub struct RunEventRow {
     pub event: String,
     pub command: Option<String>,
     pub flow: Option<String>,
-    pub step: Option<String>,
+    pub skill: Option<String>,
     pub step_index: Option<i64>,
     pub error: Option<String>,
     pub input_tokens: Option<i64>,

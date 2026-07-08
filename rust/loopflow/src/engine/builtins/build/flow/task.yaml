@@ -1,4 +1,4 @@
-# One bounded task-flowloop pass.
+# One bounded pass of the task flowloop.
 - task_clarify
 - task_pursue
 - task_mutate

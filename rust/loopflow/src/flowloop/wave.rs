@@ -3,7 +3,7 @@
 //!
 //! This runs INSIDE THE RESIDENT PROCESS (`lf wave <name> --flowloop-only`,
 //! see [`crate::wave::resident`]) — never in the listener. A turn is one
-//! `wave-pass` flow (`wave_clarify → wave_pursue → wave_mutate`) run as a
+//! `wave` flow (`wave_clarify → wave_pursue → wave_mutate`) run as a
 //! bounded headless child in the wave home; continuity is GOAL.md + memory +
 //! the chat journal riding every pass's seed, never a vendor thread.
 //! Everything the flowloop does surfaces as [`ResidentDelta`]s sent through
@@ -67,7 +67,7 @@ use crate::wave::supervisor::sleep_until_opt;
 use crate::wave::wire::{InFlightWorker, ResidentDelta, ResidentStateTo};
 
 /// How long the flowloop sits idle (empty queue, no pass) before a
-/// heartbeat pass. Each heartbeat burns a full three-phase `wave-pass`, so
+/// heartbeat pass. Each heartbeat burns a full three-phase `wave`, so
 /// the quiet-wave cadence is deliberately coarse; messages and crons drive
 /// the wave the rest of the time.
 pub const HEARTBEAT_IDLE: Duration = Duration::from_secs(4 * 60 * 60);
@@ -156,7 +156,7 @@ pub(crate) fn cron_prompt(due: &[WaveCronDef]) -> String {
 /// pass timeout.
 #[derive(Debug, Clone)]
 pub struct FlowloopConfig {
-    /// Idle window before a heartbeat `wave-pass`.
+    /// Idle window before a heartbeat `wave`.
     pub heartbeat_idle: Duration,
     /// Per-pass wall-clock timeout.
     pub pass_timeout: Duration,
@@ -264,7 +264,7 @@ enum FlowloopEnd {
 }
 
 /// How a pass child is spawned — a seam so tests can substitute a stub
-/// process for the real `lf -b wave-pass` invocation.
+/// process for the real `lf -b wave` invocation.
 type SpawnPass =
     Box<dyn Fn(&Path, &str, Option<u32>) -> std::io::Result<tokio::process::Child> + Send>;
 
@@ -456,7 +456,7 @@ impl WaveFlowloop {
         let child = match (self.spawn_pass)(&self.cwd, &seed, self.config.max_turns) {
             Ok(child) => child,
             Err(err) => {
-                self.finish_failed_pass(&format!("failed to spawn wave-pass: {err:#}"))
+                self.finish_failed_pass(&format!("failed to spawn wave: {err:#}"))
                     .await;
                 return;
             }
@@ -490,7 +490,7 @@ impl WaveFlowloop {
                 _ = &mut timeout => {
                     wait_task.abort();
                     self.finish_failed_pass(&format!(
-                        "wave-pass timed out after {}s",
+                        "wave timed out after {}s",
                         self.config.pass_timeout.as_secs()
                     )).await;
                     return;
@@ -499,7 +499,7 @@ impl WaveFlowloop {
                     match result {
                         Ok(output) => self.on_pass_output(output).await,
                         Err(err) => {
-                            self.finish_failed_pass(&format!("wave-pass wait task failed: {err:#}"))
+                            self.finish_failed_pass(&format!("wave wait task failed: {err:#}"))
                                 .await;
                         }
                     }
@@ -523,10 +523,10 @@ impl WaveFlowloop {
             }
             Ok(output) => {
                 self.ship_output(output).await;
-                self.finish_failed_pass("wave-pass exited nonzero").await;
+                self.finish_failed_pass("wave exited nonzero").await;
             }
             Err(err) => {
-                self.finish_failed_pass(&format!("wave-pass wait failed: {err:#}"))
+                self.finish_failed_pass(&format!("wave wait failed: {err:#}"))
                     .await;
             }
         }
@@ -575,7 +575,7 @@ impl WaveFlowloop {
         self.consecutive_failures += 1;
         if self.consecutive_failures >= MAX_CONSECUTIVE_PASS_FAILURES {
             self.fail(&format!(
-                "{MAX_CONSECUTIVE_PASS_FAILURES} consecutive wave-pass failures: {reason}"
+                "{MAX_CONSECUTIVE_PASS_FAILURES} consecutive wave failures: {reason}"
             ))
             .await;
         }
@@ -639,7 +639,8 @@ fn spawn_wave_pass(
         command.arg("--max-turns").arg(max_turns.to_string());
     }
     command
-        .arg("wave-pass")
+        .arg("flow")
+        .arg("wave")
         .arg(seed)
         .current_dir(cwd)
         .stdout(std::process::Stdio::piped())
@@ -757,7 +758,7 @@ mod tests {
         });
 
         // The resident half: attach, subscribe, run the flowloop over the
-        // wire with a stub spawner in place of `lf -b wave-pass`.
+        // wire with a stub spawner in place of `lf -b wave`.
         let client = ListenerClient::new(addr.to_string(), "test-token".to_string());
         let attach = client.attach(std::process::id()).await.expect("attach");
         assert_eq!(attach.wave, "ship");
@@ -1104,10 +1105,7 @@ mod tests {
         let FlowloopState::Failed { reason } = loop_.runtime.flowloop_state() else {
             unreachable!()
         };
-        assert!(
-            reason.contains("consecutive wave-pass failures"),
-            "{reason}"
-        );
+        assert!(reason.contains("consecutive wave failures"), "{reason}");
         assert!(
             loop_.pass_count() >= MAX_CONSECUTIVE_PASS_FAILURES as usize,
             "the cap took the full ladder"
@@ -1119,7 +1117,7 @@ mod tests {
             .expect("flowloop task ends")
             .expect("flowloop task not cancelled");
         let err = outcome.expect_err("flowloop failure is an error exit");
-        assert!(err.to_string().contains("consecutive wave-pass failures"));
+        assert!(err.to_string().contains("consecutive wave failures"));
     }
 
     /// A pass overrunning its timeout is killed and finishes its turn

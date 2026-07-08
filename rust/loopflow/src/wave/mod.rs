@@ -834,7 +834,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(attach["wave"], "ship");
-        assert!(attach["thread_id"].is_null());
         assert_eq!(runtime.flowloop_state().name(), "idle", "attach revives");
 
         // Deltas through the door: a whole turn, in order, one batch.
@@ -842,7 +841,6 @@ mod tests {
             .post(format!("{base}/resident/deltas"))
             .header(RESIDENT_TOKEN_HEADER, "test-token")
             .json(&serde_json::json!({ "deltas": [
-                { "kind": "thread_started", "vendor": "codex", "thread_id": "t-1" },
                 { "kind": "turn_opened", "answers": [] },
                 { "kind": "turn_text", "text": "over the wire" },
                 { "kind": "turn_usage", "input_tokens": 7, "output_tokens": 3, "cache_read_tokens": null },
@@ -854,13 +852,13 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert_eq!(deltas["accepted"], 5);
+        assert_eq!(deltas["accepted"], 4);
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "over the wire");
         assert_eq!(thread[0].status, Lifecycle::Completed);
 
-        // The context door serves the resume handle and the in-flight fold.
+        // The context door serves the in-flight fold.
         runtime.journal_run_observed("run-1", "sess-1", "implement", "wire it");
         let context: serde_json::Value = client
             .get(format!("{base}/resident/context"))
@@ -871,7 +869,7 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert_eq!(context["thread_id"], "t-1");
+
         assert_eq!(context["in_flight"][0]["run_id"], "run-1");
         assert_eq!(context["in_flight"][0]["flow"], "implement");
     }

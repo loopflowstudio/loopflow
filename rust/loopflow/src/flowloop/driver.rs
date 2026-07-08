@@ -7,7 +7,7 @@
 //! itself: every pass's seed carries a standing instruction
 //! ([`loop_instruction`]) explaining how to mark for termination, so ANY
 //! flow is loopable without its skills knowing loop mechanics. Purpose-built
-//! loop flows (task-pass, project-pass) additionally discuss WHEN to flip
+//! loop flows (task, project) additionally discuss WHEN to flip
 //! the bit in their mutate skill, with tier context.
 //!
 //! The bit is one file, read and REMOVED by the driver at every pass
@@ -45,7 +45,7 @@ const DEFAULT_POLL_SECS: u64 = 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoopOptions {
-    /// The flow each pass runs (`task-pass`, `project-pass`, any flow).
+    /// The flow each pass runs (`task`, `project`, any flow).
     pub flow: String,
     pub wave: Option<String>,
     pub max_passes: u32,
@@ -221,7 +221,7 @@ mod tests {
 
     fn options(max_passes: u32) -> LoopOptions {
         LoopOptions {
-            flow: "task-pass".to_string(),
+            flow: "task".to_string(),
             wave: None,
             max_passes,
             pass_timeout: Duration::from_secs(5),

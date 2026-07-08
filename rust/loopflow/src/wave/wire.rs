@@ -106,9 +106,6 @@ pub enum ResidentDelta {
     /// `TurnOpened`/`TurnFinished`; only the transitions the turn deltas
     /// can't express ride here.
     FlowloopState { to: ResidentStateTo, reason: String },
-    /// The vendor thread the flowloop runs on — its first durable act, journaled
-    /// by the listener before the first turn (borrowed-handle rule).
-    ThreadStarted { vendor: String, thread_id: String },
 }
 
 /// Destination of a reported [`ResidentDelta::FlowloopState`] transition. The
@@ -156,8 +153,6 @@ pub struct AttachRequest {
 pub struct AttachResponse {
     /// The wave this listener serves — the resident refuses a mismatch.
     pub wave: String,
-    /// Last journaled vendor thread id — the flowloop's resume handle.
-    pub thread_id: Option<String>,
 }
 
 /// `GET /resident/context` response: the pre-turn snapshot the resident folds
@@ -166,7 +161,6 @@ pub struct AttachResponse {
 /// cadence stale.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContextResponse {
-    pub thread_id: Option<String>,
     pub in_flight: Vec<InFlightWorker>,
 }
 
@@ -261,10 +255,6 @@ mod tests {
                 to: ResidentStateTo::Failed,
                 reason: "harness disconnected".into(),
             },
-            ResidentDelta::ThreadStarted {
-                vendor: "codex".into(),
-                thread_id: "thread-abc".into(),
-            },
         ];
         for delta in deltas {
             let value = serde_json::to_value(&delta).expect("serialize");
@@ -284,7 +274,6 @@ mod tests {
             serde_json::json!({ "kind": "turn_text" }),
             serde_json::json!({ "kind": "flowloop_state", "to": "failed" }),
             serde_json::json!({ "kind": "messages_requeued" }),
-            serde_json::json!({ "kind": "thread_started", "vendor": "codex" }),
         ] {
             assert!(
                 serde_json::from_value::<ResidentDelta>(bad.clone()).is_err(),

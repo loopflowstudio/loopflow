@@ -187,19 +187,6 @@ async fn corrupt_trailing_line_is_tolerated_on_reboot() {
 }
 
 #[tokio::test]
-async fn thread_started_survives_a_restart() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    {
-        let rt = open_wave(tmp.path());
-        assert_eq!(rt.last_thread_id(), None);
-        rt.journal_thread_started("codex", "thread-abc");
-    }
-    // The resume handle is a fold of the journal, like everything else.
-    let rt = open_wave(tmp.path());
-    assert_eq!(rt.last_thread_id().as_deref(), Some("thread-abc"));
-}
-
-#[tokio::test]
 async fn illegal_flowloop_transition_is_refused() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());

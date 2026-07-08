@@ -455,10 +455,7 @@ mod tests {
         let client = ListenerClient::new(addr.to_string(), "wrong-token".to_string());
         let started = std::time::Instant::now();
         let err = client
-            .send_deltas(vec![ResidentDelta::ThreadStarted {
-                vendor: "codex".into(),
-                thread_id: "t-1".into(),
-            }])
+            .send_deltas(vec![ResidentDelta::TurnText { text: "t-1".into() }])
             .await
             .expect_err("wrong token is refused");
         assert!(err.to_string().contains("listener refused"), "{err:#}");

@@ -77,7 +77,7 @@ Run a roadmap task as a bounded task flowloop:
 lf task "fix the flaky chord-timeout test" --wave designer
 ```
 
-`lf task` takes free text, creates a task worktree, and loops `task-pass`
+`lf task` takes free text, creates a task worktree, and loops `task`
 over it until the PR merges. The open runs with a task flow ARE the wave's
 open tasks (`lf runs`); the merged PR is the record of done — no tracker
 required.

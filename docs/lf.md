@@ -28,7 +28,7 @@ lf office-hours                   # bare name works when unambiguous
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
-lf task "fix the flaky test" --wave designer   # loop task-pass until the PR merges
+lf task "fix the flaky test" --wave designer   # loop task until the PR merges
 ```
 
 ## Steps
@@ -130,7 +130,7 @@ lf task "…" --flow scan-pass          # any flow is loopable
 
 `lf task` takes free text, creates a task worktree, and loops the flow over
 it until the flow's skills write `done` to `scratch/loop.yaml` (for
-`task-pass`: when the PR merges). The open runs with a task flow are the
+`task`: when the PR merges). The open runs with a task flow are the
 wave's open tasks (`lf runs`); the merged PR is the record of done.
 
 ## Speaking to Waves

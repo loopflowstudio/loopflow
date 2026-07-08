@@ -6,7 +6,7 @@
   lf wave <name>                      lf wave <name> --flowloop-only
   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
   │ LISTENER (origin repo)│──────────▶│ RESIDENT (<repo>.<wave>) │
-  │ pens · folds · doors  │           │ wave-pass runner · queue │
+  │ pens · folds · doors  │           │ wave runner · queue │
   │ observer · supervisor │◀──deltas──│ GOAL.md seed · schedule  │
   └──────────┬────────────┘           └────────────▲─────────────┘
              └────────── /events?inbox=true ───────┘
@@ -19,7 +19,7 @@
   supervises the resident. It serves from the **origin repo** and creates no
   worktrees.
 - **The resident** is the wave's flowloop (see `flowloop/wave.rs`): every
-  turn is one `wave-pass` flow (`wave_clarify → wave_pursue → wave_mutate`)
+  turn is one `wave` flow (`wave_clarify → wave_pursue → wave_mutate`)
   run as a bounded headless child — no persistent vendor thread; continuity
   is GOAL.md + memory + the chat journal riding every pass's seed. It
   bootstraps and enters the wave's `<repo>.<wave>` sibling worktree — passes
@@ -88,10 +88,9 @@ per-machine, never committed. The in-process state (`WaveRuntime`) is a fold
 of it: the `thread` and the flowloop state are rebuilt from the journal on
 boot, so a restart keeps the full conversation and turn ids continue
 monotonically. The journal event vocabulary predates the pass model —
-`TurnStarted`/`TurnItem`/`TurnSteered`/`TurnFinished`/`FlowloopState`/
-`ThreadStarted` are all still journaled by the listener on receipt from the
-wire (`TurnSteered` and `ThreadStarted` are vestigial: pass-based residents
-never emit them, but old journals still fold). `wave/<name>/MEMORY.md`
+`TurnStarted`/`TurnItem`/`TurnSteered`/`TurnFinished`/`FlowloopState` are
+all journaled by the listener on receipt from the wire (`TurnSteered` is
+vestigial: pass-based residents never emit it). `wave/<name>/MEMORY.md`
 seeds the flowloop (read from the origin repo), and the live listener holds
 its pen: `lf memory update` POSTs the compiled checkpoint. `lf memory add`
 publishes a replayable fact to the stream without accreting raw bullets into
@@ -108,13 +107,12 @@ don't consume this wire):
   in-process TurnSink vocabulary promoted to the wire: `turn_opened
   {answers}`, `turn_text`, `turn_item`, `turn_usage`, `turn_finished {status,
   cost_usd}`, `turn_steered {answers}`, `flowloop_state {to, reason}`
-  (interrupting/failed — turning/idle are derived from the turn deltas),
-  `thread_started {vendor, thread_id}`. Sent serially, so per-turn order is
-  the transport's order; turn ids never ride the wire — the listener mints
-  them from its journal seq. Plus `POST /resident/attach {pid}` (liveness
-  registration + revival; returns `{wave, thread_id}`) and
-  `GET /resident/context` (`{thread_id, in_flight}`; serving it freshens the
-  store fold).
+  (interrupting/failed — turning/idle are derived from the turn deltas).
+  Sent serially, so per-turn order is the transport's order; turn ids never
+  ride the wire — the listener mints them from its journal seq. Plus
+  `POST /resident/attach {pid}` (liveness registration + revival; returns
+  `{wave}`) and `GET /resident/context` (`{in_flight}`; serving it freshens
+  the store fold).
 - **Listener → resident**: `GET /events?inbox=true` adds `inbox` SSE frames
   to the primary subscription — `{id, op, text, from}` per resident-directed
   op, the pending queue replayed on connect, bare interrupts live-only with
@@ -191,9 +189,9 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 | `GET /memory`             | `{content}` — the wave's MEMORY.md (origin repo). |
 | `GET /memory/log`         | `{facts}` — add-stream facts since the last curation, oldest first. |
 | `POST /memory {op, content, summary}` | `op`: `update` replaces `MEMORY.md`; `add` publishes one replayable fact. `summary` null → first non-empty content line. Returns `{summary}`. |
-| `POST /resident/attach {pid}` | Resident door (token-gated): register the resident's pid, revive a failed flowloop. Returns `{wave, thread_id}`. |
+| `POST /resident/attach {pid}` | Resident door (token-gated): register the resident's pid, revive a failed flowloop. Returns `{wave}`. |
 | `POST /resident/deltas {deltas}` | Resident door (token-gated): ordered turn deltas → the journal fold. Returns `{accepted}`. |
-| `GET /resident/context`   | Resident door (token-gated): `{thread_id, in_flight}`; freshens the store observations. |
+| `GET /resident/context`   | Resident door (token-gated): `{in_flight}`; freshens the store observations. |
 
 ### Turn
 

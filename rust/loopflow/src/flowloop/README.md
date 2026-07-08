@@ -1,13 +1,13 @@
 # flowloop — loop a flow until its bit reads set
 
-A **flowloop** is a looping flow. Any flow can loop — `task-pass`, a scan
+A **flowloop** is a looping flow. Any flow can loop — `task`, a scan
 flow, a single skill. The flow's skills own everything about the work,
 including how to decide it is done; the runner owns placement, the loop, and
 caps. There are no tiers in code: "task" and "project" are just flows we
 define.
 
 ```
-lf task "fix the flaky chord-timeout test"     # loop task-pass to a merged PR
+lf task "fix the flaky chord-timeout test"     # loop task to a merged PR
 lf task "…" --flow scan-pass                   # loop any flow the same way
 ```
 
@@ -28,7 +28,7 @@ recheck: gh pr view --json state -q .state | grep -q MERGED
 free; when it exits 0 the loop runs one more pass so the flow can close out.
 The mechanics come from the runner; the WHEN comes from the flow: the mutate
 skills of purpose-built loop flows discuss it with context — for
-`task-pass`, the agent both drives the PR to merged and decides that
+`task`, the agent both drives the PR to merged and decides that
 observing MERGED means flipping the bit. Self-report in a reply counts for
 nothing; only the file does.
 
@@ -52,9 +52,9 @@ not in a tracker.
   scheduler (inbox / heartbeat / cron) instead of a sequential loop, with no
   bit — the loop is the point. See `wave/README.md` for the topology.
 
-The canonical flows live in `engine/builtins/build/`: `task-pass`
+The canonical flows live in `engine/builtins/build/`: `task`
 (`task_clarify → task_pursue → task_mutate`, bit = merged PR) and
-`project-pass` (`project_clarify → project_pursue → project_mutate`, KR set
+`project` (`project_clarify → project_pursue → project_mutate`, KR set
 in the project's own doc, bit = all KRs checked). Tier behavior lives in the
 skill texts — defining a new kind of flowloop is writing a flow + skills,
 zero Rust.

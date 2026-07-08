@@ -237,22 +237,17 @@ fn resident_deltas_fixture_round_trips_the_wire() {
     let value = load_fixture("resident_deltas.json");
     let request: PostDeltasRequest =
         serde_json::from_value(value.clone()).expect("resident deltas fixture should parse");
-    assert_eq!(request.deltas.len(), 10);
+    assert_eq!(request.deltas.len(), 9);
 
     // Every wire kind appears in the fixture, in a realistic turn order.
     assert!(matches!(
         &request.deltas[0],
-        ResidentDelta::ThreadStarted { vendor, thread_id }
-            if vendor == "codex" && thread_id == "thread-0199a"
-    ));
-    assert!(matches!(
-        &request.deltas[1],
         ResidentDelta::TurnOpened { answers } if answers == &["msg-4", "msg-5"]
     ));
-    assert!(matches!(&request.deltas[2], ResidentDelta::TurnText { .. }));
-    assert!(matches!(&request.deltas[3], ResidentDelta::TurnItem { .. }));
+    assert!(matches!(&request.deltas[1], ResidentDelta::TurnText { .. }));
+    assert!(matches!(&request.deltas[2], ResidentDelta::TurnItem { .. }));
     assert!(matches!(
-        &request.deltas[4],
+        &request.deltas[3],
         ResidentDelta::TurnUsage {
             input_tokens: Some(1204),
             output_tokens: Some(96),
@@ -260,27 +255,27 @@ fn resident_deltas_fixture_round_trips_the_wire() {
         }
     ));
     assert!(matches!(
-        &request.deltas[5],
+        &request.deltas[4],
         ResidentDelta::TurnFinished { status: Lifecycle::Completed, cost_usd: Some(cost) }
             if (cost - 0.0125).abs() < f64::EPSILON
     ));
     assert!(matches!(
-        &request.deltas[6],
+        &request.deltas[5],
         ResidentDelta::TurnSteered { answers } if answers == &["msg-6"]
     ));
     assert!(matches!(
-        &request.deltas[7],
+        &request.deltas[6],
         ResidentDelta::MessagesRequeued { ids } if ids == &["msg-6"]
     ));
     assert!(matches!(
-        &request.deltas[8],
+        &request.deltas[7],
         ResidentDelta::FlowloopState {
             to: ResidentStateTo::Interrupting,
             ..
         }
     ));
     assert!(matches!(
-        &request.deltas[9],
+        &request.deltas[8],
         ResidentDelta::FlowloopState { to: ResidentStateTo::Failed, reason }
             if reason.contains("codex_disconnected")
     ));
@@ -313,11 +308,9 @@ fn resident_door_fixture_round_trips_attach_and_context() {
     let attached: AttachResponse = serde_json::from_value(value["attach_response"].clone())
         .expect("attach response should parse");
     assert_eq!(attached.wave, "ship");
-    assert_eq!(attached.thread_id.as_deref(), Some("thread-0199a"));
 
     let context: ContextResponse = serde_json::from_value(value["context_response"].clone())
         .expect("context response should parse");
-    assert_eq!(context.thread_id.as_deref(), Some("thread-0199a"));
     assert_eq!(context.in_flight.len(), 1);
     assert_eq!(context.in_flight[0].flow, "implement");
     assert_eq!(context.in_flight[0].task, "Wire the endpoint.");
@@ -337,20 +330,6 @@ fn resident_door_fixture_round_trips_attach_and_context() {
     );
 
     // No serde defaults: absent required fields are parse errors; the
-    // explicitly Optional thread_id may be null.
-    assert!(serde_json::from_value::<AttachRequest>(serde_json::json!({})).is_err());
-    assert!(
-        serde_json::from_value::<AttachResponse>(serde_json::json!({ "thread_id": null })).is_err()
-    );
-    assert!(
-        serde_json::from_value::<ContextResponse>(serde_json::json!({ "thread_id": null }))
-            .is_err(),
-        "in_flight is required"
-    );
-    let fresh: AttachResponse =
-        serde_json::from_value(serde_json::json!({ "wave": "ship", "thread_id": null }))
-            .expect("null thread_id parses");
-    assert_eq!(fresh.thread_id, None);
 }
 
 /// The SSE `state` vocabulary (`idle | turning | interrupting | failed`)

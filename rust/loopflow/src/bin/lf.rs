@@ -245,6 +245,31 @@ fn with_step_runtime<T>(
     result
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TargetKind {
+    Flow,
+    Skill,
+}
+
+/// The explicit verbs promise a kind; a name that resolves to the other one
+/// is an error, not a silent fallback.
+fn require_target_kind(name: &str, kind: TargetKind) -> anyhow::Result<()> {
+    let repo_root = loopflow::lf::commands::util::find_repo_root()?;
+    match (
+        loopflow::lf::discovery::discover_target(&repo_root, name)?,
+        kind,
+    ) {
+        (loopflow::lf::discovery::Target::Flow(_), TargetKind::Flow) => Ok(()),
+        (loopflow::lf::discovery::Target::Step(_), TargetKind::Skill) => Ok(()),
+        (loopflow::lf::discovery::Target::Flow(_), TargetKind::Skill) => {
+            Err(anyhow::anyhow!("'{name}' is a flow — run `lf flow {name}`"))
+        }
+        (loopflow::lf::discovery::Target::Step(_), TargetKind::Flow) => Err(anyhow::anyhow!(
+            "'{name}' is a skill — run `lf skill {name}`"
+        )),
+    }
+}
+
 fn run_target(
     name: &str,
     message: Option<&str>,
@@ -567,6 +592,16 @@ fn main() -> anyhow::Result<()> {
             }) => {
                 loopflow::lf::commands::ssh::run(host, repo.as_deref(), secret, *forward_agent, cmd)
             }
+            Some(Commands::Flow { name, args: rest }) => {
+                require_target_kind(name, TargetKind::Flow)?;
+                let message = join_args(rest);
+                run_target(name, message.as_deref(), &cli, &args)
+            }
+            Some(Commands::Skill { name, args: rest }) => {
+                require_target_kind(name, TargetKind::Skill)?;
+                let message = join_args(rest);
+                run_target(name, message.as_deref(), &cli, &args)
+            }
             Some(Commands::External(external_args)) => {
                 match loopflow::lf::commands::run::split_step_args(external_args) {
                     Ok((name, step_args)) => {
@@ -602,6 +637,9 @@ fn run_label(cli: &Cli) -> Option<String> {
     }
     match &cli.command {
         Some(Commands::Inline { .. }) => Some("inline".to_string()),
+        Some(Commands::Flow { name, .. }) | Some(Commands::Skill { name, .. }) => {
+            Some(name.clone())
+        }
         Some(Commands::External(args)) => args
             .first()
             .map(|step| step.trim_end_matches(':').to_string()),
@@ -635,8 +673,8 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "op", "wave", "task", "chat", "memory", "usage", "ls", "status", "runs", "trace",
-            "help",
+            ":", "op", "wave", "task", "flow", "skill", "chat", "memory", "usage", "ls", "status",
+            "runs", "trace", "help",
         ] {
             assert!(tables.commands.contains(command), "command {command}");
         }

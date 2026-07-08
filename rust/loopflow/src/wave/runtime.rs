@@ -11,8 +11,6 @@
 //!   records — served after the finalized thread and re-broadcast as it grows,
 //!   so subscribers watch a turn stream instead of minutes of silence;
 //! - the flowloop state is the last `FlowloopState` event;
-//! - the vendor thread id is the last `ThreadStarted` event — the flowloop's
-//!   resume handle;
 //! - the SSE broadcast is liveness only — a subscriber that lags resyncs from
 //!   the store.
 //!
@@ -164,7 +162,7 @@ pub struct Subscription {
 
 /// Everything that must stay mutually consistent: the journal (truth), the
 /// thread cache (fold of it), the open-turn snapshot, the flowloop state (last
-/// transition), and the vendor thread id (last `ThreadStarted`).
+/// transition).
 #[derive(Debug)]
 struct Inner {
     journal: Journal,
@@ -185,7 +183,6 @@ struct Inner {
     /// until the next `TurnOpened`.
     drop_deltas_until_opened: bool,
     state: FlowloopState,
-    thread_id: Option<String>,
     /// Id of the flowloop's current or most recently committed assistant turn —
     /// what `journal_steered` falls back to when the turn closed during the
     /// send (the thread's *last* turn at that point is usually the steer's
@@ -341,7 +338,6 @@ impl WaveRuntime {
                 open_text_items: 0,
                 drop_deltas_until_opened: false,
                 state,
-                thread_id: fold.thread_id,
                 last_assistant_turn_id,
                 workers,
                 pending_messages: fold.pending_messages,
@@ -433,10 +429,6 @@ impl WaveRuntime {
     }
 
     /// The last journaled vendor thread id, if any — the flowloop's resume handle.
-    pub fn last_thread_id(&self) -> Option<String> {
-        self.inner().thread_id.clone()
-    }
-
     /// User messages journaled but not yet consumed by a turn — the durable
     /// queue. Replayed as `inbox` frames when a resident subscribes, and the
     /// validator for the resident's `answers` declarations.
@@ -805,17 +797,6 @@ impl WaveRuntime {
         });
     }
 
-    /// Journal the vendor thread the flowloop runs on. The borrowed-handle rule:
-    /// this is the flowloop's first durable act, appended before its first turn.
-    pub fn journal_thread_started(&self, vendor: &str, thread_id: &str) {
-        let mut inner = self.inner();
-        inner.journal.append(|_| EventKind::ThreadStarted {
-            vendor: vendor.to_string(),
-            thread_id: thread_id.to_string(),
-        });
-        inner.thread_id = Some(thread_id.to_string());
-    }
-
     /// Atomically snapshot the thread (including the open turn) and the flowloop
     /// state, and subscribe to live frames for both. Every broadcast happens
     /// under the same lock as the append it reflects, so the receiver sees
@@ -1087,9 +1068,6 @@ impl WaveRuntime {
                     );
                 }
             },
-            ResidentDelta::ThreadStarted { vendor, thread_id } => {
-                self.journal_thread_started(&vendor, &thread_id);
-            }
         }
     }
 
@@ -1581,23 +1559,6 @@ mod tests {
         // Nothing journaled, nothing in the thread, nothing pending.
         assert!(rt.thread_snapshot().is_empty());
         assert!(rt.pending_messages().is_empty());
-    }
-
-    #[test]
-    fn thread_id_round_trips_through_the_journal() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        {
-            let rt = open_runtime(tmp.path());
-            assert_eq!(rt.last_thread_id(), None);
-            rt.apply_resident_delta(ResidentDelta::ThreadStarted {
-                vendor: "codex".into(),
-                thread_id: "thread-abc".into(),
-            });
-            assert_eq!(rt.last_thread_id().as_deref(), Some("thread-abc"));
-        }
-        // A restarted runtime folds the resume handle back out of the log.
-        let rt = open_runtime(tmp.path());
-        assert_eq!(rt.last_thread_id().as_deref(), Some("thread-abc"));
     }
 
     #[test]

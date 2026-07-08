@@ -68,13 +68,13 @@
 //!     stream is byte-identical to the pre-resident wire.
 //! - The resident door (token-gated via the `x-lf-resident-token` header —
 //!   401 without this boot's token):
-//!   - `POST /resident/attach {pid}` → `{wave, thread_id}` — registers the
+//!   - `POST /resident/attach {pid}` → `{wave}` — registers the
 //!     resident's pid for liveness and revives a `failed` flowloop (a fresh
 //!     resident IS the revival).
 //!   - `POST /resident/deltas {deltas: [...]}` → `{accepted}` — ordered turn
 //!     deltas, applied to the journal fold
 //!     ([`WaveRuntime::apply_resident_delta`]).
-//!   - `GET /resident/context` → `{thread_id, in_flight}` — the pre-turn
+//!   - `GET /resident/context` → `{in_flight}` — the pre-turn
 //!     snapshot; serving it freshens the store observations (one poll).
 //! - `POST /messages {op, text, from?, channel?}` → `{turn, state}`. `op` is
 //!   required — `"message"` (human speech steers a live steer-capable turn;
@@ -518,7 +518,6 @@ async fn resident_attach_handler(
     tracing::info!(pid = body.pid, "resident attached");
     Ok(Json(AttachResponse {
         wave: state.runtime.name().to_string(),
-        thread_id: state.runtime.last_thread_id(),
     }))
 }
 
@@ -555,10 +554,7 @@ async fn resident_context_handler(
             task: worker.task,
         })
         .collect();
-    Ok(Json(ContextResponse {
-        thread_id: state.runtime.last_thread_id(),
-        in_flight,
-    }))
+    Ok(Json(ContextResponse { in_flight }))
 }
 
 /// The verb policy's ruling on one argv: run it, or refuse it naming the verb.
@@ -622,7 +618,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         | Some(Commands::Sub { .. })
         | Some(Commands::Trace { .. })
         | Some(Commands::Usage) => ExecVerdict::Allow,
-        // A flow/step run or an inline prompt: allowed only when it will land
+        // A flow/skill run or an inline prompt: allowed only when it will land
         // in a sandboxed worktree (`--dispatch`), never run in the outwave.
         Some(Commands::External(parts)) => {
             if cli.dispatch {
@@ -630,6 +626,13 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
             } else {
                 let flow = parts.first().cloned().unwrap_or_else(|| "flow".to_string());
                 ExecVerdict::Deny(flow)
+            }
+        }
+        Some(Commands::Flow { name, .. }) | Some(Commands::Skill { name, .. }) => {
+            if cli.dispatch {
+                ExecVerdict::Allow
+            } else {
+                ExecVerdict::Deny(name.clone())
             }
         }
         Some(Commands::Inline { .. }) => {

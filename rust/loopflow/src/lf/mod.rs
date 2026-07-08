@@ -174,13 +174,13 @@ pub enum Commands {
         #[arg(long, conflicts_with = "no_flowloop")]
         flowloop_only: bool,
     },
-    /// Run a task as a bounded flowloop: loop task-pass until the PR merges
+    /// Run a task as a bounded flowloop: loop task until the PR merges
     Task {
         /// What to do — free text; the flow's skills clarify it into a design
         /// doc and drive one small PR to merged
         seed: String,
         /// Loop a different flow (any flow is loopable)
-        #[arg(long = "flow", default_value = "task-pass")]
+        #[arg(long = "flow", default_value = "task")]
         flow: String,
         /// Wave name (default: inferred from the current worktree/branch)
         #[arg(short = 'w', long = "wave")]
@@ -283,6 +283,23 @@ pub enum Commands {
         /// Command to run on the remote (after `--`)
         #[arg(last = true)]
         cmd: Vec<String>,
+    },
+    /// Run a flow by name — the explicit form; bare flow names that collide
+    /// with subcommands (`task`, `wave`) are only reachable this way
+    Flow {
+        /// Flow name
+        name: String,
+        /// Message for the flow
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+    },
+    /// Run a skill (step) by name — the explicit form
+    Skill {
+        /// Skill name
+        name: String,
+        /// Message for the skill
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
     },
     /// External: step/flow name (when no subcommand matches)
     #[command(external_subcommand)]

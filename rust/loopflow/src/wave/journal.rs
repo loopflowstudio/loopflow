@@ -21,7 +21,7 @@
 //! shared store — these are confirmed facts, not commands — and the in-flight
 //! view is their fold ([`fold_workers`]). `MemoryUpdated` and `MemoryAdded`
 //! are produced by the server's memory routes (`lf memory update`/`add` — the
-//! server holds MEMORY.md's pen). `ThreadStarted` is produced by the flowloop: the
+//! server holds MEMORY.md's pen). The
 //! vendor thread id is its first durable act, journaled before the first turn.
 //! `ServerStarted` is appended once per boot, after replay — restarts are
 //! forensically visible in the record.
@@ -208,19 +208,13 @@ pub enum EventKind {
     /// force-finalized, failed, or the resident reported the vendor never
     /// received them). The fold returns them to the pending queue, so a
     /// resident replay re-delivers them instead of losing them forever.
-    MessagesRequeued {
-        ids: Vec<MessageId>,
-    },
+    MessagesRequeued { ids: Vec<MessageId> },
     TurnFinished {
         turn_id: String,
         status: Lifecycle,
         usage: Usage,
     },
     // -- flowloop lifecycle --
-    ThreadStarted {
-        vendor: String,
-        thread_id: String,
-    },
     FlowloopState {
         from: FlowloopState,
         to: FlowloopState,
@@ -254,21 +248,14 @@ pub enum EventKind {
     // -- memory --
     /// A compiled memory checkpoint was written to `MEMORY.md`. Clears the
     /// replayable add delta because the checkpoint is now the seed.
-    MemoryUpdated {
-        summary: String,
-    },
+    MemoryUpdated { summary: String },
     /// A fact published to the stream (`lf memory add`). Accumulates into the
     /// replayable delta until the next `MemoryUpdated`.
-    MemoryAdded {
-        fact: String,
-    },
+    MemoryAdded { fact: String },
     // -- server lifecycle --
     /// One boot of the wave server, appended after replay. Folds ignore it;
     /// it exists so restarts are visible in the forensic record.
-    ServerStarted {
-        pid: u32,
-        endpoint: String,
-    },
+    ServerStarted { pid: u32, endpoint: String },
 }
 
 /// Path of a wave's journal: `.lf/journal/waves/<wave>/journal.jsonl` under
@@ -458,9 +445,6 @@ impl Narrator {
                     lifecycle_name(*status),
                     usage_segment(usage)
                 ))
-            }
-            EventKind::ThreadStarted { vendor, thread_id } => {
-                info(format!("flowloop thread {vendor} {thread_id}"))
             }
             EventKind::FlowloopState { from, to, reason } => {
                 info(format!("state {} → {} ({reason})", from.name(), to.name()))
@@ -715,9 +699,6 @@ pub struct ThreadFold {
     pub open: Vec<ChatTurn>,
     /// Last `FlowloopState` transition's destination; `Idle` if none.
     pub state: FlowloopState,
-    /// Last `ThreadStarted`'s vendor thread id — the resume handle for the
-    /// flowloop's persistent vendor session.
-    pub thread_id: Option<String>,
     /// User messages not named by any `TurnStarted.answers` or
     /// `TurnSteered.answers` (minus what `MessagesRequeued` restored); this
     /// seeds the scheduler queue on restart.
@@ -809,7 +790,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     // In-order list, not a map: the crash tail keeps its start order.
     let mut open: Vec<ChatTurn> = Vec::new();
     let mut state = FlowloopState::Idle;
-    let mut thread_id: Option<String> = None;
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
     let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
     let mut consumed_messages: HashSet<MessageId> = HashSet::new();
@@ -880,11 +860,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             EventKind::FlowloopState { to, .. } => {
                 state = to.clone();
             }
-            EventKind::ThreadStarted {
-                thread_id: started, ..
-            } => {
-                thread_id = Some(started.clone());
-            }
             // Steer consumption affects the queue fold, not the thread: the
             // steered text is already a user turn via its `UserMessage` row.
             EventKind::TurnSteered { turn_id, answers } => {
@@ -932,7 +907,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         turns,
         open,
         state,
-        thread_id,
         pending_messages,
         messages,
         open_claims,
@@ -1128,10 +1102,6 @@ mod tests {
                     cost_usd: Some(0.01),
                 },
             },
-            EventKind::ThreadStarted {
-                vendor: "codex".into(),
-                thread_id: "thread-abc".into(),
-            },
             EventKind::FlowloopState {
                 from: FlowloopState::Idle,
                 to: FlowloopState::Turning {
@@ -1262,10 +1232,6 @@ mod tests {
                 turn_id: "turn-2".into(),
                 status: Lifecycle::Completed,
                 usage: Usage::empty(),
-            },
-            EventKind::ThreadStarted {
-                vendor: "codex".into(),
-                thread_id: "thread-abc".into(),
             },
             EventKind::FlowloopState {
                 from: FlowloopState::Idle,
@@ -1439,12 +1405,6 @@ mod tests {
             "turn turn-4 completed · 4 items · 192k in / 1.4k out (182k cached)"
         );
 
-        let n = render(EventKind::ThreadStarted {
-            vendor: "codex".into(),
-            thread_id: "thread-7f3a".into(),
-        });
-        assert_eq!(n.line, "flowloop thread codex thread-7f3a");
-
         let n = render(EventKind::RunObserved {
             run_id: "run-8c1d2e3f4a".into(),
             session_id: "sess-9".into(),
@@ -1604,14 +1564,9 @@ mod tests {
             status: Lifecycle::Completed,
             usage: Usage::empty(),
         }));
-        events.push(journal.append(|_| EventKind::ThreadStarted {
-            vendor: "codex".into(),
-            thread_id: "thread-abc".into(),
-        }));
 
         let fold = fold_thread(&events);
         assert!(fold.open.is_empty());
-        assert_eq!(fold.thread_id.as_deref(), Some("thread-abc"));
         assert_eq!(fold.turns.len(), 2);
         assert_eq!(fold.turns[0].role, ChatRole::User);
         assert_eq!(fold.turns[0].id, "turn-1");

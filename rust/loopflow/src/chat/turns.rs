@@ -1,6 +1,6 @@
 //! Turn vocabulary: `ChatTurn`, the wire type Loopflow consumes.
 //!
-//! The wave's flowloop runs each turn as a bounded `wave-pass` child inside
+//! The wave's flowloop runs each turn as a bounded `wave` child inside
 //! the RESIDENT process (see [`crate::flowloop::wave`]) and reports it as
 //! resident wire deltas ([`crate::wave::wire`]), folded by the listener's
 //! runtime into journaled, broadcast turns.

@@ -21,6 +21,9 @@ pub fn run_pass(worktree: &Path, flow: &str, seed: &str, options: &PassOptions) 
     if let Some(max_turns) = options.max_turns {
         cmd.arg("--max-turns").arg(max_turns.to_string());
     }
+    // The explicit verb: bare flow names (`task`, `wave`) collide with
+    // subcommands, `lf flow <name>` never does.
+    cmd.arg("flow");
     cmd.arg(flow);
     cmd.arg(seed);
     cmd.current_dir(worktree);
@@ -28,7 +31,7 @@ pub fn run_pass(worktree: &Path, flow: &str, seed: &str, options: &PassOptions) 
     let output = run_with_timeout(cmd, options.timeout)?;
     if !output.status.success() {
         return Err(OpsError::CommandFailed {
-            command: format!("lf -b {flow}"),
+            command: format!("lf -b flow {flow}"),
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         });
     }

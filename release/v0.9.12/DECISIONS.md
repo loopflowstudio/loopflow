@@ -12,6 +12,6 @@
 
 **Context:** Cadenza's first release showed the useful half of the decisions ledger — it captured intent — and the weak half of a raw ledger dump: it was too long and not interpreted. Loopflow's older PR-based notes had the opposite problem: concrete changes without enough narrative intent.
 
-**Decision:** The shared `release-notes` skill now treats `DECISIONS.md` as the intent ledger and merged PRs/diffs as the behavior ledger. `lf op release notes` uses the same agent-backed release-note skill as `lf op release run`, so standalone notes, weekly releases, and repo consumers share one prompt contract.
+**Decision:** The shared `release-notes` step now treats `DECISIONS.md` as the intent ledger and merged PRs/diffs as the behavior ledger. `lf op release notes` uses the same agent-backed release-note step as `lf op release run`, so standalone notes, weekly releases, and repo consumers share one prompt contract.
 
 **Implications:** Release notes should read as an interpreted story grounded in shipped behavior, while the raw decision ledger remains archived under `release/v<version>/DECISIONS.md`. Repos like Cadenza can call Loopflow's release-note command instead of embedding their own note writer.

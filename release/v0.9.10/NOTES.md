@@ -9,8 +9,8 @@ Changes since `v0.9.9`.
 - **Chord-waves replace chord tables** — a chord-wave is now an ordinary wave whose `area` points at `wave/<name>/` directories. Removed ~1400 lines of chord-specific CRUD across Rust, Python, and Swift
 - **Gardening replaces tending** — the coordinating flow that lets a chord-wave observe, assess, and mutate member waves. `tend` renamed to `garden` throughout; `scan` + `assess` + `mutate` + `review` are the primitives
 - **VSM governance flows** — `govern-identity`, `govern-coordination`, `govern-control`, and `govern-intelligence` each scan, assess, and mutate a different viable-system layer
-- **xor / or / loop in flows** — flows can branch on a router skill's judgment (`xor`), parallelize (`or`), or repeat until exit (`loop`). `xor` paths can be `silence` — a clean no-op when nothing needs to happen
-- **Build / govern / ops categorization** — every skill and flow is tagged by agency: `build/` for work you drive, `govern/` for autonomous coordination, `ops/` for side-channel utilities. Concerto's Flows panel groups the catalog the same way
+- **xor / or / loop in flows** — flows can branch on a router step's judgment (`xor`), parallelize (`or`), or repeat until exit (`loop`). `xor` paths can be `silence` — a clean no-op when nothing needs to happen
+- **Build / govern / ops categorization** — every step and flow is tagged by agency: `build/` for work you drive, `govern/` for autonomous coordination, `ops/` for side-channel utilities. Concerto's Flows panel groups the catalog the same way
 
 ## PM integration
 
@@ -23,7 +23,7 @@ Changes since `v0.9.9`.
 
 ## Attention queue
 
-- **One inbox for everything needing a human** — code reviews ready to ship, skill failures, rebase conflicts, missing PRs, dirty scratch. Items flow `surfaced → viewed → resolved` and auto-resolve when the underlying condition clears
+- **One inbox for everything needing a human** — code reviews ready to ship, step failures, rebase conflicts, missing PRs, dirty scratch. Items flow `surfaced → viewed → resolved` and auto-resolve when the underlying condition clears
 - **Concerto detail pane** — the empty "catch a wave" state is replaced with the attention queue. Items expose contextual actions like **Ship** and **Retry**
 - **`/attention` HTTP routes** — `GET /attention`, `GET /attention/history`, `PATCH /attention/{id}` for external clients
 - **Algedonic signals with repair backoff** — wave failures escalate through a lineage-aware repair loop with error classification before surfacing to the human
@@ -32,7 +32,7 @@ Changes since `v0.9.9`.
 
 - **Wave workspaces in Concerto** — each wave gets a workspace pane with terminal-native keyboard routing, cached transcript state, and pluggable shells (Ghostty in addition to the built-in terminal)
 - **Terminal multiplexer** — multi-pane layout with tmux attach helpers; the lfd side exposes a terminal-attach connection contract
-- **Interactive checkpoints** — skill agents can pause mid-flow, hand control to a human, and resume where they left off
+- **Interactive checkpoints** — step agents can pause mid-flow, hand control to a human, and resume where they left off
 - **Codex session input over HTTP** — `lfd` accepts Codex session input so agent sessions are controllable via API, not just stdin
 - **Connections panel redesign** — cleaner provider auth with Doppler secrets support and on-disk credential detection (Claude/Codex tokens read from `~/.claude/.credentials.json` and `~/.codex/auth.json` before falling back to Keychain)
 - **Eager daemon startup** — `BundledDaemonManager` starts at app launch, so provider auth is available before any repo connects
@@ -41,7 +41,7 @@ Changes since `v0.9.9`.
 
 - **One flow engine for `lf` and `lfd`** — flow runs emit runtime journals whether triggered from the CLI or from Concerto, giving both surfaces the same observability
 - **`lfd` observes wave CLI runs** — standalone `lf` invocations now report through the same journals the daemon uses for wave runs
-- **Prompt system/content split** — assembled prompts use Claude's plan-compatible structure so skill agents can be routed through plan mode
+- **Prompt system/content split** — assembled prompts use Claude's plan-compatible structure so step agents can be routed through plan mode
 
 ## Auth simplification
 
@@ -53,7 +53,7 @@ Changes since `v0.9.9`.
 - **Wave crons** — supplementary flows scheduled per wave, independent of the worker pool. `workers: 0` + `crons:` is valid for cron-only governance waves
 - **Restructured wave items** — items are stored as a directory under `wave/<name>/items/` with structured README frontmatter (Vision, Strategy, Goals, Risks, Metrics)
 - **Concurrent ingest coordination** — PM claim prevents two agents from picking the same item simultaneously
-- **Garden wave-report skill** — reads health signals across all waves for inbox-zero triage
+- **Garden wave-report step** — reads health signals across all waves for inbox-zero triage
 
 ## Review workflow
 
@@ -63,14 +63,14 @@ Changes since `v0.9.9`.
 
 ## Ecosystem
 
-- **gstack workstyle imports** — `lf gstack:office-hours` runs imported skills from external repos. Namespaced flows isolate third-party content from local skills
-- **npx skills** — `lf npx:explain-code` fetches a skill from the npx ecosystem and runs it
+- **gstack workstyle imports** — `lf gstack:office-hours` runs imported steps from external repos. Namespaced flows isolate third-party content from local steps
+- **npx skills** — `lf npx:explain-code` fetches a step from the npx ecosystem and runs it
 - **Flows catalog in Concerto** — browse the full catalog from the Flows panel; each flow shows parent flows that use it
 
 ## Release and CI
 
 - **Nightly regression suite** — automated end-to-end checks feed into a weekly auto-release cadence
-- **Decisions ledger shapes release notes** — interactive runs append to `release/unreleased/DECISIONS.md`; `lf op release run` promotes the ledger to `release/v<version>/` and feeds it into the release-notes skill. Falls back to merged PR history when the ledger is absent
+- **Decisions ledger shapes release notes** — interactive runs append to `release/unreleased/DECISIONS.md`; `lf op release run` promotes the ledger to `release/v<version>/` and feeds it into the release-notes step. Falls back to merged PR history when the ledger is absent
 - **Concerto.app bundles `lf` and `lfd`** — install script no longer required for the embedded CLI and daemon
 - **Dependabot hardening** — auto-enable squash merge on open; only close PRs on required-check failure (not flaky optional checks); documented workflow in the repo
 - **CI enforces clear scratch before landing** — `scratch/` must be empty before a PR can merge
@@ -78,10 +78,10 @@ Changes since `v0.9.9`.
 ## Quality of life
 
 - **`lf review-open-work`** — surveys branches, PRs, worktrees, and waves for inbox-zero triage. New `ship` flow pairs it with `land`
-- **Rebase-conflict auto-recovery** — `lf op rebase` / `land` / `pr` launch a skill agent on conflict instead of failing; the original command retries after resolution
+- **Rebase-conflict auto-recovery** — `lf op rebase` / `land` / `pr` launch a step agent on conflict instead of failing; the original command retries after resolution
 - **Stacked-branch rebase after squash** — fork-point detection via `git cherry` skips commits already absorbed into the target, so B stacked on A rebases cleanly after A squash-merges
 - **Fresh-branch preservation** — rotated worktrees are no longer incorrectly pruned; squash-merged status is suppressed while a branch is still tree-equal to main
-- **Dirty-file auto-commit** — standalone skill runs commit dirty files after completing instead of leaving them loose
+- **Dirty-file auto-commit** — standalone step runs commit dirty files after completing instead of leaving them loose
 - **`lf op wt` prefers exact branch matches** and supports sourced `dev-lf` for in-repo development
 - **Rebase notes for already-merged branches** — clearer guidance when a branch's commits are already on main
 - **`concerto-dev.py` release script extracted** — `scripts/release-concerto.py` is callable directly from CI, and Concerto font loading works across release, `swift run`, and xcodegen builds

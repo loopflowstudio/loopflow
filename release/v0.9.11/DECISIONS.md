@@ -15,10 +15,10 @@ chat clients, IDE integrations, and mobile apps than we will, and they ship them
 faster.
 
 **Decision:** Loopflow is the orchestration layer. It runs headless agent work
-(skills, flows, waves) and **does not host interactive sessions.** When a human
+(steps, flows, waves) and **does not host interactive sessions.** When a human
 drives a session, it happens in the vendor's own surface:
 
-- **Launch new sessions in the vendor's app** — `lf <skill>` opens a fresh session
+- **Launch new sessions in the vendor's app** — `lf <step>` opens a fresh session
   directly in the Codex / Claude Code app, automatically, when configured that
   way. This is the headline new capability, and it is terminal-first: a plain
   `lf` invocation does it; Concerto is just another caller.
@@ -49,7 +49,7 @@ frame around vendor TUIs. It is no longer a chat client.
 - The in-place teardown on `main` was dropped (stashed) in favor of doing it
   deliberately as part of executing this thesis.
 
-## 2026-06-19 — Run skills as vendor Skills; retire the assembled prompt for handoffs
+## 2026-06-19 — Run steps as vendor Skills; retire the assembled prompt for handoffs
 
 **Context:** The first cut of vendor-session launch passed loopflow's whole
 assembled prompt to the vendor CLI as a positional argument. That prompt is ~100KB
@@ -64,17 +64,17 @@ for the Claude harness; (3) the GUI deep links (`claude://code/new`,
 vendors shipped the same answer to "reusable instructions": **Skills** — the open
 `SKILL.md` standard, discovered per-repo and globally, loaded progressively (name
 + description up front, body only on invoke). Verified on-machine that a synced
-`/skill` fires under **headless** `claude -p` and `codex exec`, not just
+`/step` fires under **headless** `claude -p` and `codex exec`, not just
 interactively.
 
 **Decision:** Stop assembling a prompt for the handoff. Loopflow's execution model
 becomes **files on disk + a tiny seed**:
 
-- **Skills are Skills.** A sync emits each skill as a `SKILL.md` into four targets —
+- **Steps are Skills.** A sync emits each step as a `SKILL.md` into four targets —
   `.claude/skills/` and `.agents/skills/`, each at repo and global scope. Claude
   emits carry `disable-model-invocation: true` (explicit-only, zero context cost);
-  Codex self-caps its skill index. Body stays out of context until `/skill` fires.
-- **The seed is `"<surface preamble> /skill"`** — the only per-run injection, kept
+  Codex self-caps its skill index. Body stays out of context until `/step` fires.
+- **The seed is `"<surface preamble> /step"`** — the only per-run injection, kept
   small. Identical shape headless and interactive; the surface preamble is the
   one thing that varies (headless "never ask, decide and note ambiguity" vs cli
   "ask and wait").
@@ -86,17 +86,17 @@ becomes **files on disk + a tiny seed**:
   perspective fragment injected into the assembled prompt; with no assembled
   prompt and a human (or surface preamble) steering, it has no delivery vehicle.
   The machinery goes; the direction *text* survives, redistributed by where the
-  perspective belongs: **most embeds into the relevant skill-skills** (perspective
-  that shapes how a skill is done), **some moves to AGENTS.md** (always-on standing
+  perspective belongs: **most embeds into the relevant step-skills** (perspective
+  that shapes how a step is done), **some moves to AGENTS.md** (always-on standing
   point of view for a repo/wave). The exact split is worked out with concrete
   examples at build time. The wave model simplifies from **area × direction ×
   flow** to **area × flow**.
 - **Flows are unchanged; only the interactive session relocates.** Flow
   orchestration stays the purview of Cadenza and the `lf` CLI — a flow is still
-  loopflow chaining skills. Flows do *not* become skills. Inside a flow, an
-  interactive skill hands off to the vendor session (`/skill` seed); a headless skill
+  loopflow chaining steps. Flows do *not* become skills. Inside a flow, an
+  interactive step hands off to the vendor session (`/step` seed); a headless step
   `exec`s. `lf code` still runs as a flow.
-- **Skill sync is global, prune later.** All builtin skills sync to
+- **Skill sync is global, prune later.** All builtin steps sync to
   `~/.claude/skills` and `~/.agents/skills` — they appear in every project's
   session, which is acceptable. No namespacing for now; prune if the menu gets
   noisy. Generated skills carry a provenance marker so re-sync can prune safely.
@@ -104,7 +104,7 @@ becomes **files on disk + a tiny seed**:
 **Implications:**
 
 - **Headless and interactive unify** onto one execution model: pre-sync skills,
-  then `exec`/open with a surface-stamped `/skill` seed. Headless stops assembling
+  then `exec`/open with a surface-stamped `/step` seed. Headless stops assembling
   a ~100KB prompt.
 - **Removed:** the `direction` config field and wave-YAML key, the `-d/--direction`
   flag, `builtins/directions/`, the direction loader and prompt-injection path,
@@ -112,7 +112,7 @@ becomes **files on disk + a tiny seed**:
 - **The `--tui/--ide` launcher and the skills work are one milestone, one branch.**
   The launcher (already committed on session-handoff) is non-functional alone — it
   seeds a blob the TUIs truncate and the GUI deep links can't carry. It picks the
-  *surface*; skills make the *seed* (`/skill`) work. Shipping the launcher without
+  *surface*; skills make the *seed* (`/step`) work. Shipping the launcher without
   skills would land a broken feature, so they go together here.
 - **System prompts are off the table for the Claude harness, by policy** — recorded
   so no one re-discovers the competitor-mention block the hard way.
@@ -127,25 +127,25 @@ becomes **files on disk + a tiny seed**:
 ## 2026-06-24 — Ambient context moves to disk; one seed path, harness-aware sigil
 
 **Context:** The skills milestone (2026-06-19) routed both interactive and headless
-named-skill runs through the `/skill` seed but carried the always-on context (the
+named-step runs through the `/step` seed but carried the always-on context (the
 `LOOPFLOW.md` operating manual, the orientation header) in the seed or as an
 injected system doc. Two things were off. First, `LOOPFLOW.md` was injected into
 every session as product context even though it's loopflow's own operating manual,
 and the orientation header was a seed-level afterthought disconnected from the
-skills that actually depend on `scratch/`. Second, the seed hard-coded a `/skill`
+steps that actually depend on `scratch/`. Second, the seed hard-coded a `/step`
 invocation for every vendor, but Codex's interactive composer reserves `/` for
-built-in commands — skills fire there with `$skill`.
+built-in commands — skills fire there with `$step`.
 
 **Decision:**
 
-- **Both surfaces keep the `/skill` seed.** Skills fire under `claude -p` and
+- **Both surfaces keep the `/step` seed.** Skills fire under `claude -p` and
   `codex exec` (re-verified on-machine, sentinel probe), so headless stays on the
   seed too — it is *not* sent back to the assembled prompt. The seed must carry the
   surface run-mode preamble for both: the headless warning ("no user present,
   decide and keep moving, note ambiguity in `scratch/questions.md`") and the cli
   "ask and wait" line. `surface.instructions()` already supplies this.
-- **Harness-aware invocation sigil.** `skill_launch_seed` emits `$skill` for Codex
-  and `/skill` for Claude. `$` works in *both* Codex paths (exec and the interactive
+- **Harness-aware invocation sigil.** `skill_launch_seed` emits `$step` for Codex
+  and `/step` for Claude. `$` works in *both* Codex paths (exec and the interactive
   composer); `/` only works in `codex exec`, not the composer. Claude uses `/`
   everywhere.
 - **`LOOPFLOW.md` leaves the product.** The operating manual is no longer injected
@@ -153,9 +153,9 @@ built-in commands — skills fire there with `$skill`.
   `CLAUDE.md`/`AGENTS.md` symlink to), auto-loaded by the vendor only when working on
   loopflow. `LOOPFLOW_DOC` and the `loopflow_doc` prompt field are deleted; `RLM`
   becomes the unconditional system section.
-- **Orientation embeds into the skills that need it.** The orientation block (read
+- **Orientation embeds into the steps that need it.** The orientation block (read
   `scratch/`, `wave/`, the agent doc) is embedded directly into the body of every
-  skill that references `scratch/` (all 37 — build, govern, ops), so it travels with
+  step that references `scratch/` (all 37 — build, govern, ops), so it travels with
   the skill instead of riding the seed. Dropped from `skill_launch_seed`;
   `ORIENTATION.md` deleted.
 
@@ -165,12 +165,12 @@ built-in commands — skills fire there with `$skill`.
   holds — they share both the skills *and* the seed path. The only per-surface
   difference is the run-mode preamble; the only per-harness difference is the sigil.
 - User repos no longer receive the loopflow operating manual as ambient context.
-  Operational knowledge now comes from the skill bodies (skills) plus the repo's own
+  Operational knowledge now comes from the step bodies (skills) plus the repo's own
   agent doc. Acceptable: the manual is loopflow-specific, and a `git`-managed agent
   doc is the right home for it.
-- Orientation is duplicated across 37 skill files (no include mechanism for skill
-  `.md`). That duplication is the cost of "embedded in the relevant skills"; re-run
-  the embed if the set of scratch-dependent skills changes.
+- Orientation is duplicated across 37 step files (no include mechanism for step
+  `.md`). That duplication is the cost of "embedded in the relevant steps"; re-run
+  the embed if the set of scratch-dependent steps changes.
 
 ## 2026-06-29 — Self-hosted loopflow is the default automation shape
 
@@ -222,7 +222,7 @@ built-in commands — skills fire there with `$skill`.
 
 ## 2026-06-30 — Spend over $100/month is the next human blocker
 
-**Context:** Release automation needs to keep moving without checking in for every reversible skill, but cloud hosts and agent providers can create open-ended spend.
+**Context:** Release automation needs to keep moving without checking in for every reversible step, but cloud hosts and agent providers can create open-ended spend.
 
 **Decision:** Continue autonomous release-infra iteration until actual or projected automation spend would exceed $100/month. Card/bank transactions are the source of truth; AWS, Fly.io, Claude/Anthropic, OpenAI/Codex, OpenCode, Doppler, and release-host services should use the company card when the vendor supports card billing.
 
@@ -238,7 +238,7 @@ built-in commands — skills fire there with `$skill`.
 
 ## 2026-06-30 — Mac private cron hosts use native lfd first
 
-**Context:** Bringing up the private Mac host exposed Docker Desktop assumptions that make the container stack a poor first skill on macOS: launchd PATH, Docker Desktop context, credential helper behavior, and slow first-run image builds. Native `lfd` already supports launchd, remote bind, and bearer-token auth, and it became healthy with fewer moving parts.
+**Context:** Bringing up the private Mac host exposed Docker Desktop assumptions that make the container stack a poor first step on macOS: launchd PATH, Docker Desktop context, credential helper behavior, and slow first-run image builds. Native `lfd` already supports launchd, remote bind, and bearer-token auth, and it became healthy with fewer moving parts.
 
 **Decision:** Use native launchd `lfd` as the default Mac private cron-host path. Keep Docker Compose as an explicit self-hosted/container option, especially for Linux or hosts that need container isolation, but do not block the Mac private host on it.
 
@@ -264,6 +264,6 @@ built-in commands — skills fire there with `$skill`.
 
 **Context:** The product reads as its own model — Loop + flow → Loopflow — but the runtime noun was "Wave." The goals-wave design (committed earlier today) deliberately kept "Wave" and added "Goal" as the loop prompt. A design pass on the vocabulary landed on "Loop" as the clearer central noun: it says what the thing is (an always-running, steerable session) and it's the word in the product name.
 
-**Decision:** The MVP vocabulary is **Loopflow** (product) → **Loop** (always-running interactive session: steers with the human, aligns to the **Goal** + metrics, schedules against a budget) → **Worker** (a hosted tmux session running one **Flow** on one **Task**) → **Flow** (the grain a Loop dispatches whole) → **Skill** (the internal atom `lf` executes). **Loop renames Wave**, superseding the goals-wave "keep Wave" call. Tasks live in **Asana**, generated in the Loop's conversations. A blocked Worker is a joinable session (embedded Ghostty in Concerto), holding its slot but spending no budget while it waits. **Chords** (a Loop whose children are Loops) and **gardening** are parked as workflows, not MVP nouns.
+**Decision:** The MVP vocabulary is **Loopflow** (product) → **Loop** (always-running interactive session: steers with the human, aligns to the **Goal** + metrics, schedules against a budget) → **Worker** (a hosted tmux session running one **Flow** on one **Task**) → **Flow** (the grain a Loop dispatches whole) → **Step** (the internal atom `lf` executes). **Loop renames Wave**, superseding the goals-wave "keep Wave" call. Tasks live in **Asana**, generated in the Loop's conversations. A blocked Worker is a joinable session (embedded Ghostty in Concerto), holding its slot but spending no budget while it waits. **Chords** (a Loop whose children are Loops) and **gardening** are parked as workflows, not MVP nouns.
 
-**Implications:** The grain line sits at Worker→Flow: a Loop reasons in Flows and Tasks, never in Skills. The Wave→Loop rename is wide (`loopflow.api`, `wave/<name>/`, Concerto UI, DTOs mirrored three ways, config keys, goldens) and is its own migration wave — this decision fixes the vocabulary, not the rename. Design captured in `scratch/vocabulary.md`.
+**Implications:** The grain line sits at Worker→Flow: a Loop reasons in Flows and Tasks, never in Steps. The Wave→Loop rename is wide (`loopflow.api`, `wave/<name>/`, Concerto UI, DTOs mirrored three ways, config keys, goldens) and is its own migration wave — this decision fixes the vocabulary, not the rename. Design captured in `scratch/vocabulary.md`.

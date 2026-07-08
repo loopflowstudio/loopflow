@@ -12,7 +12,7 @@ cargo test --all                       # Rust tests
 uv run pytest python/tests/            # Python tests
 cd website && uv run python dev.py test # Website tests
 swift test --package-path swift        # Swift package tests
-cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO  # Loopflow UI
+cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=  # Loopflow UI
 tests/e2e/test_smoke.sh               # E2E smoke
 uv run pytest tests/regression/ -v     # nightly/weekly release gate
 ```
@@ -88,7 +88,7 @@ UI tests for the macOS app. Requires Xcode and xcodegen.
 ```bash
 cd swift
 xcodegen generate
-xcodebuild test -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+xcodebuild test -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
 ```
 
 ## What CI Runs

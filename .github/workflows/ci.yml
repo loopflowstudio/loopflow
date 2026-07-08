@@ -134,8 +134,12 @@ jobs:
             -scheme LoopflowMac \
             -destination platform=macOS \
             -derivedDataPath DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO
+            -disableAutomaticPackageResolution \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            DEVELOPMENT_TEAM=
         timeout-minutes: 12
         working-directory: swift
 

@@ -1,8 +1,0 @@
-name: gstack
-description: Garry Tan's sprint factory
-source:
-  repo: garrytan/gstack
-  ref: main
-  last_commit: dbd7aee5b6b5bb41b17ae7747568e2fda8a91d77
-  last_sync: '2026-04-10T01:16:19Z'
-prefix: gstack

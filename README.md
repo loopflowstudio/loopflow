@@ -115,7 +115,7 @@ commands for long-term coordination.
 lf debug -c    # paste an error, watch it fix
 lf op pm show --wave designer   # print the wave's live Linear roadmap
 lf design      # interactive design session
-lf gstack/office-hours   # run a built-in gstack workstyle skill
+lf gstack/office-hours   # run a built-in gstack skill
 lf office-hours          # same thing — bare name works when unambiguous
 lf npx/vercel-labs/deep-research   # fetch any Claude Skill live and run it
 lf op sync-skills       # compile skills into ~/.claude/skills and ~/.agents/skills

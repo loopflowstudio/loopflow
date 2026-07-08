@@ -1,6 +1,6 @@
 # Performance
 
-Concerto's responsiveness is a measured, first-class concern — not a vibe. The
+the Mac app's responsiveness is a measured, first-class concern — not a vibe. The
 most-used views carry latency budgets that are monitored and regression-tested;
 experiments are ground against those metrics with recorded before/after numbers.
 
@@ -28,7 +28,7 @@ Governing invariant: **reads never block on lfd.** The repo/wave list paints fro
 
 ## Notes
 
-- Coordinate with the systems wave's Concerto CI work (branches
+- Coordinate with the systems wave's the Mac app CI work (branches
   `systems/ci-concerto-idle`, `systems/ci-concerto-speedup`) — reuse, don't
   duplicate.
 - Budgets start unset; the first job of monitoring is to establish the real

@@ -1,13 +1,13 @@
-# Concerto
+# The Mac app
 
-Concerto for macOS. The layer above the vendors' sessions.
+the Mac app for macOS. The layer above the vendors' sessions.
 
 ## Vision
 
-Concerto frames work; the vendors run it. The conductor opens the app, launches a
+the Mac app frames work; the vendors run it. The conductor opens the app, launches a
 session, and that session is the vendor's own — a TUI (Claude Code, Codex,
 opencode) inside an embedded terminal pane, or a bounce out to the vendor's
-standalone app. Concerto keeps embedded sessions alive across restarts and shows
+standalone app. the Mac app keeps embedded sessions alive across restarts and shows
 wave state around them. It is not a chat client and does not render assistant turns
 itself.
 
@@ -16,7 +16,7 @@ See `release/unreleased/DECISIONS.md` (2026-06-19, "Loopflow is the layer above"
 ### Not here
 
 - A native chat UI — we do not reimplement the vendors' chat. Dropped.
-- Replacing the CLI — the CLI stays the source of truth; Concerto composes the
+- Replacing the CLI — the CLI stays the source of truth; the Mac app composes the
   work around it
 - Governance dashboards, calibration, portfolio, beat programming — those belong
   to `workflows`
@@ -27,7 +27,7 @@ See `release/unreleased/DECISIONS.md` (2026-06-19, "Loopflow is the layer above"
 
 1. **`embedded-terminal-build-driver`** (p1) — terminal launch, reattach,
    multi-agent dispatch, terminal tabs, and window polish compose into one daily
-   surface. The pane hosts the vendor's TUI; Concerto frames it, doesn't render
+   surface. The pane hosts the vendor's TUI; the Mac app frames it, doesn't render
    chat.
 
 ## Risks

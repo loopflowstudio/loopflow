@@ -5,7 +5,7 @@ Watch for regressions; don't expand speculatively.
 
 ## KRs
 
-- Concerto reaches a native remote `lfd` over HTTPS via Tailscale (TLS
+- the Mac app reaches a native remote `lfd` over HTTPS via Tailscale (TLS
   terminates outside the daemon).
 - Bearer-token rotation takes effect without re-pasting into Settings.
 

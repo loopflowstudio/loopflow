@@ -1,6 +1,6 @@
 # Attention & navigation
 
-Open the app, land in the right wave. Concerto owns which wave to open.
+Open the app, land in the right wave. the Mac app owns which wave to open.
 
 ## KRs
 

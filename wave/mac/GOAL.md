@@ -7,11 +7,11 @@ pm:
 
 ## Objective
 
-Make Concerto the daily surface for conducting waves — without stealing the
+Make the Mac app the daily surface for conducting waves — without stealing the
 vendor's instrument. The human opens the app and lands immediately in the right
 wave: the vendor's own TUI alive in the terminal, just enough state around it to
 pick the next move. Frame, don't render — navigation, launch, reattach,
-attention, and repo context belong to Concerto; assistant turns and agent
+attention, and repo context belong to the Mac app; assistant turns and agent
 protocol stay with the CLI that made them. Calm and glanceable, a conductor's
 podium rather than a cockpit; when it's working the app recedes into the work.
 
@@ -23,7 +23,7 @@ deleted, not flagged; git history is its tombstone.
 
 ## Cron
 
-- `daily` -> open Concerto against a live loopflow wave, walk the
+- `daily` -> open the Mac app against a live loopflow wave, walk the
   highest-friction path, and convert the first real failure into a task.
 
 ## Process

@@ -114,7 +114,7 @@ pub fn map_repo_edge_row(row: &rusqlite::Row<'_>) -> StoreResult<RepoEdge> {
     })
 }
 
-/// SELECT id, wave_id, iteration, step_index, status, worktree, branch,
+/// SELECT id, wave_id, iteration, skill_index, status, worktree, branch,
 ///        started_at, ended_at, error, snapshot_repo, snapshot_flow,
 ///        snapshot_task, snapshot_direction, snapshot_area, snapshot_pr,
 ///        flow_parents, execution_cursor, parent_run_id,
@@ -146,7 +146,7 @@ pub fn map_run_row(row: &rusqlite::Row<'_>) -> StoreResult<Run> {
         direction: snapshot_direction,
         area: snapshot_area,
         iteration: int(row, 2)? as u32,
-        step_index: int(row, 3)? as u32,
+        skill_index: int(row, 3)? as u32,
         status: RunStatus::from_i32(int(row, 4)?),
         worktree: text(row, 5)?,
         branch: text(row, 6)?,
@@ -184,7 +184,7 @@ pub fn map_live_pr_state_row(row: &rusqlite::Row<'_>) -> StoreResult<LivePullReq
     })
 }
 
-/// SELECT id, run_id, step_index, branch_index, status, worktree
+/// SELECT id, run_id, skill_index, branch_index, status, worktree
 pub fn map_fork_run_row(row: &rusqlite::Row<'_>) -> StoreResult<ForkRun> {
     let status = ForkRunStatus::from_i64(int(row, 4)? as i64)
         .ok_or_else(|| StoreError::InvalidData("invalid fork run status".to_string()))?;
@@ -192,7 +192,7 @@ pub fn map_fork_run_row(row: &rusqlite::Row<'_>) -> StoreResult<ForkRun> {
     Ok(ForkRun {
         id: LfdId::from_raw(text(row, 0)?),
         run_id: LfdId::from_raw(text(row, 1)?),
-        step_index: int(row, 2)? as u32,
+        skill_index: int(row, 2)? as u32,
         branch_index: int(row, 3)? as u32,
         status,
         worktree: text(row, 5)?,

@@ -30,7 +30,7 @@ public struct Session: Sendable, Identifiable, Codable, Equatable {
     public let runId: String?
     public let parentSessionId: String?
     public let sessionUse: SessionUse
-    public let step: String
+    public let skill: String
     public let agent: String
     public let cwd: String
     public let argv: [String]
@@ -49,7 +49,7 @@ public struct Session: Sendable, Identifiable, Codable, Equatable {
         case runId = "run_id"
         case parentSessionId = "parent_session_id"
         case sessionUse = "use"
-        case step
+        case skill
         case agent
         case cwd
         case argv
@@ -69,7 +69,7 @@ public struct Session: Sendable, Identifiable, Codable, Equatable {
         runId: String?,
         parentSessionId: String?,
         sessionUse: SessionUse,
-        step: String,
+        skill: String,
         agent: String,
         cwd: String,
         argv: [String],
@@ -87,7 +87,7 @@ public struct Session: Sendable, Identifiable, Codable, Equatable {
         self.runId = runId
         self.parentSessionId = parentSessionId
         self.sessionUse = sessionUse
-        self.step = step
+        self.skill = skill
         self.agent = agent
         self.cwd = cwd
         self.argv = argv

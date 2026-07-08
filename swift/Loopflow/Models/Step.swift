@@ -1,10 +1,10 @@
-// Step model - the basic unit of execution.
-// A Step is a prompt to run with optional config.
+// Skill model - the basic unit of execution.
+// A Skill is a prompt to run with optional config.
 
 import Foundation
 
-/// Per-step configuration overrides.
-public struct StepConfig: Sendable, Codable, Equatable {
+/// Per-skill configuration overrides.
+public struct SkillConfig: Sendable, Codable, Equatable {
     public var agent: String?
     public var defaultAgent: String?
     public var direction: String?
@@ -37,23 +37,23 @@ public struct StepConfig: Sendable, Codable, Equatable {
     }
 }
 
-/// A Step is the basic unit - a prompt to run with optional config.
-public struct Step: Sendable, Codable, Equatable, Identifiable {
+/// A Skill is the basic unit - a prompt to run with optional config.
+public struct Skill: Sendable, Codable, Equatable, Identifiable {
     public var id: UUID = UUID()
     public var prompt: String
-    public var config: StepConfig?
+    public var config: SkillConfig?
 
     enum CodingKeys: String, CodingKey {
         case prompt, config
     }
 
-    public init(prompt: String, config: StepConfig? = nil) {
+    public init(prompt: String, config: SkillConfig? = nil) {
         self.prompt = prompt
         self.config = config
     }
 
     public init(from decoder: Decoder) throws {
-        // Handle string shorthand: "design" -> Step(prompt: "design")
+        // Handle string shorthand: "design" -> Skill(prompt: "design")
         if let singleValue = try? decoder.singleValueContainer(),
            let promptName = try? singleValue.decode(String.self) {
             self.prompt = promptName
@@ -62,18 +62,18 @@ public struct Step: Sendable, Codable, Equatable, Identifiable {
 
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.prompt = try container.decode(String.self, forKey: .prompt)
-        self.config = try container.decodeIfPresent(StepConfig.self, forKey: .config)
+        self.config = try container.decodeIfPresent(SkillConfig.self, forKey: .config)
     }
 
 }
 
-// MARK: - Step Execution
+// MARK: - Skill Execution
 
-/// StepRun represents a single execution of a step.
-/// Schema matches Python's lfd/models.py StepRun class.
-public struct StepRun: Sendable, Identifiable, Codable, Hashable {
+/// SkillRun represents a single execution of a skill.
+/// Schema matches Python's lfd/models.py SkillRun class.
+public struct SkillRun: Sendable, Identifiable, Codable, Hashable {
     public let id: String
-    public let step: String  // matches Python schema (was "prompt")
+    public let skill: String  // matches Python schema (was "prompt")
     public let repo: String
     public let worktree: String
     public let status: String
@@ -83,7 +83,7 @@ public struct StepRun: Sendable, Identifiable, Codable, Hashable {
     public let runMode: String
 
     enum CodingKeys: String, CodingKey {
-        case id, step, repo, worktree, status, agent
+        case id, skill, repo, worktree, status, agent
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case runMode = "run_mode"
@@ -104,7 +104,7 @@ public struct StepRun: Sendable, Identifiable, Codable, Hashable {
     /// Memberwise initializer (required since we add a custom init).
     public init(
         id: String,
-        step: String,
+        skill: String,
         repo: String,
         worktree: String,
         status: String,
@@ -114,7 +114,7 @@ public struct StepRun: Sendable, Identifiable, Codable, Hashable {
         runMode: String
     ) {
         self.id = id
-        self.step = step
+        self.skill = skill
         self.repo = repo
         self.worktree = worktree
         self.status = status

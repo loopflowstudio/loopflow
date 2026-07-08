@@ -16,7 +16,7 @@ struct CatalogTests {
 
         #expect(roundTripped.result == response.result)
         #expect(roundTripped.result.flowsByName["build"]?.category == "Build")
-        #expect(roundTripped.result.stepsByName["gate"]?.source == .repo)
+        #expect(roundTripped.result.skillsByName["gate"]?.source == .repo)
     }
 
     @Test("catalog computes direct parents")
@@ -45,8 +45,8 @@ private let sampleCatalogResponse = """
           {
             "type": "Loop",
             "data": {
-              "steps": [
-                {"type": "Step", "data": {"name": "implement", "interactive": false}}
+              "skills": [
+                {"type": "Skill", "data": {"name": "implement", "interactive": false}}
               ],
               "exit": {
                 "router": "gate",
@@ -63,12 +63,12 @@ private let sampleCatalogResponse = """
         "category": "Build",
         "source": "builtin",
         "items": [
-          {"type": "Step", "data": {"name": "implement", "interactive": false}},
-          {"type": "Step", "data": {"name": "gate", "interactive": false}}
+          {"type": "Skill", "data": {"name": "implement", "interactive": false}},
+          {"type": "Skill", "data": {"name": "gate", "interactive": false}}
         ]
       }
     ],
-    "steps": [
+    "skills": [
       {
         "name": "implement",
         "category": "Build",

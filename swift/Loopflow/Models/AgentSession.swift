@@ -113,7 +113,7 @@ public struct FileEdit: Sendable, Hashable, Codable {
 }
 
 public struct AgentSessionConfig: Sendable, Hashable {
-    public var step: String
+    public var skill: String
     public var repoRoot: String
     public var directions: [String]
     public var area: String?
@@ -127,7 +127,7 @@ public struct AgentSessionConfig: Sendable, Hashable {
     public var clientCompact: Bool?
 
     public init(
-        step: String,
+        skill: String,
         repoRoot: String,
         directions: [String] = [],
         area: String? = nil,
@@ -140,7 +140,7 @@ public struct AgentSessionConfig: Sendable, Hashable {
         clientHasUI: Bool? = nil,
         clientCompact: Bool? = nil
     ) {
-        self.step = step
+        self.skill = skill
         self.repoRoot = repoRoot
         self.directions = directions
         self.area = area
@@ -207,7 +207,7 @@ public struct ContextSnapshot: Sendable, Hashable {
     public let documents: [DocumentEntry]
     public let total: UInt64
     public let diffTier: String
-    public let stepName: String?
+    public let skillName: String?
     public let directionNames: [String]
     public let waveName: String?
     public let hasClipboard: Bool
@@ -218,7 +218,7 @@ public struct ContextSnapshot: Sendable, Hashable {
         documents: [DocumentEntry],
         total: UInt64,
         diffTier: String,
-        stepName: String?,
+        skillName: String?,
         directionNames: [String],
         waveName: String?,
         hasClipboard: Bool
@@ -228,7 +228,7 @@ public struct ContextSnapshot: Sendable, Hashable {
         self.documents = documents
         self.total = total
         self.diffTier = diffTier
-        self.stepName = stepName
+        self.skillName = skillName
         self.directionNames = directionNames
         self.waveName = waveName
         self.hasClipboard = hasClipboard

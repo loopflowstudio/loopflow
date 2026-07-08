@@ -1,6 +1,6 @@
 name: builtin_code_review
 repo: tests/parity/fixtures/basic
-step: code-review
+skill: code-review
 surface: headless
 directions: []
 docs: []

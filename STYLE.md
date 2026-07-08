@@ -288,7 +288,7 @@ Start features with a design doc under `scratch/`. After implementation, `lf rev
 
 User docs follow the same principles as prompts (see PROMPT_STYLE.md):
 
-**Direct and imperative.** State what something does, not what it is. "Runs a prompt with assembled context" beats "A step is a markdown file containing instructions."
+**Direct and imperative.** State what something does, not what it is. "Runs a prompt with assembled context" beats "A skill is a markdown file containing instructions."
 
 **Examples carry the weight.** Code blocks are the primary content. Prose exists to connect them. If you can cut a paragraph and the examples still make sense, cut it.
 
@@ -298,7 +298,7 @@ User docs follow the same principles as prompts (see PROMPT_STYLE.md):
 
 ```markdown
 # Bad
-In order to run a step with clipboard content, you can use the -c flag.
+In order to run a skill with clipboard content, you can use the -c flag.
 This allows you to paste an error and have the agent fix it.
 
 # Good

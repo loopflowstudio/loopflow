@@ -73,7 +73,7 @@ fn is_known_flag(arg: &str) -> bool {
     arg_tables().bool_flags.contains(arg) || is_value_flag(arg)
 }
 
-/// Reorder args so flags come before the step/flow name.
+/// Reorder args so flags come before the skill/flow name.
 /// This allows `lf debug -c` to work like `lf -c debug`.
 fn reorder_args(args: Vec<String>) -> Vec<String> {
     if args.len() <= 1 {
@@ -90,32 +90,32 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
         }
     }
 
-    // Find where the step name is and collect flags that come after it
+    // Find where the skill name is and collect flags that come after it
     let mut flags_before: Vec<String> = Vec::new();
-    let mut step_and_args: Vec<String> = Vec::new();
+    let mut skill_and_args: Vec<String> = Vec::new();
     let mut flags_after: Vec<String> = Vec::new();
 
     let mut i = 0;
-    let mut found_step = false;
+    let mut found_skill = false;
 
     while i < rest.len() {
         let arg = &rest[i];
 
-        if !found_step {
+        if !found_skill {
             if arg.starts_with('-') {
-                // It's a flag before the step
+                // It's a flag before the skill
                 flags_before.push(arg.clone());
                 if is_value_flag(arg) && i + 1 < rest.len() {
                     i += 1;
                     flags_before.push(rest[i].clone());
                 }
             } else {
-                // Found the step name
-                found_step = true;
-                step_and_args.push(arg.clone());
+                // Found the skill name
+                found_skill = true;
+                skill_and_args.push(arg.clone());
             }
         } else {
-            // After the step name
+            // After the skill name
             if arg.starts_with('-') {
                 // Check if it's a known lf flag
                 if is_known_flag(arg) {
@@ -125,22 +125,22 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
                         flags_after.push(rest[i].clone());
                     }
                 } else {
-                    // Unknown flag - treat as step arg
-                    step_and_args.push(arg.clone());
+                    // Unknown flag - treat as skill arg
+                    skill_and_args.push(arg.clone());
                 }
             } else {
-                // Non-flag after step - it's a step arg
-                step_and_args.push(arg.clone());
+                // Non-flag after skill - it's a skill arg
+                skill_and_args.push(arg.clone());
             }
         }
         i += 1;
     }
 
-    // Reconstruct: program + flags_before + flags_after + step_and_args
+    // Reconstruct: program + flags_before + flags_after + skill_and_args
     let mut result = vec![program];
     result.extend(flags_before);
     result.extend(flags_after);
-    result.extend(step_and_args);
+    result.extend(skill_and_args);
     result
 }
 
@@ -203,17 +203,17 @@ fn in_repo_runtime<T>(
     with_runtime(&repo_root, command, || run(&repo_root))
 }
 
-fn with_step_runtime<T>(
+fn with_skill_runtime<T>(
     repo_root: &std::path::Path,
-    step_name: &str,
+    skill_name: &str,
     run: impl FnOnce() -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
     journal::emit(
         repo_root,
-        LfNode::Step,
+        LfNode::Skill,
         LfEventType::Started,
         LfEventFields {
-            step: Some(step_name.to_string()),
+            skill: Some(skill_name.to_string()),
             index: Some(0),
             ..LfEventFields::default()
         },
@@ -222,20 +222,20 @@ fn with_step_runtime<T>(
     match &result {
         Ok(_) => journal::emit(
             repo_root,
-            LfNode::Step,
+            LfNode::Skill,
             LfEventType::Completed,
             LfEventFields {
-                step: Some(step_name.to_string()),
+                skill: Some(skill_name.to_string()),
                 index: Some(0),
                 ..LfEventFields::default()
             },
         ),
         Err(err) => journal::emit(
             repo_root,
-            LfNode::Step,
+            LfNode::Skill,
             LfEventType::Errored,
             LfEventFields {
-                step: Some(step_name.to_string()),
+                skill: Some(skill_name.to_string()),
                 index: Some(0),
                 error: Some(err.to_string()),
                 ..LfEventFields::default()
@@ -260,11 +260,11 @@ fn require_target_kind(name: &str, kind: TargetKind) -> anyhow::Result<()> {
         kind,
     ) {
         (loopflow::lf::discovery::Target::Flow(_), TargetKind::Flow) => Ok(()),
-        (loopflow::lf::discovery::Target::Step(_), TargetKind::Skill) => Ok(()),
+        (loopflow::lf::discovery::Target::Skill(_), TargetKind::Skill) => Ok(()),
         (loopflow::lf::discovery::Target::Flow(_), TargetKind::Skill) => {
             Err(anyhow::anyhow!("'{name}' is a flow — run `lf flow {name}`"))
         }
-        (loopflow::lf::discovery::Target::Step(_), TargetKind::Flow) => Err(anyhow::anyhow!(
+        (loopflow::lf::discovery::Target::Skill(_), TargetKind::Flow) => Err(anyhow::anyhow!(
             "'{name}' is a skill — run `lf skill {name}`"
         )),
     }
@@ -291,12 +291,12 @@ fn run_target_in_repo(
     command: &[String],
 ) -> anyhow::Result<()> {
     match loopflow::lf::discovery::discover_target(repo_root, name)? {
-        loopflow::lf::discovery::Target::Step(_) => with_runtime(repo_root, command, || {
-            with_step_runtime(repo_root, name, || {
+        loopflow::lf::discovery::Target::Skill(_) => with_runtime(repo_root, command, || {
+            with_skill_runtime(repo_root, name, || {
                 loopflow::lf::commands::run::run(Some(name), message, cli)?;
-                // Commit any uncommitted changes left by the step.
+                // Commit any uncommitted changes left by the skill.
                 // When running inside a flow, the flow executor handles this;
-                // for standalone steps we must do it here.
+                // for standalone skills we must do it here.
                 let options = loopflow::ops::CommitOptions {
                     add: true,
                     message: Some(format!("lf commit: {name}")),
@@ -501,7 +501,7 @@ fn main() -> anyhow::Result<()> {
         .without_time()
         .init();
 
-    // Reorder args so flags can appear after the step name
+    // Reorder args so flags can appear after the skill name
     let raw_args: Vec<String> = std::env::args().collect();
     let args = reorder_args(raw_args.clone());
 
@@ -512,8 +512,8 @@ fn main() -> anyhow::Result<()> {
     // sessions; every other command still flips LFD_SESSION_ID to "inherited"
     // for its children (see lf::session for the env contract).
     let registration = match run_label(&cli) {
-        Some(step) => loopflow::lf::session::register_run(
-            &step,
+        Some(skill) => loopflow::lf::session::register_run(
+            &skill,
             cli.model.as_deref().unwrap_or("lf"),
             &raw_args,
         ),
@@ -603,9 +603,9 @@ fn main() -> anyhow::Result<()> {
                 run_target(name, message.as_deref(), &cli, &args)
             }
             Some(Commands::External(external_args)) => {
-                match loopflow::lf::commands::run::split_step_args(external_args) {
-                    Ok((name, step_args)) => {
-                        let message = join_args(&step_args);
+                match loopflow::lf::commands::run::split_skill_args(external_args) {
+                    Ok((name, skill_args)) => {
+                        let message = join_args(&skill_args);
                         run_target(&name, message.as_deref(), &cli, &args)
                     }
                     Err(err) => Err(err),
@@ -642,7 +642,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         }
         Some(Commands::External(args)) => args
             .first()
-            .map(|step| step.trim_end_matches(':').to_string()),
+            .map(|skill| skill.trim_end_matches(':').to_string()),
         None => Some("interactive".to_string()),
         Some(Commands::Op { .. })
         | Some(Commands::Cron { .. })
@@ -728,9 +728,9 @@ mod tests {
 
     /// Uppercase short aliases reorder exactly like their lowercase forms —
     /// the drift the hand-maintained lists had (`lf debug -M codex` used to
-    /// treat `codex` as a step arg).
+    /// treat `codex` as a skill arg).
     #[test]
-    fn reorder_args_uppercase_value_alias_after_step() {
+    fn reorder_args_uppercase_value_alias_after_skill() {
         let args = vec![
             "lf".to_string(),
             "debug".to_string(),
@@ -741,20 +741,20 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_uppercase_bool_alias_after_step() {
+    fn reorder_args_uppercase_bool_alias_after_skill() {
         let args = vec!["lf".to_string(), "debug".to_string(), "-C".to_string()];
         assert_eq!(reorder_args(args), vec!["lf", "-C", "debug"]);
     }
 
     #[test]
-    fn reorder_args_flag_after_step() {
+    fn reorder_args_flag_after_skill() {
         let args = vec!["lf".to_string(), "debug".to_string(), "-c".to_string()];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-c", "debug"]);
     }
 
     #[test]
-    fn reorder_args_placement_flags_after_step() {
+    fn reorder_args_placement_flags_after_skill() {
         let args = vec![
             "lf".to_string(),
             "implement".to_string(),
@@ -811,14 +811,14 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_flag_before_step() {
+    fn reorder_args_flag_before_skill() {
         let args = vec!["lf".to_string(), "-c".to_string(), "debug".to_string()];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-c", "debug"]);
     }
 
     #[test]
-    fn reorder_args_value_flag_before_step() {
+    fn reorder_args_value_flag_before_skill() {
         // lf -m codex implement -> should stay the same (already correct order)
         let args = vec![
             "lf".to_string(),
@@ -831,7 +831,7 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_value_flag_after_step() {
+    fn reorder_args_value_flag_after_skill() {
         let args = vec![
             "lf".to_string(),
             "debug".to_string(),
@@ -857,7 +857,7 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_no_direction_flag_after_step() {
+    fn reorder_args_no_direction_flag_after_skill() {
         let args = vec![
             "lf".to_string(),
             "implement".to_string(),
@@ -868,7 +868,7 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_no_loopflow_flag_after_step() {
+    fn reorder_args_no_loopflow_flag_after_skill() {
         let args = vec![
             "lf".to_string(),
             "gate".to_string(),
@@ -879,7 +879,7 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_step_with_args() {
+    fn reorder_args_skill_with_args() {
         let args = vec![
             "lf".to_string(),
             "implement:".to_string(),
@@ -927,7 +927,7 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_no_step() {
+    fn reorder_args_no_skill() {
         let args = vec!["lf".to_string(), "-l".to_string()];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-l"]);

@@ -98,7 +98,7 @@ pub struct UpdateWaveRequest {
     workers: Option<u32>,
     status: Option<String>,
     agent: Option<String>,
-    step_agents: Option<std::collections::HashMap<String, String>>,
+    skill_agents: Option<std::collections::HashMap<String, String>>,
     serialized: Option<bool>,
 }
 
@@ -252,13 +252,13 @@ pub async fn update_wave_handler(
         wave.set_status(parsed);
     }
 
-    if payload.agent.is_some() || payload.step_agents.is_some() {
+    if payload.agent.is_some() || payload.skill_agents.is_some() {
         let repo = wave.repo().to_string();
         let wave_name = wave.name().clone();
         let agent = payload.agent.clone();
-        let step_agents = payload.step_agents.clone();
+        let skill_agents = payload.skill_agents.clone();
         run_blocking_result(
-            move || update_wave_agent_config(FsPath::new(&repo), &wave_name, agent, step_agents),
+            move || update_wave_agent_config(FsPath::new(&repo), &wave_name, agent, skill_agents),
             StatusCode::BAD_REQUEST,
         )
         .await?;
@@ -819,12 +819,12 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use,
-            step: "implement".to_string(),
+            skill: "implement".to_string(),
             agent: "lf".to_string(),
             cwd: cwd.to_string_lossy().to_string(),
             argv: Vec::new(),
             env: Default::default(),
-            source: "wave_step_tmux".to_string(),
+            source: "wave_skill_tmux".to_string(),
             tmux_name: "lf-worker-caller".to_string(),
             status: SessionStatus::Running,
             attached_at: None,
@@ -973,12 +973,12 @@ mod tests {
             run_id: Some(run.id.clone()),
             parent_session_id: None,
             session_use: SessionUse::Worker,
-            step: "design".to_string(),
+            skill: "design".to_string(),
             agent: "lf".to_string(),
             cwd: repo.clone(),
             argv: vec!["lf".to_string(), "design".to_string()],
             env: Default::default(),
-            source: "wave_step".to_string(),
+            source: "wave_skill".to_string(),
             tmux_name: "lf-test-branch".to_string(),
             status: SessionStatus::Running,
             attached_at: Some(OffsetDateTime::now_utc()),

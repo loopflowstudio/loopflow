@@ -10,7 +10,7 @@ use serde::Deserialize;
 struct GoldenCase {
     name: String,
     repo: String,
-    step: Option<String>,
+    skill: Option<String>,
     surface: Option<Surface>,
     directions: Vec<String>,
     docs: Vec<String>,
@@ -64,7 +64,7 @@ fn golden_prompts_match_python() {
         let repo = root.join(&case.repo);
         let opts = GatherContextOpts {
             repo_root: repo.clone(),
-            step: case.step.clone(),
+            skill: case.skill.clone(),
             message: None,
             operate: !case.no_loopflow,
             surface: case.surface.unwrap_or_default(),

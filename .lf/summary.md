@@ -7,13 +7,13 @@ Summarized from:
 - `rust/loopflow/src/lfd/`
 - `rust/loopflow/src/lfd/http/`
 - `rust/loopflow/src/engine/`
-- `rust/loopflow/src/engine/builtins/steps/`
+- `rust/loopflow/src/engine/builtins/skills/`
 - `rust/loopflow/src/engine/builtins/flows/`
 - `python/loopflow/`
 
 ## High-Level Layout
 
-- `rust/loopflow/src/engine/`: local execution/runtime layer. Defines the flow DSL, built-in step/flow loading, prompt/context assembly, agent command launch, git/worktree helpers, stream parsing, and config loading.
+- `rust/loopflow/src/engine/`: local execution/runtime layer. Defines the flow DSL, built-in skill/flow loading, prompt/context assembly, agent command launch, git/worktree helpers, stream parsing, and config loading.
 - `rust/loopflow/src/lfd/`: daemon/service layer. Owns persistent state, HTTP API, scheduler/executor, trigger orchestration, session management, provider auth, token/secrets handling, repo registration, and queue reconciliation.
 - `python/loopflow/`: thin typed client + Typer CLI for the `lfd` HTTP API.
 
@@ -95,7 +95,7 @@ pub struct Run {
     pub direction: Vec<String>,
     pub area: Vec<String>,
     pub iteration: u32,
-    pub step_index: u32,
+    pub skill_index: u32,
     pub status: RunStatus,
     pub worktree: String,
     pub branch: String,
@@ -207,7 +207,7 @@ Source: `rust/loopflow/src/lfd/types/execution.rs`, `attention.rs`, `summary.rs`
 ```rust
 pub struct ExecutionProcess {
     pub id: LfdId,
-    pub step: String,
+    pub skill: String,
     pub repo: String,
     pub worktree: String,
     pub run_id: Option<LfdId>,
@@ -272,7 +272,7 @@ pub struct Session {
     pub run_id: Option<LfdId>,
     pub parent_session_id: Option<LfdId>,
     pub session_use: SessionUse,
-    pub step: String,
+    pub skill: String,
     pub agent: String,
     pub cwd: String,
     pub argv: Vec<String>,
@@ -328,7 +328,7 @@ pub struct ContextSnapshot {
     pub budget: u64,
     pub total: u64,
     pub diff_tier: String,
-    pub step_name: Option<String>,
+    pub skill_name: Option<String>,
     pub direction_names: Vec<String>,
     pub area_name: Option<String>,
     pub wave_name: Option<String>,
@@ -353,7 +353,7 @@ pub enum ConversationEvent {
 }
 
 pub struct ConversationConfig {
-    pub step: String,
+    pub skill: String,
     pub repo_root: String,
     pub directions: Vec<String>,
     pub area: Option<String>,
@@ -403,7 +403,7 @@ Important pattern: `Session` is the attachable live control surface; provider tr
 Source: `rust/loopflow/src/engine/flow.rs`
 
 ```rust
-pub struct Step {
+pub struct Skill {
     pub name: String,
     pub agent: Option<String>,
     pub default_agent: Option<String>,
@@ -415,7 +415,7 @@ pub struct Step {
 }
 
 pub enum FlowItem {
-    Step(Step),
+    Skill(Skill),
     Op(Op),
     And { branches: Vec<FlowItem> },
     FlowRef(String),
@@ -434,7 +434,7 @@ pub struct OrDef {
 
 pub struct OrPath {
     pub flow: Option<String>,
-    pub step: Option<String>,
+    pub skill: Option<String>,
     pub description: String,
     pub direction: Vec<String>,
 }
@@ -444,13 +444,13 @@ pub struct Flow {
     pub items: Vec<FlowItem>,
 }
 
-pub struct ConcreteStep {
-    pub step: Step,
+pub struct ConcreteSkill {
+    pub skill: Skill,
     pub flow_parents: Vec<String>,
 }
 
 pub struct ConcreteAndBranch {
-    pub steps: Vec<ConcreteStep>,
+    pub skills: Vec<ConcreteSkill>,
     pub flow_parents: Vec<String>,
     pub label: String,
     pub directions: Vec<String>,
@@ -473,16 +473,16 @@ pub struct ConcreteOp {
 }
 
 pub enum ConcreteItem {
-    Step(ConcreteStep),
+    Skill(ConcreteSkill),
     Op(ConcreteOp),
     And(ConcreteAnd),
     Or(ConcreteOr),
 }
 
 pub enum FlowAction {
-    RunStep { step: ConcreteStep },
+    RunSkill { skill: ConcreteSkill },
     RunOps { ops: ConcreteOp },
-    WaitInteractive { step: ConcreteStep },
+    WaitInteractive { skill: ConcreteSkill },
     And { fork: ConcreteAnd },
     Or { branch: ConcreteOr },
     Complete,
@@ -497,11 +497,11 @@ pub struct Direction {
 
 Pattern:
 
-- Repo-local lookup first: `.lf/flows`, `.lf/steps`, `.lf/directions`.
+- Repo-local lookup first: `.lf/flows`, `.lf/skills`, `.lf/directions`.
 - Fallback to embedded built-ins from `rust/loopflow/src/engine/builtins/`.
-- Final fallback for steps: `.agents/skills/<name>/SKILL.md`.
-- A bare step name can auto-wrap into a one-step flow.
-- `And` = parallel branches; `Or` = routed branch selection with an optional router step and verdict file.
+- Final fallback for skills: `.agents/skills/<name>/SKILL.md`.
+- A bare skill name can auto-wrap into a one-skill flow.
+- `And` = parallel branches; `Or` = routed branch selection with an optional router skill and verdict file.
 
 ### Prompt assembly
 
@@ -509,7 +509,7 @@ Source: `rust/loopflow/src/engine/prompt.rs`, `launch.rs`, `structured_reply.rs`
 
 ```rust
 pub enum DocumentSource {
-    Step,
+    Skill,
     Direction,
     Diff,
     RepoDoc,
@@ -537,7 +537,7 @@ pub struct ContextBreakdown {
     pub source_counts: HashMap<DocumentSource, usize>,
     pub documents: Vec<DocumentEntry>,
     pub system_tokens: usize,
-    pub step_name: Option<String>,
+    pub skill_name: Option<String>,
     pub direction_names: Vec<String>,
     pub diff_tier: DiffTier,
     pub diff_file_count: usize,
@@ -558,7 +558,7 @@ pub struct GatherSpec {
 
 pub struct GatherContextOpts {
     pub repo_root: PathBuf,
-    pub step: Option<String>,
+    pub skill: Option<String>,
     pub message: Option<String>,
     pub surface: Surface,
     pub directions: Vec<String>,
@@ -578,7 +578,7 @@ pub struct PromptComponents {
     pub docs: Vec<Document>,
     pub diff: Option<String>,
     pub diff_files: Vec<Document>,
-    pub step: Option<Step>,
+    pub skill: Option<Skill>,
     pub repo_root: String,
     pub clipboard: Option<String>,
     pub directions: Vec<Direction>,
@@ -603,8 +603,8 @@ pub struct ContextSourceOverrides {
 
 pub struct LaunchPromptInput {
     pub repo_root: PathBuf,
-    pub step: Option<String>,
-    pub resolved_step: Option<Step>,
+    pub skill: Option<String>,
+    pub resolved_skill: Option<Skill>,
     pub surface: Surface,
     pub directions: Vec<String>,
     pub area: Option<String>,
@@ -644,7 +644,7 @@ pub struct ClientContext {
 Critical prompt pipeline:
 
 1. Resolve config from `~/.lf/config.yaml` + `.lf/config.yaml`.
-2. Merge directions from step frontmatter + config + request.
+2. Merge directions from skill frontmatter + config + request.
 3. Gather sources (`repo docs`, `diff`, `clipboard`, `wave`, `area`, related repos).
 4. Budget into `DEFAULT_CONTEXT_BUDGET = 75_000`.
 5. Build `system_prompt` + `task_prompt`.
@@ -654,7 +654,7 @@ Direct quote paths/constants:
 
 - `".lf/config.yaml"`
 - `"~/.lf/config.yaml"`
-- `".lf/steps"`
+- `".lf/skills"`
 - `".lf/flows"`
 - `".lf/directions"`
 - `".lf/fork-manifest.json"`
@@ -777,7 +777,7 @@ pub type SharedStore = Arc<Store>;
 pub struct SessionFilters {
     pub wave: Option<String>,
     pub flow: Option<String>,
-    pub step: Option<String>,
+    pub skill: Option<String>,
     pub from: Option<i64>,
     pub to: Option<i64>,
 }
@@ -1066,7 +1066,7 @@ pub async fn revoke_tokens_handler(...);
 
 Special route behavior:
 
-- `/v0/flows` introspects repo-local + built-in flows/steps/directions and returns `supported_harnesses`.
+- `/v0/flows` introspects repo-local + built-in flows/skills/directions and returns `supported_harnesses`.
 - `/v0/waves/{wave_id}/logs` is plain text, not SSE.
 - `/v0/conversations/{id}/events` is SSE with replay completion sentinel `"conversation.replay_completed"`.
 
@@ -1220,7 +1220,7 @@ class Run(BaseModel):
     wave_id: str
     task: Optional[str]
     iteration: int
-    step_index: int
+    skill_index: int
     status: str
     local_worktree: str
     remote_branch: str
@@ -1230,7 +1230,7 @@ class Run(BaseModel):
     error: Optional[str]
     flow_parents: list[str]
 
-class FlowStep(BaseModel):
+class FlowSkill(BaseModel):
     type: str
     name: str
 
@@ -1250,7 +1250,7 @@ class Wave(BaseModel):
     remote_branch: Optional[str]
     commits: list[CommitEntry]
     diff_stat: Optional[str]
-    flow_steps: list[FlowStep]
+    flow_skills: list[FlowSkill]
     active_run: Optional[Run]
     created_at: Optional[datetime]
     branch: Optional[str]
@@ -1264,7 +1264,7 @@ class Session(BaseModel):
     run_id: Optional[str]
     parent_session_id: Optional[str]
     session_use: str
-    step: str
+    skill: str
     agent: str
     cwd: str
     argv: list[str]
@@ -1398,7 +1398,7 @@ lfq logs <wave>
 lfq sessions [wave]
 lfq attach <session-id>
 lfq whoami
-lfq usage [--wave|--flow|--step|--model|--source|--group-by|--billing|--json]
+lfq usage [--wave|--flow|--skill|--model|--source|--group-by|--billing|--json]
 lfq providers
 
 lfq auth status
@@ -1429,7 +1429,7 @@ CLI characteristics:
 - OAuth browser flow helpers in CLI
 - repo relationships use exact `"owner/repo"` parsing
 
-## Built-In Flows and Steps
+## Built-In Flows and Skills
 
 ### Built-in flow names
 
@@ -1458,7 +1458,7 @@ From `rust/loopflow/src/engine/builtins/flows/`:
 - `tend/tend-tune`
 - `tend/tend`
 
-The README in `rust/loopflow/src/engine/builtins/flows/README.md` documents representative step sequences such as:
+The README in `rust/loopflow/src/engine/builtins/flows/README.md` documents representative skill sequences such as:
 
 - `build`: `implement -> compress -> lint -> gate -> update-wave`
 - `ship`: `design -> build -> review -> land`
@@ -1467,9 +1467,9 @@ The README in `rust/loopflow/src/engine/builtins/flows/README.md` documents repr
 - `incident`: `debug -> 5whys -> build`
 - `wave-reduce`, `wave-polish`, `wave-expand`: `and(...) -> update-wave`
 
-### Built-in step names
+### Built-in skill names
 
-From `rust/loopflow/src/engine/builtins/steps/`:
+From `rust/loopflow/src/engine/builtins/skills/`:
 
 - code: `ci-fix`, `compress`, `debug`, `gate`, `implement`, `integrate-upstream`, `qa`, `triage`
 - interactive: `code-review`, `demo`, `design`, `explore`, `refine`, `review-design`
@@ -1480,11 +1480,11 @@ From `rust/loopflow/src/engine/builtins/steps/`:
 `engine/builtins.rs` exposes:
 
 ```rust
-pub fn get_builtin_step(name: &str) -> Option<&'static str>;
+pub fn get_builtin_skill(name: &str) -> Option<&'static str>;
 pub fn get_builtin_flow(name: &str) -> Option<&'static str>;
 pub fn get_builtin_direction(name: &str) -> Option<&'static str>;
 pub fn get_builtin_ops_prompt(name: &str) -> Option<&'static str>;
-pub fn builtin_step_names() -> Vec<&'static str>;
+pub fn builtin_skill_names() -> Vec<&'static str>;
 pub fn builtin_flow_names() -> Vec<&'static str>;
 pub fn builtin_flow_entries() -> impl Iterator<Item = (&'static str, &'static str)>;
 ```
@@ -1495,7 +1495,7 @@ pub fn builtin_flow_entries() -> impl Iterator<Item = (&'static str, &'static st
 - Git/PR state is treated as projection data layered onto core store records. DTOs enrich `Wave`/`Run` with current worktree, diff, PR, live PR state, and queue role.
 - Repo relationships are a graph over registered repos (`RepoEdge`). Prompt gathering and some orchestration can include related repos.
 - Prompt context is source-tagged and token-budgeted. `ContextBreakdown` / `ContextSnapshot` are first-class outputs, not debugging leftovers.
-- Interactive sessions and headless wave execution share the same prompt-prep primitives (`prepare_launch_prompt`, `gather_context`, built-in steps/flows).
+- Interactive sessions and headless wave execution share the same prompt-prep primitives (`prepare_launch_prompt`, `gather_context`, built-in skills/flows).
 - Built-ins are embedded in the Rust binary but repo-local `.lf/*` content overrides them.
 - HTTP endpoints mostly return DTO projections, not raw store structs.
 - The Python package is intentionally thin; real behavior lives in Rust.
@@ -1504,7 +1504,7 @@ pub fn builtin_flow_entries() -> impl Iterator<Item = (&'static str, &'static st
 
 ## Most Important Exact Names
 
-- paths: `".lf/config.yaml"`, `".lf/steps"`, `".lf/flows"`, `".lf/directions"`, `".lf/fork-manifest.json"`, `"rust/loopflow/src/lfd/http/routes/waves.rs"`, `"python/loopflow/client.py"`
+- paths: `".lf/config.yaml"`, `".lf/skills"`, `".lf/flows"`, `".lf/directions"`, `".lf/fork-manifest.json"`, `"rust/loopflow/src/lfd/http/routes/waves.rs"`, `"python/loopflow/client.py"`
 - commands: `"git"`, `"gh"`, `"claude"`, `"codex"`, `"gemini"`, `"opencode"`, `"lfq"`
 - route prefixes: `"/v0/waves"`, `"/v0/sessions"`, `"/v0/usage/summary"`, `"/v0/providers"`, `"/v0/repos"`, `"/health"`, `"/status"`, `"/ws"`
 - core literals: `"ship-roadmap"`, `"ci-fix"`, `"main"`, `"suggest_actions"`

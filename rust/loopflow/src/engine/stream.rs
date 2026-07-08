@@ -14,7 +14,7 @@ pub enum StreamEvent {
     Text(String),
     /// A tool invocation, with a short summary of what it did.
     ToolUse { name: String, summary: String },
-    /// Token usage reported by the agent for a turn/step. Fields are optional
+    /// Token usage reported by the agent for a turn/skill. Fields are optional
     /// because providers report different subsets (codex/claude split
     /// input/output; cache reads only appear on some providers).
     Usage {
@@ -149,14 +149,14 @@ impl StreamParser {
             "init" | "tool_result" => ParseResult::Skipped,
 
             // ── OpenCode ─────────────────────────────────────────────
-            // OpenCode emits text/step_start/step_finish with a "part" wrapper.
+            // OpenCode emits text/skill_start/skill_finish with a "part" wrapper.
             // Guard "text" on sessionID to avoid conflicts with future agents.
             "text" if v.get("sessionID").is_some() => match parse_opencode_text(&v) {
                 Some(event) => ParseResult::Events(vec![event]),
                 None => ParseResult::Skipped,
             },
-            "step_start" => ParseResult::Skipped,
-            "step_finish" => ParseResult::Events(parse_opencode_finish(&v)),
+            "skill_start" => ParseResult::Skipped,
+            "skill_finish" => ParseResult::Events(parse_opencode_finish(&v)),
 
             // ── Shared ──────────────────────────────────────────────
             // Both Claude and Gemini emit "result" events (different schemas).
@@ -973,16 +973,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_opencode_step_start_skipped() {
+    fn parse_opencode_skill_start_skipped() {
         let mut parser = StreamParser::new();
-        let line = r#"{"type":"step_start","timestamp":1759406015000,"sessionID":"ses_abc","part":{"type":"step-start"}}"#;
+        let line = r#"{"type":"skill_start","timestamp":1759406015000,"sessionID":"ses_abc","part":{"type":"skill-start"}}"#;
         assert_eq!(parser.feed_line(line), ParseResult::Skipped);
     }
 
     #[test]
-    fn parse_opencode_step_finish() {
+    fn parse_opencode_skill_finish() {
         let mut parser = StreamParser::new();
-        let line = r#"{"type":"step_finish","timestamp":1759406020000,"sessionID":"ses_abc","part":{"type":"step-finish","tokens":{"input":1234,"output":567},"cost":0.05}}"#;
+        let line = r#"{"type":"skill_finish","timestamp":1759406020000,"sessionID":"ses_abc","part":{"type":"skill-finish","tokens":{"input":1234,"output":567},"cost":0.05}}"#;
         assert_eq!(
             parser.feed_line(line),
             ParseResult::Events(vec![

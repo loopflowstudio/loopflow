@@ -32,7 +32,7 @@ class TestWaveModel:
         wave = Wave.model_validate(WAVE_MINIMAL)
         assert wave.name == "reduce"
         assert wave.created_at is None
-        assert wave.flow_steps == []
+        assert wave.flow_skills == []
         assert wave.workers == 1
         assert wave.repo == "/tmp/repo"
         assert wave.iteration == 0
@@ -51,8 +51,8 @@ class TestWaveModel:
         assert wave.commits[0].sha == "a1b2c3d"
         assert wave.commits[0].message == "implement: add retry logic"
         assert wave.diff_stat == " 3 files changed, 42 insertions(+), 7 deletions(-)"
-        assert [step.type for step in wave.flow_steps] == ["step", "step", "step", "step"]
-        assert [step.name for step in wave.flow_steps] == [
+        assert [skill.type for skill in wave.flow_skills] == ["skill", "skill", "skill", "skill"]
+        assert [skill.name for skill in wave.flow_skills] == [
             "review",
             "iterate",
             "build",
@@ -67,18 +67,18 @@ class TestWaveModel:
         assert reparsed.active_run.pr.url == wave.active_run.pr.url
         assert reparsed.commits == wave.commits
         assert reparsed.diff_stat == wave.diff_stat
-        assert reparsed.flow_steps == wave.flow_steps
+        assert reparsed.flow_skills == wave.flow_skills
 
     def test_unknown_fields_ignored(self):
         data = {**WAVE_MINIMAL, "new_field": "surprise"}
         wave = Wave.model_validate(data)
         assert wave.name == "reduce"
 
-    def test_flow_steps_parse_ops_items(self):
-        data = {**WAVE_MINIMAL, "flow_steps": ["implement", "op: land --create-pr"]}
+    def test_flow_skills_parse_ops_items(self):
+        data = {**WAVE_MINIMAL, "flow_skills": ["implement", "op: land --create-pr"]}
         wave = Wave.model_validate(data)
-        assert [step.type for step in wave.flow_steps] == ["step", "op"]
-        assert wave.flow_steps[1].name == "land --create-pr"
+        assert [skill.type for skill in wave.flow_skills] == ["skill", "op"]
+        assert wave.flow_skills[1].name == "land --create-pr"
 
 
 class TestCommitEntryModel:

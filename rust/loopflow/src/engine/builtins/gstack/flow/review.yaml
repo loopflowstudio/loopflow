@@ -1,7 +1,7 @@
 # gstack/review: parallel deep review with built-in synthesis
 - and:
     branches:
-      - step: gstack/pr-review
-      - step: gstack/cso
-      - step: gstack/codex
+      - skill: gstack/pr-review
+      - skill: gstack/cso
+      - skill: gstack/codex
     synthesize: synthesize

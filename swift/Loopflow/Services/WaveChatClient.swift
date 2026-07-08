@@ -127,7 +127,7 @@ public struct ComposerVerbs: Equatable, Sendable {
 }
 
 /// Verb selection: idle+text = Send; turning+text = Steer (Interrupt & Send
-/// one step away); turning+empty = Interrupt. While interrupting, text
+/// one keypress away); turning+empty = Interrupt. While interrupting, text
 /// degrades to a queued Send and a bare re-interrupt is pointless (disabled).
 public func composerVerbs(state: WaveFlowloopState, hasText: Bool) -> ComposerVerbs {
     switch (state, hasText) {
@@ -163,7 +163,7 @@ struct FrameChannelTag: Decodable {
 /// `OpFrame` (`wave/wire.rs`); `kind` reuses the `run_events` ledger vocabulary
 /// 1:1 (`run.started`, `run.completed`, `run.errored`) so the live frame and a
 /// `lf runs` history row fold with one code path. Live-only — never replayed;
-/// history is the query. The dashboard card for a wave reads its run/flow/step
+/// history is the query. The dashboard card for a wave reads its run/flow/skill
 /// motion from these frames on the same connection that drives the chat pane.
 public struct WaveOpFrame: Decodable, Equatable, Sendable {
     public let kind: String
@@ -203,7 +203,7 @@ public final class WaveChatConnection {
     /// Last `memory` frame's summary — the wave's most recent MEMORY.md
     /// curation. Live-only (no replay); exposed for the UI to adopt later.
     public private(set) var memorySummary: String?
-    /// Last `op` frame — this wave's most recent run/flow/step motion. Live-only
+    /// Last `op` frame — this wave's most recent run/flow/skill motion. Live-only
     /// (no replay); the dashboard card lights up from this alongside the chat
     /// pane, both off this one connection. History is a `lf runs` query.
     public private(set) var lastOp: WaveOpFrame?

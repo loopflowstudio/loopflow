@@ -1,6 +1,6 @@
 name: with_direction
 repo: tests/parity/fixtures/with_direction
-step: test
+skill: test
 surface: headless
 directions:
   - thorough

@@ -43,7 +43,7 @@ fn suggest_actions_reply(ctx: &ClientContext, action_style: Option<&str>) -> Str
     let max_actions = if ctx.compact { 3 } else { 4 };
     let style_guidance = match action_style {
         Some("procedural") => {
-            "Suggest actions that move the workflow forward. Prefer clear next steps and binary choices."
+            "Suggest actions that move the workflow forward. Prefer clear next actions and binary choices."
         }
         Some("exploratory") => {
             "Suggest actions that open meaningful branches. Prefer options that explore alternatives or deepen understanding."

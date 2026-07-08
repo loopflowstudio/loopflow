@@ -35,15 +35,15 @@ pub use config::{
 };
 pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use execution::{
-    advance_cursor_after_wait, current_flow_parents, current_step, xor_verdict_path,
-    ExecutionContext, ExecutionCursor, ExecutionStep, FlowEngine, FlowOutcome, FlowProgress,
-    LoopCursorPhase, NestedCursor, StepExecutor, StepOutcome, TEMP_XOR_ROUTE_STEP_NAME,
+    advance_cursor_after_wait, current_flow_parents, current_skill, xor_verdict_path,
+    ExecutionContext, ExecutionCursor, ExecutionSkill, FlowEngine, FlowOutcome, FlowProgress,
+    LoopCursorPhase, NestedCursor, SkillExecutor, SkillOutcome, TEMP_XOR_ROUTE_STEP_NAME,
 };
 pub use flow::{
-    available_flow_names, expand_flow, load_direction, load_flow, load_goal, load_step,
+    available_flow_names, expand_flow, load_direction, load_flow, load_goal, load_skill,
     next_action, render_goal, ConcreteAnd, ConcreteAndBranch, ConcreteItem, ConcreteLoop,
-    ConcreteOp, ConcreteOr, ConcreteStep, ConcreteXor, Direction, Flow, FlowAction, FlowItem, Goal,
-    GoalRenderContext, Op, OrDef, Step, XorDef, XorPath,
+    ConcreteOp, ConcreteOr, ConcreteSkill, ConcreteXor, Direction, Flow, FlowAction, FlowItem,
+    Goal, GoalRenderContext, Op, OrDef, Skill, XorDef, XorPath,
 };
 pub use launch::{
     prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, PreparedLaunchPrompt,

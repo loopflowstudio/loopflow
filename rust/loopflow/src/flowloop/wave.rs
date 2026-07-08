@@ -85,7 +85,7 @@ pub const CRON_GRACE: chrono::Duration = chrono::Duration::hours(24);
 /// Compact nudge for heartbeat passes (the pass seed carries goal and
 /// memory; the nudge only names the wake).
 const HEARTBEAT_PROMPT: &str = "Heartbeat: re-read your goal and memory, then take the next \
-     orchestration step. If nothing needs doing, say so in one line.";
+     orchestration skill. If nothing needs doing, say so in one line.";
 
 /// Longest task excerpt carried per worker in the `<in_flight>` section —
 /// enough to recognize the dispatch, token-lean by design.

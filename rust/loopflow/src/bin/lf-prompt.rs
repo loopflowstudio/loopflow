@@ -15,9 +15,9 @@ struct Args {
     #[arg(long)]
     repo: PathBuf,
 
-    /// Step name
+    /// Skill name
     #[arg(long)]
-    step: Option<String>,
+    skill: Option<String>,
 
     /// Prompt surface (headless/cli/mac/iphone)
     #[arg(long)]
@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let opts = GatherContextOpts {
         repo_root: args.repo.clone(),
-        step: args.step,
+        skill: args.skill,
         message: None,
         operate: !args.no_loopflow,
         surface: args.surface.unwrap_or_default(),

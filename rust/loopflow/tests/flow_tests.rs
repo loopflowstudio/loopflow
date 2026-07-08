@@ -1,14 +1,14 @@
 use std::fs;
 use std::path::Path;
 
-use loopflow::engine::flow::{ConcreteItem, FlowItem, Step};
+use loopflow::engine::flow::{ConcreteItem, FlowItem, Skill};
 use loopflow::engine::{expand_flow, load_flow};
 use tempfile::TempDir;
 
-fn write_step(repo: &Path, name: &str, content: &str) {
-    let steps_dir = repo.join(".lf/steps");
-    fs::create_dir_all(&steps_dir).unwrap();
-    fs::write(steps_dir.join(format!("{name}.md")), content).unwrap();
+fn write_skill(repo: &Path, name: &str, content: &str) {
+    let skills_dir = repo.join(".lf/skills");
+    fs::create_dir_all(&skills_dir).unwrap();
+    fs::write(skills_dir.join(format!("{name}.md")), content).unwrap();
 }
 
 fn write_flow(repo: &Path, name: &str, content: &str) {
@@ -22,17 +22,17 @@ fn expand_named_flow(repo: &Path, name: &str) -> Vec<ConcreteItem> {
     expand_flow(&flow, repo).unwrap()
 }
 
-fn assert_step_name(item: &ConcreteItem, expected: &str) {
+fn assert_skill_name(item: &ConcreteItem, expected: &str) {
     match item {
-        ConcreteItem::Step(step) => assert_eq!(step.step.name, expected),
-        other => panic!("expected step {expected}, got {other:?}"),
+        ConcreteItem::Skill(skill) => assert_eq!(skill.skill.name, expected),
+        other => panic!("expected skill {expected}, got {other:?}"),
     }
 }
 
-fn assert_step_sequence(items: &[ConcreteItem], expected: &[&str]) {
+fn assert_skill_sequence(items: &[ConcreteItem], expected: &[&str]) {
     assert_eq!(items.len(), expected.len());
-    for (item, step_name) in items.iter().zip(expected) {
-        assert_step_name(item, step_name);
+    for (item, skill_name) in items.iter().zip(expected) {
+        assert_skill_name(item, skill_name);
     }
 }
 
@@ -45,7 +45,7 @@ fn flow_parsing_parity() {
         "sample",
         r#"
 - implement
-- step:
+- skill:
     name: review
     interactive: true
     direction: [ux, security]
@@ -57,7 +57,7 @@ fn flow_parsing_parity() {
     assert_eq!(flow.items.len(), 2);
     assert_eq!(
         flow.items[0],
-        FlowItem::Step(Step {
+        FlowItem::Skill(Skill {
             name: "implement".to_string(),
             agent: None,
             default_agent: None,
@@ -70,7 +70,7 @@ fn flow_parsing_parity() {
     );
     assert_eq!(
         flow.items[1],
-        FlowItem::Step(Step {
+        FlowItem::Skill(Skill {
             name: "review".to_string(),
             agent: None,
             default_agent: None,
@@ -93,12 +93,12 @@ fn golden_flows() {
         r#"
 - and:
     branches:
-      - step: { name: implement }
-      - step: { name: polish }
+      - skill: { name: implement }
+      - skill: { name: polish }
 - and:
     branches:
-      - step: { name: quick }
-      - step: { name: deep }
+      - skill: { name: quick }
+      - skill: { name: deep }
 - flow: nested
 "#,
     );
@@ -135,7 +135,7 @@ fn and_select_is_rejected() {
         r#"
 - and:
     branches:
-      - step: { name: implement }
+      - skill: { name: implement }
     select: all
 "#,
     );
@@ -168,7 +168,7 @@ fn flow_ref_parses_into_items() {
     let flow = load_flow("parent", repo).unwrap();
     assert_eq!(flow.items.len(), 2);
     assert!(matches!(flow.items[0], FlowItem::FlowRef(_)));
-    assert!(matches!(flow.items[1], FlowItem::Step(_)));
+    assert!(matches!(flow.items[1], FlowItem::Skill(_)));
 }
 
 #[test]
@@ -221,63 +221,63 @@ fn expand_flow_tracks_parents() {
     let flow = load_flow("parent", repo).unwrap();
     let items = expand_flow(&flow, repo).unwrap();
     match &items[0] {
-        ConcreteItem::Step(step) => {
-            assert_eq!(step.step.name, "implement");
-            assert_eq!(step.flow_parents, vec!["parent", "child"]);
+        ConcreteItem::Skill(skill) => {
+            assert_eq!(skill.skill.name, "implement");
+            assert_eq!(skill.flow_parents, vec!["parent", "child"]);
         }
-        _ => panic!("expected expanded step"),
+        _ => panic!("expected expanded skill"),
     }
 }
 
 /// Plain string items in flow YAML that match a sub-flow name should be
-/// expanded as sub-flows, not treated as step names.
+/// expanded as sub-flows, not treated as skill names.
 #[test]
 fn expand_flow_resolves_plain_string_as_subflow() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    write_flow(repo, "publish", "- step-a\n- step-b");
+    write_flow(repo, "publish", "- skill-a\n- skill-b");
     write_flow(repo, "parent", "- review\n- publish");
 
     let items = expand_named_flow(repo, "parent");
 
-    assert_eq!(items.len(), 3, "publish should expand into its sub-steps");
-    assert_step_name(&items[0], "review");
+    assert_eq!(items.len(), 3, "publish should expand into its sub-skills");
+    assert_skill_name(&items[0], "review");
     match &items[1] {
-        ConcreteItem::Step(s) => {
-            assert_eq!(s.step.name, "step-a");
+        ConcreteItem::Skill(s) => {
+            assert_eq!(s.skill.name, "skill-a");
             assert_eq!(s.flow_parents, vec!["parent", "publish"]);
         }
-        _ => panic!("expected step from publish sub-flow"),
+        _ => panic!("expected skill from publish sub-flow"),
     }
     match &items[2] {
-        ConcreteItem::Step(s) => {
-            assert_eq!(s.step.name, "step-b");
+        ConcreteItem::Skill(s) => {
+            assert_eq!(s.skill.name, "skill-b");
             assert_eq!(s.flow_parents, vec!["parent", "publish"]);
         }
-        _ => panic!("expected step from publish sub-flow"),
+        _ => panic!("expected skill from publish sub-flow"),
     }
 }
 
-/// A plain string that is both a step name AND a flow name should NOT
-/// be expanded as a sub-flow (step takes priority to avoid ambiguity).
+/// A plain string that is both a skill name AND a flow name should NOT
+/// be expanded as a sub-flow (skill takes priority to avoid ambiguity).
 #[test]
-fn expand_flow_prefers_step_over_single_step_flow() {
+fn expand_flow_prefers_skill_over_single_skill_flow() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
-    write_step(repo, "review", "Review the code.");
+    write_skill(repo, "review", "Review the code.");
     write_flow(repo, "parent", "- review");
 
     let items = expand_named_flow(repo, "parent");
 
     assert_eq!(items.len(), 1);
     match &items[0] {
-        ConcreteItem::Step(s) => {
-            assert_eq!(s.step.name, "review");
+        ConcreteItem::Skill(s) => {
+            assert_eq!(s.skill.name, "review");
             assert_eq!(s.flow_parents, vec!["parent"]);
         }
-        _ => panic!("expected step"),
+        _ => panic!("expected skill"),
     }
 }
 
@@ -300,8 +300,8 @@ fn builtin_garden_flow_structure() {
 
     // garden: scan, assess, xor(act, silence)
     assert_eq!(items.len(), 3);
-    assert_step_name(&items[0], "scan");
-    assert_step_name(&items[1], "assess");
+    assert_skill_name(&items[0], "scan");
+    assert_skill_name(&items[1], "assess");
     match &items[2] {
         ConcreteItem::Xor(xor_def) => {
             assert_eq!(xor_def.paths.len(), 2);
@@ -326,7 +326,7 @@ fn builtin_governance_flows_structure() {
 
     for (flow_name, expected) in cases {
         let items = expand_named_flow(repo, flow_name);
-        assert_step_sequence(&items, &expected);
+        assert_skill_sequence(&items, &expected);
     }
 }
 

@@ -168,7 +168,7 @@ enum LocalWaveAgentLauncher {
     /// so every candidate is capability-probed before it's trusted.
     ///
     /// The probe is `lf help wave`, NOT `lf wave --help`: lf's arg reorderer
-    /// treats an unknown `wave` as a step name, so `lf wave --help` prints the
+    /// treats an unknown `wave` as a skill name, so `lf wave --help` prints the
     /// root help and exits 0 even on a build without the subcommand. `lf help
     /// wave` exits 0 only when the subcommand exists (verified against both a
     /// stale and a wave-capable build), and clap answers it without touching

@@ -117,7 +117,7 @@ public final class RepoState {
 
     public var showingFlows = false
 
-    /// Fetch the flow + step catalog for the currently selected repo.
+    /// Fetch the flow + skill catalog for the currently selected repo.
     public func fetchCatalog() async throws -> Catalog {
         let repo = currentRepo?.path
         return try await waveService.fetchCatalog(repo: repo)
@@ -137,11 +137,11 @@ public final class RepoState {
         }
         let repoRoot = currentRepo?.path() ?? FileManager.default.currentDirectoryPath
         let wave = waveStore.wave(for: waveId)
-        let sessionStep = wave?.activeRun?.currentStep ?? "design"
+        let sessionSkill = wave?.activeRun?.currentSkill ?? "design"
         let state = SessionState(
             waveId: waveId,
             sessionConfig: AgentSessionConfig(
-                step: sessionStep,
+                skill: sessionSkill,
                 repoRoot: repoRoot,
                 directions: wave?.direction ?? [],
                 area: wave?.area.first,
@@ -375,7 +375,7 @@ public final class RepoState {
                         repo: repo,
                         direction: ["clarity"],
                         status: .failed,
-                        currentStep: "implement",
+                        currentSkill: "implement",
                         error: "Build failed: missing dependency 'libcrypto'",
                         createdAt: Date().addingTimeInterval(-3600)
                     )
@@ -398,7 +398,7 @@ public final class RepoState {
                 status: .completed,
                 iteration: 1,
                 branch: "wave-auth-feature",
-                currentStep: "gate",
+                currentSkill: "gate",
                 pr: PullRequest(url: URL(string: "https://github.com/example/repo/pull/42")!, number: 42, state: .merged, title: "Add auth middleware"),
                 startedAt: Date().addingTimeInterval(-7200),
                 endedAt: Date().addingTimeInterval(-6600),
@@ -414,7 +414,7 @@ public final class RepoState {
                 status: .completed,
                 iteration: 2,
                 branch: "wave-auth-feature",
-                currentStep: "gate",
+                currentSkill: "gate",
                 pr: PullRequest(url: URL(string: "https://github.com/example/repo/pull/45")!, number: 45, state: .open, title: "Add OAuth token refresh"),
                 startedAt: Date().addingTimeInterval(-3600),
                 endedAt: Date().addingTimeInterval(-3000),
@@ -430,7 +430,7 @@ public final class RepoState {
                 status: .running,
                 iteration: 3,
                 branch: "wave-auth-feature",
-                currentStep: "implement",
+                currentSkill: "implement",
                 startedAt: Date().addingTimeInterval(-300),
                 createdAt: Date().addingTimeInterval(-300)
             ),
@@ -705,7 +705,7 @@ public final class RepoState {
     }
 
     private func statusSnapshot(for waveId: String) async throws
-        -> (runs: [Run], attention: [AttentionItem], mind: String?) {
+        -> (runs: [Run], attention: [AttentionItem], flowloop: String?) {
         guard let registryQuery,
               let wave = waveStore.wave(for: waveId)
         else {
@@ -751,16 +751,16 @@ public final class RepoState {
         // Note: loadWaveContent is driven by the snapshot loop / selection — not duplicated here.
         switch newStatus {
         case .waiting:
-            let step = wave.recentSteps.first?.step ?? "step"
+            let skill = wave.recentSkills.first?.skill ?? "skill"
             NotificationService.shared.notifyNeedsInteractive(
                 waveId: wave.id,
                 waveName: wave.displayName,
-                step: step
+                skill: skill
             )
 
         case .failed:
-            let step = wave.recentSteps.first?.step ?? "unknown step"
-            let message = "Error in \(step)"
+            let skill = wave.recentSkills.first?.skill ?? "unknown skill"
+            let message = "Error in \(skill)"
             NotificationService.shared.notifyError(
                 waveId: wave.id,
                 waveName: wave.displayName,
@@ -851,21 +851,21 @@ public final class RepoState {
         direction: [String]? = nil,
         status: WaveStatus? = nil,
         agent: String? = nil,
-        stepAgents: [String: String]? = nil
+        skillAgents: [String: String]? = nil
     ) async throws {
         try await optimistic(wave.id, mutation: { w in
             if let area { w.area = area }
             if let direction { w.direction = direction }
             if let status { w.status = status }
             if let agent { w.agent = agent.isEmpty ? nil : agent }
-            if let stepAgents { w.stepAgents = stepAgents }
+            if let skillAgents { w.skillAgents = skillAgents }
         }) {
             let config = WaveConfigUpdate(
                 area: area,
                 direction: direction,
                 status: status,
                 agent: agent,
-                stepAgents: stepAgents
+                skillAgents: skillAgents
             )
             _ = try await self.waveService.updateWave(wave.id, config: config)
         }

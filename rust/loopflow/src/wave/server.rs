@@ -578,7 +578,7 @@ enum ExecVerdict {
 /// - `op …` EXCEPT `op auth` — git/GitHub/pm/release/queue: the commit-and-land path.
 /// - `chat`, `memory` — a worker reporting up and curating wave memory.
 /// - the read verbs `ls`/`status`/`runs`/`sub`/`trace`/`usage` — inspection.
-/// - the dispatch path: a flow/step run or an inline prompt carrying
+/// - the dispatch path: a flow/skill run or an inline prompt carrying
 ///   `--dispatch`, which lands in a FRESH sandboxed worktree.
 ///
 /// Rejected:

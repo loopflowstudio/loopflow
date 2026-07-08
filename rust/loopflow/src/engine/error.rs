@@ -6,8 +6,8 @@ use serde::Serialize;
 pub enum StoreError {
     #[error("run not found: {0}")]
     RunNotFound(String),
-    #[error("step run not found: {0}")]
-    StepRunNotFound(String),
+    #[error("skill run not found: {0}")]
+    SkillRunNotFound(String),
     #[error("store error: {0}")]
     Other(String),
 }
@@ -18,14 +18,14 @@ pub enum LoadError {
     FlowNotFound(String),
     #[error("goal not found: {0}")]
     GoalNotFound(String),
-    #[error("step not found: {0}")]
-    StepNotFound(String),
+    #[error("skill not found: {0}")]
+    SkillNotFound(String),
     #[error("direction not found: {0}")]
     DirectionNotFound(String),
     #[error("invalid flow: {0}")]
     InvalidFlow(String),
-    #[error("invalid step: {0}")]
-    InvalidStep(String),
+    #[error("invalid skill: {0}")]
+    InvalidSkill(String),
     #[error("invalid direction: {0}")]
     InvalidDirection(String),
     #[error("io error: {0}")]
@@ -38,8 +38,8 @@ pub enum CoreError {
     FlowNotFound(String),
     #[error("goal not found: {0}")]
     GoalNotFound(String),
-    #[error("step not found: {0}")]
-    StepNotFound(String),
+    #[error("skill not found: {0}")]
+    SkillNotFound(String),
     #[error("invalid flow: {0}")]
     InvalidFlow(String),
     #[error("execution failed: {0}")]
@@ -72,7 +72,7 @@ impl From<LoadError> for CoreError {
         match err {
             LoadError::FlowNotFound(name) => CoreError::FlowNotFound(name),
             LoadError::GoalNotFound(name) => CoreError::GoalNotFound(name),
-            LoadError::StepNotFound(name) => CoreError::StepNotFound(name),
+            LoadError::SkillNotFound(name) => CoreError::SkillNotFound(name),
             LoadError::InvalidFlow(msg) => CoreError::InvalidFlow(msg),
             other => CoreError::ExecutionFailed(other.to_string()),
         }

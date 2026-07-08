@@ -451,7 +451,7 @@ fn generated_only(repo: &Path, base_ref: &str) -> OpsResult<bool> {
 
 fn is_protected_path(path: &Path) -> bool {
     path.starts_with(Path::new("wave"))
-        || path.starts_with(Path::new(".lf/steps"))
+        || path.starts_with(Path::new(".lf/skills"))
         || path.starts_with(Path::new(".lf/flows"))
         || path.starts_with(Path::new(".lf/directions"))
         || path == Path::new(".lf/config.yaml")

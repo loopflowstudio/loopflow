@@ -49,7 +49,7 @@ use crate::engine::prompt::{ContextBreakdown, DiffTier, DocumentSource};
 /// Format the context header table for stderr output.
 pub fn format_context_header(breakdown: &ContextBreakdown) -> String {
     let mut lines = Vec::new();
-    let step_tokens = breakdown.source_tokens(DocumentSource::Step);
+    let skill_tokens = breakdown.source_tokens(DocumentSource::Skill);
     let direction_tokens = breakdown.source_tokens(DocumentSource::Direction);
     let scratch_tokens = breakdown.source_tokens(DocumentSource::Scratch);
     let wave_tokens = breakdown.source_tokens(DocumentSource::Wave)
@@ -61,8 +61,8 @@ pub fn format_context_header(breakdown: &ContextBreakdown) -> String {
     let wave_memory_tokens = breakdown.source_tokens(DocumentSource::WaveMemory);
     let clipboard_tokens = breakdown.source_tokens(DocumentSource::Clipboard);
 
-    // Step name as prominent header
-    let title = breakdown.step_name.as_deref().unwrap_or("context");
+    // Skill name as prominent header
+    let title = breakdown.skill_name.as_deref().unwrap_or("context");
     let bar_len = 45usize.saturating_sub(title.len() + 4);
     lines.push(format!(
         "\u{2500}\u{2500} {} {}",
@@ -70,8 +70,8 @@ pub fn format_context_header(breakdown: &ContextBreakdown) -> String {
         "\u{2500}".repeat(bar_len)
     ));
 
-    if step_tokens > 0 {
-        lines.push(format_row("step", step_tokens, ""));
+    if skill_tokens > 0 {
+        lines.push(format_row("skill", skill_tokens, ""));
     }
 
     if direction_tokens > 0 {
@@ -160,7 +160,7 @@ fn format_tokens(n: usize) -> String {
 
 /// Build a reproducible lf command from run parameters.
 pub fn format_reproducible_command(
-    step: Option<&str>,
+    skill: Option<&str>,
     directions: &[String],
     wave: Option<&str>,
     docs: &[String],
@@ -169,7 +169,7 @@ pub fn format_reproducible_command(
     model: Option<&str>,
 ) -> String {
     let mut parts = vec!["lf".to_string()];
-    if let Some(s) = step {
+    if let Some(s) = skill {
         parts.push(s.to_string());
     }
     for d in directions {
@@ -220,13 +220,13 @@ mod tests {
     fn format_context_header_with_content() {
         let breakdown = ContextBreakdown {
             source_tokens: std::collections::HashMap::from([
-                (DocumentSource::Step, 1000),
+                (DocumentSource::Skill, 1000),
                 (DocumentSource::Direction, 500),
                 (DocumentSource::Diff, 5000),
                 (DocumentSource::Docs, 2000),
             ]),
             system_tokens: 3000,
-            step_name: Some("implement".to_string()),
+            skill_name: Some("implement".to_string()),
             direction_names: vec!["security".to_string()],
             diff_tier: DiffTier::UnifiedDiff,
             diff_file_count: 8,

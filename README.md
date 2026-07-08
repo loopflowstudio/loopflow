@@ -109,31 +109,31 @@ commands for long-term coordination.
 | PR merged | `lf op queue reconcile --wave <name>` |
 | Push to main | `lf chat --wave <name> "main moved: …"` — the flowloop decides whether to rebase or integrate |
 
-## Steps
+## Skills
 
 ```bash
 lf debug -c    # paste an error, watch it fix
 lf op pm show --wave designer   # print the wave's live Linear roadmap
 lf design      # interactive design session
-lf gstack/office-hours   # run a built-in gstack workstyle step
+lf gstack/office-hours   # run a built-in gstack workstyle skill
 lf office-hours          # same thing — bare name works when unambiguous
 lf npx/vercel-labs/deep-research   # fetch any Claude Skill live and run it
-lf op sync-skills       # compile steps into ~/.claude/skills and ~/.agents/skills
+lf op sync-skills       # compile skills into ~/.claude/skills and ~/.agents/skills
 ```
 
-Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
+Skills are prompts that run coding agents. Add your own in `.lf/skills/`.
 
-`lf op sync-skills` compiles resolved steps (builtins + your `~/.lf/`) into your personal vendor Skill directories under `~/.claude/skills` and `~/.agents/skills`, so compact skill invocations work in Claude and Codex sessions (`/step` for Claude, `$step` for Codex handoffs). It only ever writes under your home — never into a working repo. Add `--yes` to skip the confirmation prompt.
+`lf op sync-skills` compiles resolved skills (builtins + your `~/.lf/`) into your personal vendor Skill directories under `~/.claude/skills` and `~/.agents/skills`, so compact skill invocations work in Claude and Codex sessions (`/skill` for Claude, `$skill` for Codex handoffs). It only ever writes under your home — never into a working repo. Add `--yes` to skip the confirmation prompt.
 
-Names resolve in this order: your repo (`.lf/steps/<name>.md`, `.lf/steps/<ns>/<name>.md`, or `.claude/commands/<name>.md`) → your global dir (`~/.lf/steps/<name>.md`, `~/.lf/steps/<ns>/<name>.md`, or `~/.claude/commands/<name>.md`) → core builtins (`build/`, `govern/`, `ops/`) → namespaced builtins (`gstack/`, …) → external skill namespaces. A bare name resolves to a namespaced builtin only when exactly one namespace has that name. Namespaced steps and flows use `/`, not `:`. For third-party skills, use `lf npx/<owner>/<repo>` (or `lf npx/<name>` once cached or searchable via `npx skills`). The legacy `rams/rams` shim also resolves when `~/.claude/commands/rams.md` exists.
+Names resolve in this order: your repo (`.lf/skills/<name>.md`, `.lf/skills/<ns>/<name>.md`, or `.claude/commands/<name>.md`) → your global dir (`~/.lf/skills/<name>.md`, `~/.lf/skills/<ns>/<name>.md`, or `~/.claude/commands/<name>.md`) → core builtins (`build/`, `govern/`, `ops/`) → namespaced builtins (`gstack/`, …) → external skill namespaces. A bare name resolves to a namespaced builtin only when exactly one namespace has that name. Namespaced skills and flows use `/`, not `:`. For third-party skills, use `lf npx/<owner>/<repo>` (or `lf npx/<name>` once cached or searchable via `npx skills`). The legacy `rams/rams` shim also resolves when `~/.claude/commands/rams.md` exists.
 
-Steps and flows are organized into three categories by agency: **build** (manual work you drive), **govern** (autonomous coordination the system drives), **ops** (side-channel utilities).
+Skills and flows are organized into three categories by agency: **build** (manual work you drive), **govern** (autonomous coordination the system drives), **ops** (side-channel utilities).
 
-### Build steps (`build/`)
+### Build skills (`build/`)
 
 Manual work — you invoke these, often interactively.
 
-| Step | What it does |
+| Skill | What it does |
 |------|--------------|
 | `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
 | `research` | Map the territory — architecture, complexity, quality, potential |
@@ -159,11 +159,11 @@ Manual work — you invoke these, often interactively.
 | `refine` | Refine existing work |
 | `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
 
-### Govern steps (`govern/`)
+### Govern skills (`govern/`)
 
 Autonomous coordination — crons and waves-watching-waves drive these.
 
-| Step | What it does |
+| Skill | What it does |
 |------|--------------|
 | `scan` | Read member wave state — PRs, blocks, progress, git activity |
 | `assess` | Judge wave health and identify pressure points |
@@ -179,11 +179,11 @@ Autonomous coordination — crons and waves-watching-waves drive these.
 | `s2-scan` | Scan backlogs, PR overlap, path overlap, and conflict history |
 | `s2-assess` | Assess coordination risk, conflict map, and safe ordering |
 
-### Ops steps (`ops/`)
+### Ops skills (`ops/`)
 
 Side-channel utilities — wrappers around git, PR, release, and wave state.
 
-| Step | What it does |
+| Skill | What it does |
 |------|--------------|
 | `init` | Set up loopflow in this repo |
 | `commit` | Commit with generated message |
@@ -197,16 +197,16 @@ Side-channel utilities — wrappers around git, PR, release, and wave state.
 | `release-notes` | Write narrative `RELEASE_NOTES.md` from release context, preferring release decisions when present |
 | `synthesize` | Combine multiple perspectives into one |
 | `token-compress` | Compress text into a target token budget without silently dropping important information |
-| `validate` | Validate flows, steps, and directions |
+| `validate` | Validate flows, skills, and directions |
 
 ## Flows
 
 ```bash
-lf design && lf implement && lf gate    # chain steps manually
+lf design && lf implement && lf gate    # chain skills manually
 lf build                                # or use a named flow
 ```
 
-Steps chain into flows. Flows feed into waves.
+Skills chain into flows. Flows feed into waves.
 
 Flows can include mechanical ops items directly:
 
@@ -218,7 +218,7 @@ Flows can include mechanical ops items directly:
 
 ### Build flows (`build/`)
 
-| Flow | Steps |
+| Flow | Skills |
 |------|-------|
 | `build` | kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy |
 | `build-or-silent` | xor(build, silence) |
@@ -232,7 +232,7 @@ Flows can include mechanical ops items directly:
 
 ### Govern flows (`govern/`)
 
-| Flow | Steps |
+| Flow | Skills |
 |------|-------|
 | `garden` | scan → assess → xor(garden-act, silence) |
 | `garden-act` | mutate → review |
@@ -245,7 +245,7 @@ Flows can include mechanical ops items directly:
 
 ### Ops flows (`ops/`)
 
-| Flow | Steps |
+| Flow | Skills |
 |------|-------|
 | `release` | op: release run patch |
 | `sync` | rebase → integrate-upstream |
@@ -276,7 +276,7 @@ lfd serve
 curl -s "http://127.0.0.1:2486/v0/catalog?repo=$(pwd)" | jq '.result.flows[] | {name, category, source}'
 ```
 
-Open **Flows** in Loopflow to browse the same catalog visually. The left pane groups flows and steps by `build`, `govern`, and `ops`; the right pane shows every parent flow that uses the selected flow or step.
+Open **Flows** in Loopflow to browse the same catalog visually. The left pane groups flows and skills by `build`, `govern`, and `ops`; the right pane shows every parent flow that uses the selected flow or skill.
 
 ### Branches (xor)
 
@@ -296,19 +296,19 @@ Branches route a flow based on an agent's assessment of the current state. Exact
         description: "Everything is healthy"
 ```
 
-The `xor` construct runs a router step that reads scratch/ and chooses a path. The router's prompt gets routing instructions appended automatically — the step author focuses on *what to think about*, not *how to express the choice*. A path with no `flow:` or `step:` (like `silence`) is a clean no-op exit.
+The `xor` construct runs a router skill that reads scratch/ and chooses a path. The router's prompt gets routing instructions appended automatically — the skill author focuses on *what to think about*, not *how to express the choice*. A path with no `flow:` or `skill:` (like `silence`) is a clean no-op exit.
 
 If no `router:` is specified, a generic routing agent picks a path based on scratch/ contents.
 
 ## Playing in the Waves
 
-Once you're chaining steps into flows, you're ready to ride a wave. Write its `wave/<name>/GOAL.md`, then run the agent:
+Once you're chaining skills into flows, you're ready to ride a wave. Write its `wave/<name>/GOAL.md`, then run the agent:
 
 ```bash
 lf wave engbot             # start the wave agent
 ```
 
-Directions compose extra nuance into any step or flow the wave dispatches.
+Directions compose extra nuance into any skill or flow the wave dispatches.
 
 ```bash
 lf research -d ux,clarity
@@ -334,9 +334,9 @@ uv run python scripts/install.py local --use   # full build: lf, lfd, Loopflow.a
 uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf+lfd, sync skills
 ```
 
-`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, install them into the local bin dir, and sync loopflow steps into `~/.claude/skills` and `~/.agents/skills`. Both paths run `lf op sync-skills --global --yes` after installing, so Claude and Codex always see the latest steps.
+`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, install them into the local bin dir, and sync loopflow skills into `~/.claude/skills` and `~/.agents/skills`. Both paths run `lf op sync-skills --global --yes` after installing, so Claude and Codex always see the latest skills.
 
-Built-in steps and flows included. `lf init` sets up your coding agent and preferences.
+Built-in skills and flows included. `lf init` sets up your coding agent and preferences.
 
 ```bash
 cargo install --git https://github.com/loopflowstudio/loopflow --bin lf --bin lfd
@@ -408,13 +408,13 @@ set -g @loopflow_status_format '[#{branch}]'        # branch only
 set -g @loopflow_status_format '[lf: #{status}]'    # default
 ```
 
-Variables: `#{status}` (computed text), `#{branch}`, `#{step}`, `#{waves}`, `#{wave}`.
+Variables: `#{status}` (computed text), `#{branch}`, `#{skill}`, `#{waves}`, `#{wave}`.
 
 Keybindings start with `prefix+l`:
 
 | Key | Action |
 |-----|--------|
-| `r` | Run step/wave |
+| `r` | Run skill/wave |
 | `s` | Stop |
 | `o` | Open logs |
 | `p` | Open PR |

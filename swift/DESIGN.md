@@ -97,12 +97,12 @@ Cursor provides three tiers: Tab (local), Cmd+K (scoped), Agent (autonomous). Ea
 For Loopflow:
 - Quick actions: single-task launches, inline status
 - Standard mode: task execution with streaming output
-- Agent mode: multi-step pipelines with checkpoints
+- Agent mode: multi-skill pipelines with checkpoints
 - Always provide a path back to manual control
 
 ### 7. Transparency Over Automation (Cursor, Andy Matuschak)
 
-**Show plans before execution. Break work into auditable steps.**
+**Show plans before execution. Break work into auditable skills.**
 
 Cursor's Plan Mode decouples reasoning from execution. Matuschak warns against tools that collect without compounding.
 
@@ -144,7 +144,7 @@ For Loopflow:
 
 **Give users actions, not just information.**
 
-When something is wrong, don't just tell them—give them a button to fix it. Empty states, error states, and disconnected states should all offer the next step.
+When something is wrong, don't just tell them—give them a button to fix it. Empty states, error states, and disconnected states should all offer the next skill.
 
 For Loopflow:
 - "Connect lfd" not "lfd not connected"

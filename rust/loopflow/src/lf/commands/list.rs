@@ -1,7 +1,7 @@
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{
-    builtin_flow_descriptions, builtin_flows, builtin_step_description, builtin_steps,
-    is_step_interactive, list_all_steps, list_user_flows, BUILTIN_FLOW_CATEGORIES,
+    builtin_flow_descriptions, builtin_flows, builtin_skill_description, builtin_skills,
+    is_skill_interactive, list_all_skills, list_user_flows, BUILTIN_FLOW_CATEGORIES,
     BUILTIN_STEP_CATEGORIES,
 };
 
@@ -15,17 +15,17 @@ pub fn show_all() -> Result<()> {
     let repo_root = find_repo_root().ok();
     let colors = Colors::default();
 
-    let (user_steps, global_steps, builtin_only, external_skills) =
-        list_all_steps(repo_root.as_deref());
-    let user_step_set: HashSet<_> = user_steps.iter().cloned().collect();
-    let all_known_steps: HashSet<_> = user_steps
+    let (user_skills, global_skills, builtin_only, external_skills) =
+        list_all_skills(repo_root.as_deref());
+    let user_skill_set: HashSet<_> = user_skills.iter().cloned().collect();
+    let all_known_skills: HashSet<_> = user_skills
         .iter()
-        .chain(global_steps.iter())
+        .chain(global_skills.iter())
         .chain(builtin_only.iter())
         .cloned()
         .collect();
 
-    let builtins = builtin_steps();
+    let builtins = builtin_skills();
 
     // =========================================================================
     // FLOWS section
@@ -97,7 +97,7 @@ pub fn show_all() -> Result<()> {
         );
         for flow in custom_flows {
             let chain = flow
-                .step_names
+                .skill_names
                 .iter()
                 .map(|s| s.as_str())
                 .collect::<Vec<_>>()
@@ -119,22 +119,22 @@ pub fn show_all() -> Result<()> {
     }
 
     // =========================================================================
-    // STEPS section
+    // SKILLS section
     // =========================================================================
     println!(
-        "{cyan}{bold}STEPS{reset}",
+        "{cyan}{bold}SKILLS{reset}",
         cyan = colors.cyan,
         bold = colors.bold,
         reset = colors.reset
     );
     println!();
 
-    for (category, step_names) in BUILTIN_STEP_CATEGORIES {
-        let category_steps: Vec<_> = step_names
+    for (category, skill_names) in BUILTIN_STEP_CATEGORIES {
+        let category_skills: Vec<_> = skill_names
             .iter()
-            .filter(|t| all_known_steps.contains(**t))
+            .filter(|t| all_known_skills.contains(**t))
             .collect();
-        if category_steps.is_empty() {
+        if category_skills.is_empty() {
             continue;
         }
 
@@ -145,11 +145,11 @@ pub fn show_all() -> Result<()> {
             reset = colors.reset
         );
 
-        for name in category_steps {
-            let desc = truncate(&builtin_step_description(name), DESC_WIDTH);
+        for name in category_skills {
+            let desc = truncate(&builtin_skill_description(name), DESC_WIDTH);
             let is_interactive = repo_root
                 .as_ref()
-                .is_some_and(|r| is_step_interactive(r, name));
+                .is_some_and(|r| is_skill_interactive(r, name));
             let badge = if is_interactive {
                 format!(
                     "  {yellow}interactive{reset}",
@@ -159,7 +159,7 @@ pub fn show_all() -> Result<()> {
             } else {
                 String::new()
             };
-            let custom_tag = if user_step_set.contains(*name) {
+            let custom_tag = if user_skill_set.contains(*name) {
                 format!(
                     " {dim}(customized){reset}",
                     dim = colors.dim,
@@ -184,9 +184,9 @@ pub fn show_all() -> Result<()> {
     }
 
     // =========================================================================
-    // User steps (repo-local, not overriding builtins)
+    // User skills (repo-local, not overriding builtins)
     // =========================================================================
-    let custom: Vec<_> = user_steps
+    let custom: Vec<_> = user_skills
         .iter()
         .filter(|t| !builtins.contains(*t))
         .collect();
@@ -200,7 +200,7 @@ pub fn show_all() -> Result<()> {
         for name in custom {
             let is_interactive = repo_root
                 .as_ref()
-                .is_some_and(|r| is_step_interactive(r, name));
+                .is_some_and(|r| is_skill_interactive(r, name));
             let badge = if is_interactive {
                 format!(
                     "  {yellow}interactive{reset}",
@@ -222,19 +222,19 @@ pub fn show_all() -> Result<()> {
     }
 
     // =========================================================================
-    // Global steps
+    // Global skills
     // =========================================================================
-    if !global_steps.is_empty() {
+    if !global_skills.is_empty() {
         println!(
             "{green}{bold}Global{reset}",
             green = colors.green,
             bold = colors.bold,
             reset = colors.reset
         );
-        for name in &global_steps {
+        for name in &global_skills {
             let is_interactive = repo_root
                 .as_ref()
-                .is_some_and(|r| is_step_interactive(r, name));
+                .is_some_and(|r| is_skill_interactive(r, name));
             let badge = if is_interactive {
                 format!(
                     "  {yellow}interactive{reset}",
@@ -301,7 +301,7 @@ pub fn show_all() -> Result<()> {
     // Footer
     // =========================================================================
     println!(
-        "{dim}Run lf <step>, lf <flow>, or lf <namespace>/<step> [args]{reset}",
+        "{dim}Run lf <skill>, lf <flow>, or lf <namespace>/<skill> [args]{reset}",
         dim = colors.dim,
         reset = colors.reset
     );

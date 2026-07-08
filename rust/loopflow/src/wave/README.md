@@ -41,7 +41,7 @@ the respawn affordance, and one day the human-in-the-seat affordance.
   injection. The RESIDENT declares what it consumed in its `TurnOpened`
   delta's `answers`, and the listener validates against its pending fold
   before journaling `TurnStarted.answers`. Quiet for 4 hours with an empty
-  queue → a heartbeat pass nudges the next orchestration step, carrying the
+  queue → a heartbeat pass nudges the next orchestration skill, carrying the
   `<in_flight>` worker fold fetched from `GET /resident/context`.
 - **Crons are the third deadline.** `crons: [{flow, schedule}]` in the
   wave's `GOAL.md` frontmatter (re-read live, no restart); a due schedule

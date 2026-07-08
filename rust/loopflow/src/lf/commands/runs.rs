@@ -129,22 +129,24 @@ pub fn trace(run_id: &str) -> Result<()> {
             .unwrap_or_else(|| "running".to_string()),
     );
 
-    // Step/flow timeline with per-step durations and token deltas (token
-    // fields on step boundaries are cumulative snapshots).
+    // Skill/flow timeline with per-skill durations and token deltas (token
+    // fields on skill boundaries are cumulative snapshots).
     let mut open: BTreeMap<String, i64> = BTreeMap::new();
     let mut last_tokens: i64 = 0;
     for event in &events {
         let key = match (
             event.node.as_str(),
-            event.step.as_deref(),
+            event.skill.as_deref(),
             event.flow.as_deref(),
         ) {
-            ("step", Some(step), _) => format!("step:{step}:{}", event.step_index.unwrap_or(0)),
+            ("skill", Some(skill), _) => {
+                format!("skill:{skill}:{}", event.skill_index.unwrap_or(0))
+            }
             ("flow", _, flow) => format!("flow:{}", flow.unwrap_or("")),
             _ => continue,
         };
         let name = event
-            .step
+            .skill
             .as_deref()
             .or(event.flow.as_deref())
             .unwrap_or("?")
@@ -158,7 +160,7 @@ pub fn trace(run_id: &str) -> Result<()> {
             }
             "completed" | "errored" | "escalated" => {
                 let started = open.remove(&key);
-                if event.node == "step" {
+                if event.node == "skill" {
                     let tokens = event
                         .input_tokens
                         .unwrap_or(0)
@@ -296,7 +298,7 @@ fn summarize(events: &[RunEventRow]) -> Vec<RunSummary> {
             let label = events
                 .iter()
                 .find_map(|e| e.flow.clone())
-                .or_else(|| events.iter().find_map(|e| e.step.clone()))
+                .or_else(|| events.iter().find_map(|e| e.skill.clone()))
                 .or_else(|| {
                     events
                         .iter()
@@ -439,8 +441,8 @@ mod tests {
             event: event.to_string(),
             command: Some(r#"["lf","gate"]"#.to_string()),
             flow: None,
-            step: None,
-            step_index: None,
+            skill: None,
+            skill_index: None,
             error: None,
             input_tokens: None,
             output_tokens: None,

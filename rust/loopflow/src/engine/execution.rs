@@ -7,8 +7,8 @@ use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
 
 use crate::engine::flow::{
-    build_xor_routing_suffix, load_step, load_xor_path_items, ConcreteAnd, ConcreteItem,
-    ConcreteLoop, ConcreteOp, ConcreteStep, ConcreteXor, Step,
+    build_xor_routing_suffix, load_skill, load_xor_path_items, ConcreteAnd, ConcreteItem,
+    ConcreteLoop, ConcreteOp, ConcreteSkill, ConcreteXor, Skill,
 };
 
 pub const TEMP_XOR_ROUTE_STEP_NAME: &str = "xor-route";
@@ -20,18 +20,18 @@ pub struct FlowProgress {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecutionStep {
-    pub step: ConcreteStep,
+pub struct ExecutionSkill {
+    pub skill: ConcreteSkill,
     pub invoke_as: String,
     pub display_name: String,
     pub temporary_content: Option<String>,
 }
 
-impl ExecutionStep {
-    pub fn regular(step: ConcreteStep) -> Self {
-        let name = step.step.name.clone();
+impl ExecutionSkill {
+    pub fn regular(skill: ConcreteSkill) -> Self {
+        let name = skill.skill.name.clone();
         Self {
-            step,
+            skill,
             invoke_as: name.clone(),
             display_name: name,
             temporary_content: None,
@@ -77,7 +77,7 @@ pub enum LoopCursorPhase {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StepOutcome {
+pub enum SkillOutcome {
     Completed,
     Waiting,
 }
@@ -89,7 +89,7 @@ pub enum FlowOutcome {
 }
 
 #[async_trait]
-pub trait StepExecutor: Send + Sync {
+pub trait SkillExecutor: Send + Sync {
     fn repo_root(&self) -> &Path;
 
     async fn before_top_level_item(
@@ -110,7 +110,11 @@ pub trait StepExecutor: Send + Sync {
         Ok(())
     }
 
-    async fn run_step(&self, step: &ExecutionStep, ctx: ExecutionContext) -> Result<StepOutcome>;
+    async fn run_skill(
+        &self,
+        skill: &ExecutionSkill,
+        ctx: ExecutionContext,
+    ) -> Result<SkillOutcome>;
 
     async fn run_op(&self, ops: &ConcreteOp, ctx: ExecutionContext) -> Result<()>;
 
@@ -134,7 +138,7 @@ impl<E> FlowEngine<E> {
     }
 }
 
-impl<E: StepExecutor> FlowEngine<E> {
+impl<E: SkillExecutor> FlowEngine<E> {
     pub async fn run(&self, items: &[ConcreteItem], start_index: usize) -> Result<FlowOutcome> {
         let mut cursor = ExecutionCursor {
             index: start_index,
@@ -202,7 +206,7 @@ impl<E: StepExecutor> FlowEngine<E> {
     ) -> BoxFuture<'a, Result<FlowOutcome>> {
         async move {
             match item {
-                ConcreteItem::Step(step) => self.run_concrete_step(step, ctx).await,
+                ConcreteItem::Skill(skill) => self.run_concrete_skill(skill, ctx).await,
                 ConcreteItem::Op(ops) => {
                     self.executor.run_op(ops, ctx).await?;
                     Ok(FlowOutcome::Completed)
@@ -221,18 +225,18 @@ impl<E: StepExecutor> FlowEngine<E> {
         .boxed()
     }
 
-    async fn run_concrete_step(
+    async fn run_concrete_skill(
         &self,
-        step: &ConcreteStep,
+        skill: &ConcreteSkill,
         ctx: ExecutionContext,
     ) -> Result<FlowOutcome> {
         let outcome = self
             .executor
-            .run_step(&ExecutionStep::regular(step.clone()), ctx)
+            .run_skill(&ExecutionSkill::regular(skill.clone()), ctx)
             .await?;
         Ok(match outcome {
-            StepOutcome::Completed => FlowOutcome::Completed,
-            StepOutcome::Waiting => FlowOutcome::Waiting,
+            SkillOutcome::Completed => FlowOutcome::Completed,
+            SkillOutcome::Waiting => FlowOutcome::Waiting,
         })
     }
 
@@ -244,9 +248,9 @@ impl<E: StepExecutor> FlowEngine<E> {
     ) -> BoxFuture<'a, Result<FlowOutcome>> {
         async move {
             if cursor.child.is_none() {
-                let router_step = self.build_router_step(branch)?;
-                let outcome = self.executor.run_step(&router_step, ctx).await?;
-                if outcome == StepOutcome::Waiting {
+                let router_skill = self.build_router_skill(branch)?;
+                let outcome = self.executor.run_skill(&router_skill, ctx).await?;
+                if outcome == SkillOutcome::Waiting {
                     return Ok(FlowOutcome::Waiting);
                 }
 
@@ -302,19 +306,19 @@ impl<E: StepExecutor> FlowEngine<E> {
                     LoopCursorPhase::Body {
                         cursor: body_cursor,
                     } => {
-                        let outcome = self.run_items(&body.steps, body_cursor, false).await?;
+                        let outcome = self.run_items(&body.skills, body_cursor, false).await?;
                         if outcome == FlowOutcome::Waiting {
                             return Ok(FlowOutcome::Waiting);
                         }
                         *phase = LoopCursorPhase::ExitRouter;
                     }
                     LoopCursorPhase::ExitRouter => {
-                        let router_step = self.build_router_step(&body.exit)?;
+                        let router_skill = self.build_router_skill(&body.exit)?;
                         let outcome = self
                             .executor
-                            .run_step(&router_step, ExecutionContext { progress: None })
+                            .run_skill(&router_skill, ExecutionContext { progress: None })
                             .await?;
-                        if outcome == StepOutcome::Waiting {
+                        if outcome == SkillOutcome::Waiting {
                             return Ok(FlowOutcome::Waiting);
                         }
 
@@ -350,25 +354,25 @@ impl<E: StepExecutor> FlowEngine<E> {
         .boxed()
     }
 
-    fn build_router_step(&self, branch: &ConcreteXor) -> Result<ExecutionStep> {
+    fn build_router_skill(&self, branch: &ConcreteXor) -> Result<ExecutionSkill> {
         let display_name = branch.router.as_deref().unwrap_or(TEMP_XOR_ROUTE_STEP_NAME);
         let routing_suffix = build_xor_routing_suffix(branch);
         let prompt = if let Some(router_name) = branch.router.as_deref() {
-            let router = load_step(router_name, self.executor.repo_root())?;
+            let router = load_skill(router_name, self.executor.repo_root())?;
             let base = router.content.as_deref().unwrap_or("");
             format!("{base}\n\n{routing_suffix}")
         } else {
             format!(
                 "---\nagent: claude:sonnet\n---\n\
-                 Previous steps have analyzed the current state and written their findings to scratch/.\n\
+                 Previous skills have analyzed the current state and written their findings to scratch/.\n\
                  Read scratch/ to understand what's been decided, then choose the right path forward.\n\n\
                  {routing_suffix}"
             )
         };
 
-        Ok(ExecutionStep {
-            step: ConcreteStep {
-                step: Step {
+        Ok(ExecutionSkill {
+            skill: ConcreteSkill {
+                skill: Skill {
                     name: display_name.to_string(),
                     agent: None,
                     default_agent: Some("claude:sonnet".to_string()),
@@ -391,17 +395,17 @@ pub fn xor_verdict_path(repo_root: &Path) -> PathBuf {
     repo_root.join("scratch/route-xor.md")
 }
 
-pub fn current_step(
+pub fn current_skill(
     items: &[ConcreteItem],
     cursor: &ExecutionCursor,
     repo_root: &Path,
-) -> Result<Option<ConcreteStep>> {
+) -> Result<Option<ConcreteSkill>> {
     let Some(item) = items.get(cursor.index) else {
         return Ok(None);
     };
 
     match item {
-        ConcreteItem::Step(step) => Ok(Some(step.clone())),
+        ConcreteItem::Skill(skill) => Ok(Some(skill.clone())),
         ConcreteItem::Xor(branch) => {
             let Some(NestedCursor::Xor {
                 selected,
@@ -415,7 +419,7 @@ pub fn current_step(
                 .get(selected)
                 .ok_or_else(|| anyhow!("selected xor path '{selected}' not found"))?;
             let sub_items = load_xor_path_items(xor_path, repo_root)?;
-            current_step(&sub_items, path_cursor, repo_root)
+            current_skill(&sub_items, path_cursor, repo_root)
         }
         ConcreteItem::Loop(loop_body) => match cursor.child.as_deref() {
             Some(NestedCursor::Loop {
@@ -423,7 +427,7 @@ pub fn current_step(
                     LoopCursorPhase::Body {
                         cursor: body_cursor,
                     },
-            }) => current_step(&loop_body.steps, body_cursor, repo_root),
+            }) => current_skill(&loop_body.skills, body_cursor, repo_root),
             Some(NestedCursor::Loop {
                 phase:
                     LoopCursorPhase::ExitPath {
@@ -437,7 +441,7 @@ pub fn current_step(
                     .get(selected)
                     .ok_or_else(|| anyhow!("selected xor path '{selected}' not found"))?;
                 let sub_items = load_xor_path_items(xor_path, repo_root)?;
-                current_step(&sub_items, path_cursor, repo_root)
+                current_skill(&sub_items, path_cursor, repo_root)
             }
             _ => Ok(None),
         },
@@ -450,12 +454,12 @@ pub fn current_flow_parents(
     cursor: &ExecutionCursor,
     repo_root: &Path,
 ) -> Result<Vec<String>> {
-    if let Some(step) = current_step(items, cursor, repo_root)? {
-        return Ok(step.flow_parents);
+    if let Some(skill) = current_skill(items, cursor, repo_root)? {
+        return Ok(skill.flow_parents);
     }
 
     Ok(match items.get(cursor.index) {
-        Some(ConcreteItem::Step(step)) => step.flow_parents.clone(),
+        Some(ConcreteItem::Skill(skill)) => skill.flow_parents.clone(),
         Some(ConcreteItem::Op(ops)) => ops.flow_parents.clone(),
         Some(ConcreteItem::And(and)) => and.flow_parents.clone(),
         Some(ConcreteItem::Xor(branch)) => branch.flow_parents.clone(),
@@ -475,7 +479,7 @@ pub fn advance_cursor_after_wait(
     };
 
     match item {
-        ConcreteItem::Step(_) | ConcreteItem::Op(_) | ConcreteItem::And(_) => {
+        ConcreteItem::Skill(_) | ConcreteItem::Op(_) | ConcreteItem::And(_) => {
             cursor.child = None;
             cursor.index += 1;
             Ok(())
@@ -513,8 +517,8 @@ pub fn advance_cursor_after_wait(
                 LoopCursorPhase::Body {
                     cursor: body_cursor,
                 } => {
-                    advance_cursor_after_wait(&loop_body.steps, body_cursor, repo_root)?;
-                    if body_cursor.index >= loop_body.steps.len() {
+                    advance_cursor_after_wait(&loop_body.skills, body_cursor, repo_root)?;
+                    if body_cursor.index >= loop_body.skills.len() {
                         *phase = LoopCursorPhase::ExitRouter;
                     }
                     Ok(())
@@ -553,7 +557,7 @@ pub fn advance_cursor_after_wait(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::flow::{ConcreteOp, Op, Step, XorPath};
+    use crate::engine::flow::{ConcreteOp, Op, Skill, XorPath};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
@@ -582,8 +586,8 @@ mod tests {
             self
         }
 
-        fn with_wait(mut self, step: &str) -> Self {
-            self.wait_on = Some(step.to_string());
+        fn with_wait(mut self, skill: &str) -> Self {
+            self.wait_on = Some(skill.to_string());
             self
         }
 
@@ -593,24 +597,24 @@ mod tests {
     }
 
     #[async_trait]
-    impl StepExecutor for RecordingExecutor {
+    impl SkillExecutor for RecordingExecutor {
         fn repo_root(&self) -> &Path {
             &self.repo_root
         }
 
-        async fn run_step(
+        async fn run_skill(
             &self,
-            step: &ExecutionStep,
+            skill: &ExecutionSkill,
             _ctx: ExecutionContext,
-        ) -> Result<StepOutcome> {
+        ) -> Result<SkillOutcome> {
             self.calls
                 .lock()
                 .expect("call mutex")
-                .push(step.display_name.clone());
-            if self.wait_on.as_deref() == Some(step.display_name.as_str()) {
-                Ok(StepOutcome::Waiting)
+                .push(skill.display_name.clone());
+            if self.wait_on.as_deref() == Some(skill.display_name.as_str()) {
+                Ok(SkillOutcome::Waiting)
             } else {
-                Ok(StepOutcome::Completed)
+                Ok(SkillOutcome::Completed)
             }
         }
 
@@ -639,9 +643,9 @@ mod tests {
         }
     }
 
-    fn step(name: &str) -> ConcreteStep {
-        ConcreteStep {
-            step: Step::named(name),
+    fn skill(name: &str) -> ConcreteSkill {
+        ConcreteSkill {
+            skill: Skill::named(name),
             flow_parents: vec!["test".to_string()],
         }
     }
@@ -652,7 +656,7 @@ mod tests {
         std::fs::create_dir_all(repo.path().join(".lf/flows")).expect("flows dir");
         std::fs::write(
             repo.path().join(".lf/flows/branch.yaml"),
-            "- selected-step\n- op: next\n",
+            "- selected-skill\n- op: next\n",
         )
         .expect("write flow");
 
@@ -664,8 +668,8 @@ mod tests {
                 "ship".to_string(),
                 XorPath {
                     flow: Some("branch".to_string()),
-                    step: None,
-                    steps: Vec::new(),
+                    skill: None,
+                    skills: Vec::new(),
                     description: "ship it".to_string(),
                     direction: Vec::new(),
                 },
@@ -679,7 +683,7 @@ mod tests {
             executor.calls(),
             vec![
                 "xor-route".to_string(),
-                "selected-step".to_string(),
+                "selected-skill".to_string(),
                 "op:next".to_string()
             ]
         );
@@ -692,7 +696,7 @@ mod tests {
             RecordingExecutor::new(repo.path().to_path_buf()).with_verdicts(&["retry", "done"]);
         let engine = FlowEngine::new(executor.clone());
         let items = vec![ConcreteItem::Loop(ConcreteLoop {
-            steps: vec![ConcreteItem::Step(step("body-step"))],
+            skills: vec![ConcreteItem::Skill(skill("body-skill"))],
             exit: ConcreteXor {
                 router: None,
                 paths: HashMap::from([
@@ -700,8 +704,8 @@ mod tests {
                         "retry".to_string(),
                         XorPath {
                             flow: None,
-                            step: None,
-                            steps: Vec::new(),
+                            skill: None,
+                            skills: Vec::new(),
                             description: "retry".to_string(),
                             direction: Vec::new(),
                         },
@@ -710,8 +714,8 @@ mod tests {
                         "done".to_string(),
                         XorPath {
                             flow: None,
-                            step: None,
-                            steps: Vec::new(),
+                            skill: None,
+                            skills: Vec::new(),
                             description: "done".to_string(),
                             direction: Vec::new(),
                         },
@@ -727,9 +731,9 @@ mod tests {
         assert_eq!(
             executor.calls(),
             vec![
-                "body-step".to_string(),
+                "body-skill".to_string(),
                 "xor-route".to_string(),
-                "body-step".to_string(),
+                "body-skill".to_string(),
                 "xor-route".to_string(),
             ]
         );
@@ -741,8 +745,8 @@ mod tests {
         let executor = RecordingExecutor::new(repo.path().to_path_buf()).with_wait("design");
         let engine = FlowEngine::new(executor.clone());
         let items = vec![
-            ConcreteItem::Step(step("design")),
-            ConcreteItem::Step(step("implement")),
+            ConcreteItem::Skill(skill("design")),
+            ConcreteItem::Skill(skill("implement")),
         ];
 
         let outcome = engine.run(&items, 0).await.expect("engine run");
@@ -751,7 +755,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn engine_resumes_nested_xor_after_waiting_step() {
+    async fn engine_resumes_nested_xor_after_waiting_skill() {
         let repo = tempdir().expect("tempdir");
         std::fs::create_dir_all(repo.path().join(".lf/flows")).expect("flows dir");
         std::fs::write(
@@ -766,8 +770,8 @@ mod tests {
                 "ship".to_string(),
                 XorPath {
                     flow: Some("branch".to_string()),
-                    step: None,
-                    steps: Vec::new(),
+                    skill: None,
+                    skills: Vec::new(),
                     description: "ship it".to_string(),
                     direction: Vec::new(),
                 },
@@ -790,10 +794,10 @@ mod tests {
         );
 
         advance_cursor_after_wait(&items, &mut cursor, repo.path()).expect("advance cursor");
-        let resumed = current_step(&items, &cursor, repo.path())
-            .expect("current step")
-            .expect("step should remain");
-        assert_eq!(resumed.step.name, "implement");
+        let resumed = current_skill(&items, &cursor, repo.path())
+            .expect("current skill")
+            .expect("skill should remain");
+        assert_eq!(resumed.skill.name, "implement");
 
         let executor = RecordingExecutor::new(repo.path().to_path_buf()).with_verdicts(&["ship"]);
         let outcome = FlowEngine::new(executor.clone())

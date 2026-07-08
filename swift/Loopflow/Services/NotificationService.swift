@@ -23,11 +23,11 @@ public final class NotificationService: NSObject, UNUserNotificationCenterDelega
         try await center.requestAuthorization(options: [.alert, .sound])
     }
 
-    public func notifyNeedsInteractive(waveId: String, waveName: String, step: String) {
+    public func notifyNeedsInteractive(waveId: String, waveName: String, skill: String) {
         post(
             id: "interactive-\(waveId)",
-            title: "\(waveName) waiting: \(step)",
-            body: "Interactive step needs your input",
+            title: "\(waveName) waiting: \(skill)",
+            body: "Interactive skill needs your input",
             waveId: waveId
         )
     }

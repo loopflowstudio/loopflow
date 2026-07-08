@@ -13,11 +13,11 @@ Local dev and the native Mac `lfd` host had grown two implementations of the sam
 
 ## A release pipeline that fails fast and explains itself
 
-Two changes harden how a release actually gets out the door. The DMG job could hang indefinitely on a stuck subprocess and spin until the workflow-level limit with no signal why; now every external step is bounded and logs are unbuffered, so a stuck step fails fast with a clear message. Separately, the release-note step was rebuilt around the split this document is written to: `DECISIONS.md` carries intent, merged PRs and diffs carry shipped behavior, and the note interprets one against the other.
+Two changes harden how a release actually gets out the door. The DMG job could hang indefinitely on a stuck subprocess and spin until the workflow-level limit with no signal why; now every external skill is bounded and logs are unbuffered, so a stuck skill fails fast with a clear message. Separately, the release-note skill was rebuilt around the split this document is written to: `DECISIONS.md` carries intent, merged PRs and diffs carry shipped behavior, and the note interprets one against the other.
 
-- **DMG build hangs are bounded** — `build-dmg` gets a 45-minute cap plus tighter per-step limits (35m build/sign/notarize, 30m `notarytool --wait`, 20m cargo/swift, 10m dmg creation, 5m codesign/staple, 5m R2 upload). The release script runs with `python3 -u` and flushed logging, so CI progress is visible as it happens instead of after the fact.
-- **Release notes fuse intent and behavior** — the `release-notes` step treats decisions as the *why* and commits as the *what shipped*, producing an outcome-oriented story (opening → thematic sections → operational notes → small changes). The raw ledger stays archived under `release/v<version>/DECISIONS.md`.
-- **`lf op release notes` and `lf op release run` share one step** — standalone notes, weekly releases, and repo consumers like Cadenza now use the same prompt contract instead of each embedding its own note writer.
+- **DMG build hangs are bounded** — `build-dmg` gets a 45-minute cap plus tighter per-skill limits (35m build/sign/notarize, 30m `notarytool --wait`, 20m cargo/swift, 10m dmg creation, 5m codesign/staple, 5m R2 upload). The release script runs with `python3 -u` and flushed logging, so CI progress is visible as it happens instead of after the fact.
+- **Release notes fuse intent and behavior** — the `release-notes` skill treats decisions as the *why* and commits as the *what shipped*, producing an outcome-oriented story (opening → thematic sections → operational notes → small changes). The raw ledger stays archived under `release/v<version>/DECISIONS.md`.
+- **`lf op release notes` and `lf op release run` share one skill** — standalone notes, weekly releases, and repo consumers like Cadenza now use the same prompt contract instead of each embedding its own note writer.
 
 ## Operational notes
 

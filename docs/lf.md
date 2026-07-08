@@ -10,20 +10,20 @@ title: lf Command Reference
 ## Basic Usage
 
 ```bash
-lf <step>                        # run a step file
-lf <step>: args                  # run with arguments
-lf <namespace>/<step>            # run a namespaced step (e.g. gstack/office-hours)
+lf <skill>                        # run a skill file
+lf <skill>: args                  # run with arguments
+lf <namespace>/<skill>            # run a namespaced skill (e.g. gstack/office-hours)
 lf npx/<owner>/<repo>            # fetch any Claude Skill live via npx skills
-lf : "inline prompt"             # no step file, just prompt
-lf --list                        # show all available steps
+lf : "inline prompt"             # no skill file, just prompt
+lf --list                        # show all available skills
 ```
 
 ## Examples
 
 ```bash
-lf gate                           # run the gate step
+lf gate                           # run the gate skill
 lf implement: add auth            # pass arguments after colon
-lf gstack/office-hours            # run a built-in gstack step
+lf gstack/office-hours            # run a built-in gstack skill
 lf office-hours                   # bare name works when unambiguous
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
@@ -31,26 +31,26 @@ lf debug -c                       # paste clipboard, fix the bug
 lf task "fix the flaky test" --wave designer   # loop task until the PR merges
 ```
 
-## Steps
+## Skills
 
 Names resolve in this order:
 
-1. `.lf/steps/<step>.md` or `.lf/steps/<ns>/<step>.md` — repo-local (also overrides builtins)
-2. `.claude/commands/<step>.md` — Claude Code compatible
-3. `~/.lf/steps/<step>.md`, `~/.lf/steps/<ns>/<step>.md`, or `~/.claude/commands/<step>.md` — user-global
-4. Core built-in steps — `build/`, `govern/`, `ops/` (run `lf --list` for the full catalog)
-5. Namespaced built-in steps — e.g. `gstack/<step>`. Bare names (without `<ns>/`) resolve here only when exactly one namespace owns the name.
+1. `.lf/skills/<skill>.md` or `.lf/skills/<ns>/<skill>.md` — repo-local (also overrides builtins)
+2. `.claude/commands/<skill>.md` — Claude Code compatible
+3. `~/.lf/skills/<skill>.md`, `~/.lf/skills/<ns>/<skill>.md`, or `~/.claude/commands/<skill>.md` — user-global
+4. Core built-in skills — `build/`, `govern/`, `ops/` (run `lf --list` for the full catalog)
+5. Namespaced built-in skills — e.g. `gstack/<skill>`. Bare names (without `<ns>/`) resolve here only when exactly one namespace owns the name.
 6. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
 
-Namespaced steps and flows use `/`, not `:`. Run `gstack/office-hours`, not `gstack:office-hours`.
+Namespaced skills and flows use `/`, not `:`. Run `gstack/office-hours`, not `gstack:office-hours`.
 
-### Step Arguments
+### Skill Arguments
 
 ```bash
 lf implement: add user authentication
 ```
 
-Inside step files, `{args}` is replaced with whatever comes after the colon.
+Inside skill files, `{args}` is replaced with whatever comes after the colon.
 
 ## Context Flags
 
@@ -104,7 +104,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 ## Running Flows
 
-Run a named flow (chains of steps):
+Run a named flow (chains of skills):
 
 ```bash
 lf <flow>
@@ -162,7 +162,7 @@ All three default to the invoking context's wave (`LFD_WAVE_ID` env, else the wo
 
 ## What's Included by Default
 
-Every step automatically includes:
+Every skill automatically includes:
 
 | Context | Default | How to disable |
 |---------|---------|----------------|
@@ -236,13 +236,13 @@ lf debug -c    # include current clipboard text in the prompt
 ### Launch an interactive vendor session
 
 ```bash
-lf design                 # interactive step → uses session.launch (default: tui)
-lf gate --tui             # force a terminal handoff for a normally-headless step
+lf design                 # interactive skill → uses session.launch (default: tui)
+lf gate --tui             # force a terminal handoff for a normally-headless skill
 lf : "fix the bug" --ide -m codex   # force the Codex app instead
 ```
 
 `--tui` and `--ide` override the repo default. Set `session.launch: ide` in
-`.lf/config.yaml` to make the vendor app the default for interactive steps.
+`.lf/config.yaml` to make the vendor app the default for interactive skills.
 
 ### External skills
 

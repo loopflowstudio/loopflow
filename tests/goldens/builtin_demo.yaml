@@ -1,6 +1,6 @@
 name: builtin_demo
 repo: tests/parity/fixtures/basic
-step: demo
+skill: demo
 surface: headless
 directions: []
 docs: []

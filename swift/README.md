@@ -169,10 +169,10 @@ The multiplexer workspace remains available in the codebase, but repo windows no
 
 Repo windows also have a **Flows** tab:
 
-- Left pane groups flows and steps into **Build**, **Govern**, and **Ops**
+- Left pane groups flows and skills into **Build**, **Govern**, and **Ops**
 - Expand a flow inline to see nested flows, xor branches, and loops
-- Click any flow or step to see every parent flow that uses it
-- Repo `.lf/flows/*.yaml` and `.lf/steps/*.md` overrides replace builtins in place and get repo-source styling
+- Click any flow or skill to see every parent flow that uses it
+- Repo `.lf/flows/*.yaml` and `.lf/skills/*.md` overrides replace builtins in place and get repo-source styling
 - `Loopflow/Models/Catalog.swift` mirrors the flow catalog DTO; registry reads go through `lf --json`
 
 ## Session quote replies (macOS)
@@ -223,7 +223,7 @@ stream. There is no machine-wide telemetry socket.
 
 2. **Per-wave SSE** (`WaveChatConnection` in `WaveChatClient.swift`)
    - One connection per wave the UI is watching, off that wave's `/events`
-   - Frames: `state` / `turn` / `memory` / `op` (run/flow/step motion)
+   - Frames: `state` / `turn` / `memory` / `op` (run/flow/skill motion)
    - Drives both the chat pane and the wave's dashboard card
 
 ## Connections Panel

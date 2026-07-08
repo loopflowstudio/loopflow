@@ -5,7 +5,7 @@
   "run_id": null,
   "parent_session_id": null,
   "use": "palette",
-  "step": "ship",
+  "skill": "ship",
   "agent": "codex",
   "cwd": "/tmp/repo.Desktop",
   "argv": ["lf", "ship", "--no-direction", "-w", "Desktop", "-m", "codex"],

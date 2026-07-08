@@ -7,7 +7,7 @@ import yaml
 from loopflow.workstyle.convert import convert_gstack_repo, extract_openclaw_direction
 
 
-def test_convert_gstack_repo_writes_steps_manifest_and_direction(tmp_path: Path) -> None:
+def test_convert_gstack_repo_writes_skills_manifest_and_direction(tmp_path: Path) -> None:
     source_repo = tmp_path / "gstack"
     source_repo.mkdir()
     (source_repo / "SKILL.md").write_text(
@@ -162,7 +162,7 @@ Filter entries within the retro time window by `ts` field.
 
 If the JSONL file doesn't exist or has no entries in the window, skip the Eureka Moments row.
 
-### Step 3: Commit Time Distribution
+### Skill 3: Commit Time Distribution
 
 Keep the actual retro.
 """,
@@ -184,8 +184,8 @@ Keep the actual retro.
     assert manifest.name == "gstack"
     assert manifest.source_repo == "garrytan/gstack"
     assert manifest.source_ref == "main"
-    assert manifest.step_prefix == "gstack"
-    assert manifest.steps == ["gstack", "browse", "office-hours", "ceo-review", "retro"]
+    assert manifest.skill_prefix == "gstack"
+    assert manifest.skills == ["gstack", "browse", "office-hours", "ceo-review", "retro"]
 
     workstyle = yaml.safe_load(output_dir.joinpath("workstyle.yaml").read_text(encoding="utf-8"))
     assert workstyle["prefix"] == "gstack"
@@ -295,8 +295,8 @@ Then load:
     frontmatter = yaml.safe_load(review.split("---", 2)[1])
     assert "gstack:office-hours" in review
     assert "gstack:design-review" in review
-    assert ".lf/steps/gstack/office-hours.md" in review
-    assert ".lf/steps/gstack/design-review.md" in review
+    assert ".lf/skills/gstack/office-hours.md" in review
+    assert ".lf/skills/gstack/design-review.md" in review
     assert "Search Before Building" not in review
     assert "Contributor Mode" not in review
     assert "Telemetry (run last)" not in review

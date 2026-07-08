@@ -22,7 +22,7 @@ class TestDTOFixtures:
     def test_session_fixture_pins_palette_shape(self):
         session = Session.model_validate(_load("session.json"))
         assert session.object == "session"
-        assert session.step == "ship"
+        assert session.skill == "ship"
         assert session.agent == "codex"
         assert session.source == "palette"
         assert session.session_use == "palette"

@@ -19,7 +19,7 @@ class Run(BaseModel):
     wave_id: str
     task: Optional[str] = None
     iteration: int
-    step_index: int
+    skill_index: int
     status: str
     local_worktree: str
     remote_branch: str
@@ -35,13 +35,13 @@ class CommitEntry(BaseModel):
     message: str
 
 
-class FlowStep(BaseModel):
+class FlowSkill(BaseModel):
     type: str
     name: str
 
     @classmethod
-    def from_raw(cls, value: Any) -> "FlowStep":
-        if isinstance(value, FlowStep):
+    def from_raw(cls, value: Any) -> "FlowSkill":
+        if isinstance(value, FlowSkill):
             return value
         if isinstance(value, dict):
             return cls.model_validate(value)
@@ -49,15 +49,15 @@ class FlowStep(BaseModel):
             for prefix in ("op:",):
                 if value.startswith(prefix):
                     return cls(type="op", name=value.split(":", 1)[1].strip())
-            for marker, step_type in (
+            for marker, skill_type in (
                 ("[branch]", "branch"),
                 ("[fork]", "fork"),
                 ("[loop]", "loop"),
             ):
                 if value == marker:
-                    return cls(type=step_type, name=step_type)
-            return cls(type="step", name=value)
-        raise TypeError(f"Unsupported flow step value: {value!r}")
+                    return cls(type=skill_type, name=skill_type)
+            return cls(type="skill", name=value)
+        raise TypeError(f"Unsupported flow skill value: {value!r}")
 
 
 class Wave(BaseModel):
@@ -80,7 +80,7 @@ class Wave(BaseModel):
     commits: list[CommitEntry]
     open_pr_count: int
     stack_count: int
-    flow_steps: list[FlowStep]
+    flow_skills: list[FlowSkill]
     parent_wave_id: Optional[str]
     local_worktree: Optional[str] = None
     remote_branch: Optional[str] = None
@@ -89,14 +89,14 @@ class Wave(BaseModel):
     pr: Optional[PullRequest] = None
     created_at: Optional[datetime] = None
 
-    @field_validator("flow_steps", mode="before")
+    @field_validator("flow_skills", mode="before")
     @classmethod
-    def _parse_flow_steps(cls, value: Any) -> list[FlowStep]:
+    def _parse_flow_skills(cls, value: Any) -> list[FlowSkill]:
         if value in (None, ""):
             return []
         if not isinstance(value, list):
             return []
-        return [FlowStep.from_raw(item) for item in value]
+        return [FlowSkill.from_raw(item) for item in value]
 
 
 class Session(BaseModel):
@@ -106,7 +106,7 @@ class Session(BaseModel):
     run_id: Optional[str]
     parent_session_id: Optional[str]
     session_use: str = Field(alias="use")
-    step: str
+    skill: str
     agent: str
     cwd: str
     argv: list[str]

@@ -53,9 +53,9 @@ or by land.
 
 ## Delegate Work
 
-Dispatch an `lf` flow or step for real implementation work. A dispatched child
+Dispatch an `lf` flow or skill for real implementation work. A dispatched child
 inherits loopflow context: operating guidance, scratch notes, explicit docs,
-wave context, and step instructions. Inline edits in the coordinating session do not, and they
+wave context, and skill instructions. Inline edits in the coordinating session do not, and they
 bloat the transcript with work that belongs in a child.
 
 Inside a Wave loop, dispatch with:
@@ -67,7 +67,7 @@ lf <flow> "<task>" --wave <wave> --dispatch
 This spawns the child as its own attachable tmux session — not an inline
 shell-out — so it's independently monitorable and steerable. List live
 sessions with `tmux ls` and drop into one with `tmux attach -t <name>` to
-answer an interactive step.
+answer an interactive skill.
 
 Inline edits are only for trivial fixes smaller than the cost of dispatching.
 When you do one, say why. Keep the coordinating session about decisions,
@@ -141,8 +141,8 @@ such as dropping tables or deleting branches.
 
 ## Adaptation
 
-When you learn something repo-specific, write it into `.lf/`: adapt a step
-(`.lf/steps/<name>.md`), a direction (`.lf/directions/<name>.md`), or config
+When you learn something repo-specific, write it into `.lf/`: adapt a skill
+(`.lf/skills/<name>.md`), a direction (`.lf/directions/<name>.md`), or config
 (`.lf/config.yaml`). Commit `.lf/` changes alongside
 the work so they stay transparent and reviewable.
 
@@ -217,11 +217,11 @@ Root readme.
 </lf:file>
 </lf:files>
 
-The step.
+The skill.
 
-<lf:step:test>
+<lf:skill:test>
 # Test step
 
 Do the thing.
 
-</lf:step:test>
+</lf:skill:test>

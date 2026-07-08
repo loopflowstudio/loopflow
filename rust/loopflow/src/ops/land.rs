@@ -37,7 +37,7 @@ enum Finalize {
     AssignForReview,
 }
 
-/// Run every land step: commit, rebase onto main, clear scratch, mark the PR
+/// Run every land skill: commit, rebase onto main, clear scratch, mark the PR
 /// ready, and finalize per `finalize`. `land` arms auto-merge; `submit` assigns
 /// the PR for a human to merge. Neither rotates the worktree — the wave home is
 /// permanent. Returns the resulting PR (`None` for a local merge) so callers can

@@ -98,11 +98,11 @@ public struct Run: Sendable, Identifiable, Hashable {
 
     public var status: RunStatus
     public var iteration: Int
-    public var stepIndex: Int
+    public var skillIndex: Int
 
     public var worktree: String?
     public var branch: String?
-    public var currentStep: String?
+    public var currentSkill: String?
     public var error: String?
     public var pr: PullRequest?
 
@@ -120,10 +120,10 @@ public struct Run: Sendable, Identifiable, Hashable {
         direction: [String] = [],
         status: RunStatus = .pending,
         iteration: Int = 0,
-        stepIndex: Int = 0,
+        skillIndex: Int = 0,
         worktree: String? = nil,
         branch: String? = nil,
-        currentStep: String? = nil,
+        currentSkill: String? = nil,
         error: String? = nil,
         pr: PullRequest? = nil,
         startedAt: Date? = nil,
@@ -139,10 +139,10 @@ public struct Run: Sendable, Identifiable, Hashable {
         self.direction = direction
         self.status = status
         self.iteration = iteration
-        self.stepIndex = stepIndex
+        self.skillIndex = skillIndex
         self.worktree = worktree
         self.branch = branch
-        self.currentStep = currentStep
+        self.currentSkill = currentSkill
         self.error = error
         self.pr = pr
         self.startedAt = startedAt

@@ -175,17 +175,17 @@ Run it with `lf wave shipper`.
 
 ```bash
 curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.flows[] | {name, category, source}'
-curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.steps[] | select(.name=="gate")'
+curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.skills[] | select(.name=="gate")'
 ```
 
-`/v0/catalog` returns the resolved flow + step catalog that Loopflow uses for the **Flows** tab. Pass `repo=/path/to/repo` to merge builtin definitions with repo-local `.lf/flows/*.yaml` and `.lf/steps/*.md` overrides. Omit `repo` to inspect the builtin catalog only.
+`/v0/catalog` returns the resolved flow + skill catalog that Loopflow uses for the **Flows** tab. Pass `repo=/path/to/repo` to merge builtin definitions with repo-local `.lf/flows/*.yaml` and `.lf/skills/*.md` overrides. Omit `repo` to inspect the builtin catalog only.
 
 ## Sessions API
 
 List live sessions:
 
 ```bash
-curl -s "$LFD_ADDR/v0/sessions?active_only=true" | jq '.data[] | {id, wave_id, step, source, status, tmux_name}'
+curl -s "$LFD_ADDR/v0/sessions?active_only=true" | jq '.data[] | {id, wave_id, skill, source, status, tmux_name}'
 ```
 
 Create a palette session:

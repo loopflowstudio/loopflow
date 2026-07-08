@@ -63,7 +63,7 @@ fn session_fixture_pins_palette_shape() {
     assert_eq!(session["object"], "session");
     let session: SessionDto =
         serde_json::from_value(session).expect("session fixture should parse");
-    assert_eq!(session.step, "ship");
+    assert_eq!(session.skill, "ship");
     assert_eq!(session.agent, "codex");
     assert_eq!(session.source, "palette");
     assert_eq!(session.session_use, "palette");

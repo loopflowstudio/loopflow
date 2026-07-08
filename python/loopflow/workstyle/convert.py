@@ -71,7 +71,7 @@ _REMOVED_SECTION_PREFIXES = (
     "## Repo Ownership",
     "## Review Log",
     "## Search Before Building",
-    "## Step 8.75: Persist ship metrics",
+    "## Skill 8.75: Persist ship metrics",
     "## AskUserQuestion Format",
     "## Completeness Principle",
 )
@@ -168,8 +168,8 @@ class WorkstyleManifest:
     source_ref: str
     last_sync: str
     last_commit: str
-    step_prefix: str
-    steps: list[str]
+    skill_prefix: str
+    skills: list[str]
 
 
 def convert_gstack_repo(
@@ -181,7 +181,7 @@ def convert_gstack_repo(
     direction_output: Path | None = None,
 ) -> WorkstyleManifest:
     skill_paths = _find_skill_paths(source_repo)
-    converted_steps: list[tuple[str, GstackSkill]] = []
+    converted_skills: list[tuple[str, GstackSkill]] = []
     extracted_voice: str | None = None
     fallback_voice: str | None = None
     last_commit = _git_head(source_repo)
@@ -189,8 +189,8 @@ def convert_gstack_repo(
 
     for skill_path in skill_paths:
         skill, voice = _convert_skill(skill_path)
-        step_name = _step_name(skill.name)
-        converted_steps.append((step_name, skill))
+        skill_name = _skill_name(skill.name)
+        converted_skills.append((skill_name, skill))
         if fallback_voice is None and voice:
             fallback_voice = voice
         if voice and "You are GStack" in voice:
@@ -206,10 +206,10 @@ def convert_gstack_repo(
         source_ref=source_ref,
         last_sync=last_sync,
         last_commit=last_commit,
-        step_prefix="gstack",
-        steps=[name for name, _skill in converted_steps],
+        skill_prefix="gstack",
+        skills=[name for name, _skill in converted_skills],
     )
-    _write_workstyle(output_dir, converted_steps, manifest)
+    _write_workstyle(output_dir, converted_skills, manifest)
 
     if direction_output is not None:
         direction_output.parent.mkdir(parents=True, exist_ok=True)
@@ -249,7 +249,7 @@ def _convert_skill(skill_path: Path) -> tuple[GstackSkill, str | None]:
         version=_maybe_string(metadata.get("version")),
         description=_rewrite_imported_references(_maybe_string(metadata.get("description")) or ""),
         allowed_tools=_string_list(metadata.get("allowed-tools")),
-        benefits_from=[_step_name(name) for name in _string_list(metadata.get("benefits-from"))],
+        benefits_from=[_skill_name(name) for name in _string_list(metadata.get("benefits-from"))],
         preamble_tier=_maybe_int(metadata.get("preamble-tier")),
         instructions=instructions + "\n" if instructions else "",
     )
@@ -317,18 +317,18 @@ def _strip_named_sections(text: str, heading_prefixes: tuple[str, ...]) -> str:
 
 def _write_workstyle(
     output_dir: Path,
-    converted_steps: list[tuple[str, GstackSkill]],
+    converted_skills: list[tuple[str, GstackSkill]],
     manifest: WorkstyleManifest,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    stale_steps_dir = output_dir.joinpath("steps")
-    if stale_steps_dir.exists():
-        shutil.rmtree(stale_steps_dir)
+    stale_skills_dir = output_dir.joinpath("skills")
+    if stale_skills_dir.exists():
+        shutil.rmtree(stale_skills_dir)
     for path in output_dir.glob("*.md"):
         path.unlink()
 
-    for step_name, skill in converted_steps:
-        _write_step(output_dir.joinpath(f"{step_name}.md"), step_name, skill)
+    for skill_name, skill in converted_skills:
+        _write_skill(output_dir.joinpath(f"{skill_name}.md"), skill_name, skill)
 
     manifest_data = {
         "name": manifest.name,
@@ -339,7 +339,7 @@ def _write_workstyle(
             "last_commit": manifest.last_commit,
             "last_sync": manifest.last_sync,
         },
-        "prefix": manifest.step_prefix,
+        "prefix": manifest.skill_prefix,
     }
     output_dir.joinpath("workstyle.yaml").write_text(
         yaml.safe_dump(manifest_data, sort_keys=False, allow_unicode=True),
@@ -347,7 +347,7 @@ def _write_workstyle(
     )
 
 
-def _write_step(path: Path, step_name: str, skill: GstackSkill) -> None:
+def _write_skill(path: Path, skill_name: str, skill: GstackSkill) -> None:
     frontmatter: dict[str, Any] = {}
     if skill.description:
         frontmatter["description"] = skill.description
@@ -359,7 +359,7 @@ def _write_step(path: Path, step_name: str, skill: GstackSkill) -> None:
         frontmatter["preamble_tier"] = skill.preamble_tier
     if skill.benefits_from:
         frontmatter["after"] = skill.benefits_from
-    if step_name in _BROWSER_SKILLS:
+    if skill_name in _BROWSER_SKILLS:
         frontmatter["requires"] = ["browser"]
 
     yaml_frontmatter = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
@@ -380,7 +380,7 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _step_name(name: str) -> str:
+def _skill_name(name: str) -> str:
     return _RENAMED_STEPS.get(name, name)
 
 
@@ -416,12 +416,12 @@ def _cleanup_imported_artifacts(text: str) -> str:
 def _rewrite_imported_references(text: str) -> str:
     rewritten = re.sub(
         r"~/.claude/skills/gstack/([a-z0-9-]+)/SKILL\.md",
-        lambda match: f".lf/steps/gstack/{_step_name(match.group(1))}.md",
+        lambda match: f".lf/skills/gstack/{_skill_name(match.group(1))}.md",
         text,
     )
 
     for skill_name in _GSTACK_STEP_REFERENCES:
-        prefixed_name = f"gstack:{_step_name(skill_name)}"
+        prefixed_name = f"gstack:{_skill_name(skill_name)}"
         rewritten = re.sub(
             rf"(?<![\w.-])/{re.escape(skill_name)}(?![\w-])",
             prefixed_name,
@@ -452,14 +452,14 @@ def _cleanup_loopflow_integration_artifacts(text: str) -> str:
     cleaned = re.sub(
         r"\nFollow it inline, \*\*skipping these sections\*\* "
         r"\(already handled by (?:the )?parent skill\):\n(?:- .+\n)+",
-        "\nFollow the imported loopflow step content directly.\n",
+        "\nFollow the imported loopflow skill content directly.\n",
         text,
     )
     cleaned = re.sub(
         r"\nFollow it inline, skipping these sections "
         r"\(already handled by (?:the )?parent skill\):\n"
-        r"(?:[^\n]*\n)+?(?=\n(?:Note current Step|After completion))",
-        "\nFollow the imported loopflow step content directly.\n\n",
+        r"(?:[^\n]*\n)+?(?=\n(?:Note current Skill|After completion))",
+        "\nFollow the imported loopflow skill content directly.\n\n",
         cleaned,
     )
     cleaned = re.sub(
@@ -519,7 +519,7 @@ def main() -> None:
         direction_output=args.direction_output,
     )
     print(
-        f"Converted {len(manifest.steps)} skills from {manifest.source_repo}@{manifest.source_ref} "
+        f"Converted {len(manifest.skills)} skills from {manifest.source_repo}@{manifest.source_ref} "
         f"to {args.output_dir}"
     )
 

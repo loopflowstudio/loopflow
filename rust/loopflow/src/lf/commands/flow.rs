@@ -1,15 +1,15 @@
 use crate::engine::flow::expand_direction_names;
 use crate::engine::flow::load_xor_path_items;
 use crate::engine::fork::{
-    fork_worktree_path, plan_fork_execution, ForkManifest, ForkManifestBranch, ForkManifestStep,
+    fork_worktree_path, plan_fork_execution, ForkManifest, ForkManifestBranch, ForkManifestSkill,
     FORK_MANIFEST_RELATIVE_PATH, FORK_SYNTHESIZE_STEP,
 };
 use crate::engine::git::current_branch;
 use crate::engine::worktree::create_worktree;
 use crate::engine::{
     expand_flow, xor_verdict_path, ConcreteAnd, ConcreteItem, ConcreteLoop, ConcreteXor,
-    ExecutionContext, ExecutionStep, Flow, FlowEngine, FlowOutcome, FlowProgress, StepExecutor,
-    StepOutcome, TEMP_XOR_ROUTE_STEP_NAME,
+    ExecutionContext, ExecutionSkill, Flow, FlowEngine, FlowOutcome, FlowProgress, SkillExecutor,
+    SkillOutcome, TEMP_XOR_ROUTE_STEP_NAME,
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
@@ -24,7 +24,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// Run a flow: print pipeline header, then execute each step sequentially.
+/// Run a flow: print pipeline header, then execute each skill sequentially.
 pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     let items = expand_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items, repo)?;
@@ -108,24 +108,24 @@ fn render_pipeline_lines(items: &[ConcreteItem], repo: &Path) -> Result<Vec<Stri
 
 fn render_pipeline_item(item: &ConcreteItem, repo: &Path) -> Result<Vec<String>> {
     match item {
-        ConcreteItem::Step(step) => Ok(vec![step.step.name.clone()]),
+        ConcreteItem::Skill(skill) => Ok(vec![skill.skill.name.clone()]),
         ConcreteItem::Op(ops) => Ok(vec![format!("op: {}", ops.item.display_name())]),
         ConcreteItem::And(and) => {
             let mut lines = vec!["[and]".to_string()];
             let total_lines = and.branches.len() + 1;
             for (index, branch) in and.branches.iter().enumerate() {
                 let branch_chain = branch
-                    .steps
+                    .skills
                     .iter()
-                    .map(|step| step.step.name.as_str())
+                    .map(|skill| skill.skill.name.as_str())
                     .collect::<Vec<_>>()
                     .join(" → ");
                 let branch_prefix = tree_prefix(index, total_lines);
                 lines.push(format!("{branch_prefix} {} → {branch_chain}", branch.label));
             }
-            let synth_step = and.synthesize.as_deref().unwrap_or(FORK_SYNTHESIZE_STEP);
+            let synth_skill = and.synthesize.as_deref().unwrap_or(FORK_SYNTHESIZE_STEP);
             let synth_prefix = tree_prefix(and.branches.len(), total_lines);
-            lines.push(format!("{synth_prefix} synthesize → {synth_step}"));
+            lines.push(format!("{synth_prefix} synthesize → {synth_skill}"));
             Ok(lines)
         }
         ConcreteItem::Xor(branch) => {
@@ -183,7 +183,7 @@ fn render_loop_pipeline(loop_def: &ConcreteLoop, repo: &Path) -> Result<Vec<Stri
     let mut lines = vec!["loop".to_string()];
 
     let mut body_lines = Vec::new();
-    for item in &loop_def.steps {
+    for item in &loop_def.skills {
         body_lines.extend(render_pipeline_item(item, repo)?);
     }
     lines.extend(prefix_nested_lines(&body_lines));
@@ -265,42 +265,46 @@ struct CliFlowExecutor<'a> {
 }
 
 #[async_trait]
-impl StepExecutor for CliFlowExecutor<'_> {
+impl SkillExecutor for CliFlowExecutor<'_> {
     fn repo_root(&self) -> &Path {
         &self.repo
     }
 
-    async fn run_step(&self, step: &ExecutionStep, ctx: ExecutionContext) -> Result<StepOutcome> {
+    async fn run_skill(
+        &self,
+        skill: &ExecutionSkill,
+        ctx: ExecutionContext,
+    ) -> Result<SkillOutcome> {
         if let Some(progress) = ctx.progress {
-            print_step_progress(progress, &step.display_name);
+            print_skill_progress(progress, &skill.display_name);
         } else {
-            print_nested_step_progress(&step.display_name);
+            print_nested_skill_progress(&skill.display_name);
         }
 
-        run_step_with_journal(
+        run_skill_with_journal(
             &self.repo,
-            &step.display_name,
+            &skill.display_name,
             ctx.progress.map(|progress| progress.index),
             || {
-                if let Some(prompt) = step.temporary_content.as_deref() {
-                    let _guard = write_temp_step(&self.repo, &step.invoke_as, prompt)?;
+                if let Some(prompt) = skill.temporary_content.as_deref() {
+                    let _guard = write_temp_skill(&self.repo, &skill.invoke_as, prompt)?;
                     crate::lf::commands::run::run(
-                        Some(step.invoke_as.as_str()),
+                        Some(skill.invoke_as.as_str()),
                         self.message,
                         self.cli,
                     )?;
                 } else {
                     crate::lf::commands::run::run(
-                        Some(step.invoke_as.as_str()),
+                        Some(skill.invoke_as.as_str()),
                         self.message,
                         self.cli,
                     )?;
                 }
-                commit_step_work(&self.repo, &step.display_name)?;
+                commit_skill_work(&self.repo, &skill.display_name)?;
                 Ok(())
             },
         )?;
-        Ok(StepOutcome::Completed)
+        Ok(SkillOutcome::Completed)
     }
 
     async fn run_op(&self, ops: &crate::engine::ConcreteOp, ctx: ExecutionContext) -> Result<()> {
@@ -324,7 +328,7 @@ impl StepExecutor for CliFlowExecutor<'_> {
 
     async fn run_and(&self, fork: &ConcreteAnd, _ctx: ExecutionContext) -> Result<()> {
         run_and(fork, self.message, self.cli, &self.repo)?;
-        commit_step_work(&self.repo, "and")?;
+        commit_skill_work(&self.repo, "and")?;
         Ok(())
     }
 
@@ -334,7 +338,7 @@ impl StepExecutor for CliFlowExecutor<'_> {
     }
 }
 
-fn print_step_progress(progress: FlowProgress, step_name: &str) {
+fn print_skill_progress(progress: FlowProgress, skill_name: &str) {
     let colors = Colors::new();
     eprintln!(
         "{dim}[{current}/{total}]{reset} {bold}{name}{reset}",
@@ -343,33 +347,33 @@ fn print_step_progress(progress: FlowProgress, step_name: &str) {
         bold = colors.bold,
         current = progress.index + 1,
         total = progress.total,
-        name = step_name,
+        name = skill_name,
     );
 }
 
-fn print_nested_step_progress(step_name: &str) {
+fn print_nested_skill_progress(skill_name: &str) {
     let colors = Colors::new();
     eprintln!(
         "{dim}[*]{reset} {bold}{name}{reset}",
         dim = colors.dim,
         reset = colors.reset,
         bold = colors.bold,
-        name = step_name,
+        name = skill_name,
     );
 }
 
-fn run_step_with_journal(
+fn run_skill_with_journal(
     repo: &Path,
-    step_name: &str,
+    skill_name: &str,
     index: Option<usize>,
     run: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
     journal::emit(
         repo,
-        LfNode::Step,
+        LfNode::Skill,
         LfEventType::Started,
         LfEventFields {
-            step: Some(step_name.to_string()),
+            skill: Some(skill_name.to_string()),
             index: index.map(|value| value as u32),
             ..LfEventFields::default()
         },
@@ -378,20 +382,20 @@ fn run_step_with_journal(
     match &result {
         Ok(_) => journal::emit(
             repo,
-            LfNode::Step,
+            LfNode::Skill,
             LfEventType::Completed,
             LfEventFields {
-                step: Some(step_name.to_string()),
+                skill: Some(skill_name.to_string()),
                 index: index.map(|value| value as u32),
                 ..LfEventFields::default()
             },
         ),
         Err(err) => journal::emit(
             repo,
-            LfNode::Step,
+            LfNode::Skill,
             LfEventType::Errored,
             LfEventFields {
-                step: Some(step_name.to_string()),
+                skill: Some(skill_name.to_string()),
                 index: index.map(|value| value as u32),
                 error: Some(err.to_string()),
                 ..LfEventFields::default()
@@ -401,34 +405,34 @@ fn run_step_with_journal(
     result
 }
 
-/// Commit any uncommitted changes left by the previous step.
-fn commit_step_work(repo: &Path, step_name: &str) -> Result<()> {
+/// Commit any uncommitted changes left by the previous skill.
+fn commit_skill_work(repo: &Path, skill_name: &str) -> Result<()> {
     let options = CommitOptions {
         add: true,
-        message: Some(format!("lf commit: {step_name}")),
-        ..CommitOptions::for_task(step_name)
+        message: Some(format!("lf commit: {skill_name}")),
+        ..CommitOptions::for_task(skill_name)
     };
     commit_workflow(repo, &options, &NullProgress)?;
     Ok(())
 }
-fn write_temp_step(repo: &Path, name: &str, prompt: &str) -> Result<TempStepGuard> {
-    let tmp_step_dir = repo.join(".lf/steps");
-    std::fs::create_dir_all(&tmp_step_dir)?;
-    let path = tmp_step_dir.join(format!("{name}.md"));
+fn write_temp_skill(repo: &Path, name: &str, prompt: &str) -> Result<TempSkillGuard> {
+    let tmp_skill_dir = repo.join(".lf/skills");
+    std::fs::create_dir_all(&tmp_skill_dir)?;
+    let path = tmp_skill_dir.join(format!("{name}.md"));
     let original_content = std::fs::read_to_string(&path).ok();
     std::fs::write(&path, prompt)?;
-    Ok(TempStepGuard {
+    Ok(TempSkillGuard {
         path,
         original_content,
     })
 }
 
-struct TempStepGuard {
+struct TempSkillGuard {
     path: PathBuf,
     original_content: Option<String>,
 }
 
-impl Drop for TempStepGuard {
+impl Drop for TempSkillGuard {
     fn drop(&mut self) {
         let result = match &self.original_content {
             Some(content) => std::fs::write(&self.path, content),
@@ -441,7 +445,7 @@ impl Drop for TempStepGuard {
 
         if let Err(err) = result {
             eprintln!(
-                "failed to restore temporary step {}: {}",
+                "failed to restore temporary skill {}: {}",
                 self.path.display(),
                 err
             );
@@ -452,7 +456,7 @@ impl Drop for TempStepGuard {
 #[derive(Debug, Clone)]
 struct ForkBranchTask {
     index: usize,
-    step_names: Vec<String>,
+    skill_names: Vec<String>,
     directions: Vec<String>,
     worktree: PathBuf,
     branch_name: String,
@@ -486,7 +490,7 @@ fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) ->
         worktrees.push(worktree.clone());
         tasks.push(ForkBranchTask {
             index,
-            step_names: branch.steps.iter().map(|s| s.step.name.clone()).collect(),
+            skill_names: branch.skills.iter().map(|s| s.skill.name.clone()).collect(),
             directions: branch.directions.clone(),
             worktree,
             branch_name,
@@ -496,14 +500,14 @@ fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) ->
     let mut handles = Vec::new();
     for task in tasks.iter().cloned() {
         let worktree = task.worktree.clone();
-        let step_names = task.step_names.clone();
+        let skill_names = task.skill_names.clone();
         let directions = task.directions.clone();
         let branch_label = format!("fork-{}", task.index);
         let msg = message.map(|value| value.to_string());
         let handle = std::thread::spawn(move || {
-            run_fork_branch_steps(
+            run_fork_branch_skills(
                 &worktree,
-                &step_names,
+                &skill_names,
                 &directions,
                 msg.as_deref(),
                 &branch_label,
@@ -514,14 +518,14 @@ fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) ->
 
     let mut outcomes = Vec::new();
     for (task, handle) in handles {
-        let (exit_code, step_results, err) = match handle.join() {
+        let (exit_code, skill_results, err) = match handle.join() {
             Ok(Ok((code, results))) => (code, results, None),
             Ok(Err(err)) => (1, Vec::new(), Some(err.to_string())),
             Err(_) => (1, Vec::new(), Some("fork thread panicked".to_string())),
         };
 
         if exit_code != 0 || err.is_some() {
-            let failed_step = step_results
+            let failed_skill = skill_results
                 .iter()
                 .rev()
                 .find(|s| s.exit_code != 0)
@@ -531,10 +535,10 @@ fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) ->
                     "fork branch {} failed ({}): {}",
                     task.index, task.branch_name, err
                 );
-            } else if let Some(step_name) = failed_step {
+            } else if let Some(skill_name) = failed_skill {
                 eprintln!(
-                    "fork branch {} failed ({}) at step '{}': exited with {}",
-                    task.index, task.branch_name, step_name, exit_code
+                    "fork branch {} failed ({}) at skill '{}': exited with {}",
+                    task.index, task.branch_name, skill_name, exit_code
                 );
             } else {
                 eprintln!(
@@ -546,7 +550,7 @@ fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) ->
 
         outcomes.push(ForkManifestBranch {
             index: task.index,
-            steps: step_results,
+            skills: skill_results,
             direction: task.directions.join(","),
             worktree: task.worktree.to_string_lossy().to_string(),
             branch: task.branch_name.clone(),
@@ -563,8 +567,8 @@ fn run_and(fork: &ConcreteAnd, message: Option<&str>, cli: &Cli, repo: &Path) ->
         return Err(err);
     }
 
-    let synth_step = fork.synthesize.as_deref().unwrap_or(FORK_SYNTHESIZE_STEP);
-    let synthesize_result = crate::lf::commands::run::run(Some(synth_step), message, cli);
+    let synth_skill = fork.synthesize.as_deref().unwrap_or(FORK_SYNTHESIZE_STEP);
+    let synthesize_result = crate::lf::commands::run::run(Some(synth_skill), message, cli);
     cleanup_fork_artifacts(repo, &worktrees);
 
     synthesize_result?;
@@ -600,39 +604,39 @@ fn cleanup_fork_worktrees(worktrees: &[PathBuf]) {
     }
 }
 
-/// Run steps sequentially within a fork branch. Returns the first non-zero
-/// exit code (fail-fast) or 0, along with per-step outcomes.
-fn run_fork_branch_steps(
+/// Run skills sequentially within a fork branch. Returns the first non-zero
+/// exit code (fail-fast) or 0, along with per-skill outcomes.
+fn run_fork_branch_skills(
     worktree: &Path,
-    step_names: &[String],
+    skill_names: &[String],
     directions: &[String],
     message: Option<&str>,
     branch_label: &str,
-) -> Result<(i32, Vec<ForkManifestStep>)> {
-    let mut step_results = Vec::new();
-    for step_name in step_names {
+) -> Result<(i32, Vec<ForkManifestSkill>)> {
+    let mut skill_results = Vec::new();
+    for skill_name in skill_names {
         let exit_code =
-            run_fork_branch_step(worktree, step_name, directions, message, branch_label)?;
-        step_results.push(ForkManifestStep {
-            name: step_name.clone(),
+            run_fork_branch_skill(worktree, skill_name, directions, message, branch_label)?;
+        skill_results.push(ForkManifestSkill {
+            name: skill_name.clone(),
             exit_code,
         });
         if exit_code != 0 {
-            return Ok((exit_code, step_results));
+            return Ok((exit_code, skill_results));
         }
     }
-    Ok((0, step_results))
+    Ok((0, skill_results))
 }
 
-fn run_fork_branch_step(
+fn run_fork_branch_skill(
     worktree: &Path,
-    step: &str,
+    skill: &str,
     directions: &[String],
     message: Option<&str>,
     branch_label: &str,
 ) -> Result<i32> {
     let mut cmd = build_lf_command();
-    cmd.arg(step).arg("-b");
+    cmd.arg(skill).arg("-b");
     for direction in directions {
         cmd.arg("-d").arg(direction);
     }
@@ -690,51 +694,51 @@ fn relay_fork_logs<R: std::io::Read>(reader: R, branch_label: &str, stderr: bool
 
 #[cfg(test)]
 mod tests {
-    use super::{render_pipeline_lines, write_temp_step};
+    use super::{render_pipeline_lines, write_temp_skill};
     use crate::engine::{ConcreteItem, Flow};
     use std::fs;
     use tempfile::tempdir;
     use tempfile::TempDir;
 
     #[test]
-    fn write_xor_route_step_removes_temp_file_when_none_existed() {
+    fn write_xor_route_skill_removes_temp_file_when_none_existed() {
         let temp = TempDir::new().unwrap();
-        let step_path = temp.path().join(".lf/steps/xor-route.md");
+        let skill_path = temp.path().join(".lf/skills/xor-route.md");
 
         {
             let _guard =
-                write_temp_step(temp.path(), "xor-route", "temporary route prompt").unwrap();
+                write_temp_skill(temp.path(), "xor-route", "temporary route prompt").unwrap();
             assert_eq!(
-                fs::read_to_string(&step_path).unwrap(),
+                fs::read_to_string(&skill_path).unwrap(),
                 "temporary route prompt"
             );
         }
 
         assert!(
-            !step_path.exists(),
-            "temporary xor-route step should be removed after use"
+            !skill_path.exists(),
+            "temporary xor-route skill should be removed after use"
         );
     }
 
     #[test]
-    fn write_xor_route_step_restores_existing_file() {
+    fn write_xor_route_skill_restores_existing_file() {
         let temp = TempDir::new().unwrap();
-        let steps_dir = temp.path().join(".lf/steps");
-        fs::create_dir_all(&steps_dir).unwrap();
-        let step_path = steps_dir.join("xor-route.md");
-        fs::write(&step_path, "existing route prompt").unwrap();
+        let skills_dir = temp.path().join(".lf/skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+        let skill_path = skills_dir.join("xor-route.md");
+        fs::write(&skill_path, "existing route prompt").unwrap();
 
         {
             let _guard =
-                write_temp_step(temp.path(), "xor-route", "temporary route prompt").unwrap();
+                write_temp_skill(temp.path(), "xor-route", "temporary route prompt").unwrap();
             assert_eq!(
-                fs::read_to_string(&step_path).unwrap(),
+                fs::read_to_string(&skill_path).unwrap(),
                 "temporary route prompt"
             );
         }
 
         assert_eq!(
-            fs::read_to_string(&step_path).unwrap(),
+            fs::read_to_string(&skill_path).unwrap(),
             "existing route prompt"
         );
     }
@@ -753,7 +757,7 @@ mod tests {
         let flow = Flow {
             name: "tend".to_string(),
             items: vec![
-                crate::engine::flow::FlowItem::Step(crate::engine::flow::Step::named(
+                crate::engine::flow::FlowItem::Skill(crate::engine::flow::Skill::named(
                     "tend/scan-waves",
                 )),
                 crate::engine::flow::FlowItem::Xor(crate::engine::flow::XorDef {
@@ -763,8 +767,8 @@ mod tests {
                             "tune".to_string(),
                             crate::engine::flow::XorPath {
                                 flow: Some("tend/tune".to_string()),
-                                step: None,
-                                steps: Vec::new(),
+                                skill: None,
+                                skills: Vec::new(),
                                 description: "Adjust the chord".to_string(),
                                 direction: Vec::new(),
                             },
@@ -773,8 +777,8 @@ mod tests {
                             "silence".to_string(),
                             crate::engine::flow::XorPath {
                                 flow: None,
-                                step: None,
-                                steps: Vec::new(),
+                                skill: None,
+                                skills: Vec::new(),
                                 description: "No-op".to_string(),
                                 direction: Vec::new(),
                             },
@@ -803,21 +807,21 @@ mod tests {
     }
 
     #[test]
-    fn render_pipeline_lines_shows_and_synthesize_step() {
+    fn render_pipeline_lines_shows_and_synthesize_skill() {
         let temp = tempdir().unwrap();
-        // Use synthetic step names that don't collide with builtin flows or
-        // steps so expansion stays under test control.
+        // Use synthetic skill names that don't collide with builtin flows or
+        // skills so expansion stays under test control.
         let flow = Flow {
             name: "demo-and".to_string(),
             items: vec![crate::engine::flow::FlowItem::And {
                 branches: vec![
-                    crate::engine::flow::FlowItem::Step(crate::engine::flow::Step::named(
+                    crate::engine::flow::FlowItem::Skill(crate::engine::flow::Skill::named(
                         "demo-branch-a",
                     )),
-                    crate::engine::flow::FlowItem::Step(crate::engine::flow::Step::named(
+                    crate::engine::flow::FlowItem::Skill(crate::engine::flow::Skill::named(
                         "demo-branch-b",
                     )),
-                    crate::engine::flow::FlowItem::Step(crate::engine::flow::Step::named(
+                    crate::engine::flow::FlowItem::Skill(crate::engine::flow::Skill::named(
                         "demo-branch-c",
                     )),
                 ],

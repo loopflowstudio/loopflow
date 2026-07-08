@@ -22,7 +22,7 @@ homepage:
       - title: "Persistent memory across runs"
         description: "Each wave keeps a memory its agent writes as it works — so it builds on what it learned, not just what you typed."
       - title: "Prompt files you can diff"
-        description: "Steps, directions, and goals live in your repo, so prompt changes get reviewed like code."
+        description: "Skills, directions, and goals live in your repo, so prompt changes get reviewed like code."
       - title: "Delegation you can watch"
         description: "A wave agent coordinates; it dispatches workers that each open a PR you can attach to, steer, or ship."
       - title: "From manual to autonomous"
@@ -57,8 +57,8 @@ homepage:
 
           Use the build flow for implementation work; write a scratch design
           first when a change crosses storage, tokens, or public auth behavior.
-      - label: "A step"
-        filename: ".lf/steps/implement.md"
+      - label: "A skill"
+        filename: ".lf/skills/implement.md"
         content: |
           Turn the design doc into working code.
 
@@ -77,7 +77,7 @@ homepage:
       - label: "A flow"
         filename: ".lf/flows/ship-wave.yaml"
         content: |
-          steps:
+          skills:
             - design
             - implement
             - review
@@ -100,7 +100,7 @@ homepage:
       note: "CLI and daemon"
       description: "Manage prompts and context with the CLI. Run waves remotely with the daemon."
       details:
-        - "lf — context management for waves, steps, directions, and memory"
+        - "lf — context management for waves, skills, directions, and memory"
         - "lfd — long-running daemon, natively or in containers"
         - "Authentication built in — WorkOS OAuth via Loopflow Studio"
       terminal_lines:

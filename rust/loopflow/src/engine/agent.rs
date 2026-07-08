@@ -1099,7 +1099,7 @@ mod tests {
 
     #[test]
     fn build_codex_command_without_context_file() {
-        // Skill-launched steps clear the system prompt, so no context file is
+        // Skill-launched skills clear the system prompt, so no context file is
         // written. Codex must not receive an empty `model_instructions_file`.
         let launch = default_launch();
         let process = ProcessConfig {

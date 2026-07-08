@@ -190,7 +190,7 @@ pub struct InboxFrame {
 /// 1:1 (`<node>.<event>`) so the durable ledger row and the live frame carry
 /// the same shape — a client folds `lf runs` history and live `op` frames with
 /// one code path. The base model emits run-grain kinds (`run.started`,
-/// `run.completed`, `run.errored`); step/flow granularity is future work, so
+/// `run.completed`, `run.errored`); skill/flow granularity is future work, so
 /// `kind` stays a free-form string like the ledger's `node`/`event` columns.
 ///
 /// Live-only: the past is a ledger query (`lf runs`), never a stream — nothing

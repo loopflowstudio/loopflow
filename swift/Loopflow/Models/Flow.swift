@@ -1,26 +1,26 @@
-// Flow model - a sequence of steps.
+// Flow model - a sequence of skills.
 
 import Foundation
 
 public enum FlowType: String, Sendable, Codable {
     case flow
-    case step
+    case skill
 }
 
-/// A flow definition with name and steps.
+/// A flow definition with name and skills.
 public struct Flow: Sendable, Codable, Identifiable, Equatable {
     public var id: UUID = UUID()
     public var name: String
-    public var steps: [Step]
+    public var skills: [Skill]
     public var type: FlowType
 
     enum CodingKeys: String, CodingKey {
-        case name, steps, type
+        case name, skills, type
     }
 
-    public init(name: String, steps: [Step] = [], type: FlowType = .flow) {
+    public init(name: String, skills: [Skill] = [], type: FlowType = .flow) {
         self.name = name
-        self.steps = steps
+        self.skills = skills
         self.type = type
     }
 
@@ -33,23 +33,23 @@ public struct Flow: Sendable, Codable, Identifiable, Equatable {
         // Type defaults to flow
         self.type = try container.decodeIfPresent(FlowType.self, forKey: .type) ?? .flow
 
-        // Steps can be strings or objects
-        if let stepsContainer = try? container.nestedUnkeyedContainer(forKey: .steps) {
-            var steps: [Step] = []
-            var mutableContainer = stepsContainer
+        // Skills can be strings or objects
+        if let skillsContainer = try? container.nestedUnkeyedContainer(forKey: .skills) {
+            var skills: [Skill] = []
+            var mutableContainer = skillsContainer
             while !mutableContainer.isAtEnd {
                 // Try decoding as string first
                 if let promptName = try? mutableContainer.decode(String.self) {
-                    steps.append(Step(prompt: promptName))
+                    skills.append(Skill(prompt: promptName))
                 } else {
-                    // Decode as full step object
-                    let step = try mutableContainer.decode(Step.self)
-                    steps.append(step)
+                    // Decode as full skill object
+                    let skill = try mutableContainer.decode(Skill.self)
+                    skills.append(skill)
                 }
             }
-            self.steps = steps
+            self.skills = skills
         } else {
-            self.steps = []
+            self.skills = []
         }
     }
 

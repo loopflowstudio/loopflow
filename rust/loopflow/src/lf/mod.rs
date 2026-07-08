@@ -7,13 +7,13 @@ pub mod session;
 
 #[derive(Parser, Debug)]
 #[command(name = "lf")]
-#[command(about = "Run steps and flows with coding agents")]
+#[command(about = "Run skills and flows with coding agents")]
 #[command(version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
-    /// List available steps and flows
+    /// List available skills and flows
     #[arg(short, long)]
     pub list: bool,
 
@@ -225,7 +225,7 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Reconstruct one run from the local ledger: steps, durations, tokens, prompt logs
+    /// Reconstruct one run from the local ledger: skills, durations, tokens, prompt logs
     Trace {
         /// Run id from `lf runs` (a unique prefix is enough)
         run_id: String,
@@ -293,7 +293,7 @@ pub enum Commands {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
-    /// Run a skill (step) by name — the explicit form
+    /// Run a skill (skill) by name — the explicit form
     Skill {
         /// Skill name
         name: String,
@@ -301,7 +301,7 @@ pub enum Commands {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
-    /// External: step/flow name (when no subcommand matches)
+    /// External: skill/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -422,7 +422,7 @@ pub enum OpsCommand {
     },
     /// Update local main to match origin
     Sync,
-    /// Compile loopflow steps into your home vendor Skills directories
+    /// Compile loopflow skills into your home vendor Skills directories
     #[command(name = "sync-skills")]
     SyncSkills {
         /// Confirm writes under ~/ without prompting
@@ -486,7 +486,7 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: PmCommand,
     },
-    /// Provider authentication for local lf steps and ops
+    /// Provider authentication for local lf skills and ops
     Auth {
         #[command(subcommand)]
         cmd: AuthCommand,
@@ -512,7 +512,7 @@ pub enum CronCommand {
         /// Wave name passed to `lf <flow> --wave <wave>`
         #[arg(short = 'w', long = "wave")]
         wave: String,
-        /// Flow or step name to run
+        /// Flow or skill name to run
         #[arg(long = "flow")]
         flow: String,
         /// Schedule expression. v0 supports `daily`.
@@ -526,7 +526,7 @@ pub enum CronCommand {
         /// Wave name passed to `lf <flow> --wave <wave>`
         #[arg(short = 'w', long = "wave")]
         wave: String,
-        /// Flow or step name to remove
+        /// Flow or skill name to remove
         #[arg(long = "flow")]
         flow: String,
     },

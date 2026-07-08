@@ -107,7 +107,7 @@ pub async fn create_run_for_placement(
         direction: wave.direction().clone(),
         area: wave.area().clone(),
         iteration,
-        step_index: 0,
+        skill_index: 0,
         status: RunStatus::Running,
         worktree: wt_path,
         branch,
@@ -341,8 +341,8 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
     PathBuf::from("lf")
 }
 
-pub(crate) fn build_lf_step_command(
-    step_name: &str,
+pub(crate) fn build_lf_skill_command(
+    skill_name: &str,
     batch: bool,
     directions: &[String],
     docs: &[String],
@@ -350,7 +350,7 @@ pub(crate) fn build_lf_step_command(
 ) -> Vec<String> {
     let mut cmd = vec![
         resolve_lf_binary().to_string_lossy().to_string(),
-        step_name.to_string(),
+        skill_name.to_string(),
     ];
     append_lf_run_options(&mut cmd, batch, directions, docs, wave_name);
     cmd
@@ -618,7 +618,7 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::Worker,
-            step: "dispatch:implement".to_string(),
+            skill: "dispatch:implement".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.wave.a1b2c3d4".to_string(),
             argv: vec![

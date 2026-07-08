@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::engine::agent::AgentConfig;
 use crate::engine::config::{parse_agent, Config};
 use crate::engine::error::CoreError;
-use crate::engine::flow::Step;
+use crate::engine::flow::Skill;
 use crate::engine::fork::merge_directions;
 use crate::engine::prompt::{
     drop_native_instruction_docs, format_claude_system_prompt, format_claude_task_prompt,
@@ -24,8 +24,8 @@ pub struct ContextSourceOverrides {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LaunchPromptInput {
     pub repo_root: PathBuf,
-    pub step: Option<String>,
-    pub resolved_step: Option<Step>,
+    pub skill: Option<String>,
+    pub resolved_skill: Option<Skill>,
     pub surface: Surface,
     pub directions: Vec<String>,
     pub docs: Vec<String>,
@@ -60,8 +60,8 @@ pub fn prepare_launch_prompt(
 ) -> Result<PreparedLaunchPrompt, CoreError> {
     let LaunchPromptInput {
         repo_root,
-        step,
-        resolved_step,
+        skill,
+        resolved_skill,
         surface,
         directions: mut requested_directions,
         docs: requested_docs,
@@ -79,8 +79,8 @@ pub fn prepare_launch_prompt(
         related_repos,
     } = input;
 
-    if let Some(step) = resolved_step.as_ref() {
-        requested_directions = merge_directions(&step.directions, &requested_directions);
+    if let Some(skill) = resolved_skill.as_ref() {
+        requested_directions = merge_directions(&skill.directions, &requested_directions);
     }
 
     let config_directions: &[String] = if include_config_directions {
@@ -98,7 +98,11 @@ pub fn prepare_launch_prompt(
 
     let opts = GatherContextOpts {
         repo_root: repo_root.clone(),
-        step: if resolved_step.is_some() { None } else { step },
+        skill: if resolved_skill.is_some() {
+            None
+        } else {
+            skill
+        },
         message,
         operate: !no_loopflow,
         surface,
@@ -113,8 +117,8 @@ pub fn prepare_launch_prompt(
     };
 
     let mut gathered = gather_context(&opts)?;
-    if let Some(step) = resolved_step {
-        gathered.components_mut().step = Some(step);
+    if let Some(skill) = resolved_skill {
+        gathered.components_mut().skill = Some(skill);
     }
     drop_native_instruction_docs(gathered.components_mut(), &repo_root);
 
@@ -130,13 +134,18 @@ pub fn prepare_launch_prompt(
     let prompt = format_prompt(PromptFormatMode::Full, gathered.components()).into_string();
 
     let agent = agent
-        .or_else(|| gathered.step.as_ref().and_then(|step| step.agent.clone()))
+        .or_else(|| {
+            gathered
+                .skill
+                .as_ref()
+                .and_then(|skill| skill.agent.clone())
+        })
         .or_else(|| config.agent.clone())
         .or_else(|| {
             gathered
-                .step
+                .skill
                 .as_ref()
-                .and_then(|step| step.default_agent.clone())
+                .and_then(|skill| skill.default_agent.clone())
         })
         .unwrap_or_else(|| "claude:opus".to_string());
     validate_agent_policy(&agent)?;
@@ -148,9 +157,9 @@ pub fn prepare_launch_prompt(
     let task_prompt = format_claude_task_prompt(gathered.components());
     let components = gathered.into_components();
     let action_style = components
-        .step
+        .skill
         .as_ref()
-        .and_then(|step| step.action_style.as_deref());
+        .and_then(|skill| skill.action_style.as_deref());
     let launch = AgentConfig {
         system_prompt,
         task_prompt,
@@ -216,19 +225,19 @@ mod tests {
 
     fn create_repo_fixture() -> tempfile::TempDir {
         let tmp = tempdir().expect("tempdir");
-        fs::create_dir_all(tmp.path().join(".lf/steps")).expect("steps dir");
+        fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
         fs::create_dir_all(tmp.path().join(".lf/directions")).expect("directions dir");
         fs::write(
-            tmp.path().join(".lf/steps/test.md"),
+            tmp.path().join(".lf/skills/test.md"),
             r#"---
 agent: codex:o3
 directions: [thorough]
 action_style: procedural
 ---
-Test step body.
+Test skill body.
 "#,
         )
-        .expect("write step");
+        .expect("write skill");
         fs::write(
             tmp.path().join(".lf/directions/thorough.md"),
             "Be thorough.",
@@ -253,14 +262,14 @@ Test step body.
     }
 
     #[test]
-    fn prepare_launch_prompt_prefers_step_agent_when_no_override() {
+    fn prepare_launch_prompt_prefers_skill_agent_when_no_override() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_launch_prompt(
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                step: Some("test".to_string()),
+                skill: Some("test".to_string()),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },
@@ -278,7 +287,7 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                step: Some("test".to_string()),
+                skill: Some("test".to_string()),
                 agent: Some("claude:sonnet".to_string()),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()
@@ -331,16 +340,16 @@ Test step body.
     #[test]
     fn prepare_launch_prompt_uses_default_agent_when_no_user_config() {
         let tmp = tempdir().expect("tempdir");
-        fs::create_dir_all(tmp.path().join(".lf/steps")).expect("steps dir");
+        fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
         fs::write(
-            tmp.path().join(".lf/steps/test.md"),
+            tmp.path().join(".lf/skills/test.md"),
             r#"---
 default_agent: gemini:2.5-pro
 ---
-Test step body.
+Test skill body.
 "#,
         )
-        .expect("write step");
+        .expect("write skill");
 
         let mut config = default_test_config();
         config.agent = None;
@@ -348,7 +357,7 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                step: Some("test".to_string()),
+                skill: Some("test".to_string()),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },
@@ -361,16 +370,16 @@ Test step body.
     #[test]
     fn prepare_launch_prompt_user_config_overrides_default_agent() {
         let tmp = tempdir().expect("tempdir");
-        fs::create_dir_all(tmp.path().join(".lf/steps")).expect("steps dir");
+        fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
         fs::write(
-            tmp.path().join(".lf/steps/test.md"),
+            tmp.path().join(".lf/skills/test.md"),
             r#"---
 default_agent: gemini:2.5-pro
 ---
-Test step body.
+Test skill body.
 "#,
         )
-        .expect("write step");
+        .expect("write skill");
 
         let mut config = default_test_config();
         config.agent = Some("codex:o3".to_string());
@@ -378,7 +387,7 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                step: Some("test".to_string()),
+                skill: Some("test".to_string()),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()
             },
@@ -480,7 +489,7 @@ Test step body.
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                step: Some("test".to_string()),
+                skill: Some("test".to_string()),
                 client_context: ClientContext {
                     has_ui: true,
                     compact: true,
@@ -505,20 +514,20 @@ Test step body.
             prepared.config.structured_replies[0]
                 .guidance
                 .contains("workflow forward"),
-            "step action_style should shape guidance"
+            "skill action_style should shape guidance"
         );
     }
 
     #[test]
-    fn prepare_launch_prompt_uses_resolved_skill_step_without_loading_by_name() {
+    fn prepare_launch_prompt_uses_resolved_skill_skill_without_loading_by_name() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
         let prepared = prepare_launch_prompt(
             &config,
             LaunchPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                step: Some("npx/skill-creator".to_string()),
-                resolved_step: Some(Step {
+                skill: Some("npx/skill-creator".to_string()),
+                resolved_skill: Some(Skill {
                     name: "npx/skill-creator".to_string(),
                     agent: Some("codex:o3".to_string()),
                     default_agent: None,
@@ -537,9 +546,9 @@ Test step body.
         assert_eq!(
             prepared
                 .components
-                .step
+                .skill
                 .as_ref()
-                .map(|step| step.name.as_str()),
+                .map(|skill| skill.name.as_str()),
             Some("npx/skill-creator")
         );
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));

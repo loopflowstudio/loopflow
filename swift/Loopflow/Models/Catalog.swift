@@ -1,13 +1,13 @@
 import Foundation
 
-/// Source of a flow or step definition.
+/// Source of a flow or skill definition.
 public enum CatalogSource: String, Codable, Sendable, Hashable {
     case builtin
     case repo
 }
 
 /// A flow in the catalog: name, category, source, and the structured body
-/// of items that make it up (steps, sub-flow refs, xor branches, loops, ops).
+/// of items that make it up (skills, sub-flow refs, xor branches, loops, ops).
 public struct CatalogFlow: Sendable, Codable, Hashable, Identifiable {
     public let name: String
     public let category: String
@@ -17,8 +17,8 @@ public struct CatalogFlow: Sendable, Codable, Hashable, Identifiable {
     public var id: String { name }
 }
 
-/// A step in the catalog.
-public struct CatalogStep: Sendable, Codable, Hashable, Identifiable {
+/// A skill in the catalog.
+public struct CatalogSkill: Sendable, Codable, Hashable, Identifiable {
     public let name: String
     public let category: String
     public let source: CatalogSource
@@ -30,7 +30,7 @@ public struct CatalogStep: Sendable, Codable, Hashable, Identifiable {
 
 /// One item inside a flow body. Mirrors `engine::flow::FlowItem` from Rust.
 public enum CatalogFlowItem: Sendable, Codable, Hashable {
-    case step(name: String, interactive: Bool?)
+    case skill(name: String, interactive: Bool?)
     case op(command: String, args: [String])
     case flowRef(name: String)
     case xor(CatalogXor)
@@ -47,9 +47,9 @@ public enum CatalogFlowItem: Sendable, Codable, Hashable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let type = try container.decode(String.self, forKey: .type)
         switch type {
-        case "Step":
-            let payload = try container.decode(StepPayload.self, forKey: .data)
-            self = .step(name: payload.name, interactive: payload.interactive)
+        case "Skill":
+            let payload = try container.decode(SkillPayload.self, forKey: .data)
+            self = .skill(name: payload.name, interactive: payload.interactive)
         case "Op":
             let payload = try container.decode(OpPayload.self, forKey: .data)
             self = .op(command: payload.command, args: payload.args ?? [])
@@ -76,9 +76,9 @@ public enum CatalogFlowItem: Sendable, Codable, Hashable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .step(name, interactive):
-            try container.encode("Step", forKey: .type)
-            try container.encode(StepPayload(name: name, interactive: interactive), forKey: .data)
+        case let .skill(name, interactive):
+            try container.encode("Skill", forKey: .type)
+            try container.encode(SkillPayload(name: name, interactive: interactive), forKey: .data)
         case let .op(command, args):
             try container.encode("Op", forKey: .type)
             try container.encode(OpPayload(command: command, args: args), forKey: .data)
@@ -100,7 +100,7 @@ public enum CatalogFlowItem: Sendable, Codable, Hashable {
         }
     }
 
-    private struct StepPayload: Codable, Hashable {
+    private struct SkillPayload: Codable, Hashable {
         let name: String
         let interactive: Bool?
     }
@@ -118,23 +118,23 @@ public struct CatalogXor: Sendable, Codable, Hashable {
 
 public struct CatalogXorPath: Sendable, Codable, Hashable {
     public let flow: String?
-    public let step: String?
+    public let skill: String?
     public let description: String
 
     private enum CodingKeys: String, CodingKey {
-        case flow, step, description
+        case flow, skill, description
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.flow = try container.decodeIfPresent(String.self, forKey: .flow)
-        self.step = try container.decodeIfPresent(String.self, forKey: .step)
+        self.skill = try container.decodeIfPresent(String.self, forKey: .skill)
         self.description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
     }
 }
 
 public struct CatalogLoop: Sendable, Codable, Hashable {
-    public let steps: [CatalogFlowItem]
+    public let skills: [CatalogFlowItem]
     public let exit: CatalogXor
 }
 
@@ -152,19 +152,19 @@ public struct CatalogResponse: Sendable, Codable {
 /// Whole catalog response.
 public struct Catalog: Sendable, Codable, Hashable {
     public let flows: [CatalogFlow]
-    public let steps: [CatalogStep]
+    public let skills: [CatalogSkill]
 
-    public init(flows: [CatalogFlow], steps: [CatalogStep]) {
+    public init(flows: [CatalogFlow], skills: [CatalogSkill]) {
         self.flows = flows
-        self.steps = steps
+        self.skills = skills
     }
 
     public var flowsByName: [String: CatalogFlow] {
         Dictionary(uniqueKeysWithValues: flows.map { ($0.name, $0) })
     }
 
-    public var stepsByName: [String: CatalogStep] {
-        Dictionary(uniqueKeysWithValues: steps.map { ($0.name, $0) })
+    public var skillsByName: [String: CatalogSkill] {
+        Dictionary(uniqueKeysWithValues: skills.map { ($0.name, $0) })
     }
 }
 
@@ -178,11 +178,11 @@ extension Catalog {
 
 extension CatalogFlowItem {
     /// Walk this item (recursively) and report whether it references the given
-    /// step or flow name.
+    /// skill or flow name.
     public func references(name: String) -> Bool {
         switch self {
-        case let .step(stepName, _):
-            return stepName == name
+        case let .skill(skillName, _):
+            return skillName == name
         case let .op(command, _):
             return command == name
         case let .flowRef(refName):
@@ -190,14 +190,14 @@ extension CatalogFlowItem {
         case let .xor(def), let .or(def):
             if def.router == name { return true }
             return def.paths.values.contains { path in
-                path.flow == name || path.step == name
+                path.flow == name || path.skill == name
             }
         case let .loop(def):
             if def.exit.router == name { return true }
-            if def.exit.paths.values.contains(where: { $0.flow == name || $0.step == name }) {
+            if def.exit.paths.values.contains(where: { $0.flow == name || $0.skill == name }) {
                 return true
             }
-            return def.steps.contains { $0.references(name: name) }
+            return def.skills.contains { $0.references(name: name) }
         case let .and(def):
             return def.branches.contains { $0.references(name: name) }
         }

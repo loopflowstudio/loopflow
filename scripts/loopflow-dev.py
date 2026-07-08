@@ -804,7 +804,7 @@ def _create_dev_signing_identity() -> None:
 
     Fallback for machines with no Apple developer identity. The cert must be
     trusted for code signing or `codesign` and `find-identity` won't accept it;
-    the trust step may raise a one-time authorization dialog.
+    the trust skill may raise a one-time authorization dialog.
     """
     print(f'Creating stable dev signing identity "{DEV_SIGNING_IDENTITY}"...')
     p12_password = "loopflow-dev"  # transient; only unlocks the export archive

@@ -415,7 +415,7 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::WaveAgent,
-            step: "flowloop".to_string(),
+            skill: "flowloop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
             argv: vec!["lf".to_string(), "wave".to_string(), wave.name().clone()],

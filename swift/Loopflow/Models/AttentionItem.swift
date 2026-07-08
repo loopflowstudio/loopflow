@@ -1,7 +1,7 @@
 import Foundation
 
 /// Two attention paths:
-/// - `interactive`: `lf` is at a step that needs a human
+/// - `interactive`: `lf` is at a skill that needs a human
 /// - `algedonic`: something is wrong and the system is escalating
 public enum AttentionKind: String, Sendable, CaseIterable, Hashable {
     case interactive
@@ -27,7 +27,7 @@ public enum AttentionKind: String, Sendable, CaseIterable, Hashable {
         case "interactive": self = .interactive
         case "algedonic": self = .algedonic
         case "design_review", "code_review", "calibration": self = .interactive
-        case "queue_failure", "step_failure": self = .algedonic
+        case "queue_failure", "skill_failure": self = .algedonic
         default: return nil
         }
     }
@@ -39,20 +39,20 @@ public enum AttentionStatus: String, Sendable, CaseIterable, Hashable {
     case resolved
 }
 
-/// Context for interactive attention items (step needs human input).
+/// Context for interactive attention items (skill needs human input).
 public struct InteractiveAttentionContext: Sendable, Hashable {
-    public let step: String?
+    public let skill: String?
     public let sessionId: String?
     public let designPath: String?
     public let mutationSummary: String?
 
     public init(
-        step: String? = nil,
+        skill: String? = nil,
         sessionId: String? = nil,
         designPath: String? = nil,
         mutationSummary: String? = nil
     ) {
-        self.step = step
+        self.skill = skill
         self.sessionId = sessionId
         self.designPath = designPath
         self.mutationSummary = mutationSummary
@@ -61,18 +61,18 @@ public struct InteractiveAttentionContext: Sendable, Hashable {
 
 /// Context for algedonic attention items (system escalation).
 public struct AlgedonicAttentionContext: Sendable, Hashable {
-    public let step: String?
+    public let skill: String?
     public let error: String?
     public let reason: String?
     public let conflictFiles: [String]
 
     public init(
-        step: String? = nil,
+        skill: String? = nil,
         error: String? = nil,
         reason: String? = nil,
         conflictFiles: [String] = []
     ) {
-        self.step = step
+        self.skill = skill
         self.error = error
         self.reason = reason
         self.conflictFiles = conflictFiles
@@ -133,7 +133,7 @@ public extension AttentionItem {
         case .interactive:
             return .interactive(
                 InteractiveAttentionContext(
-                    step: json["step"] as? String,
+                    skill: json["skill"] as? String,
                     sessionId: json["session_id"] as? String,
                     designPath: json["design_path"] as? String,
                     mutationSummary: json["mutation_summary"] as? String
@@ -142,7 +142,7 @@ public extension AttentionItem {
         case .algedonic:
             return .algedonic(
                 AlgedonicAttentionContext(
-                    step: json["step"] as? String,
+                    skill: json["skill"] as? String,
                     error: json["error"] as? String,
                     reason: json["reason"] as? String,
                     conflictFiles: json["conflict_files"] as? [String] ?? []

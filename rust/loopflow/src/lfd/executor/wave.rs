@@ -21,7 +21,7 @@ use crate::lfd::types::{
 use crate::lfdb::SharedStore;
 
 use super::helpers::{
-    build_lf_step_command, is_active_run_status, is_ephemeral_worktree_path,
+    build_lf_skill_command, is_active_run_status, is_ephemeral_worktree_path,
     launch_session_in_tmux, tmux_exit_file, tmux_session_exists, TMUX_EXIT_TAIL,
 };
 use super::JanitorReport;
@@ -106,7 +106,7 @@ impl WaveExecutor {
         }
 
         let session_id = LfdId::new();
-        let mut cmd = build_lf_step_command(flow, false, &wave.direction, &wave.area, wave.name());
+        let mut cmd = build_lf_skill_command(flow, false, &wave.direction, &wave.area, wave.name());
         cmd.push("-m".to_string());
         cmd.push(agent.to_string());
 
@@ -118,7 +118,7 @@ impl WaveExecutor {
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::Palette,
-            step: flow.to_string(),
+            skill: flow.to_string(),
             agent: agent.to_string(),
             cwd: worktree.to_string(),
             argv: cmd,
@@ -313,7 +313,7 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::Worker,
-            step: "dispatch:implement".to_string(),
+            skill: "dispatch:implement".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.wave".to_string(),
             argv: vec!["lf".to_string(), "implement".to_string()],

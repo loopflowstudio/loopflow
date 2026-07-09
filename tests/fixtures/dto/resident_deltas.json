@@ -14,7 +14,6 @@
         "model": "gpt-5",
         "host": "devbox",
         "worktree": "/repo.ship",
-        "run_id": null,
         "started_at": "2026-07-03T18:30:00Z",
         "ended_at": null,
         "termination_reason": null

@@ -300,7 +300,7 @@ impl WaveRuntime {
             if let Some(active) = state.active.clone() {
                 let reason = "startup janitor: body abandoned by server restart";
                 let events =
-                    state.finish_body(&active.body.body_id, StepOutcome::Interrupted, reason)?;
+                    state.finish_body(&active.body_id, StepOutcome::Interrupted, reason)?;
                 for event in events {
                     journal.append(|_| EventKind::PlayheadChanged {
                         event,
@@ -588,7 +588,6 @@ impl WaveRuntime {
             model: None,
             host: gethostname::gethostname().to_string_lossy().to_string(),
             worktree: self.repo_root.to_string_lossy().to_string(),
-            run_id: None,
             started_at: now_rfc3339(),
             ended_at: Some(now_rfc3339()),
             termination_reason: Some(reason.to_string()),
@@ -636,10 +635,6 @@ impl WaveRuntime {
     /// Live loop-state transitions (no snapshot).
     pub fn subscribe_states(&self) -> broadcast::Receiver<LoopState> {
         self.state_tx.subscribe()
-    }
-
-    pub fn subscribe_playhead(&self) -> broadcast::Receiver<PlayheadView> {
-        self.playhead_tx.subscribe()
     }
 
     /// Live turn frames (no snapshot).
@@ -1340,8 +1335,7 @@ impl WaveRuntime {
         let body = inner
             .playhead
             .as_ref()
-            .and_then(|playhead| playhead.active.as_ref())
-            .map(|active| active.body.clone());
+            .and_then(|playhead| playhead.active.clone());
         let event = inner.journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers,

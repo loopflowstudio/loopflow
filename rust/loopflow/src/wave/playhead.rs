@@ -108,6 +108,8 @@ pub struct StepRef {
     pub iteration: u32,
 }
 
+/// One attempt at the selected step. `invocation_id` + `step_index` pin it to
+/// that step; the rest is where and how the attempt ran.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BodyProvenance {
     pub body_id: String,
@@ -121,22 +123,15 @@ pub struct BodyProvenance {
     pub model: Option<String>,
     pub host: String,
     pub worktree: String,
-    pub run_id: Option<String>,
     pub started_at: String,
     pub ended_at: Option<String>,
     pub termination_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActiveBody {
-    pub step: StepRef,
-    pub body: BodyProvenance,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Playhead {
     pub stack: Vec<InvocationState>,
-    pub active: Option<ActiveBody>,
+    pub active: Option<BodyProvenance>,
 }
 
 /// The playhead plus the three cursors a header needs. The innermost
@@ -144,7 +139,7 @@ pub struct Playhead {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayheadView {
     pub stack: Vec<InvocationState>,
-    pub active: Option<ActiveBody>,
+    pub active: Option<BodyProvenance>,
     pub now: Option<StepRef>,
     pub next: Option<StepRef>,
     pub return_to: Option<StepRef>,
@@ -159,13 +154,20 @@ pub enum StepOutcome {
     Interrupted,
 }
 
+impl StepOutcome {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Skipped => "skipped",
+            Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PlayheadEvent {
-    Initialized {
-        invocation_id: String,
-        flow: String,
-    },
     FlowEnqueued {
         parent_invocation_id: String,
         invocation_id: String,
@@ -187,30 +189,17 @@ pub enum PlayheadEvent {
         body_id: String,
         session_id: String,
     },
-    StepCompleted {
+    StepFinished {
         step: StepRef,
         body_id: String,
-    },
-    StepSkipped {
-        step: StepRef,
-        body_id: String,
-        reason: String,
-    },
-    StepFailed {
-        step: StepRef,
-        body_id: String,
-        reason: String,
-    },
-    StepInterrupted {
-        step: StepRef,
-        body_id: String,
+        outcome: StepOutcome,
         reason: String,
     },
 }
 
 impl Playhead {
     pub fn new(root: QueuedInvocation) -> (Self, PlayheadEvent) {
-        let event = PlayheadEvent::Initialized {
+        let event = PlayheadEvent::InvocationStarted {
             invocation_id: root.id.clone(),
             flow: root.flow.clone(),
         };
@@ -262,10 +251,10 @@ impl Playhead {
             return Err(anyhow!("body does not match the current playhead step"));
         }
         let event = PlayheadEvent::StepStarted {
-            step: step.clone(),
+            step,
             body_id: body.body_id.clone(),
         };
-        self.active = Some(ActiveBody { step, body });
+        self.active = Some(body);
         Ok(event)
     }
 
@@ -279,31 +268,18 @@ impl Playhead {
             .active
             .take()
             .ok_or_else(|| anyhow!("playhead has no active body"))?;
-        if active.body.body_id != body_id {
+        if active.body_id != body_id {
             self.active = Some(active);
             return Err(anyhow!("body id does not match the active playhead body"));
         }
 
-        let mut events = vec![match outcome {
-            StepOutcome::Completed => PlayheadEvent::StepCompleted {
-                step: active.step.clone(),
-                body_id: body_id.to_string(),
-            },
-            StepOutcome::Skipped => PlayheadEvent::StepSkipped {
-                step: active.step.clone(),
-                body_id: body_id.to_string(),
-                reason: reason.to_string(),
-            },
-            StepOutcome::Failed => PlayheadEvent::StepFailed {
-                step: active.step.clone(),
-                body_id: body_id.to_string(),
-                reason: reason.to_string(),
-            },
-            StepOutcome::Interrupted => PlayheadEvent::StepInterrupted {
-                step: active.step.clone(),
-                body_id: body_id.to_string(),
-                reason: reason.to_string(),
-            },
+        let mut events = vec![PlayheadEvent::StepFinished {
+            step: self
+                .current()
+                .expect("an active body always selects a step"),
+            body_id: body_id.to_string(),
+            outcome,
+            reason: reason.to_string(),
         }];
 
         if matches!(outcome, StepOutcome::Completed | StepOutcome::Skipped) {
@@ -326,10 +302,10 @@ impl Playhead {
             .active
             .as_mut()
             .ok_or_else(|| anyhow!("playhead has no active body"))?;
-        if active.body.body_id != body_id {
+        if active.body_id != body_id {
             return Err(anyhow!("body id does not match the active playhead body"));
         }
-        active.body.session_id = Some(session_id.to_string());
+        active.session_id = Some(session_id.to_string());
         Ok(PlayheadEvent::BodySessionUpdated {
             body_id: body_id.to_string(),
             session_id: session_id.to_string(),
@@ -465,7 +441,6 @@ mod tests {
             model: None,
             host: "host".to_string(),
             worktree: "/repo".to_string(),
-            run_id: None,
             started_at: "2026-07-09T00:00:00Z".to_string(),
             ended_at: None,
             termination_reason: None,

@@ -175,7 +175,6 @@ struct WaveChatView: View {
                 Text("harness  \(body.harness ?? "—") · model  \(body.model ?? "—")")
                 Text("host  \(body.host)")
                 Text("worktree  \(body.worktree)")
-                Text("run  \(body.runId ?? "—")")
                 Text("started  \(body.startedAt)")
                 Text("finished  \(body.endedAt ?? "—")")
                 if let reason = body.terminationReason {

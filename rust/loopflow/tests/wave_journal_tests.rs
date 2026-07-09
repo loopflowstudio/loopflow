@@ -81,7 +81,6 @@ fn body_for_current(runtime: &WaveRuntime, body_id: &str) -> BodyProvenance {
         model: Some("gpt-5".to_string()),
         host: "test-host".to_string(),
         worktree: runtime.repo_root().display().to_string(),
-        run_id: None,
         started_at: "2026-07-09T12:00:00Z".to_string(),
         ended_at: None,
         termination_reason: None,

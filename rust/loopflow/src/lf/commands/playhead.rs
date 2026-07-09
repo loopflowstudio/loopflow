@@ -2,9 +2,9 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
+use crate::engine::wave_context::read_endpoint_pointer;
 use crate::ops::util::resolve_wave_name;
 use crate::wave::playhead::PlayheadView;
-use crate::wave::server;
 
 pub fn enqueue(repo: &Path, wave: Option<&str>, flow: &str) -> Result<()> {
     post(
@@ -49,7 +49,6 @@ fn endpoint(repo: &Path, wave: Option<&str>) -> Result<String> {
     let wave = resolve_wave_name(repo, wave)
         .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?;
     let origin = crate::engine::wave_context::wave_origin(repo);
-    std::fs::read_to_string(server::endpoint_path(&origin, &wave))
-        .map(|value| value.trim().to_string())
-        .map_err(|_| anyhow!("wave '{wave}' is not running; start it with `lf loop {wave}`"))
+    read_endpoint_pointer(&origin, &wave)
+        .ok_or_else(|| anyhow!("wave '{wave}' is not running; start it with `lf loop {wave}`"))
 }

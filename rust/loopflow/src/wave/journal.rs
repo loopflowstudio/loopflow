@@ -465,9 +465,6 @@ impl Narrator {
                 info(format!("state {} → {} ({reason})", from.name(), to.name()))
             }
             EventKind::PlayheadChanged { event, .. } => match event {
-                PlayheadEvent::Initialized { flow, .. } => {
-                    info(format!("playhead initialized · {flow}"))
-                }
                 PlayheadEvent::FlowEnqueued { flow, .. } => {
                     info(format!("playhead enqueued · {flow}"))
                 }
@@ -483,21 +480,16 @@ impl Narrator {
                 PlayheadEvent::BodySessionUpdated { session_id, .. } => {
                     info(format!("playhead session · {session_id}"))
                 }
-                PlayheadEvent::StepCompleted { step, .. } => info(format!(
-                    "playhead completed · {} / {}",
-                    step.flow, step.step
-                )),
-                PlayheadEvent::StepSkipped { step, reason, .. } => info(format!(
-                    "playhead skipped · {} / {} ({reason})",
-                    step.flow, step.step
-                )),
-                PlayheadEvent::StepFailed { step, reason, .. } => info(format!(
-                    "playhead failed · {} / {} ({reason})",
-                    step.flow, step.step
-                )),
-                PlayheadEvent::StepInterrupted { step, reason, .. } => info(format!(
-                    "playhead interrupted · {} / {} ({reason})",
-                    step.flow, step.step
+                PlayheadEvent::StepFinished {
+                    step,
+                    outcome,
+                    reason,
+                    ..
+                } => info(format!(
+                    "playhead {} · {} / {} ({reason})",
+                    outcome.name(),
+                    step.flow,
+                    step.step
                 )),
             },
             EventKind::RunObserved {

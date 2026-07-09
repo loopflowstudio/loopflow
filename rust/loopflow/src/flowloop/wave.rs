@@ -266,7 +266,6 @@ fn body_provenance(step: &StepRef, cwd: &Path) -> BodyProvenance {
         model,
         host: gethostname::gethostname().to_string_lossy().to_string(),
         worktree: cwd.to_string_lossy().to_string(),
-        run_id: None,
         started_at: time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default(),

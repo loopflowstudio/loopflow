@@ -63,7 +63,6 @@ public struct BodyProvenance: Codable, Sendable, Hashable {
     public let model: String?
     public let host: String
     public let worktree: String
-    public let runId: String?
     public let startedAt: String
     public let endedAt: String?
     public let terminationReason: String?
@@ -74,21 +73,15 @@ public struct BodyProvenance: Codable, Sendable, Hashable {
         case invocationId = "invocation_id"
         case stepIndex = "step_index"
         case sessionId = "session_id"
-        case runId = "run_id"
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case terminationReason = "termination_reason"
     }
 }
 
-public struct ActiveBody: Codable, Sendable, Hashable {
-    public let step: PlayheadStepRef
-    public let body: BodyProvenance
-}
-
 public struct PlayheadView: Codable, Sendable, Hashable {
     public let stack: [InvocationState]
-    public let active: ActiveBody?
+    public let active: BodyProvenance?
     public let now: PlayheadStepRef?
     public let next: PlayheadStepRef?
     public let returnTo: PlayheadStepRef?

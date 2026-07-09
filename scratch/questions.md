@@ -1,26 +1,30 @@
 # Open questions
 
-## Outstanding: rebase onto origin/main
+## Resolved: rebased onto origin/main
 
-The branch is 1 commit behind `origin/main`. The earlier blocker (a second
-`codex exec` agent holding this worktree with uncommitted edits) is gone: the
-process has exited and the tree is clean. The rebase can now run.
+Rebased onto `601881cd waves: reshape roster into wave/project/task ontology`.
+Twenty-one conflicts, all one shape: main rewrote prose this branch was
+renaming. Resolution rule throughout — **main's prose, this branch's grammar**.
 
-```bash
-lf rebase
-```
+Main's `PmCommand` is a strict superset (`--project` filtering, `--pr` on
+close, `pm sync --plan`, and the `pm task create/update/done/move` family), so
+the enum merged intact; only the parent path changed from `lf op pm` to
+`lf pm`. Goldens were regenerated from the resolved prompts rather than
+hand-merged.
 
-`origin/main` is ahead by `601881cd waves: reshape roster into wave/project/task
-ontology`, plus `3ddf006c install.py: drop stale --global from lf op sync-skills`
-— which touches `docs/lfop.md`, the file this branch renamed to `docs/ops.md`.
-That rename/edit collision is the one conflict worth reading carefully. This
-branch removes the `--global` flag path from `install.py` entirely, so main's
-correction likely no longer applies.
+Two sweeps beyond conflict resolution, both because main *added* `lf op`
+references to files this branch's rename commits had already passed over:
 
-For the rest: files central to this branch's intent (the `lf op` → first-class
-command sweep — `lf/mod.rs`, `bin/lf.rs`, `ops/*`, goldens, builtin skill
-prompts) keep this branch's version. Files main touched incidentally take
-main's.
+- `05c4619a` — main's reshape put `lf op pm show` in every builtin skill's
+  orientation line, plus `docs/index.md` and a `pm.rs` error string.
+- `f7c21caf` — `Wave.command` (Swift) appended `lf op commit --push`, a
+  command this branch deletes. Every Concerto-launched session would have
+  failed at the commit step. This predates the rebase; it was never a
+  conflict, just a miss.
+
+Deliberately left carrying `lf op`: `release/*` notes and `RELEASE_NOTES.md`
+(shipped records), the recorded turn fixture in `WaveChatConnectionTests.swift`
+(captured data), and `wave/*/MEMORY.md` (server-owned).
 
 ## Latent: `op: rebase --plan` in a flow silently does nothing
 

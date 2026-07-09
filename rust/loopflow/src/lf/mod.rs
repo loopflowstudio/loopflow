@@ -183,7 +183,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ReleaseCommand,
     },
-    /// Roadmap in Linear (show, update, init, status)
+    /// Linear tasks for waves and local projects
     Pm {
         #[command(subcommand)]
         cmd: PmCommand,

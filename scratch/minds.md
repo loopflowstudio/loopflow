@@ -201,8 +201,9 @@ queue; it advances a cursor through that default cycle.
 An explicitly enqueued flow temporarily supplies the next steps. It runs in the
 same mind, against the same thread and memory, then the default playhead resumes
 where it left off. This is inhabitation made visible: running another flow does
-not create another conversation, worktree, or resident. Detaching that flow is
-the separate choice that creates a hand.
+not create another conversation or resident. The invocation may still carry a
+placed worktree; placement is where the body acts, not whether it is another
+mind. Detaching that flow is the separate choice that creates a hand.
 
 ```text
 now playing   wave / pursue
@@ -542,6 +543,120 @@ project would systematically starve the priority. Keep the one whose next move
 needs the wave's memory and chat in the room — the one you could not write a
 self-sufficient seed for. The delegation test and the seed test are the same
 test.
+
+## MVP product proof
+
+The MVP is one local wave with one continuous Chat thread, one persistent
+playhead, and explicit enqueue and skip controls. It proves the mind can move
+through default, nested, and inserted flows while the user experiences one
+conversation and can always tell where it is.
+
+Promotion, demotion, remote execution, detached-hand UX, the complete KRs/PRs/
+backlog dashboard, and a full editable flow graph are not required for this
+proof. They remain consequences of the architecture, not prerequisites for
+trying the core interaction.
+
+### Done when: the mind is always somewhere
+
+- Starting a wave opens one Chat thread whose header names the active flow and
+  step without requiring the user to find or choose a session.
+- The header shows a breadcrumb for the invocation stack plus `now` and `next`.
+- When one body ends and the next starts, the playhead transitions in place;
+  the Chat never resets or presents an empty "no session" state.
+
+### Done when: the default flow visibly loops
+
+- A complete `wave` cycle advances through clarify, pursue, and mutate, then
+  wraps to clarify again.
+- The wrap starts a new invocation/cycle in the same thread. Completed turns
+  and their body boundaries remain above it.
+- With nothing explicitly queued, the resident continues its default cycle
+  without a human relaunch.
+
+### Done when: chat reaches the body now playing
+
+- Sending a message while a step is active delivers it into that step's live
+  session rather than waiting for the whole flow to finish.
+- The reply streams beneath the active body boundary and journals as it grows.
+- A message and its answer appear exactly once after reconnect or replay.
+
+### Done when: a flow can be enqueued at the current scope
+
+- From `wave › review-design › pursue`, enqueueing `research` shows it in
+  the `review-design` invocation's local queue and shows the return target in
+  `wave`.
+- `review-design` finishes its remaining steps, `research` runs, and only then
+  does the playhead return to the suspended `wave` invocation.
+- The inserted flow uses the same thread and memory. If its invocation needs a
+  placed worktree, the placement changes without creating another chat.
+- Enqueueing two flows at the same scope runs them FIFO before returning to the
+  caller.
+
+### Done when: skip advances without destroying the route
+
+- Pressing Skip interrupts the active session, records a visible `skipped by
+  user` boundary, and starts the next step.
+- Skipping preserves the current invocation's remaining steps, local queue,
+  and return target.
+- Output arriving from the skipped session after the boundary cannot append to
+  the new body's span.
+
+### Done when: session handoffs are legible but secondary
+
+- Every assistant span sits beneath a boundary labeled with flow and step.
+- Expanding a boundary reveals invocation id, step path, session id, harness,
+  model, host, worktree/run, start/end time, and termination reason.
+- Collapsing the details leaves a readable conversation. There is still one
+  composer and no session-shaped chat tabs.
+
+### Done when: nested navigation fits in the Chat header
+
+- During a nested flow, the primary UI answers four questions without opening
+  an inspector: where am I, what is next, what is queued here, and where do I
+  return?
+- Repeated invocations of the same named flow remain distinguishable; the UI
+  and journal key them by invocation id and step path, not display name.
+- Loops show their current iteration and branches show the selected path. The
+  unchosen graph stays in the audit view rather than crowding Chat.
+
+### Done when: the playhead survives reconnect and restart
+
+- Closing and reopening Loopflow Mac reconstructs the same thread grouping,
+  invocation stack, current step, local queues, and return targets.
+- Restarting the wave server marks the abandoned body interrupted, resumes the
+  same logical step in a new session, and preserves every queued continuation.
+- Recovery neither silently advances a step nor duplicates a completed turn.
+
+### Done when: a failed body does not become a lost mind
+
+- Killing the active harness produces a visible failure boundary tied to that
+  body.
+- The scheduler retries the same logical step in a new body; it does not mark
+  the step complete or advance the playhead because a process exited.
+- If the step cannot restart, Chat remains on that failed step with Skip
+  available. The user never has to attach to tmux to recover control.
+
+### Done when: the record explains the experience
+
+- Replaying the journal reproduces the same thread spans, body boundaries,
+  playhead, queue, skips, failures, and resumptions shown live.
+- Selecting any assistant span opens the run/session trace that produced it.
+- A tester can inspect the replay and answer which body produced every piece
+  of assistant output and why the playhead moved next.
+
+### The MVP demo: enqueue, skip, return
+
+1. Open a running wave in Chat and watch its default flow advance without
+   selecting a session.
+2. Enqueue `review-design`; while inside it, enqueue `research`.
+3. Send a message and watch the active body answer inline.
+4. Skip one step. See the skip boundary, the next body, the queued `research`
+   flow, and the eventual return to the suspended wave invocation.
+5. Close and reopen the app. The thread, body boundaries, playhead, queue, and
+   return point are unchanged.
+
+The MVP holds when that entire demonstration uses one Chat thread and never
+requires a terminal attachment or session picker.
 
 ## Demo
 

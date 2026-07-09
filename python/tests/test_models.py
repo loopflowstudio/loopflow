@@ -75,10 +75,10 @@ class TestWaveModel:
         assert wave.name == "reduce"
 
     def test_flow_steps_parse_ops_items(self):
-        data = {**WAVE_MINIMAL, "flow_steps": ["implement", "op: land --create-pr"]}
+        data = {**WAVE_MINIMAL, "flow_steps": ["implement", "op: pr land --create-pr"]}
         wave = Wave.model_validate(data)
         assert [skill.type for skill in wave.flow_steps] == ["skill", "op"]
-        assert wave.flow_steps[1].name == "land --create-pr"
+        assert wave.flow_steps[1].name == "pr land --create-pr"
 
 
 class TestCommitEntryModel:

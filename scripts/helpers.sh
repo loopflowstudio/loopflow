@@ -148,7 +148,7 @@ _loopflow_fzf_pick() {
 loopflow_pick_wave() {
     local items selection
     if loopflow_has_cmd lf; then
-        items="$(lf op wt list 2>/dev/null)"
+        items="$(lf wt list 2>/dev/null)"
     elif loopflow_has_cmd git; then
         items="$(git worktree list --porcelain 2>/dev/null | grep '^worktree ' | sed 's/^worktree //')"
     fi
@@ -254,9 +254,16 @@ loopflow_dispatch() {
                 loopflow_display "gh CLI not found"
             fi
             ;;
-        next|land)
+        next)
             if loopflow_has_cmd lf; then
-                tmux send-keys "lf op $action" Enter
+                tmux send-keys "lf next" Enter
+            else
+                loopflow_display "lf not found"
+            fi
+            ;;
+        land)
+            if loopflow_has_cmd lf; then
+                tmux send-keys "lf pr land" Enter
             else
                 loopflow_display "lf not found"
             fi

@@ -214,7 +214,7 @@ Flows can include mechanical ops items directly:
 ```yaml
 - implement
 - gate
-- op: land --create-pr
+- op: pr land --create-pr
 ```
 
 ### Build flows (`build/`)
@@ -227,8 +227,8 @@ Flows can include mechanical ops items directly:
 | `queue` | compress → update-wave → gate |
 | `code` | implement → compress → lint → gate |
 | `pair` | design → code |
-| `deploy` | gate → op: land --create-pr |
-| `ship` | refresh-plan → implement → gate → op: pr → op: land |
+| `deploy` | gate → op: pr land --create-pr |
+| `ship` | refresh-plan → implement → gate → op: pr open → op: pr land |
 | `incident` | debug → 5whys → code → deploy |
 
 ### Govern flows (`govern/`)
@@ -335,7 +335,7 @@ uv run python scripts/install.py local --use   # full build: lf, lfd, Loopflow.a
 uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf+lfd, sync skills
 ```
 
-`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, install them into the local bin dir, and sync loopflow skills into `~/.claude/skills` and `~/.agents/skills`. Both paths run `lf sync-skills --global --yes` after installing, so Claude and Codex always see the latest skills.
+`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, install them into the local bin dir, and sync loopflow skills into `~/.claude/skills` and `~/.agents/skills`. Both paths run `lf sync-skills --yes` after installing, so Claude and Codex always see the latest skills.
 
 Built-in skills and flows included. `lf init` sets up your coding agent and preferences.
 

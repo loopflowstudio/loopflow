@@ -678,7 +678,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
 /// Two gates in front of the state-free [`crate::lfd::lf_exec`] engine: the
 /// generic shape check ([`validate_lf_argv`] — garbage argv → 400, no exec),
 /// then this door's own verb allowlist ([`wave_exec_verdict`] — a parsed but
-/// forbidden verb like `op auth` or `wave` → 400). Only then exec and
+/// forbidden verb like `auth` or `wave` → 400). Only then exec and
 /// capture. The door pins execution to the outwave, so a client-supplied
 /// `cwd` on the shared [`ExecRequest`] shape is ignored here — the machine
 /// lfd's `/v0/exec` honors it; the wave's does not, by design.

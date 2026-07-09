@@ -195,7 +195,7 @@ def test_sync_skills_runs_fresh_lf_with_yes(tmp_path: Path) -> None:
 
     install._sync_skills(lf)
 
-    assert log.read_text() == "op sync-skills --yes\n"
+    assert log.read_text() == "sync-skills --yes\n"
 
 
 def test_sync_skills_warns_without_failing_when_lf_cannot_run(

@@ -90,7 +90,7 @@ def main() -> int:
         repo = Path(tmp)
         run(["git", "init", "-q"], repo)
         write_probe_step(repo)
-        run(lf_command(source_root) + ["op", "sync-skills"], repo)
+        run(lf_command(source_root) + ["sync-skills"], repo)
         verify_synced_files(repo)
         maybe_run_live(repo, args.live)
     print("skill sync verified")

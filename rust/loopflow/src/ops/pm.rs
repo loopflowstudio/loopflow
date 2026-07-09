@@ -223,6 +223,11 @@ fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
     read_wave_config(repo, wave).and_then(|config| config.pm)
 }
 
+fn resolve_wave(repo: &Path, wave: Option<&str>) -> OpsResult<String> {
+    resolve_wave_name(repo, wave)
+        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))
+}
+
 fn parse_provider(value: &str) -> OpsResult<PmProviderKind> {
     value.parse::<PmProviderKind>().map_err(pm_to_ops)
 }
@@ -401,8 +406,7 @@ async fn pm_init_async(
     options: &PmInitOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmInitResult> {
-    let wave = resolve_wave_name(repo, options.wave.as_deref())
-        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
+    let wave = resolve_wave(repo, options.wave.as_deref())?;
     let wave_dir = repo.join("wave").join(&wave);
     if !wave_dir.is_dir() {
         return Err(OpsError::Message(format!(
@@ -464,8 +468,7 @@ async fn pm_show_async(
     options: &PmShowOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmShowResult> {
-    let wave = resolve_wave_name(repo, options.wave.as_deref())
-        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
+    let wave = resolve_wave(repo, options.wave.as_deref())?;
     let local_project = resolve_local_project(repo, &wave, options.project.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     fetch_items(&wave, local_project.as_deref(), &ctx, progress).await
@@ -527,8 +530,7 @@ async fn pm_update_async(
     options: &PmUpdateOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
-    let wave = resolve_wave_name(repo, options.wave.as_deref())
-        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
+    let wave = resolve_wave(repo, options.wave.as_deref())?;
     let local_project = resolve_local_project(repo, &wave, options.project.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     apply_update(&wave, local_project.as_deref(), &ctx, options, progress).await
@@ -676,8 +678,7 @@ async fn pm_status_async(
     }
 
     let waves = if let Some(wave) = options.wave.as_deref() {
-        vec![resolve_wave_name(repo, Some(wave))
-            .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?]
+        vec![resolve_wave(repo, Some(wave))?]
     } else {
         list_pm_waves(repo)?
     };
@@ -745,25 +746,10 @@ async fn pm_status_async(
 }
 
 pub fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
-    let wave_dir = repo.join("wave");
-    if !wave_dir.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut waves = Vec::new();
-    for entry in std::fs::read_dir(&wave_dir)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        if wave_has_pm_project(repo, &name) {
-            waves.push(name);
-        }
-    }
-    waves.sort();
-    Ok(waves)
+    Ok(list_local_waves(repo)?
+        .into_iter()
+        .filter(|wave| wave_has_pm_project(repo, wave))
+        .collect())
 }
 
 // ── sync / doctor ──────────────────────────────────────────────────
@@ -915,8 +901,7 @@ async fn pm_rename_async(
     options: &PmRenameOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmRenameResult> {
-    let wave = resolve_wave_name(repo, options.wave.as_deref())
-        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
+    let wave = resolve_wave(repo, options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     progress.status(&format!(
         "renaming {} Linear project {} to {}",
@@ -946,8 +931,7 @@ async fn pm_task_move_async(
     options: &PmTaskMoveOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmTaskMoveResult> {
-    let wave = resolve_wave_name(repo, options.wave.as_deref())
-        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
+    let wave = resolve_wave(repo, options.wave.as_deref())?;
     resolve_local_project(repo, &wave, Some(&options.project))?;
     let ctx = resolve_context(repo, &wave).await?;
     let label = project_label(&options.project);

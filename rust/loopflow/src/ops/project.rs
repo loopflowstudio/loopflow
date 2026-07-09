@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::lfd::executor::helpers::{resolve_lf_binary, spawn_detached_lf, tmux_session_slug};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::Wave;
 use crate::lfdb::{open_existing_store, Store};
@@ -52,9 +53,7 @@ pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<S
 }
 
 async fn wake_child(repo: &Path, wave: &str) -> OpsResult<()> {
-    let executable = std::env::current_exe()
-        .map_err(|err| OpsError::Message(format!("cannot resolve lf executable: {err}")))?;
-    let status = tokio::process::Command::new(executable)
+    let status = tokio::process::Command::new(resolve_lf_binary())
         .args([
             "chat",
             "--from",
@@ -118,39 +117,14 @@ async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> O
 }
 
 async fn launch_residency(repo: &Path, wave: &str) -> OpsResult<()> {
-    let executable = std::env::current_exe()
-        .map_err(|err| OpsError::Message(format!("cannot resolve lf executable: {err}")))?;
-    let command = [
-        executable.display().to_string(),
+    let argv = [
+        resolve_lf_binary().display().to_string(),
         "wave".to_string(),
         wave.to_string(),
-    ]
-    .iter()
-    .map(|arg| crate::lfd::executor::helpers::shell_escape(arg))
-    .collect::<Vec<_>>()
-    .join(" ");
-    let session = promotion_session_name(repo, wave);
-    let status = tokio::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-c",
-            &repo.display().to_string(),
-            "/bin/zsh",
-            "-lc",
-            &format!("exec {command}"),
-        ])
-        .status()
+    ];
+    spawn_detached_lf(&promotion_session_name(repo, wave), repo, &argv)
         .await
-        .map_err(|err| OpsError::Message(format!("tmux failed to start child wave: {err}")))?;
-    if !status.success() {
-        return Err(OpsError::Message(
-            "tmux failed to start child wave residency".to_string(),
-        ));
-    }
-    Ok(())
+        .map_err(|err| OpsError::Message(format!("failed to start child wave residency: {err}")))
 }
 
 fn promotion_session_name(repo: &Path, wave: &str) -> String {
@@ -158,19 +132,7 @@ fn promotion_session_name(repo: &Path, wave: &str) -> String {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("repo");
-    let sanitize = |value: &str| {
-        value
-            .chars()
-            .map(|ch| {
-                if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
-                    ch
-                } else {
-                    '-'
-                }
-            })
-            .collect::<String>()
-    };
-    format!("lf-{}-{}", sanitize(repo), sanitize(wave))
+    format!("lf-{}-{}", tmux_session_slug(repo), tmux_session_slug(wave))
 }
 
 #[cfg(test)]

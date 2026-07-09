@@ -271,7 +271,10 @@ async fn memory_wave_chain_from_store(
     Some(chain)
 }
 
+/// Render each wave's memory oldest-ancestor first. A lone wave reads as its
+/// own memory, unheadered; an inherited chain labels who owns what.
 fn gather_memory_chain(origin: &Path, chain: &[String]) -> Option<String> {
+    let leaf = chain.last()?;
     let scoped = chain
         .iter()
         .filter_map(|wave| {
@@ -279,30 +282,19 @@ fn gather_memory_chain(origin: &Path, chain: &[String]) -> Option<String> {
             let adds = live_memory_adds(origin, wave)
                 .or_else(|| journal_memory_adds(origin, wave))
                 .unwrap_or_default();
-            render_wave_memory(adds, &base).map(|memory| (wave.clone(), memory))
+            let memory = render_wave_memory(adds, &base)?;
+            if chain.len() == 1 {
+                return Some(memory);
+            }
+            let ownership = if wave == leaf {
+                "owned by"
+            } else {
+                "inherited from"
+            };
+            Some(format!("## Memory {ownership} {wave}\n\n{memory}"))
         })
         .collect::<Vec<_>>();
-    if scoped.is_empty() {
-        return None;
-    }
-    if chain.len() == 1 {
-        return scoped.into_iter().next().map(|(_, memory)| memory);
-    }
-    let leaf = chain.last()?;
-    Some(
-        scoped
-            .into_iter()
-            .map(|(wave, memory)| {
-                let ownership = if &wave == leaf {
-                    "owned by"
-                } else {
-                    "inherited from"
-                };
-                format!("## Memory {ownership} {wave}\n\n{memory}")
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n"),
-    )
+    (!scoped.is_empty()).then(|| scoped.join("\n\n"))
 }
 
 /// Turn/char budget for the parent-wave section of a work line's overlay —

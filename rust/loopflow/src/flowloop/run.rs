@@ -39,7 +39,7 @@ impl FlowloopRun {
                 .map_err(|err| OpsError::Message(format!("failed to read wave registry: {err}")))?
                 .ok_or_else(|| OpsError::Message(format!("wave '{wave_name}' not found")))?;
             let run_id = LfdId::new();
-            let mut run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh, None)
+            let mut run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh)
                 .await
                 .map_err(|err| {
                     OpsError::Message(format!("failed to create flowloop worktree: {err}"))

@@ -120,7 +120,6 @@
 //!
 //! `Turn` is [`crate::chat::turns::ChatTurn`].
 
-use std::collections::HashSet;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -139,6 +138,7 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
+use crate::lfd::executor::helpers::{resolve_lf_binary, spawn_detached_lf, tmux_session_slug};
 use crate::lfd::http::routes::exec::{ExecRequest, ExecResponse};
 use crate::lfd::lf_exec::{exec_lf, validate_lf_argv};
 use crate::wave::channel::tagged_turn_json;
@@ -421,91 +421,29 @@ struct ServerState {
     subagent: SubagentDoor,
     observer: Option<Arc<StoreObserver>>,
     supervisor: Option<SupervisorHandle>,
-    loops: DetachedLoopSupervisor,
     started_at: OffsetDateTime,
 }
 
-/// Detached loop ownership lives with the listener. Tmux keeps the child
-/// inspectable without granting stdin (`tmux attach -r`); this set is the
-/// listener's live supervision view and is pruned when a session exits.
-#[derive(Debug, Clone, Default)]
-struct DetachedLoopSupervisor {
-    sessions: Arc<Mutex<HashSet<String>>>,
-}
-
-impl DetachedLoopSupervisor {
-    async fn launch(
-        &self,
-        repo_root: &Path,
-        wave: &str,
-        request: &DetachedLoopRequest,
-    ) -> Result<String, String> {
-        let session = detached_loop_session_name(wave);
-        let command = detached_loop_command(request, wave)?;
-        let status = tokio::process::Command::new("tmux")
-            .args([
-                "new-session",
-                "-d",
-                "-s",
-                &session,
-                "-c",
-                &repo_root.display().to_string(),
-                "/bin/zsh",
-                "-lc",
-                &command,
-            ])
-            .status()
-            .await
-            .map_err(|err| format!("tmux failed to spawn detached loop: {err}"))?;
-        if !status.success() {
-            return Err("tmux failed to launch detached loop".to_string());
-        }
-        let _ = tokio::process::Command::new("tmux")
-            .args(["set-option", "-t", &session, "mouse", "on"])
-            .status()
-            .await;
-
-        self.sessions
-            .lock()
-            .expect("detached loop session lock poisoned")
-            .insert(session.clone());
-        let sessions = Arc::clone(&self.sessions);
-        let watched = session.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                match crate::lfd::executor::helpers::tmux_session_exists(&watched).await {
-                    Ok(true) => continue,
-                    Ok(false) => break,
-                    Err(err) => {
-                        tracing::warn!(session = watched, %err, "detached loop probe failed");
-                        continue;
-                    }
-                }
-            }
-            sessions
-                .lock()
-                .expect("detached loop session lock poisoned")
-                .remove(&watched);
-            tracing::info!(session = watched, "detached loop ended");
-        });
-        Ok(session)
-    }
+/// Start the blocking `lf loop` the request names, detached in its own tmux
+/// session. Tmux keeps the child inspectable without granting stdin
+/// (`tmux attach -r`); the loop's own run row is its durable supervision view.
+async fn launch_detached_loop(
+    repo_root: &Path,
+    wave: &str,
+    request: &DetachedLoopRequest,
+) -> Result<String, String> {
+    let session = detached_loop_session_name(wave);
+    let argv = detached_loop_argv(&resolve_lf_binary(), request, wave);
+    spawn_detached_lf(&session, repo_root, &argv)
+        .await
+        .map_err(|err| format!("failed to launch detached loop: {err}"))?;
+    tracing::info!(session, wave, flow = request.flow, "detached loop launched");
+    Ok(session)
 }
 
 fn detached_loop_session_name(wave: &str) -> String {
-    let wave: String = wave
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect();
     let run = uuid::Uuid::new_v4().simple().to_string();
-    format!("lf-loop-{wave}-{}", &run[..8])
+    format!("lf-loop-{}-{}", tmux_session_slug(wave), &run[..8])
 }
 
 fn detached_loop_argv(executable: &Path, request: &DetachedLoopRequest, wave: &str) -> Vec<String> {
@@ -532,17 +470,6 @@ fn detached_loop_argv(executable: &Path, request: &DetachedLoopRequest, wave: &s
     argv
 }
 
-fn detached_loop_command(request: &DetachedLoopRequest, wave: &str) -> Result<String, String> {
-    let executable =
-        std::env::current_exe().map_err(|err| format!("cannot resolve lf executable: {err}"))?;
-    let command = detached_loop_argv(&executable, request, wave)
-        .iter()
-        .map(|arg| crate::lfd::executor::helpers::shell_escape(arg))
-        .collect::<Vec<_>>()
-        .join(" ");
-    Ok(format!("unset LFD_SESSION_INHERITED; exec {command}"))
-}
-
 /// Build the router over a running [`WaveRuntime`]. `observer` is the store
 /// poller when this server is registered — `GET /resident/context` freshens
 /// it before serving. `supervisor` lets the attach door stand the respawn
@@ -565,7 +492,6 @@ pub fn router(
         subagent,
         observer,
         supervisor,
-        loops: DetachedLoopSupervisor::default(),
         started_at: OffsetDateTime::now_utc(),
     };
     Router::new()
@@ -877,9 +803,7 @@ async fn loops_handler(
     }
     crate::flowloop::driver::require_loop_flow(state.runtime.repo_root(), &request.flow)
         .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
-    let session = state
-        .loops
-        .launch(state.runtime.repo_root(), state.runtime.name(), &request)
+    let session = launch_detached_loop(state.runtime.repo_root(), state.runtime.name(), &request)
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
     Ok(Json(DetachedLoopResponse { session }))
@@ -1651,7 +1575,7 @@ mod tests {
     }
 
     #[test]
-    fn detached_loop_command_forces_the_server_owned_blocking_form() {
+    fn detached_loop_argv_forces_the_server_owned_blocking_form() {
         let request = DetachedLoopRequest {
             flow: "task".into(),
             seed: "fix 'quoted' behavior".into(),

@@ -290,14 +290,33 @@ Requires the [Chrome extension](https://chromewebstore.google.com/detail/claude-
 
 ### Yolo
 
-Skip permissions. Codex uses the danger-full-access sandbox.
+Skip vendor permission prompts and sandboxes.
 
 | | |
 |---|---|
 | **Config** | `yolo: true` |
 | **Default** | `false` |
 
-Claude: `--dangerously-skip-permissions`. Codex: `--sandbox danger-full-access` with `approval_policy="never"`. Gemini: `--yolo`. OpenCode: `permission: "allow"` via `OPENCODE_CONFIG_CONTENT`.
+Loopflow's normal floor is conservative automation: Codex gets
+`workspace-write` and non-interactive Codex runs get `approval_policy = "never"`;
+non-interactive Claude runs skip permission prompts. User and repo-level vendor
+configs that are already more permissive are not downgraded. For example, Codex
+`sandbox_mode = "danger-full-access"` or Claude
+`permissions.defaultMode = "bypassPermissions"` are left to the vendor config.
+If vendor config is less permissive, Loopflow warns and supplies its default.
+
+`yolo: true` is the explicit Loopflow bypass: Claude uses
+`--dangerously-skip-permissions`, Codex uses
+`--dangerously-bypass-approvals-and-sandbox`, Gemini uses `--yolo`, and OpenCode
+uses `permission: "allow"` via `OPENCODE_CONFIG_CONTENT`.
+
+### Worktree Sandboxes
+
+Claude and Codex CLI/TUI sessions launched from a Git worktree automatically add
+the main repo as an extra writable directory. This keeps normal agent
+permissions, but lets Git write the linked worktree index under
+`<main>/.git/worktrees/<worktree>/` when the agent stages, commits, rebases, or
+runs `lf op`.
 
 ### Autoprune
 

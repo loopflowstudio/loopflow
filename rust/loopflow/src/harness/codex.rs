@@ -707,9 +707,8 @@ impl CodexHarness {
 
                 // Any server request (method + id) is an approval request
                 // (item/commandExecution/requestApproval and friends); answer
-                // it per the configured policy. With approvalPolicy "never"
-                // in thread/start these should not occur, but the belt goes
-                // with the suspenders.
+                // it per the configured Loopflow response policy. The user's
+                // Codex approval policy decides whether these requests occur.
                 if let Some(id) = value.get("id") {
                     let result = match approval {
                         ApprovalPolicy::AutoApprove => json!({ "decision": "accept" }),
@@ -763,18 +762,10 @@ impl CodexHarness {
             .map_err(|_| anyhow!("codex initialize channel closed"))?;
         self.send_notification("initialized").await?;
 
-        let mut thread_params = build_codex_thread_start_params(launch);
-        // Pass the approval intent explicitly instead of inheriting whatever
-        // ~/.codex/config.toml says. Probed live on 0.142.5: thread/start
-        // accepts `approvalPolicy` (AskForApproval: "never" | "on-request" |
-        // "on-failure" | "untrusted") and `sandbox` (SandboxMode: "read-only"
-        // | "workspace-write" | "danger-full-access") and echoes them back in
-        // its response.
-        let (approval_policy, sandbox) = match self.approval {
-            ApprovalPolicy::AutoApprove => ("never", "danger-full-access"),
-        };
-        thread_params.insert("approvalPolicy".to_string(), json!(approval_policy));
-        thread_params.insert("sandbox".to_string(), json!(sandbox));
+        let thread_params = build_codex_thread_start_params(launch);
+        // The thread params include Loopflow's conservative defaults only when
+        // Codex config is missing or less permissive. More permissive user or
+        // repo config, such as danger-full-access, is left alone.
         // Publish the request id before sending so the reader can match the
         // response even if it races the send.
         let request_id = self.next_request_id;

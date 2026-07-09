@@ -17,7 +17,7 @@ A wave is a local operating context plus remote task tracking:
   Projects belong to exactly one wave; they do not own memory, cadence, or child
   projects.
 - **Tasks live in Linear**, not in the repo. Read them with `lf op pm show`;
-  change them with `lf op pm update`. There is no local task mirror — never
+  change them with `lf op pm task ...`. There is no local task mirror — never
   write `N-*.md` item files, task lists in project docs, or a roadmap table.
 
 ## Orientation
@@ -43,7 +43,7 @@ Whether you're cleaning up after a build, reconciling scratch analysis, or both:
   changes a project's definition or KR set, update the relevant file under
   `wave/<wave>/projects/`.
 - The PM tasks in Linear reflect reality: shipped work is closed, new work is
-  filed, stale items are corrected — all through `lf op pm update`.
+  filed, stale items are corrected — all through `lf op pm task ...`.
 - `scratch/` is trimmed to what a reviewer needs (see below).
 
 ## Bias: fold into MEMORY, don't drop
@@ -56,7 +56,7 @@ Every scratch file with future-relevant content must land somewhere durable:
 
 - Decisions, learnings, gotchas, patterns established → fold into `MEMORY.md`.
 - Concrete future work (a next step, a follow-up, a discovered bug) → file it as
-  a PM task with `lf op pm update --project <project> --title "…" --notes "…"`.
+  a PM task with `lf op pm task create --project <project> --title "…" --notes "…"`.
 - Open questions about future work → `MEMORY.md`, or a PM task if it's
   actionable.
 - If content overlaps what's already in `MEMORY.md`, merge it — don't skip it.
@@ -72,11 +72,11 @@ fold it. If it only describes what was already built, let it go.
 3. Read `wave/<wave>/projects/*.md` and `scratch/` — every file, completely.
 4. **Reconcile Linear tasks against reality.** For each task, ask:
    - **Shipped?** If this branch (or main) crossed its finish line, close it:
-     `lf op pm update --id <task-id> --status done`.
+     `lf op pm task done --id <task-id>`.
    - **Accurate?** If the item's description no longer matches the codebase,
-     correct it: `lf op pm update --id <task-id> --title "…" --notes "…"`.
-   - **New work surfaced?** File it: `lf op pm update --title "…" --notes "…"`.
-   Do this remotely. Never create or delete local roadmap files.
+     correct it: `lf op pm task update --id <task-id> --title "…" --notes "…"`.
+   - **New work surfaced?** File it: `lf op pm task create --title "…" --notes "…"`.
+   Do this remotely. Never create or delete local task-list files.
 5. **Fold scratch learnings into `MEMORY.md`.** Merge into existing sections
    where there's a clear match; add sections for new durable context. Keep it
    tight — memory is a working store, not an archive.
@@ -107,7 +107,7 @@ When `scratch/` holds a proposal and no wave exists yet, create one:
    gets a definition and `## KRs`.
 4. Connect Linear: `lf op pm init --wave <name>` creates/links the wave's
    Linear project and writes `linear_project` into `GOAL.md`.
-5. File the opening tasks in Linear with `lf op pm update` — the urgent and
+5. File the opening tasks in Linear with `lf op pm task create` — the urgent and
    next-step work, one task each. Tasks start in Linear, not on disk.
 
 ### GOAL.md
@@ -157,7 +157,7 @@ projects, or issue mirrors. Put concrete work in Linear.
 
 Linear tasks go stale — the codebase moves, other waves ship, intent evolves.
 When you find incoherent tasks, fix them in place through
-`lf op pm update`:
+`lf op pm task update`:
 
 - **Finish line moved** — the goal was reached a different way → close the item.
 - **Design diverged** — building it as written would fight the current

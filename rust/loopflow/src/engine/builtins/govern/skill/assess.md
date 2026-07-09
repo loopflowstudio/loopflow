@@ -61,7 +61,7 @@ be fine. Look past activity to actual progress toward finish lines.
      changes, competing for the same code, contradictory directions?
    - **Gaps** — Is there work that needs doing that no wave owns?
    - **Redundancy** — Are multiple waves doing equivalent work?
-   - **Phase fit** — Does the current phase (from the roadmap) still
+   - **Phase fit** — Does the current phase (from the live task mix) still
      make sense given what's been learned?
 
 4. **Identify the pressure points.** What are the 1-3 things that, if
@@ -87,7 +87,7 @@ Write `scratch/garden-assessment.md`:
 ## Chord-Level
 **Balance**: <how waves relate to each other>
 **Gaps**: <unowned work, if any>
-**Phase**: <is the current roadmap phase still right?>
+**Phase**: <is the current task mix still right?>
 
 ## Pressure Points
 1. <highest leverage change>

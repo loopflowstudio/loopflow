@@ -7,7 +7,7 @@ Clarify the wave artifact: `wave/<wave>/GOAL.md`.
 
 ## Orientation
 
-Read the wave GOAL/MEMORY, project docs, recent chat, and the live roadmap. The
+Read the wave GOAL/MEMORY, project docs, recent chat, and live Linear tasks. The
 wave owns the operating context and project selection, not a task list mirror.
 Each project belongs to exactly one wave and owns KRs, not memory or cadence.
 

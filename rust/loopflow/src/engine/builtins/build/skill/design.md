@@ -99,7 +99,7 @@ This is the natural session exit point. The user's answer determines what to run
    - `lf op pm init --wave <name>` creates/links the Linear project and writes
      `linear_project` into `GOAL.md`.
    - File the opening items with
-     `lf op pm update --project <project> --title "…" --notes "…"` — the urgent
+     `lf op pm task create --project <project> --title "…" --notes "…"` — the urgent
      and next-step work, one task each. Tasks start in Linear, not on disk.
 6. The first item you expect to build now becomes the design doc for this branch
    (`scratch/<branch>.md`).

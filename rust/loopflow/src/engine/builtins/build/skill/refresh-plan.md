@@ -66,7 +66,7 @@ Branches sit while main moves. Reconcile the plan against the current diff, upst
    ## Strategy: ship bias
 
    - Finish only what's trivial and in-scope for this branch
-   - Defer anything non-trivial into the wave's roadmap, or `scratch/questions.md` if waveless
+  - Defer anything non-trivial into Linear tasks, or `scratch/questions.md` if waveless
    - Prefer landing over comprehensive — a wave doc captures intent
    ```
 
@@ -92,7 +92,7 @@ Write `scratch/<branch>.md` with:
 
 ## Deferred
 
-- <Non-trivial work to move into the wave roadmap, or into scratch/questions.md if waveless>
+- <Non-trivial work to move into Linear tasks, or into scratch/questions.md if waveless>
 
 ## Risks / blockers
 

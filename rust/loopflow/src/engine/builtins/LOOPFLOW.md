@@ -119,15 +119,15 @@ and edits the wave's Linear project; tasks attach to local projects with
 ```bash
 lf op pm show                                          # the wave's live PM tasks
 lf op pm show --project wave-chat                      # filter by local project
-lf op pm update --project wave-chat --title "..." --notes "..." # file a labeled task
-lf op pm update --id <task-id> --status done --pr <url> # close a shipped task with its PR link
-lf op pm update --id <task-id> --title "..."           # edit an existing task
+lf op pm task create --project wave-chat --title "..." --notes "..." # file a labeled task
+lf op pm task done --id <task-id> --pr <url>           # close a shipped task with its PR link
+lf op pm task update --id <task-id> --title "..."      # edit an existing task
 lf op pm sync --plan                                   # report PM drift
 ```
 
-Close a shipped task with `--status done --pr <url>` so the task carries a
-pointer back to the work. The PR link posts as a comment; it never clobbers the
-task's description.
+Close a shipped task with `lf op pm task done --id <task-id> --pr <url>` so the
+task carries a pointer back to the work. The PR link posts as a comment; it
+never clobbers the task's description.
 
 Add `--wave <name>` when the wave is ambiguous. Never write `wave/<name>/N-*.md`
 roadmap files, a roadmap table in `GOAL.md`, or task lists in project docs —

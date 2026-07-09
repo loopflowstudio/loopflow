@@ -52,7 +52,7 @@ Git/PR/PM ops             Clients
 | Direction | `.lf/directions/` | `engine` prompt assembly |
 | Wave goal | `wave/<name>/GOAL.md` | `lf wave` server + resident flowloop |
 | Wave memory | `wave/<name>/MEMORY.md` | wave agent |
-| Roadmap item | Linear | `lf op pm` and wave flows |
+| Task | Linear | `lf op pm` and wave flows |
 | Session | lfdb | `lf` runs and placement flags |
 | Run/event | lfdb | lfd HTTP/event stream |
 | Attention | lfdb | lfd + Loopflow |
@@ -116,7 +116,7 @@ Important paths:
 ## Wave Loop
 
 ```text
-1. Read GOAL.md, MEMORY.md, roadmap, and relevant docs.
+1. Read GOAL.md, MEMORY.md, project docs, live Linear tasks, and relevant docs.
 2. Assess current wave state and messages in the thread.
 3. Pick one move: study, ingest, dispatch, unblock, review, or wait.
 4. Run a skill or flow, often by dispatching a worker.
@@ -149,7 +149,7 @@ Loopflow integrates with:
 
 - Git and worktrees for branch isolation.
 - GitHub for PRs, webhook ingress translated to `lf` execs, and release workflows.
-- Linear and Notion for PM-backed wave roadmaps.
+- Linear and Notion for PM-backed wave tasks.
 - tmux and local processes for interactive sessions.
 - Swift/macOS services for Loopflow and native host behavior.
 

@@ -20,11 +20,11 @@ Before starting, orient yourself in this branch:
 Write design artifacts, notes, and open questions under `scratch/`. Don't
 re-derive what these already record.
 
-Kickoff took a fuzzy roadmap item and fleshed it out. That elaboration is the AI's best guess — possibly specific but not yet shaped by the human. This session is where the human shows up and sculpts it.
+Kickoff took a fuzzy task and fleshed it out. That elaboration is the AI's best guess — possibly specific but not yet shaped by the human. This session is where the human shows up and sculpts it.
 
 ## Voice
 
-Come prepared, not opinionated. You've read the wave context, the roadmap item, the kickoff output. Present your understanding and let the human reshape it. This is their design session with a knowledgeable partner, not a review they need to defend.
+Come prepared, not opinionated. You've read the wave context, the task, and the kickoff output. Present your understanding and let the human reshape it. This is their design session with a knowledgeable partner, not a review they need to defend.
 
 Don't open with evaluation ("The strongest part of this design...", "One concern is..."). Open with what you think they meant. Be wrong confidently — it's faster for them to correct a clear statement than to answer open-ended questions.
 

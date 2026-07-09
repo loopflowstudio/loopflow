@@ -23,7 +23,7 @@ struct LocalWaveAgentLauncherTests {
             "tmux", "new-session", "-d",
             "-s", "lf-loopflow-goals",
             "-c", "/Users/jack/src/loopflow",
-            "/Applications/Loopflow.app/Contents/MacOS/lf", "wave", "goals",
+            "/Applications/Loopflow.app/Contents/MacOS/lf", "loop", "goals",
         ])
     }
 
@@ -97,7 +97,7 @@ struct LocalWaveAgentLauncherTests {
             guard case let WaveLaunchError.noUsableLf(detail) = error else { return false }
             return detail.contains("/Users/jack/.local/bin/lf")
                 && detail.contains("/Users/jack/src/loopflow/target/release/lf")
-                && detail.contains("lf help wave")
+                && detail.contains("lf help loop")
         }
     }
 

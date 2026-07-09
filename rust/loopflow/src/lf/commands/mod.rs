@@ -4,6 +4,7 @@ pub mod flow;
 pub mod list;
 pub mod memory;
 pub mod ops;
+pub mod playhead;
 pub mod run;
 pub mod runs;
 pub mod ssh;

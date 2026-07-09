@@ -146,7 +146,7 @@ struct ContractTests {
         #expect(turn.status == .completed)
         #expect(turn.from == nil, "explicit null decodes as absent")
         #expect(turn.items.isEmpty)
-        #expect(WaveFlowloopState(rawValue: posted.state) == .turning)
+        #expect(WaveLoopState(rawValue: posted.state) == .turning)
 
         // `turn` is explicitly Optional: null for a bare interrupt.
         var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -184,15 +184,15 @@ struct ContractTests {
         #expect(untagged.channel == nil, "absent channel = the wave's own channel")
     }
 
-    @Test("wave_flowloop_states.json pins the shared SSE state vocabulary")
-    func flowloopStateVocabularyPinned() throws {
-        // The same fixture Rust's dto_fixtures checks against FlowloopState::name;
+    @Test("wave_loop_states.json pins the shared SSE state vocabulary")
+    func loopStateVocabularyPinned() throws {
+        // The same fixture Rust's dto_fixtures checks against LoopState::name;
         // a renamed state fails both languages. Swift still deliberately drops
         // unknown names off the stream (see WaveChatConnectionTests) — this
         // pins the vocabulary, not the tolerance.
-        let json = try fixtureJSON("dto/wave_flowloop_states.json")
+        let json = try fixtureJSON("dto/wave_loop_states.json")
         let names = try #require(json["states"] as? [String])
-        #expect(names.map { WaveFlowloopState(rawValue: $0) } == [.idle, .turning, .interrupting, .failed])
+        #expect(names.map { WaveLoopState(rawValue: $0) } == [.idle, .turning, .interrupting, .failed])
     }
 }
 

@@ -72,6 +72,65 @@ pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result
     result
 }
 
+/// Run exactly one expanded top-level step. The resident owns the cursor and
+/// invokes this hidden primitive once per body, so a session boundary maps to
+/// a product step instead of an entire flow.
+pub fn run_step(flow: &str, index: usize, message: &str, cli: &Cli, repo: &Path) -> Result<()> {
+    let definition = crate::engine::load_flow(flow, repo)?;
+    let items = expand_flow(&definition, repo)?;
+    let item = items
+        .get(index)
+        .cloned()
+        .ok_or_else(|| anyhow!("flow '{flow}' has no step at index {index}"))?;
+    journal::emit(
+        repo,
+        LfNode::Flow,
+        LfEventType::Started,
+        LfEventFields {
+            flow: Some(definition.name.clone()),
+            index: Some(index as u32),
+            ..LfEventFields::default()
+        },
+    );
+    let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", &definition.name);
+    let executor = CliFlowExecutor {
+        cli,
+        message: Some(message),
+        repo: repo.to_path_buf(),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("failed to build flow-step runtime")?;
+    let result = runtime
+        .block_on(FlowEngine::new(executor).run(std::slice::from_ref(&item), 0))
+        .map(|_| ());
+    match &result {
+        Ok(()) => journal::emit(
+            repo,
+            LfNode::Flow,
+            LfEventType::Completed,
+            LfEventFields {
+                flow: Some(definition.name),
+                index: Some(index as u32),
+                ..LfEventFields::default()
+            },
+        ),
+        Err(err) => journal::emit(
+            repo,
+            LfNode::Flow,
+            LfEventType::Errored,
+            LfEventFields {
+                flow: Some(definition.name),
+                index: Some(index as u32),
+                error: Some(err.to_string()),
+                ..LfEventFields::default()
+            },
+        ),
+    }
+    result
+}
+
 fn print_pipeline_header(flow_name: &str, items: &[ConcreteStep], repo: &Path) -> Result<()> {
     let colors = Colors::new();
     let lines = render_pipeline_lines(items, repo)?;
@@ -406,7 +465,7 @@ fn run_skill_with_journal(
 }
 
 /// Commit any uncommitted changes left by the previous skill.
-fn commit_skill_work(repo: &Path, skill_name: &str) -> Result<()> {
+pub(crate) fn commit_skill_work(repo: &Path, skill_name: &str) -> Result<()> {
     let options = CommitOptions {
         add: true,
         message: Some(format!("lf commit: {skill_name}")),

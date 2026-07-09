@@ -1,6 +1,6 @@
-# flowloop — loop a flow until its bit reads set
+# loop — loop a flow until its bit reads set
 
-A **flowloop** is a looping flow. Any flow can loop — `task`, a scan
+A **loop** is a looping flow. Any flow can loop — `task`, a scan
 flow, a single skill. The flow's skills own everything about the work,
 including how to decide it is done; the runner owns placement, the loop, and
 caps. There are no tiers in code: "task" and "project" are just flows we
@@ -12,8 +12,8 @@ lf loop scan-pass "scan the runtime" --detach    # delegate the same primitive
 ```
 
 **The termination bit is one generic contract, identical for every
-flowloop**, and the runner teaches it itself: every pass's seed carries a
-standing `<lf:flowloop>` instruction explaining how to mark for termination
+loop**, and the runner teaches it itself: every pass's seed carries a
+standing `<lf:loop>` instruction explaining how to mark for termination
 — so any flow is loopable without its skills knowing loop mechanics. The bit
 is one file, read and removed at every boundary:
 
@@ -49,7 +49,7 @@ read-only inspection. Both execute headlessly and fork a worktree.
 - `driver.rs` — the loop: place → pass → read the loop file → done / recheck
   / continue, under caps (max passes, wall clock; exhaustion escalates via
   `lf chat --parent`).
-- `run.rs` — `FlowloopRun`: the registry-backed run lifecycle (worktree,
+- `run.rs` — `LoopRun`: the registry-backed run lifecycle (worktree,
   store row, status). The row is what makes a running loop visible as an
   open task.
 - `wave.rs` — the wave: the same pass, driven by the residency's event
@@ -60,8 +60,8 @@ The canonical flows live in `engine/builtins/build/`: `task`
 (`task_clarify → task_pursue → task_mutate`, bit = merged PR) and
 `project` (`project_clarify → project_pursue → project_mutate`, KR set
 in the project's own doc, bit = all KRs checked). Tier behavior lives in the
-skill texts — defining a new kind of flowloop is writing a flow + skills,
+skill texts — defining a new kind of loop is writing a flow + skills,
 zero Rust.
 
 Phase runs are plumbing — never surfaced in the product. Chat is the one
-interface to a flowloop; only execs surface as attachable sessions.
+interface to a loop; only execs surface as attachable sessions.

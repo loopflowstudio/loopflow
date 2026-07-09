@@ -151,7 +151,7 @@ lf memory update < MEMORY.md                # replace it from stdin
 | Command | What it does |
 |---------|--------------|
 | `lf chat [TEXT]` | Post a message into a wave's thread; reads stdin when TEXT is omitted. Outside any wave the publish drops silently (exit 0), so the verb is safe in every prompt |
-| `lf sub [WAVE] [--json]` | Follow a wave's live events (turns, flowloop state, memory) until killed; exits 0 with a note when no wave resolves |
+| `lf sub [WAVE] [--json]` | Follow a wave's live events (turns, loop state, memory) until killed; exits 0 with a note when no wave resolves |
 | `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 
 All three default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).

@@ -8,12 +8,13 @@ use std::sync::Arc;
 use loopflow::chat::turns::ChatRole;
 use loopflow::chat::types::{ConversationItem, Lifecycle};
 use loopflow::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
+use loopflow::wave::playhead::BodyProvenance;
 use loopflow::wave::runtime::WaveRuntime;
 use loopflow::wave::server::{self, ResidentDoor, SubagentDoor};
-use loopflow::wave::state::FlowloopState;
+use loopflow::wave::state::LoopState;
 use loopflow::wave::wire::ResidentDelta;
 
-/// One complete resident turn, as the flowloop emits it after a pass: an
+/// One complete resident turn, as the loop emits it after a pass: an
 /// item, the pass's reply text, usage, then the finalized boundary.
 fn resident_turn_deltas() -> Vec<ResidentDelta> {
     vec![
@@ -40,6 +41,7 @@ fn resident_turn_deltas() -> Vec<ResidentDelta> {
         ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
             cost_usd: None,
+            reason: None,
         },
     ]
 }
@@ -60,6 +62,30 @@ fn turn_seq(id: &str) -> u64 {
 
 fn open_wave(repo: &Path) -> Arc<WaveRuntime> {
     WaveRuntime::open("ship".into(), repo.to_path_buf()).expect("open runtime")
+}
+
+fn body_for_current(runtime: &WaveRuntime, body_id: &str) -> BodyProvenance {
+    let step = runtime
+        .playhead()
+        .and_then(|playhead| playhead.now)
+        .expect("current playhead step");
+    BodyProvenance {
+        body_id: body_id.to_string(),
+        invocation_id: step.invocation_id,
+        step_path: step.step_path,
+        flow: step.flow,
+        step: step.step,
+        iteration: step.iteration,
+        session_id: Some("session-1".to_string()),
+        harness: Some("codex".to_string()),
+        model: Some("gpt-5".to_string()),
+        host: "test-host".to_string(),
+        worktree: runtime.repo_root().display().to_string(),
+        run_id: None,
+        started_at: "2026-07-09T12:00:00Z".to_string(),
+        ended_at: None,
+        termination_reason: None,
+    }
 }
 
 #[tokio::test]
@@ -83,7 +109,7 @@ async fn restart_replays_thread_and_turn_ids_continue() {
         before,
         "restart keeps the full thread"
     );
-    assert_eq!(rt.flowloop_state(), FlowloopState::Idle);
+    assert_eq!(rt.loop_state(), LoopState::Idle);
 
     // And new turn ids continue the journal's seq domain monotonically.
     let max_before = before.iter().map(|t| turn_seq(&t.id)).max().unwrap();
@@ -126,6 +152,7 @@ async fn crashed_open_turn_is_finalized_failed_on_reboot() {
         journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers: vec![],
+            body: None,
         });
         journal.append(|_| EventKind::TurnItem {
             turn_id: "turn-1".into(),
@@ -135,9 +162,9 @@ async fn crashed_open_turn_is_finalized_failed_on_reboot() {
                 phase: None,
             },
         });
-        journal.append(|_| EventKind::FlowloopState {
-            from: FlowloopState::Idle,
-            to: FlowloopState::Turning {
+        journal.append(|_| EventKind::LoopState {
+            from: LoopState::Idle,
+            to: LoopState::Turning {
                 turn_id: "turn-1".into(),
             },
             reason: "turn opened".into(),
@@ -153,10 +180,37 @@ async fn crashed_open_turn_is_finalized_failed_on_reboot() {
         "janitor closed the crash tail"
     );
     assert_eq!(thread[0].text, "half a thought");
+    assert_eq!(rt.loop_state(), LoopState::Idle, "janitor settled the loop");
+}
+
+#[tokio::test]
+async fn restart_interrupts_the_abandoned_body_without_advancing_the_playhead() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let first_step = {
+        let rt = open_wave(tmp.path());
+        let view = rt.ensure_playhead().expect("initialize playhead");
+        let first_step = view.now.expect("first step");
+        rt.start_body(body_for_current(&rt, "body-1"))
+            .expect("start body");
+        rt.apply_resident_delta(ResidentDelta::TurnOpened { answers: vec![] });
+        first_step
+    };
+
+    let rt = open_wave(tmp.path());
+    let playhead = rt.playhead().expect("replayed playhead");
+    assert!(playhead.active.is_none(), "abandoned body was closed");
     assert_eq!(
-        rt.flowloop_state(),
-        FlowloopState::Idle,
-        "janitor settled the flowloop"
+        playhead.now.expect("same logical step"),
+        first_step,
+        "a process crash retries instead of silently advancing"
+    );
+    let turn = rt.thread_snapshot().pop().expect("recovered assistant turn");
+    assert_eq!(turn.status, Lifecycle::Failed);
+    let body = turn.body.expect("turn keeps body provenance");
+    assert_eq!(body.body_id, "body-1");
+    assert_eq!(
+        body.termination_reason.as_deref(),
+        Some("startup janitor: body abandoned by server restart")
     );
 }
 
@@ -187,27 +241,27 @@ async fn corrupt_trailing_line_is_tolerated_on_reboot() {
 }
 
 #[tokio::test]
-async fn illegal_flowloop_transition_is_refused() {
+async fn illegal_loop_transition_is_refused() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
 
     assert!(!rt.transition(
-        FlowloopState::Interrupting {
+        LoopState::Interrupting {
             turn_id: "turn-1".into()
         },
         "nothing to interrupt"
     ));
-    assert_eq!(rt.flowloop_state(), FlowloopState::Idle, "state untouched");
+    assert_eq!(rt.loop_state(), LoopState::Idle, "state untouched");
     // Refused moves leave no trace in the journal.
     let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("open journal");
     assert!(events.is_empty());
 }
 
 /// `/health` splits channel liveness (`status`, always `serving`) from the
-/// resident's condition (`flowloop`: null while no resident was ever spawned or
-/// attached, then the flowloop-state name).
+/// resident's condition (`loop`: null while no resident was ever spawned or
+/// attached, then the loop-state name).
 #[tokio::test]
-async fn health_reports_channel_liveness_and_the_flowloop_state() {
+async fn health_reports_channel_liveness_and_the_loop_state() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
 
@@ -232,7 +286,7 @@ async fn health_reports_channel_liveness_and_the_flowloop_state() {
         .unwrap();
     assert_eq!(body["status"], "serving");
     assert!(
-        body["flowloop"].is_null(),
+        body["loop_state"].is_null(),
         "no resident yet: a dormant channel"
     );
 
@@ -243,10 +297,10 @@ async fn health_reports_channel_liveness_and_the_flowloop_state() {
         .json()
         .await
         .unwrap();
-    assert_eq!(body["flowloop"], "idle");
+    assert_eq!(body["loop_state"], "idle");
 
     rt.transition(
-        FlowloopState::Turning {
+        LoopState::Turning {
             turn_id: "turn-1".into(),
         },
         "test turn",
@@ -258,5 +312,5 @@ async fn health_reports_channel_liveness_and_the_flowloop_state() {
         .await
         .unwrap();
     assert_eq!(body["status"], "serving", "channel liveness is constant");
-    assert_eq!(body["flowloop"], "turning");
+    assert_eq!(body["loop_state"], "turning");
 }

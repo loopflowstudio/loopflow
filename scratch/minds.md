@@ -3,7 +3,7 @@
 ## Problem
 
 A wave that wants work done has exactly one move: dispatch. `wave_pursue.md`
-says *"Launch project or task flowloops for clear planned work"* and allows
+says *"Launch project or task loops for clear planned work"* and allows
 direct execs only for *"hot, now problems or trivial single-file changes."*
 `LOOPFLOW.md` makes it doctrine: *"Inline edits are only for trivial fixes
 smaller than the cost of dispatching."*
@@ -77,24 +77,24 @@ ear, on purpose.
 
 `wave/channel.rs` already says this:
 
-> Child channels have NO flowloop: they are pure streams (no `FlowloopState`,
+> Child channels have NO loop: they are pure streams (no `LoopState`,
 > no memory — a work line's notes are files; **MEMORY.md is wave identity**).
 
 There is no way to launch a mind without promoting to a wave. Task and project
-flowloops are runnable *from within* a mind:
+loops are runnable *from within* a mind:
 
 ```bash
 lf loop task "..."           # block on solve — the wave waits for the bit
 lf loop task "..." --detach  # background solve — server-owned; concurrency, the only reason to
 ```
 
-Entering a task or project flowloop inherently forks a worktree. That is not a
+Entering a task or project loop inherently forks a worktree. That is not a
 cost to weigh; it is what the verb means.
 
 ### Two wires: the bus and the thread
 
 The `say` op is two different things fused. Today it is both agent-to-agent
-signaling (wakes the flowloop, coalesces into the inbox) and the human chat
+signaling (wakes the loop, coalesces into the inbox) and the human chat
 (folds into the thread the Mac renders). Every steering problem in this design
 traces to that fusion. Split them.
 
@@ -116,7 +116,7 @@ becomes sugar for `--channel <self>/report`, and `driver.rs:206` stops being a
 crossing: the child was always talking in its own room, and the parent was
 always the one who chose to listen.
 
-**Wake is subscription.** The flowloop wakes on reports, heartbeat, and cron.
+**Wake is subscription.** The loop wakes on reports, heartbeat, and cron.
 It does not subscribe to its own narration — so a wave inhabiting a task cannot
 wake itself. Not guarded against; structurally impossible once narration and
 address are different things. A hand that finishes silently is a hand that
@@ -158,7 +158,7 @@ child; everything else queues for the boundary
 (`messages_during_a_pass_coalesce_into_one_boundary_pass`). The change is one
 arm: forward the message **into the child's live session** (streaming-input
 harness mode) instead of queuing it. Interrupt and coalescing survive
-unchanged — restart-the-flowloop is a steering lever that already exists and is
+unchanged — restart-the-loop is a steering lever that already exists and is
 already journaled.
 
 Responsiveness becomes tool-boundary granularity (seconds to a minute), not
@@ -302,9 +302,9 @@ summaries; do not reread worker transcripts."* Its posts are public. What forks
 under delegation is neither memory nor voice; **it is the transcript**.
 
 A hand's ear is subtler than it looks. A one-shot `--dispatch` exec is seeded
-once and deaf after. A **flowloop** is many births: every pass is a fresh
+once and deaf after. A **loop** is many births: every pass is a fresh
 process inheriting `LFD_WAVE_ID`, and context assembly resolves the *wave* from
-it. So a flowloop re-reads the wave's live memory and thread at every pass
+it. So a loop re-reads the wave's live memory and thread at every pass
 boundary. Its ear opens once per pass, not once per loop.
 
 If that holds for `lf loop` children (**verify**), then a hand is steerable
@@ -402,7 +402,7 @@ already reads it; caps, `recheck`, and escalation run under the normal driver
 with a wave for a parent — exactly as today. (An earlier draft swapped the
 wave's own flow instead. This answer deletes that entire mechanism.)
 
-Entering a task or project flowloop always forks a worktree, so the wave home
+Entering a task or project loop always forks a worktree, so the wave home
 never lands and `lf pr land`'s `scratch/*` sweep never touches it.
 
 **Blocking is a long tool call.** While `lf loop` runs foreground, the wave's
@@ -475,7 +475,7 @@ a ratchet — two copies of every shared fact, one of which rots.
 currently load-bearing on: LOOPFLOW.md advertises attach to *"answer an
 interactive skill."*
 
-The flowloop already solved this and execs did not inherit it —
+The loop already solved this and execs did not inherit it —
 `run_pass(content, answers, inbox_rx)` (`wave.rs:439`) threads answers from the
 inbox. So closing the door is either porting that path to execs, or declaring
 dispatched execs non-interactive by construction. They already run `lf -b`,
@@ -488,10 +488,10 @@ control" is a doctrine change or a feature.
 Agents may file tasks without running them. No enforcement that a task be solved
 to be added.
 
-This resolves the standing contradiction — `flowloop/README.md:35` (*"No
+This resolves the standing contradiction — `loop/README.md:35` (*"No
 backlog… intent that isn't running yet lives in GOAL.md, memory, and chat — not
 in a tracker"*) versus `LOOPFLOW.md` (*"Concrete tasks live in Linear"*) — in
-Linear's favor. The flowloop README becomes wrong, not merely in tension, and
+Linear's favor. The loop README becomes wrong, not merely in tension, and
 must be rewritten.
 
 Be deliberate about what "no backlog" was buying. It made *"the open runs ARE
@@ -512,7 +512,7 @@ pane on it, not a place to navigate to.
   and whether they hold.
 - **Open PRs** — the record of done-and-pending. Under no-backlog these *were*
   half the task model; they still are the closure evidence.
-- **Active sessions** — the hands. Which flowloops are running, foreground or
+- **Active sessions** — the hands. Which loops are running, foreground or
   backgrounded, in which worktree, at which pass. This is the `<in_flight>` fold
   and `lf runs`, surfaced.
 - **Backlog** — filed-but-not-running tasks, now that they exist.
@@ -528,7 +528,7 @@ this design gets undone in the UI after being right in the runtime.
 ### 7. Doctrine
 
 `wave_pursue.md`'s frontmatter reads *"Delegate wave work through project and
-task flowloops."* Its escape clause — *"Run execs directly only for hot, now
+task loops."* Its escape clause — *"Run execs directly only for hot, now
 problems"* — is the line this design deletes.
 
 Because the three pursue skills sit in the same slot, "inhabit one, delegate the
@@ -697,14 +697,14 @@ A second room, because you asked for one. The parent stops overhearing.
 
 - **Buffer vs byline** was never a choice: the bus carries narration and
   reports; the thread is not a topic at all.
-- **A separate chat LLM vs the flowloop** was a false pair: the chat is an
+- **A separate chat LLM vs the loop** was a false pair: the chat is an
   attachment mode on the running pass. One head; the thread outlives its
   bodies.
 - **Does a loop child re-read the wave live?** Yes, verified: no `env_clear`
-  in the pass-spawn path, and `FlowloopRun` worktrees are wave-named
+  in the pass-spawn path, and `LoopRun` worktrees are wave-named
   (`<repo>.<wave>.<run-id>`), so ambient resolution lands on the wave with or
   without `LFD_WAVE_ID`. The ear is at pass granularity.
-- **The finish-wake hole**: done is a report on `<self>/report`; the flowloop
+- **The finish-wake hole**: done is a report on `<self>/report`; the loop
   subscribes to reports, not narration. A hand that finishes silently never
   reported — legible as its failure.
 - **Inhabitation is a call, not a mode.** The wave LLM chooses to run

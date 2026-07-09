@@ -47,11 +47,11 @@ Both forms create the same placed worktree. `--detach` changes attention and
 ownership, not execution: the server launches a headless loop and the caller
 returns immediately.
 
-Waves are independent by default. When one process needs to report into a wave, post into its thread — `lf chat --wave <name> "…"` works from any process, including another wave's flowloop.
+Waves are independent by default. When one process needs to report into a wave, post into its thread — `lf chat --wave <name> "…"` works from any process, including another wave's loop.
 
 ## Crons
 
-Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter and are read by the wave's resident flowloop: when a schedule comes due while the flowloop is idle, it opens a system pass ("cron due: <flow> — dispatch it") and dispatches the flow with judgment. Edits to the file land without a restart.
+Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter and are read by the wave's resident loop: when a schedule comes due while the loop is idle, it opens a system pass ("cron due: <flow> — dispatch it") and dispatches the flow with judgment. Edits to the file land without a restart.
 
 ```markdown
 <!-- wave/shipper/GOAL.md -->

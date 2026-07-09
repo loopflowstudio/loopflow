@@ -9,7 +9,7 @@ Clarify the task into one small PR's worth of work.
 
 The task seed is in `<lf:message>` — free text: a sentence, an error paste, a
 file path, sometimes a tracker reference. Read it, then read `scratch/` and
-the repo style guide. This flowloop owns one design doc and one PR. If the seed
+the repo style guide. This loop owns one design doc and one PR. If the seed
 came from Linear, keep that filed task as the planning record and link the PR
 when it ships; the run row is the active execution record.
 

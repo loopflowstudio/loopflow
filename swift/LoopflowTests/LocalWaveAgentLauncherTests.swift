@@ -48,7 +48,7 @@ struct LocalWaveAgentLauncherTests {
 
     @Test("probe passes: the first candidate wins")
     func probePassesFirstCandidate() throws {
-        let resolved = try LocalWaveAgentLauncher.resolveWaveCapableLf(
+        let resolved = try LocalWaveAgentLauncher.resolveLoopCapableLf(
             originRepo: "/Users/jack/src/loopflow",
             bundled: URL(fileURLWithPath: "/Applications/Loopflow.app/Contents/MacOS/lf"),
             pathEnv: "/usr/local/bin",
@@ -63,7 +63,7 @@ struct LocalWaveAgentLauncherTests {
     @Test("a stale PATH lf is rejected by the probe; the dev-tree build wins")
     func staleLfFallsThroughToDevBuild() throws {
         var probed: [String] = []
-        let resolved = try LocalWaveAgentLauncher.resolveWaveCapableLf(
+        let resolved = try LocalWaveAgentLauncher.resolveLoopCapableLf(
             originRepo: "/Users/jack/src/loopflow",
             bundled: nil,
             pathEnv: "/Users/jack/.local/bin",
@@ -85,7 +85,7 @@ struct LocalWaveAgentLauncherTests {
     @Test("every candidate rejected: the error names what was found and why")
     func allCandidatesRejected() {
         #expect {
-            try LocalWaveAgentLauncher.resolveWaveCapableLf(
+            try LocalWaveAgentLauncher.resolveLoopCapableLf(
                 originRepo: "/Users/jack/src/loopflow",
                 bundled: nil,
                 pathEnv: "/Users/jack/.local/bin",
@@ -104,7 +104,7 @@ struct LocalWaveAgentLauncherTests {
     @Test("nothing bundled, nothing on PATH, no dev build: a clear error")
     func nothingResolves() {
         #expect {
-            try LocalWaveAgentLauncher.resolveWaveCapableLf(
+            try LocalWaveAgentLauncher.resolveLoopCapableLf(
                 originRepo: "/Users/jack/src/loopflow",
                 bundled: nil,
                 pathEnv: "/usr/local/bin:/usr/bin",
@@ -220,11 +220,11 @@ struct LocalWaveAgentLauncherTests {
 
         #expect(
             String(hint.characters)
-                == "Start it here, or run lf wave goals in a terminal — its conversation appears here live."
+                == "Start it here, or run lf loop goals in a terminal — its conversation appears here live."
         )
 
         let codeRuns = hint.runs.filter { $0.inlinePresentationIntent == .code }
-        #expect(codeRuns.map { String(hint.characters[$0.range]) } == ["lf wave goals"])
+        #expect(codeRuns.map { String(hint.characters[$0.range]) } == ["lf loop goals"])
     }
 }
 #endif

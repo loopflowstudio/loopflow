@@ -1,6 +1,26 @@
 {
   "deltas": [
     {
+      "kind": "body_started",
+      "body": {
+        "body_id": "body-3",
+        "invocation_id": "inv-wave-1",
+        "step_path": "1",
+        "flow": "wave",
+        "step": "wave_pursue",
+        "iteration": 2,
+        "session_id": null,
+        "harness": "codex",
+        "model": "gpt-5",
+        "host": "devbox",
+        "worktree": "/repo.ship",
+        "run_id": null,
+        "started_at": "2026-07-03T18:30:00Z",
+        "ended_at": null,
+        "termination_reason": null
+      }
+    },
+    {
       "kind": "turn_opened",
       "answers": [
         "msg-4",
@@ -31,7 +51,14 @@
     {
       "kind": "turn_finished",
       "status": "completed",
-      "cost_usd": 0.0125
+      "cost_usd": 0.0125,
+      "reason": null
+    },
+    {
+      "kind": "body_finished",
+      "body_id": "body-3",
+      "outcome": "completed",
+      "reason": "completed"
     },
     {
       "kind": "turn_steered",
@@ -46,12 +73,12 @@
       ]
     },
     {
-      "kind": "flowloop_state",
+      "kind": "loop_state",
       "to": "interrupting",
       "reason": "user interrupt"
     },
     {
-      "kind": "flowloop_state",
+      "kind": "loop_state",
       "to": "failed",
       "reason": "harness disconnected: codex_disconnected"
     }

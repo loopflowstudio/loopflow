@@ -1,9 +1,9 @@
-//! The generic flowloop driver: loop a named flow in a placed worktree until
+//! The generic loop driver: loop a named flow in a placed worktree until
 //! the loop file says done, under caps.
 //!
 //! The driver knows nothing about what the flow does or when it is done —
 //! that judgment lives in the flow's skills. The termination bit is ONE
-//! GENERIC CONTRACT, identical for every flowloop, and the driver teaches it
+//! GENERIC CONTRACT, identical for every loop, and the driver teaches it
 //! itself: every pass's seed carries a standing instruction
 //! ([`loop_instruction`]) explaining how to mark for termination, so ANY
 //! flow is loopable without its skills knowing loop mechanics. Purpose-built
@@ -34,7 +34,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 
 use crate::flowloop::pass::{run_pass, PassOptions};
-use crate::flowloop::run::FlowloopRun;
+use crate::flowloop::run::LoopRun;
 use crate::ops::{OpsError, OpsResult};
 use crate::wave::wire::{
     DetachedLoopRequest, DetachedLoopResponse, RESIDENT_TOKEN_HEADER, SUBAGENT_TOKEN_HEADER,
@@ -83,17 +83,13 @@ pub struct LoopFile {
 
 /// `lf loop <flow> "<seed>"`: place a worktree through the wave
 /// registry, then loop the flow over it until the loop file says done.
-pub fn run_flowloop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<()> {
+pub fn run_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<()> {
     require_loop_flow(repo, &options.flow)?;
     let wave_name = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
-    let mut run = FlowloopRun::start(&wave_name, &options.flow, seed.to_string())?;
+    let mut run = LoopRun::start(&wave_name, &options.flow, seed.to_string())?;
     let worktree = run.worktree();
-    eprintln!(
-        "flowloop {} running in {}",
-        options.flow,
-        worktree.display()
-    );
+    eprintln!("loop {} running in {}", options.flow, worktree.display());
     let result = drive(
         &worktree,
         seed,
@@ -117,7 +113,7 @@ pub(crate) fn require_loop_flow(repo: &Path, flow: &str) -> OpsResult<()> {
 /// Ask the live wave server to own the same loop invocation and return its
 /// read-only inspection session. The server, not this short-lived CLI, owns
 /// launch and observation.
-pub fn detach_flowloop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<String> {
+pub fn detach_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<String> {
     let wave = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
     let origin = crate::engine::wave_context::wave_origin(repo);
@@ -177,8 +173,8 @@ fn detached_loop_credential(origin: &Path, wave: &str) -> Option<(&'static str, 
 /// how-to-terminate contract. The WHEN belongs to the flow's skills.
 fn loop_instruction(pass: u32, max_passes: u32) -> String {
     format!(
-        "<lf:flowloop>\n\
-         This flow is running inside a flowloop — pass {pass} of at most \
+        "<lf:loop>\n\
+         This flow is running inside a loop — pass {pass} of at most \
          {max_passes}. The loop repeats until you mark it terminated. To \
          terminate, write `scratch/loop.yaml` before this pass ends:\n\n\
          - `done: true` — the loop stops at this boundary. Flip it only when \
@@ -190,7 +186,7 @@ fn loop_instruction(pass: u32, max_passes: u32) -> String {
          The file is consumed at every boundary — write it fresh each pass \
          or the loop simply continues. Exhausting the pass budget without \
          `done` escalates to the parent as a failure.\n\
-         </lf:flowloop>"
+         </lf:loop>"
     )
 }
 
@@ -225,7 +221,7 @@ fn drive(
     }
 
     let message = format!(
-        "flowloop {} exhausted {} pass(es) without done",
+        "loop {} exhausted {} pass(es) without done",
         options.flow, options.max_passes
     );
     escalate_parent(&message);
@@ -273,7 +269,7 @@ fn wait_for_recheck(
 fn check_wall_clock(started: Instant, wall_clock: Duration) -> OpsResult<()> {
     if started.elapsed() >= wall_clock {
         return Err(OpsError::Message(format!(
-            "flowloop exceeded wall-clock cap of {}s",
+            "loop exceeded wall-clock cap of {}s",
             wall_clock.as_secs()
         )));
     }

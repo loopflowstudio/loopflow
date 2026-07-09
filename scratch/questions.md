@@ -4,7 +4,7 @@
   process. Inbox messages journal immediately and queue at the pass boundary;
   they are not yet injected into the running Codex harness at tool boundaries,
   and assistant text journals when the pass exits rather than incrementally.
-  Closing this requires moving `flowloop/wave.rs` onto the existing session
+  Closing this requires moving `loop/wave.rs` onto the existing session
   harness API instead of adding stdin control to execs. Detached loops are
   deliberately headless and tmux is documented/read back as `attach -r`, so
   the old unjournaled mutation door is closed meanwhile.

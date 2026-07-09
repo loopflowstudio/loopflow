@@ -233,7 +233,7 @@ impl Renderer {
             let fresh: String = turn.text.chars().skip(progress.text_chars).collect();
             progress.text_chars = turn.text.chars().count();
             for fragment in fresh.split('\n').filter(|f| !f.trim().is_empty()) {
-                lines.push(format!("  flowloop: \"{}\"", ellipsize(fragment, 100)));
+                lines.push(format!("  loop: \"{}\"", ellipsize(fragment, 100)));
             }
         }
         for item in turn.items.iter().skip(progress.items) {
@@ -421,7 +421,7 @@ mod tests {
             event: "turn".into(),
             data: running("thinking", "[]"),
         });
-        assert_eq!(lines, vec!["  flowloop: \"thinking\""]);
+        assert_eq!(lines, vec!["  loop: \"thinking\""]);
 
         // Same text re-sent with a new item: only the item prints.
         let lines = renderer.lines_for(&Frame {

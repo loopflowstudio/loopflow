@@ -5,7 +5,7 @@ pub mod discovery;
 pub mod output;
 pub mod session;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Default)]
 #[command(name = "lf")]
 #[command(about = "Run skills and flows with coding agents")]
 #[command(version)]
@@ -199,36 +199,18 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: CronCommand,
     },
-    /// Start a wave: a long-lived listener (journal, doors, live events over
-    /// a loopback HTTP port; discovery via `wave/<name>/.wave-endpoint`)
-    /// that spawns and supervises the wave's flowloop as a resident child
-    /// process.
-    #[command(name = "wave")]
-    Wave {
-        /// Wave name (matches wave/<name>/)
+    /// Start a named mind. With a seed, run a bounded child loop for that flow.
+    Loop {
+        /// Wave name, or flow name when a seed is supplied
         name: String,
-        /// Take over even if lfd reports another live wave-agent session
+        /// A child loop's whole handoff; omit to run the named wave
+        seed: Option<String>,
+        /// Take over even if another live wave session is registered
         #[arg(long)]
         force: bool,
-        /// Serve dormant: listener only, no resident (health reads flowloop: null)
-        #[arg(long, conflicts_with = "flowloop_only")]
-        no_flowloop: bool,
-        /// Run only the resident flowloop against an existing listener
-        #[arg(long, conflicts_with = "no_flowloop")]
-        flowloop_only: bool,
-    },
-    /// Run a flow repeatedly in a fresh worktree until its termination bit flips
-    Loop {
-        /// Flow to loop (`task`, `project`, or any other flow)
-        flow: String,
-        /// The loop's whole handoff
-        seed: String,
         /// Ask the live wave server to own the loop and return immediately
         #[arg(long)]
         detach: bool,
-        /// Wave name (default: inferred from the current worktree/branch)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
         /// Maximum passes before escalation
         #[arg(long = "max-passes", default_value_t = 8)]
         max_passes: u32,
@@ -245,6 +227,17 @@ pub enum Commands {
         #[arg(long = "max-turns")]
         max_turns: Option<u32>,
     },
+    /// Enqueue a flow in the current wave's innermost invocation
+    Enqueue { flow: String },
+    /// Skip the current logical step without destroying its route
+    Skip,
+    /// Internal resident primitive: execute one expanded top-level flow step.
+    #[command(name = "__flow-step", hide = true)]
+    FlowStep {
+        flow: String,
+        index: usize,
+        seed: String,
+    },
     /// Project lifecycle operations
     Project {
         #[command(subcommand)]
@@ -259,7 +252,7 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show one wave's runs, attention, and (when live) flowloop state, from the
+    /// Show one wave's runs, attention, and (when live) loop state, from the
     /// registry. Defaults to the ambient wave (`LFD_WAVE_ID`).
     Status {
         /// Wave name (default: the ambient wave)
@@ -292,7 +285,7 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
-    /// Follow a wave's live event stream (turns, flowloop state, memory) until
+    /// Follow a wave's live event stream (turns, loop state, memory) until
     /// killed. Defaults to the invoking context's wave; exits 0 with a note
     /// when no wave resolves.
     Sub {

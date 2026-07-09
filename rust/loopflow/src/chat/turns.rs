@@ -1,6 +1,6 @@
 //! Turn vocabulary: `ChatTurn`, the wire type Loopflow consumes.
 //!
-//! The wave's flowloop runs each turn as a bounded `wave` child inside
+//! The wave's loop runs each turn as a bounded `wave` child inside
 //! the RESIDENT process (see [`crate::flowloop::wave`]) and reports it as
 //! resident wire deltas ([`crate::wave::wire`]), folded by the listener's
 //! runtime into journaled, broadcast turns.
@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::wave::playhead::BodyProvenance;
 
 /// Who authored a turn. Mirrors Swift `MessageRole` (user/assistant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,9 +43,12 @@ pub struct ChatTurn {
     /// RFC 3339 timestamp of when the turn opened.
     pub created_at: String,
     /// Speaker label for attributed emissions (`lf chat` — worker reports,
-    /// child-wave escalations). Absent for the flowloop's own turns and plain
+    /// child-wave escalations). Absent for the loop's own turns and plain
     /// user turns.
     pub from: Option<String>,
+    /// Body that produced an assistant span. Required on the wire and
+    /// explicitly null for human/attributed turns.
+    pub body: Option<BodyProvenance>,
 }
 
 impl ChatTurn {
@@ -64,6 +68,7 @@ impl ChatTurn {
             items: Vec::new(),
             created_at: Self::now_rfc3339(),
             from: None,
+            body: None,
         }
     }
 
@@ -74,8 +79,12 @@ impl ChatTurn {
     /// turns through this — a second copy is the live-vs-replay split-brain
     /// the journal exists to kill.
     pub fn absorb_item(&mut self, item: ConversationItem) {
-        if let ConversationItem::Message { text, .. } = &item {
-            self.push_text(text);
+        if let ConversationItem::Message { text, phase, .. } = &item {
+            if phase.as_deref() == Some("stream") {
+                self.text.push_str(text);
+            } else {
+                self.push_text(text);
+            }
         } else {
             self.items.push(item);
         }
@@ -143,5 +152,19 @@ mod tests {
 
         assert_eq!(turn.text, "first\nsecond");
         assert_eq!(turn.items.len(), 1, "prose joins text, tools append");
+    }
+
+    #[test]
+    fn absorb_item_concatenates_stream_fragments_exactly() {
+        let mut turn = ChatTurn::user("turn-4".into(), String::new());
+        for text in ["hello", " ", "world"] {
+            turn.absorb_item(ConversationItem::Message {
+                id: format!("m-{}", turn.text.len()),
+                text: text.into(),
+                phase: Some("stream".into()),
+            });
+        }
+
+        assert_eq!(turn.text, "hello world");
     }
 }

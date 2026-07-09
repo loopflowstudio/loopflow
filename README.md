@@ -38,7 +38,7 @@ change crosses component or product boundaries.
 Run the wave in your terminal:
 
 ```bash
-lf wave designer             # the wave's server: one persistent flowloop, until Ctrl-C
+lf wave designer             # the wave's server: one persistent loop, until Ctrl-C
 lf chat "ship the button audit first"     # post into its thread (any process can)
 lf memory add "buttons: variants unified" # curate what it knows
 ```
@@ -47,12 +47,12 @@ Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
 `tmux attach -r -t <name>` to inspect one without writing into its session.
 
 `lf wave <name>` starts a long-lived server at the repo's main checkout (the
-wave's journal and endpoint live at the origin); the resident flowloop — one
+wave's journal and endpoint live at the origin); the resident loop — one
 persistent codex thread — enters the wave's worktree to work. Progress and
 chat are a single conversation: human messages steer a live turn by default,
 attributed messages (workers, scripts) queue for the next one, and interrupt
 finalizes a partial turn. Truth is an append-only journal, so a restart keeps
-the whole thread. `lf chat` and `lf memory` are the message doors for flowloops,
+the whole thread. `lf chat` and `lf memory` are the message doors for loops,
 workers, humans, and scripts; worker reports arrive attributed in the thread.
 Outside any wave a publish drops silently (exit 0) — the verbs are safe in
 every prompt. See `rust/loopflow/src/wave/README.md` for the wire contract,
@@ -74,7 +74,7 @@ lf loop build "audit the settings panes" --wave designer --detach # delegate
 
 Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its intent in view. Their PRs are how results flow back to the wave.
 
-Run a task as a bounded task flowloop:
+Run a task as a bounded task loop:
 
 ```bash
 lf loop task "fix the flaky chord-timeout test" --wave designer
@@ -86,7 +86,7 @@ until its bit flips (`task`: when the PR merges). Linear holds filed work,
 
 ### Crons
 
-Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. They live in `GOAL.md` frontmatter; the wave's resident flowloop fires each due schedule as a system pass. `workers: 0` is valid for a cron-only wave.
+Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. They live in `GOAL.md` frontmatter; the wave's resident loop fires each due schedule as a system pass. `workers: 0` is valid for a cron-only wave.
 
 ```markdown
 <!-- wave/governance/GOAL.md -->
@@ -107,9 +107,9 @@ commands for long-term coordination.
 
 | Event | What lfd runs |
 |-------|---------------|
-| CI fails on a wave's PR | `lf chat --wave <name> "CI failed: …"` — the flowloop decides how to fix (usually a `ci-fix` worker) |
+| CI fails on a wave's PR | `lf chat --wave <name> "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
 | PR merged | queue state reconciles in-process |
-| Push to main | `lf chat --wave <name> "main moved: …"` — the flowloop decides whether to rebase or integrate |
+| Push to main | `lf chat --wave <name> "main moved: …"` — the loop decides whether to rebase or integrate |
 
 ## Skills
 

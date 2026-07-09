@@ -5,10 +5,10 @@
 //! reconciles in-process so daemon behavior does not depend on CLI grammar.
 //!
 //! - **check_run failure** → `lf chat --wave <wave> "CI failed: …"` — the
-//!   wave's flowloop decides whether and how to dispatch a fix.
+//!   wave's loop decides whether and how to dispatch a fix.
 //! - **PR merged** → reconcile queue state for each wave holding that PR.
 //! - **push to main** → `lf chat --wave <wave> "main moved: …"` for every
-//!   wave in the repo — the flowloop decides to rebase/integrate with judgment.
+//!   wave in the repo — the loop decides to rebase/integrate with judgment.
 //!
 //! Execs are spawned detached; a wave whose server is down bounces the chat
 //! with exit ≠ 0 — logged at warn and, for CI failures, the dedupe key is NOT

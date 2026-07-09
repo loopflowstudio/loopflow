@@ -9,20 +9,20 @@ use crate::lfd::types::{Run, RunStatus};
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::ops::{OpsError, OpsResult};
 
-/// A flowloop's registry-backed run: a fresh worktree plus the tokio
-/// runtime and store handle it needs to update the run as the flowloop
+/// A loop's registry-backed run: a fresh worktree plus the tokio
+/// runtime and store handle it needs to update the run as the loop
 /// progresses. Every looped flow shares this lifecycle.
-pub(crate) struct FlowloopRun {
+pub(crate) struct LoopRun {
     pub runtime: tokio::runtime::Runtime,
     pub store: SharedStore,
     pub run: Run,
 }
 
-impl FlowloopRun {
+impl LoopRun {
     /// Resolve the wave, create a fresh worktree, and register the run.
     pub fn start(wave_name: &str, flow: &str, task: String) -> OpsResult<Self> {
         let runtime = tokio::runtime::Runtime::new()
-            .map_err(|err| OpsError::Message(format!("failed to build flowloop runtime: {err}")))?;
+            .map_err(|err| OpsError::Message(format!("failed to build loop runtime: {err}")))?;
         let store: SharedStore = Arc::new(runtime.block_on(async {
             open_existing_store().await.ok_or_else(|| {
                 OpsError::Message(
@@ -42,13 +42,14 @@ impl FlowloopRun {
             let mut run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh)
                 .await
                 .map_err(|err| {
-                    OpsError::Message(format!("failed to create flowloop worktree: {err}"))
+                    OpsError::Message(format!("failed to create loop worktree: {err}"))
                 })?;
             run.flow = flow.to_string();
             run.task = Some(task);
-            store.update_run(&run).await.map_err(|err| {
-                OpsError::Message(format!("failed to update flowloop run: {err}"))
-            })?;
+            store
+                .update_run(&run)
+                .await
+                .map_err(|err| OpsError::Message(format!("failed to update loop run: {err}")))?;
             Ok::<Run, OpsError>(run)
         })?;
 
@@ -70,7 +71,7 @@ impl FlowloopRun {
             self.store
                 .update_run(&self.run)
                 .await
-                .map_err(|err| OpsError::Message(format!("failed to record flowloop pass: {err}")))
+                .map_err(|err| OpsError::Message(format!("failed to record loop pass: {err}")))
         })
     }
 
@@ -87,7 +88,7 @@ impl FlowloopRun {
             self.store
                 .update_run(&self.run)
                 .await
-                .map_err(|err| OpsError::Message(format!("failed to finish flowloop run: {err}")))
+                .map_err(|err| OpsError::Message(format!("failed to finish loop run: {err}")))
         })?;
         result
     }

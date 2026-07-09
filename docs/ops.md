@@ -37,21 +37,6 @@ lf pr land
 
 Enables auto-merge on your PR. GitHub merges when CI passes and the merge queue clears. Run `lf wt prune` after merge completes to clean up.
 
-## lf queue reconcile
-
-Run one merge-queue reconcile pass over stacked wave runs.
-
-```bash
-lf queue reconcile               # every wave with queue state
-lf queue reconcile --wave infra  # just one wave
-```
-
-Infers stack status from git and GitHub, flips PRs between draft and ready, lazily rebases stack heads, and records queue blocks as attention. Prints one line per wave — `reconciled` or `blocked (<reasons>)`. `lfd` execs the same verb when a PR-merged webhook arrives; running it by hand is always safe.
-
-| Flag | Description |
-|------|-------------|
-| `-w, --wave NAME` | Only reconcile this wave (default: every wave with queue state) |
-
 ## lf cron
 
 Install local launchd jobs that run `lf` commands on a schedule.
@@ -75,31 +60,6 @@ lf cron remove --wave memory --flow export-memory
 | `-w, --wave NAME` | Wave name passed to the scheduled command |
 | `--flow NAME` | Flow or skill to run |
 | `--schedule daily` | Daily schedule (default) |
-
-## lf next
-
-Preserve the current worktree and create a fresh branch.
-
-```bash
-lf next
-```
-
-Commits and pushes current changes, optionally rebases, then creates and pushes a timestamped successor branch in the same worktree. If the current PR is already merged, it first resets to the default branch and syncs from origin before creating the next branch.
-
-## lf advance
-
-Rotate a recurring wave onto a fresh branch.
-
-```bash
-lf advance                # wave inferred from the worktree
-lf advance --wave shipper
-```
-
-Generates the wave's next schema-named branch (de-colliding with a word pair if taken), creates it in the worktree, and pushes it with upstream set. Unlike `lf next`, it doesn't commit or rebase — it's the branch rotation a recurring wave (or its flowloop) runs after landing.
-
-| Flag | Description |
-|------|-------------|
-| `-w, --wave NAME` | Wave name (default: inferred from the worktree) |
 
 ## lf commit
 
@@ -198,16 +158,6 @@ pm:
 
 ---
 
-## lf doctor
-
-Check dependencies.
-
-```bash
-lf doctor
-```
-
-Verifies that required tools are installed and working.
-
 ## lf rebase
 
 Plan or update the current branch against the right base.
@@ -228,20 +178,6 @@ Use an explicit target when needed:
 lf rebase origin/main
 lf rebase --plan parent.branch
 ```
-
-## lf sync
-
-Update the local default branch to match origin.
-
-```bash
-lf sync
-```
-
-Fetches `origin/<default-branch>` and updates your local default branch. Safe to run from any worktree.
-
-If the default branch is checked out in another worktree, Loopflow resets that checked-out worktree to `origin/<default-branch>` instead of only moving the ref behind its back. Dirty changes in that worktree are auto-stashed and restored after the reset, including untracked files.
-
-If restoring the stash conflicts, Loopflow keeps the stash so you can recover the work manually.
 
 ## lf wt
 
@@ -350,17 +286,6 @@ lf pr abandon feature-branch --force   # skip confirmation
 | Flag | Description |
 |------|-------------|
 | `-f, --force` | Skip confirmation and force abandon with uncommitted changes |
-
-## lf shell
-
-Shell integration setup.
-
-```bash
-lf shell init       # print shell integration code
-lf shell install    # install to shell config file
-```
-
-Installs a wrapper that sources shell directives after `lf` commands (auto-cd into new worktrees).
 
 ## Typical Workflow
 

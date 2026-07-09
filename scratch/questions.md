@@ -30,3 +30,39 @@ the endurance KRs are measured by hand?
 `lf auth linear` again."* This clarify pass therefore read only the local
 project files, never the live tasks. If a task in Linear contradicts a KR here,
 this pass did not see it. Needs `lf auth linear` before the next wave loop.
+
+## 3. "Progress in my other projects" is adoption, not instrumentation
+
+Two of the four projects have never appeared in the run ledger:
+
+| project | last `lf` run | ledger rows |
+|---|---|---|
+| loopflow | 2026-07-09 | 2720 |
+| cadenza | 2026-07-06 | 161 |
+| manabot | 2026-05-18 | 0 |
+| hootro | 2026-06-20 | 0 |
+
+manabot committed heavily on 2026-07-09 without loopflow. So the portfolio
+measure — cost and cycle time per landed change, per repo — cannot see half the
+portfolio, and no eval harness changes that. manabot and hootro are currently a
+live, uninstrumented counterfactual.
+
+Open: is the goal to *drive* manabot and hootro through loopflow (making them
+measurable, and the portfolio claim real), or to leave them as the control arm?
+Both are defensible. They are different projects.
+
+## 4. Which corpus does the eval harvester target first?
+
+The test-as-judge construction is validated (see `evals-design.md`), but the
+environment tax decides where it can run today:
+
+- **cadenza** `server/tests/*.py` — pure Python, validated in 0.5s. Ready.
+- **loopflow** `rust/loopflow/tests/*.rs` — integration tests only; the inline
+  `#[cfg(test)]` unit tests cannot be split from their code at file level.
+- **manabot** — needs a `managym` native build pinned to the right Python ABI at
+  the parent commit. Real work, deferred.
+- **hootro** — unknown.
+
+**Assumption taken:** harvest cadenza first, because it validated immediately
+and it is the one non-loopflow repo already in the ledger. Slice 1 is the
+harvester, not the runner — the corpus is the asset, and it costs no tokens.

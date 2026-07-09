@@ -78,7 +78,19 @@ enum GUIProcessEnvironment {
         process.executableURL = URL(fileURLWithPath: shell)
         process.arguments = ["-ilc", "printf '%s%s%s' '\(beginMarker)' \"$PATH\" '\(endMarker)'"]
 
-        let stdout = Pipe()
+        // A pipe would have to be drained concurrently with the timeout wait;
+        // reading it synchronously can block forever before the timeout fires.
+        // A temporary file lets rc-file chatter flow without coupling shell
+        // termination to our reader.
+        let stdoutURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-shell-path-\(UUID().uuidString)")
+        guard FileManager.default.createFile(atPath: stdoutURL.path, contents: nil),
+              let stdout = try? FileHandle(forWritingTo: stdoutURL)
+        else { return nil }
+        defer {
+            try? stdout.close()
+            try? FileManager.default.removeItem(at: stdoutURL)
+        }
         process.standardOutput = stdout
         // rc files write banners, warnings, and version-manager noise to stderr.
         // None of it is ours to surface.
@@ -97,15 +109,12 @@ enum GUIProcessEnvironment {
             return nil
         }
 
-        // Read before waiting: an rc file that floods stdout would otherwise
-        // fill the pipe buffer and deadlock against the shell's own exit.
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-
         guard exited.wait(timeout: .now() + shellTimeout) == .success else {
             process.terminate()
             return nil
         }
         guard process.terminationStatus == 0 else { return nil }
+        guard let data = try? Data(contentsOf: stdoutURL) else { return nil }
 
         return extractPath(from: String(data: data, encoding: .utf8) ?? "")
     }

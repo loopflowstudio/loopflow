@@ -1,5 +1,11 @@
 # `lf eval` — is loopflow worth it, provably?
 
+> **Status: not started.** Slice 1 is the harvester, not the runner: the corpus
+> is the asset and it costs no tokens. Target cadenza first. The construction
+> below is validated by hand (cadenza `9a3d164` reproduces in 0.5s; manabot
+> `c7e93d3` does not, and the reason it does not is the whole design). See
+> `plan.md` for where this sits against the telemetry and dashboard work.
+
 ## The trap
 
 The obvious eval is: drive a set of prompts through loopflow and through some

@@ -1,5 +1,19 @@
 # Ledger dashboard
 
+> **Status, measured 2026-07-09.** The ledger is now a reliable API: span
+> identity, closed vocabularies, absolute repo, model, cumulative usage, and an
+> `lf doctor` that exits 0. `lf runs --json`, `lf trace <id> --json`, and
+> `lf doctor --json` are the surfaces this page consumes.
+>
+> The first slice is drafted in `swift/LoopflowMac/Views/TelemetryDashboardView.swift`
+> — run flamechart, cost waterfall, cache-hit ratio, silence ribbon — and it
+> compiles, but **it has never rendered real data**. Finishing that is the whole
+> remaining risk; see `plan.md`. Demo instructions live there too (`swift run`
+> crashes: the app needs a real bundle, so build with xcodegen + xcodebuild).
+>
+> The PR metrics below remain blocked on a delivery record and a firing
+> `escalated` event. Neither is telemetry work.
+
 > "PRs by wave would be cool"
 
 > "Token flamechart for main, and some sort data about movement over time would

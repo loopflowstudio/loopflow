@@ -1,8 +1,29 @@
 # Telemetry pass: make `run_events` a reliable API
 
-Implement in one pass. The dashboard (`dashboard-design.md`) is the consumer;
-the audit that motivates each change is `telemetry.md`. Run `lf doctor` before
-you start — it exits 1 today, and the point of this work is that it exits 0.
+> **Status, measured 2026-07-09.** Implemented in `f78e856c`. The schema, the
+> writer, the readers, `lf doctor`, and the four charts all exist; 1029 Rust
+> tests, clippy, fmt, and `swift build` are green. Done-whens 1–7, 11, and 12
+> are **verified against the real ledger** (`lf doctor` exits 0; the CHECK
+> rejects `node='task'`; a dangling parent trips `lineage`; `lf trace` prints a
+> real nested tree whose child costs sum to the run total; a killed run renders
+> `open`).
+>
+> Done-whens **8, 9, and 10 are not done**: no chart has rendered real data, the
+> cost waterfall has never been reconciled against `lf usage`, and the silence
+> ribbon has never been shown a real gap. See `plan.md`. Schema without a chart
+> is no product value.
+>
+> One correction the implementation found, and it was the spec's fault: this doc
+> claimed no two spans share a `process_id` *and* that `own_spend` diffs
+> consecutive boundaries within one. Both cannot describe the same DTO, since
+> flow and skill boundary rows reuse their process's id by contract. Resolved in
+> `questions.md` §5 — `lf trace --json` returns one `SpanDto` per process and
+> never synthesizes process ids for skill frames; `own_spend` remains the one
+> cumulative-diff implementation and accepts boundary-shaped spans for chart
+> series.
+
+The dashboard (`dashboard-design.md`) is the consumer; the audit that motivates
+each change is `telemetry.md`.
 
 ## What is broken
 

@@ -610,6 +610,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Chat { text, from, target }) => {
                 loopflow::lf::commands::chat::run(text, from.as_deref(), target)
             }
+            Some(Commands::Wavechat { wave, from }) => {
+                loopflow::lf::commands::wavechat::run(wave.as_deref(), from.as_deref())
+            }
             Some(Commands::Sub { wave, json }) => {
                 loopflow::lf::commands::sub::run(wave.as_deref(), *json)
             }
@@ -696,6 +699,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Trace { .. })
         | Some(Commands::Chat { .. })
         | Some(Commands::Sub { .. })
+        | Some(Commands::Wavechat { .. })
         | Some(Commands::Memory { .. })
         | Some(Commands::Ssh { .. }) => None,
     }

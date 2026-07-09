@@ -11,4 +11,5 @@ pub mod ssh;
 pub mod sub;
 pub mod usage;
 pub mod util;
+pub mod wavechat;
 pub mod waves;

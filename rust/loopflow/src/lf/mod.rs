@@ -299,6 +299,16 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
+    /// Steer and monitor a wave from one terminal pane: its live events scroll
+    /// past while a typed line is spoken into the thread. `lf chat` publishes;
+    /// `lf sub` reads; this does both.
+    Wavechat {
+        /// Wave name (default: the ambient wave — env, else worktree)
+        wave: Option<String>,
+        /// Attribution label for machine speech (e.g. --from ci)
+        #[arg(long)]
+        from: Option<String>,
+    },
     /// Follow a wave's live event stream (turns, flowloop state, memory) until
     /// killed. Defaults to the invoking context's wave; exits 0 with a note
     /// when no wave resolves.

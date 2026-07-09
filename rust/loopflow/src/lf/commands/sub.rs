@@ -59,7 +59,9 @@ pub fn run(wave: Option<&str>, json: bool) -> Result<()> {
 const BACKOFF_FLOOR: Duration = Duration::from_secs(1);
 const BACKOFF_CEIL: Duration = Duration::from_secs(30);
 
-async fn follow(wave: Option<&str>, json: bool) -> Result<()> {
+/// Follow the stream until the process ends. `lf wavechat` runs this as a task
+/// so one terminal both monitors and steers.
+pub(crate) async fn follow(wave: Option<&str>, json: bool) -> Result<()> {
     let target = WaveTargetArgs {
         wave: wave.map(str::to_string),
         parent: false,

@@ -621,6 +621,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         | Some(Commands::Status { .. })
         | Some(Commands::Runs { .. })
         | Some(Commands::Sub { .. })
+        | Some(Commands::Wavechat { .. })
         | Some(Commands::Trace { .. })
         | Some(Commands::Usage)
         | Some(Commands::Doctor { .. }) => ExecVerdict::Allow,

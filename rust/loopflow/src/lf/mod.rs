@@ -146,10 +146,57 @@ pub enum Commands {
         #[arg(trailing_var_arg = true)]
         prompt: Vec<String>,
     },
-    /// Git operations
-    Op {
+    /// Pull request lifecycle
+    Pr {
         #[command(subcommand)]
-        op: OpsCommand,
+        cmd: Option<PrCommand>,
+    },
+    /// Worktree operations
+    Wt {
+        #[command(subcommand)]
+        cmd: WtCommand,
+    },
+    /// Rebase current branch onto target (default: main)
+    Rebase {
+        /// Print the planned rebase strategy without mutating git
+        #[arg(long)]
+        plan: bool,
+        /// Branch to rebase onto
+        onto: Option<String>,
+    },
+    /// Commit changes
+    Commit {
+        #[arg(short = 'm', long = "message", short_alias = 'M')]
+        message: Option<String>,
+        #[arg(short = 'p', long = "push", short_alias = 'P')]
+        push: bool,
+        #[arg(long = "no-add")]
+        no_add: bool,
+    },
+    /// Provider authentication for local lf skills and ops
+    Auth {
+        #[command(subcommand)]
+        cmd: AuthCommand,
+    },
+    /// Release operations (run, check, notes, bump, tag, status)
+    Release {
+        #[command(subcommand)]
+        cmd: ReleaseCommand,
+    },
+    /// Linear tasks for waves and local projects
+    Pm {
+        #[command(subcommand)]
+        cmd: PmCommand,
+    },
+    /// Compile loopflow skills into your home vendor Skills directories.
+    #[command(name = "sync-skills", hide = true)]
+    SyncSkills {
+        /// Confirm writes under ~/ without prompting
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+        /// Keep stale loopflow-generated skills
+        #[arg(long = "no-prune")]
+        no_prune: bool,
     },
     /// Local launchd jobs that run lf commands on a schedule
     Cron {
@@ -265,7 +312,7 @@ pub enum Commands {
     /// Resolves the local credential bundle (GitHub, Claude, PM) and forwards it
     /// over the ssh channel per-invocation; nothing persists on the remote. The
     /// Doppler token is never forwarded — name specific secrets with `--secret`
-    /// to resolve them locally. Example: `lf ssh mini-heart -- lf op pr`.
+    /// to resolve them locally. Example: `lf ssh mini-heart -- lf pr open`.
     Ssh {
         /// Remote host (ssh alias or user@host)
         host: String,
@@ -348,36 +395,35 @@ pub enum MemoryCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum OpsCommand {
-    /// Copy context to clipboard
-    Cp {
-        /// Patterns to exclude
-        #[arg(short = 'e', long = "exclude")]
-        exclude: Vec<String>,
-        /// Files or directories to include
-        paths: Vec<String>,
+pub enum PrCommand {
+    /// Show current branch's PR state
+    Status,
+    /// Create or update a PR
+    Open {
+        #[arg(short = 'm', long = "model", short_alias = 'M')]
+        model: Option<String>,
+        #[arg(long = "title")]
+        title: Option<String>,
+        #[arg(long = "body")]
+        body: Option<String>,
     },
-    /// Check loopflow dependencies
-    Doctor {
-        /// Print the generated Brewfile (from the declared dependency list) and exit
-        #[arg(long, hide = true)]
-        brewfile: bool,
-    },
-    /// Rebase current branch onto target (default: main)
-    Rebase {
-        /// Print the planned rebase strategy without mutating git
+    /// Prepare a PR to land: rebase, clear scratch, mark ready, and assign it
+    /// to you. Nothing merges until you click merge on GitHub.
+    Submit {
         #[arg(long)]
-        plan: bool,
-        /// Branch to rebase onto
-        onto: Option<String>,
+        strict: bool,
+        #[arg(short = 'c', long = "create-pr")]
+        create_pr: bool,
+        #[arg(short = 'w', long = "worktree")]
+        worktree: Option<String>,
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        #[arg(long = "title")]
+        title: Option<String>,
+        #[arg(long = "body")]
+        body: Option<String>,
     },
-    /// Push current branch to remote
-    Push {
-        #[arg(long)]
-        force: bool,
-    },
-    /// Land a PR hands-off: rebase, clear scratch, arm auto-merge, and rotate
-    /// the worktree. For a human-gated merge instead, use `lf op submit`.
+    /// Land a PR hands-off: rebase, clear scratch, and arm auto-merge
     Land {
         #[arg(long)]
         strict: bool,
@@ -394,114 +440,12 @@ pub enum OpsCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Prepare a PR to land: rebase, clear scratch, mark ready, and assign it
-    /// to you. Nothing merges until you click merge on GitHub — the one
-    /// required gate. Does not arm auto-merge or rotate the worktree.
-    Submit {
-        #[arg(long)]
-        strict: bool,
-        #[arg(short = 'c', long = "create-pr")]
-        create_pr: bool,
-        #[arg(short = 'w', long = "worktree")]
-        worktree: Option<String>,
-        #[arg(short = 'm', long = "message")]
-        message: Option<String>,
-        #[arg(long = "title")]
-        title: Option<String>,
-        #[arg(long = "body")]
-        body: Option<String>,
-    },
-    /// Create or update a PR
-    Pr {
-        #[arg(short = 'm', long = "model", short_alias = 'M')]
-        model: Option<String>,
-        #[arg(long = "title")]
-        title: Option<String>,
-        #[arg(long = "body")]
-        body: Option<String>,
-    },
-    /// Update local main to match origin
-    Sync,
-    /// Compile loopflow skills into your home vendor Skills directories
-    #[command(name = "sync-skills")]
-    SyncSkills {
-        /// Confirm writes under ~/ without prompting
-        #[arg(short = 'y', long = "yes")]
-        yes: bool,
-        /// Keep stale loopflow-generated skills
-        #[arg(long = "no-prune")]
-        no_prune: bool,
-    },
-    /// Rotate a recurring wave onto a fresh branch (pushed with upstream)
-    Advance {
-        /// Wave name (default: inferred from the worktree)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-    },
-    /// Create next iteration branch
-    Next {
-        #[arg(short = 'c', long = "create-pr")]
-        create_pr: bool,
-        #[arg(long = "no-rebase")]
-        no_rebase: bool,
-    },
-    /// Commit changes
-    Commit {
-        #[arg(short = 'm', long = "message", short_alias = 'M')]
-        message: Option<String>,
-        #[arg(short = 'p', long = "push", short_alias = 'P')]
-        push: bool,
-        #[arg(long = "no-add")]
-        no_add: bool,
-    },
     /// Abandon branch: close PR, remove worktree, delete branch
     Abandon {
         /// Branch to abandon (default: current)
         branch: Option<String>,
         #[arg(short = 'f', long)]
         force: bool,
-    },
-    /// Remote branch operations
-    Branches {
-        #[command(subcommand)]
-        cmd: BranchesCommand,
-    },
-    /// Worktree operations
-    Wt {
-        #[command(subcommand)]
-        cmd: WtCommand,
-    },
-    /// Shell integration
-    Shell {
-        #[command(subcommand)]
-        cmd: ShellCommand,
-    },
-    /// Release operations (run, check, notes, bump, tag, status)
-    Release {
-        #[command(subcommand)]
-        cmd: ReleaseCommand,
-    },
-    /// Linear tasks for waves and local projects
-    Pm {
-        #[command(subcommand)]
-        cmd: PmCommand,
-    },
-    /// Provider authentication for local lf skills and ops
-    Auth {
-        #[command(subcommand)]
-        cmd: AuthCommand,
-    },
-    /// Merge-queue maintenance for stacked wave runs
-    Queue {
-        #[command(subcommand)]
-        cmd: QueueCommand,
-    },
-    /// Kill every lf-* tmux session and clear stale wave endpoints (fresh start)
-    #[command(name = "reset-waves")]
-    ResetWaves {
-        /// Skip the confirmation prompt
-        #[arg(short = 'y', long = "yes")]
-        yes: bool,
     },
 }
 
@@ -530,59 +474,6 @@ pub enum CronCommand {
         #[arg(long = "flow")]
         flow: String,
     },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum QueueCommand {
-    /// Run one reconcile pass: stack-status inference, draft/ready flips,
-    /// lazy head rebase, queue-block attention writes
-    Reconcile {
-        /// Only this wave (default: every wave with queue state)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum BranchesCommand {
-    /// Preview remote branches by filter
-    List {
-        #[command(flatten)]
-        filters: BranchFilterArgs,
-    },
-    /// Delete remote branches by filter
-    Prune {
-        #[command(flatten)]
-        filters: BranchFilterArgs,
-        /// Show what would be pruned without deleting anything
-        #[arg(long = "dry-run")]
-        dry_run: bool,
-        /// Skip confirmation
-        #[arg(short = 'y', long = "yes")]
-        yes: bool,
-    },
-}
-
-#[derive(Args, Debug, Clone)]
-pub struct BranchFilterArgs {
-    /// Branches authored by user (`@me` for current git user)
-    #[arg(long = "user")]
-    pub user: Option<String>,
-    /// Branches whose name includes this wave segment
-    #[arg(long = "wave")]
-    pub wave: Option<String>,
-    /// No commits in the last duration (for example 30d, 2w)
-    #[arg(long = "stale")]
-    pub stale: Option<String>,
-    /// First unique commit before YYYY-MM-DD
-    #[arg(long = "created-before")]
-    pub created_before: Option<String>,
-    /// Only branches already merged into main
-    #[arg(long = "merged")]
-    pub merged: bool,
-    /// Include branches with open PRs
-    #[arg(long = "include-open-prs")]
-    pub include_open_prs: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -744,7 +635,7 @@ pub enum AuthCommand {
         /// Provider name
         provider: String,
     },
-    /// External: provider name (so `lf op auth linear` works)
+    /// External: provider name (so `lf auth linear` works)
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -856,41 +747,19 @@ pub enum WtCommand {
     },
 }
 
-#[derive(Subcommand, Debug)]
-pub enum ShellCommand {
-    /// Print shell integration code
-    Init {
-        /// Shell to generate for (bash, zsh, fish)
-        shell: Option<String>,
-    },
-    /// Install shell integration to config file
-    Install {
-        /// Shell to install for (bash, zsh, fish)
-        shell: Option<String>,
-    },
-    /// Run a shell directive
-    Directive {
-        #[arg(trailing_var_arg = true)]
-        command: Vec<String>,
-    },
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn pm_init_accepts_positional_wave() {
-        let cli = Cli::try_parse_from(["lf", "op", "pm", "init", "pm"]).expect("parse");
-        let Some(Commands::Op {
-            op:
-                OpsCommand::Pm {
-                    cmd:
-                        PmCommand::Init {
-                            wave,
-                            wave_flag,
-                            all,
-                        },
+        let cli = Cli::try_parse_from(["lf", "pm", "init", "pm"]).expect("parse");
+        let Some(Commands::Pm {
+            cmd:
+                PmCommand::Init {
+                    wave,
+                    wave_flag,
+                    all,
                 },
         }) = cli.command
         else {
@@ -904,16 +773,13 @@ mod tests {
 
     #[test]
     fn pm_init_accepts_all_flag() {
-        let cli = Cli::try_parse_from(["lf", "op", "pm", "init", "--all"]).expect("parse");
-        let Some(Commands::Op {
-            op:
-                OpsCommand::Pm {
-                    cmd:
-                        PmCommand::Init {
-                            wave,
-                            wave_flag,
-                            all,
-                        },
+        let cli = Cli::try_parse_from(["lf", "pm", "init", "--all"]).expect("parse");
+        let Some(Commands::Pm {
+            cmd:
+                PmCommand::Init {
+                    wave,
+                    wave_flag,
+                    all,
                 },
         }) = cli.command
         else {
@@ -927,13 +793,9 @@ mod tests {
 
     #[test]
     fn pm_show_accepts_wave_flag() {
-        let cli =
-            Cli::try_parse_from(["lf", "op", "pm", "show", "--wave", "goals"]).expect("parse");
-        let Some(Commands::Op {
-            op:
-                OpsCommand::Pm {
-                    cmd: PmCommand::Show { wave, project },
-                },
+        let cli = Cli::try_parse_from(["lf", "pm", "show", "--wave", "goals"]).expect("parse");
+        let Some(Commands::Pm {
+            cmd: PmCommand::Show { wave, project },
         }) = cli.command
         else {
             panic!("expected pm show command");
@@ -946,7 +808,6 @@ mod tests {
     fn pm_update_parses_create_and_close() {
         let cli = Cli::try_parse_from([
             "lf",
-            "op",
             "pm",
             "update",
             "--project",
@@ -957,19 +818,16 @@ mod tests {
             "details",
         ])
         .expect("parse");
-        let Some(Commands::Op {
-            op:
-                OpsCommand::Pm {
-                    cmd:
-                        PmCommand::Update {
-                            wave,
-                            project,
-                            id,
-                            title,
-                            notes,
-                            status,
-                            pr,
-                        },
+        let Some(Commands::Pm {
+            cmd:
+                PmCommand::Update {
+                    wave,
+                    project,
+                    id,
+                    title,
+                    notes,
+                    status,
+                    pr,
                 },
         }) = cli.command
         else {
@@ -985,7 +843,6 @@ mod tests {
 
         let cli = Cli::try_parse_from([
             "lf",
-            "op",
             "pm",
             "update",
             "--id",
@@ -996,11 +853,8 @@ mod tests {
             "https://github.com/acme/repo/pull/7",
         ])
         .expect("parse");
-        let Some(Commands::Op {
-            op:
-                OpsCommand::Pm {
-                    cmd: PmCommand::Update { id, status, pr, .. },
-                },
+        let Some(Commands::Pm {
+            cmd: PmCommand::Update { id, status, pr, .. },
         }) = cli.command
         else {
             panic!("expected pm update command");
@@ -1085,93 +939,10 @@ mod tests {
     }
 
     #[test]
-    fn op_advance_parses_optional_wave() {
-        let cli = Cli::try_parse_from(["lf", "op", "advance"]).expect("parse");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Op {
-                op: OpsCommand::Advance { wave: None }
-            })
-        ));
-
-        let cli = Cli::try_parse_from(["lf", "op", "advance", "-w", "goals"]).expect("parse");
-        let Some(Commands::Op {
-            op: OpsCommand::Advance { wave },
-        }) = cli.command
-        else {
-            panic!("expected op advance command");
-        };
-        assert_eq!(wave.as_deref(), Some("goals"));
-    }
-
-    #[test]
-    fn branches_list_accepts_filters() {
-        let cli = Cli::try_parse_from([
-            "lf", "op", "branches", "list", "--user", "@me", "--stale", "60d",
-        ])
-        .expect("parse");
-        let Some(Commands::Op {
-            op:
-                OpsCommand::Branches {
-                    cmd:
-                        BranchesCommand::List {
-                            filters:
-                                BranchFilterArgs {
-                                    user,
-                                    stale,
-                                    merged,
-                                    ..
-                                },
-                        },
-                },
-        }) = cli.command
-        else {
-            panic!("expected branches list command");
-        };
-
-        assert_eq!(user.as_deref(), Some("@me"));
-        assert_eq!(stale.as_deref(), Some("60d"));
-        assert!(!merged);
-    }
-
-    #[test]
-    fn branches_prune_accepts_yes_and_dry_run() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "op",
-            "branches",
-            "prune",
-            "--wave",
-            "redesign",
-            "--dry-run",
-            "-y",
-        ])
-        .expect("parse");
-        let Some(Commands::Op {
-            op:
-                OpsCommand::Branches {
-                    cmd:
-                        BranchesCommand::Prune {
-                            filters: BranchFilterArgs { wave, .. },
-                            dry_run,
-                            yes,
-                        },
-                },
-        }) = cli.command
-        else {
-            panic!("expected branches prune command");
-        };
-
-        assert_eq!(wave.as_deref(), Some("redesign"));
-        assert!(dry_run);
-        assert!(yes);
-    }
-
-    #[test]
-    fn op_pr_accepts_model_override() {
-        let cli = Cli::try_parse_from(["lf", "op", "pr", "-m", "codex"]).expect("parse");
-        let Some(Commands::Op {
-            op: OpsCommand::Pr { model, title, body },
+    fn pr_open_accepts_model_override() {
+        let cli = Cli::try_parse_from(["lf", "pr", "open", "-m", "codex"]).expect("parse");
+        let Some(Commands::Pr {
+            cmd: Some(PrCommand::Open { model, title, body }),
         }) = cli.command
         else {
             panic!("expected pr command");
@@ -1183,10 +954,10 @@ mod tests {
     }
 
     #[test]
-    fn top_level_model_reaches_op_command() {
-        let cli = Cli::try_parse_from(["lf", "-m", "codex", "op", "pr"]).expect("parse");
-        let Some(Commands::Op {
-            op: OpsCommand::Pr { model, title, body },
+    fn top_level_model_reaches_pr_open() {
+        let cli = Cli::try_parse_from(["lf", "-m", "codex", "pr", "open"]).expect("parse");
+        let Some(Commands::Pr {
+            cmd: Some(PrCommand::Open { model, title, body }),
         }) = cli.command
         else {
             panic!("expected pr command");

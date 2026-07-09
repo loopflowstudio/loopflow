@@ -15,18 +15,13 @@ use crate::engine::{
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_skill;
 use crate::lf::output::Colors;
-use crate::lf::{
-    BranchFilterArgs, BranchesCommand, CronCommand, OpsCommand, PmCommand, PmTaskCommand,
-    QueueCommand, ReleaseCommand, ShellCommand, WtCommand,
-};
+use crate::lf::{CronCommand, PmCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, land, list_branch_candidates,
-    next_branch, plan_rebase, prune_branches, rebase_class_name, rebase_strategy_name,
-    rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
-    release_tag, submit, AbandonOptions, BranchFilterOptions, BranchListOptions,
-    BranchPruneOptions, CommitOptions, CronSpec, LandOptions, NextOptions, PrOptions, Progress,
-    RebaseOptions, SystemLaunchctl,
+    abandon_branch, commit_workflow, create_or_update_pr, current_pr, land, plan_rebase,
+    rebase_class_name, rebase_strategy_name, rebase_with_recovery, release_bump, release_check,
+    release_notes, release_run, release_status, release_tag, submit, AbandonOptions, CommitOptions,
+    CronSpec, LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -34,42 +29,24 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
+pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
-    match op {
-        OpsCommand::Cp { paths, exclude } => copy_context(paths, exclude),
-        OpsCommand::Doctor { brewfile } => doctor(*brewfile),
-        OpsCommand::Rebase { plan, onto } => rebase_current(onto.as_deref(), *plan, &progress),
-        OpsCommand::Push { force } => push_current(*force),
-        OpsCommand::Land {
-            strict,
-            local,
-            create_pr,
-            worktree,
-            message,
-            title,
-            body,
-        } => land_current(
-            &LandOptions {
-                strict: *strict,
-                local: *local,
-                create_pr: *create_pr,
-                worktree: worktree.clone(),
-                commit_message: message.clone(),
-                pr_title: title.clone(),
-                pr_body: body.clone(),
-                agent: cli_model.map(str::to_string),
-            },
+    match cmd {
+        None | Some(PrCommand::Status) => pr_status(),
+        Some(PrCommand::Open { model, title, body }) => open_pr(
+            title.clone(),
+            body.clone(),
+            model.as_deref().or(cli_model),
             &progress,
         ),
-        OpsCommand::Submit {
+        Some(PrCommand::Submit {
             strict,
             create_pr,
             worktree,
             message,
             title,
             body,
-        } => submit_current(
+        }) => submit_current(
             &LandOptions {
                 strict: *strict,
                 local: false,
@@ -82,134 +59,51 @@ pub fn run(op: &OpsCommand, cli_model: Option<&str>) -> Result<()> {
             },
             &progress,
         ),
-        OpsCommand::Pr { model, title, body } => open_pr(
-            title.clone(),
-            body.clone(),
-            model.as_deref().or(cli_model),
+        Some(PrCommand::Land {
+            strict,
+            local,
+            create_pr,
+            worktree,
+            message,
+            title,
+            body,
+        }) => land_current(
+            &LandOptions {
+                strict: *strict,
+                local: *local,
+                create_pr: *create_pr,
+                worktree: worktree.clone(),
+                commit_message: message.clone(),
+                pr_title: title.clone(),
+                pr_body: body.clone(),
+                agent: cli_model.map(str::to_string),
+            },
             &progress,
         ),
-        OpsCommand::Sync => sync_current(),
-        OpsCommand::SyncSkills { yes, no_prune } => sync_skills_cmd(*yes, !*no_prune),
-        OpsCommand::Advance { wave } => advance_cmd(wave.as_deref()),
-        OpsCommand::Next {
-            create_pr,
-            no_rebase,
-        } => next_branch_cmd(*create_pr, !*no_rebase, cli_model, &progress),
-        OpsCommand::Commit {
-            message,
-            push,
-            no_add,
-        } => commit_current(message.as_deref(), *push, !no_add, cli_model, &progress),
-        OpsCommand::Abandon { force, branch } => {
+        Some(PrCommand::Abandon { force, branch }) => {
             abandon_current(branch.as_deref(), *force, &progress)
         }
-        OpsCommand::Branches { cmd } => run_branches(cmd, &progress),
-        OpsCommand::Wt { cmd } => run_worktree(cmd),
-        OpsCommand::Shell { cmd } => run_shell(cmd),
-        OpsCommand::Release { cmd } => match cmd {
-            ReleaseCommand::Run { version, target } => {
-                release_run_cmd(version.as_deref(), target.as_deref(), &progress)
-            }
-            ReleaseCommand::Check { target } => release_check_cmd(target.as_deref()),
-            ReleaseCommand::Notes {
-                version,
-                prev_tag,
-                target,
-            } => release_notes_cmd(version, prev_tag.as_deref(), target.as_deref(), &progress),
-            ReleaseCommand::Bump { version, target } => {
-                release_bump_cmd(version, target.as_deref(), &progress)
-            }
-            ReleaseCommand::Tag { version, target } => release_tag_cmd(version, target.as_deref()),
-            ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
-        },
-        OpsCommand::Pm { cmd } => pm_cmd(cmd, &progress),
-        OpsCommand::Auth { cmd } => crate::lf::commands::auth::run(cmd),
-        OpsCommand::Queue { cmd } => match cmd {
-            QueueCommand::Reconcile { wave } => {
-                crate::ops::queue::reconcile_queue_cmd(wave.as_deref())
-            }
-        },
-        OpsCommand::ResetWaves { yes } => reset_waves(*yes),
     }
 }
 
-/// Kill every `lf-*` tmux session and clear stale wave endpoint pointers — the
-/// operator's fresh-start button.
-///
-/// Loopflow launches every wave server and worker as an `lf-`-prefixed tmux
-/// session, so killing those takes down the wave flowloops too (tmux SIGHUPs the
-/// session's process group). Stale `.wave-endpoint` pointers under this repo's
-/// `wave/` are then removed so nothing dangles; lfd reconciles its own
-/// registry rows on next boot.
-fn reset_waves(assume_yes: bool) -> Result<()> {
-    let sessions = lf_tmux_sessions()?;
-    if sessions.is_empty() {
-        println!("No lf-* tmux sessions running.");
-    } else {
-        if !assume_yes && io::stdin().is_terminal() {
-            println!("About to kill {} lf tmux session(s):", sessions.len());
-            for session in &sessions {
-                println!("  {session}");
-            }
-            print!("Proceed? [y/N]: ");
-            let _ = io::stdout().flush();
-            let mut input = String::new();
-            io::stdin().read_line(&mut input)?;
-            if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
-                println!("Aborted.");
-                return Ok(());
-            }
+pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
+    let progress = CliProgress;
+    match cmd {
+        ReleaseCommand::Run { version, target } => {
+            release_run_cmd(version.as_deref(), target.as_deref(), &progress)
         }
-        for session in &sessions {
-            let _ = Command::new("tmux")
-                .args(["kill-session", "-t", session])
-                .status();
-            println!("killed {session}");
+        ReleaseCommand::Check { target } => release_check_cmd(target.as_deref()),
+        ReleaseCommand::Notes {
+            version,
+            prev_tag,
+            target,
+        } => release_notes_cmd(version, prev_tag.as_deref(), target.as_deref(), &progress),
+        ReleaseCommand::Bump { version, target } => {
+            release_bump_cmd(version, target.as_deref(), &progress)
         }
+        ReleaseCommand::Tag { version, target } => release_tag_cmd(version, target.as_deref()),
+        ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
     }
-
-    let cleared = clear_stale_endpoints()?;
-    if cleared > 0 {
-        println!("cleared {cleared} stale wave endpoint(s)");
-    }
-    Ok(())
-}
-
-/// Every tmux session whose name starts with `lf-` (wave agents
-/// `lf-<repo>-<wave>` and workers `lf-<branch>-<uuid>`). A missing tmux server
-/// means no sessions, not an error.
-fn lf_tmux_sessions() -> Result<Vec<String>> {
-    let output = Command::new("tmux")
-        .args(["list-sessions", "-F", "#{session_name}"])
-        .output()
-        .map_err(|err| anyhow!("failed to run tmux: {err}"))?;
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|name| name.starts_with("lf-"))
-        .map(str::to_string)
-        .collect())
-}
-
-/// Remove every `wave/<name>/.wave-endpoint` pointer under the main repo. Only
-/// called after the sessions are killed, so every pointer is now stale — a
-/// live wave would have kept its server (and pointer) alive.
-fn clear_stale_endpoints() -> Result<u32> {
-    let repo = find_repo_root()?;
-    let main = main_repo_root(&repo).unwrap_or(repo);
-    let mut cleared = 0;
-    if let Ok(entries) = std::fs::read_dir(main.join("wave")) {
-        for entry in entries.flatten() {
-            let endpoint = entry.path().join(crate::wave::server::ENDPOINT_FILE);
-            if endpoint.exists() && std::fs::remove_file(&endpoint).is_ok() {
-                cleared += 1;
-            }
-        }
-    }
-    Ok(cleared)
 }
 
 struct CliProgress;
@@ -238,7 +132,8 @@ impl Progress for CliProgress {
     }
 }
 
-fn rebase_current(onto: Option<&str>, plan_only: bool, progress: &impl Progress) -> Result<()> {
+pub fn run_rebase(onto: Option<&str>, plan_only: bool) -> Result<()> {
+    let progress = &CliProgress;
     let repo_root = find_repo_root()?;
     let started = Instant::now();
     let plan = plan_rebase(&repo_root, onto)?;
@@ -301,51 +196,45 @@ fn print_rebase_plan(plan: &crate::ops::RebasePlan) {
     println!("agent_launched: false");
 }
 
-fn push_current(force: bool) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    crate::engine::git::push(&repo_root, force).map_err(Into::into)
-}
-
-fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    match land(&repo_root, options, progress) {
-        Ok(_) => {}
+/// Run a PR-mutating op; on a rebase conflict, launch the rebase agent to
+/// resolve it and retry once. A second conflict is a real error.
+fn with_rebase_retry<T>(
+    repo_root: &Path,
+    label: &str,
+    progress: &impl Progress,
+    op: impl Fn(&Path) -> Result<T, OpsError>,
+) -> Result<T> {
+    match op(repo_root) {
+        Ok(value) => Ok(value),
         Err(OpsError::RebaseConflict { onto, detail }) => {
             let context = format!(
                 "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
             );
             progress.status("Launching rebase agent to resolve conflicts...");
-            launch_skill_agent(&repo_root, "rebase", Some(&context))?;
-            progress.status("Retrying land after rebase...");
-            land(&repo_root, options, progress)?;
+            launch_skill_agent(repo_root, "rebase", Some(&context))?;
+            progress.status(&format!("Retrying {label} after rebase..."));
+            op(repo_root).map_err(Into::into)
         }
-        Err(err) => return Err(err.into()),
-    };
+        Err(err) => Err(err.into()),
+    }
+}
 
+fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
+    let repo_root = find_repo_root()?;
     // The wave home stays put on land — no rotation, no cd.
+    with_rebase_retry(&repo_root, "land", progress, |repo| {
+        land(repo, options, progress)
+    })?;
     Ok(())
 }
 
 fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    match submit(&repo_root, options, progress) {
-        Ok(_) => {
-            progress.status("Ready to land — click merge on the PR once checks pass.");
-            Ok(())
-        }
-        Err(OpsError::RebaseConflict { onto, detail }) => {
-            let context = format!(
-                "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
-            );
-            progress.status("Launching rebase agent to resolve conflicts...");
-            launch_skill_agent(&repo_root, "rebase", Some(&context))?;
-            progress.status("Retrying submit after rebase...");
-            submit(&repo_root, options, progress)?;
-            progress.status("Ready to land — click merge on the PR once checks pass.");
-            Ok(())
-        }
-        Err(err) => Err(err.into()),
-    }
+    with_rebase_retry(&repo_root, "submit", progress, |repo| {
+        submit(repo, options, progress)
+    })?;
+    progress.status("Ready to land — click merge on the PR once checks pass.");
+    Ok(())
 }
 
 fn open_pr(
@@ -355,40 +244,33 @@ fn open_pr(
     progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let result = match create_or_update_pr(
-        &repo_root,
-        &PrOptions {
-            title: title.clone(),
-            body: body.clone(),
-            agent: agent_override.map(str::to_string),
-        },
-        progress,
-    ) {
-        Ok(result) => result,
-        Err(OpsError::RebaseConflict { onto, detail }) => {
-            let context = format!(
-                "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
-            );
-            progress.status("Launching rebase agent to resolve conflicts...");
-            launch_skill_agent(&repo_root, "rebase", Some(&context))?;
-            progress.status("Retrying PR creation after rebase...");
-            create_or_update_pr(
-                &repo_root,
-                &PrOptions {
-                    title,
-                    body,
-                    agent: agent_override.map(str::to_string),
-                },
-                progress,
-            )?
-        }
-        Err(err) => return Err(err.into()),
-    };
+    let result = with_rebase_retry(&repo_root, "PR creation", progress, |repo| {
+        create_or_update_pr(
+            repo,
+            &PrOptions {
+                title: title.clone(),
+                body: body.clone(),
+                agent: agent_override.map(str::to_string),
+            },
+            progress,
+        )
+    })?;
     println!("{}", result.url);
     Ok(())
 }
 
-fn sync_skills_cmd(yes: bool, prune: bool) -> Result<()> {
+fn pr_status() -> Result<()> {
+    let repo_root = find_repo_root()?;
+    match current_pr(&repo_root)? {
+        Some(pr) => {
+            println!("#{} {} {} {}", pr.number, pr.state, pr.branch, pr.url);
+        }
+        None => println!("No open PR for the current branch."),
+    }
+    Ok(())
+}
+
+pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
     if !yes {
         if !std::io::stdin().is_terminal() {
             return Err(anyhow!(
@@ -404,7 +286,7 @@ fn sync_skills_cmd(yes: bool, prune: bool) -> Result<()> {
     }
 
     let report = sync_skills(&SkillSyncOptions {
-        prune,
+        prune: !no_prune,
         global_home: None,
     })?;
     println!(
@@ -415,65 +297,24 @@ fn sync_skills_cmd(yes: bool, prune: bool) -> Result<()> {
     Ok(())
 }
 
-fn sync_current() -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_branch = get_default_branch(&repo_root)?;
-    let ok = crate::engine::git::sync_main(&repo_root, &main_branch)?;
-    if !ok {
-        return Err(anyhow!("working tree dirty; sync aborted"));
-    }
-    Ok(())
-}
-
-fn next_branch_cmd(
-    create_pr: bool,
-    rebase: bool,
-    agent_override: Option<&str>,
-    progress: &impl Progress,
-) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let result = next_branch(
-        &repo_root,
-        &NextOptions {
-            create_pr,
-            rebase,
-            wave_name: None,
-            agent: agent_override.map(str::to_string),
-        },
-        progress,
-    )?;
-    println!("{}", result.new_branch);
-    Ok(())
-}
-
-fn advance_cmd(wave: Option<&str>) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let wave = crate::ops::util::resolve_wave_name(&repo_root, wave)
-        .ok_or_else(|| anyhow!("cannot determine wave name (pass --wave)"))?;
-    let new_branch = crate::ops::advance_branch(&repo_root, &wave)?;
-    println!("{new_branch}");
-    Ok(())
-}
-
-fn commit_current(
+pub fn run_commit(
     message: Option<&str>,
     push: bool,
-    add: bool,
+    no_add: bool,
     agent_override: Option<&str>,
-    progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
     let _ = commit_workflow(
         &repo_root,
         &CommitOptions {
-            add,
+            add: !no_add,
             push,
             create_draft_pr: true,
             message: message.map(str::to_string),
             agent: agent_override.map(str::to_string),
             ..CommitOptions::for_task("commit")
         },
-        progress,
+        &CliProgress,
     )?;
     Ok(())
 }
@@ -491,7 +332,8 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
     Ok(())
 }
 
-fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
+pub fn run_pm(cmd: &PmCommand) -> Result<()> {
+    let progress = &CliProgress;
     let repo_root = find_repo_root()?;
     let list_all_waves = || -> Result<Vec<String>> {
         let wave_dir = repo_root.join("wave");
@@ -936,105 +778,7 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn run_branches(cmd: &BranchesCommand, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    match cmd {
-        BranchesCommand::List { filters } => {
-            let candidates =
-                list_branch_candidates(&repo_root, &branch_list_options(filters, true))?;
-            print_branch_candidates(&candidates);
-        }
-        BranchesCommand::Prune {
-            filters,
-            dry_run,
-            yes,
-        } => {
-            let candidates = prune_branches(
-                &repo_root,
-                &branch_prune_options(filters, *dry_run, *yes),
-                progress,
-            )?;
-            if *dry_run {
-                print_branch_candidates(&candidates);
-            } else if !candidates.is_empty() {
-                println!("Deleted {} remote branch(es).", candidates.len());
-            }
-        }
-    }
-    Ok(())
-}
-
-fn branch_list_options(
-    filters: &BranchFilterArgs,
-    default_user_if_empty: bool,
-) -> BranchListOptions {
-    BranchListOptions {
-        filters: branch_filter_options(filters),
-        default_user_if_empty,
-    }
-}
-
-fn branch_prune_options(
-    filters: &BranchFilterArgs,
-    dry_run: bool,
-    yes: bool,
-) -> BranchPruneOptions {
-    BranchPruneOptions {
-        filters: branch_filter_options(filters),
-        dry_run,
-        yes,
-    }
-}
-
-fn branch_filter_options(filters: &BranchFilterArgs) -> BranchFilterOptions {
-    BranchFilterOptions {
-        user: filters.user.clone(),
-        wave: filters.wave.clone(),
-        stale: filters.stale.clone(),
-        created_before: filters.created_before.clone(),
-        merged: filters.merged,
-        include_open_prs: filters.include_open_prs,
-    }
-}
-
-fn print_branch_candidates(candidates: &[crate::ops::BranchCandidate]) {
-    if candidates.is_empty() {
-        println!("No remote branches match.");
-        return;
-    }
-
-    let max_branch = candidates
-        .iter()
-        .map(|candidate| candidate.branch.len())
-        .max()
-        .unwrap_or(0);
-    for candidate in candidates {
-        let status = if candidate.protected {
-            format!(
-                "protected: {}",
-                candidate.protect_reason.as_deref().unwrap_or("safety")
-            )
-        } else if candidate.open_pr {
-            "open PR".to_string()
-        } else if candidate.merged {
-            "merged".to_string()
-        } else {
-            "active".to_string()
-        };
-        let wave = candidate.wave.as_deref().unwrap_or("-");
-        println!(
-            "{:<width$}  {:>4}d  {}  {:<12}  {}",
-            candidate.branch,
-            candidate.age_days,
-            candidate.last_commit_date,
-            status,
-            wave,
-            width = max_branch,
-        );
-    }
-}
-
-fn run_worktree(cmd: &WtCommand) -> Result<()> {
+pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
         WtCommand::Create {
             name,
@@ -1123,7 +867,7 @@ fn wt_create(name: &str, child: Option<&str>, dry_run: bool) -> Result<()> {
 
     if !write_shell_directive(&format!("cd {}", result.path.display()))? {
         println!("cd {}", result.path.display());
-        println!("Tip: Run 'lf op shell install' for auto-cd");
+        println!("Tip: source scripts/dev-lf to apply auto-cd in this shell");
     }
 
     Ok(())
@@ -1251,7 +995,7 @@ fn parent_branch_of(branch: &str, user: &str, default_branch: &str) -> String {
         .unwrap_or_else(|| default_branch.to_string())
 }
 
-/// `lf op wt up` — skill to the parent worktree in the stack (toward main).
+/// `lf wt up` — skill to the parent worktree in the stack (toward main).
 fn wt_up() -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
@@ -1271,7 +1015,7 @@ fn wt_up() -> Result<()> {
     cd_directive(&target)
 }
 
-/// `lf op wt down [name]` — skill to a child worktree (away from main). When
+/// `lf wt down [name]` — skill to a child worktree (away from main). When
 /// there is more than one child, `name` picks it by leaf.
 fn wt_down(name: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
@@ -1318,7 +1062,7 @@ fn wt_down(name: Option<&str>) -> Result<()> {
                 })
                 .collect();
             Err(anyhow!(
-                "{} children — pick one: lf op wt down <{}>",
+                "{} children — pick one: lf wt down <{}>",
                 leaves.len(),
                 leaves.join("|")
             ))
@@ -1691,87 +1435,6 @@ fn wt_ci(watch: bool, logs: bool) -> Result<()> {
     }
 }
 
-fn run_shell(cmd: &ShellCommand) -> Result<()> {
-    match cmd {
-        ShellCommand::Init { shell } => shell_init(shell.as_deref()),
-        ShellCommand::Install { shell } => shell_install(shell.as_deref()),
-        ShellCommand::Directive { command } => shell_directive(command),
-    }
-}
-
-fn shell_init(shell: Option<&str>) -> Result<()> {
-    let shell = shell.unwrap_or("zsh");
-    let init = match shell {
-        "zsh" => SHELL_INIT_ZSH,
-        "bash" => SHELL_INIT_BASH,
-        _ => return Err(anyhow!("unsupported shell: {}", shell)),
-    };
-    println!("{}", init);
-    Ok(())
-}
-
-fn shell_install(shell: Option<&str>) -> Result<()> {
-    let shell = shell
-        .map(|value| value.to_string())
-        .or_else(|| std::env::var("SHELL").ok())
-        .unwrap_or_else(|| "zsh".to_string());
-    let shell_name = if shell.contains("bash") {
-        "bash"
-    } else {
-        "zsh"
-    };
-    let (config_path, install_line) = match shell_name {
-        "bash" => (
-            dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".bashrc"),
-            SHELL_INSTALL_LINE_BASH,
-        ),
-        _ => (
-            dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".zshrc"),
-            SHELL_INSTALL_LINE_ZSH,
-        ),
-    };
-
-    if let Ok(content) = std::fs::read_to_string(&config_path) {
-        if content.contains("lf op shell init") {
-            println!("Already installed in {}", config_path.display());
-            return Ok(());
-        }
-    }
-
-    std::fs::create_dir_all(
-        config_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new(".")),
-    )?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&config_path)?;
-    use std::io::Write;
-    writeln!(file, "\n{}", install_line)?;
-    println!("Installed to {}", config_path.display());
-    println!(
-        "Restart your shell or run: source {}",
-        config_path.display()
-    );
-    Ok(())
-}
-
-fn shell_directive(command: &[String]) -> Result<()> {
-    if command.is_empty() {
-        return Err(anyhow!("command required"));
-    }
-    let line = command.join(" ");
-    if !write_shell_directive(&line)? {
-        println!("{}", line);
-    }
-    Ok(())
-}
-
 fn write_shell_directive(command: &str) -> Result<bool> {
     let directive = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
     let Some(path) = directive else {
@@ -1785,61 +1448,6 @@ fn write_shell_directive(command: &str) -> Result<bool> {
     writeln!(file, "{}", command)?;
     Ok(true)
 }
-
-const SHELL_INIT_ZSH: &str = r#"# loopflow shell integration for zsh
-#
-# Enables directory switching after commands that emit shell directives
-# (for example `lf op wt create`, `lf op wt switch`, `lf op land`).
-
-if command -v lf >/dev/null 2>&1; then
-    lf() {
-        local directive_file exit_code=0
-        directive_file="$(mktemp)"
-
-        LOOPFLOW_DIRECTIVE_FILE="$directive_file" command lf "$@" || exit_code=$?
-
-        if [[ -s "$directive_file" ]]; then
-            source "$directive_file"
-            if [[ $exit_code -eq 0 ]]; then
-                exit_code=$?
-            fi
-        fi
-
-        rm -f "$directive_file"
-        return "$exit_code"
-    }
-fi
-"#;
-
-const SHELL_INIT_BASH: &str = r#"# loopflow shell integration for bash
-#
-# Enables directory switching after commands that emit shell directives
-# (for example `lf op wt create`, `lf op wt switch`, `lf op land`).
-
-if command -v lf >/dev/null 2>&1; then
-    lf() {
-        local directive_file exit_code=0
-        directive_file="$(mktemp)"
-
-        LOOPFLOW_DIRECTIVE_FILE="$directive_file" command lf "$@" || exit_code=$?
-
-        if [[ -s "$directive_file" ]]; then
-            source "$directive_file"
-            if [[ $exit_code -eq 0 ]]; then
-                exit_code=$?
-            fi
-        fi
-
-        rm -f "$directive_file"
-        return "$exit_code"
-    }
-fi
-"#;
-
-const SHELL_INSTALL_LINE_ZSH: &str =
-    "if command -v lf >/dev/null 2>&1; then eval \"$(command lf op shell init zsh)\"; fi";
-const SHELL_INSTALL_LINE_BASH: &str =
-    "if command -v lf >/dev/null 2>&1; then eval \"$(command lf op shell init bash)\"; fi";
 
 // ==========================================================================
 // Skill agent fallback
@@ -1893,80 +1501,7 @@ fn launch_skill_agent(repo_root: &Path, skill_name: &str, context: Option<&str>)
 }
 
 // ==========================================================================
-// lf op cp
-// ==========================================================================
-
-fn copy_context(paths: &[String], exclude: &[String]) -> Result<()> {
-    use crate::engine::prompt::{count_tokens, gather_context, Document, GatherContextOpts};
-    use std::collections::HashSet;
-
-    let repo_root = find_repo_root()?;
-
-    let has_paths = !paths.is_empty();
-
-    // Gather context
-    let opts = GatherContextOpts {
-        repo_root: repo_root.clone(),
-        docs: Vec::new(),
-        files: paths.to_vec(),
-        include_diff: !has_paths,
-        include_diff_files: true,
-        ..Default::default()
-    };
-
-    let components = gather_context(&opts)?.into_components();
-
-    // Collect all documents to format
-    let mut all_docs: Vec<Document> = Vec::new();
-    all_docs.extend(components.diff_files);
-    all_docs.extend(components.docs);
-
-    // Apply exclusion patterns
-    if !exclude.is_empty() {
-        let exclude_set: HashSet<&str> = exclude.iter().map(|s| s.as_str()).collect();
-        all_docs.retain(|doc| !exclude_set.iter().any(|pattern| doc.path.contains(pattern)));
-    }
-
-    if all_docs.is_empty() {
-        println!("No files to copy.");
-        return Ok(());
-    }
-
-    // Format files as raw content (similar to Python's format_files_raw)
-    let mut output = String::new();
-    for doc in &all_docs {
-        output.push_str(&format!("=== {} ===\n", doc.path));
-        output.push_str(&doc.content);
-        if !doc.content.ends_with('\n') {
-            output.push('\n');
-        }
-        output.push('\n');
-    }
-
-    // Copy to clipboard
-    copy_to_clipboard(&output)?;
-
-    // Display token tree
-    let mut total_tokens = 0;
-    for doc in &all_docs {
-        let tokens = count_tokens(&doc.content);
-        total_tokens += tokens;
-        println!("{:>6} tokens  {}", tokens, doc.path);
-    }
-    println!("─────────────");
-    println!("{:>6} tokens  total", total_tokens);
-    println!("\nCopied to clipboard.");
-
-    Ok(())
-}
-
-fn copy_to_clipboard(text: &str) -> Result<()> {
-    crate::engine::clipboard::write(text)?;
-    Ok(())
-}
-
-// ==========================================================================
-// lf op doctor
+// System dependency manifest
 // ==========================================================================
 
 /// How a dependency is installed via Homebrew (macOS).
@@ -1979,8 +1514,7 @@ enum Brew {
 }
 
 /// A single declared system dependency. This array is the source of truth for
-/// both `lf op doctor` and the repo-root `Brewfile` (generated via
-/// `lf op doctor --brewfile`).
+/// the repo-root `Brewfile`.
 #[derive(Debug, Clone, Copy)]
 struct SystemDep {
     /// Display name. Also the binary probed via `which`, unless `command` differs.
@@ -2020,8 +1554,8 @@ impl SystemDep {
 /// The declared system dependencies loopflow expects on a working host.
 ///
 /// Required deps are the build/run essentials; optional deps are the agent CLIs
-/// and editors. `lf op doctor` loops over this list, and the repo-root Brewfile
-/// is generated from it — do not hand-maintain a second list.
+/// and editors. The repo-root Brewfile is generated from it — do not
+/// hand-maintain a second list.
 const SYSTEM_DEPS: &[SystemDep] = &[
     // Required: build/run essentials.
     SystemDep {
@@ -2128,7 +1662,7 @@ fn brewfile_contents() -> String {
     let mut out = String::new();
     out.push_str("# Generated from the declared SYSTEM_DEPS list in\n");
     out.push_str("# rust/loopflow/src/lf/commands/ops/mod.rs — do not edit by hand.\n");
-    out.push_str("# Regenerate with: lf op doctor --brewfile > Brewfile\n");
+    out.push_str("# Keep this file in sync with SYSTEM_DEPS.\n");
     out.push_str("# Install everything with: brew bundle\n\n");
     for dep in SYSTEM_DEPS {
         let Some(brew) = dep.brew else { continue };
@@ -2141,7 +1675,7 @@ fn brewfile_contents() -> String {
     out
 }
 
-fn doctor(brewfile: bool) -> Result<()> {
+pub fn run_doctor(brewfile: bool) -> Result<()> {
     if brewfile {
         print!("{}", brewfile_contents());
         return Ok(());
@@ -2238,7 +1772,7 @@ mod doctor_tests {
         assert_eq!(
             committed,
             brewfile_contents(),
-            "Brewfile is stale; regenerate with `lf op doctor --brewfile > Brewfile`"
+            "Brewfile is stale; update it alongside SYSTEM_DEPS"
         );
     }
 }

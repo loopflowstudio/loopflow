@@ -6,25 +6,24 @@ release plumbing. Route those operations through `lf`, not around it. Doing them
 by hand breaks the machinery loopflow relies on: worktree naming, merge queue
 behavior, wave rotation, and context inheritance.
 
-## Git, Worktrees, GitHub -> `lf op`
+## Git, Worktrees, GitHub -> `lf`
 
-Use `lf op` for mechanical git and GitHub operations.
+Use the top-level `lf` command suites for mechanical git and GitHub operations.
 
 ```bash
-lf op commit -m "message" -p     # commit and push
-lf op pr --title "..."           # create/update PR
-lf op submit                     # prep + mark ready + assign to you; you click merge
-lf op land                       # hands-off: submit, then arm auto-merge
-lf op rebase --plan              # show reset/rebase strategy
-lf op rebase                     # apply the planned update
-lf op next                       # preserve worktree, fresh branch
-lf op wt create my-feature       # sibling worktree, root branch from main (default)
-lf op wt create thing --child parent # stack a child under parent
-lf op wt switch my-feature       # cd to a worktree (wave name, leaf, or branch)
-lf op wt up                      # cd to the parent worktree in the stack
-lf op wt down                    # cd to a child worktree in the stack
-lf op wt list                    # the worktree stack as a tree
-lf op wt prune                   # clean up merged worktrees
+lf commit -m "message" -p     # commit and push
+lf pr open --title "..."           # create/update PR
+lf pr submit                     # prep + mark ready + assign to you; you click merge
+lf pr land                       # hands-off: submit, then arm auto-merge
+lf rebase --plan              # show reset/rebase strategy
+lf rebase                     # apply the planned update
+lf wt create my-feature       # sibling worktree, root branch from main (default)
+lf wt create thing --child parent # stack a child under parent
+lf wt switch my-feature       # cd to a worktree (wave name, leaf, or branch)
+lf wt up                      # cd to the parent worktree in the stack
+lf wt down                    # cd to a child worktree in the stack
+lf wt list                    # the worktree stack as a tree
+lf wt prune                   # clean up merged worktrees
 ```
 
 ### `pr` vs `submit` vs `land`
@@ -32,23 +31,23 @@ lf op wt prune                   # clean up merged worktrees
 Three commands, three commitment levels — pick by how done the work is and who
 lands it:
 
-- **`lf op pr`** — open or refresh the PR while work is still in flight. Rebases
+- **`lf pr open`** — open or refresh the PR while work is still in flight. Rebases
   only if behind, writes title/body, leaves the PR up for review. Use it to make
   work visible mid-stream; nothing is finalized.
-- **`lf op submit`** — the work is done and a **human** lands it. Rebases onto
+- **`lf pr submit`** — the work is done and a **human** lands it. Rebases onto
   main, clears `scratch/`, marks the PR ready, and assigns it to you. Stops
   there: no auto-merge. Your merge click on GitHub is the one required gate —
   the button unlocks once checks pass. (GitHub blocks approving your own PR, so
   the gate is the merge click, not a review approval.) Use this as the default
   finish for anything a person should land by hand.
-- **`lf op land`** — the work is done and **loopflow** lands it hands-off. Does
+- **`lf pr land`** — the work is done and **loopflow** lands it hands-off. Does
   everything `submit` does, then arms auto-merge so it merges when checks pass.
   Use it in headless/auto runs where no human is gating. The wave home stays put
   — landing never moves your worktree; a merged worker's tree is pruned when its
   branch is deleted.
 
 The sibling naming convention (`<repo>.<name>`) is load-bearing: worktrees
-created elsewhere aren't recognized by `lf op wt` (list, switch, up/down, prune)
+created elsewhere aren't recognized by `lf wt` (list, switch, up/down, prune)
 or by land.
 
 ## Delegate Work
@@ -113,20 +112,20 @@ sibling projects, promote the operating context into a wave, or demote the
 pieces into tasks.
 
 Project definitions and KRs live in `wave/<wave>/projects/<project>.md`.
-Concrete tasks live in Linear. There are no local task lists. `lf op pm` reads
+Concrete tasks live in Linear. There are no local task lists. `lf pm` reads
 and edits the wave's Linear project; tasks attach to local projects with
 `project:<slug>` labels.
 
 ```bash
-lf op pm show                                          # the wave's live PM tasks
-lf op pm show --project wave-chat                      # filter by local project
-lf op pm task create --project wave-chat --title "..." --notes "..." # file a labeled task
-lf op pm task done --id <task-id> --pr <url>           # close a shipped task with its PR link
-lf op pm task update --id <task-id> --title "..."      # edit an existing task
-lf op pm sync --plan                                   # report PM drift
+lf pm show                                          # the wave's live PM tasks
+lf pm show --project wave-chat                      # filter by local project
+lf pm task create --project wave-chat --title "..." --notes "..." # file a labeled task
+lf pm task done --id <task-id> --pr <url>           # close a shipped task with its PR link
+lf pm task update --id <task-id> --title "..."      # edit an existing task
+lf pm sync --plan                                   # report PM drift
 ```
 
-Close a shipped task with `lf op pm task done --id <task-id> --pr <url>` so the
+Close a shipped task with `lf pm task done --id <task-id> --pr <url>` so the
 task carries a pointer back to the work. The PR link posts as a comment; it
 never clobbers the task's description.
 
@@ -192,7 +191,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't

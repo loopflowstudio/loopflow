@@ -1,6 +1,6 @@
 # Generated from the declared SYSTEM_DEPS list in
 # rust/loopflow/src/lf/commands/ops/mod.rs — do not edit by hand.
-# Regenerate with: lf op doctor --brewfile > Brewfile
+# Keep this file in sync with SYSTEM_DEPS.
 # Install everything with: brew bundle
 
 brew "git"  # git (required)

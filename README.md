@@ -107,24 +107,21 @@ commands for long-term coordination.
 | Event | What lfd runs |
 |-------|---------------|
 | CI fails on a wave's PR | `lf chat --wave <name> "CI failed: …"` — the flowloop decides how to fix (usually a `ci-fix` worker) |
-| PR merged | `lf op queue reconcile --wave <name>` |
+| PR merged | queue state reconciles in-process |
 | Push to main | `lf chat --wave <name> "main moved: …"` — the flowloop decides whether to rebase or integrate |
 
 ## Skills
 
 ```bash
 lf debug -c    # paste an error, watch it fix
-lf op pm show --wave designer   # print the wave's live Linear tasks
+lf pm show --wave designer   # print the wave's live Linear tasks
 lf design      # interactive design session
 lf gstack/office-hours   # run a built-in gstack skill
 lf office-hours          # same thing — bare name works when unambiguous
 lf npx/vercel-labs/deep-research   # fetch any Claude Skill live and run it
-lf op sync-skills       # compile skills into ~/.claude/skills and ~/.agents/skills
 ```
 
 Skills are prompts that run coding agents. Add your own in `.lf/skills/`.
-
-`lf op sync-skills` compiles resolved skills (builtins + your `~/.lf/`) into your personal vendor Skill directories under `~/.claude/skills` and `~/.agents/skills`, so compact skill invocations work in Claude and Codex sessions (`/skill` for Claude, `$skill` for Codex handoffs). It only ever writes under your home — never into a working repo. Add `--yes` to skip the confirmation prompt.
 
 Names resolve in this order: your repo (`.lf/skills/<name>.md`, `.lf/skills/<ns>/<name>.md`, or `.claude/commands/<name>.md`) → your global dir (`~/.lf/skills/<name>.md`, `~/.lf/skills/<ns>/<name>.md`, or `~/.claude/commands/<name>.md`) → core builtins (`build/`, `govern/`, `ops/`) → namespaced builtins (`gstack/`, …) → external skill namespaces. A bare name resolves to a namespaced builtin only when exactly one namespace has that name. Namespaced skills and flows use `/`, not `:`. For third-party skills, use `lf npx/<owner>/<repo>` (or `lf npx/<name>` once cached or searchable via `npx skills`). The legacy `rams/rams` shim also resolves when `~/.claude/commands/rams.md` exists.
 
@@ -189,7 +186,7 @@ Side-channel utilities — wrappers around git, PR, release, and wave state.
 | `init` | Set up loopflow in this repo |
 | `commit` | Commit with generated message |
 | `rebase` | Rebase onto main |
-| `pr` | Generate PR title/body and call `lf op pr --title --body` |
+| `pr` | Generate PR title/body and call `lf pr open --title --body` |
 | `land` | Land PR, rotate worktree |
 | `lint` | Run linter, fix issues |
 | `update-wave` | Create, update, or delete wave state |
@@ -214,7 +211,7 @@ Flows can include mechanical ops items directly:
 ```yaml
 - implement
 - gate
-- op: land --create-pr
+- op: pr land --create-pr
 ```
 
 ### Build flows (`build/`)
@@ -227,8 +224,8 @@ Flows can include mechanical ops items directly:
 | `queue` | compress → update-wave → gate |
 | `code` | implement → compress → lint → gate |
 | `pair` | design → code |
-| `deploy` | gate → op: land --create-pr |
-| `ship` | refresh-plan → implement → gate → op: pr → op: land |
+| `deploy` | gate → op: pr land --create-pr |
+| `ship` | refresh-plan → implement → gate → op: pr open → op: pr land |
 | `incident` | debug → 5whys → code → deploy |
 
 ### Govern flows (`govern/`)
@@ -257,7 +254,7 @@ Flows can include mechanical ops items directly:
 
 ```bash
 cat release/unreleased/DECISIONS.md
-lf op release run patch
+lf release run patch
 find release -maxdepth 2 -type f | sort
 ```
 
@@ -268,7 +265,7 @@ find release -maxdepth 2 -type f | sort
 | `release/vX.Y.Z/NOTES.md` | Snapshot of the release notes generated for that shipped version |
 | `RELEASE_NOTES.md` | Always-latest release notes at the repo root |
 
-Interactive runs append to `release/unreleased/DECISIONS.md` when they make a durable product or process decision. Headless runs do not. If the ledger exists, `lf op release run` promotes `release/unreleased/` to `release/v<version>/`, uses `DECISIONS.md` to shape the narrative release notes, and archives the generated root notes to `release/v<version>/NOTES.md`. If the ledger is absent, release notes fall back to merged PR history.
+Interactive runs append to `release/unreleased/DECISIONS.md` when they make a durable product or process decision. Headless runs do not. If the ledger exists, `lf release run` promotes `release/unreleased/` to `release/v<version>/`, uses `DECISIONS.md` to shape the narrative release notes, and archives the generated root notes to `release/v<version>/NOTES.md`. If the ledger is absent, release notes fall back to merged PR history.
 
 ### Browse the catalog
 
@@ -335,7 +332,7 @@ uv run python scripts/install.py local --use   # full build: lf, lfd, Loopflow.a
 uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf+lfd, sync skills
 ```
 
-`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, install them into the local bin dir, and sync loopflow skills into `~/.claude/skills` and `~/.agents/skills`. Both paths run `lf op sync-skills --global --yes` after installing, so Claude and Codex always see the latest skills.
+`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, install them into the local bin dir, and sync loopflow skills into `~/.claude/skills` and `~/.agents/skills`.
 
 Built-in skills and flows included. `lf init` sets up your coding agent and preferences.
 
@@ -355,19 +352,19 @@ tmux attach -t <name>  # attach to one
 
 Read `wave/engbot/GOAL.md` and `wave/engbot/MEMORY.md` for a wave's state, or
 watch it in Loopflow. To remove a wave, delete `wave/engbot/` and its worktree
-(`lf op wt remove engbot`).
+(`lf wt remove engbot`).
 
 ```bash
-lf op auth status    # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Linear)
-lf op auth github    # connect GitHub in your browser
-lf op auth claude    # connect Claude in your browser
-lf op auth codex     # connect Codex in your browser
-lf op auth zen       # connect OpenCode Zen in your browser
-lf op auth linear     # connect Linear with OAuth
-lf op auth disconnect github
+lf auth status    # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Linear)
+lf auth github    # connect GitHub in your browser
+lf auth claude    # connect Claude in your browser
+lf auth codex     # connect Codex in your browser
+lf auth zen       # connect OpenCode Zen in your browser
+lf auth linear     # connect Linear with OAuth
+lf auth disconnect github
 ```
 
-Tasks live in Linear. Pin a wave to its Linear project in `wave/<name>/GOAL.md` frontmatter — `lf op pm init` writes this for you:
+Tasks live in Linear. Pin a wave to its Linear project in `wave/<name>/GOAL.md` frontmatter — `lf pm init` writes this for you:
 
 ```yaml
 # wave/designer/GOAL.md frontmatter
@@ -376,18 +373,16 @@ pm:
 ```
 
 ```bash
-lf op branches list --user @me --stale 60d   # preview stale remote branches
-lf op branches prune --user @me --stale 60d  # delete after confirmation
-lf op pm init --wave designer                # connect/create the Linear project
-lf op pm show --wave designer                # group live tasks by local project
-lf op pm show --wave designer --project ui   # filter to one local project
-lf op pm task create --wave designer --project ui --title "Add dark mode" --notes "..."
-lf op pm task done --id 1207... --pr "..."   # close a shipped task
-lf op pm sync --plan                         # show Linear/task/project drift
-lf op pm status                              # show linked waves and task counts
+lf pm init --wave designer                # connect/create the Linear project
+lf pm show --wave designer                # group live tasks by local project
+lf pm show --wave designer --project ui   # filter to one local project
+lf pm task create --wave designer --project ui --title "Add dark mode" --notes "..."
+lf pm task done --id 1207... --pr "..."   # close a shipped task
+lf pm sync --plan                         # show Linear/task/project drift
+lf pm status                              # show linked waves and task counts
 ```
 
-`lf op pm` reads and edits tasks directly in Linear. Local projects stay in `wave/<wave>/projects/`; Linear tasks attach to them with labels named `project:<slug>`. Issue descriptions and comments are Markdown, which Linear renders natively.
+`lf pm` reads and edits tasks directly in Linear. Local projects stay in `wave/<wave>/projects/`; Linear tasks attach to them with labels named `project:<slug>`. Issue descriptions and comments are Markdown, which Linear renders natively.
 
 The `loopflow` Python package is a library only (wire models).
 Use the install script or cargo to install `lf` and `lfd`.

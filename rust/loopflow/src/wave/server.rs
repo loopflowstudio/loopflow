@@ -575,14 +575,14 @@ enum ExecVerdict {
 /// hatch's needs, refuse everything else.
 ///
 /// Permitted:
-/// - `op …` EXCEPT `op auth` — git/GitHub/pm/release/queue: the commit-and-land path.
+/// - Git/GitHub/pm/release/queue commands EXCEPT `auth` — the commit-and-land path.
 /// - `chat`, `memory` — a worker reporting up and curating wave memory.
 /// - the read verbs `ls`/`status`/`runs`/`sub`/`trace`/`usage` — inspection.
 /// - the dispatch path: a flow/skill run or an inline prompt carrying
 ///   `--dispatch`, which lands in a FRESH sandboxed worktree.
 ///
 /// Rejected:
-/// - `op auth` — credential rotation is never the escape hatch's job.
+/// - `auth` — credential rotation is never the escape hatch's job.
 /// - `wave …` — wave lifecycle (start / `--force` take-over / dormant serve).
 /// - `task …` — starts a long-running task flowloop; dispatch it from the
 ///   wave flowloop, not through this unsandboxed exec door.
@@ -595,7 +595,7 @@ enum ExecVerdict {
 /// capture swallows everything after the flow token, so a trailing
 /// `--dispatch` would be an argument to the flow, not the top-level flag).
 fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
-    use crate::lf::{Cli, Commands, OpsCommand};
+    use crate::lf::{Cli, Commands};
     use clap::Parser;
 
     let full = std::iter::once("lf".to_string()).chain(argv.iter().cloned());
@@ -606,10 +606,15 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         return ExecVerdict::Allow;
     };
     match &cli.command {
-        Some(Commands::Op { op }) => match op {
-            OpsCommand::Auth { .. } => ExecVerdict::Deny("op auth".to_string()),
-            _ => ExecVerdict::Allow,
-        },
+        Some(
+            Commands::Pr { .. }
+            | Commands::Wt { .. }
+            | Commands::Rebase { .. }
+            | Commands::Commit { .. }
+            | Commands::Release { .. }
+            | Commands::Pm { .. },
+        ) => ExecVerdict::Allow,
+        Some(Commands::Auth { .. }) => ExecVerdict::Deny("auth".to_string()),
         Some(Commands::Chat { .. })
         | Some(Commands::Memory { .. })
         | Some(Commands::Ls { .. })
@@ -651,6 +656,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         // `lf cron` schedules recurring execution — a persistence/escalation
         // vector, not part of the commit/dispatch escape hatch.
         Some(Commands::Cron { .. }) => ExecVerdict::Deny("cron".to_string()),
+        Some(Commands::SyncSkills { .. }) => ExecVerdict::Deny("sync-skills".to_string()),
         // Bare `lf` (interactive launch) has no verb the door can run.
         None => ExecVerdict::Deny("lf".to_string()),
     }
@@ -665,7 +671,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
 /// Two gates in front of the state-free [`crate::lfd::lf_exec`] engine: the
 /// generic shape check ([`validate_lf_argv`] — garbage argv → 400, no exec),
 /// then this door's own verb allowlist ([`wave_exec_verdict`] — a parsed but
-/// forbidden verb like `op auth` or `wave` → 400). Only then exec and
+/// forbidden verb like `auth` or `wave` → 400). Only then exec and
 /// capture. The door pins execution to the outwave, so a client-supplied
 /// `cwd` on the shared [`ExecRequest`] shape is ignored here — the machine
 /// lfd's `/v0/exec` honors it; the wave's does not, by design.
@@ -1299,7 +1305,7 @@ mod tests {
         // No token: refused before any exec.
         let no_token = client
             .post(&url)
-            .json(&serde_json::json!({ "argv": ["op", "doctor"], "cwd": null }))
+            .json(&serde_json::json!({ "argv": ["pr", "status"], "cwd": null }))
             .send()
             .await
             .unwrap();
@@ -1309,7 +1315,7 @@ mod tests {
         let resident_token = client
             .post(&url)
             .header(RESIDENT_TOKEN_HEADER, "resident")
-            .json(&serde_json::json!({ "argv": ["op", "doctor"], "cwd": null }))
+            .json(&serde_json::json!({ "argv": ["pr", "status"], "cwd": null }))
             .send()
             .await
             .unwrap();
@@ -1320,7 +1326,7 @@ mod tests {
         let bad_argv = client
             .post(&url)
             .header(SUBAGENT_TOKEN_HEADER, &token)
-            .json(&serde_json::json!({ "argv": ["op", "next", "--nonesuch"], "cwd": null }))
+            .json(&serde_json::json!({ "argv": ["pr", "land", "--nonesuch"], "cwd": null }))
             .send()
             .await
             .unwrap();
@@ -1391,14 +1397,14 @@ mod tests {
     }
 
     /// The escape hatch's real work passes the verb policy: committing and
-    /// landing through `op`, reporting via `chat`/`memory`, inspecting via the
+    /// landing through git/PR commands, reporting via `chat`/`memory`, inspecting via the
     /// read verbs, and dispatching a flow into a sandboxed worktree.
     #[test]
     fn wave_exec_policy_permits_the_escape_hatch_essentials() {
         for command in [
-            argv(&["op", "commit", "-m", "wip"]),
-            argv(&["op", "land", "--strict"]),
-            argv(&["op", "pr"]),
+            argv(&["commit", "-m", "wip"]),
+            argv(&["pr", "land", "--strict"]),
+            argv(&["pr", "open"]),
             argv(&["chat", "worker done"]),
             argv(&["memory", "add", "learned a thing"]),
             argv(&["ls"]),
@@ -1424,10 +1430,12 @@ mod tests {
     #[test]
     fn wave_exec_policy_rejects_dangerous_verbs() {
         let denied = [
-            argv(&["op", "auth", "login"]),
-            argv(&["op", "auth", "status"]),
+            argv(&["auth", "login"]),
+            argv(&["auth", "status"]),
             argv(&["wave", "ship"]),
             argv(&["wave", "ship", "--force"]),
+            argv(&["task", "ship it"]),
+            argv(&["sync-skills", "--yes"]),
             // A flow / inline prompt with no `--dispatch`: no sandbox.
             argv(&["implement", "ship it"]),
             argv(&[":", "do", "something"]),
@@ -1444,12 +1452,20 @@ mod tests {
     #[test]
     fn wave_exec_policy_names_the_rejected_verb() {
         assert_eq!(
-            wave_exec_verdict(&argv(&["op", "auth", "login"])),
-            ExecVerdict::Deny("op auth".to_string())
+            wave_exec_verdict(&argv(&["auth", "login"])),
+            ExecVerdict::Deny("auth".to_string())
         );
         assert_eq!(
             wave_exec_verdict(&argv(&["wave", "ship", "--force"])),
             ExecVerdict::Deny("wave".to_string())
+        );
+        assert_eq!(
+            wave_exec_verdict(&argv(&["task", "ship it"])),
+            ExecVerdict::Deny("task".to_string())
+        );
+        assert_eq!(
+            wave_exec_verdict(&argv(&["sync-skills", "--yes"])),
+            ExecVerdict::Deny("sync-skills".to_string())
         );
         assert_eq!(
             wave_exec_verdict(&argv(&["implement", "ship it"])),
@@ -1468,7 +1484,7 @@ mod tests {
         let refused = client
             .post(&url)
             .header(SUBAGENT_TOKEN_HEADER, &token)
-            .json(&serde_json::json!({ "argv": ["op", "auth", "status"], "cwd": null }))
+            .json(&serde_json::json!({ "argv": ["auth", "status"], "cwd": null }))
             .send()
             .await
             .unwrap();

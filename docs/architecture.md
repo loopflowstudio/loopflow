@@ -52,7 +52,7 @@ Git/PR/PM ops             Clients
 | Direction | `.lf/directions/` | `engine` prompt assembly |
 | Wave goal | `wave/<name>/GOAL.md` | `lf wave` server + resident flowloop |
 | Wave memory | `wave/<name>/MEMORY.md` | wave agent |
-| Task | Linear | `lf op pm` and wave flows |
+| Task | Linear | `lf pm` and wave flows |
 | Session | lfdb | `lf` runs and placement flags |
 | Run/event | lfdb | lfd HTTP/event stream |
 | Attention | lfdb | lfd + Loopflow |

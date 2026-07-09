@@ -1,4 +1,4 @@
-//! `lf op pm` — read and write a wave's PM tasks directly in a provider.
+//! `lf pm` — read and write a wave's PM tasks directly in a provider.
 //!
 //! The PM provider is the single source of truth for a wave's tasks. There is
 //! no local mirror: every command here talks to the Linear project pinned by the
@@ -284,7 +284,7 @@ async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     let project = read_project(repo, wave, provider).ok_or_else(|| {
         OpsError::Message(format!(
             "wave/{wave}/GOAL.md has no `pm.{}`. \
-             Run `lf op pm init --wave {wave}` to connect its Linear project.",
+             Run `lf pm init --wave {wave}` to connect its Linear project.",
             provider.project_key()
         ))
     })?;
@@ -303,7 +303,7 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
     // A forwarded token wins over the local store: `lf ssh` resolves the PM
     // credential on the caller's machine (where lfdb lives) and hands it to the
     // remote through the environment. The remote lfdb holds no PM credential, so
-    // without this hook remote `lf op pm` could never authenticate.
+    // without this hook remote `lf pm` could never authenticate.
     if let Some(token) = forwarded_pm_token(provider) {
         return Ok(token);
     }
@@ -321,7 +321,7 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
         .map_err(|err| OpsError::Message(format!("failed to load {provider} token: {err}")))?
         .ok_or_else(|| {
             OpsError::Message(format!(
-                "No {provider} credential found. Run `lf op auth {provider}`."
+                "No {provider} credential found. Run `lf auth {provider}`."
             ))
         })?;
 
@@ -361,7 +361,7 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
     }
 
     Err(OpsError::Message(format!(
-        "Stored {provider} token has expired. Run `lf op auth {provider}` again."
+        "Stored {provider} token has expired. Run `lf auth {provider}` again."
     )))
 }
 
@@ -578,7 +578,7 @@ async fn apply_update(
         None => {
             let Some(title) = options.title.as_ref() else {
                 return Err(OpsError::Message(
-                    "`lf op pm update --title` is required when creating a task".to_string(),
+                    "`lf pm update --title` is required when creating a task".to_string(),
                 ));
             };
             progress.status(&format!(

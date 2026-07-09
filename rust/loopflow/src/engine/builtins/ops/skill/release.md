@@ -19,7 +19,7 @@ If no input is provided, default to `patch`.
 Run exactly one command:
 
 ```bash
-lf op release run <version>
+lf release run <version>
 ```
 
 That command is responsible for:
@@ -34,7 +34,7 @@ That command is responsible for:
 
 ## Re-entry
 
-`lf op release run` should be safe to re-run after interruptions.
+`lf release run` should be safe to re-run after interruptions.
 
 ## Guardrails
 

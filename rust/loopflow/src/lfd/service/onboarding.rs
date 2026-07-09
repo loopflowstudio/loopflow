@@ -16,14 +16,14 @@ const AUTH_POLL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 pub fn run_install_onboarding(no_interactive: bool) -> Result<()> {
     if no_interactive {
-        println!("Run `lf op auth status` to connect providers.");
+        println!("Run `lf auth status` to connect providers.");
         return Ok(());
     }
 
     let client = OnboardingClient::new()?;
     if !client.wait_until_ready(READY_TIMEOUT) {
         bail!(
-            "lfd did not become ready within {} seconds. Run `lf op auth status` to connect providers once the daemon is running.",
+            "lfd did not become ready within {} seconds. Run `lf auth status` to connect providers once the daemon is running.",
             READY_TIMEOUT.as_secs()
         );
     }
@@ -53,7 +53,7 @@ pub fn run_install_onboarding(no_interactive: bool) -> Result<()> {
     let final_statuses = client.list_statuses()?;
     if !required_providers_connected(&final_statuses) {
         bail!(
-            "required providers are not connected. Run `lf op auth status` and `lf op auth <provider>` to finish setup"
+            "required providers are not connected. Run `lf auth status` and `lf auth <provider>` to finish setup"
         );
     }
 

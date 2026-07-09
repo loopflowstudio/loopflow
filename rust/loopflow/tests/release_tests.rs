@@ -115,7 +115,8 @@ fn release_notes_falls_back_when_agent_cli_is_missing() {
     let gh_script = write_gh_script(
         r#"[{"number":101,"title":"Make weekly release self-contained","body":"Release automation no longer requires a workstation CLI.","additions":42,"deletions":7,"changedFiles":3}]"#,
     );
-    let lf_script = "#!/bin/sh\necho \"'claude' CLI not found. Run \\`lf op doctor\\` to check dependencies.\" >&2\nexit 1\n";
+    let lf_script =
+        "#!/bin/sh\necho \"'claude' CLI not found. Install it and rerun \\`lf init\\`.\" >&2\nexit 1\n";
     let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
 
     let repo = TestRepo::new();

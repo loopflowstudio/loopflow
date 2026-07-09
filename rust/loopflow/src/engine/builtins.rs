@@ -217,15 +217,15 @@ mod tests {
         let scan_waves = get_builtin_skill("scan").expect("scan prompt");
         let split_wave = get_builtin_skill("split-wave").expect("split-wave prompt");
 
-        // The roadmap lives in Linear, reached via `lf op pm` — no local N-*.md files.
-        assert!(update_wave.contains("lf op pm"));
+        // The roadmap lives in Linear, reached via `lf pm` — no local N-*.md files.
+        assert!(update_wave.contains("lf pm"));
         assert!(update_wave.contains("MEMORY.md"));
         assert!(!update_wave.contains("1-fix-broken-build.md"));
-        assert!(design.contains("lf op pm"));
+        assert!(design.contains("lf pm"));
         assert!(design.contains("GOAL.md"));
         assert!(!design.contains("1-*.md"));
-        assert!(scan_waves.contains("lf op pm show"));
-        assert!(split_wave.contains("lf op pm"));
+        assert!(scan_waves.contains("lf pm show"));
+        assert!(split_wave.contains("lf pm"));
         assert!(WAVE_AUTHORING_DOC.contains("GOAL.md"));
         assert!(WAVE_AUTHORING_DOC.contains("Linear"));
         assert!(!WAVE_AUTHORING_DOC.contains("1-fix-crash-loop.md"));
@@ -250,7 +250,7 @@ mod tests {
         assert!(skill.contains("lf memory show --wave <wave>"));
         assert!(skill.contains("lf memory log --wave <wave>"));
         assert!(skill.contains("lf memory update --wave <wave>"));
-        assert!(skill.contains("lf op commit -m \"export-memory: compile MEMORY.md\""));
+        assert!(skill.contains("lf commit -m \"export-memory: compile MEMORY.md\""));
         assert!(skill.contains("write `wave/<wave>/MEMORY.md` directly"));
         // Typed blocks: a starting vocabulary the agent owns, not an enforced schema.
         assert!(skill.contains("Organize into typed blocks"));

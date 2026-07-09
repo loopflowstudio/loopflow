@@ -28,7 +28,7 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
         AuthCommand::External(args) => {
             let provider = args
                 .first()
-                .ok_or_else(|| anyhow!("usage: lf op auth <provider>"))?;
+                .ok_or_else(|| anyhow!("usage: lf auth <provider>"))?;
             if args.len() > 1 {
                 return Err(anyhow!(
                     "unexpected auth arguments: {}",
@@ -102,7 +102,7 @@ async fn configure(raw_provider: &str) -> Result<()> {
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
             anyhow!(
-                "{env_name} is not set. Export it, then run `lf op auth configure {}`.",
+                "{env_name} is not set. Export it, then run `lf auth configure {}`.",
                 provider.as_str()
             )
         })?;
@@ -167,7 +167,7 @@ async fn wait_for_active_status(
             }
             AuthStatus::Expired => {
                 println!(
-                    "Authentication expired. Run `lf op auth {}` again.",
+                    "Authentication expired. Run `lf auth {}` again.",
                     provider.as_str()
                 );
                 return Ok(());
@@ -175,7 +175,7 @@ async fn wait_for_active_status(
             AuthStatus::Pending | AuthStatus::None => {
                 if std::time::Instant::now() >= deadline {
                     println!(
-                        "Authentication still pending. Finish the browser flow, then run `lf op auth status {}`.",
+                        "Authentication still pending. Finish the browser flow, then run `lf auth status {}`.",
                         provider.as_str()
                     );
                     return Ok(());

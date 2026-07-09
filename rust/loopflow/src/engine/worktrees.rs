@@ -40,7 +40,7 @@ impl WorktreeSegment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlacementRequest {
     /// Root branch off the default branch. The no-flag default for
-    /// `lf op wt create` — ad-hoc worktrees never stack unless asked.
+    /// `lf wt create` — ad-hoc worktrees never stack unless asked.
     Main { segment: WorktreeSegment },
     /// Child branch stacked under an explicit parent (`--child`).
     Stack {

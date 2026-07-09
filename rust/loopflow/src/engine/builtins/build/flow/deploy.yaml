@@ -1,2 +1,2 @@
 - gate
-- op: land --create-pr
+- op: pr land --create-pr

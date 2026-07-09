@@ -67,7 +67,7 @@ pub fn create_or_update_pr(
     let commit_options = CommitOptions {
         add: true,
         push: true,
-        message: Some("lf op pr: prepare branch".to_string()),
+        message: Some("lf pr open: prepare branch".to_string()),
         agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };
@@ -272,7 +272,7 @@ fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
     Ok(open)
 }
 
-pub fn update_pr(repo: &Path, number: u64, title: &str, body: &str) -> OpsResult<()> {
+fn update_pr(repo: &Path, number: u64, title: &str, body: &str) -> OpsResult<()> {
     let output = Command::new("gh")
         .arg("pr")
         .arg("edit")
@@ -758,13 +758,13 @@ Body:
 ## Usage
 
 ```bash
-lf op linear init
+lf pm init
 ```"#;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "pm: add linear provider".to_string(),
-                body: "## Usage\n\n```bash\nlf op linear init\n```".to_string(),
+                body: "## Usage\n\n```bash\nlf pm init\n```".to_string(),
             })
         );
     }
@@ -828,12 +828,12 @@ pm: add linear provider
     fn parse_generated_pr_copy_handles_unescaped_quotes_inside_body() {
         let raw = r###"{"title":"ops: harden pr copy parsing","body":"## Summary
 
-Use "lf op pr" after gating to open or update the PR."}"###;
+Use "lf pr open" after gating to open or update the PR."}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "ops: harden pr copy parsing".to_string(),
-                body: "## Summary\n\nUse \"lf op pr\" after gating to open or update the PR."
+                body: "## Summary\n\nUse \"lf pr open\" after gating to open or update the PR."
                     .to_string(),
             })
         );

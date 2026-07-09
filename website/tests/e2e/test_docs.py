@@ -28,8 +28,8 @@ def test_docs_config_page(page: Page, base_url: str):
     assert content.is_visible()
 
 
-def test_docs_lfop_page(page: Page, base_url: str):
-    page.goto(f"{base_url}/docs/lfop")
+def test_docs_ops_page(page: Page, base_url: str):
+    page.goto(f"{base_url}/docs/ops")
     content = page.locator(".docs-content")
     assert content.is_visible()
 

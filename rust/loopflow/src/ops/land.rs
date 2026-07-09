@@ -60,7 +60,7 @@ fn prepare_pr(
     };
     if !options.local && !pr_exists && !options.create_pr {
         return Err(OpsError::Message(format!(
-            "no open PR found for branch '{feature_branch}'; run lf op pr or use --create-pr"
+            "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
         )));
     }
     let (pr_title, pr_body) = resolve_pr_copy(&repo_root, options, progress)?;
@@ -288,7 +288,7 @@ fn ensure_pr(
             )?;
         } else {
             return Err(OpsError::Message(format!(
-                "no open PR found for branch '{feature_branch}'; run lf op pr or use --create-pr"
+                "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
             )));
         }
     }

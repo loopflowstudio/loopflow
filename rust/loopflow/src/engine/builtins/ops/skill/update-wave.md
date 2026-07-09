@@ -16,8 +16,8 @@ A wave is a local operating context plus remote task tracking:
 - **`wave/<wave>/projects/<project>.md`** — one measured bet and its KRs.
   Projects belong to exactly one wave; they do not own memory, cadence, or child
   projects.
-- **Tasks live in Linear**, not in the repo. Read them with `lf op pm show`;
-  change them with `lf op pm task ...`. There is no local task mirror — never
+- **Tasks live in Linear**, not in the repo. Read them with `lf pm show`;
+  change them with `lf pm task ...`. There is no local task mirror — never
   write `N-*.md` item files, task lists in project docs, or a roadmap table.
 
 ## Orientation
@@ -29,7 +29,7 @@ Before starting, orient yourself in this branch:
   open questions and assumptions).
 - Read `wave/<wave>/GOAL.md` and `MEMORY.md`.
 - Read `wave/<wave>/projects/*.md`.
-- Read the live PM tasks: `lf op pm show` (add `--wave <name>` if ambiguous).
+- Read the live PM tasks: `lf pm show` (add `--wave <name>` if ambiguous).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 ## Goal
@@ -43,7 +43,7 @@ Whether you're cleaning up after a build, reconciling scratch analysis, or both:
   changes a project's definition or KR set, update the relevant file under
   `wave/<wave>/projects/`.
 - The PM tasks in Linear reflect reality: shipped work is closed, new work is
-  filed, stale items are corrected — all through `lf op pm task ...`.
+  filed, stale items are corrected — all through `lf pm task ...`.
 - `scratch/` is trimmed to what a reviewer needs (see below).
 
 ## Bias: fold into MEMORY, don't drop
@@ -56,7 +56,7 @@ Every scratch file with future-relevant content must land somewhere durable:
 
 - Decisions, learnings, gotchas, patterns established → fold into `MEMORY.md`.
 - Concrete future work (a next step, a follow-up, a discovered bug) → file it as
-  a PM task with `lf op pm task create --project <project> --title "…" --notes "…"`.
+  a PM task with `lf pm task create --project <project> --title "…" --notes "…"`.
 - Open questions about future work → `MEMORY.md`, or a PM task if it's
   actionable.
 - If content overlaps what's already in `MEMORY.md`, merge it — don't skip it.
@@ -68,14 +68,14 @@ fold it. If it only describes what was already built, let it go.
 ## Workflow
 
 1. Read the diff (if any) to understand what this branch built.
-2. Read `GOAL.md`, `MEMORY.md`, and the live PM tasks (`lf op pm show`).
+2. Read `GOAL.md`, `MEMORY.md`, and the live PM tasks (`lf pm show`).
 3. Read `wave/<wave>/projects/*.md` and `scratch/` — every file, completely.
 4. **Reconcile Linear tasks against reality.** For each task, ask:
    - **Shipped?** If this branch (or main) crossed its finish line, close it:
-     `lf op pm task done --id <task-id>`.
+     `lf pm task done --id <task-id>`.
    - **Accurate?** If the item's description no longer matches the codebase,
-     correct it: `lf op pm task update --id <task-id> --title "…" --notes "…"`.
-   - **New work surfaced?** File it: `lf op pm task create --title "…" --notes "…"`.
+     correct it: `lf pm task update --id <task-id> --title "…" --notes "…"`.
+   - **New work surfaced?** File it: `lf pm task create --title "…" --notes "…"`.
    Do this remotely. Never create or delete local task-list files.
 5. **Fold scratch learnings into `MEMORY.md`.** Merge into existing sections
    where there's a clear match; add sections for new durable context. Keep it
@@ -87,7 +87,7 @@ fold it. If it only describes what was already built, let it go.
 7. **Update `GOAL.md` only if the wave's identity moved.** Changed objective,
    changed measures, or changed routing judgment count. If the branch didn't
    change what the wave *is*, leave `GOAL.md` alone.
-8. **Trim scratch docs for shipped work.** Don't delete them — `lf op pr land`
+8. **Trim scratch docs for shipped work.** Don't delete them — `lf pr land`
    handles that. Strip implementation detail that now lives in the code. Keep
    only:
    - **Validation procedures** — "Done when" checks, commands to run, expected
@@ -105,9 +105,9 @@ When `scratch/` holds a proposal and no wave exists yet, create one:
    the proposal (key decisions, constraints, what's known). It can be short.
 3. Create `wave/<wave>/projects/` with one file per measured bet. Each project
    gets a definition and `## KRs`.
-4. Connect Linear: `lf op pm init --wave <name>` creates/links the wave's
+4. Connect Linear: `lf pm init --wave <name>` creates/links the wave's
    Linear project and writes `linear_project` into `GOAL.md`.
-5. File the opening tasks in Linear with `lf op pm task create` — the urgent and
+5. File the opening tasks in Linear with `lf pm task create` — the urgent and
    next-step work, one task each. Tasks start in Linear, not on disk.
 
 ### GOAL.md
@@ -119,7 +119,7 @@ When `scratch/` holds a proposal and no wave exists yet, create one:
 ```yaml
 ---
 pm:
-  linear_project: "8c4ba3f9-cf23-4136-87ed-37847aa7dc82"   # written by `lf op pm init`
+  linear_project: "8c4ba3f9-cf23-4136-87ed-37847aa7dc82"   # written by `lf pm init`
 ---
 ```
 
@@ -157,7 +157,7 @@ projects, or issue mirrors. Put concrete work in Linear.
 
 Linear tasks go stale — the codebase moves, other waves ship, intent evolves.
 When you find incoherent tasks, fix them in place through
-`lf op pm task update`:
+`lf pm task update`:
 
 - **Finish line moved** — the goal was reached a different way → close the item.
 - **Design diverged** — building it as written would fight the current

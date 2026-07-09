@@ -138,7 +138,7 @@ Shell-based workflows for CLI and live HTTP API behavior.
 tests/e2e/test_smoke.sh
 ```
 
-Long-running workflow tests for `lf op`:
+Long-running workflow tests for mechanical `lf` commands:
 
 ```bash
 tests/e2e/test_full_cycle.sh

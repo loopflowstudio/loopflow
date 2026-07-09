@@ -11,7 +11,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -55,7 +55,7 @@ of what changed and why. This step is both composer and performer.
    - create or remove wave directories only when lifecycle pressure requires it
 
 5. **Sync runtime state.** For changes that affect registered wave config,
-   update runtime state through `lf op update-wave` or the equivalent API.
+   update runtime state through the equivalent `lf` API.
 
 6. **Verify.** Read back every changed config and make sure the YAML still
    parses. If a mutation cannot be applied cleanly, skip it and record why.

@@ -13,7 +13,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -21,13 +21,13 @@ re-derive what these already record.
 
 ## API
 
-`lf op submit` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, marking it ready, and assigning it to the human who will merge. It does **not** arm auto-merge.
+`lf pr submit` handles the entire mechanical workflow: staging uncommitted changes, rebasing, creating or updating the PR, marking it ready, and assigning it to the human who will merge. It does **not** arm auto-merge.
 
 ```
-lf op submit [--create-pr] [-m "commit message"] [--title "..."] [--body "..."]
+lf pr submit [--create-pr] [-m "commit message"] [--title "..."] [--body "..."]
 ```
 
-**Do not run git commit, git push, gh pr create, or gh pr ready directly.** `lf op submit` does all of this. Running those commands manually skips the assignment and leaves the PR in an inconsistent state.
+**Do not run git commit, git push, gh pr create, or gh pr ready directly.** `lf pr submit` does all of this. Running those commands manually skips the assignment and leaves the PR in an inconsistent state.
 
 ## Workflow
 
@@ -44,7 +44,7 @@ Stage and include all changes — committed and uncommitted — in the PR. If th
 
 ### 2. Prepare PR copy
 
-If `scratch/pr-title.txt`, `scratch/pr-body.md`, and `scratch/.pr-copy-ref` exist (from `lf gate`), `lf op submit` reuses them automatically.
+If `scratch/pr-title.txt`, `scratch/pr-body.md`, and `scratch/.pr-copy-ref` exist (from `lf gate`), `lf pr submit` reuses them automatically.
 
 If those files are missing or stale, write title/body manually and pass `--title` + `--body`.
 
@@ -64,23 +64,23 @@ Examples:
 ### 3. Submit
 
 ```bash
-lf op submit --create-pr
+lf pr submit --create-pr
 ```
 
 If you wrote title/body manually, include them:
 
 ```bash
-lf op submit --create-pr --title "<title>" --body "<body>"
+lf pr submit --create-pr --title "<title>" --body "<body>"
 ```
 
 Include `-m "<message>"` if the working tree was dirty in step 1.
 
-If `lf op submit` fails due to rebase conflicts, launch a sub-agent to run the `rebase` step, then retry `lf op submit`.
+If `lf pr submit` fails due to rebase conflicts, launch a sub-agent to run the `rebase` step, then retry `lf pr submit`.
 
 ## Notes
 
 - The PR is left ready and assigned — the assignee's merge click lands it. Don't enable auto-merge or merge on their behalf.
-- If the PR already has a good title and body, run `lf op submit` without `--title`/`--body` to keep existing content.
+- If the PR already has a good title and body, run `lf pr submit` without `--title`/`--body` to keep existing content.
 
 ## Adaptation
 

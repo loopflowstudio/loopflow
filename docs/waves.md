@@ -108,7 +108,7 @@ tmux ls                 # live sessions — the wave agent and its workers
 tmux attach -t <name>   # attach to one; agent output lives here
 ```
 
-To remove a wave, delete `wave/<name>/` and its worktree (`lf op wt remove <name>`).
+To remove a wave, delete `wave/<name>/` and its worktree (`lf wt remove <name>`).
 
 ## Next
 

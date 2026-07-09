@@ -46,12 +46,12 @@ git -C "$other_dir" push origin main >/dev/null
 mkdir -p "$repo_dir/scratch"
 echo "notes" > "$repo_dir/scratch/design.md"
 
-plan=$(cd "$repo_dir" && run_lf op rebase --plan)
+plan=$(cd "$repo_dir" && run_lf rebase --plan)
 grep -q "class: scratch_only" <<<"$plan"
 grep -q "strategy: reset_to_base" <<<"$plan"
 grep -q "agent_launched: false" <<<"$plan"
 
-(cd "$repo_dir" && run_lf op rebase >/dev/null)
+(cd "$repo_dir" && run_lf rebase >/dev/null)
 
 if [ ! -f "$repo_dir/scratch/design.md" ]; then
   echo "expected scratch/design.md to survive reset" >&2
@@ -63,13 +63,13 @@ if ! git -C "$repo_dir" diff --quiet HEAD origin/main -- file.txt; then
   exit 1
 fi
 
-placement=$(cd "$repo_dir" && run_lf op wt create --plan child)
+placement=$(cd "$repo_dir" && run_lf wt create --plan child)
 grep -q "branch: demo.parent.child" <<<"$placement"
 grep -q "base: demo.parent" <<<"$placement"
 grep -q "strategy: create_stack_child" <<<"$placement"
 
 set +e
-dot_output=$(cd "$repo_dir" && run_lf op wt create --plan api.v2 2>&1)
+dot_output=$(cd "$repo_dir" && run_lf wt create --plan api.v2 2>&1)
 dot_status=$?
 set -e
 

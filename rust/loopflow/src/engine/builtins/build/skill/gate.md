@@ -13,7 +13,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -108,7 +108,7 @@ Make the change easy to review.
    - `scratch/pr-body.md` — markdown PR body
    - `scratch/.pr-copy-ref` — current `HEAD` SHA (`git rev-parse HEAD`)
 
-   `lf op land` consumes these files.
+   `lf pr land` consumes these files.
 
 4. **Update README and docs**
    - If user-facing behavior changed, docs must reflect it

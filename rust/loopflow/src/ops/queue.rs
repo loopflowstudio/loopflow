@@ -1,18 +1,15 @@
-//! One merge-queue reconcile pass, verb-shaped: `lf op queue reconcile`.
+//! One merge-queue reconcile pass.
 //!
 //! Runs the same pass the daemon's 60s poller runs (stack-status inference,
 //! draft/ready flips, lazy head rebase, queue-block attention writes),
-//! sourced from lfdb + gh, then exits. The doorman's poll loop and PR-merged
-//! webhook will exec this verb once the collapse lands (wave 3).
+//! sourced from lfdb + gh. The daemon calls this in-process from PR-merged
+//! webhooks and queue maintenance.
 //!
 //! Queue blocks are attention rows in the ledger — the durable record of the
 //! fact. There is no live push; a client reads them by querying attention
 //! (`lf status`), the same as every other durable fact in the wave model.
 
-use std::sync::Arc;
-
-use anyhow::{anyhow, Context, Result};
-use secrecy::SecretString;
+use anyhow::Result;
 
 use crate::lfd::config::GitHubConfig;
 use crate::lfd::id::LfdId;
@@ -20,69 +17,13 @@ use crate::lfd::queue::{
     acquire_reconcile_lock, reconcile_wave_queue_with_ops, QueueOps, RealQueueOps,
 };
 use crate::lfd::types::Wave;
-use crate::lfdb::{open_store, SharedStore};
+use crate::lfdb::SharedStore;
 
 #[derive(Debug)]
 pub struct WaveQueueOutcome {
     pub wave: String,
     pub wave_id: LfdId,
     pub result: Result<(), String>,
-}
-
-/// CLI entry: open the local registry, reconcile one wave (by name) or every
-/// wave with queue state, print one line per wave.
-pub fn reconcile_queue_cmd(wave: Option<&str>) -> Result<()> {
-    let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    rt.block_on(async {
-        let cfg = crate::lfd::storage_config_from_env()
-            .context("failed to resolve local run registry")?;
-        let store: SharedStore = Arc::new(
-            open_store(&cfg)
-                .await
-                .map_err(|err| anyhow!("failed to open local run registry: {err}"))?,
-        );
-        let github = github_config_for_verb(&store).await;
-        let outcomes = reconcile_wave_queues(&store, &github, wave)
-            .await
-            .map_err(|err| anyhow!(err))?;
-
-        if outcomes.is_empty() {
-            println!("no waves with queue state");
-            return Ok(());
-        }
-
-        let mut failures = 0;
-        for outcome in &outcomes {
-            match &outcome.result {
-                Ok(()) => {
-                    let block_note = store
-                        .list_queue_blocks(&outcome.wave_id)
-                        .await
-                        .ok()
-                        .filter(|blocks| !blocks.is_empty())
-                        .map(|blocks| {
-                            blocks
-                                .iter()
-                                .map(|block| block.reason.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        });
-                    match block_note {
-                        Some(reasons) => println!("{}: blocked ({reasons})", outcome.wave),
-                        None => println!("{}: reconciled", outcome.wave),
-                    }
-                }
-                Err(err) => {
-                    failures += 1;
-                    eprintln!("{}: {err}", outcome.wave);
-                }
-            }
-        }
-        if failures > 0 {
-            return Err(anyhow!("{failures} wave(s) failed to reconcile"));
-        }
-        Ok(())
-    })
 }
 
 /// One reconcile pass. `wave` narrows to a single wave by name; `None` covers
@@ -134,30 +75,6 @@ async fn reconcile_wave_queues_with_ops(
         });
     }
     Ok(outcomes)
-}
-
-/// The daemon reads its GitHub token from config/`LFD_GITHUB_TOKEN`; the verb
-/// honors the same env var, then falls back to the stored github provider
-/// token so a plain shell works. With no token, live-PR lookups fall back to
-/// the last synced state in the store.
-async fn github_config_for_verb(store: &SharedStore) -> GitHubConfig {
-    let env_token = std::env::var("LFD_GITHUB_TOKEN")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    let token = match env_token {
-        Some(token) => Some(token),
-        None => store
-            .get_provider_token("github")
-            .await
-            .ok()
-            .flatten()
-            .map(|token| token.access_token),
-    };
-    GitHubConfig {
-        webhook_secret: String::new(),
-        token: token.map(SecretString::new),
-    }
 }
 
 #[cfg(test)]

@@ -1,15 +1,12 @@
-//! GitHub webhook ingress — the gatekeeper's ears, translating inward to `lf`.
+//! GitHub webhook ingress — the gatekeeper's ears, translating inward.
 //!
-//! Webhooks no longer feed the trigger/activation machinery. Each surviving
-//! event execs the `lf` surface (collapse call #1). In M0, CI failures and
-//! main pushes still use attributed `lf chat` as a compatibility notification
-//! path so the demo keeps working; M1 should move coordination to durable
-//! facts plus explicit `lf` commands where that is the real contract.
+//! Webhooks no longer feed the trigger/activation machinery. Human-facing
+//! notifications still use attributed `lf chat`; machine-owned queue state
+//! reconciles in-process so daemon behavior does not depend on CLI grammar.
 //!
 //! - **check_run failure** → `lf chat --wave <wave> "CI failed: …"` — the
 //!   wave's flowloop decides whether and how to dispatch a fix.
-//! - **PR merged** → `lf op queue reconcile --wave <wave>` — the queue verb
-//!   owns stack-status inference and promotion.
+//! - **PR merged** → reconcile queue state for each wave holding that PR.
 //! - **push to main** → `lf chat --wave <wave> "main moved: …"` for every
 //!   wave in the repo — the flowloop decides to rebase/integrate with judgment.
 //!
@@ -75,19 +72,6 @@ impl LfExec {
                 "--from".to_string(),
                 from.to_string(),
                 text,
-            ],
-            dedupe_key: None,
-        }
-    }
-
-    fn queue_reconcile(wave: &str) -> Self {
-        Self {
-            args: vec![
-                "op".to_string(),
-                "queue".to_string(),
-                "reconcile".to_string(),
-                "--wave".to_string(),
-                wave.to_string(),
             ],
             dedupe_key: None,
         }
@@ -224,15 +208,15 @@ async fn plan_check_run_notifications(
     Ok(execs)
 }
 
-/// PR merged → `lf op queue reconcile` for each wave holding that PR in its
-/// stack. Replaces the in-process `handle_pr_merged_with_events` call.
-async fn plan_pr_merged_reconciles(
+/// PR merged → reconcile each wave holding that PR in its stack.
+async fn reconcile_pr_merged_queues(
     store: &SharedStore,
+    github: &crate::lfd::config::GitHubConfig,
     repo_full_name: &str,
     pr_number: u32,
-) -> Result<Vec<LfExec>, String> {
+) -> Result<u32, String> {
     let wave_ids = find_waves_for_pr(store, repo_full_name, pr_number).await?;
-    let mut execs = Vec::new();
+    let mut processed = 0;
     for wave_id in wave_ids {
         let Some(wave) = store
             .get_wave(&wave_id)
@@ -241,9 +225,15 @@ async fn plan_pr_merged_reconciles(
         else {
             continue;
         };
-        execs.push(LfExec::queue_reconcile(wave.name()));
+        let outcomes = crate::ops::queue::reconcile_wave_queues(store, github, Some(wave.name()))
+            .await
+            .map_err(|err| err.to_string())?;
+        for outcome in outcomes {
+            outcome.result?;
+            processed += 1;
+        }
     }
-    Ok(execs)
+    Ok(processed)
 }
 
 /// A deleted branch → remove the local worktree that was on it. GitHub deletes
@@ -443,8 +433,9 @@ pub async fn github_webhook_handler(
                     serde_json::json!({ "ok": true, "processed": 0, "skipped": true }),
                 ));
             }
-            let execs = plan_pr_merged_reconciles(
+            let processed = reconcile_pr_merged_queues(
                 &state.store,
+                &state.github,
                 &event.repository.full_name,
                 event.pull_request.number,
             )
@@ -455,8 +446,6 @@ pub async fn github_webhook_handler(
                     ApiMessage::Untrusted(err),
                 )
             })?;
-            let processed = execs.len() as u32;
-            spawn_lf_execs(&state.ci_failure_cache, execs);
             Ok(Json(
                 serde_json::json!({ "ok": true, "processed": processed }),
             ))
@@ -905,9 +894,9 @@ mod tests {
         assert!(deduped.is_empty(), "delivered wave+sha never reports twice");
     }
 
-    /// PR merged plans the queue-reconcile verb for the owning wave.
+    /// PR merged resolves to the waves that need in-process queue reconcile.
     #[tokio::test]
-    async fn pr_merged_plans_queue_reconcile_for_owning_wave() {
+    async fn pr_merged_finds_owning_wave() {
         let tmp = tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
@@ -918,16 +907,35 @@ mod tests {
             .await
             .expect("run");
 
-        let execs = plan_pr_merged_reconciles(&store, "loopflowstudio/loopflow", 7)
+        let waves = find_waves_for_pr(&store, "loopflowstudio/loopflow", 7)
             .await
-            .expect("plan");
-        assert_eq!(execs, vec![LfExec::queue_reconcile("ship")]);
+            .expect("find");
+        assert_eq!(waves, vec![wave.id().clone()]);
 
-        // A PR nobody holds plans nothing.
-        let none = plan_pr_merged_reconciles(&store, "loopflowstudio/loopflow", 99)
+        // A PR nobody holds reconciles nothing.
+        let none = find_waves_for_pr(&store, "loopflowstudio/loopflow", 99)
             .await
-            .expect("plan none");
+            .expect("find none");
         assert!(none.is_empty());
+    }
+
+    /// Every planned argv must resolve to a real `lf` subcommand. Bare
+    /// `Cli::try_parse_from` is not enough: `lf` accepts external subcommands,
+    /// so a stale verb (`op queue reconcile`) parses fine and then fails at
+    /// exec time as a silent no-op. Assert we landed on a known command.
+    #[test]
+    fn planned_execs_resolve_to_known_lf_commands() {
+        use clap::Parser;
+
+        let exec = LfExec::chat("ship", "main moved".to_string(), "github");
+        let argv = std::iter::once("lf".to_string()).chain(exec.args.iter().cloned());
+        let cli = crate::lf::Cli::try_parse_from(argv)
+            .unwrap_or_else(|err| panic!("{:?} must parse: {err}", exec.args));
+        assert!(
+            !matches!(cli.command, Some(crate::lf::Commands::External(_))),
+            "{:?} fell through to an external subcommand — stale verb",
+            exec.args
+        );
     }
 
     /// A deleted branch removes the sibling worktree that was on it, and leaves

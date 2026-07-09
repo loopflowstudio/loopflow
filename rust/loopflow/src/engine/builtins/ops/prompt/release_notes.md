@@ -31,7 +31,7 @@ When target context is provided (target name, tag prefix, area scope), include o
 
 Lead with outcomes, not mechanisms.
 
-Good: “`lf op release run` now generates versioned notes from the merged PRs and archives them for audit.”
+Good: “`lf release run` now generates versioned notes from the merged PRs and archives them for audit.”
 Bad: “Updated release.rs and release_notes.md.”
 
 Do not dump PR titles verbatim. The release notes are the synthesis of what shipped and why, drawn from the PRs themselves.

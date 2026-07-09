@@ -84,11 +84,11 @@ lf : "add type hints to utils.py"
 Design, implement, gate, ship.
 
 ```bash
-lf op wt create auth-feature       # create worktree
+lf wt create auth-feature       # create worktree
 lf design: add OAuth login         # discuss approach
 lf implement                       # build it
 lf gate                            # ship-ready check
-lf op pr                           # open PR
+lf pr open                           # open PR
 ```
 
 ### Skills chain
@@ -138,8 +138,8 @@ lf audit    # runs your custom skill
 ### Shipping
 
 ```bash
-lf op pr      # create or update PR
-lf op land    # submit to merge queue
+lf pr open      # create or update PR
+lf pr land    # submit to merge queue
 ```
 
 ---
@@ -202,10 +202,10 @@ surface.
 Auth connects your providers:
 
 ```bash
-lf op auth github    # connect GitHub
-lf op auth claude    # connect Claude
-lf op auth linear     # connect Linear with OAuth
-lf op auth status    # check connections
+lf auth github    # connect GitHub
+lf auth claude    # connect Claude
+lf auth linear     # connect Linear with OAuth
+lf auth status    # check connections
 ```
 
 ---
@@ -236,4 +236,4 @@ Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3
 
 ## Reference
 
-[`lf` commands](lf.md) · [`lf op` commands](lfop.md) · [`lfd` commands](lfd.md) · [Configuration](config.md) · [Wave Authoring](wave-authoring.md) · [Waves](waves.md)
+[`lf` commands](lf.md) · [`lf` operations](ops.md) · [`lfd` commands](lfd.md) · [Configuration](config.md) · [Wave Authoring](wave-authoring.md) · [Waves](waves.md)

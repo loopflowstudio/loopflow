@@ -1,6 +1,6 @@
-# systems wave memory
+# infrastructure wave memory
 
-Steers Loopflow toward boring releases: nightly verification that never deploys, weekly publishing gated on that same verification, and a repo-owned self-hosted `lfd` running the crons — with Cadenza mirroring the cadence.
+Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers Loopflow toward boring releases: nightly verification that never deploys, weekly publishing gated on that same verification, and a repo-owned self-hosted `lfd` running the crons — with Cadenza mirroring the cadence.
 
 ## Shipped
 
@@ -11,10 +11,11 @@ Steers Loopflow toward boring releases: nightly verification that never deploys,
   - **Identity (stage 2):** `WaveId` (`engine/identity.rs`) — one identity, **two decoupled projections** that are not string-derivable from each other: `dir_component()` = flat `{chain}[.ts]` (author-free, the local worktree dir `{repo}.{dir_component}`) and `branch()` = `{user}/{chain}[.ts]` (author-scoped `/`, glob-able `jack/**`, **remote only** — a `/` can't go in a worktree dir). The dir↔branch link lives on the `Run` record, not string surgery. Wave name = chain segment 0 (keys `wave/<name>/`, chat, pm). Waves/subwaves are stamp-free; workers carry one trailing `.ts` minted at dispatch — the stamp's *presence is the worker marker*. `parse(raw, fallback_user)` is the single input funnel (Postel: liberal in, strict out). `BranchNameConfig`/`branch_names` schema, `format_branch_name`/`generate_word_pair` rotation naming — all retired. Data model doc: `rust/loopflow/src/wave/DATAMODEL.md`.
   - **Land (stage 3a):** land rotation killed — `rotate_worktree`/`RotationResult` removed. A land never renames the live worktree; the **wave home is permanent** (`<repo>.<wave>` on a stamp-free branch). Workers self-prune once merged; direct commits from the wave home stay possible but discouraged (soft LOOPFLOW.md guidance, not a hard block).
   - **Rejected delimiters:** `@` (legal in refs but outside GitHub's safe set, shadows `@{upstream}`, breaks pip/CI URL parsing) and `:` (illegal in refs, Finder renders it `/`). Research: every mature stacking tool (Graphite/Sapling/ghstack/gh) keeps lineage in metadata, not the name — so the chain in a name is a *hint*, never parsed for truth (loopflow already has the DAG in `Run.parent_run_id`/`stack_group_id`/`stack_position`).
+- **`lf op pm` speaks wave/project/task** (PR #852) — `status`, `show --project <slug>`, `task create/update/done/move`, `rename`, `sync --plan`. The Linear `teamId` `String!`-vs-`ID!` bug is fixed: creating and closing tasks from the CLI works. `update` survives as a compat alias; the documented path is `task …`.
 
 ## Gotchas
 
-- **`lf op pm update` can't create or close tasks — only edit existing ones.** Any mutation that needs a `teamId` (task *creation*, and `--status done` transitions) fails with Linear `400: Variable "$teamId" of type "String!" used in position expecting type "ID"`. Editing an existing task's title/notes/pr works (no teamId). **Consequence: agents currently cannot file new roadmap items or close shipped ones from the CLI** — they retitle with `[obsolete]`/`[done]` markers and fold new work into MEMORY instead. Filed as work below; fix the mutation's `teamId` variable type in the Linear PM provider (`lfd/pm` / `ops/pm.rs`).
+- **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly** (filed). `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
 - **Dotted-root vs dotted-ancestry collision — RESOLVED** by the WaveId decoupling: the dir is a flat `.`-chain, the remote branch carries `/`+author, and ancestry is read from the `Run` record, not the string. The old `branch_names.schema` grammar that caused it is gone.
 
 ## Model (design settled)
@@ -26,13 +27,20 @@ Steers Loopflow toward boring releases: nightly verification that never deploys,
 - Don't extract a generic multi-product deploy platform before a second or third real deployment proves the shape.
 - Release owns the automation spine, not release-content substance: each product owns its own changelog and provider-specific agent credentials (beyond pass-through/secret wiring).
 
+## Planning model (settled, PR #852)
+
+- **Three nouns, distinguished by kind, not size.** Wave = durable operating context (memory, cadence, budget, chat, project selection). Project = one measured bet inside exactly one wave, a definition plus KRs. Task = a concrete change. No project trees, no orphan projects.
+- **Where each noun lives.** Wave = `wave/<wave>/` (`GOAL.md` + `MEMORY.md`). Project = `wave/<wave>/projects/<slug>.md`. Task = a Linear issue. The old local roadmap mirrors (`wave/*/items/*.md`, `wave/*/[0-9]-*.md`) are deleted, not stale — Linear is the only roadmap.
+- **One Linear project backs one wave; Loopflow projects are Linear *labels*** named `project:<slug>`. Rejected: a Linear project per Loopflow project (forces nesting Linear can't express, and blocks incremental migration). Labels are visible in Linear, migratable one task at a time, and let every task stay in its wave's container.
+- **Vocabulary discipline.** Say "Linear project" for the Linear object, "project" for a Loopflow measured bet. No fourth noun — "space" and "provider container" were considered and rejected as user-facing words.
+- **`sync --plan` diagnoses; it never guesses.** It reports renamed/stranded Linear projects, unassigned tasks, and labels naming no local project. Ambiguous task moves stay in the plan output for a human.
+- **Open question:** `lf op pm doctor` and `sync --plan` are byte-for-byte identical (both call `pm_sync` with `plan: true`). `doctor` earns its keep only as a memorable read-only verb. Collapsing it is a product-surface call, deliberately left to Jack.
+
 ## Next
 
-Roadmap writes are currently blocked by the `lf op pm` create/close bug (see Gotchas). Until it's fixed, new work lives here, not in Linear.
-
 - **Worker-mind runtime (worktree redesign stage 3b)** — the open frontier, a new subsystem (not a mechanical edit). Insert the Worker tier: a looping mind per PR whose goal is "land to `parent()`", dispatching Execs (`lf` runs) in its own worktree and retrying through CI. Dispatch collapses to one rule — **fork from and target `parent()`**: worker PRs target the parent branch (`jack/bugs`), recursing to `main` when parent is `None`. Retire the old ephemeral rotation entirely: `lf op next`/`advance_branch`, `next_wave_handler` (a wire endpoint Concerto calls) — Rust + wire + Swift. This also closes the "`lf op next` fails in worktrees" item. Open questions (were in `scratch/worktree-redesign.md`): per-tier integration trigger (self-draining bottom-up once a Worker's PR merges *and* it has no unlanded children, vs. manual/threshold); how much of the Wave mind loop (`wave/resident.rs`, `mind.rs`) reuses for a fixed land-to-parent goal; Exec = `Run` minus worktree (runs in the Worker's worktree, no new branch — collapses per-Run worktrees into per-Worker). Concept vocabulary settled: **Wave** (persistent mind, many PRs) and **Worker** (ephemeral mind, one PR to parent then dies) are the same recursive primitive; **Exec** is one `lf` invocation with no mind/branch.
-- **Fix `lf op pm` teamId bug** — `--status done` and task creation fail with Linear `400 teamId String! vs ID`; agents can't file or close roadmap items from the CLI. See Gotchas for the exact query.
-- **Drain current buffer** — keep local `lf`/`lfd`, release scripts, and CI aligned with the latest merged release-infra work. Known drift: `wave/*/items/*.md` and `wave/*/[0-9]-*.md` local roadmap mirrors are stale — the roadmap now lives only in Linear (`lf op pm show`), not in local files. Sweep these stale mirrors when a broader wave-hygiene pass runs; this update-wave run left them in place per the skill's "never delete local roadmap files" rule.
+- **Live Linear migration** (filed) — PR #852 shipped the CLI but ran no live mutation during gate. **Redeploy `lf` first**: the installed binary predates `sync`/`task`, so `lf op pm sync --plan` errors with `unrecognized subcommand`. Then rename the backing Linear projects, label existing tasks `project:<slug>`, and resolve the stranded `Datamodel` Linear project (no local wave points at it).
+- **Drain current buffer** — keep local `lf`/`lfd`, release scripts, and CI aligned with the latest merged release-infra work.
 - **Cadenza release parity** — same nightly/weekly cadence, one-command updater, tests, self-hosted assumptions; document any deliberate divergence.
 - **Cron host bootstrap** — bring up the first maintained self-hosted `lfd` host (Mac mini + Tailscale default), Doppler configured, root/conductor wave with scheduled checks.
 - **Release feedback loop** — failed nightly/weekly runs surface as attention items or focused fix PRs, distinguishing verification vs publish vs host vs stale-local drift.

@@ -1,4 +1,9 @@
-# Concerto wave memory
+# product wave memory
+
+Renamed from `concerto` in the 2026-07-08 wave/project/task restructure. The wave's
+scope widened past the Mac app: product now owns the shared API and every surface
+(CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
+they mean the Mac surface.
 
 ## Model (design invariants)
 
@@ -7,18 +12,22 @@
 - The vendor-session launch mechanism (`vendor-session-launch`) lives in `workflows`; Concerto consumes it.
 - lfd owns the goal-loop harness runtime; Concerto attaches to and frames the session, it does not own the loop.
 
-### Charter model (restarted 2026-07-07, flowloop tiering)
+### Charter model (restarted 2026-07-07, resettled 2026-07-08)
 
 - **GOAL.md holds the Objective only** — mission/vision/vibe collapsed into one
   `## Objective` paragraph. The Measures (KRs) left the charter.
 - **`projects/*.md` holds the durable middle tier** — one file per live bet, a
-  title + `## KRs`. `ls projects/` *is* the roadmap: what's there is alive. No
-  status field; a dead bet is **deleted** (git is the tombstone). Crons live on
-  the wave only (the one heartbeat), never per-project.
-- **task = design-doc → one small PR** — ephemeral; Linear-backed.
-- Five live projects seeded from the retired Measures: session-lifecycle,
-  attention-navigation, wave-conducting, remote-connection, palette (experiment),
-  plus performance. native-multiplexer/native-chat was deleted, not tombstoned.
+  title + `## KRs`. `ls projects/` *is* the roster of live bets. No status field;
+  a dead bet is **deleted** (git is the tombstone). Crons live on the wave only
+  (the one heartbeat), never per-project. KRs read as proof — observable end
+  states, not backlog bullets or implementation receipts.
+- **task = one Linear issue**, labeled `project:<slug>` to attach it to the bet
+  it advances. Linear is the only roadmap.
+- The seven live bets after the wave/project/task restructure: loopflow-api,
+  wave-chat, mac-surface-ux, ios-surface-ux, distributed-computing,
+  product-performance, auditability. The old Concerto project set
+  (session-lifecycle, attention-navigation, wave-conducting, remote-connection,
+  palette) was folded into these and deleted, not tombstoned.
 
 ### The `lf` / lfd / pubsub spine (direction, started not complete)
 
@@ -50,9 +59,11 @@
   retired from the frontend (stays flowloop's word for how a run is born).
 - **Slice 1 is local & file-first** — reads the wave dir directly, no new wire
   shape. Plan renders only when local files exist; remote/iOS/authorless waves
-  fall back to WaveChat-only. Projects are modeled with `tasks`, left empty:
-  a wave has one `linear_project` today, so tasks are one flat bucket, not yet
-  per-`projects/*.md` (flowloop R1). Don't fake a per-project split.
+  fall back to WaveChat-only. Projects are modeled with `tasks`, left empty in
+  Swift. The per-project split now exists on the CLI side (PR #852: tasks carry a
+  `project:<slug>` Linear label, `lf op pm show --project <slug>` filters by it);
+  wiring it into `WaveProject.tasks` is unbuilt, and the Swift side must read the
+  label rather than invent its own grouping.
 - Not yet built: runs ledger renderer, live pubsub wiring, Linear task loading,
   remote/`lf wave show` plan query (slices 2–4).
 
@@ -70,8 +81,8 @@
   retired-lfd-HTTP facade whose ~25 action methods `throw unsupported(...)` — NOT
   dead, RepoState/SessionState/AuthProviderStore still call them behind live UI
   actions (stop/delete/land/next/addTrigger/combinePRs, session
-  create/attach/cancel). Collapsing it is a behavior change tied to the
-  session-lifecycle + wave-conducting projects, not a compress edit. Its
+  create/attach/cancel). Collapsing it is a behavior change under the
+  mac-surface-ux bet, not a compress edit. Its
   dict-based `parse*FromJSON` (~260 lines) is a SECOND wire mirror of the types
   RegistryQuery decodes via Codable — the DTO drift hazard — but it backs the
   `session.json` fixture test + ContractTests/WaveTests/AttentionStoreTests;
@@ -148,7 +159,7 @@
   optional container settings — speculative with a single Mac mini host); no
   live-tailnet CI round-trip (coverage is script syntax + Config/ConnectionStore
   tests); no bundled TLS inside lfd (rejected alternative, not a gap).
-- Product gap (belongs to goals/systems waves, not Concerto): **no
+- Product gap (belongs to the infrastructure wave): **no
   `lf wave stop <name>`**. Killing out-of-band means raw `tmux kill-session` or
   `lf op reset-waves` (kills every `lf-*` session — too broad); a wave killed
   out-of-band leaves its registry row `status: running` forever, only the probed

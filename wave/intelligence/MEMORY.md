@@ -1,6 +1,10 @@
-# Memory wave — compiled memory
+# intelligence wave memory
 
-Seeded from the design exploration on branch `memory-stream`. Dogfoods the block
+Renamed from `memory` in the 2026-07-08 wave/project/task restructure. Intelligence
+owns context, trace, and evals — there is no standalone Memory project, in the local
+project files or in the Linear task grouping. What follows is the compiled-memory
+design seeded from branch `memory-stream`: inherited context for the `context` bet,
+whose wave-facing half now belongs to product's `wave-chat`. Dogfoods the block
 structure the model proposes.
 
 ## Decisions

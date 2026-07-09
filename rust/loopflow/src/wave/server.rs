@@ -771,6 +771,24 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
     }
 }
 
+/// A subagent capability belongs to one wave. The exec door runs outside the
+/// worker sandbox, where another wave's resident token file is readable, so an
+/// explicit detached-loop target must stay pinned to this server's wave.
+fn detached_loop_targets_other_wave(argv: &[String], wave: &str) -> bool {
+    use crate::lf::{Cli, Commands};
+    use clap::Parser;
+
+    let full = std::iter::once("lf".to_string()).chain(argv.iter().cloned());
+    matches!(
+        Cli::try_parse_from(full).ok().and_then(|cli| cli.command),
+        Some(Commands::Loop {
+            detach: true,
+            wave: Some(target),
+            ..
+        }) if target != wave
+    )
+}
+
 /// `POST /v0/exec` — the wave's exec door: "a wave HAS an lfd" in one route.
 /// A subagent (a sandboxed process spawned inside this wave) presents its
 /// per-subagent token and runs an arbitrary `lf` argv **unsandboxed in the
@@ -798,6 +816,15 @@ async fn exec_handler(
         return Err((
             StatusCode::BAD_REQUEST,
             format!("command '{verb}' is not permitted through the wave exec door"),
+        ));
+    }
+    if detached_loop_targets_other_wave(&payload.argv, state.runtime.name()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "detached loops through this exec door must target wave '{}'",
+                state.runtime.name()
+            ),
         ));
     }
     let cwd = state.runtime.repo_root().display().to_string();
@@ -1695,6 +1722,24 @@ mod tests {
             body.contains("not permitted through the wave exec door"),
             "body names the refusal: {body}"
         );
+    }
+
+    #[tokio::test]
+    async fn exec_door_pins_detached_loops_to_its_wave() {
+        let (base, token, _tmp) = boot_exec().await;
+        let response = reqwest::Client::new()
+            .post(format!("{base}/v0/exec"))
+            .header(SUBAGENT_TOKEN_HEADER, token)
+            .json(&serde_json::json!({
+                "argv": ["loop", "task", "ship it", "--wave", "another-wave", "--detach"],
+                "cwd": null
+            }))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        assert!(response.text().await.unwrap().contains("must target wave"));
     }
 
     /// A pointer to a dead address is stale: the probe says no live server.

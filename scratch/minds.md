@@ -187,6 +187,113 @@ Three seams:
   pass's window. That was the only genuine advantage of a separate face agent,
   and it is the price of one head.
 
+### The mind has a playhead
+
+> "in this world the mind is always in the middle of some flow. Let's imagine
+> it sort of like a playlist/queue. The default is just looping N steps. But
+> you can also enqueue an arbitrary flow, or you could skip to the next step"
+
+The resident is not idle between passes. It always has a current step and a
+next step. The wave flow is its default playlist: after the last step, the
+playhead wraps to the first. The scheduler does not pre-materialize an infinite
+queue; it advances a cursor through that default cycle.
+
+An explicitly enqueued flow temporarily supplies the next steps. It runs in the
+same mind, against the same thread and memory, then the default playhead resumes
+where it left off. This is inhabitation made visible: running another flow does
+not create another conversation, worktree, or resident. Detaching that flow is
+the separate choice that creates a hand.
+
+```text
+now playing   wave / pursue
+up next       review-design / clarify
+              review-design / pursue
+then resume   wave / mutate
+```
+
+Skip interrupts the current body, journals the step as skipped, and advances
+the playhead. It does not restart the wave or discard the rest of the flow.
+Human steering still goes into the current body; enqueue and skip are explicit
+controls over what body the thread will inhabit next.
+
+The journal is the queue's source of truth. At minimum it records flow
+enqueued, step started, step completed, and step skipped, so a process restart
+reconstructs both the durable thread and its current playhead. The product can
+therefore say what the mind is doing without exposing a session as the unit of
+conversation.
+
+> "after the current inner most invocation."
+
+Enqueue attaches to the innermost active flow invocation. The current step and
+the rest of that invocation finish first; the enqueued flow then plays before
+control returns to the caller. If `wave` invoked `review-design`, and
+`review-design` enqueues `research`, the order is:
+
+```text
+wave / pursue
+  review-design / clarify
+  review-design / pursue
+  review-design / mutate
+  research / ...              # queued on review-design
+wave / mutate                  # return to the caller
+```
+
+The queue is therefore local to a flow frame, not one flat list attached to
+the wave. Each invocation has a cursor and a FIFO continuation queue. Finishing
+the frame drains that queue before popping back to its parent. The root wave
+invocation is the default frame; after its continuations drain, its cursor
+wraps and begins the next cycle.
+
+### Navigation is stack-shaped
+
+Complex flows should not be flattened into a playlist UI. The chat needs only
+the local horizon:
+
+```text
+wave › review-design › pursue       # where am I?
+now       review-design / pursue
+next      review-design / mutate
+queued    research                         # before returning to wave
+```
+
+The breadcrumb is the invocation stack. `Now`, `next`, and the current frame's
+queue are the steering surface. An expandable execution map can show the full
+flow tree, completed branches, loops, skips, and return points for audit, but
+that complexity stays out of the primary chat path.
+
+This requires stable invocation identity in addition to flow and step names.
+The same flow may appear more than once in the stack or queue, so provenance
+must carry an invocation id and step path; names alone cannot reconstruct the
+navigation.
+
+### The thread shows its bodies
+
+One thread is assembled from many session streams. The UI should preserve that
+provenance instead of flattening the handoffs away or turning each session into
+a conversation.
+
+At every body change, the transcript gets a quiet inline boundary:
+
+```text
+── wave / pursue · now playing ──
+assistant output…
+
+── review-design / clarify · enqueued ──
+assistant output…
+
+── wave / mutate · resumed ──
+```
+
+The primary label is the product meaning — flow and step — not an opaque
+session id. Expanding the boundary reveals the exact session, harness, model,
+host, run, timing, and termination reason for audit. Each streamed assistant
+turn carries that provenance from `TurnOpened` onward, so reconnect and journal
+replay reconstruct the same grouping.
+
+Enqueue, skip, completion, crash, and timeout appear as boundary events in the
+same thread. A session is therefore visible as the body that produced a span of
+the stream, but never becomes a tab, room, or alternate chat history.
+
 ### What a hand is
 
 A hand has a voice and no room. Its transcript is private — *"Trust worker

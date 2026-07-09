@@ -2,22 +2,20 @@ import Charts
 import Loopflow
 import SwiftUI
 
+/// Where the tokens went. Every chart here reads one payload — `lf usage --json`,
+/// which applies the cumulative-diff rule so each boundary row carries what that
+/// skill (or that inline run) actually spent. The rows are additive: they sum to
+/// the totals `lf usage` prints. If a chart disagrees with that table, the chart
+/// is wrong.
 struct TelemetryDashboardView: View {
     @Environment(\.palette) private var palette
 
-    @State private var runs: [RunLedgerEntry] = []
-    @State private var spans: [TraceSpan] = []
+    private static let windowDays = 30
+
+    @State private var spend: [TraceSpan] = []
     @State private var doctor: DoctorReport?
-    @State private var selectedRunID: String?
     @State private var errorMessage: String?
     @State private var isLoading = true
-
-    private var traces: [RunLedgerEntry] {
-        var seen = Set<String>()
-        return runs
-            .sorted { $0.started > $1.started }
-            .filter { seen.insert($0.runId).inserted }
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,21 +24,37 @@ struct TelemetryDashboardView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.xl) {
                     ledgerHealth
-                    chartCard("Run flamechart", subtitle: "Wall-clock width · own process cost") {
-                        RunFlamechart(spans: spans)
-                            .frame(minHeight: 120)
+
+                    chartCard(
+                        "Tokens by skill · \(Self.windowDays) days",
+                        subtitle: "Input + output, per day. A run with no skill is inline work."
+                    ) {
+                        DailyTokensChart(spend: spend, key: Self.skillKey)
+                            .frame(height: 260)
                     }
-                    chartCard("Cost waterfall", subtitle: "One additive bar per process") {
-                        CostWaterfall(spans: spans)
+
+                    chartCard(
+                        "Tokens by model · \(Self.windowDays) days",
+                        subtitle: "provider:model — the harness and the model it drove"
+                    ) {
+                        DailyTokensChart(spend: spend, key: { $0.agent })
+                            .frame(height: 260)
+                    }
+
+                    chartCard(
+                        "Token flame · by repo",
+                        subtitle: "repo → wave → flow → skill. Width is tokens, not time."
+                    ) {
+                        TokenFlame(spend: spend)
+                            .frame(minHeight: 200)
+                    }
+
+                    chartCard(
+                        "Cache-hit ratio",
+                        subtitle: "cache read / (input + cache read)"
+                    ) {
+                        CacheRatioChart(spend: spend)
                             .frame(height: 220)
-                    }
-                    chartCard("Cache-hit ratio", subtitle: "cache read / (input + cache read)") {
-                        CacheRatioChart(runs: runs)
-                            .frame(height: 220)
-                    }
-                    chartCard("Ledger silence · 7 days", subtitle: "Black means no recorded run activity") {
-                        SilenceRibbon(runs: runs)
-                            .frame(height: 44)
                     }
                 }
                 .padding(Spacing.xxl)
@@ -48,10 +62,12 @@ struct TelemetryDashboardView: View {
         }
         .background(palette.background)
         .task { await refresh() }
-        .onChange(of: selectedRunID) { _, runID in
-            guard let runID else { return }
-            Task { await loadTrace(runID) }
-        }
+    }
+
+    /// A boundary with no skill is a run that never entered one — an inline
+    /// prompt. Naming it keeps the series honest rather than dropping the spend.
+    private static func skillKey(_ span: TraceSpan) -> String {
+        span.skill ?? "(inline)"
     }
 
     private var header: some View {
@@ -60,21 +76,14 @@ struct TelemetryDashboardView: View {
                 Text("Telemetry")
                     .font(Typography.heroTitle(26))
                     .foregroundStyle(palette.text)
-                Text("What moved, what it cost, and whether the ledger heard it.")
+                Text("Where the tokens went, and whether the ledger heard it.")
                     .font(Typography.caption())
                     .foregroundStyle(palette.textSecondary)
             }
             Spacer()
-            if !traces.isEmpty {
-                Picker("Run", selection: $selectedRunID) {
-                    ForEach(traces) { run in
-                        Text("\(run.wave ?? "—") · \(run.label)")
-                            .tag(Optional(run.runId))
-                    }
-                }
-                .labelsHidden()
-                .frame(maxWidth: 300)
-            }
+            Text(totalLabel)
+                .font(Typography.code(12))
+                .foregroundStyle(palette.textSecondary)
             Button {
                 Task { await refresh() }
             } label: {
@@ -86,6 +95,12 @@ struct TelemetryDashboardView: View {
         }
         .padding(.horizontal, Spacing.xxl)
         .padding(.vertical, Spacing.lg)
+    }
+
+    private var totalLabel: String {
+        let tokens = spend.reduce(0) { $0 + $1.totalTokens }
+        let cost = spend.reduce(0.0) { $0 + ($1.costUsd ?? 0) }
+        return "\(tokens.formatted()) tokens · \(cost.formatted(.currency(code: "USD")))"
     }
 
     @ViewBuilder
@@ -146,26 +161,10 @@ struct TelemetryDashboardView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            runs = try await RegistryQueryLocal.shared.recentRuns()
+            spend = try await RegistryQueryLocal.shared.spend(days: Self.windowDays)
             doctor = try? await RegistryQueryLocal.shared.doctor()
             errorMessage = nil
-            let available = Set(runs.map(\.runId))
-            if selectedRunID == nil || !available.contains(selectedRunID ?? "") {
-                selectedRunID = traces.first?.runId
-            } else if let selectedRunID {
-                await loadTrace(selectedRunID)
-            }
         } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func loadTrace(_ runID: String) async {
-        do {
-            spans = try await RegistryQueryLocal.shared.trace(runID: runID)
-            errorMessage = nil
-        } catch {
-            spans = []
             errorMessage = error.localizedDescription
         }
     }
@@ -179,205 +178,253 @@ struct TelemetryDashboardView: View {
     }
 }
 
-private struct RunFlamechart: View {
-    let spans: [TraceSpan]
+private func compactTokens(_ tokens: Int) -> String {
+    switch tokens {
+    case 1_000_000...: return "\(tokens / 1_000_000)M"
+    case 1_000...: return "\(tokens / 1_000)k"
+    default: return "\(tokens)"
+    }
+}
 
+// MARK: - Daily tokens, stacked by a chosen dimension
+
+private struct DailyBucket: Identifiable {
+    let id: String
+    let day: Date
+    let series: String
+    let tokens: Int
+}
+
+/// One stacked bar per day. `key` picks the dimension — skill, or provider:model.
+private struct DailyTokensChart: View {
     @Environment(\.palette) private var palette
+    let spend: [TraceSpan]
+    let key: (TraceSpan) -> String
 
-    private var ordered: [(span: TraceSpan, depth: Int)] {
-        let ids = Set(spans.map(\.processId))
-        return spans
-            .sorted { $0.startedAt < $1.startedAt }
-            .map { span in
-                var depth = 0
-                var parent = span.parentProcessId
-                var visited = Set<String>()
-                while let value = parent, ids.contains(value), visited.insert(value).inserted {
-                    depth += 1
-                    parent = spans.first { $0.processId == value }?.parentProcessId
-                }
-                return (span, depth)
-            }
+    private var buckets: [DailyBucket] {
+        var totals: [String: DailyBucket] = [:]
+        for span in spend where span.totalTokens > 0 {
+            let day = Calendar.current.startOfDay(
+                for: Date(timeIntervalSince1970: TimeInterval(span.startedAt))
+            )
+            let series = key(span)
+            let id = "\(day.timeIntervalSince1970)-\(series)"
+            let running = totals[id]?.tokens ?? 0
+            totals[id] = DailyBucket(
+                id: id, day: day, series: series, tokens: running + span.totalTokens
+            )
+        }
+        return totals.values.sorted {
+            ($0.day, $0.series) < ($1.day, $1.series)
+        }
     }
 
     var body: some View {
-        if spans.isEmpty {
-            empty("Select a recorded run")
+        if buckets.isEmpty {
+            EmptyChartHint()
         } else {
-            let first = spans.map(\.startedAt).min() ?? 0
-            let lastRecorded = spans.flatMap { [$0.startedAt, $0.endedAt ?? $0.startedAt] }.max() ?? first
-            let range = max(lastRecorded - first, 1)
-            let maxCost = max(spans.compactMap(\.costUsd).max() ?? 0, 0.01)
-            VStack(spacing: Spacing.xs) {
-                ForEach(ordered, id: \.span.processId) { item in
-                    HStack(spacing: Spacing.sm) {
-                        Text(item.span.name ?? "unknown process")
-                            .font(Typography.code(10))
-                            .foregroundStyle(palette.text)
-                            .lineLimit(1)
-                            .padding(.leading, CGFloat(item.depth) * 12)
-                            .frame(width: 230, alignment: .leading)
-                        GeometryReader { geometry in
-                            let start = CGFloat(item.span.startedAt - first) / CGFloat(range)
-                            let recordedEnd = item.span.endedAt ?? lastRecorded
-                            let width = CGFloat(max(recordedEnd - item.span.startedAt, 0)) / CGFloat(range)
-                            let intensity = (item.span.costUsd ?? 0) / maxCost
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.loopflowBurgundy.opacity(0.3 + 0.7 * intensity))
-                                .overlay {
-                                    if item.span.endedAt == nil {
-                                        HatchPattern()
-                                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                                    }
-                                }
-                                .frame(width: max(6, geometry.size.width * width))
-                                .offset(x: geometry.size.width * start)
-                                .help(spanHelp(item.span))
-                        }
-                        .frame(height: 20)
-                    }
-                }
-            }
-        }
-    }
-
-    private func spanHelp(_ span: TraceSpan) -> String {
-        let cost = span.costUsd.map { String(format: "$%.2f", $0) } ?? "—"
-        let agent = [span.provider, span.model].compactMap { $0 }.joined(separator: ":")
-        return "\(span.status) · \(cost) · \(agent.isEmpty ? "unknown agent" : agent)"
-    }
-
-    private func empty(_ text: String) -> some View {
-        Text(text)
-            .font(Typography.caption())
-            .foregroundStyle(palette.textSecondary)
-            .frame(maxWidth: .infinity, minHeight: 100)
-    }
-}
-
-private struct HatchPattern: View {
-    var body: some View {
-        Canvas { context, size in
-            var path = Path()
-            for offset in stride(from: -size.height, through: size.width, by: 6) {
-                path.move(to: CGPoint(x: offset, y: size.height))
-                path.addLine(to: CGPoint(x: offset + size.height, y: 0))
-            }
-            context.stroke(path, with: .color(.white.opacity(0.6)), lineWidth: 1)
-        }
-    }
-}
-
-private struct CostWaterfall: View {
-    let spans: [TraceSpan]
-
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        if spans.contains(where: { ($0.costUsd ?? 0) > 0 }) {
-            Chart(spans) { span in
+            Chart(buckets) { bucket in
                 BarMark(
-                    x: .value("Process", shortName(span.name)),
-                    y: .value("Cost", span.costUsd ?? 0)
+                    x: .value("Day", bucket.day, unit: .day),
+                    y: .value("Tokens", bucket.tokens)
                 )
-                .foregroundStyle(Color.loopflowBurgundy.gradient)
-                .annotation(position: .top) {
-                    if let cost = span.costUsd {
-                        Text(String(format: "$%.2f", cost))
-                            .font(Typography.code(9))
-                            .foregroundStyle(palette.textSecondary)
+                .foregroundStyle(by: .value("Series", bucket.series))
+            }
+            .chartLegend(position: .bottom, spacing: Spacing.sm)
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisGridLine().foregroundStyle(palette.border)
+                    AxisValueLabel {
+                        if let tokens = value.as(Int.self) {
+                            Text(compactTokens(tokens))
+                        }
                     }
                 }
             }
-            .chartYAxisLabel("USD")
-        } else {
-            Text("No cost recorded for this run.")
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    private func shortName(_ name: String?) -> String {
-        guard let name else { return "unknown" }
-        let parts = name.split(separator: " ")
-        return parts.suffix(2).joined(separator: " ")
     }
 }
 
-private struct CacheRatioChart: View {
-    let runs: [RunLedgerEntry]
+// MARK: - Token flame
 
-    private var points: [CachePoint] {
-        runs.compactMap { run in
-            let denominator = run.inputTokens + run.cacheReadTokens
-            guard denominator > 0 else { return nil }
-            return CachePoint(
-                id: run.processId,
-                date: Date(timeIntervalSince1970: TimeInterval(run.started)),
-                ratio: Double(run.cacheReadTokens) / Double(denominator),
-                provider: run.provider ?? "unknown"
-            )
-        }
-        .sorted { $0.date < $1.date }
-    }
+/// A node in the repo → wave → flow → skill rollup. Width is tokens.
+private struct FlameNode: Identifiable {
+    let id: String
+    let label: String
+    let tokens: Int
+    var children: [FlameNode]
+}
+
+/// An icicle chart: the repo on top, each level below partitioned by the tokens
+/// its children spent. Width is tokens, never time — a fast skill can be the
+/// widest thing on the page, which is exactly what a cost chart should say.
+private struct TokenFlame: View {
+    let spend: [TraceSpan]
+
+    private var roots: [FlameNode] { Self.build(spend) }
 
     var body: some View {
-        Chart(points) { point in
-            LineMark(
-                x: .value("Time", point.date),
-                y: .value("Cache hit", point.ratio)
-            )
-            .foregroundStyle(by: .value("Provider", point.provider))
-            PointMark(
-                x: .value("Time", point.date),
-                y: .value("Cache hit", point.ratio)
-            )
-            .foregroundStyle(by: .value("Provider", point.provider))
-        }
-        .chartYScale(domain: 0...1)
-        .chartYAxis {
-            AxisMarks(format: Decimal.FormatStyle.Percent.percent.scale(100))
+        if roots.isEmpty {
+            EmptyChartHint()
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(roots) { root in
+                    FlameRow(node: root, total: root.tokens, depth: 0)
+                }
+            }
         }
     }
+
+    /// Group by the dimensions each row carries, skipping the ones it doesn't.
+    static func build(_ spend: [TraceSpan]) -> [FlameNode] {
+        let rows = spend.filter { $0.totalTokens > 0 }
+        let byRepo = Dictionary(grouping: rows) { $0.repo.map(shortRepo) ?? "(unattributed)" }
+        return byRepo
+            .map { repo, repoRows in
+                FlameNode(
+                    id: repo,
+                    label: repo,
+                    tokens: repoRows.reduce(0) { $0 + $1.totalTokens },
+                    children: level(repoRows, prefix: repo, path: [\.wave, \.flow, \.skill])
+                )
+            }
+            .sorted { $0.tokens > $1.tokens }
+    }
+
+    private static func level(
+        _ rows: [TraceSpan],
+        prefix: String,
+        path: [KeyPath<TraceSpan, String?>]
+    ) -> [FlameNode] {
+        guard let keyPath = path.first else { return [] }
+        let rest = Array(path.dropFirst())
+        // A dimension nothing in this subtree carries adds a row of noise; skip it.
+        guard rows.contains(where: { $0[keyPath: keyPath] != nil }) else {
+            return level(rows, prefix: prefix, path: rest)
+        }
+        let groups = Dictionary(grouping: rows) { $0[keyPath: keyPath] ?? "—" }
+        return groups
+            .map { label, groupRows in
+                FlameNode(
+                    id: "\(prefix)/\(label)",
+                    label: label,
+                    tokens: groupRows.reduce(0) { $0 + $1.totalTokens },
+                    children: level(groupRows, prefix: "\(prefix)/\(label)", path: rest)
+                )
+            }
+            .sorted { $0.tokens > $1.tokens }
+    }
+
+    private static func shortRepo(_ repo: String) -> String {
+        repo.split(separator: "/").last.map(String.init) ?? repo
+    }
 }
+
+private struct FlameRow: View {
+    @Environment(\.palette) private var palette
+    let node: FlameNode
+    let total: Int
+    let depth: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            GeometryReader { geometry in
+                let fraction = total > 0 ? Double(node.tokens) / Double(total) : 0
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: CornerRadius.sm)
+                        .fill(depthColor.opacity(0.85))
+                        .frame(width: max(2, geometry.size.width * fraction))
+                    Text("\(node.label)  \(compactTokens(node.tokens))")
+                        .font(Typography.code(11))
+                        .foregroundStyle(palette.text)
+                        .padding(.leading, Spacing.xs)
+                        .lineLimit(1)
+                }
+            }
+            .frame(height: 22)
+            .help("\(node.label): \(node.tokens.formatted()) tokens")
+
+            ForEach(node.children) { child in
+                FlameRow(node: child, total: total, depth: depth + 1)
+                    .padding(.leading, Spacing.md)
+            }
+        }
+    }
+
+    private var depthColor: Color {
+        let ramp: [Color] = [.loopflowBurgundy, .statusInfo, .statusSuccess, .statusWarning]
+        return ramp[min(depth, ramp.count - 1)]
+    }
+}
+
+// MARK: - Cache-hit ratio
 
 private struct CachePoint: Identifiable {
     let id: String
     let date: Date
     let ratio: Double
-    let provider: String
+    let agent: String
 }
 
-private struct SilenceRibbon: View {
-    let runs: [RunLedgerEntry]
+private struct CacheRatioChart: View {
+    @Environment(\.palette) private var palette
+    let spend: [TraceSpan]
 
-    private let binCount = 28
-
-    private var bins: [Bool] {
-        let end = Date()
-        let start = end.addingTimeInterval(-7 * 24 * 3600)
-        let width = end.timeIntervalSince(start) / Double(binCount)
-        return (0..<binCount).map { index in
-            let binStart = start.addingTimeInterval(Double(index) * width)
-            let binEnd = binStart.addingTimeInterval(width)
-            return runs.contains { run in
-                let runStart = Date(timeIntervalSince1970: TimeInterval(run.started))
-                let runEnd = Date(timeIntervalSince1970: TimeInterval(run.ended ?? run.started))
-                return runStart < binEnd && runEnd >= binStart
+    private var points: [CachePoint] {
+        spend
+            .compactMap { span in
+                let denominator = (span.inputTokens ?? 0) + (span.cacheReadTokens ?? 0)
+                guard denominator > 0 else { return nil }
+                return CachePoint(
+                    id: span.id,
+                    date: Date(timeIntervalSince1970: TimeInterval(span.startedAt)),
+                    ratio: Double(span.cacheReadTokens ?? 0) / Double(denominator),
+                    agent: span.agent
+                )
             }
-        }
+            .sorted { $0.date < $1.date }
     }
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(Array(bins.enumerated()), id: \.offset) { _, active in
-                Rectangle()
-                    .fill(active ? Color.loopflowBurgundy : Color.black)
+        if points.isEmpty {
+            EmptyChartHint()
+        } else {
+            Chart(points) { point in
+                PointMark(
+                    x: .value("When", point.date),
+                    y: .value("Cache hit", point.ratio)
+                )
+                .foregroundStyle(by: .value("Agent", point.agent))
+                .opacity(0.8)
             }
+            .chartYScale(domain: 0...1)
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisGridLine().foregroundStyle(palette.border)
+                    AxisValueLabel {
+                        if let ratio = value.as(Double.self) {
+                            Text(ratio.formatted(.percent.precision(.fractionLength(0))))
+                        }
+                    }
+                }
+            }
+            .chartLegend(position: .bottom, spacing: Spacing.sm)
         }
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
-        .accessibilityLabel("Seven day ledger coverage")
-        .accessibilityValue("\(bins.filter { $0 }.count) of \(binCount) intervals recorded activity")
+    }
+}
+
+private struct EmptyChartHint: View {
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(spacing: Spacing.xs) {
+            Text("No recorded spend in this window")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+            Text("Run `lf doctor` to check the ledger is being written")
+                .font(Typography.code(11))
+                .foregroundStyle(palette.textSecondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 120)
     }
 }

@@ -78,6 +78,14 @@ public struct RegistryQuery: Sendable {
     }
 
     /// The ledger's self-audit, including continuity and lineage tripwires.
+    /// Per-boundary spend over a window: what each skill, and each terminal run,
+    /// actually spent. `lf usage --json` applies the cumulative-diff rule, so
+    /// these rows are additive and sum to the totals `lf usage` prints.
+    public func spend(days: Int = 30) async throws -> [TraceSpan] {
+        let stdout = try await run(["usage", "--json", "--days", String(days)], nil)
+        return try Self.decode([TraceSpan].self, from: stdout)
+    }
+
     public func doctor() async throws -> DoctorReport {
         let stdout = try await run(["doctor", "--json"], nil)
         return try Self.decode(DoctorReport.self, from: stdout)
@@ -261,13 +269,19 @@ public struct RunLedgerEntry: Decodable, Sendable, Identifiable {
 
 /// One process in `lf trace --json`. Mirrors Rust `SpanDto` exactly.
 public struct TraceSpan: Decodable, Sendable, Identifiable {
-    public var id: String { processId }
+    /// A process contributes several boundaries (one per skill, one terminal),
+    /// so the process id alone is not unique across a spend query.
+    public var id: String { "\(processId)-\(startedAt)-\(node)-\(skill ?? name ?? "")" }
 
     public let runId: String
     public let processId: String
     public let parentProcessId: String?
     public let node: String
     public let name: String?
+    public let repo: String?
+    public let wave: String?
+    public let flow: String?
+    public let skill: String?
     public let startedAt: Int
     public let endedAt: Int?
     public let status: String
@@ -279,8 +293,19 @@ public struct TraceSpan: Decodable, Sendable, Identifiable {
     public let provider: String?
     public let model: String?
 
+    /// `provider:model` — the harness and the model it drove.
+    public var agent: String {
+        switch (provider, model) {
+        case let (provider?, model?): return "\(provider):\(model)"
+        case let (provider?, nil): return provider
+        default: return "unattributed"
+        }
+    }
+
+    public var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
+
     enum CodingKeys: String, CodingKey {
-        case node, name, status, provider, model
+        case node, name, status, provider, model, repo, wave, flow, skill
         case runId = "run_id"
         case processId = "process_id"
         case parentProcessId = "parent_process_id"

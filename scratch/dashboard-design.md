@@ -38,15 +38,28 @@ One row per wave:
 The row expands into a time series of runs and PR landings. A PR opens the runs
 that contributed to it; a run opens its flamechart.
 
-## Flamechart
+## The four charts
 
-Render the recorded run -> flow -> skill hierarchy across wall-clock time.
-Width is elapsed time. Color is cost or token intensity. Every frame shows
-input, output, cache-read tokens, cost, status, harness/provider, and model when
-the ledger records it.
+All four read one payload: `lf usage --json --days 30`, which emits one row per
+*boundary* — what each skill, and each inline run, actually spent — with the
+cumulative-diff rule already applied. The rows are additive and sum to the
+totals `lf usage` prints. **That reconciliation is the contract**; a chart that
+disagrees with the table is wrong, and `boundary_spend_sums_to_the_run_total_without_double_counting`
+pins it.
 
-The chart must preserve waiting and parallelism. Summed skill durations are not
-the same thing as elapsed run time.
+1. **Tokens by skill, 30 days.** Stacked per day. A boundary with no skill is an
+   inline prompt and is labelled as such rather than dropped.
+2. **Tokens by model, 30 days.** Same shape, keyed by `provider:model` — the
+   harness and the model it drove.
+3. **Token flame, by repo.** `repo → wave → flow → skill`, width proportional to
+   tokens. **Width is tokens, not time.** A fast skill can be the widest thing on
+   the page; that is the point of a cost chart, and it is why this replaced a
+   wall-clock flamechart.
+4. **Cache-hit ratio.** `cache read / (input + cache read)`, per boundary, keyed
+   by agent. The largest cost lever in the system.
+
+A dimension nothing in a subtree carries (a repo with no waves, say) is skipped
+rather than drawn as a row of `—`.
 
 ## Movement
 

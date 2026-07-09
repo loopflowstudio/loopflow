@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 use crate::journal::open_ledger;
+use crate::lf::commands::runs::{boundary_spans, own_spend};
 use crate::lf::output::Colors;
 use crate::lfdb::{ProviderUsage, RepoProviderUsage, TokenUsageReport};
 
@@ -12,9 +13,26 @@ const COST_WIDTH: usize = 10;
 /// Print a repo x provider table of token usage and cost, with per-provider
 /// and grand-total rollups. Reads the local run ledger directly — the same
 /// store `lf runs` and `lf trace` read, and no running `lfd` required.
-pub fn run() -> Result<()> {
+///
+/// `--json` emits one row per *boundary* instead: what each skill, and each
+/// terminal run, actually spent. That is the grain the dashboard groups by —
+/// skill, `provider:model`, repo — and it is the only form in which "tokens by
+/// skill" is answerable, because a skill row's reading is cumulative and must
+/// be diffed against the boundary before it.
+pub fn run(json: bool, days: u32) -> Result<()> {
+    if json {
+        return print_spend_json(days);
+    }
     let report = open_ledger()?.aggregate_token_usage()?;
     print_report(&report);
+    Ok(())
+}
+
+fn print_spend_json(days: u32) -> Result<()> {
+    let since = time::OffsetDateTime::now_utc().unix_timestamp() - i64::from(days) * 86_400;
+    let events = open_ledger()?.list_run_events_since(since)?;
+    let spend = own_spend(&boundary_spans(&events));
+    println!("{}", serde_json::to_string(&spend)?);
     Ok(())
 }
 

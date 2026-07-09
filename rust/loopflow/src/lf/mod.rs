@@ -249,7 +249,14 @@ pub enum Commands {
         max_turns: Option<u32>,
     },
     /// Show token usage and cost by repo and provider (from the local ledger)
-    Usage,
+    Usage {
+        /// Emit per-boundary spend (skill, provider:model, repo) as JSON
+        #[arg(long)]
+        json: bool,
+        /// Window for --json, in days
+        #[arg(long, default_value_t = 30)]
+        days: u32,
+    },
     /// Audit the local run ledger: continuity, vocabulary, attribution, coverage
     Doctor {
         /// Emit the audit as JSON

@@ -284,6 +284,10 @@ pub struct SpanDto {
     pub parent_process_id: Option<String>,
     pub node: String,
     pub name: Option<String>,
+    pub repo: Option<String>,
+    pub wave: Option<String>,
+    pub flow: Option<String>,
+    pub skill: Option<String>,
     pub started_at: i64,
     pub ended_at: Option<i64>,
     pub status: String,
@@ -331,6 +335,10 @@ fn trace_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
                     .as_deref()
                     .and_then(parse_argv)
                     .map(|argv| argv.join(" ")),
+                repo: started.repo.clone(),
+                wave: started.wave.clone(),
+                flow: process_events.iter().find_map(|event| event.flow.clone()),
+                skill: None,
                 started_at: started.ts,
                 ended_at: terminal.map(|event| event.ts),
                 status: terminal
@@ -354,6 +362,53 @@ fn trace_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
         .collect();
     spans.sort_by_key(|span| (span.started_at, span.process_id.clone()));
     spans
+}
+
+/// Every row that carries a cumulative usage reading, at its own grain: a skill
+/// boundary names its skill, a terminal run row names its command. Feed this to
+/// [`own_spend`] to get what each boundary actually spent.
+///
+/// `trace_spans` folds a whole process into one span, which is right for a
+/// process tree and wrong for asking where the tokens went inside it.
+pub(crate) fn boundary_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
+    let mut rows: Vec<&RunEventRow> = events
+        .iter()
+        .filter(|event| event.input_tokens.is_some())
+        .filter(|event| (event.node == "run" || event.node == "skill") && event.event != "started")
+        .collect();
+    // own_spend diffs against the previous boundary in the same process, so the
+    // rows must reach it in the order the process produced them.
+    rows.sort_by_key(|event| (event.ts, event.seq));
+
+    rows.into_iter()
+        .map(|event| SpanDto {
+            run_id: event.run_id.clone(),
+            process_id: event.process_id.clone(),
+            parent_process_id: event.parent_process_id.clone(),
+            node: event.node.clone(),
+            name: event.skill.clone().or_else(|| {
+                event
+                    .command
+                    .as_deref()
+                    .and_then(parse_argv)
+                    .map(|argv| argv.join(" "))
+            }),
+            repo: event.repo.clone(),
+            wave: event.wave.clone(),
+            flow: event.flow.clone(),
+            skill: event.skill.clone(),
+            started_at: event.ts,
+            ended_at: Some(event.ts),
+            status: event.event.clone(),
+            input_tokens: event.input_tokens,
+            output_tokens: event.output_tokens,
+            cache_read_tokens: event.cache_read_tokens,
+            cost_usd: event.cost_usd,
+            duration_secs: event.duration_secs,
+            provider: event.provider.clone(),
+            model: event.model.clone(),
+        })
+        .collect()
 }
 
 /// Convert cumulative boundary readings into the spend attributable to each
@@ -583,7 +638,9 @@ fn truncate(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_duration, format_tokens, own_spend, summarize, trace_spans, SpanDto};
+    use super::{
+        boundary_spans, format_duration, format_tokens, own_spend, summarize, trace_spans, SpanDto,
+    };
     use crate::lfdb::RunEventRow;
 
     fn row(run_id: &str, seq: i64, ts: i64, node: &str, event: &str) -> RunEventRow {
@@ -685,6 +742,37 @@ mod tests {
         assert_eq!(spans[0].ended_at, None);
     }
 
+    /// The charts group these rows and must reconcile with `lf usage`. A skill
+    /// boundary reads cumulative, so the terminal run row that follows it spends
+    /// nothing of its own — summing every boundary yields the run total exactly
+    /// once.
+    #[test]
+    fn boundary_spend_sums_to_the_run_total_without_double_counting() {
+        let mut events = vec![
+            row("trace", 1, 100, "run", "started"),
+            row("trace", 2, 110, "skill", "completed"),
+            row("trace", 3, 120, "skill", "completed"),
+            row("trace", 4, 130, "run", "completed"),
+        ];
+        events[1].skill = Some("implement".to_string());
+        events[1].input_tokens = Some(100);
+        events[2].skill = Some("gate".to_string());
+        events[2].input_tokens = Some(150); // cumulative
+        events[3].input_tokens = Some(150); // the run total
+
+        let spend = own_spend(&boundary_spans(&events));
+        let total: i64 = spend.iter().map(|s| s.input_tokens.unwrap_or(0)).sum();
+
+        assert_eq!(total, 150, "boundaries must sum to the run total");
+        assert_eq!(spend.len(), 3);
+        assert_eq!(spend[0].skill.as_deref(), Some("implement"));
+        assert_eq!(spend[0].input_tokens, Some(100));
+        assert_eq!(spend[1].skill.as_deref(), Some("gate"));
+        assert_eq!(spend[1].input_tokens, Some(50));
+        // The terminal row adds nothing: its process already reported everything.
+        assert_eq!(spend[2].input_tokens, Some(0));
+    }
+
     #[test]
     fn own_spend_diffs_consecutive_boundaries_within_a_process() {
         let boundary = |cost, input| SpanDto {
@@ -693,6 +781,10 @@ mod tests {
             parent_process_id: None,
             node: "skill".to_string(),
             name: Some("implement".to_string()),
+            repo: Some("/repo".to_string()),
+            wave: None,
+            flow: None,
+            skill: Some("implement".to_string()),
             started_at: input,
             ended_at: Some(input + 1),
             status: "completed".to_string(),

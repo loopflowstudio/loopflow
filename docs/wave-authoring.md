@@ -49,7 +49,7 @@ Infrastructure wave
 Author `wave/<name>/GOAL.md` — the body is the goal prompt; optional frontmatter sets machine config such as `workers:`, `crons:`, and `pm:`. Then run the agent:
 
 ```bash
-lf wave infra             # start the wave agent
+lf loop infra             # start the wave agent
 ```
 
 ---
@@ -97,10 +97,10 @@ Use a direct worker for mechanical changes; write a scratch design first when th
 blast radius crosses storage, auth, or public APIs.
 ```
 
-Run `lf wave <wave>` to start that wave directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
+Run `lf loop <wave>` to start that wave directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
 
 ```bash
-lf wave s3           # the s3 (control) charter
+lf loop s3           # the s3 (control) charter
 ```
 
 ### Memory
@@ -211,7 +211,7 @@ The resident loop reads `crons:` directly from this frontmatter and opens a syst
 lf design: plan infrastructure hardening for the daemon
 ```
 
-The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, `lf wave <name>` runs them and Loopflow picks them up; connect Linear with `lf pm init` and add tasks with `lf pm task create`.
+The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, `lf loop <name>` runs them and Loopflow picks them up; connect Linear with `lf pm init` and add tasks with `lf pm task create`.
 
 **Write by hand.** Sometimes an editor is faster. Create the files, push, done.
 
@@ -243,7 +243,7 @@ When a task ships, its context — what was learned, what changed, what downstre
 ## Running and Monitoring
 
 ```bash
-lf wave mywave              # start the wave agent (Ctrl-C to stop)
+lf loop mywave              # start the wave agent (Ctrl-C to stop)
 tmux ls                     # the wave agent and every worker it launched
 tmux attach -r -t <name>    # inspect one; agent output lives here
 ```

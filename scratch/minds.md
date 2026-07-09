@@ -661,7 +661,7 @@ requires a terminal attachment or session picker.
 ## Demo
 
 ```bash
-lf wave infrastructure          # a wave with three projects, one chat
+lf loop infrastructure          # a wave with three projects, one chat
 lf chat "how's release stability?"
 ```
 

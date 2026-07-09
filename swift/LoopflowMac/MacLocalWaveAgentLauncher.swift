@@ -231,7 +231,7 @@ enum LocalWaveAgentLauncher {
     /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
     /// facts by shelling the daemonless `lf` over `lfdb`, not by streaming a
-    /// center. Resolves the same wave-capable `lf` the launcher trusts (a build
+    /// center. Resolves the same loop-capable `lf` the launcher trusts (a build
     /// old enough to lack `lf loop` also lacks these verbs), then execs it with
     /// the enriched GUI PATH. Throws on a spawn failure or a non-zero exit.
     static func queryLf(_ subargs: [String], cwd: String?) throws -> String {

@@ -30,10 +30,9 @@
 //! ([`RESIDENT_TOKEN_HEADER`]): the listener generates it at bind, passes it
 //! to a spawned resident via [`RESIDENT_TOKEN_ENV`], and writes it to
 //! `wave/<name>/.wave-resident-token` beside the endpoint pointer for
-//! attached residents (`lf wave <name> --loop-only`) — the same
-//! filesystem-trust domain as the discovery file. This is a stopgap: when a
-//! human (or a remote loop) can hold the resident seat, the token becomes a
-//! credential the gatekeeper issues, not a file the repo trusts.
+//! the internal resident — the same filesystem-trust domain as the discovery
+//! file. This is a stopgap: when a remote Loop can hold the resident seat, the
+//! token becomes a credential the gatekeeper issues, not a file the repo trusts.
 
 use serde::{Deserialize, Serialize};
 
@@ -126,6 +125,8 @@ pub enum ResidentDelta {
     MessagesRequeued { ids: Vec<String> },
     /// A fresh body took the current logical playhead step.
     BodyStarted { body: BodyProvenance },
+    /// The harness announced its provider session after the body opened.
+    BodySessionUpdated { body_id: String, session_id: String },
     /// A body ended. Only completed/skipped outcomes advance the playhead;
     /// failure/interruption leave the logical step selected for retry.
     BodyFinished {

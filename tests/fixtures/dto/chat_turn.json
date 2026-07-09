@@ -57,7 +57,7 @@
   "body": {
     "body_id": "body-3",
     "invocation_id": "inv-wave-1",
-    "step_path": "1",
+    "step_index": 1,
     "flow": "wave",
     "step": "wave_pursue",
     "iteration": 2,

@@ -172,7 +172,7 @@ Run one loop iteration for this wave.
 - **Key Results**: backlog is empty.
 ```
 
-Run it with `lf wave shipper`.
+Run it with `lf loop shipper`.
 
 ## Browse the flow catalog
 

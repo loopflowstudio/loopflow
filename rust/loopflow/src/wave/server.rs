@@ -22,8 +22,7 @@
 //! - `GET /health` → `{status, loop_state, wave, turns, workers, uptime_seconds}`;
 //!   `status` is CHANNEL liveness — always `serving` while this process
 //!   answers; `loop_state` is the resident's state (`idle | turning | interrupting
-//!   | failed`), or null while no resident has ever been spawned or attached
-//!   (`--no-loop` serves dormant); a served channel whose resident died reads
+//!   | failed`), or null before any resident has attached; a served channel whose resident died reads
 //!   `status: "serving", loop_state: "failed"`. `workers` counts this wave's
 //!   observed in-flight worker runs.
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
@@ -303,7 +302,7 @@ struct HealthBody {
     /// died is `status: "serving", loop_state: "failed"`.
     status: String,
     /// Resident loop state name, or null for a channel with no resident
-    /// (a dormant `--no-loop` channel, or before any resident attaches).
+    /// (before any resident attaches).
     loop_state: Option<String>,
     wave: String,
     turns: usize,
@@ -566,7 +565,7 @@ async fn playhead_skip_handler(
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
     // `loop_state` is null until a resident has ever been spawned or attached —
-    // a dormant channel (`--no-loop`) has no loop to report on.
+    // A listener-only test channel has no Loop to report on.
     let loop_state = state
         .runtime
         .resident_expected()
@@ -594,14 +593,14 @@ async fn resident_attach_handler(
     // refuses the attach naming it — a second resident would split-brain the
     // wire. A dead/absent seat is free (takeover after a crash rides the same
     // door; the supervisor's own seat probe frees a dead pid on its cadence).
-    // `--force` is `lf wave`'s boot flag, not the door's business.
+    // `--force` is `lf loop`'s boot flag, not the door's business.
     if let Some(seated) = state.resident.seat_pid() {
         if seated != body.pid && process_alive(seated).await {
             return Err((
                 StatusCode::CONFLICT,
                 format!(
                     "wave '{}' already has a live resident on the seat (pid {seated}); \
-                     stop it before attaching, or use `lf wave <name> --force` to take over",
+                     stop it before attaching, or use `lf loop <name> --force` to take over",
                     state.runtime.name()
                 ),
             ));
@@ -1357,8 +1356,8 @@ pub fn resident_token_path(repo_root: &Path, wave: &str) -> PathBuf {
     repo_root.join("wave").join(wave).join(RESIDENT_TOKEN_FILE)
 }
 
-/// Publish this boot's resident token so an attached resident (`lf wave
-/// <name> --loop-only`) can present it — the same filesystem-trust domain as
+/// Publish this boot's resident token so the internal resident can present it
+/// — the same filesystem-trust domain as
 /// the endpoint pointer. Owner-only on unix.
 pub fn write_resident_token(repo_root: &Path, wave: &str, token: &str) -> std::io::Result<()> {
     let path = resident_token_path(repo_root, wave);
@@ -1374,7 +1373,7 @@ pub fn write_resident_token(repo_root: &Path, wave: &str, token: &str) -> std::i
     Ok(())
 }
 
-/// Read the current resident token, for `--loop-only` attachment.
+/// Read the current resident token for attachment.
 pub fn read_resident_token(repo_root: &Path, wave: &str) -> Option<String> {
     let token = std::fs::read_to_string(resident_token_path(repo_root, wave)).ok()?;
     let token = token.trim().to_string();

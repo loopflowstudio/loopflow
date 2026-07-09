@@ -19,13 +19,12 @@ pub enum StepKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepPlan {
-    pub path: String,
     pub name: String,
     pub kind: StepKind,
 }
 
 impl StepPlan {
-    fn from_concrete(index: usize, step: &ConcreteStep) -> Self {
+    fn from_concrete(step: &ConcreteStep) -> Self {
         let (name, kind) = match step {
             ConcreteStep::Skill(skill) => (skill.skill.name.clone(), StepKind::Skill),
             ConcreteStep::Op(op) => (op.item.display_name(), StepKind::Op),
@@ -46,11 +45,7 @@ impl StepPlan {
             ),
             ConcreteStep::Loop(_) => ("loop".to_string(), StepKind::Loop),
         };
-        Self {
-            path: index.to_string(),
-            name,
-            kind,
-        }
+        Self { name, kind }
     }
 }
 
@@ -66,8 +61,7 @@ impl QueuedInvocation {
         let definition = load_flow(flow, repo)?;
         let steps = expand_flow(&definition, repo)?
             .iter()
-            .enumerate()
-            .map(|(index, step)| StepPlan::from_concrete(index, step))
+            .map(StepPlan::from_concrete)
             .collect::<Vec<_>>();
         if steps.is_empty() {
             return Err(anyhow!("flow '{flow}' has no steps"));
@@ -101,11 +95,12 @@ pub struct InvocationState {
     pub queue: Vec<QueuedInvocation>,
 }
 
+/// One logical step, keyed by `invocation_id` + `index` — repeated invocations
+/// of the same flow name stay distinguishable, and the name is display only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepRef {
     pub invocation_id: String,
     pub flow: String,
-    pub step_path: String,
     pub step: String,
     pub kind: StepKind,
     pub index: u32,
@@ -117,7 +112,7 @@ pub struct StepRef {
 pub struct BodyProvenance {
     pub body_id: String,
     pub invocation_id: String,
-    pub step_path: String,
+    pub step_index: u32,
     pub flow: String,
     pub step: String,
     pub iteration: u32,
@@ -144,13 +139,14 @@ pub struct Playhead {
     pub active: Option<ActiveBody>,
 }
 
+/// The playhead plus the three cursors a header needs. The innermost
+/// invocation's local queue is `stack.last().queue` — not repeated here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayheadView {
     pub stack: Vec<InvocationState>,
     pub active: Option<ActiveBody>,
     pub now: Option<StepRef>,
     pub next: Option<StepRef>,
-    pub queued: Vec<QueuedInvocation>,
     pub return_to: Option<StepRef>,
 }
 
@@ -186,6 +182,10 @@ pub enum PlayheadEvent {
     StepStarted {
         step: StepRef,
         body_id: String,
+    },
+    BodySessionUpdated {
+        body_id: String,
+        session_id: String,
     },
     StepCompleted {
         step: StepRef,
@@ -224,32 +224,15 @@ impl Playhead {
     }
 
     pub fn current(&self) -> Option<StepRef> {
-        let invocation = self.stack.last()?;
-        let step = invocation.steps.get(invocation.cursor as usize)?;
-        Some(StepRef {
-            invocation_id: invocation.id.clone(),
-            flow: invocation.flow.clone(),
-            step_path: step.path.clone(),
-            step: step.name.clone(),
-            kind: step.kind,
-            index: invocation.cursor,
-            total: invocation.steps.len() as u32,
-            iteration: invocation.iteration,
-        })
+        step_ref(self.stack.last()?)
     }
 
     pub fn view(&self) -> PlayheadView {
-        let queued = self
-            .stack
-            .last()
-            .map(|invocation| invocation.queue.clone())
-            .unwrap_or_default();
         PlayheadView {
             stack: self.stack.clone(),
             active: self.active.clone(),
             now: self.current(),
             next: self.next_after_current(),
-            queued,
             return_to: self.return_target(),
         }
     }
@@ -275,7 +258,7 @@ impl Playhead {
         let step = self
             .current()
             .ok_or_else(|| anyhow!("playhead has no current step"))?;
-        if body.invocation_id != step.invocation_id || body.step_path != step.step_path {
+        if body.invocation_id != step.invocation_id || body.step_index != step.index {
             return Err(anyhow!("body does not match the current playhead step"));
         }
         let event = PlayheadEvent::StepStarted {
@@ -334,6 +317,25 @@ impl Playhead {
         Ok(events)
     }
 
+    pub fn update_body_session(
+        &mut self,
+        body_id: &str,
+        session_id: &str,
+    ) -> Result<PlayheadEvent> {
+        let active = self
+            .active
+            .as_mut()
+            .ok_or_else(|| anyhow!("playhead has no active body"))?;
+        if active.body.body_id != body_id {
+            return Err(anyhow!("body id does not match the active playhead body"));
+        }
+        active.body.session_id = Some(session_id.to_string());
+        Ok(PlayheadEvent::BodySessionUpdated {
+            body_id: body_id.to_string(),
+            session_id: session_id.to_string(),
+        })
+    }
+
     fn settle(&mut self, events: &mut Vec<PlayheadEvent>) {
         loop {
             let depth = self.stack.len();
@@ -357,6 +359,15 @@ impl Playhead {
                 return;
             }
 
+            // A completed frame stays on the stack while its queued
+            // continuations run so the breadcrumb preserves their scope.
+            // Once marked past-end, returning from the continuation pops it
+            // without emitting a second completion.
+            if (top.cursor as usize) > top.steps.len() {
+                self.stack.pop();
+                continue;
+            }
+
             events.push(PlayheadEvent::InvocationCompleted {
                 invocation_id: top.id.clone(),
                 flow: top.flow.clone(),
@@ -364,6 +375,7 @@ impl Playhead {
 
             if !top.queue.is_empty() {
                 let queued = top.queue.remove(0);
+                top.cursor += 1;
                 events.push(PlayheadEvent::InvocationStarted {
                     invocation_id: queued.id.clone(),
                     flow: queued.flow.clone(),
@@ -402,20 +414,23 @@ impl Playhead {
         self.stack[..self.stack.len() - 1]
             .iter()
             .rev()
-            .find_map(|invocation| {
-                let step = invocation.steps.get(invocation.cursor as usize)?;
-                Some(StepRef {
-                    invocation_id: invocation.id.clone(),
-                    flow: invocation.flow.clone(),
-                    step_path: step.path.clone(),
-                    step: step.name.clone(),
-                    kind: step.kind,
-                    index: invocation.cursor,
-                    total: invocation.steps.len() as u32,
-                    iteration: invocation.iteration,
-                })
-            })
+            .find_map(step_ref)
     }
+}
+
+/// The step an invocation's cursor selects, `None` once the cursor has run off
+/// the end (an invocation about to complete).
+fn step_ref(invocation: &InvocationState) -> Option<StepRef> {
+    let step = invocation.steps.get(invocation.cursor as usize)?;
+    Some(StepRef {
+        invocation_id: invocation.id.clone(),
+        flow: invocation.flow.clone(),
+        step: step.name.clone(),
+        kind: step.kind,
+        index: invocation.cursor,
+        total: invocation.steps.len() as u32,
+        iteration: invocation.iteration,
+    })
 }
 
 #[cfg(test)]
@@ -428,9 +443,7 @@ mod tests {
             flow: flow.to_string(),
             steps: steps
                 .iter()
-                .enumerate()
-                .map(|(index, name)| StepPlan {
-                    path: index.to_string(),
+                .map(|name| StepPlan {
                     name: (*name).to_string(),
                     kind: StepKind::Skill,
                 })
@@ -443,7 +456,7 @@ mod tests {
         BodyProvenance {
             body_id: id.to_string(),
             invocation_id: step.invocation_id,
-            step_path: step.step_path,
+            step_index: step.index,
             flow: step.flow,
             step: step.step,
             iteration: step.iteration,
@@ -515,8 +528,16 @@ mod tests {
         complete(&mut playhead, "body-3");
         complete(&mut playhead, "body-4");
         assert_eq!(playhead.current().unwrap().flow, "research");
-        complete(&mut playhead, "body-5");
+        let events = complete(&mut playhead, "body-5");
         assert_eq!(playhead.current().unwrap().step, "mutate");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, PlayheadEvent::InvocationCompleted { flow, .. } if flow == "review-design"))
+                .count(),
+            0,
+            "returning from a continuation does not complete its parent twice"
+        );
     }
 
     #[test]

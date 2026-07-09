@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use loopflow::chat::turns::{ChatRole, ChatTurn};
 use loopflow::chat::types::{ConversationItem, Lifecycle};
 use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, UsageReportDto, WaveDto};
-use loopflow::wave::state::LoopState;
 use loopflow::wave::playhead::StepOutcome;
+use loopflow::wave::state::LoopState;
 use loopflow::wave::wire::{
     AttachRequest, AttachResponse, ContextResponse, PostDeltasRequest, ResidentDelta,
     ResidentStateTo,
@@ -238,18 +238,25 @@ fn resident_deltas_fixture_round_trips_the_wire() {
     let value = load_fixture("resident_deltas.json");
     let request: PostDeltasRequest =
         serde_json::from_value(value.clone()).expect("resident deltas fixture should parse");
-    assert_eq!(request.deltas.len(), 11);
+    assert_eq!(request.deltas.len(), 12);
 
     // Every wire kind appears in the fixture, in a realistic turn order.
     assert!(matches!(
-        &request.deltas[1],
+        &request.deltas[2],
         ResidentDelta::TurnOpened { answers } if answers == &["msg-4", "msg-5"]
     ));
-    assert!(matches!(&request.deltas[0], ResidentDelta::BodyStarted { .. }));
-    assert!(matches!(&request.deltas[2], ResidentDelta::TurnText { .. }));
-    assert!(matches!(&request.deltas[3], ResidentDelta::TurnItem { .. }));
     assert!(matches!(
-        &request.deltas[4],
+        &request.deltas[0],
+        ResidentDelta::BodyStarted { .. }
+    ));
+    assert!(matches!(
+        &request.deltas[1],
+        ResidentDelta::BodySessionUpdated { session_id, .. } if session_id == "session-3"
+    ));
+    assert!(matches!(&request.deltas[3], ResidentDelta::TurnText { .. }));
+    assert!(matches!(&request.deltas[4], ResidentDelta::TurnItem { .. }));
+    assert!(matches!(
+        &request.deltas[5],
         ResidentDelta::TurnUsage {
             input_tokens: Some(1204),
             output_tokens: Some(96),
@@ -257,32 +264,32 @@ fn resident_deltas_fixture_round_trips_the_wire() {
         }
     ));
     assert!(matches!(
-        &request.deltas[5],
+        &request.deltas[6],
         ResidentDelta::TurnFinished { status: Lifecycle::Completed, cost_usd: Some(cost), .. }
             if (cost - 0.0125).abs() < f64::EPSILON
     ));
     assert!(matches!(
-        &request.deltas[7],
+        &request.deltas[8],
         ResidentDelta::TurnSteered { answers } if answers == &["msg-6"]
     ));
     assert!(matches!(
-        &request.deltas[8],
+        &request.deltas[9],
         ResidentDelta::MessagesRequeued { ids } if ids == &["msg-6"]
     ));
     assert!(matches!(
-        &request.deltas[9],
+        &request.deltas[10],
         ResidentDelta::LoopState {
             to: ResidentStateTo::Interrupting,
             ..
         }
     ));
     assert!(matches!(
-        &request.deltas[10],
+        &request.deltas[11],
         ResidentDelta::LoopState { to: ResidentStateTo::Failed, reason }
             if reason.contains("codex_disconnected")
     ));
     assert!(matches!(
-        &request.deltas[6],
+        &request.deltas[7],
         ResidentDelta::BodyFinished {
             outcome: StepOutcome::Completed,
             ..

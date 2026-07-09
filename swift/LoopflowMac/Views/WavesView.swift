@@ -1,6 +1,6 @@
 // The exposed main window: a burgundy repo rail (left) filtering a burgundy wave
 // list (center), with a "+" new-wave launcher, and a WaveChat detail (right) that
-// streams the selected wave's live conversation from its `lf wave` chat server.
+// streams the selected wave's live conversation from its `lf loop` chat server.
 //
 // Reshaped from the battle-tested PortfolioWindow: keeps its connection / daemon
 // plumbing, swaps the multi-repo card grid for the sidebar+list+terminal shape

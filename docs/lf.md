@@ -123,12 +123,14 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 ## Running Loops
 
 ```bash
+lf loop designer                                  # start the named mind
 lf loop task "fix the flaky chord-timeout test" --wave designer
 lf loop task "…" --wave designer --max-passes 4 --wall-clock-secs 3600
 lf loop scan-pass "scan the runtime" --detach # any flow is loopable
 ```
 
-`lf loop` takes a flow and free text, creates a worktree, and loops until the
+With one name, `lf loop <name>` starts that mind and its persistent playhead.
+With a flow plus free text, it creates a child worktree and loops until the
 flow's skills write `done` to `scratch/loop.yaml` (`task`: when the PR merges).
 Without `--detach` it blocks; with `--detach` the live wave server owns it and
 returns a read-only tmux inspection session. Linear holds filed tasks,

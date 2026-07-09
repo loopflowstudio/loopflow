@@ -165,7 +165,7 @@ impl ResolvedWave {
     pub fn require_endpoint(&self) -> Result<String> {
         self.endpoint.clone().ok_or_else(|| {
             anyhow!(
-                "wave '{name}' has no live server — start one with `lf wave {name}`. \
+                "wave '{name}' has no live server — start one with `lf loop {name}`. \
                  (Queuing for offline waves is not implemented yet.)",
                 name = self.name
             )
@@ -331,7 +331,7 @@ pub(crate) async fn post_json(
         .await
         .map_err(|err| {
             anyhow!(
-                "wave server at {endpoint} is not answering ({err}) — is `lf wave` still running?"
+                "wave server at {endpoint} is not answering ({err}) — is `lf loop` still running?"
             )
         })?;
     let status = response.status();
@@ -348,7 +348,7 @@ pub(crate) async fn get_json(endpoint: &str, path: &str) -> Result<serde_json::V
         .await
         .map_err(|err| {
             anyhow!(
-                "wave server at {endpoint} is not answering ({err}) — is `lf wave` still running?"
+                "wave server at {endpoint} is not answering ({err}) — is `lf loop` still running?"
             )
         })?;
     let status = response.status();
@@ -406,7 +406,7 @@ mod tests {
     }
 
     /// A live wave_server WaveAgent row carrying `endpoint` in its env — the
-    /// shape `lf wave` registers (see crate::wave::registry).
+    /// shape `lf loop` registers (see crate::wave::registry).
     fn live_server_session(wave: &Wave, endpoint: &str) -> Session {
         let now = OffsetDateTime::now_utc();
         Session {
@@ -802,7 +802,7 @@ mod tests {
         let err = resolved.require_endpoint().expect_err("no server");
         let message = err.to_string();
         assert!(message.contains("no live server"), "{message}");
-        assert!(message.contains("lf wave ship"), "{message}");
+        assert!(message.contains("lf loop ship"), "{message}");
         assert!(message.contains("not implemented yet"), "{message}");
     }
 }

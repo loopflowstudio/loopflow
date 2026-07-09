@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# demo_wave.sh — guided live demo of the wave (`lf wave`), two processes:
+# demo_wave.sh — guided live demo of the wave (`lf loop`), two processes:
 # the LISTENER (journal pens, doors, supervisor — vendor-free) and the
-# RESIDENT it spawns (`lf wave --loop-only` — the loop, wave-pass runner,
+# RESIDENT it spawns (the same `lf loop` command with private server env,
 # running in the wave's own worktree).
 #
 # Walks the whole surface against a throwaway repo: boot + discovery (both
@@ -172,10 +172,10 @@ pause
 
 # ---------- launch --------------------------------------------------------
 
-hr "launch · lf wave $WAVE (detached tmux: $TMUX_SESSION)"
-tmux new-session -d -s "$TMUX_SESSION" -c "$DEMO_REPO" "$LF_BIN wave $WAVE"
+hr "launch · lf loop $WAVE (detached tmux: $TMUX_SESSION)"
+tmux new-session -d -s "$TMUX_SESSION" -c "$DEMO_REPO" "$LF_BIN loop $WAVE"
 say "one command, two processes: the listener boots, then spawns the resident"
-say "(lf wave $WAVE --loop-only) — both narrate into the same pane."
+say "the listener and resident both narrate into the same pane."
 say "watch it live in another terminal:  tmux attach -r -t $TMUX_SESSION"
 poll "endpoint published ($ENDPOINT_FILE)" 90 test -s "$ENDPOINT_FILE" || {
     warn "server never published its endpoint; last tmux output:"
@@ -327,10 +327,10 @@ if [[ -z "$ORPHANS" ]]; then
 else
     warn "orphaned codex pids: $ORPHANS"
 fi
-if ! pgrep -f "lf wave $WAVE --loop-only" >/dev/null 2>&1; then
+if ! pgrep -f "lf loop $WAVE" >/dev/null 2>&1; then
     ok "no orphaned resident (the listener SIGTERMs its tenant on shutdown)"
 else
-    warn "resident still running: $(pgrep -f "lf wave $WAVE --loop-only")"
+    warn "Loop process still running: $(pgrep -f "lf loop $WAVE")"
 fi
 journal_types
 say "demo repo kept for inspection: $DEMO_REPO"

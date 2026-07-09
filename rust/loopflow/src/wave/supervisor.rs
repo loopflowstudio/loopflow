@@ -4,8 +4,8 @@
 //! The listener is the pen-holder, so every anti-wedge that must not depend
 //! on the resident's health lives here, server-side:
 //!
-//! - **Resident death.** A spawned resident is watched by process exit; an
-//!   attached one (`lf wave <name> --loop-only`) by a pid probe on the seat
+//! - **Resident death.** A spawned resident is watched by process exit; a
+//!   separately attached one by a pid probe on the seat
 //!   the attach door recorded. Death closes whatever turn the resident left
 //!   open (`TurnFinished{Failed}` — the journal never dangles), journals
 //!   `LoopState::Failed`, and arms the respawn ladder.
@@ -161,7 +161,7 @@ pub struct Supervisor {
 
 impl Supervisor {
     /// Build the supervisor, subscribing to the runtime's broadcasts now.
-    /// `spawner` is `None` for a pure listener (`--no-loop`): the janitor and
+    /// `spawner` is `None` only in listener-only tests: the janitor and
     /// the attach probe still run — the pen-side anti-wedges never depend on
     /// who spawned the resident.
     pub fn new(
@@ -375,8 +375,8 @@ impl Supervisor {
     }
 
     /// The attach door admitted a resident (its pid already on the seat).
-    /// For a foreign resident — `lf wave <name> --loop-only`, not our own
-    /// spawned child — the attach IS the revival: the respawn ladder stands
+    /// For a separately attached resident, not our own spawned child, the
+    /// attach is the revival: the respawn ladder stands
     /// down and resets, and the seat is watched by pid probe
     /// (attached-not-child). Without this, an armed respawn deadline would
     /// later spawn a second loop over the attached one and overwrite its

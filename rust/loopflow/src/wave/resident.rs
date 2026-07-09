@@ -1,6 +1,6 @@
 //! The resident: the wave's loop as its own `lf` process.
 //!
-//! `lf wave <name> --loop-only` runs here. The resident owns everything
+//! The server-spawned half of `lf loop <name>` runs here. It owns everything
 //! vendor-shaped — the conversations harness, the scheduler
 //! ([`crate::flowloop::wave`]), the rendered GOAL.md seed — and NOTHING
 //! pen-shaped: it never touches a journal file. Its two connections to the
@@ -17,7 +17,7 @@
 //! the origin repo.
 //!
 //! # Lifecycle
-//! Spawned by the listener (default `lf wave <name>`) with the endpoint and
+//! Spawned by the listener with the endpoint and
 //! token in env, or attached by hand against the discovery files. On listener
 //! death the subscription ends and the resident exits cleanly — its keeper is
 //! gone; whether anything restarts the pair is the human's arrangement
@@ -45,8 +45,7 @@ use crate::wave::wire::{
     RESIDENT_TOKEN_ENV, RESIDENT_TOKEN_HEADER,
 };
 
-/// `lf wave <name> --loop-only`: attach to the wave's live listener and be
-/// its loop until one of us dies.
+/// Enter the resident half of `lf loop <name>` until its listener disappears.
 pub fn run(name: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
@@ -72,7 +71,7 @@ pub fn run(name: &str) -> Result<()> {
     std::env::set_var("PATH", path_for_children());
 
     println!(
-        "lf wave · {wave} · resident loop · listener http://{endpoint} \
+        "lf loop · {wave} · resident · listener http://{endpoint} \
          · worktree {}",
         loop_cwd.display()
     );
@@ -124,7 +123,7 @@ fn wave_worktree(main_repo: &Path, wave: &str) -> Result<PathBuf> {
 
 /// Where the listener is and how to prove we belong at its resident door:
 /// spawn env first (the keeper passed both), the discovery files second
-/// (`--loop-only` by hand, same trust domain as `.wave-endpoint`).
+/// (same filesystem trust domain as `.wave-endpoint`).
 fn resolve_attachment(
     env_endpoint: Option<String>,
     env_token: Option<String>,
@@ -143,7 +142,7 @@ fn resolve_attachment(
         .ok_or_else(|| {
             anyhow!(
                 "wave '{wave}' has no live listener (no {env} in env, no \
-                 wave/{wave}/{file}) — start one with `lf wave {wave}`",
+                 wave/{wave}/{file}) — start one with `lf loop {wave}`",
                 env = WAVE_SERVER_ENDPOINT_ENV,
                 file = server::ENDPOINT_FILE,
             )
@@ -361,9 +360,9 @@ mod tests {
 
         // Nothing anywhere: a clear error naming the fix.
         let err = resolve_attachment(None, None, tmp.path(), "ship").expect_err("no listener");
-        assert!(err.to_string().contains("lf wave ship"), "{err}");
+        assert!(err.to_string().contains("lf loop ship"), "{err}");
 
-        // Files only (the --loop-only path).
+        // Files only (a separately attached resident).
         let addr: std::net::SocketAddr = "127.0.0.1:50607".parse().unwrap();
         server::write_endpoint(tmp.path(), "ship", addr).expect("pointer");
         server::write_resident_token(tmp.path(), "ship", "tok-file").expect("token");

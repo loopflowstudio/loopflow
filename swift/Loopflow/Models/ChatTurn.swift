@@ -17,7 +17,6 @@ public enum PlayheadStepKind: String, Codable, Sendable, Hashable {
 }
 
 public struct PlayheadStepPlan: Codable, Sendable, Hashable {
-    public let path: String
     public let name: String
     public let kind: PlayheadStepKind
 }
@@ -40,7 +39,6 @@ public struct InvocationState: Codable, Sendable, Hashable, Identifiable {
 public struct PlayheadStepRef: Codable, Sendable, Hashable {
     public let invocationId: String
     public let flow: String
-    public let stepPath: String
     public let step: String
     public let kind: PlayheadStepKind
     public let index: Int
@@ -50,14 +48,13 @@ public struct PlayheadStepRef: Codable, Sendable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case flow, step, kind, index, total, iteration
         case invocationId = "invocation_id"
-        case stepPath = "step_path"
     }
 }
 
 public struct BodyProvenance: Codable, Sendable, Hashable {
     public let bodyId: String
     public let invocationId: String
-    public let stepPath: String
+    public let stepIndex: Int
     public let flow: String
     public let step: String
     public let iteration: Int
@@ -75,7 +72,7 @@ public struct BodyProvenance: Codable, Sendable, Hashable {
         case flow, step, iteration, harness, model, host, worktree
         case bodyId = "body_id"
         case invocationId = "invocation_id"
-        case stepPath = "step_path"
+        case stepIndex = "step_index"
         case sessionId = "session_id"
         case runId = "run_id"
         case startedAt = "started_at"
@@ -94,11 +91,10 @@ public struct PlayheadView: Codable, Sendable, Hashable {
     public let active: ActiveBody?
     public let now: PlayheadStepRef?
     public let next: PlayheadStepRef?
-    public let queued: [QueuedInvocation]
     public let returnTo: PlayheadStepRef?
 
     private enum CodingKeys: String, CodingKey {
-        case stack, active, now, next, queued
+        case stack, active, now, next
         case returnTo = "return_to"
     }
 }
@@ -233,7 +229,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
         case createdAt = "created_at"
     }
 
-    public init(id: String, role: ChatRole, text: String, status: Lifecycle, items: [ConversationItem], createdAt: String, from: String?, body: BodyProvenance? = nil) {
+    public init(id: String, role: ChatRole, text: String, status: Lifecycle, items: [ConversationItem], createdAt: String, from: String?, body: BodyProvenance?) {
         self.id = id
         self.role = role
         self.text = text

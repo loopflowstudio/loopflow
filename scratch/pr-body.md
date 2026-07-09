@@ -15,16 +15,19 @@ Validation run:
 ```bash
 cargo fmt --check
 cargo clippy -- -D warnings
+cargo test -p loopflow pm
 cargo test -p loopflow golden_prompt
 uv run python scripts/test.py
 uv run python scripts/test.py --all
 ```
 
-`scripts/test.py --all` passed Python, Rust, website, Swift package, and e2e smoke. The Loopflow UI suite is blocked locally by `LoopflowUITests-Runner` hanging before it connects; the app/unit test bundle inside that command reports 304 passing tests before Xcode returns exit 65.
+`scripts/test.py` passed the changed-aware Rust and website suites. `scripts/test.py --all` passed Python, Rust, website, Swift package, and e2e smoke. The Loopflow UI suite is blocked locally: the first full run failed in shared DerivedData while linking `LoopflowUITests`; a fresh-DerivedData retry built and ran the app/unit bundle, reported 304 passing tests, then `LoopflowUITests-Runner` exited before establishing the UI-test connection and Xcode returned 65.
 
 ## Intent
 
 Make Loopflow's planning model explicit in code and docs: waves are durable operating contexts, projects are measured bets under one wave, and tasks live in Linear. `lf op pm` can now group, filter, create, move, close, diagnose, and rename Linear tasks/projects in terms of the local wave project tree.
+
+Gate polish aligned the core built-in prompts and architecture docs with that model so agents now see the canonical `lf op pm task ...` surface instead of the compatibility `pm update` path.
 
 ## Assumptions
 
@@ -34,7 +37,7 @@ Live Linear mutation demos were not run in gate because they would create labels
 
 ## Key Decisions
 
-One Linear project remains the task container for each wave; local Loopflow projects are represented as labels instead of additional Linear projects. `lf op pm update` remains compatible, but the documented API is now `lf op pm task ...`. `sync --plan` reports ambiguous drift instead of guessing task migrations.
+One Linear project remains the task container for each wave; local Loopflow projects are represented as labels instead of additional Linear projects. `lf op pm update` remains compatible, but the documented and prompt-visible API is now `lf op pm task ...`. `sync --plan` reports ambiguous drift instead of guessing task migrations.
 
 ## Not Included
 

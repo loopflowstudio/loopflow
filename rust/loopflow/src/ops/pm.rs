@@ -101,28 +101,18 @@ pub struct PmSyncOptions {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmSyncResult {
-    pub actions: Vec<PmSyncAction>,
-    pub diagnostics: Vec<PmSyncDiagnostic>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmSyncAction {
-    pub message: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmSyncDiagnostic {
-    pub message: String,
+    pub actions: Vec<String>,
+    pub diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
-pub struct PmSpaceRenameOptions {
+pub struct PmRenameOptions {
     pub wave: Option<String>,
     pub title: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmSpaceRenameResult {
+pub struct PmRenameResult {
     pub wave: String,
     pub project: String,
     pub title: String,
@@ -522,10 +512,6 @@ pub fn format_task_item(item: &PmItem) -> String {
     )
 }
 
-pub fn format_roadmap_item(item: &PmItem) -> String {
-    format_task_item(item)
-}
-
 // ── update ──────────────────────────────────────────────────────────
 
 pub fn pm_update(
@@ -807,9 +793,7 @@ async fn pm_sync_async(
         if let Some(project) = read_project(repo, wave, provider) {
             linked_project_ids.insert(project);
         } else {
-            diagnostics.push(PmSyncDiagnostic {
-                message: format!("wave/{wave} has no Linear project"),
-            });
+            diagnostics.push(format!("wave/{wave} has no Linear project"));
         }
     }
 
@@ -830,12 +814,10 @@ async fn pm_sync_async(
         .collect();
     for space in &spaces {
         if !linked_project_ids.contains(&space.id) {
-            diagnostics.push(PmSyncDiagnostic {
-                message: format!(
-                    "Linear project `{}` ({}) is not linked by any local wave",
-                    space.name, space.id
-                ),
-            });
+            diagnostics.push(format!(
+                "Linear project `{}` ({}) is not linked by any local wave",
+                space.name, space.id
+            ));
         }
     }
 
@@ -850,19 +832,17 @@ async fn pm_sync_async(
                 let message = format!(
                     "rename Linear project `{actual}` ({space_id}) to `{expected_space_name}` for wave/{wave}"
                 );
-                if options.plan {
-                    actions.push(PmSyncAction { message });
-                } else {
+                if !options.plan {
                     client
                         .rename_project(&space_id, &expected_space_name)
                         .await
                         .map_err(pm_to_ops)?;
-                    actions.push(PmSyncAction { message });
                 }
+                actions.push(message);
             }
-            None => diagnostics.push(PmSyncDiagnostic {
-                message: format!("wave/{wave} points at missing Linear project {space_id}"),
-            }),
+            None => diagnostics.push(format!(
+                "wave/{wave} points at missing Linear project {space_id}"
+            )),
             _ => {}
         }
 
@@ -870,13 +850,10 @@ async fn pm_sync_async(
         for project in &local_projects {
             let label = project_label(project);
             if !label_names.contains(&label) {
-                let message = format!("create label `{label}` for wave/{wave}");
-                if options.plan {
-                    actions.push(PmSyncAction { message });
-                } else {
+                if !options.plan {
                     client.ensure_label(&label).await.map_err(pm_to_ops)?;
-                    actions.push(PmSyncAction { message });
                 }
+                actions.push(format!("create label `{label}` for wave/{wave}"));
             }
         }
 
@@ -891,29 +868,25 @@ async fn pm_sync_async(
                 }
             }
             if project_labels.is_empty() {
-                diagnostics.push(PmSyncDiagnostic {
-                    message: format!(
-                        "task `{}` ({}) in wave/{wave} has no project:<slug> label",
-                        item.name, item.id
-                    ),
-                });
+                diagnostics.push(format!(
+                    "task `{}` ({}) in wave/{wave} has no project:<slug> label",
+                    item.name, item.id
+                ));
             }
             for project in project_labels {
                 if !local_project_set.contains(&project) {
-                    diagnostics.push(PmSyncDiagnostic {
-                        message: format!(
-                            "task `{}` ({}) in wave/{wave} uses missing local project `{project}`",
-                            item.name, item.id
-                        ),
-                    });
+                    diagnostics.push(format!(
+                        "task `{}` ({}) in wave/{wave} uses missing local project `{project}`",
+                        item.name, item.id
+                    ));
                 }
             }
         }
         for project in &local_project_set {
             if open_by_project.get(project).copied().unwrap_or(0) == 0 {
-                diagnostics.push(PmSyncDiagnostic {
-                    message: format!("wave/{wave}/projects/{project}.md has no open tasks"),
-                });
+                diagnostics.push(format!(
+                    "wave/{wave}/projects/{project}.md has no open tasks"
+                ));
             }
         }
     }
@@ -926,19 +899,19 @@ async fn pm_sync_async(
 
 // ── explicit mutations ─────────────────────────────────────────────
 
-pub fn pm_space_rename(
+pub fn pm_rename(
     repo: &Path,
-    options: &PmSpaceRenameOptions,
+    options: &PmRenameOptions,
     progress: &impl Progress,
-) -> OpsResult<PmSpaceRenameResult> {
-    block_on_pm(pm_space_rename_async(repo, options, progress))
+) -> OpsResult<PmRenameResult> {
+    block_on_pm(pm_rename_async(repo, options, progress))
 }
 
-async fn pm_space_rename_async(
+async fn pm_rename_async(
     repo: &Path,
-    options: &PmSpaceRenameOptions,
+    options: &PmRenameOptions,
     progress: &impl Progress,
-) -> OpsResult<PmSpaceRenameResult> {
+) -> OpsResult<PmRenameResult> {
     let wave = resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
     let ctx = resolve_context(repo, &wave).await?;
@@ -950,7 +923,7 @@ async fn pm_space_rename_async(
         .rename_project(&ctx.project, &options.title)
         .await
         .map_err(pm_to_ops)?;
-    Ok(PmSpaceRenameResult {
+    Ok(PmRenameResult {
         wave,
         project: ctx.project,
         title: options.title.clone(),
@@ -1059,15 +1032,11 @@ fn project_label(project: &str) -> String {
     format!("project:{project}")
 }
 
-fn item_project_labels(item: &PmItem) -> Vec<String> {
+pub fn item_project_labels(item: &PmItem) -> Vec<String> {
     item.labels
         .iter()
         .filter_map(|label| label.strip_prefix("project:").map(str::to_string))
         .collect()
-}
-
-pub fn item_local_projects(item: &PmItem) -> Vec<String> {
-    item_project_labels(item)
 }
 
 fn item_matches_project(item: &PmItem, project: &str) -> bool {
@@ -1206,8 +1175,8 @@ mod tests {
     }
 
     #[test]
-    fn format_roadmap_item_is_one_scannable_line() {
-        let line = format_roadmap_item(&PmItem {
+    fn format_task_item_is_one_scannable_line() {
+        let line = format_task_item(&PmItem {
             id: "123".to_string(),
             name: "Ship it".to_string(),
             description: String::new(),

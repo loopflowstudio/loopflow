@@ -16,8 +16,8 @@ use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_skill;
 use crate::lf::output::Colors;
 use crate::lf::{
-    BranchFilterArgs, BranchesCommand, CronCommand, OpsCommand, PmCommand, PmSpaceCommand,
-    PmTaskCommand, QueueCommand, ReleaseCommand, ShellCommand, WtCommand,
+    BranchFilterArgs, BranchesCommand, CronCommand, OpsCommand, PmCommand, PmTaskCommand,
+    QueueCommand, ReleaseCommand, ShellCommand, WtCommand,
 };
 use crate::ops::OpsError;
 use crate::ops::{
@@ -615,9 +615,9 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
             }
         }
         PmCommand::Rename { wave, title } => {
-            let result = crate::ops::pm::pm_space_rename(
+            let result = crate::ops::pm::pm_rename(
                 &repo_root,
-                &crate::ops::pm::PmSpaceRenameOptions {
+                &crate::ops::pm::PmRenameOptions {
                     wave: wave.clone(),
                     title: title.clone(),
                 },
@@ -628,22 +628,6 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 result.wave, result.project, result.title
             );
         }
-        PmCommand::Space { cmd } => match cmd {
-            PmSpaceCommand::Rename { wave, title } => {
-                let result = crate::ops::pm::pm_space_rename(
-                    &repo_root,
-                    &crate::ops::pm::PmSpaceRenameOptions {
-                        wave: wave.clone(),
-                        title: title.clone(),
-                    },
-                    progress,
-                )?;
-                println!(
-                    "{}: renamed Linear project {} to `{}`",
-                    result.wave, result.project, result.title
-                );
-            }
-        },
         PmCommand::Task { cmd } => match cmd {
             PmTaskCommand::Create {
                 wave,
@@ -727,15 +711,6 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                     result.wave, result.id, result.project
                 );
             }
-            PmTaskCommand::Import {
-                from_wave,
-                to_wave,
-                project,
-            } => {
-                return Err(anyhow!(
-                    "task import is not automatic yet; run `lf op pm sync --plan`, then move unambiguous tasks with `lf op pm task move --id <task> --wave {to_wave} --project {project}` (source wave: {from_wave})"
-                ));
-            }
         },
         PmCommand::Doctor => {
             let result = crate::ops::pm::pm_sync(
@@ -778,7 +753,7 @@ fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {
     let mut grouped: std::collections::BTreeMap<String, Vec<_>> = std::collections::BTreeMap::new();
     let mut unassigned = Vec::new();
     for item in &result.items {
-        let projects = crate::ops::pm::item_local_projects(item);
+        let projects = crate::ops::pm::item_project_labels(item);
         if projects.is_empty() {
             unassigned.push(item);
         } else {
@@ -808,10 +783,10 @@ fn print_pm_sync_result(result: &crate::ops::pm::PmSyncResult) {
         return;
     }
     for action in &result.actions {
-        println!("action: {}", action.message);
+        println!("action: {action}");
     }
     for diagnostic in &result.diagnostics {
-        println!("diagnostic: {}", diagnostic.message);
+        println!("diagnostic: {diagnostic}");
     }
 }
 

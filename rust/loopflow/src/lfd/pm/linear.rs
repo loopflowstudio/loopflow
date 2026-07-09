@@ -744,12 +744,7 @@ struct ProjectNode {
 #[derive(Deserialize)]
 struct LabelsData {
     #[serde(rename = "issueLabels")]
-    issue_labels: LabelsConnection,
-}
-
-#[derive(Deserialize)]
-struct LabelsConnection {
-    nodes: Vec<LabelNode>,
+    issue_labels: LabelConnection,
 }
 
 async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response) -> PmResult<T> {

@@ -654,28 +654,10 @@ pub enum PmCommand {
         #[arg(long = "title")]
         title: String,
     },
-    /// Linear project operations
-    Space {
-        #[command(subcommand)]
-        cmd: PmSpaceCommand,
-    },
     /// Linear task operations
     Task {
         #[command(subcommand)]
         cmd: PmTaskCommand,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum PmSpaceCommand {
-    /// Rename the Linear project backing a wave
-    Rename {
-        /// Wave name (auto-detected if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Linear project title
-        #[arg(long = "title")]
-        title: String,
     },
 }
 
@@ -734,18 +716,6 @@ pub enum PmTaskCommand {
         /// Destination wave
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// Destination local project slug
-        #[arg(short = 'p', long = "project")]
-        project: String,
-    },
-    /// Import tasks from one wave's Linear project into another wave/project
-    Import {
-        /// Source wave
-        #[arg(long = "from-wave")]
-        from_wave: String,
-        /// Destination wave
-        #[arg(long = "to-wave")]
-        to_wave: String,
         /// Destination local project slug
         #[arg(short = 'p', long = "project")]
         project: String,

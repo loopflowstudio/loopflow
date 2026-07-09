@@ -12,7 +12,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -24,7 +24,7 @@ re-derive what these already record.
 
 2. **De-risk.** Before designing anything, find the things that could invalidate your approach and resolve them. Search the web, read docs, check APIs, run experiments. The job isn't to list risks — it's to come back with answers.
 
-   **Start with what's already flagged.** If the ingested item or wave README calls out specific risks, unknowns, or "what needs validation" — those are your first priority. Someone already thought these were dangerous enough to name. Research each one until you can confirm or refute it.
+   **Start with what's already flagged.** If the ingested item, wave `GOAL.md`, `MEMORY.md`, or project docs call out specific risks, unknowns, or "what needs validation" — those are your first priority. Someone already thought these were dangerous enough to name. Research each one until you can confirm or refute it.
 
    **Then scan for what was missed.** Look across technical constraints (does the API actually support this?), prior art (have others tried and failed?), ecosystem shifts (will the ground move under us?), and domain knowledge (are there papers or benchmarks that constrain the solution space?). Not every dimension applies — focus where uncertainty is highest.
 

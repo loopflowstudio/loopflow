@@ -97,9 +97,23 @@ server is down errors instead; note it and move on.
 
 ## The Roadmap Lives in Linear
 
-A wave's roadmap is not in the repo — it lives in Linear, and `lf op pm` is the
-only way to read or change it. There is no local roadmap file to edit and no
-sync step; Linear is the source of truth.
+Use three planning nouns:
+
+- **Wave**: durable operating context. It owns memory, cadence, budget, chat,
+  and project selection.
+- **Project**: measured bet inside exactly one wave. It owns definition, KRs,
+  and closure criteria.
+- **Task**: concrete work that advances a project — one implementation step,
+  investigation, doc, or shipped change.
+
+Every project belongs to one wave. Projects do not contain projects, and they do
+not own memory or cadence. If a project seems to need subprojects, split it into
+sibling projects, promote the operating context into a wave, or demote the
+pieces into tasks.
+
+Project definitions and KRs live in `wave/<wave>/projects/<project>.md`.
+Concrete tasks live in Linear. There are no local task lists and nothing to sync
+— `lf op pm` reads and edits the wave's Linear project directly.
 
 ```bash
 lf op pm show                                          # the wave's live roadmap
@@ -113,10 +127,17 @@ pointer back to the work. The PR link posts as a comment; it never clobbers the
 task's description.
 
 Add `--wave <name>` when the wave is ambiguous. Never write `wave/<name>/N-*.md`
-roadmap files or a roadmap table in `GOAL.md` — that mirror is gone.
+roadmap files, a roadmap table in `GOAL.md`, or task lists in project docs —
+that mirror is gone.
+
+Write project KRs as proof: observable end states that show the bet now holds.
+Do not mix KRs with backlog bullets, implementation receipts, issue ids, or
+status. Individual technical-debt cleanup is a task; a standing debt frontier can
+be a project.
 
 ## Where To Write
 
+- `wave/<wave>/projects/<project>.md` - project definition and KRs
 - `scratch/<branch>.md` - design doc for the current work
 - `scratch/questions.md` - open questions, blockers, assumptions
 - `lf memory add "<fact>"` - durable wave learnings; `wave/<name>/MEMORY.md` is

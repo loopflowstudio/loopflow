@@ -11,7 +11,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -144,14 +144,14 @@ Are the items in a wave pulling in the same direction, or has the wave
 become a dumping ground?
 
 Gather:
-- Read all item files in the wave
-- Read the wave README (vision, strategy)
-- Check area overlap between items within the same wave
+- Read all project docs in the wave
+- Read the wave `GOAL.md` and `MEMORY.md`
+- Check area overlap between projects within the same wave
 
 Interpret:
-- Items should serve the wave's stated vision. An item in the `pm` wave
+- Projects and tasks should serve the wave's stated objective. A task in the `pm` wave
   that's really about Loopflow UI belongs in `macos`.
-- Items at the same priority tier should be independent enough to work
+- Projects at the same priority tier should be independent enough to work
   in parallel. If item 2a blocks item 2b, that's a sequencing issue the
   report should surface.
 - A wave with items spanning 4 different subsystems may need to be split.

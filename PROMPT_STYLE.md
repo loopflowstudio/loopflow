@@ -66,12 +66,62 @@ Goals follow a consistent pattern:
 4. **Quality bar**: Standards for the output.
 5. **Anti-patterns**: Common failure modes to avoid. All goals should have these.
 
+### Wave/project/task ontology
+
+Wave planning uses three nouns, and they differ by kind rather than size:
+
+- **Wave**: durable operating context. It owns memory, cadence, budget, chat,
+  and project selection.
+- **Project**: measured bet inside exactly one wave. It owns KRs and closure
+  criteria.
+- **Task**: concrete implementation, investigation, docs, or shipped change.
+
+Every project belongs to one wave. Projects do not contain projects, and they do
+not own their own memory or cadence. If a project seems to need subprojects,
+either split it into sibling projects, promote the operating context into a
+wave, or demote the pieces into tasks.
+
+Good projects are either completable behavioral improvements or standing quality
+frontiers. "Wave Chat can steer and interrupt work from CLI and Mac" is a
+project. "Technical Architecture stays legible and minimally simple" is a
+project. "Collapse `lfd` and `lfq`" is individual debt: file it as a task under
+a project.
+
+Write project KRs as proof, not backlog. A KR states an observable end state:
+what would let a maintainer say the bet now holds. Do not mix task lists,
+implementation receipts, issue ids, or status into the KR line.
+
+```markdown
+# Weak: task bundle pretending to be a project
+# One system
+
+## KRs
+
+- Collapse lfd/lfq into lf.
+- Retire chord/member vocabulary.
+- Unify the operating prompt.
+
+# Strong: project frontier with proof-shaped KRs
+# Technical Architecture
+
+Loopflow's architecture is legible from the top down: the key data structures
+and APIs explain the system, the implementation follows that map, and obsolete
+pre-flowloop concepts do not linger as alternate design.
+
+## KRs
+
+- Top-down architecture documentation is complete, published, and centered on the key data structures and public APIs.
+- Every data structure and API in the architecture is ratified as minimally simple for its purpose.
+- The codebase, prompts, docs, and UI contain no stale pre-flowloop technical design language.
+```
+
 ### A wave's GOAL.md: five marks of a goal that loops well
 
-A wave's `GOAL.md` is a goal run in a loop. It has a body prompt and a `metrics`
-frontmatter list the loop judges itself against. The difference between one that
-compounds and one that produces rubber-stamp output comes down to five marks.
-Study `wave/systems/GOAL.md` and `wave/architecture/GOAL.md` — both hit all five.
+A wave's `GOAL.md` is a goal run in a loop. It defines the wave's operating
+context: why it exists, what it owns, what it refuses, and how it chooses useful
+work. Project KRs live with the project, not as a roadmap table in `GOAL.md`.
+The difference between a wave that compounds and one that produces rubber-stamp
+output comes down to five marks.
 
 1. **Identity by contrast.** State what the wave is *and what it is not*, ideally
    against a sibling. "Systems owns the machinery around the code; Architecture
@@ -79,10 +129,10 @@ Study `wave/systems/GOAL.md` and `wave/architecture/GOAL.md` — both hit all fi
    does not render chat." A named boundary is what stops a looping agent from
    sprawling into every adjacent wave's work.
 
-2. **Metrics are readable signals, most-important-first.** Not "the feature
+2. **Measures are readable signals, most-important-first.** Not "the feature
    works" — numbers or checkable states the loop can actually read: `billing`,
    `prod uptime`, `green on main`, `test time`; `net concept count flat-or-falling`.
-   Three to five, ranked. If a metric can't be observed, it can't steer a loop.
+   Three to five, ranked. If a measure can't be observed, it can't steer a loop.
 
 3. **The body is a loop with concrete verbs.** Give the agent a menu of real
    moves to choose among: "sand a sharp edge, automate a manual ritual, harden a

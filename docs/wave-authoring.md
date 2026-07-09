@@ -5,7 +5,42 @@ title: Wave Authoring
 
 # Wave Authoring
 
-A wave is a named agent with a goal. You author its intent and memory; it works a roadmap, dispatches workers to build each item, watches their PRs, and loops.
+A wave is a named agent with a goal. You author its intent, memory, and project bets; it works tasks, dispatches workers, watches their PRs, and loops.
+
+---
+
+## The Planning Model
+
+Use three nouns:
+
+| Noun | What it means | What it owns |
+|------|---------------|--------------|
+| **Wave** | Durable operating context | Memory, cadence, budget, chat, and project selection |
+| **Project** | Measured bet inside exactly one wave | Definition, KRs, and closure criteria |
+| **Task** | Concrete work that advances a project | One implementation step, investigation, doc, or shipped change |
+
+Keep the hierarchy shallow. Every project belongs to one wave. Projects do not
+contain projects, and projects do not own their own memory or cadence. If a
+project seems to need subprojects, split it into sibling projects, promote the
+durable operating context into a wave, or demote the pieces into tasks.
+
+Good projects are either completable behavioral improvements or standing quality
+frontiers. Individual cleanup work is a task; a recurring debt frontier can be a
+project.
+
+```text
+Product wave
+  Loopflow API project
+    Linear tasks
+  Wave Chat project
+    Linear tasks
+
+Infrastructure wave
+  Technical Architecture project
+    Linear tasks
+  Release Stability project
+    Linear tasks
+```
 
 ---
 
@@ -25,11 +60,15 @@ Wave content lives in `wave/<name>/` at the root of your repo:
 
 ```
 wave/infra/
-├── GOAL.md    # The wave's intent and loop prompt
-└── MEMORY.md  # What the agent remembers between loops
+├── GOAL.md               # The wave's intent and loop prompt
+├── MEMORY.md             # What the agent remembers between loops
+└── projects/
+    └── stability.md      # One measured bet and its KRs
 ```
 
-`GOAL.md` and `MEMORY.md` are the two files a wave authors. The roadmap itself lives in Linear, not in the repo — read and edit it with `lf op pm` (see [Roadmap](#the-roadmap)).
+`GOAL.md`, `MEMORY.md`, and project docs are the authored wave surface. Task
+tracking lives in Linear, not in the repo — read and edit tasks with `lf op pm`
+(see [Roadmap](#the-roadmap)).
 
 ### The Goal
 
@@ -68,9 +107,54 @@ lf wave s3           # the s3 (control) charter
 
 `MEMORY.md` is durable working context the wave agent writes as it goes — decisions, dead ends, what a downstream task should know. Workers inherit it as read-only context so they build with the wave's history in view; only the wave agent writes it.
 
+### Projects
+
+A project is a measured bet inside a wave. Write one file per live project under
+`wave/<wave>/projects/`. The file holds the project definition and its KRs. It
+does not hold a task list, status table, or independent memory.
+
+```markdown
+# Technical Architecture
+
+Loopflow's architecture is legible from the top down: the key data structures
+and APIs explain the system, the implementation follows that map, and obsolete
+pre-flowloop concepts do not linger as alternate design.
+
+## KRs
+
+- Top-down architecture documentation is complete, published, and centered on the key data structures and public APIs.
+- Every data structure and API in the architecture is ratified as minimally simple for its purpose.
+- The codebase, prompts, docs, and UI contain no stale pre-flowloop technical design language.
+```
+
+KRs should read as proof: observable end states that show the bet now holds.
+Avoid backlog bullets, implementation receipts, status, and issue ids. Put
+concrete work in Linear tasks.
+
+```markdown
+# Weak: task bundle pretending to be a project
+# One system
+
+## KRs
+
+- Collapse lfd/lfq into lf.
+- Retire chord/member vocabulary.
+- Unify the operating prompt.
+
+# Strong: standing quality frontier
+# Technical Architecture
+
+## KRs
+
+- Top-down architecture documentation is complete, published, and centered on the key data structures and public APIs.
+- Every data structure and API in the architecture is ratified as minimally simple for its purpose.
+- The codebase, prompts, docs, and UI contain no stale pre-flowloop technical design language.
+```
+
 ### The Roadmap
 
-The roadmap lives in Linear. There are no local roadmap files and nothing to sync — `lf op pm` reads and edits the wave's Linear project directly.
+Tasks live in Linear. There are no local task lists and nothing to sync — `lf op
+pm` reads and edits the wave's Linear project directly.
 
 Connect a wave to Linear once. `lf op pm init` creates (or links) the project and writes its id into `GOAL.md` frontmatter:
 
@@ -90,7 +174,9 @@ lf op pm update --wave infra --id 1207... --status done # close a task
 lf op pm status                                         # show linked waves
 ```
 
-Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels like it needs splitting, it does. Give it a clear finish line so a worker knows when to stop.
+Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels
+like it needs splitting, it does. Give it a clear finish line and name the
+project it advances so a worker knows when to stop.
 
 ### Goal Frontmatter
 

@@ -113,7 +113,7 @@ commands for long-term coordination.
 
 ```bash
 lf debug -c    # paste an error, watch it fix
-lf op pm show --wave designer   # print the wave's live PM tasks
+lf op pm show --wave designer   # print the wave's live Linear tasks
 lf design      # interactive design session
 lf gstack/office-hours   # run a built-in gstack skill
 lf office-hours          # same thing — bare name works when unambiguous
@@ -366,7 +366,7 @@ lf op auth linear     # connect Linear with OAuth
 lf op auth disconnect github
 ```
 
-PM tasks live in Linear. Pin a wave to its Linear PM space in `wave/<name>/GOAL.md` frontmatter — `lf op pm init` writes this for you:
+Tasks live in Linear. Pin a wave to its Linear project in `wave/<name>/GOAL.md` frontmatter — `lf op pm init` writes this for you:
 
 ```yaml
 # wave/designer/GOAL.md frontmatter
@@ -377,13 +377,13 @@ pm:
 ```bash
 lf op branches list --user @me --stale 60d   # preview stale remote branches
 lf op branches prune --user @me --stale 60d  # delete after confirmation
-lf op pm init --wave designer                # connect/create the Linear PM space
-lf op pm show --wave designer                # print the wave's live PM tasks
-lf op pm show --wave designer --project ui   # filter by local project label
-lf op pm update --wave designer --project ui --title "Add dark mode" --notes "..." # create a labeled task
-lf op pm update --wave designer --id 1207... --status done --pr "..."              # close a shipped task
-lf op pm sync --plan                         # show PM space/task/project drift
-lf op pm status                              # show linked waves and PM space names
+lf op pm init --wave designer                # connect/create the Linear project
+lf op pm show --wave designer                # group live tasks by local project
+lf op pm show --wave designer --project ui   # filter to one local project
+lf op pm task create --wave designer --project ui --title "Add dark mode" --notes "..."
+lf op pm task done --id 1207... --pr "..."   # close a shipped task
+lf op pm sync --plan                         # show Linear/task/project drift
+lf op pm status                              # show linked waves and task counts
 ```
 
 `lf op pm` reads and edits tasks directly in Linear. Local projects stay in `wave/<wave>/projects/`; Linear tasks attach to them with labels named `project:<slug>`. Issue descriptions and comments are Markdown, which Linear renders natively.

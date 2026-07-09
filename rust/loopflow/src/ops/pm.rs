@@ -829,7 +829,10 @@ async fn pm_sync_async(
     for space in &spaces {
         if !linked_project_ids.contains(&space.id) {
             diagnostics.push(PmSyncDiagnostic {
-                message: format!("PM space `{}` ({}) is not linked by any local wave", space.name, space.id),
+                message: format!(
+                    "PM space `{}` ({}) is not linked by any local wave",
+                    space.name, space.id
+                ),
             });
         }
     }
@@ -1033,7 +1036,11 @@ pub fn list_local_projects(repo: &Path, wave: &str) -> OpsResult<Vec<String>> {
     Ok(projects)
 }
 
-fn resolve_local_project(repo: &Path, wave: &str, project: Option<&str>) -> OpsResult<Option<String>> {
+fn resolve_local_project(
+    repo: &Path,
+    wave: &str,
+    project: Option<&str>,
+) -> OpsResult<Option<String>> {
     let Some(project) = project.map(str::trim).filter(|project| !project.is_empty()) else {
         return Ok(None);
     };
@@ -1340,15 +1347,9 @@ mod tests {
             pr: None,
         };
 
-        let result = apply_update(
-            "product",
-            Some("wave-chat"),
-            &ctx,
-            &options,
-            &NullProgress,
-        )
-        .await
-        .expect("update succeeds");
+        let result = apply_update("product", Some("wave-chat"), &ctx, &options, &NullProgress)
+            .await
+            .expect("update succeeds");
 
         assert!(result.created);
         let requests = requests.lock().await;

@@ -13,7 +13,7 @@ pub struct WaveCronDef {
     pub schedule: String,
 }
 
-/// The PM project a wave's roadmap lives in, from `pm.*` in GOAL.md.
+/// The Linear project a wave's tasks live in, from `pm.*` in GOAL.md.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct WavePmConfig {
     #[serde(default)]

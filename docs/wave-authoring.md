@@ -68,7 +68,7 @@ wave/infra/
 
 `GOAL.md`, `MEMORY.md`, and project docs are the authored wave surface. Task
 tracking lives in Linear, not in the repo — read and edit tasks with `lf op pm`
-(see [Roadmap](#the-roadmap)).
+(see [Linear Tasks](#linear-tasks)).
 
 ### The Goal
 
@@ -161,10 +161,11 @@ concrete work in tasks.
 - Four consecutive weekly releases complete with no manual repair.
 ```
 
-### The Roadmap
+### Linear Tasks
 
-Tasks live in Linear. There are no local task lists and nothing to sync — `lf op
-pm` reads and edits the wave's Linear project directly.
+Tasks live in Linear. There are no local task lists. `lf op pm` reads and edits
+the wave's Linear project directly, while local projects stay in
+`wave/<wave>/projects/`.
 
 Connect a wave to Linear once. `lf op pm init` creates (or links) the project and writes its id into `GOAL.md` frontmatter:
 
@@ -174,14 +175,15 @@ pm:
   linear_project: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
 ```
 
-Then read and edit the roadmap:
+Then read and edit tasks:
 
 ```bash
-lf op pm init --wave infra                              # connect/create the Linear project
-lf op pm show --wave infra                              # print the live roadmap
-lf op pm update --wave infra --title "Daemon data integrity" --notes "..."   # add a task
-lf op pm update --wave infra --id 1207... --status done # close a task
-lf op pm status                                         # show linked waves
+lf op pm init --wave infra                                             # connect/create the Linear project
+lf op pm status                                                        # show linked waves and task counts
+lf op pm show --wave infra                                             # group tasks by local project
+lf op pm show --wave infra --project stability                         # filter to one local project
+lf op pm task create --wave infra --project stability --title "Daemon data integrity"
+lf op pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 ```
 
 Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels
@@ -195,7 +197,7 @@ project it advances so a worker knows when to stop.
 | `workers` | Parallelism for dispatched work. `0` means "don't auto-dispatch" |
 | `agent` | Preferred agent harness/model |
 | `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident flowloop |
-| `pm.linear_project` | Linear project id backing the wave's roadmap (written by `lf op pm init`) |
+| `pm.linear_project` | Linear project id backing the wave's tasks (written by `lf op pm init`) |
 
 The resident flowloop reads `crons:` directly from this frontmatter and opens a system pass when a schedule comes due; edits land without a restart. See [Crons](waves.md#crons).
 
@@ -209,7 +211,7 @@ The resident flowloop reads `crons:` directly from this frontmatter and opens a 
 lf design: plan infrastructure hardening for the daemon
 ```
 
-The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, `lf wave <name>` runs them and Loopflow picks them up; connect the roadmap with `lf op pm init` and add tasks with `lf op pm update`.
+The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, `lf wave <name>` runs them and Loopflow picks them up; connect Linear with `lf op pm init` and add tasks with `lf op pm task create`.
 
 **Write by hand.** Sometimes an editor is faster. Create the files, push, done.
 
@@ -274,7 +276,7 @@ A `wave/billing/` directory for a billing rewrite. **`GOAL.md`** sets the intent
 - Invoices generate correctly for all plan types
 - Legacy endpoints return the same responses during migration
 
-The **Linear roadmap** holds the tasks, each scoped to one PR:
+The backing **Linear project** holds the tasks, each scoped to one PR:
 
 ```
 Usage events       → Event capture and storage
@@ -284,7 +286,7 @@ Migration shim     → Legacy API compatibility layer
 Cleanup            → Remove old billing code
 ```
 
-The wave agent reads the roadmap with `lf op pm show`, picks the highest-priority task, dispatches a worker per task, and loops — folding each shipped PR into memory and closing the task with `lf op pm update --status done` — until the roadmap is empty.
+The wave agent reads tasks with `lf op pm show`, picks the highest-priority task, dispatches a worker per task, and loops — folding each shipped PR into memory and closing the task with `lf op pm task done` — until no open tasks remain.
 
 ---
 

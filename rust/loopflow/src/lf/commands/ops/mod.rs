@@ -541,7 +541,7 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                     "already linked"
                 };
                 println!(
-                    "{}: PM space {} ({state})",
+                    "{}: Linear project {} ({state})",
                     result.wave, result.project_id
                 );
             }
@@ -775,8 +775,7 @@ fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {
         return;
     }
 
-    let mut grouped: std::collections::BTreeMap<String, Vec<_>> =
-        std::collections::BTreeMap::new();
+    let mut grouped: std::collections::BTreeMap<String, Vec<_>> = std::collections::BTreeMap::new();
     let mut unassigned = Vec::new();
     for item in &result.items {
         let projects = crate::ops::pm::item_local_projects(item);

@@ -726,7 +726,7 @@ pub enum PmTaskCommand {
         #[arg(long = "pr")]
         pr: Option<String>,
     },
-    /// Move a task into a wave PM space and attach a local project label
+    /// Move a task into a wave's Linear project and attach a local project label
     Move {
         /// Existing task id to move
         #[arg(long = "id")]
@@ -738,7 +738,7 @@ pub enum PmTaskCommand {
         #[arg(short = 'p', long = "project")]
         project: String,
     },
-    /// Import tasks from one wave's PM space into another wave/project
+    /// Import tasks from one wave's Linear project into another wave/project
     Import {
         /// Source wave
         #[arg(long = "from-wave")]
@@ -960,9 +960,10 @@ mod tests {
         let cli =
             Cli::try_parse_from(["lf", "op", "pm", "show", "--wave", "goals"]).expect("parse");
         let Some(Commands::Op {
-            op: OpsCommand::Pm {
-                cmd: PmCommand::Show { wave, project },
-            },
+            op:
+                OpsCommand::Pm {
+                    cmd: PmCommand::Show { wave, project },
+                },
         }) = cli.command
         else {
             panic!("expected pm show command");

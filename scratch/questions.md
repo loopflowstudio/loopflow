@@ -39,9 +39,8 @@ broken today. Left as-is because turning the no-op into an error is a behavior
 change, not a reduction. Assumption: a future pass makes `--plan` an
 unsupported flow op rather than a silent success.
 
-## Untested: the two new exec-door denials
+## Resolved: exec-door denials covered
 
-`wave_exec_verdict` (`src/wave/server.rs`) grew `Deny` arms for `auth`,
-`sync-skills`, and `task`. Only `auth` is covered by
-`wave_exec_policy_rejects_dangerous_verbs`. Adding `sync-skills` and `task` to
-that list is one line each; skipped here because this pass only removes code.
+`wave_exec_policy_rejects_dangerous_verbs` and
+`wave_exec_policy_names_the_rejected_verb` now cover both `task` and hidden
+`sync-skills`, matching the `wave_exec_verdict` deny arms.

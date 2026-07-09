@@ -9,7 +9,8 @@ lf wt list
 lf wt create next-thing
 lf commit -m "message"
 lf release run patch
-lf pm show --wave designer
+lf pm show --wave systems
+lf pm task create --wave systems --project ops --title "Tighten the gate"
 ```
 
 Flow operation items use the same command payloads:
@@ -19,29 +20,45 @@ Flow operation items use the same command payloads:
 - op: pr land --create-pr
 ```
 
-Validation run:
+Validation:
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
-uv run python scripts/test.py
+cargo test
+swift test --package-path swift -Xswiftc -gnone
+uv run pytest python/tests/
 uv run python scripts/test.py --all
 ```
 
-The full matrix passed through Python, Rust, website, Swift package, and e2e smoke. The Loopflow UI Xcode test built and launched, then the UI runner sat idle at 0% CPU in this headless session; I interrupted it and killed the orphaned runner.
+Current local result: Python, Rust, website, Swift package, and e2e passed. The
+Loopflow UI Xcode job builds and passes app/unit tests here, but the
+`LoopflowUITests-Runner` exits before bootstrapping in this headless session.
 
 ## Intent
 
-Remove the `lf op` drawer from the human command API and make the common mechanical commands first-class. Humans, builtin flows, webhook execs, docs, prompts, and smoke tests now use the same command grammar.
+Remove the `lf op` drawer from the human command API and make common mechanical
+commands first-class. Humans, builtin flows, webhook execs, docs, prompts,
+Swift-launched session commands, and smoke tests now use one command grammar.
 
 ## Assumptions
 
-`op:` remains the flow-step marker; only its payload changes to the new CLI grammar. Historical release notes keep old `lf op` mentions because they describe old shipped behavior. The implementation currently keeps several plumbing verbs as top-level commands (`next`, `advance`, `branches`, `sync`, `doctor`, `sync-skills`, `shell`) even though the scratch design suggests some should die; reviewers should confirm that product choice.
+`op:` remains the flow-step marker; only its payload changes to the promoted CLI
+grammar. `sync-skills` remains hidden instead of documented because the install
+path still needs a direct non-interactive sync command. Historical release
+notes and recorded fixtures keep old `lf op` text because they are shipped
+records or captured data.
 
 ## Key decisions
 
-Bare `lf pr` reports status, while `lf pr open`, `lf pr submit`, and `lf pr land` carry the mutating lifecycle. PR operations keep the existing conflict-recovery behavior. Webhook-planned commands now have a regression test that catches stale argv falling through to external subcommands.
+Bare `lf pr` reports status, while `lf pr open`, `lf pr submit`, and
+`lf pr land` carry mutating lifecycle actions. Main's newer Linear task/project
+surface was preserved under `lf pm` during the rebase. The retired human CLI
+verbs (`next`, `branches`, `doctor`, `shell`, `cp`, `push`, `sync`, and queue
+reconcile) are gone from clap; machine callers use library paths or validated
+new argv.
 
 ## Not included
 
-No `lf op` compatibility shim, no old flow-payload migration, and no edits to historical release artifacts.
+No `lf op` compatibility shim, no old flow-payload migration, and no edits to
+historical release artifacts. The branch was rebased locally and not pushed.

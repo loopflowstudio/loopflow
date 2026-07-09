@@ -6,10 +6,12 @@ enum LocalShellCommandRunner {
     static let run: WaveService.ShellCommandRunner = { args in
         let cmd = args.joined(separator: " ")
         LoggingService.lfd("runShellCommand: \(cmd)")
+        let environment = await GUIProcessEnvironment.shared.resolved(ProcessInfo.processInfo.environment)
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-l", "-c", cmd]
+        process.environment = environment
 
         let pipe = Pipe()
         process.standardOutput = pipe

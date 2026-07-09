@@ -3,23 +3,26 @@
 // GUI-launched apps inherit a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that
 // doesn't include Homebrew, ~/.local/bin, or ~/.cargo/bin. Anything Loopflow
 // shells out to — tmux, git, the bundled lfd, the vendor agent binaries —
-// inherits that, so execvp can't find user-installed binaries. Pipe child envs
-// through `enrichedPath` so they resolve the same binaries the user's shell
-// would.
+// inherits that, so execvp can't find user-installed binaries. Child launchers
+// await `resolved(_:)` so they see the same binaries the user's shell would.
 //
-// PATH comes from the user's interactive login shell, asked once and cached. A
-// fixed candidate list can't keep up with version managers: nvm, pyenv, and
-// rbenv all install into version-pinned directories that only exist on PATH
-// because an rc file put them there. `zsh -lc` won't do — a non-interactive
-// login shell reads .zprofile and skips .zshrc, which is where nvm lives. The
-// shell must be interactive (-i) for its PATH to be the one the user sees.
+// PATH starts with a fixed fallback so the app can paint immediately, then
+// resolves from the user's interactive login shell in the background. Child
+// launchers await that one cached resolution before spawning. A fixed candidate
+// list can't keep up with version managers: nvm, pyenv, and rbenv all install
+// into version-pinned directories that only exist on PATH because an rc file put
+// them there. `zsh -lc` won't do — a non-interactive login shell reads .zprofile
+// and skips .zshrc, which is where nvm lives. The shell must be interactive (-i)
+// for its PATH to be the one the user sees.
 //
 // The candidate list survives as a fallback for when the shell can't be asked:
 // it errors, it hangs, or it prints a PATH we can't parse.
 
 import Foundation
 
-enum GUIProcessEnvironment {
+actor GUIProcessEnvironment {
+    static let shared = GUIProcessEnvironment()
+
     /// How long the login shell gets to print its PATH before we give up on it.
     /// Slow rc files are common; hanging the GUI on one is not acceptable.
     private static let shellTimeout: TimeInterval = 3
@@ -28,8 +31,19 @@ enum GUIProcessEnvironment {
     private static let beginMarker = "__LF_PATH_BEGIN__"
     private static let endMarker = "__LF_PATH_END__"
 
-    /// Directories the user's shell would have if it could be asked. Ordered
-    /// most-specific first; entries that don't exist are harmless on PATH.
+    private let readLoginShellPath: @Sendable () -> String?
+    private var resolutionTask: Task<[String], Never>?
+
+    init(
+        readLoginShellPath: @escaping @Sendable () -> String? = {
+            GUIProcessEnvironment.loginShellPath()
+        }
+    ) {
+        self.readLoginShellPath = readLoginShellPath
+    }
+
+    /// Directories most GUI-launched tools need even before shell discovery.
+    /// Entries that don't exist are harmless on PATH.
     private static var fallbackCandidates: [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return [
@@ -42,29 +56,59 @@ enum GUIProcessEnvironment {
         ]
     }
 
-    /// Asked once per process launch. `static let` gives us lazy,
-    /// thread-safe-once initialization for free.
-    private static let loginShellComponents: [String] = {
-        guard let path = loginShellPath() else { return [] }
-        return path.split(separator: ":").map(String.init)
-    }()
+    static func fallbackPath(from existing: String?) -> String {
+        mergePath(existing, prepending: fallbackCandidates)
+    }
 
-    static func enrichedPath(from existing: String?) -> String {
+    static func fallback(_ env: [String: String]) -> [String: String] {
+        var copy = env
+        copy["PATH"] = fallbackPath(from: env["PATH"])
+        return copy
+    }
+
+    /// Start shell discovery without waiting for it.
+    func prepare() {
+        _ = makeResolutionTask()
+    }
+
+    func resolvedPath(from existing: String?) async -> String {
+        let shellComponents = await makeResolutionTask().value
+        return Self.mergePath(
+            existing,
+            prepending: shellComponents + Self.fallbackCandidates
+        )
+    }
+
+    func resolved(_ env: [String: String]) async -> [String: String] {
+        var copy = env
+        copy["PATH"] = await resolvedPath(from: env["PATH"])
+        return copy
+    }
+
+    private func makeResolutionTask() -> Task<[String], Never> {
+        if let resolutionTask {
+            return resolutionTask
+        }
+
+        let readLoginShellPath = self.readLoginShellPath
+        let task: Task<[String], Never> = Task.detached(priority: .userInitiated) {
+            guard let path = readLoginShellPath() else { return [String]() }
+            return path.split(separator: ":").map(String.init)
+        }
+        resolutionTask = task
+        return task
+    }
+
+    private static func mergePath(_ existing: String?, prepending candidates: [String]) -> String {
         let existingComponents = existing?.split(separator: ":").map(String.init) ?? []
 
         var seen = Set(existingComponents)
         var prepended: [String] = []
-        for dir in loginShellComponents + fallbackCandidates where !seen.contains(dir) {
+        for dir in candidates where !seen.contains(dir) {
             prepended.append(dir)
             seen.insert(dir)
         }
         return (prepended + existingComponents).joined(separator: ":")
-    }
-
-    static func enriched(_ env: [String: String]) -> [String: String] {
-        var copy = env
-        copy["PATH"] = enrichedPath(from: env["PATH"])
-        return copy
     }
 
     /// Run the user's shell as an interactive login shell and read back its
@@ -76,7 +120,12 @@ enum GUIProcessEnvironment {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-ilc", "printf '%s%s%s' '\(beginMarker)' \"$PATH\" '\(endMarker)'"]
+        process.arguments = [
+            "-ilc",
+            "/usr/bin/printf '%s' '\(beginMarker)'; "
+                + "/usr/bin/printenv PATH; "
+                + "/usr/bin/printf '%s' '\(endMarker)'",
+        ]
 
         // A pipe would have to be drained concurrently with the timeout wait;
         // reading it synchronously can block forever before the timeout fires.
@@ -139,6 +188,7 @@ enum GUIProcessEnvironment {
         else { return nil }
 
         let path = String(output[begin.upperBound..<end.lowerBound])
+            .trimmingCharacters(in: .newlines)
         return path.isEmpty ? nil : path
     }
 }

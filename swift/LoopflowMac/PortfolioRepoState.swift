@@ -172,10 +172,6 @@ final class PortfolioRepoState {
             .replacingOccurrences(of: ":", with: "-")
     }
 
-    nonisolated static func waveAgentSessionExists(repoPath: String, waveName: String) -> Bool {
-        LocalWaveAgentLauncher.sessionExists(repoPath: repoPath, waveName: waveName)
-    }
-
     private nonisolated static func sanitizeWavePathComponent(_ value: String) -> String {
         var sanitized = ""
         var pendingDash = false

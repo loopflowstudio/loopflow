@@ -29,7 +29,11 @@ enum WaveLaunchError: LocalizedError, Equatable {
 enum LocalWaveAgentLauncher {
     private static let resolutionCache = ResolvedLfCache()
 
-    static func sessionExists(repoPath: String, waveName: String) -> Bool {
+    private static func sessionExists(
+        repoPath: String,
+        waveName: String,
+        environment: [String: String]
+    ) -> Bool {
         runCommandSync(
             [
                 "tmux",
@@ -37,7 +41,8 @@ enum LocalWaveAgentLauncher {
                 "-t",
                 PortfolioRepoState.waveAgentSessionName(repoPath: repoPath, waveName: waveName),
             ],
-            logFailure: false
+            logFailure: false,
+            environment: environment
         ) != nil
     }
 
@@ -49,12 +54,27 @@ enum LocalWaveAgentLauncher {
     /// `repoPath` resolves once up front and that one path feeds everything:
     /// the session name, the endpoint guard, the launch cwd, and the dev-tree
     /// lf candidate. Guard and discovery read the same file by construction.
-    static func launchWave(repoPath: String, waveName: String) throws {
+    static func launchWave(repoPath: String, waveName: String) async throws {
+        let environment = await GUIProcessEnvironment.shared.resolved(ProcessInfo.processInfo.environment)
+        try await Task.detached(priority: .userInitiated) {
+            try launchWave(repoPath: repoPath, waveName: waveName, environment: environment)
+        }.value
+    }
+
+    private static func launchWave(
+        repoPath: String,
+        waveName: String,
+        environment: [String: String]
+    ) throws {
         let origin = WaveOrigin.resolve(repoPath)
         let sessionName = PortfolioRepoState.waveAgentSessionName(repoPath: origin, waveName: waveName)
         if let reason = launchBlockReason(
             sessionName: sessionName,
-            sessionExists: sessionExists(repoPath: origin, waveName: waveName),
+            sessionExists: sessionExists(
+                repoPath: origin,
+                waveName: waveName,
+                environment: environment
+            ),
             endpoint: liveEndpoint(
                 recorded: WaveEndpoint.read(repoPath: origin, waveName: waveName),
                 waveName: waveName
@@ -62,14 +82,18 @@ enum LocalWaveAgentLauncher {
         ) {
             throw WaveLaunchError.alreadyRunning(reason)
         }
-        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        let lfPath = try resolveWaveCapableLf(
+            originRepo: origin,
+            pathEnv: environment["PATH"] ?? "",
+            probe: { hasWaveCommand(lfPath: $0, environment: environment) }
+        )
         let args = waveLaunchCommand(
             lfPath: lfPath,
             sessionName: sessionName,
             repoPath: origin,
             waveName: waveName
         )
-        try runChecked(args, cwd: origin)
+        try runChecked(args, cwd: origin, environment: environment)
     }
 
     /// Why a launch must not happen, or nil when the way is clear. `endpoint`
@@ -176,9 +200,9 @@ enum LocalWaveAgentLauncher {
     static func resolveWaveCapableLf(
         originRepo: String,
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
-        pathEnv: String = GUIProcessEnvironment.enrichedPath(from: ProcessInfo.processInfo.environment["PATH"]),
+        pathEnv: String,
         isExecutableFile: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
-        probe: (String) -> Bool = hasWaveCommand,
+        probe: (String) -> Bool,
         useCache: Bool = true
     ) throws -> String {
         let cacheKey = "\(originRepo)|\(bundled?.path ?? "")|\(pathEnv)"
@@ -212,21 +236,30 @@ enum LocalWaveAgentLauncher {
     }
 
     /// `lf help wave` exits 0 only when this build knows the subcommand.
-    static func hasWaveCommand(lfPath: String) -> Bool {
-        run([lfPath, "help", "wave"])?.status == 0
+    private static func hasWaveCommand(
+        lfPath: String,
+        environment: [String: String]
+    ) -> Bool {
+        run([lfPath, "help", "wave"], environment: environment)?.status == 0
     }
 
-    static func tmuxSessionNames() -> Set<String> {
-        guard let result = run(["tmux", "list-sessions", "-F", "#S"]) else {
-            return []
-        }
-        guard result.status == 0 else {
-            return []
-        }
-        return Set(result.stdout
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty })
+    static func tmuxSessionNames() async -> Set<String> {
+        let environment = await GUIProcessEnvironment.shared.resolved(ProcessInfo.processInfo.environment)
+        return await Task.detached(priority: .userInitiated) {
+            guard let result = run(
+                ["tmux", "list-sessions", "-F", "#S"],
+                environment: environment
+            ) else {
+                return []
+            }
+            guard result.status == 0 else {
+                return []
+            }
+            return Set(result.stdout
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty })
+        }.value
     }
 
     /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its
@@ -235,10 +268,25 @@ enum LocalWaveAgentLauncher {
     /// center. Resolves the same wave-capable `lf` the launcher trusts (a build
     /// old enough to lack `lf wave` also lacks these verbs), then execs it with
     /// the enriched GUI PATH. Throws on a spawn failure or a non-zero exit.
-    static func queryLf(_ subargs: [String], cwd: String?) throws -> String {
+    static func queryLf(_ subargs: [String], cwd: String?) async throws -> String {
+        let environment = await GUIProcessEnvironment.shared.resolved(ProcessInfo.processInfo.environment)
+        return try await Task.detached(priority: .userInitiated) {
+            try queryLf(subargs, cwd: cwd, environment: environment)
+        }.value
+    }
+
+    private static func queryLf(
+        _ subargs: [String],
+        cwd: String?,
+        environment: [String: String]
+    ) throws -> String {
         let origin = cwd.map(WaveOrigin.resolve) ?? FileManager.default.currentDirectoryPath
-        let lfPath = try resolveWaveCapableLf(originRepo: origin)
-        guard let result = run([lfPath] + subargs, cwd: cwd) else {
+        let lfPath = try resolveWaveCapableLf(
+            originRepo: origin,
+            pathEnv: environment["PATH"] ?? "",
+            probe: { hasWaveCommand(lfPath: $0, environment: environment) }
+        )
+        guard let result = run([lfPath] + subargs, cwd: cwd, environment: environment) else {
             throw WaveLaunchError.launchFailed("Failed to spawn: lf \(subargs.joined(separator: " "))")
         }
         guard result.status == 0 else {
@@ -252,8 +300,12 @@ enum LocalWaveAgentLauncher {
 
     // MARK: - Process plumbing
 
-    private static func runChecked(_ args: [String], cwd: String) throws {
-        let result = run(args, cwd: cwd)
+    private static func runChecked(
+        _ args: [String],
+        cwd: String,
+        environment: [String: String]
+    ) throws {
+        let result = run(args, cwd: cwd, environment: environment)
         guard let result else {
             throw WaveLaunchError.launchFailed("Failed to spawn: \(args.joined(separator: " "))")
         }
@@ -268,9 +320,10 @@ enum LocalWaveAgentLauncher {
     private static func runCommandSync(
         _ args: [String],
         cwd: String? = nil,
-        logFailure: Bool = true
+        logFailure: Bool = true,
+        environment: [String: String]
     ) -> String? {
-        guard let result = run(args, cwd: cwd) else { return nil }
+        guard let result = run(args, cwd: cwd, environment: environment) else { return nil }
         guard result.status == 0 else {
             guard logFailure else { return nil }
             LoggingService.lfd(
@@ -283,7 +336,8 @@ enum LocalWaveAgentLauncher {
 
     private static func run(
         _ args: [String],
-        cwd: String? = nil
+        cwd: String? = nil,
+        environment: [String: String]
     ) -> (status: Int32, stdout: String, stderr: String)? {
         let process = Process()
         let stdout = Pipe()
@@ -292,7 +346,7 @@ enum LocalWaveAgentLauncher {
         process.arguments = args
         process.standardOutput = stdout
         process.standardError = stderr
-        process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
+        process.environment = environment
         if let cwd {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
         }

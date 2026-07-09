@@ -449,6 +449,7 @@ mod tests {
             cache_read_tokens: None,
             cost_usd: None,
             duration_secs: None,
+            provider: None,
         }
     }
 

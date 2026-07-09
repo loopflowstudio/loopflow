@@ -4,7 +4,8 @@ use crate::lfd::types::{
     RepoId, Run, RunStackStatus, RunStatus, Summary, Wave, WaveStatus,
 };
 use crate::lfdb::{
-    ForkRun, ForkRunStatus, RepoProviderUsage, StoreError, StoreResult, WaveProviderUsage,
+    ForkRun, ForkRunStatus, ProviderUsage, RepoProviderUsage, StoreError, StoreResult,
+    WaveProviderUsage,
 };
 
 // -- Row helpers --------------------------------------------------------------
@@ -223,25 +224,38 @@ pub fn map_chat_memory_block_row(row: &rusqlite::Row<'_>) -> StoreResult<ChatMem
     })
 }
 
-/// SELECT wave, provider, SUM(input_tokens), SUM(output_tokens), SUM(cache_read_tokens)
+/// SELECT wave, provider, SUM(input), SUM(output), SUM(cache_read), SUM(cost_usd)
 pub fn map_wave_provider_usage_row(row: &rusqlite::Row<'_>) -> StoreResult<WaveProviderUsage> {
     Ok(WaveProviderUsage {
-        wave: LfdId::from_raw(text(row, 0)?),
-        provider: text(row, 1)?,
+        wave: opt_text(row, 0)?,
+        provider: opt_text(row, 1)?,
         input_tokens: bigint(row, 2)?.max(0) as u64,
         output_tokens: bigint(row, 3)?.max(0) as u64,
         cache_read_tokens: bigint(row, 4)?.max(0) as u64,
+        cost_usd: row.get(5)?,
     })
 }
 
-/// SELECT repo, provider, SUM(input_tokens), SUM(output_tokens), SUM(cache_read_tokens)
+/// SELECT repo, provider, SUM(input), SUM(output), SUM(cache_read), SUM(cost_usd)
 pub fn map_repo_provider_usage_row(row: &rusqlite::Row<'_>) -> StoreResult<RepoProviderUsage> {
     Ok(RepoProviderUsage {
         repo: opt_text(row, 0)?,
-        provider: text(row, 1)?,
+        provider: opt_text(row, 1)?,
         input_tokens: bigint(row, 2)?.max(0) as u64,
         output_tokens: bigint(row, 3)?.max(0) as u64,
         cache_read_tokens: bigint(row, 4)?.max(0) as u64,
+        cost_usd: row.get(5)?,
+    })
+}
+
+/// SELECT provider, SUM(input), SUM(output), SUM(cache_read), SUM(cost_usd)
+pub fn map_provider_usage_row(row: &rusqlite::Row<'_>) -> StoreResult<ProviderUsage> {
+    Ok(ProviderUsage {
+        provider: opt_text(row, 0)?,
+        input_tokens: bigint(row, 1)?.max(0) as u64,
+        output_tokens: bigint(row, 2)?.max(0) as u64,
+        cache_read_tokens: bigint(row, 3)?.max(0) as u64,
+        cost_usd: row.get(4)?,
     })
 }
 

@@ -1,6 +1,5 @@
 pub mod attention;
 pub mod auth;
-pub(crate) mod client;
 pub mod config;
 pub mod executor;
 pub mod github;

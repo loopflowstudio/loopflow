@@ -4,7 +4,6 @@ use time::OffsetDateTime;
 
 use crate::lfd::queue::QueueRunView;
 use crate::lfd::types::{AttentionItem, LivePullRequestState, Run, RunStatus, Session};
-use crate::lfdb::TokenUsageReport;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -393,82 +392,6 @@ pub struct WorktreeDto {
     pub prunable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wave_id: Option<String>,
-}
-
-/// Token usage summed for one (repo, provider) pair. `repo` is Optional
-/// because usage rows recorded before the repo dimension existed carry none.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RepoProviderUsageDto {
-    pub repo: Option<String>,
-    pub provider: String,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_tokens: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct WaveProviderUsageDto {
-    pub wave_id: String,
-    pub provider: String,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_tokens: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProviderUsageDto {
-    pub provider: String,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_tokens: u64,
-}
-
-/// Aggregated token usage across the whole store: per (repo, provider), per
-/// (wave, provider), and per-provider rollups.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UsageReportDto {
-    pub object: String,
-    pub by_repo_provider: Vec<RepoProviderUsageDto>,
-    pub by_wave_provider: Vec<WaveProviderUsageDto>,
-    pub by_provider: Vec<ProviderUsageDto>,
-}
-
-pub fn usage_report_dto(report: TokenUsageReport) -> UsageReportDto {
-    UsageReportDto {
-        object: "usage_report".to_string(),
-        by_repo_provider: report
-            .by_repo_provider
-            .into_iter()
-            .map(|row| RepoProviderUsageDto {
-                repo: row.repo,
-                provider: row.provider,
-                input_tokens: row.input_tokens,
-                output_tokens: row.output_tokens,
-                cache_read_tokens: row.cache_read_tokens,
-            })
-            .collect(),
-        by_wave_provider: report
-            .by_wave_provider
-            .into_iter()
-            .map(|row| WaveProviderUsageDto {
-                wave_id: row.wave.to_string(),
-                provider: row.provider,
-                input_tokens: row.input_tokens,
-                output_tokens: row.output_tokens,
-                cache_read_tokens: row.cache_read_tokens,
-            })
-            .collect(),
-        by_provider: report
-            .by_provider
-            .into_iter()
-            .map(|row| ProviderUsageDto {
-                provider: row.provider,
-                input_tokens: row.input_tokens,
-                output_tokens: row.output_tokens,
-                cache_read_tokens: row.cache_read_tokens,
-            })
-            .collect(),
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]

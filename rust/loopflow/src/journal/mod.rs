@@ -60,6 +60,7 @@ struct PendingUsage {
     cache_read_tokens: u64,
     cost_usd: Option<f64>,
     duration_secs: Option<f64>,
+    provider: Option<&'static str>,
     seen: bool,
 }
 
@@ -71,6 +72,7 @@ impl PendingUsage {
             cache_read_tokens: 0,
             cost_usd: None,
             duration_secs: None,
+            provider: None,
             seen: false,
         }
     }
@@ -101,6 +103,14 @@ pub fn record_result(cost_usd: Option<f64>, duration_secs: Option<f64>) {
             };
         }
         usage.seen = true;
+    });
+}
+
+/// Name the harness the current run is spending tokens through. Recorded on
+/// its own — a launch that reports no usage should not materialize a row.
+pub fn record_provider(provider: &'static str) {
+    PENDING_USAGE.with(|cell| {
+        cell.borrow_mut().provider = Some(provider);
     });
 }
 
@@ -306,6 +316,7 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
         cache_read_tokens: usage.map(|u| u.cache_read_tokens as i64),
         cost_usd: usage.and_then(|u| u.cost_usd),
         duration_secs: usage.and_then(|u| u.duration_secs),
+        provider: usage.and_then(|u| u.provider).map(str::to_string),
     };
 
     match open_ledger() {

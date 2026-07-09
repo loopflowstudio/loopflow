@@ -248,7 +248,7 @@ pub enum Commands {
         #[arg(long = "max-turns")]
         max_turns: Option<u32>,
     },
-    /// Show token usage by repo and provider (from a running lfd)
+    /// Show token usage and cost by repo and provider (from the local ledger)
     Usage,
     /// List every wave in the registry (running and stopped), marking which
     /// have a live server. Local-only query over the shared ledger.

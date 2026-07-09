@@ -230,6 +230,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "055_run_events_step_index_repair",
         sql: include_str!("migrations/055_run_events_step_index_repair.sql"),
     },
+    Migration {
+        version: "056_run_events_provider",
+        sql: include_str!("migrations/056_run_events_provider.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the

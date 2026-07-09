@@ -46,18 +46,27 @@ structure the model proposes.
   snapshot+tail); `MEMORY.md` is the only thing that crosses land/branch/machine.
 
 - **`run_events` is the one home for token and cost evidence.** The journal
-  already writes input/output/cache/cost/duration onto `run_events` rows at
-  skill boundaries and at terminal run events. `run_token_usage` is a second,
-  never-fed table: its only callers are in `#[cfg(test)] mod tests`, so
-  `lf usage` and `GET /v0/usage` aggregate an always-empty table and print
-  "No token usage recorded yet." forever. Delete it and reroute `lf usage` at
-  `run_events`; do not "wire it up".
-- **Wiring `run_token_usage` would silently lose tokens.** Its `run_id TEXT
-  PRIMARY KEY` + `ON CONFLICT DO UPDATE SET input_tokens = excluded.…`
-  overwrites rather than accumulates, but a `run_id` is shared by a run and
+  writes input/output/cache/cost/duration onto `run_events` rows at skill
+  boundaries and at terminal run events, and `056_run_events_provider` added
+  the provider dimension it lacked. `run_token_usage` was a second table no
+  production code ever wrote to — its only callers lived in `#[cfg(test)] mod
+  tests`, so `lf usage` aggregated an always-empty table and printed "No token
+  usage recorded yet." forever. Dropped; `lf usage` now reads the ledger.
+- **Wiring `run_token_usage` would have silently lost tokens.** Its `run_id
+  TEXT PRIMARY KEY` + `ON CONFLICT DO UPDATE SET input_tokens = excluded.…`
+  overwrote rather than accumulated, but a `run_id` is shared by a run and
   every nested `lf` it spawns (`047_run_events.sql` says so: "several writers
-  may share a run_id"). 86 of 928 recorded `run_id`s already carry more than
-  one terminal run event. Last writer would win.
+  may share a run_id"). 86 of 928 recorded `run_id`s carry more than one
+  terminal run event. Last writer would have won. The `run_events` aggregate
+  sums terminal rows instead, which is additive across those processes.
+- **Aggregate only terminal run rows.** Skill-boundary rows carry a
+  *cumulative* snapshot of the run so far, so `SUM()` over every row
+  double-counts once per skill. Filter `node='run' AND event IN
+  ('completed','errored','escalated') AND input_tokens IS NOT NULL`.
+- **`lf usage` reads the ledger directly, like `lf runs` and `lf trace`.** It
+  used to fetch `GET /v0/usage` from a running `lfd` — the sole consumer of
+  the whole `lfd::client` module, which died with it. Local-only data answered
+  by a local-only read; no daemon required.
 
 ## Constraints
 

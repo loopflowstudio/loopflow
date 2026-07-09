@@ -912,7 +912,9 @@ def _install_dev_app() -> None:
     (app_dir / "MacOS").mkdir(parents=True, exist_ok=True)
     (app_dir / "Resources").mkdir(parents=True, exist_ok=True)
 
-    shutil.copy(SWIFT_DIR / ".build" / "debug" / "LoopflowMac", app_dir / "MacOS")
+    # SwiftPM names the product LoopflowMac; the bundle's CFBundleExecutable is
+    # Loopflow. Launch Services resolves the plist name, so copy under that.
+    shutil.copy(SWIFT_DIR / ".build" / "debug" / "LoopflowMac", app_dir / "MacOS" / "Loopflow")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     _apply_dev_identity(app_dir / "Info.plist")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Loopflow.sdef", app_dir / "Resources")

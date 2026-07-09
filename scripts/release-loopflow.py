@@ -171,7 +171,9 @@ def release() -> int:
     (app_dir / "Resources").mkdir(parents=True)
 
     build_dir = SWIFT_DIR / ".build" / "release"
-    shutil.copy(build_dir / "Loopflow", app_dir / "MacOS")
+    # SwiftPM names the product LoopflowMac; the bundle's CFBundleExecutable is
+    # Loopflow. Launch Services resolves the plist name, so copy under that.
+    shutil.copy(build_dir / "LoopflowMac", app_dir / "MacOS" / "Loopflow")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     stamp_bundle_version(app_dir / "Info.plist", version)
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Loopflow.sdef", app_dir / "Resources")

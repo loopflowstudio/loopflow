@@ -481,7 +481,7 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: ReleaseCommand,
     },
-    /// Roadmap in Linear (show, update, init, status)
+    /// Linear tasks for waves and local projects
     Pm {
         #[command(subcommand)]
         cmd: PmCommand,
@@ -587,7 +587,7 @@ pub struct BranchFilterArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum PmCommand {
-    /// Connect (or create) the wave's PM space; write linear_project to GOAL.md
+    /// Connect (or create) the wave's Linear project; write linear_project to GOAL.md
     Init {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
@@ -598,7 +598,7 @@ pub enum PmCommand {
         #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
         all: bool,
     },
-    /// Print the wave's live PM tasks
+    /// Print the wave's live Linear tasks
     Show {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
@@ -607,7 +607,7 @@ pub enum PmCommand {
         #[arg(short = 'p', long = "project")]
         project: Option<String>,
     },
-    /// Create, edit, or close a PM task
+    /// Create, edit, or close a Linear task
     Update {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
@@ -645,6 +645,15 @@ pub enum PmCommand {
         #[arg(long = "plan")]
         plan: bool,
     },
+    /// Rename the Linear project backing a wave
+    Rename {
+        /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Linear project title
+        #[arg(long = "title")]
+        title: String,
+    },
     /// PM-space operations
     Space {
         #[command(subcommand)]
@@ -659,12 +668,12 @@ pub enum PmCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PmSpaceCommand {
-    /// Rename the wave's PM space
+    /// Rename the Linear project backing a wave
     Rename {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// PM space title
+        /// Linear project title
         #[arg(long = "title")]
         title: String,
     },
@@ -672,6 +681,51 @@ pub enum PmSpaceCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PmTaskCommand {
+    /// Create a Linear task
+    Create {
+        /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Local project slug from wave/<wave>/projects/
+        #[arg(short = 'p', long = "project")]
+        project: Option<String>,
+        /// Task title
+        #[arg(long = "title")]
+        title: String,
+        /// Task notes/description
+        #[arg(long = "notes")]
+        notes: Option<String>,
+    },
+    /// Update a Linear task
+    Update {
+        /// Existing task id to edit
+        #[arg(long = "id")]
+        id: String,
+        /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Local project slug from wave/<wave>/projects/
+        #[arg(short = 'p', long = "project")]
+        project: Option<String>,
+        /// Task title
+        #[arg(long = "title")]
+        title: Option<String>,
+        /// Task notes/description
+        #[arg(long = "notes")]
+        notes: Option<String>,
+    },
+    /// Close a Linear task and optionally link the shipped PR
+    Done {
+        /// Existing task id to close
+        #[arg(long = "id")]
+        id: String,
+        /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// PR URL to attach as a comment
+        #[arg(long = "pr")]
+        pr: Option<String>,
+    },
     /// Move a task into a wave PM space and attach a local project label
     Move {
         /// Existing task id to move

@@ -84,11 +84,14 @@ pub struct PmWaveStatus {
     pub project_name: Option<String>,
     pub open: usize,
     pub total: usize,
+    pub unassigned: usize,
+    pub open_by_project: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmStatusResult {
     pub waves: Vec<PmWaveStatus>,
+    pub stranded_projects: Vec<PmProject>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -675,6 +678,15 @@ async fn pm_status_async(
     options: &PmStatusOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmStatusResult> {
+    let all_waves = list_local_waves(repo)?;
+    let mut linked_project_ids = BTreeSet::new();
+    for wave in &all_waves {
+        let provider = resolve_provider(repo, wave)?;
+        if let Some(project) = read_project(repo, wave, provider) {
+            linked_project_ids.insert(project);
+        }
+    }
+
     let waves = if let Some(wave) = options.wave.as_deref() {
         vec![resolve_wave_name(repo, Some(wave))
             .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?]
@@ -683,6 +695,7 @@ async fn pm_status_async(
     };
 
     let mut results = Vec::new();
+    let mut all_projects_by_provider: BTreeMap<String, Vec<PmProject>> = BTreeMap::new();
     for wave in waves {
         let provider = resolve_provider(repo, &wave)?;
         let Some(project) = read_project(repo, &wave, provider) else {
@@ -690,16 +703,35 @@ async fn pm_status_async(
         };
         let client = build_client(repo, provider).await?;
         progress.status(&format!("checking {provider} for wave/{wave}"));
-        let project_name = client
-            .list_projects()
-            .await
-            .map_err(pm_to_ops)?
+        let projects = client.list_projects().await.map_err(pm_to_ops)?;
+        all_projects_by_provider
+            .entry(provider.as_str().to_string())
+            .or_insert_with(|| projects.clone());
+        let project_name = projects
             .into_iter()
             .find(|candidate| candidate.id == project)
             .map(|candidate| candidate.name);
         let items = client.list_items(&project).await.map_err(pm_to_ops)?;
         let total = items.len();
         let open = items.iter().filter(|item| !item.completed).count();
+        let local_projects = list_local_projects(repo, &wave)?;
+        let mut open_by_project = BTreeMap::new();
+        for project in local_projects {
+            open_by_project.insert(project, 0);
+        }
+        let mut unassigned = 0;
+        for item in &items {
+            if item.completed {
+                continue;
+            }
+            let labels = item_project_labels(item);
+            if labels.is_empty() {
+                unassigned += 1;
+            }
+            for project in labels {
+                *open_by_project.entry(project).or_default() += 1;
+            }
+        }
         results.push(PmWaveStatus {
             wave,
             provider,
@@ -707,10 +739,21 @@ async fn pm_status_async(
             project_name,
             open,
             total,
+            unassigned,
+            open_by_project,
         });
     }
 
-    Ok(PmStatusResult { waves: results })
+    let stranded_projects = all_projects_by_provider
+        .into_values()
+        .flatten()
+        .filter(|project| !linked_project_ids.contains(&project.id))
+        .collect();
+
+    Ok(PmStatusResult {
+        waves: results,
+        stranded_projects,
+    })
 }
 
 pub fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
@@ -1012,6 +1055,10 @@ fn item_project_labels(item: &PmItem) -> Vec<String> {
         .iter()
         .filter_map(|label| label.strip_prefix("project:").map(str::to_string))
         .collect()
+}
+
+pub fn item_local_projects(item: &PmItem) -> Vec<String> {
+    item_project_labels(item)
 }
 
 fn item_matches_project(item: &PmItem, project: &str) -> bool {

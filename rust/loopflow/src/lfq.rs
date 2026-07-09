@@ -5,7 +5,7 @@
 //!
 //! The intended caller is a sandboxed subagent running inside a wave: the wave
 //! injects `LF_WAVE_ENDPOINT` and a per-subagent token (`LF_SUBAGENT_TOKEN`)
-//! into the subagent's env, so `lfq exec op commit -m "…"` runs `lf`
+//! into the subagent's env, so `lfq exec commit -m "…"` runs `lf`
 //! unsandboxed in the outwave, escaping the subagent worktree's `.git`-write
 //! restriction. Endpoint resolution is **env first, lfdb second**: the env
 //! points a sandboxed process straight at its wave; the store is the fallback

@@ -9,7 +9,7 @@
 //! Forwarded bundle: GitHub (`gh`), Claude/agent OAuth, and — the capability
 //! beyond the shell prototype — the PM/Linear token, which lives in lfdb rather
 //! than the environment. The remote `resolve_pm_token` reads
-//! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf op pm` works.
+//! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf pm` works.
 //!
 //! Secrets policy: `lf ssh` forwards specific resolved secrets, never the
 //! Doppler token that could fetch them all. The Doppler login/CLI token is a
@@ -63,7 +63,7 @@ pub fn run(
 ) -> anyhow::Result<()> {
     if cmd.is_empty() {
         return Err(anyhow!(
-            "lf ssh needs a command after `--`, e.g. `lf ssh {host} -- lf op pr`"
+            "lf ssh needs a command after `--`, e.g. `lf ssh {host} -- lf pr open`"
         ));
     }
     let repo = repo.unwrap_or(DEFAULT_REPO);

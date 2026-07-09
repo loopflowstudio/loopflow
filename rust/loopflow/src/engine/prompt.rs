@@ -2237,7 +2237,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:loopflow>"));
-        assert!(prompt.contains("lf op commit"));
+        assert!(prompt.contains("lf commit"));
         assert!(prompt.contains("</lf:loopflow>"));
     }
 
@@ -2250,7 +2250,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(!prompt.contains("<lf:loopflow>"));
-        assert!(!prompt.contains("lf op commit"));
+        assert!(!prompt.contains("lf commit"));
         assert!(!prompt.contains("lf chat"));
     }
 

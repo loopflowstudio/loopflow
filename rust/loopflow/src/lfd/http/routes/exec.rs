@@ -27,7 +27,7 @@ use crate::lfd::http::{api_error, ApiMessage, ApiResult};
 use crate::lfd::lf_exec::{exec_lf, validate_lf_argv};
 
 /// Request body for `/v0/exec`. `argv` is the command line after the `lf`
-/// binary name (e.g. `["op", "next", "--create-pr"]`). `cwd` is where to run
+/// binary name (e.g. `["next", "--create-pr"]`). `cwd` is where to run
 /// it — the caller owns resolving the wave worktree, since `lf` verbs infer
 /// the wave from their working directory; omitted means lfd's own cwd.
 #[derive(Debug, Serialize, Deserialize)]
@@ -82,11 +82,7 @@ mod tests {
         let err = exec_handler(
             State(state),
             Json(ExecRequest {
-                argv: vec![
-                    "op".to_string(),
-                    "next".to_string(),
-                    "--nonesuch".to_string(),
-                ],
+                argv: vec!["next".to_string(), "--nonesuch".to_string()],
                 cwd: None,
             }),
         )
@@ -111,7 +107,7 @@ mod tests {
     }
 
     /// Valid argv reaches the exec path and returns a structured result. `lf
-    /// op doctor` is read-only (dependency check) — a safe verb to actually
+    /// `lf doctor` is read-only (dependency check) — a safe verb to actually
     /// run against the real binary in-tree via `CARGO_BIN_EXE_lf`.
     /// The door lives inside the auth-protected `/v0` nest: a request with no
     /// bearer token is refused before any exec. With the token it clears auth
@@ -131,7 +127,7 @@ mod tests {
             axum::serve(listener, app).await.expect("serve app");
         });
         let url = format!("http://{addr}/v0/exec");
-        let body = serde_json::json!({ "argv": ["op", "doctor"] });
+        let body = serde_json::json!({ "argv": ["doctor"] });
         let client = reqwest::Client::new();
 
         let unauthorized = client
@@ -144,7 +140,7 @@ mod tests {
 
         // With the token, auth passes; a garbage argv proves we got past the
         // gate to the validator (400, not 401).
-        let bad_argv = serde_json::json!({ "argv": ["op", "next", "--nonesuch"] });
+        let bad_argv = serde_json::json!({ "argv": ["next", "--nonesuch"] });
         let authorized = client
             .post(&url)
             .bearer_auth("test-token")

@@ -15,7 +15,7 @@ PR state: `gh pr view --json state,url -q .state` (no PR yet is fine).
 
 - No PR-ready work yet → write the blocker or next concrete action in
   `scratch/questions.md`; no loop file — the next pass starts immediately.
-- PR-ready → `lf op submit --create-pr` with clear PR copy, then hand the
+- PR-ready → `lf pr submit --create-pr` with clear PR copy, then hand the
   wait to the runner with a recheck:
   `recheck: gh pr view --json state -q .state | grep -q MERGED`.
 - CI or review red with an obvious fix → fix it, resubmit, recheck again.

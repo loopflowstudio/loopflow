@@ -44,7 +44,7 @@ parent, or worker needs to know to act correctly without this run's context.
      `lf memory update`.
 5. Commit the update:
    ```bash
-   lf op commit -m "export-memory: compile MEMORY.md"
+   lf commit -m "export-memory: compile MEMORY.md"
    ```
 
 ## Rules

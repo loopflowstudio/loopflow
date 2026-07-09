@@ -2,7 +2,7 @@
 //! providers, token extraction from vendor CLI artifacts, and store-direct
 //! persistence into lfdb provider tokens.
 //!
-//! Shared home — called in-process by `lf op auth` and wrapped by the daemon's
+//! Shared home — called in-process by `lf auth` and wrapped by the daemon's
 //! HTTP routes. Must not depend on daemon (`lfd`) types; auth lifecycle
 //! notifications go through [`AuthEventSink`]. Auth is poll-only in the base
 //! wave model (see `scratch/eventing.md` §5), so both the CLI and the HTTP
@@ -130,7 +130,7 @@ impl Provider {
 
     pub fn api_key_configure_error(self) -> Option<&'static str> {
         match self {
-            Self::Linear => Some("Linear requires OAuth. Run 'lf op auth linear' to connect."),
+            Self::Linear => Some("Linear requires OAuth. Run 'lf auth linear' to connect."),
             _ => None,
         }
     }
@@ -3208,7 +3208,7 @@ mod tests {
         assert!(!Provider::Linear.api_key_bills_per_token());
         assert_eq!(
             Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf op auth linear' to connect.")
+            Some("Linear requires OAuth. Run 'lf auth linear' to connect.")
         );
         // Refresh is wired: Linear resolves a PM OAuth endpoint.
         assert!(pm_oauth_endpoint(Provider::Linear).is_some());
@@ -3219,7 +3219,7 @@ mod tests {
         let has_linear = default_brokers(None)
             .iter()
             .any(|broker| broker.provider() == Provider::Linear);
-        assert!(has_linear, "`lf op auth linear` needs a registered broker");
+        assert!(has_linear, "`lf auth linear` needs a registered broker");
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -3506,7 +3506,7 @@ mod tests {
     fn pm_provider_configure_errors_point_to_oauth() {
         assert_eq!(
             Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf op auth linear' to connect.")
+            Some("Linear requires OAuth. Run 'lf auth linear' to connect.")
         );
         assert_eq!(Provider::Claude.api_key_configure_error(), None);
     }

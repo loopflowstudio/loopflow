@@ -316,7 +316,7 @@ Claude and Codex CLI/TUI sessions launched from a Git worktree automatically add
 the main repo as an extra writable directory. This keeps normal agent
 permissions, but lets Git write the linked worktree index under
 `<main>/.git/worktrees/<worktree>/` when the agent stages, commits, rebases, or
-runs `lf op`.
+runs mechanical `lf` commands.
 
 ### Autoprune
 

@@ -1,4 +1,4 @@
-//! One merge-queue reconcile pass, verb-shaped: `lf op queue reconcile`.
+//! One merge-queue reconcile pass, verb-shaped: `lf queue reconcile`.
 //!
 //! Runs the same pass the daemon's 60s poller runs (stack-status inference,
 //! draft/ready flips, lazy head rebase, queue-block attention writes),

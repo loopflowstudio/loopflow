@@ -533,8 +533,62 @@ fn main() -> anyhow::Result<()> {
                     loopflow::lf::commands::run::run(None, Some(&text), &cli)
                 })
             }
-            Some(Commands::Op { op }) => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::ops::run(op, cli.model.as_deref())
+            Some(Commands::Pr { cmd }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.model.as_deref())
+            }),
+            Some(Commands::Wt { cmd }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run_worktree_command(cmd)
+            }),
+            Some(Commands::Rebase { plan, onto }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run_rebase(onto.as_deref(), *plan)
+            }),
+            Some(Commands::Commit {
+                message,
+                push,
+                no_add,
+            }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run_commit(
+                    message.as_deref(),
+                    *push,
+                    *no_add,
+                    cli.model.as_deref(),
+                )
+            }),
+            Some(Commands::Auth { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::auth::run(cmd))
+            }
+            Some(Commands::Release { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_release(cmd))
+            }
+            Some(Commands::Pm { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_pm(cmd))
+            }
+            Some(Commands::Branches { cmd }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run_branches_command(cmd)
+            }),
+            Some(Commands::Queue { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_queue(cmd))
+            }
+            Some(Commands::Shell { cmd }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run_shell_command(cmd)
+            }),
+            Some(Commands::Sync) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_sync())
+            }
+            Some(Commands::Next {
+                create_pr,
+                no_rebase,
+            }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run_next(*create_pr, *no_rebase, cli.model.as_deref())
+            }),
+            Some(Commands::Advance { wave }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run_advance(wave.as_deref())
+            }),
+            Some(Commands::Doctor { brewfile }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run_doctor(*brewfile)
+            }),
+            Some(Commands::SyncSkills { yes, no_prune }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune)
             }),
             Some(Commands::Cron { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
@@ -624,7 +678,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Session label for agent-launching invocations; `None` for utility commands
-/// (`lf op`, `lf usage`, `lf chat`, `lf sub`, `lf memory`, `lf -l`) and
+/// (`lf pr`, `lf usage`, `lf chat`, `lf sub`, `lf memory`, `lf -l`) and
 /// `lf wave`, which never self-register (placement creates the worker's row;
 /// `lf wave` registers as the wave's agent session; chat/memory are
 /// one-shot POSTs attributed via the env they inherit).
@@ -644,7 +698,21 @@ fn run_label(cli: &Cli) -> Option<String> {
             .first()
             .map(|skill| skill.trim_end_matches(':').to_string()),
         None => Some("interactive".to_string()),
-        Some(Commands::Op { .. })
+        Some(Commands::Pr { .. })
+        | Some(Commands::Wt { .. })
+        | Some(Commands::Rebase { .. })
+        | Some(Commands::Commit { .. })
+        | Some(Commands::Auth { .. })
+        | Some(Commands::Release { .. })
+        | Some(Commands::Pm { .. })
+        | Some(Commands::Branches { .. })
+        | Some(Commands::Queue { .. })
+        | Some(Commands::Shell { .. })
+        | Some(Commands::Sync)
+        | Some(Commands::Next { .. })
+        | Some(Commands::Advance { .. })
+        | Some(Commands::Doctor { .. })
+        | Some(Commands::SyncSkills { .. })
         | Some(Commands::Cron { .. })
         | Some(Commands::Wave { .. })
         | Some(Commands::Task { .. })
@@ -673,8 +741,34 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "op", "wave", "task", "flow", "skill", "chat", "memory", "usage", "ls", "status",
-            "runs", "trace", "help",
+            ":",
+            "pr",
+            "wt",
+            "rebase",
+            "commit",
+            "auth",
+            "release",
+            "pm",
+            "branches",
+            "queue",
+            "shell",
+            "sync",
+            "next",
+            "advance",
+            "doctor",
+            "sync-skills",
+            "wave",
+            "task",
+            "flow",
+            "skill",
+            "chat",
+            "memory",
+            "usage",
+            "ls",
+            "status",
+            "runs",
+            "trace",
+            "help",
         ] {
             assert!(tables.commands.contains(command), "command {command}");
         }
@@ -895,14 +989,13 @@ mod tests {
     fn reorder_args_known_command_unchanged() {
         let args = vec![
             "lf".to_string(),
-            "op".to_string(),
             "commit".to_string(),
             "-m".to_string(),
             "msg".to_string(),
         ];
         let result = reorder_args(args);
         // Known commands should not be reordered
-        assert_eq!(result, vec!["lf", "op", "commit", "-m", "msg"]);
+        assert_eq!(result, vec!["lf", "commit", "-m", "msg"]);
     }
 
     /// `lf chat --wave X text` must reach the chat subcommand untouched —

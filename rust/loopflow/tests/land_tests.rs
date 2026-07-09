@@ -495,7 +495,7 @@ fn lf_ops_land_leaves_worktree_in_place() {
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
-            "op",
+            "pr",
             "land",
             "--strict",
             "--create-pr",
@@ -507,8 +507,8 @@ fn lf_ops_land_leaves_worktree_in_place() {
         .current_dir(&worktree.path)
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
-        .expect("run lf op land");
-    assert!(status.success(), "lf op land should succeed");
+        .expect("run lf pr land");
+    assert!(status.success(), "lf pr land should succeed");
 
     // The wave home is permanent: land never rotates the worktree or cds away.
     assert!(

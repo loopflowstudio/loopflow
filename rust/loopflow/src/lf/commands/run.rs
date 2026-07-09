@@ -347,7 +347,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     let cli_check_start = Instant::now();
     if !check_cli_available(&built.harness) {
         return Err(anyhow!(
-            "'{}' CLI not found. Run `lf op doctor` to check dependencies.",
+            "'{}' CLI not found. Run `lf doctor` to check dependencies.",
             built.harness
         ));
     }
@@ -388,7 +388,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     process.stream_format = StreamFormat::Human(use_color);
 
     // Set up directive relay so agent skills can issue shell directives
-    // (e.g. `cd` after `lf op land` rotates worktrees).
+    // (e.g. `cd` after `lf pr land` rotates worktrees).
     let directive_file = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
     let mut agent_config = built.agent_config.clone();
     let relay_path = directive_file.as_ref().and_then(|_| {
@@ -560,14 +560,14 @@ mod tests {
     fn skill_launch_seed_omits_loopflow_when_disabled() {
         let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, &[]);
         assert!(!seed.contains("<lf:loopflow>"));
-        assert!(!seed.contains("lf op commit"));
+        assert!(!seed.contains("lf commit"));
     }
 
     #[test]
     fn skill_launch_seed_includes_loopflow_when_enabled() {
         let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, true, &[]);
         assert!(seed.contains("<lf:loopflow>"));
-        assert!(seed.contains("lf op commit"));
+        assert!(seed.contains("lf commit"));
         assert!(seed.contains("</lf:loopflow>"));
         assert_eq!(
             seed.matches("<lf:loopflow>").count(),

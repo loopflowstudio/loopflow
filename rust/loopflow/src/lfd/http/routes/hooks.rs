@@ -8,7 +8,7 @@
 //!
 //! - **check_run failure** → `lf chat --wave <wave> "CI failed: …"` — the
 //!   wave's flowloop decides whether and how to dispatch a fix.
-//! - **PR merged** → `lf op queue reconcile --wave <wave>` — the queue verb
+//! - **PR merged** → `lf queue reconcile --wave <wave>` — the queue verb
 //!   owns stack-status inference and promotion.
 //! - **push to main** → `lf chat --wave <wave> "main moved: …"` for every
 //!   wave in the repo — the flowloop decides to rebase/integrate with judgment.
@@ -224,7 +224,7 @@ async fn plan_check_run_notifications(
     Ok(execs)
 }
 
-/// PR merged → `lf op queue reconcile` for each wave holding that PR in its
+/// PR merged → `lf queue reconcile` for each wave holding that PR in its
 /// stack. Replaces the in-process `handle_pr_merged_with_events` call.
 async fn plan_pr_merged_reconciles(
     store: &SharedStore,

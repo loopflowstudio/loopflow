@@ -12,7 +12,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -30,15 +30,15 @@ First clear the decks: ship work that is close, abandon cruft, and prune stale r
 
 Run the scan headlessly before discussion. Gather:
 
-- Local worktrees: `lf op wt list --format json`
+- Local worktrees: `lf wt list --format json`
 - Open PRs authored by the user: `gh pr list --author @me --state open --json number,title,headRefName,url,isDraft,mergeStateStatus,statusCheckRollup,updatedAt`
-- Remote branches authored by the user: `lf op branches list --user @me`
-- Stale candidates: `lf op branches list --user @me --stale 60d`
+- Remote branches authored by the user: `lf branches list --user @me`
+- Stale candidates: `lf branches list --user @me --stale 60d`
 - Wave entries under `wave/`: GOAL/MEMORY/project docs, open task counts by local project, recent commits touching the wave area, associated open PRs
 - Merge status for each branch: ahead/behind main, CI status when a PR exists, whether a branch is merged or squash-merged
 - Wave attribution for each worktree and branch:
   - Worktrees: use the engine's worktree resolver output and sibling worktree convention. Do not invent another naming scheme.
-  - Branch-only items: use `lf op branches list`, which resolves branch names through the configured branch schema. `-` means waveless.
+  - Branch-only items: use `lf branches list`, which resolves branch names through the configured branch schema. `-` means waveless.
 
 Treat missing `gh` data as unknown, not green.
 
@@ -81,7 +81,7 @@ Walk each row with the user.
 - **ship**: dispatch `lf ship` in that worktree as a background job. Do not wait. Log to `scratch/ship-logs/<branch>.log` in the main repo.
 - **ship-partial**: dispatch `lf ship` the same way; the ship flow defaults toward landing and deferring leftovers into Linear tasks.
 - **abandon**: after confirmation, use the existing abandon path for worktrees or delete local/remote branches directly when no worktree exists.
-- **prune**: batch remote-only branch deletes for one `lf op branches prune ...` command at the end.
+- **prune**: batch remote-only branch deletes for one `lf branches prune ...` command at the end.
 
 Dispatch mechanics:
 

@@ -70,13 +70,13 @@ git worktree prune
 Remove merged worktrees:
 
 ```bash
-lf op wt prune
+lf wt prune
 ```
 
 If the default branch looks dirty after a sync or PR operation you ran from a sibling worktree, resync it explicitly:
 
 ```bash
-lf op sync
+lf sync
 ```
 
 Loopflow updates the checked-out default-branch worktree, not just the ref, and restores any dirty local edits afterward.
@@ -122,7 +122,7 @@ lf init
 Check installation:
 
 ```bash
-lf op doctor
+lf doctor
 ```
 
 ## See Also

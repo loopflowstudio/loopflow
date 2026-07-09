@@ -228,7 +228,7 @@ main-push events as attributed chat notifications; durable facts plus explicit
 commands are the long-term coordination shape.
 
 - check_run failure → `lf chat --wave <wave> "CI failed: …"` (the wave's flowloop decides how to fix)
-- PR merged → `lf op queue reconcile --wave <wave>`
+- PR merged → `lf queue reconcile --wave <wave>`
 - push to main → `lf chat --wave <wave> "main moved: …"` for each wave in the repo
 
 A wave with no live server bounces the notification — logged at debug. No wave resolved → dropped.

@@ -36,7 +36,7 @@ Branches sit while main moves. Reconcile the plan against the current diff, upst
 2. Rebase onto main:
 
    ```bash
-   lf op rebase
+   lf rebase
    ```
 
    Resolve trivial conflicts. For non-trivial conflicts, write the blocker and conflicted files to `scratch/questions.md` and stop.

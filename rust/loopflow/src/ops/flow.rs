@@ -5,7 +5,7 @@ use clap::Parser;
 use crate::engine::flow::Op;
 use crate::engine::git::{get_default_branch, sync_main};
 use crate::engine::{sync_skills, SkillSyncOptions};
-use crate::lf::{Cli, Commands, OpsCommand, ReleaseCommand};
+use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
@@ -15,83 +15,117 @@ use crate::ops::{
 };
 
 pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> OpsResult<()> {
-    let mut argv = vec!["lf".to_string(), "op".to_string(), item.command.clone()];
+    let mut argv = vec!["lf".to_string(), item.command.clone()];
     argv.extend(item.args.iter().cloned());
 
     let cli = Cli::try_parse_from(argv)
         .map_err(|err| OpsError::Message(format!("invalid op item: {err}")))?;
-    let op = match cli.command {
-        Some(Commands::Op { op }) => op,
-        _ => {
-            return Err(OpsError::Message(
-                "op item must parse as `lf op <command>`".to_string(),
-            ));
-        }
-    };
-
-    execute_parsed_ops(repo, &op, progress)
+    execute_parsed_command(repo, cli.command, progress)
 }
 
-fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) -> OpsResult<()> {
-    match op {
-        OpsCommand::Land {
-            strict,
-            local,
-            create_pr,
-            worktree,
-            message,
-            title,
-            body,
-        } => {
+fn execute_parsed_command(
+    repo: &Path,
+    command: Option<Commands>,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    match command {
+        Some(Commands::Pr {
+            cmd:
+                Some(PrCommand::Land {
+                    strict,
+                    local,
+                    create_pr,
+                    worktree,
+                    message,
+                    title,
+                    body,
+                }),
+        }) => {
             land(
                 repo,
                 &LandOptions {
-                    strict: *strict,
-                    local: *local,
-                    create_pr: *create_pr,
-                    worktree: worktree.clone(),
-                    commit_message: message.clone(),
-                    pr_title: title.clone(),
-                    pr_body: body.clone(),
+                    strict,
+                    local,
+                    create_pr,
+                    worktree,
+                    commit_message: message,
+                    pr_title: title,
+                    pr_body: body,
                     agent: None,
                 },
                 progress,
             )?;
             Ok(())
         }
-        OpsCommand::Submit {
-            strict,
-            create_pr,
-            worktree,
-            message,
-            title,
-            body,
-        } => {
+        Some(Commands::Pr {
+            cmd:
+                Some(PrCommand::Submit {
+                    strict,
+                    create_pr,
+                    worktree,
+                    message,
+                    title,
+                    body,
+                }),
+        }) => {
             submit(
                 repo,
                 &LandOptions {
-                    strict: *strict,
+                    strict,
                     local: false,
-                    create_pr: *create_pr,
-                    worktree: worktree.clone(),
-                    commit_message: message.clone(),
-                    pr_title: title.clone(),
-                    pr_body: body.clone(),
+                    create_pr,
+                    worktree,
+                    commit_message: message,
+                    pr_title: title,
+                    pr_body: body,
                     agent: None,
                 },
                 progress,
             )?;
             Ok(())
         }
-        OpsCommand::Rebase { plan, onto } => {
-            if *plan {
+        Some(Commands::Pr {
+            cmd: Some(PrCommand::Open {
+                model: _,
+                title,
+                body,
+            }),
+        }) => {
+            create_or_update_pr(
+                repo,
+                &PrOptions {
+                    title,
+                    body,
+                    agent: None,
+                },
+                progress,
+            )?;
+            Ok(())
+        }
+        Some(Commands::Pr {
+            cmd: Some(PrCommand::Abandon { force, branch }),
+        }) => {
+            abandon_branch(
+                repo,
+                &AbandonOptions {
+                    branch,
+                    force,
+                },
+                progress,
+            )?;
+            Ok(())
+        }
+        Some(Commands::Pr {
+            cmd: None | Some(PrCommand::Status),
+        }) => Err(OpsError::Message(
+            "op item does not support pr status".to_string(),
+        )),
+        Some(Commands::Rebase { plan, onto }) => {
+            if plan {
                 return Ok(());
             }
             let base = get_default_branch(repo)?;
-            let onto_ref = onto
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_else(|| format!("origin/{base}"));
+            let onto_ref = onto.unwrap_or_else(|| format!("origin/{base}"));
             rebase_with_recovery(
                 repo,
                 &RebaseOptions {
@@ -102,23 +136,7 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             )?;
             Ok(())
         }
-        OpsCommand::Pr {
-            model: _,
-            title,
-            body,
-        } => {
-            create_or_update_pr(
-                repo,
-                &PrOptions {
-                    title: title.clone(),
-                    body: body.clone(),
-                    agent: None,
-                },
-                progress,
-            )?;
-            Ok(())
-        }
-        OpsCommand::Sync => {
+        Some(Commands::Sync) => {
             let base = get_default_branch(repo)?;
             if !sync_main(repo, &base)? {
                 return Err(OpsError::Message(
@@ -127,29 +145,29 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             }
             Ok(())
         }
-        OpsCommand::SyncSkills { yes: _, no_prune } => {
+        Some(Commands::SyncSkills { yes: _, no_prune }) => {
             sync_skills(&SkillSyncOptions {
-                prune: !*no_prune,
+                prune: !no_prune,
                 global_home: None,
             })?;
             Ok(())
         }
-        OpsCommand::Advance { wave } => {
+        Some(Commands::Advance { wave }) => {
             let wave = crate::ops::util::resolve_wave_name(repo, wave.as_deref())
                 .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
             let branch = crate::ops::advance_branch(repo, &wave)?;
             progress.status(&format!("Advanced to branch: {branch}"));
             Ok(())
         }
-        OpsCommand::Next {
+        Some(Commands::Next {
             create_pr,
             no_rebase,
-        } => {
+        }) => {
             next_branch(
                 repo,
                 &NextOptions {
-                    create_pr: *create_pr,
-                    rebase: !*no_rebase,
+                    create_pr,
+                    rebase: !no_rebase,
                     wave_name: None,
                     agent: None,
                 },
@@ -157,36 +175,25 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
             )?;
             Ok(())
         }
-        OpsCommand::Commit {
+        Some(Commands::Commit {
             message,
             push,
             no_add,
-        } => {
+        }) => {
             commit_workflow(
                 repo,
                 &CommitOptions {
-                    add: !*no_add,
-                    push: *push,
+                    add: !no_add,
+                    push,
                     create_draft_pr: true,
-                    message: message.clone(),
+                    message,
                     ..CommitOptions::for_task("commit")
                 },
                 progress,
             )?;
             Ok(())
         }
-        OpsCommand::Abandon { force, branch } => {
-            abandon_branch(
-                repo,
-                &AbandonOptions {
-                    branch: branch.clone(),
-                    force: *force,
-                },
-                progress,
-            )?;
-            Ok(())
-        }
-        OpsCommand::Release { cmd } => match cmd {
+        Some(Commands::Release { cmd }) => match cmd {
             ReleaseCommand::Run { version, target } => {
                 release_run(
                     repo,
@@ -205,20 +212,14 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                 prev_tag,
                 target,
             } => {
-                release_notes(
-                    repo,
-                    version,
-                    prev_tag.as_deref(),
-                    target.as_deref(),
-                    progress,
-                )?;
+                release_notes(repo, &version, prev_tag.as_deref(), target.as_deref(), progress)?;
                 Ok(())
             }
             ReleaseCommand::Bump { version, target } => {
-                release_bump(repo, version, target.as_deref(), progress)
+                release_bump(repo, &version, target.as_deref(), progress)
             }
             ReleaseCommand::Tag { version, target } => {
-                release_tag(repo, version, target.as_deref())?;
+                release_tag(repo, &version, target.as_deref())?;
                 Ok(())
             }
             ReleaseCommand::Status { target } => {
@@ -226,17 +227,33 @@ fn execute_parsed_ops(repo: &Path, op: &OpsCommand, progress: &impl Progress) ->
                 Ok(())
             }
         },
-        OpsCommand::Push { force } => crate::engine::git::push(repo, *force).map_err(Into::into),
-        OpsCommand::Cp { .. }
-        | OpsCommand::Doctor { .. }
-        | OpsCommand::Pm { .. }
-        | OpsCommand::Branches { .. }
-        | OpsCommand::Wt { .. }
-        | OpsCommand::Shell { .. }
-        | OpsCommand::Auth { .. }
-        | OpsCommand::Queue { .. }
-        | OpsCommand::ResetWaves { .. } => Err(OpsError::Message(
-            "ops item does not support cp/doctor/pm/branches/wt/shell/auth/queue/reset-waves commands"
+        Some(
+            Commands::Auth { .. }
+            | Commands::Branches { .. }
+            | Commands::Chat { .. }
+            | Commands::Cron { .. }
+            | Commands::Doctor { .. }
+            | Commands::External(_)
+            | Commands::Flow { .. }
+            | Commands::Inline { .. }
+            | Commands::Ls { .. }
+            | Commands::Memory { .. }
+            | Commands::Pm { .. }
+            | Commands::Queue { .. }
+            | Commands::Runs { .. }
+            | Commands::Shell { .. }
+            | Commands::Skill { .. }
+            | Commands::Ssh { .. }
+            | Commands::Status { .. }
+            | Commands::Sub { .. }
+            | Commands::Task { .. }
+            | Commands::Trace { .. }
+            | Commands::Usage
+            | Commands::Wave { .. }
+            | Commands::Wt { .. },
+        )
+        | None => Err(OpsError::Message(
+            "op item must be one of pr open, pr submit, pr land, pr abandon, rebase, sync, sync-skills, advance, next, commit, or release"
                 .to_string(),
         )),
     }

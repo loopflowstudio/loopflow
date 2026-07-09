@@ -1,5 +1,5 @@
 - refresh-plan
 - implement
 - gate
-- op: pr
-- op: land
+- op: pr open
+- op: pr land

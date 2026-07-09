@@ -249,4 +249,4 @@ Every skill sees your agent doc (`AGENTS.md` / `CLAUDE.md` / `STYLE.md`), `LOOPF
 
 ## Reference
 
-[`lf` commands](lf.md) · [`lf op` commands](lfop.md) · [`lfd` commands](lfd.md) · [Configuration](config.md)
+[`lf` commands](lf.md) · [`lf` operations](lfop.md) · [`lfd` commands](lfd.md) · [Configuration](config.md)

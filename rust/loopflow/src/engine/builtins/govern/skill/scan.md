@@ -11,7 +11,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -33,7 +33,7 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
    - `GOAL.md` — intent, measures, process judgment, and the Linear handle
    - `MEMORY.md` — what the wave has learned and decided
    - `projects/*.md` — measured bets and KRs
-   - Live tasks — `lf op pm show --wave <wave-name>` (Linear is the source of truth; there are no local task lists)
+   - Live tasks — `lf pm show --wave <wave-name>` (Linear is the source of truth; there are no local task lists)
 
 2. **Read runtime state.** For each member wave:
    - `wave/<wave-name>/.wave-endpoint` — a live wave server publishes its

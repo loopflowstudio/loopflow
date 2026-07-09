@@ -146,14 +146,15 @@ CHANNEL from context (`LFD_CHANNEL`, else `LFD_WAVE_ID`, else the worktree
 name — inside a work-line worktree that is the work line's own channel: speak
 locally; `--parent` walks `parent_wave_id` through the registry; `--wave
 <name>` is explicit, dotted names addressing a work line through its family
-head), finds the FAMILY HEAD's live endpoint via its WaveAgent session row
-(falling back to `.wave-endpoint`), and POSTs a `say` op with the channel
-field. Publish-to-no-subscriber drops: with no wave context anywhere,
-`lf chat` and `lf memory` writes exit 0 with one stderr note. A resolvable
-wave whose server is down errors instead (mail to a dead wave bounces, it
-doesn't vanish). Dispatched workers finish with an `lf chat` report — it
-arrives in the thread with a `from` byline and wakes the loop like any
-input.
+head), then finds the FAMILY HEAD's live endpoint via its WaveAgent session
+row (falling back to `.wave-endpoint`). `--steer` POSTs `steer`, which reaches
+a live steer-capable turn and otherwise queues. Bare `lf chat` POSTs an
+attributed `say`; `--from` overrides its byline. Publish-to-no-subscriber
+drops: with no wave context anywhere, `lf chat` and
+`lf memory` writes exit 0 with one stderr note. A resolvable wave whose server
+is down errors instead (mail to a dead wave bounces, it doesn't vanish).
+Dispatched workers finish with an `lf chat` report — it arrives in the thread
+with a `from` byline and wakes the loop like any input.
 
 `lf sub [NAME] [--json]` is the read half: follow the family's `/events`
 stream (turns, loop state, memory curation, memory adds) until killed,
@@ -182,7 +183,7 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 | `GET /health`             | `{status, loop_state, wave, turns, workers, uptime_seconds}`; `status` is channel liveness; `loop_state` is `idle \| turning \| interrupting \| failed`; `workers` counts observed in-flight worker runs |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread; `?limit=N` tails the last N turns (open turn included) |
 | `GET /events`             | SSE, the family's one unified stream. Scope: `?channel=<name>` (one channel), `?prefix=<name>` (subtree), default = whole family; names outside the family 404. Event names: `state` (loop-state name, on subscribe + every transition; primary only), `turn` (a `Turn` JSON; replay then live; child-channel turns carry an extra `"channel"` key; ids repeat — each frame replaces the client's previous state for that (channel, id)), `memory-add` (full added facts since the last externalization, replay then live; primary only), `memory` (curation summaries, live-only; primary only), and — only with `?inbox=true`, the resident's subscription — `inbox` (`{id, op, text, from}`; pending replay + live ops; bare interrupts ride `id: null`). |
-| `POST /messages {op, text, from?, channel?}` | `op` required: `message` (next body), `steer` (inject into the active steer-capable harness, otherwise queue), `interrupt` (stop the active body; non-empty text queues for the retry), or `say` (attributed `lf chat`). Returns `{turn, state}`. |
+| `POST /messages {op, text, from?, channel?}` | `op` required: `message` (next body), `steer` (inject into the active steer-capable harness, otherwise queue), `interrupt` (stop the active body; non-empty text queues for the retry), or `say` (attributed report/FYI). Returns `{turn, state}`. |
 | `GET /playhead`           | Durable invocation stack, active body, `now`, `next`, local queue, and return target. |
 | `POST /playhead/enqueue {flow}` | Enqueue a flow FIFO at the innermost invocation and return the updated playhead. |
 | `POST /playhead/skip`     | Stop and skip the current body, or advance a failed idle step, without destroying its route. |

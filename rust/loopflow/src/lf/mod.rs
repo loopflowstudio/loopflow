@@ -297,16 +297,17 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Post a message into a wave's thread (worker reports, child-wave
-    /// escalations, proactive FYIs). Reads stdin when TEXT is omitted.
+    /// Post to a wave's thread; use --steer to reach the live body.
     Chat {
         /// Message text (reads stdin when omitted — heredoc-friendly)
         #[arg(trailing_var_arg = true)]
         text: Vec<String>,
-        /// Attribution label for machine speech (e.g. --from ci). Overrides
-        /// the ambient label; absent = the ambient sender (env, else "cli").
-        #[arg(long)]
+        /// Attribution label for machine speech (e.g. --from ci).
+        #[arg(long, conflicts_with = "steer")]
         from: Option<String>,
+        /// Inject into a live steer-capable turn; otherwise queue.
+        #[arg(long)]
+        steer: bool,
         #[command(flatten)]
         target: WaveTargetArgs,
     },
@@ -918,11 +919,18 @@ mod tests {
     #[test]
     fn chat_parses_text_and_targeting() {
         let cli = Cli::try_parse_from(["lf", "chat", "shipped", "the", "parser"]).expect("parse");
-        let Some(Commands::Chat { text, from, target }) = cli.command else {
+        let Some(Commands::Chat {
+            text,
+            from,
+            steer,
+            target,
+        }) = cli.command
+        else {
             panic!("expected chat command");
         };
         assert_eq!(text, vec!["shipped", "the", "parser"]);
         assert_eq!(from, None);
+        assert!(!steer);
         assert_eq!(target.wave, None);
         assert!(!target.parent);
 
@@ -951,6 +959,19 @@ mod tests {
         };
         assert_eq!(text, vec!["CI failed"]);
         assert_eq!(from.as_deref(), Some("ci"));
+
+        let cli =
+            Cli::try_parse_from(["lf", "chat", "--steer", "change course"]).expect("parse steer");
+        let Some(Commands::Chat { text, steer, .. }) = cli.command else {
+            panic!("expected chat command");
+        };
+        assert_eq!(text, vec!["change course"]);
+        assert!(steer);
+
+        assert!(
+            Cli::try_parse_from(["lf", "chat", "--steer", "--from", "ci", "change course"])
+                .is_err()
+        );
 
         // --wave and --parent are mutually exclusive.
         assert!(Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--parent", "x"]).is_err());

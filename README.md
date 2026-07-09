@@ -39,7 +39,7 @@ Run the wave in your terminal:
 
 ```bash
 lf loop designer             # the wave's server: one persistent loop, until Ctrl-C
-lf chat "ship the button audit first"     # post into its thread (any process can)
+lf chat --steer "ship the button audit first" # steer the live body, else queue
 lf memory add "buttons: variants unified" # curate what it knows
 ```
 
@@ -49,10 +49,10 @@ Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
 `lf loop <name>` starts a long-lived server at the repo's main checkout (the
 wave's journal and endpoint live at the origin); its playhead enters the wave's
 worktree and gives each flow step a live harness session. Progress and chat are
-a single conversation: human messages steer the body now playing by default,
-attributed messages (workers, scripts) queue for the next one, and interrupt
-finalizes a partial turn. Truth is an append-only journal, so a restart keeps
-the whole thread. `lf chat` and `lf memory` are the message doors for loops,
+a single conversation: `lf chat --steer` reaches the body now playing (and
+queues when it cannot), while attributed messages from workers and scripts
+queue for the next one. Truth is an append-only journal, so a restart keeps the
+whole thread. `lf chat` and `lf memory` are the message doors for loops,
 workers, humans, and scripts; worker reports arrive attributed in the thread.
 Outside any wave a publish drops silently (exit 0) — the verbs are safe in
 every prompt. See `rust/loopflow/src/wave/README.md` for the wire contract,
@@ -110,9 +110,9 @@ commands for long-term coordination.
 
 | Event | What lfd runs |
 |-------|---------------|
-| CI fails on a wave's PR | `lf chat --wave <name> "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
+| CI fails on a wave's PR | `lf chat --wave <name> --from ci "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
 | PR merged | queue state reconciles in-process |
-| Push to main | `lf chat --wave <name> "main moved: …"` — the loop decides whether to rebase or integrate |
+| Push to main | `lf chat --wave <name> --from github "main moved: …"` — the loop decides whether to rebase or integrate |
 
 ## Skills
 

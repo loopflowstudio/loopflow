@@ -630,9 +630,12 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Trace { run_id, json }) => {
                 loopflow::lf::commands::runs::trace(run_id, *json)
             }
-            Some(Commands::Chat { text, from, target }) => {
-                loopflow::lf::commands::chat::run(text, from.as_deref(), target)
-            }
+            Some(Commands::Chat {
+                text,
+                from,
+                steer,
+                target,
+            }) => loopflow::lf::commands::chat::run(text, from.as_deref(), *steer, target),
             Some(Commands::Wavechat { wave, from }) => {
                 loopflow::lf::commands::wavechat::run(wave.as_deref(), from.as_deref())
             }

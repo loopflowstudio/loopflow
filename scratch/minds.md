@@ -395,7 +395,8 @@ unattributed write, after `cf4aa764` took an append lock on everything else.
 Where this branch actually landed. The Model above is the durable theory and
 stands; this ledger is what a fresh session needs before touching code.
 
-**Built and verified.** Full suite green (`cargo test`, all targets).
+**Built.** The parent checkpoint was full-suite green. The CLI steer slice is
+covered by its chat-command tests and the live-body done-when test.
 
 | Change | Where |
 | --- | --- |
@@ -405,6 +406,7 @@ stands; this ledger is what a fresh session needs before touching code.
 | §3 `lf project promote` — flow, skill, parent link, PM move | `ops/project.rs` |
 | The playhead: model, FIFO nested frames, skip, retry-on-failure | `wave/playhead.rs` |
 | Playhead durability across reconnect and restart | `wave/journal.rs`, `wave/runtime.rs` |
+| `lf chat --steer` reaches live Codex bodies; attributed reports stay queued | `lf/commands/chat.rs` |
 | §4 tmux door read-only · §5 backlogs allowed · §7 doctrine | `engine/builtins/**` |
 | §6 Mac surface — five panes, playhead header, body provenance | `swift/LoopflowMac/Views/**` |
 
@@ -412,8 +414,7 @@ stands; this ledger is what a fresh session needs before touching code.
 
 | Gap | Consequence today |
 | --- | --- |
-| CLI `lf chat` never steers — it always posts `op:"say"` (`lf/commands/chat.rs:95`) | The **Demo** below overclaims: only the Mac composer emits `op=steer`, and only Codex consumes it (`flowloop/wave.rs:727`). A CLI message queues for the next pass. |
-| The bus/thread rewrite: channels-as-topics, writes-down/reads-up, server-stamped attribution | Chat still carries client-supplied `from`; no write-prefix gate exists. Root cause of the row above. |
+| The bus/thread rewrite: channels-as-topics, writes-down/reads-up, server-stamped attribution | Chat still carries client-supplied `from`; no write-prefix gate exists. |
 | Mid-turn steer for Claude and OpenCode → *roadmap* | Only Codex steers; the others queue to the next body. Vendor-gated; the product question lives in `wave/product/projects/wave-chat.md`. |
 | Composite flow nodes (and/xor/or/loop) as first-class playhead frames | They run through the internal headless `__flow-step` fallback (`flowloop/wave.rs:311`). |
 | PM `project:<slug>` label removal on promotion → *roadmap* | The provider has no remove-label op; residual labels are recorded, not cleared. |
@@ -438,19 +439,14 @@ stands; this ledger is what a fresh session needs before touching code.
 Work that is schedulable now, ordered by what unblocks the most. Everything here
 is ours to write; nothing waits on anyone else.
 
-1. **Make `lf chat` steer.** The mechanism exists and the Mac uses it. Give the
-   CLI an op — infer `steer` when a turn is live, or take it as a flag — so the
-   headline Demo becomes true. Smallest change that closes the widest gap
-   between doc and product.
-2. **The bus/thread wires** (§"Two wires"). Server-stamped attribution and a
-   `matches_prefix` write gate. Settles the topic notation below and subsumes
-   (1)'s root cause.
-3. **Project-loop caps.** Needs dogfood data, not a guessed weeks-scale timeout.
+1. **The bus/thread wires** (§"Two wires"). Server-stamped attribution and a
+   `matches_prefix` write gate. Settles the topic notation below.
+2. **Project-loop caps.** Needs dogfood data, not a guessed weeks-scale timeout.
    Run one real project loop first, then pick.
-4. **Composite playhead frames.** Promote branch/loop internals out of the
+3. **Composite playhead frames.** Promote branch/loop internals out of the
    `__flow-step` fallback. Separate graph-runtime work; do it when the Mac's
    breadcrumb starts lying about nested flows.
-5. **One writer per worktree.** Decide whether it's a wave-home invariant or a
+4. **One writer per worktree.** Decide whether it's a wave-home invariant or a
    lock. Until then, check for a live agent before working a wave worktree.
 
 ### Punted to the roadmap
@@ -653,8 +649,8 @@ trying the core interaction.
 
 ### Done when: chat reaches the body now playing
 
-*Met on the Mac, with Codex. Not met from the CLI, and not for Claude or
-OpenCode — see **Status**.*
+*Met from the Mac and `lf chat --steer` with Codex. Claude and OpenCode queue
+to the next body because their harnesses do not expose live steer.*
 
 - Sending a message while a step is active delivers it into that step's live
   session rather than waiting for the whole flow to finish.
@@ -743,7 +739,7 @@ requires a terminal attachment or session picker.
 
 ```bash
 lf loop infrastructure          # a wave with three projects, one chat
-lf chat "how's release stability?"
+lf chat --steer "how's release stability?"
 ```
 
 The wave answers from its own memory. It has inhabited `technical-architecture`
@@ -756,7 +752,7 @@ conversation.
 Steer without leaving the thread:
 
 ```bash
-lf chat "actually skip the migration, just gate it"
+lf chat --steer "actually skip the migration, just gate it"
 ```
 
 If a pass is live, the message lands inside its running session at the next
@@ -764,17 +760,12 @@ tool boundary — seconds, not a pass boundary. If not, it journals and the pass
 it wakes is born already caught up, because every mind receives recent chat at
 birth.
 
-> **Not true yet.** `lf chat` always posts `op:"say"`, which queues for the next
-> pass. Only the Mac composer emits `op=steer`, and only Codex consumes it. This
-> is item (1) in **Next implementation session** — the widest gap between this
-> doc and the product.
-
 Open Loopflow Mac on the same wave: one screen, the thread plus KRs, open PRs,
 and active sessions. The screen has no second conversation on it.
 
 ```bash
 lf project promote release-stability
-lf chat --wave release-stability "drop the flaky retry, delete the test"
+lf chat --wave release-stability --steer "drop the flaky retry, delete the test"
 ```
 
 A second room, because you asked for one. The parent stops overhearing.

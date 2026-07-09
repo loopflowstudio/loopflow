@@ -1,10 +1,10 @@
 //! `lf chat` — post a message into a wave's thread through its live server.
 //!
 //! The speech surface of the one-door calling convention: loops, workers,
-//! humans, and scripts all emit through the same verb. The message POSTs to
-//! the target wave's server as the `say` op — it lands in the thread as an
-//! attributed statement AND wakes the loop like any input (queued, coalesced,
-//! answered).
+//! humans, and scripts all emit through the same verb. `--steer` uses the
+//! `steer` op, reaching a live steer-capable turn and otherwise queueing for
+//! the next one. The default `say` op lands in the thread with a byline and
+//! queues for the loop.
 //!
 //! # Targeting (by CHANNEL name — dots are the tree)
 //! - default: the invoking context's channel — `LFD_CHANNEL` env first (set
@@ -56,13 +56,18 @@ use crate::lf::WaveTargetArgs;
 use crate::lfd::types::Wave;
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::wave::channel::family_head;
-use crate::wave::journal::Attribution;
+use crate::wave::journal::{Attribution, MessageOp};
 
-pub fn run(text_args: &[String], from_label: Option<&str>, target: &WaveTargetArgs) -> Result<()> {
+pub fn run(
+    text_args: &[String],
+    from_label: Option<&str>,
+    steer: bool,
+    target: &WaveTargetArgs,
+) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let context = CliContext::detect().await;
-        run_with_context(&context, text_args, from_label, target).await
+        run_with_context(&context, text_args, from_label, steer, target).await
     })
 }
 
@@ -72,6 +77,7 @@ pub(crate) async fn run_with_context(
     context: &CliContext,
     text_args: &[String],
     from_label: Option<&str>,
+    steer: bool,
     target: &WaveTargetArgs,
 ) -> Result<()> {
     let Some(resolved) = resolve_target(
@@ -88,20 +94,25 @@ pub(crate) async fn run_with_context(
     };
     let text = message_text(text_args, std::io::stdin())?;
     let endpoint = resolved.require_endpoint()?;
-    let mut from = sender_attribution(target.parent, resolved.own_name.as_deref());
-    if let Some(label) = from_label {
-        from.label = label.to_string();
-    }
-    let mut body = serde_json::json!({ "op": "say", "text": text, "from": from });
+    let (op, from) = if steer {
+        (MessageOp::Steer, None)
+    } else {
+        let mut from = sender_attribution(target.parent, resolved.own_name.as_deref());
+        if let Some(label) = from_label {
+            from.label = label.to_string();
+        }
+        (MessageOp::Say, Some(from))
+    };
+    let mut body = serde_json::json!({ "op": op, "text": text, "from": from });
     if let Some(channel) = &resolved.channel {
         body["channel"] = serde_json::Value::String(channel.clone());
     }
     post_json(&endpoint, "/messages", &body).await?;
-    println!(
-        "posted to channel '{}' as [{}]",
-        resolved.channel.as_deref().unwrap_or(&resolved.name),
-        from.label
-    );
+    let channel = resolved.channel.as_deref().unwrap_or(&resolved.name);
+    match from {
+        Some(from) => println!("posted to channel '{channel}' as [{}]", from.label),
+        None => println!("sent to channel '{channel}' (steer live, otherwise queue)"),
+    }
     Ok(())
 }
 
@@ -557,10 +568,56 @@ mod tests {
             &context,
             &["hello".into()],
             None,
+            false,
             &WaveTargetArgs::default(),
         )
         .await
         .expect("dropped publish exits 0");
+    }
+
+    /// `--steer` uses the same wire op as the Mac composer and carries no
+    /// attributed byline.
+    #[tokio::test]
+    async fn steer_flag_requests_live_steering() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let origin = tmp.path().join("repo");
+        std::fs::create_dir_all(&origin).unwrap();
+        let (addr, runtime, mut inbox) = boot_server(&origin, "ship").await;
+        let wave = make_wave("ship", &origin, None);
+        store.create_wave(&wave).await.expect("seed wave");
+        store
+            .register_session(&live_server_session(&wave, &addr))
+            .await
+            .expect("seed brain");
+
+        let context = CliContext {
+            store: Some(store),
+            repo: None,
+            env_wave_id: None,
+            env_channel: None,
+        };
+        run_with_context(
+            &context,
+            &["skip".into(), "the".into(), "migration".into()],
+            None,
+            true,
+            &WaveTargetArgs {
+                wave: Some("ship".into()),
+                parent: false,
+            },
+        )
+        .await
+        .expect("post human message");
+
+        let thread = runtime.thread_snapshot();
+        assert_eq!(thread.len(), 1);
+        assert_eq!(thread[0].text, "skip the migration");
+        assert_eq!(thread[0].from, None);
+        let InboxItem::Message(message) = inbox.try_recv().expect("steer inbox item") else {
+            panic!("expected message inbox item");
+        };
+        assert_eq!(message.op, MessageOp::Steer);
     }
 
     /// `--from` attributes machine speech: the label lands on the journaled
@@ -573,7 +630,7 @@ mod tests {
         let store = temp_store(tmp.path()).await;
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(&origin).unwrap();
-        let (addr, runtime, _inbox) = boot_server(&origin, "ship").await;
+        let (addr, runtime, mut inbox) = boot_server(&origin, "ship").await;
         let wave = make_wave("ship", &origin, None);
         store.create_wave(&wave).await.expect("seed wave");
         store
@@ -591,6 +648,7 @@ mod tests {
             &context,
             &["CI".into(), "failed".into()],
             Some("ci"),
+            false,
             &WaveTargetArgs {
                 wave: Some("ship".into()),
                 parent: false,
@@ -603,6 +661,10 @@ mod tests {
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "CI failed");
         assert_eq!(thread[0].from.as_deref(), Some("ci"));
+        let InboxItem::Message(message) = inbox.try_recv().expect("say inbox item") else {
+            panic!("expected message inbox item");
+        };
+        assert_eq!(message.op, MessageOp::Say);
     }
 
     /// `--parent` walks `parent_wave_id` and posts to the parent's live

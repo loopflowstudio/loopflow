@@ -1305,7 +1305,7 @@ mod tests {
         // No token: refused before any exec.
         let no_token = client
             .post(&url)
-            .json(&serde_json::json!({ "argv": ["doctor"], "cwd": null }))
+            .json(&serde_json::json!({ "argv": ["pr", "status"], "cwd": null }))
             .send()
             .await
             .unwrap();
@@ -1315,7 +1315,7 @@ mod tests {
         let resident_token = client
             .post(&url)
             .header(RESIDENT_TOKEN_HEADER, "resident")
-            .json(&serde_json::json!({ "argv": ["doctor"], "cwd": null }))
+            .json(&serde_json::json!({ "argv": ["pr", "status"], "cwd": null }))
             .send()
             .await
             .unwrap();
@@ -1326,7 +1326,7 @@ mod tests {
         let bad_argv = client
             .post(&url)
             .header(SUBAGENT_TOKEN_HEADER, &token)
-            .json(&serde_json::json!({ "argv": ["next", "--nonesuch"], "cwd": null }))
+            .json(&serde_json::json!({ "argv": ["pr", "land", "--nonesuch"], "cwd": null }))
             .send()
             .await
             .unwrap();

@@ -25,11 +25,11 @@ and Rust flow parser tests.
 - Made bare `lf pr` show PR status, with `lf pr open`, `lf pr submit`, and
   `lf pr land` carrying the lifecycle verbs.
 - Kept PR-mutating commands on the existing rebase-conflict retry path.
-- Rehomed several existing mechanical verbs as top-level commands in the
-  implementation (`next`, `advance`, `branches`, `sync`, `doctor`,
-  `sync-skills`, `shell`) rather than deleting them in this pass. The scratch
-  design says some of those should eventually die, so reviewers should confirm
-  whether this broader compatibility surface is intentional.
+- Deleted the mechanical verbs the design retires: `next`, `advance`,
+  `branches`, `sync`, `doctor`, `shell`, `cp`, `push`, `queue reconcile`.
+  Only `sync-skills` survives, hidden (`#[command(hide = true)]`), because
+  `install.py` and `verify_skill_sync.py` invoke it. Machine callers that
+  needed `next` and `queue reconcile` now call the library in-process.
 
 ## How it fits together
 
@@ -63,8 +63,9 @@ speak the same command language.
 
 - `cargo fmt --all -- --check` - pass
 - `cargo clippy --all-targets -- -D warnings` - pass
-- `uv run python scripts/test.py` - pass: Python 34 passed; Rust 1238 passed,
-  3 skipped; website 59 passed, 3 skipped
+- `cargo test` - pass (was red before the compress pass: two `/v0/exec` door
+  tests asserted a 400 on `next --nonesuch`, but with `next` deleted that argv
+  parses as an external subcommand and reaches exec instead of being refused)
 - `uv run python scripts/test.py --all` - Python pass; Rust pass; website pass;
   Swift package pass; e2e smoke pass; Loopflow UI built and then hung idle in
   headless UI test execution as noted above

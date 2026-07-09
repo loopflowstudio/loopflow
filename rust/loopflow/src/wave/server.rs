@@ -1434,6 +1434,8 @@ mod tests {
             argv(&["auth", "status"]),
             argv(&["wave", "ship"]),
             argv(&["wave", "ship", "--force"]),
+            argv(&["task", "ship it"]),
+            argv(&["sync-skills", "--yes"]),
             // A flow / inline prompt with no `--dispatch`: no sandbox.
             argv(&["implement", "ship it"]),
             argv(&[":", "do", "something"]),
@@ -1456,6 +1458,14 @@ mod tests {
         assert_eq!(
             wave_exec_verdict(&argv(&["wave", "ship", "--force"])),
             ExecVerdict::Deny("wave".to_string())
+        );
+        assert_eq!(
+            wave_exec_verdict(&argv(&["task", "ship it"])),
+            ExecVerdict::Deny("task".to_string())
+        );
+        assert_eq!(
+            wave_exec_verdict(&argv(&["sync-skills", "--yes"])),
+            ExecVerdict::Deny("sync-skills".to_string())
         );
         assert_eq!(
             wave_exec_verdict(&argv(&["implement", "ship it"])),

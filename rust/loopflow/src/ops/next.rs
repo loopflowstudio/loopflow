@@ -54,7 +54,7 @@ pub fn next_branch(
         add: true,
         push: true,
         create_draft_pr: true,
-        message: Some("lf next: checkpoint".to_string()),
+        message: Some("lf wt: checkpoint".to_string()),
         agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };

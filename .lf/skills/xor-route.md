@@ -88,7 +88,7 @@ Make the change easy to review.
    - `scratch/pr-body.md` — markdown PR body
    - `scratch/.pr-copy-ref` — current `HEAD` SHA (`git rev-parse HEAD`)
 
-   `lf op land` consumes these files.
+   `lf pr land` consumes these files.
 
 4. **Update README and docs**
    - If user-facing behavior changed, docs must reflect it

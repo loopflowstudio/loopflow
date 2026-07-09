@@ -1,7 +1,7 @@
 //! What's left of the trigger organs: token refresh. The activation queue,
 //! loop ticker, watch/cron/ci-failure pollers, repair chain, and recovery
-//! loop died in the collapse's organ cut — webhooks speak `lf chat` /
-//! `lf queue reconcile`, and cron lives in the wave's resident flowloop.
+//! loop died in the collapse's organ cut — webhooks speak `lf chat` for
+//! notifications and reconcile queue state in-process.
 
 mod token_refresh;
 

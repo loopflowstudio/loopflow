@@ -73,14 +73,13 @@ Remove merged worktrees:
 lf wt prune
 ```
 
-If the default branch looks dirty after a sync or PR operation you ran from a sibling worktree, resync it explicitly:
+If the default branch looks stale after a PR operation you ran from a sibling worktree, rebase the current branch:
 
 ```bash
-lf sync
+lf rebase
 ```
 
-Loopflow updates the checked-out default-branch worktree, not just the ref, and restores any dirty local edits afterward.
-If restoring those edits conflicts, the stash is left in place for manual recovery.
+Loopflow updates the default-branch worktree as part of the rebase path.
 
 ## Loop stuck in WAITING
 
@@ -119,11 +118,7 @@ Run the setup wizard:
 lf init
 ```
 
-Check installation:
-
-```bash
-lf doctor
-```
+If an agent CLI is missing, install that vendor's CLI and rerun `lf init`.
 
 ## See Also
 

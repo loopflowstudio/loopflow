@@ -142,7 +142,7 @@ fn build_session_command(
 fn spawn_session_command(command: &SessionCommand) -> Result<()> {
     if !check_cli_available(&command.program) {
         return Err(anyhow!(
-            "'{}' CLI not found. Run `lf doctor` to check dependencies.",
+            "'{}' CLI not found. Install it and rerun `lf init`.",
             command.program
         ));
     }

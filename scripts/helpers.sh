@@ -256,7 +256,7 @@ loopflow_dispatch() {
             ;;
         next)
             if loopflow_has_cmd lf; then
-                tmux send-keys "lf next" Enter
+                tmux send-keys 'lf wt create "$(basename "$PWD").next"' Enter
             else
                 loopflow_display "lf not found"
             fi
@@ -306,7 +306,7 @@ prefix+$prefix+r  run step/wave
 prefix+$prefix+s  stop
 prefix+$prefix+o  open logs
 prefix+$prefix+p  open PR
-prefix+$prefix+n  next iteration
+prefix+$prefix+n  create next worktree
 prefix+$prefix+d  land PR
 prefix+$prefix+u  start/bootstrap
 prefix+$prefix+w  pick wave

@@ -927,16 +927,15 @@ mod tests {
     fn planned_execs_resolve_to_known_lf_commands() {
         use clap::Parser;
 
-        for exec in [LfExec::chat("ship", "main moved".to_string(), "github")] {
-            let argv = std::iter::once("lf".to_string()).chain(exec.args.iter().cloned());
-            let cli = crate::lf::Cli::try_parse_from(argv)
-                .unwrap_or_else(|err| panic!("{:?} must parse: {err}", exec.args));
-            assert!(
-                !matches!(cli.command, Some(crate::lf::Commands::External(_))),
-                "{:?} fell through to an external subcommand — stale verb",
-                exec.args
-            );
-        }
+        let exec = LfExec::chat("ship", "main moved".to_string(), "github");
+        let argv = std::iter::once("lf".to_string()).chain(exec.args.iter().cloned());
+        let cli = crate::lf::Cli::try_parse_from(argv)
+            .unwrap_or_else(|err| panic!("{:?} must parse: {err}", exec.args));
+        assert!(
+            !matches!(cli.command, Some(crate::lf::Commands::External(_))),
+            "{:?} fell through to an external subcommand — stale verb",
+            exec.args
+        );
     }
 
     /// A deleted branch removes the sibling worktree that was on it, and leaves

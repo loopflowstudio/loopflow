@@ -1,9 +1,9 @@
-//! One merge-queue reconcile pass, verb-shaped: `lf queue reconcile`.
+//! One merge-queue reconcile pass.
 //!
 //! Runs the same pass the daemon's 60s poller runs (stack-status inference,
 //! draft/ready flips, lazy head rebase, queue-block attention writes),
-//! sourced from lfdb + gh, then exits. The doorman's poll loop and PR-merged
-//! webhook will exec this verb once the collapse lands (wave 3).
+//! sourced from lfdb + gh. The daemon calls this in-process from PR-merged
+//! webhooks and queue maintenance.
 //!
 //! Queue blocks are attention rows in the ledger — the durable record of the
 //! fact. There is no live push; a client reads them by querying attention

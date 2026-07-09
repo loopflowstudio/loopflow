@@ -107,7 +107,7 @@ commands for long-term coordination.
 | Event | What lfd runs |
 |-------|---------------|
 | CI fails on a wave's PR | `lf chat --wave <name> "CI failed: …"` — the flowloop decides how to fix (usually a `ci-fix` worker) |
-| PR merged | `lf queue reconcile --wave <name>` |
+| PR merged | queue state reconciles in-process |
 | Push to main | `lf chat --wave <name> "main moved: …"` — the flowloop decides whether to rebase or integrate |
 
 ## Skills
@@ -119,12 +119,9 @@ lf design      # interactive design session
 lf gstack/office-hours   # run a built-in gstack skill
 lf office-hours          # same thing — bare name works when unambiguous
 lf npx/vercel-labs/deep-research   # fetch any Claude Skill live and run it
-lf sync-skills       # compile skills into ~/.claude/skills and ~/.agents/skills
 ```
 
 Skills are prompts that run coding agents. Add your own in `.lf/skills/`.
-
-`lf sync-skills` compiles resolved skills (builtins + your `~/.lf/`) into your personal vendor Skill directories under `~/.claude/skills` and `~/.agents/skills`, so compact skill invocations work in Claude and Codex sessions (`/skill` for Claude, `$skill` for Codex handoffs). It only ever writes under your home — never into a working repo. Add `--yes` to skip the confirmation prompt.
 
 Names resolve in this order: your repo (`.lf/skills/<name>.md`, `.lf/skills/<ns>/<name>.md`, or `.claude/commands/<name>.md`) → your global dir (`~/.lf/skills/<name>.md`, `~/.lf/skills/<ns>/<name>.md`, or `~/.claude/commands/<name>.md`) → core builtins (`build/`, `govern/`, `ops/`) → namespaced builtins (`gstack/`, …) → external skill namespaces. A bare name resolves to a namespaced builtin only when exactly one namespace has that name. Namespaced skills and flows use `/`, not `:`. For third-party skills, use `lf npx/<owner>/<repo>` (or `lf npx/<name>` once cached or searchable via `npx skills`). The legacy `rams/rams` shim also resolves when `~/.claude/commands/rams.md` exists.
 
@@ -335,7 +332,7 @@ uv run python scripts/install.py local --use   # full build: lf, lfd, Loopflow.a
 uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf+lfd, sync skills
 ```
 
-`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, install them into the local bin dir, and sync loopflow skills into `~/.claude/skills` and `~/.agents/skills`. Both paths run `lf sync-skills --yes` after installing, so Claude and Codex always see the latest skills.
+`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, install them into the local bin dir, and sync loopflow skills into `~/.claude/skills` and `~/.agents/skills`.
 
 Built-in skills and flows included. `lf init` sets up your coding agent and preferences.
 
@@ -376,8 +373,6 @@ pm:
 ```
 
 ```bash
-lf branches list --user @me --stale 60d   # preview stale remote branches
-lf branches prune --user @me --stale 60d  # delete after confirmation
 lf pm init --wave designer                # connect/create the Linear project
 lf pm show --wave designer                # group live tasks by local project
 lf pm show --wave designer --project ui   # filter to one local project

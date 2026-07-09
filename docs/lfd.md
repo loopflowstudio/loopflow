@@ -223,12 +223,12 @@ POST /v0/hooks/github
 
 Set `github.webhook_secret` or `LFD_GITHUB_WEBHOOK_SECRET` before enabling the webhook. `lfd` verifies `X-Hub-Signature-256` and ignores unsigned requests.
 
-Webhooks translate inward as `lf` execs. The current demo path keeps CI and
-main-push events as attributed chat notifications; durable facts plus explicit
-commands are the long-term coordination shape.
+Webhooks translate inward through the daemon. The current demo path keeps CI
+and main-push events as attributed chat notifications; queue maintenance runs
+in-process.
 
 - check_run failure → `lf chat --wave <wave> "CI failed: …"` (the wave's flowloop decides how to fix)
-- PR merged → `lf queue reconcile --wave <wave>`
+- PR merged → reconcile stacked queue state for matching waves
 - push to main → `lf chat --wave <wave> "main moved: …"` for each wave in the repo
 
 A wave with no live server bounces the notification — logged at debug. No wave resolved → dropped.

@@ -134,7 +134,6 @@ Next:
   lf debug -c            # paste an error, fix it
   lf --list              # see all steps and flows
 
-  Set up tmux integration: lf shell install
   Run `lfd install` to set up the daemon for autonomous waves
 ```
 

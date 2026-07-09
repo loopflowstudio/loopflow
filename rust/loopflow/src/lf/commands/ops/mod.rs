@@ -903,7 +903,7 @@ fn wt_create(name: &str, child: Option<&str>, dry_run: bool) -> Result<()> {
 
     if !write_shell_directive(&format!("cd {}", result.path.display()))? {
         println!("cd {}", result.path.display());
-        println!("Tip: Run 'lf shell install' for auto-cd");
+        println!("Tip: source scripts/dev-lf to apply auto-cd in this shell");
     }
 
     Ok(())
@@ -1537,7 +1537,7 @@ fn launch_skill_agent(repo_root: &Path, skill_name: &str, context: Option<&str>)
 }
 
 // ==========================================================================
-// lf doctor
+// System dependency manifest
 // ==========================================================================
 
 /// How a dependency is installed via Homebrew (macOS).
@@ -1550,8 +1550,7 @@ enum Brew {
 }
 
 /// A single declared system dependency. This array is the source of truth for
-/// both `lf doctor` and the repo-root `Brewfile` (generated via
-/// `lf doctor --brewfile`).
+/// the repo-root `Brewfile`.
 #[derive(Debug, Clone, Copy)]
 struct SystemDep {
     /// Display name. Also the binary probed via `which`, unless `command` differs.
@@ -1591,8 +1590,8 @@ impl SystemDep {
 /// The declared system dependencies loopflow expects on a working host.
 ///
 /// Required deps are the build/run essentials; optional deps are the agent CLIs
-/// and editors. `lf doctor` loops over this list, and the repo-root Brewfile
-/// is generated from it — do not hand-maintain a second list.
+/// and editors. The repo-root Brewfile is generated from it — do not
+/// hand-maintain a second list.
 const SYSTEM_DEPS: &[SystemDep] = &[
     // Required: build/run essentials.
     SystemDep {
@@ -1699,7 +1698,7 @@ fn brewfile_contents() -> String {
     let mut out = String::new();
     out.push_str("# Generated from the declared SYSTEM_DEPS list in\n");
     out.push_str("# rust/loopflow/src/lf/commands/ops/mod.rs — do not edit by hand.\n");
-    out.push_str("# Regenerate with: lf doctor --brewfile > Brewfile\n");
+    out.push_str("# Keep this file in sync with SYSTEM_DEPS.\n");
     out.push_str("# Install everything with: brew bundle\n\n");
     for dep in SYSTEM_DEPS {
         let Some(brew) = dep.brew else { continue };
@@ -1809,7 +1808,7 @@ mod doctor_tests {
         assert_eq!(
             committed,
             brewfile_contents(),
-            "Brewfile is stale; regenerate with `lf doctor --brewfile > Brewfile`"
+            "Brewfile is stale; update it alongside SYSTEM_DEPS"
         );
     }
 }

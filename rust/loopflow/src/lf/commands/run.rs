@@ -347,7 +347,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     let cli_check_start = Instant::now();
     if !check_cli_available(&built.harness) {
         return Err(anyhow!(
-            "'{}' CLI not found. Run `lf doctor` to check dependencies.",
+            "'{}' CLI not found. Install it and rerun `lf init`.",
             built.harness
         ));
     }

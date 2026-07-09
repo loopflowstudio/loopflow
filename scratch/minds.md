@@ -89,6 +89,53 @@ lf loop task "..." &    # background solve — concurrency, the only reason to
 Entering a task or project flowloop inherently forks a worktree. That is not a
 cost to weigh; it is what the verb means.
 
+### Channels are topics
+
+One string does three jobs today. Split them:
+
+- **Channel** — a topic. What the stream is about. Any `lf` exec may post to or
+  listen on any channel it has the capability for.
+- **Attribution** — a byline. Who said it. **Server-stamped from the token.**
+- **Family head** — routing. Which server holds the pen, which journal file.
+  Keep it; it is a fact about single-writer discipline, not about meaning.
+
+`wave/<wave>/user` is the live-to-user channel — the one thread, the one the Mac
+renders. For now, only the wave publishes to it. A hand's report reaches the
+human when the wave relays it; that is the wave curating its own thread, which
+is what "one chat interface" means. It costs one wave pass of latency.
+
+**Writes go down. Reads go up.** Publish is permitted iff
+`matches_prefix(target, writer_channel)` — your channel and its subtree — with
+`writer_channel` derived server-side from the token. A child publishes to
+`<self>/report`; the parent *subscribes*. No upward write exists anywhere. The
+prefix rule is total, with zero exceptions.
+
+`lf chat --parent` becomes sugar for `--channel <self>/report`. `driver.rs:206`
+stops being a crossing: the child was always talking in its own room, and the
+parent was always the one who chose to listen.
+
+**Wake is subscription.** A wave wakes on `<wave>/user` and on `<child>/report`
+for each child. Its own hands narrate to `<wave>/run/<id>`, which it does not
+subscribe to — so a wave inhabiting a task cannot wake itself. Not guarded
+against; structurally impossible once narration and address are different
+things.
+
+Security consequence, not optional. `sender_attribution()` (`chat.rs:302`)
+builds the byline from the caller's env, and the wire carries
+`from: Option<Attribution>` (`server.rs:334`). Client-claimed. That is safe only
+while the channel is ownership-derived — you could write where you lived and
+nowhere else, so the address pinned the byline. Topics unpin it: a leaked worker
+token would post to the human's channel as the wave. **The token names the
+writer; the writer does not get to say.**
+
+Cost, in `channel.rs`. Ownership naming inverts a channel to a worktree
+(`child_worktree_path`), and *"its journal lives IN THAT WORKTREE… it travels
+with the branch and dies with it."* A topic cannot live in a worktree, because
+many processes post to it. Journals move to the origin; retention becomes
+per-topic policy rather than a side effect of branch deletion. The FLAGGED
+archive note (`~/.lf/journal/<repo>/<worktree>`) stops being a fallback and
+becomes the design.
+
 ### What a hand is
 
 A hand has a voice and no room. Its transcript is private — *"Trust worker
@@ -142,7 +189,8 @@ stops at wave boundaries" and "a hand hears its wave" are one rule, not two.
 ### The invariant
 
 - Worker → wave: the transcript is private, the posts are public.
-- Child wave → parent wave: the thread is private, `--parent` is public.
+- Child wave → parent wave: the child publishes to `<self>/report`; the parent
+  subscribes.
 - Memory crosses freely downward, but only because `lf memory add` already made
   it an authored statement.
 
@@ -152,10 +200,9 @@ Raw records stay home; authored statements travel. This is what lets
 log-as-truth survive nesting: every log is complete for its own scope, and what
 leaves it is what a mind decided to say.
 
-`driver.rs:206` is the one exception — cap exhaustion fires `lf chat --parent`
-with nobody deciding to. That is defensible; a wave that dies silently is worse
-than a noisy one. A second exception would mean raw records have started
-leaking upward.
+Under writes-down/reads-up the invariant is total. There is no exception,
+because there is no upward write to except — including `driver.rs:206`, which
+was never a crossing.
 
 ## Consequences
 
@@ -382,18 +429,18 @@ A second room, because you asked for one. The parent stops overhearing.
 
 ## Open questions
 
-**Is a hand's channel a buffer or a byline?** The one that blocks the rest.
-`channel.rs` builds a buffer: a work line's journal lives *in its worktree*,
-dies with the branch, and *"at land the flowloop curates the distilled story up
-(parent channel + wave memory)."* A byline instead puts the hand's words in the
-wave's thread, live, attributed. The buffer protects the thread's signal; the
-byline is what "one chat interface" sounds like it promises.
+*(Resolved: buffer vs byline was never a choice — it is two topics.
+`<wave>/run/<id>` is the firehose, `<wave>/user` is the thread, and the Mac
+panes are subscriptions.)*
 
-There is a third answer in `matches_prefix`: child channels are subscribable by
-prefix. The thread stays curated, `lf sub goals.*` gives the firehose on demand,
-and the hand boundary obeys the same rule as the wave boundary — read the stream
-if you want it, only authored statements cross into the thread. That would make
-the invariant total with no exceptions but `driver.rs:206`.
+**What is the topic vocabulary?** `<wave>/user` and `<wave>/run/<id>` and
+`<child>/report` fall out of the design. `<wave>/prs`, `<wave>/runs` fall out of
+the Mac panes. Whether those are topics or store queries is undecided, and it
+decides whether the UI is a subscriber or a poller.
+
+**Retention per topic.** `<wave>/run/<id>` should probably still die with its
+worktree; `<wave>/user` must not. Once journals live in the origin, nothing
+deletes them by accident, which was previously the only retention policy.
 
 **Does a `lf loop` child inherit `LFD_WAVE_ID`?** If yes, a flowloop's ear is at
 pass granularity and §5 (the tmux door) closes for free. If no, everything about

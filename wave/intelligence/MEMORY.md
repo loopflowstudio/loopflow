@@ -45,7 +45,41 @@ structure the model proposes.
 - **Durability scopes:** replayable stream *within a server's life* (journal
   snapshot+tail); `MEMORY.md` is the only thing that crosses land/branch/machine.
 
+- **`run_events` is the one home for token and cost evidence.** The journal
+  already writes input/output/cache/cost/duration onto `run_events` rows at
+  skill boundaries and at terminal run events. `run_token_usage` is a second,
+  never-fed table: its only callers are in `#[cfg(test)] mod tests`, so
+  `lf usage` and `GET /v0/usage` aggregate an always-empty table and print
+  "No token usage recorded yet." forever. Delete it and reroute `lf usage` at
+  `run_events`; do not "wire it up".
+- **Wiring `run_token_usage` would silently lose tokens.** Its `run_id TEXT
+  PRIMARY KEY` + `ON CONFLICT DO UPDATE SET input_tokens = excluded.…`
+  overwrites rather than accumulates, but a `run_id` is shared by a run and
+  every nested `lf` it spawns (`047_run_events.sql` says so: "several writers
+  may share a run_id"). 86 of 928 recorded `run_id`s already carry more than
+  one terminal run event. Last writer would win.
+
 ## Constraints
+
+- **A run's tokens live under a `run_id` that its children also write.** Child
+  `lf` processes inherit `LF_RUN_ID`, so per-run attribution must aggregate
+  over `run_events` rows, never assume one row per run. This is by design, not
+  a bug — `lf trace` is meant to show the whole nested tree.
+
+- **Fresh-db tests cannot see ledger drift.** Every migration test builds a db
+  from migration 001 forward, so a schema that only exists on a long-lived
+  machine is invisible to CI. A pre-release `054_step_to_skill` renamed
+  `run_events.step_index` → `skill_index`; the landed 054 does not. Jack's
+  ledger — the only one holding real history — therefore had a column no
+  reader selects, and `lf runs` and `lf trace` failed on *every* invocation
+  while CI stayed green. `055_run_events_step_index_repair` converges it.
+  Trace work must be exercised against a real ledger copy, not a fresh db.
+
+- **A migration's version id is its identity, not its content.** Editing an
+  already-applied migration file never re-runs it; the divergence becomes
+  permanent and silent. Repair forward with a new migration listed in
+  `RENAME_CONVERGENCE_MIGRATIONS`, which tolerates "no such column" so the
+  same file is a no-op on ledgers that never diverged.
 
 - **Only `MEMORY.md` crosses the branch boundary.** The journal (and the
   `MemoryAdded` replay buffer it rebuilds) is per-machine and gitignored, so the

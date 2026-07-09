@@ -21,3 +21,26 @@ cold starts without growing a second brain.
   still answers "decided / constrained / in flight" at a glance.
 - Send, steer, interrupt, and resume hit the right session 100% of a
   week's uses without exposing runtime plumbing.
+
+## Open questions
+
+**What does "steer" mean on a harness that cannot be steered?** Only Codex
+exposes a true mid-turn steer today; Claude and OpenCode take input only at a
+turn boundary, so a message to a live pass queues for the next body. The
+send/steer/interrupt KR above is written as if steering is universal, and it is
+not. Two readings, and the choice is a product decision rather than a schedule
+item:
+
+- *Steer degrades honestly.* On an unsteerable harness the message queues, and
+  the surface says so — the thread shows "will reach it at the next step."
+  Costs latency; keeps one verb.
+- *Steer means steer.* Interrupt the body, fold the message into its successor's
+  birth context. Uniform semantics; pays a restart per steer.
+
+Unblocking the first reading needs nothing from a vendor. The second is worth
+pricing before assuming the vendors will close the gap for us.
+
+**Steering is a Mac capability, not a chat capability.** `lf chat` always posts
+`op:"say"`; only the Mac composer emits `op=steer`. Whatever the answer above,
+the CLI and the Mac must reach the same session with the same verb, or the KR
+is measuring one surface and claiming both.

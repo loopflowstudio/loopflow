@@ -208,8 +208,8 @@ pub struct InFlightWorker {
 }
 
 /// One `inbox` SSE frame on `/events?inbox=true` — a resident-directed op.
-/// `id` is the journaled message id (`"msg-<seq>"`), or `None` for a bare
-/// interrupt (nothing journaled — the op is control, not content).
+/// A `Message` carries its journaled id (`"msg-<seq>"`). `Interrupt` and `Skip`
+/// carry none: nothing is journaled, because the op is control, not content.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InboxFrame {

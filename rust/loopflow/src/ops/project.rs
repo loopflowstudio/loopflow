@@ -119,7 +119,7 @@ async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> O
 async fn launch_residency(repo: &Path, wave: &str) -> OpsResult<()> {
     let argv = [
         resolve_lf_binary().display().to_string(),
-        "wave".to_string(),
+        "loop".to_string(),
         wave.to_string(),
     ];
     spawn_detached_lf(&promotion_session_name(repo, wave), repo, &argv)

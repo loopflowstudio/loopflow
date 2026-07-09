@@ -1,0 +1,40 @@
+---
+crons: []
+pm:
+  provider: linear
+  linear_project: '7cf1518e-340e-4cfa-8426-63f06b7a5e1c'
+---
+
+## Objective
+
+Loopflow's infrastructure keeps real waves moving. It owns the substrate around
+the product: technical architecture, developer efficiency, and release
+stability.
+
+The work succeeds when the system is legible, local work is fast, and shipping
+is boring. Infrastructure does not build a generic platform ahead of need; it
+turns repeated friction and operational risk into system capability.
+
+## Projects
+
+Projects live in `projects/`, one measured bet per file. Tasks live in Linear.
+Projects do not own memory, cadence, child projects, or task lists.
+
+## Bounds
+
+- Do not build a generic multi-product deploy platform before a second real
+  product proves the shape.
+
+## Cron
+
+- `daily` -> check architecture drift, local development friction, CI, release
+  cadence, spend, and host health; turn the first red or flaky signal into
+  focused work.
+
+## Process
+
+Read the projects, then look for the bottleneck currently taxing real work.
+Mechanical fixes and obvious automation go straight to a worker. Anything that
+changes architecture doctrine, release policy, host topology, credential flow,
+or the worker/wave runtime gets a scratch design first. Do not document
+avoidable manual work as a workflow; delete it with code.

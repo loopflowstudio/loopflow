@@ -16,8 +16,8 @@ use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_skill;
 use crate::lf::output::Colors;
 use crate::lf::{
-    BranchFilterArgs, BranchesCommand, CronCommand, OpsCommand, PmCommand, QueueCommand,
-    ReleaseCommand, ShellCommand, WtCommand,
+    BranchFilterArgs, BranchesCommand, CronCommand, OpsCommand, PmCommand, PmTaskCommand,
+    QueueCommand, ReleaseCommand, ShellCommand, WtCommand,
 };
 use crate::ops::OpsError;
 use crate::ops::{
@@ -541,27 +541,25 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                     "already linked"
                 };
                 println!(
-                    "{}: roadmap project {} ({state})",
+                    "{}: Linear project {} ({state})",
                     result.wave, result.project_id
                 );
             }
         }
-        PmCommand::Show { wave } => {
+        PmCommand::Show { wave, project } => {
             let result = crate::ops::pm::pm_show(
                 &repo_root,
-                &crate::ops::pm::PmShowOptions { wave: wave.clone() },
+                &crate::ops::pm::PmShowOptions {
+                    wave: wave.clone(),
+                    project: project.clone(),
+                },
                 progress,
             )?;
-            if result.items.is_empty() {
-                println!("{}: roadmap is empty", result.wave);
-            } else {
-                for item in &result.items {
-                    println!("{}", crate::ops::pm::format_roadmap_item(item));
-                }
-            }
+            print_pm_show_result(&result);
         }
         PmCommand::Update {
             wave,
+            project,
             id,
             title,
             notes,
@@ -572,6 +570,7 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 &repo_root,
                 &crate::ops::pm::PmUpdateOptions {
                     wave: wave.clone(),
+                    project: project.clone(),
                     id: id.clone(),
                     title: title.clone(),
                     notes: notes.clone(),
@@ -598,15 +597,197 @@ fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
                 println!("no PM-linked waves");
             } else {
                 for wave in result.waves {
+                    let linear_project = wave.project_name.as_deref().unwrap_or("-");
                     println!(
-                        "{}: {} project {} — {} open / {} total",
-                        wave.wave, wave.provider, wave.project, wave.open, wave.total
+                        "{}: Linear project `{linear_project}` ({}) — {} open / {} total, {} unassigned",
+                        wave.wave, wave.project, wave.open, wave.total, wave.unassigned
                     );
+                    for (project, open) in wave.open_by_project {
+                        println!("  {project:<28} {open} open");
+                    }
                 }
             }
+            for project in result.stranded_projects {
+                println!(
+                    "stranded: Linear project `{}` ({}) — no local wave points here",
+                    project.name, project.id
+                );
+            }
+        }
+        PmCommand::Rename { wave, title } => {
+            let result = crate::ops::pm::pm_rename(
+                &repo_root,
+                &crate::ops::pm::PmRenameOptions {
+                    wave: wave.clone(),
+                    title: title.clone(),
+                },
+                progress,
+            )?;
+            println!(
+                "{}: renamed Linear project {} to `{}`",
+                result.wave, result.project, result.title
+            );
+        }
+        PmCommand::Task { cmd } => match cmd {
+            PmTaskCommand::Create {
+                wave,
+                project,
+                title,
+                notes,
+            } => {
+                let result = crate::ops::pm::pm_update(
+                    &repo_root,
+                    &crate::ops::pm::PmUpdateOptions {
+                        wave: wave.clone(),
+                        project: project.clone(),
+                        id: None,
+                        title: Some(title.clone()),
+                        notes: notes.clone(),
+                        status: None,
+                        pr: None,
+                    },
+                    progress,
+                )?;
+                let suffix = project
+                    .as_deref()
+                    .map(|project| format!(" project:{project}"))
+                    .unwrap_or_default();
+                println!("{}: created task {}{suffix}", result.wave, result.id);
+            }
+            PmTaskCommand::Update {
+                id,
+                wave,
+                project,
+                title,
+                notes,
+            } => {
+                let result = crate::ops::pm::pm_update(
+                    &repo_root,
+                    &crate::ops::pm::PmUpdateOptions {
+                        wave: wave.clone(),
+                        project: project.clone(),
+                        id: Some(id.clone()),
+                        title: title.clone(),
+                        notes: notes.clone(),
+                        status: None,
+                        pr: None,
+                    },
+                    progress,
+                )?;
+                println!("{}: updated task {}", result.wave, result.id);
+            }
+            PmTaskCommand::Done { id, wave, pr } => {
+                let result = crate::ops::pm::pm_update(
+                    &repo_root,
+                    &crate::ops::pm::PmUpdateOptions {
+                        wave: wave.clone(),
+                        project: None,
+                        id: Some(id.clone()),
+                        title: None,
+                        notes: None,
+                        status: Some("done".to_string()),
+                        pr: pr.clone(),
+                    },
+                    progress,
+                )?;
+                let linked = match result.linked_pr {
+                    Some(pr) => format!(", linked {pr}"),
+                    None => String::new(),
+                };
+                println!("{}: closed task {}{linked}", result.wave, result.id);
+            }
+            PmTaskCommand::Move { id, wave, project } => {
+                let result = crate::ops::pm::pm_task_move(
+                    &repo_root,
+                    &crate::ops::pm::PmTaskMoveOptions {
+                        id: id.clone(),
+                        wave: wave.clone(),
+                        project: project.clone(),
+                    },
+                    progress,
+                )?;
+                println!(
+                    "{}: moved task {} to project:{}",
+                    result.wave, result.id, result.project
+                );
+            }
+        },
+        PmCommand::Doctor => {
+            let result = crate::ops::pm::pm_sync(
+                &repo_root,
+                &crate::ops::pm::PmSyncOptions { plan: true },
+                progress,
+            )?;
+            print_pm_sync_result(&result);
+        }
+        PmCommand::Sync { plan } => {
+            let result = crate::ops::pm::pm_sync(
+                &repo_root,
+                &crate::ops::pm::PmSyncOptions { plan: *plan },
+                progress,
+            )?;
+            print_pm_sync_result(&result);
         }
     }
     Ok(())
+}
+
+fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {
+    if result.items.is_empty() {
+        let suffix = result
+            .local_project
+            .as_deref()
+            .map(|project| format!(" project:{project}"))
+            .unwrap_or_default();
+        println!("{}{}: no Linear tasks", result.wave, suffix);
+        return;
+    }
+
+    if result.local_project.is_some() {
+        for item in &result.items {
+            println!("{}", crate::ops::pm::format_task_item(item));
+        }
+        return;
+    }
+
+    let mut grouped: std::collections::BTreeMap<String, Vec<_>> = std::collections::BTreeMap::new();
+    let mut unassigned = Vec::new();
+    for item in &result.items {
+        let projects = crate::ops::pm::item_project_labels(item);
+        if projects.is_empty() {
+            unassigned.push(item);
+        } else {
+            for project in projects {
+                grouped.entry(project).or_default().push(item);
+            }
+        }
+    }
+
+    for (project, items) in grouped {
+        println!("project:{project}");
+        for item in items {
+            println!("  {}", crate::ops::pm::format_task_item(item));
+        }
+    }
+    if !unassigned.is_empty() {
+        println!("unassigned:");
+        for item in unassigned {
+            println!("  {}", crate::ops::pm::format_task_item(item));
+        }
+    }
+}
+
+fn print_pm_sync_result(result: &crate::ops::pm::PmSyncResult) {
+    if result.actions.is_empty() && result.diagnostics.is_empty() {
+        println!("PM state matches local waves and projects");
+        return;
+    }
+    for action in &result.actions {
+        println!("action: {action}");
+    }
+    for diagnostic in &result.diagnostics {
+        println!("diagnostic: {diagnostic}");
+    }
 }
 
 pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {

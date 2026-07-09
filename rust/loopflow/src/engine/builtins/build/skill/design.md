@@ -13,8 +13,8 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its `GOAL.md` and
-  `MEMORY.md`, and its live roadmap (`lf op pm show --wave <name>`).
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`,
+  `MEMORY.md`, `projects/`, and its live tasks (`lf op pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -87,24 +87,28 @@ This is the natural session exit point. The user's answer determines what to run
      `pm.linear_project`)
    - body (the loop prompt): Objective, Measures, Cron if any, and Process. Put
      routing judgment in Process, not frontmatter.
-   - **No roadmap table, no status indicators, no item lists** — the roadmap
-     lives in Linear.
+   - **No roadmap table, no status indicators, no item lists** — tasks live in
+     Linear.
 3. Write `wave/<name>/MEMORY.md` — seed it with the load-bearing context from the
    Detail phase (key decisions, constraints, what's known). Short is fine.
-4. Connect and seed the roadmap in Linear:
+4. Create `wave/<name>/projects/` with one file per measured bet. A project is
+   either a completable behavioral improvement or a standing quality frontier.
+   Each project belongs to this wave, has no child projects, and carries a
+   definition plus proof-shaped `## KRs`.
+5. Connect and seed tasks in Linear:
    - `lf op pm init --wave <name>` creates/links the Linear project and writes
      `linear_project` into `GOAL.md`.
-   - File the opening items with `lf op pm update --title "…" --notes "…"` — the
-     urgent and next-step work, one task each. The roadmap starts in Linear, not
-     on disk.
-5. The first item you expect to build now becomes the design doc for this branch
+   - File the opening items with
+     `lf op pm task create --project <project> --title "…" --notes "…"` — the urgent
+     and next-step work, one task each. Tasks start in Linear, not on disk.
+6. The first item you expect to build now becomes the design doc for this branch
    (`scratch/<branch>.md`).
-6. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`.
-7. End session and tell the user what to run next:
+7. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`.
+8. End session and tell the user what to run next:
    - `lf implement` (for the immediate item)
    - `lf ship`
 
-Once breaking things up, be aggressive about commit boundaries—each roadmap item should be independently shippable.
+Once breaking things up, be aggressive about commit boundaries—each task should be independently shippable.
 
 ## What makes a good design doc
 

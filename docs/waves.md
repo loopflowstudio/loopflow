@@ -5,14 +5,20 @@ title: Waves
 
 # Waves
 
-A wave is a named agent with a goal. You author two files under `wave/<name>/`:
+A wave is a durable operating context. Projects are measured bets inside a wave.
+Tasks are the concrete work that advances a project.
+
+You author wave files under `wave/<name>/`:
 
 | File | Holds |
 |------|-------|
 | **`GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
 | **`MEMORY.md`** | What the wave remembers between loops — written by the wave agent |
+| **`projects/*.md`** | One measured bet per file, with KRs and closure criteria |
 
-Run the agent and it works a loop: read the roadmap and memory, pick the next move, dispatch a worker to build it, watch the PR, and fold what changed back into memory.
+Tasks live in Linear. Run the agent and it works a loop: read its projects,
+tasks, and memory; pick the next move; dispatch a worker; watch the PR; and fold
+what changed back into memory.
 
 ```bash
 lf wave shipper            # start the wave agent
@@ -63,7 +69,7 @@ Run one loop iteration for the shipper wave.
 
 ## Process
 
-Read the roadmap and dispatch the appropriate flow for the next useful move.
+Read the live tasks and dispatch the appropriate flow for the next useful move.
 ```
 
 Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due mid-turn fires at the next turn boundary; occurrences older than 24 hours are missed, not replayed.

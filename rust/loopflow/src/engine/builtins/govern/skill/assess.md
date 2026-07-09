@@ -11,7 +11,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -61,7 +61,7 @@ be fine. Look past activity to actual progress toward finish lines.
      changes, competing for the same code, contradictory directions?
    - **Gaps** — Is there work that needs doing that no wave owns?
    - **Redundancy** — Are multiple waves doing equivalent work?
-   - **Phase fit** — Does the current phase (from the roadmap) still
+   - **Phase fit** — Does the current phase (from the live task mix) still
      make sense given what's been learned?
 
 4. **Identify the pressure points.** What are the 1-3 things that, if
@@ -87,7 +87,7 @@ Write `scratch/garden-assessment.md`:
 ## Chord-Level
 **Balance**: <how waves relate to each other>
 **Gaps**: <unowned work, if any>
-**Phase**: <is the current roadmap phase still right?>
+**Phase**: <is the current task mix still right?>
 
 ## Pressure Points
 1. <highest leverage change>

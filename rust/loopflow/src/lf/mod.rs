@@ -481,7 +481,7 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: ReleaseCommand,
     },
-    /// Roadmap in Linear (show, update, init, status)
+    /// Linear tasks for waves and local projects
     Pm {
         #[command(subcommand)]
         cmd: PmCommand,
@@ -598,23 +598,29 @@ pub enum PmCommand {
         #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
         all: bool,
     },
-    /// Print the wave's live Linear roadmap
+    /// Print the wave's live Linear tasks
     Show {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+        /// Local project slug from wave/<wave>/projects/
+        #[arg(short = 'p', long = "project")]
+        project: Option<String>,
     },
-    /// Create, edit, or close a roadmap task in Linear
+    /// Create, edit, or close a Linear task
     Update {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+        /// Local project slug from wave/<wave>/projects/
+        #[arg(short = 'p', long = "project")]
+        project: Option<String>,
         /// Existing task id to edit or close; omit to create a new task
         #[arg(long = "id")]
         id: Option<String>,
         /// Task title
         #[arg(long = "title")]
-        title: String,
+        title: Option<String>,
         /// Task notes/description
         #[arg(long = "notes")]
         notes: Option<String>,
@@ -625,11 +631,94 @@ pub enum PmCommand {
         #[arg(long = "pr")]
         pr: Option<String>,
     },
-    /// Show roadmap status for linked waves
+    /// Show PM task status for linked waves
     Status {
         /// Wave name (all PM-enabled waves if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+    },
+    /// Diagnose wave/project/task drift
+    Doctor,
+    /// Reconcile low-risk PM drift
+    Sync {
+        /// Print the planned changes without applying them
+        #[arg(long = "plan")]
+        plan: bool,
+    },
+    /// Rename the Linear project backing a wave
+    Rename {
+        /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Linear project title
+        #[arg(long = "title")]
+        title: String,
+    },
+    /// Linear task operations
+    Task {
+        #[command(subcommand)]
+        cmd: PmTaskCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PmTaskCommand {
+    /// Create a Linear task
+    Create {
+        /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Local project slug from wave/<wave>/projects/
+        #[arg(short = 'p', long = "project")]
+        project: Option<String>,
+        /// Task title
+        #[arg(long = "title")]
+        title: String,
+        /// Task notes/description
+        #[arg(long = "notes")]
+        notes: Option<String>,
+    },
+    /// Update a Linear task
+    Update {
+        /// Existing task id to edit
+        #[arg(long = "id")]
+        id: String,
+        /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Local project slug from wave/<wave>/projects/
+        #[arg(short = 'p', long = "project")]
+        project: Option<String>,
+        /// Task title
+        #[arg(long = "title")]
+        title: Option<String>,
+        /// Task notes/description
+        #[arg(long = "notes")]
+        notes: Option<String>,
+    },
+    /// Close a Linear task and optionally link the shipped PR
+    Done {
+        /// Existing task id to close
+        #[arg(long = "id")]
+        id: String,
+        /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// PR URL to attach as a comment
+        #[arg(long = "pr")]
+        pr: Option<String>,
+    },
+    /// Move a task into a wave's Linear project and attach a local project label
+    Move {
+        /// Existing task id to move
+        #[arg(long = "id")]
+        id: String,
+        /// Destination wave
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Destination local project slug
+        #[arg(short = 'p', long = "project")]
+        project: String,
     },
 }
 
@@ -841,20 +930,31 @@ mod tests {
         let cli =
             Cli::try_parse_from(["lf", "op", "pm", "show", "--wave", "goals"]).expect("parse");
         let Some(Commands::Op {
-            op: OpsCommand::Pm {
-                cmd: PmCommand::Show { wave },
-            },
+            op:
+                OpsCommand::Pm {
+                    cmd: PmCommand::Show { wave, project },
+                },
         }) = cli.command
         else {
             panic!("expected pm show command");
         };
         assert_eq!(wave.as_deref(), Some("goals"));
+        assert_eq!(project, None);
     }
 
     #[test]
     fn pm_update_parses_create_and_close() {
         let cli = Cli::try_parse_from([
-            "lf", "op", "pm", "update", "--title", "Ship it", "--notes", "details",
+            "lf",
+            "op",
+            "pm",
+            "update",
+            "--project",
+            "wave-chat",
+            "--title",
+            "Ship it",
+            "--notes",
+            "details",
         ])
         .expect("parse");
         let Some(Commands::Op {
@@ -863,6 +963,7 @@ mod tests {
                     cmd:
                         PmCommand::Update {
                             wave,
+                            project,
                             id,
                             title,
                             notes,
@@ -875,8 +976,9 @@ mod tests {
             panic!("expected pm update command");
         };
         assert_eq!(wave, None);
+        assert_eq!(project.as_deref(), Some("wave-chat"));
         assert_eq!(id, None);
-        assert_eq!(title, "Ship it");
+        assert_eq!(title.as_deref(), Some("Ship it"));
         assert_eq!(notes.as_deref(), Some("details"));
         assert_eq!(status, None);
         assert_eq!(pr, None);
@@ -888,8 +990,6 @@ mod tests {
             "update",
             "--id",
             "123",
-            "--title",
-            "Ship it",
             "--status",
             "done",
             "--pr",

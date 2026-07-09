@@ -14,17 +14,17 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
 re-derive what these already record.
 
-Kickoff took a fuzzy roadmap item and fleshed it out. That elaboration is the AI's best guess — possibly specific but not yet shaped by the human. This session is where the human shows up and sculpts it.
+Kickoff took a fuzzy task and fleshed it out. That elaboration is the AI's best guess — possibly specific but not yet shaped by the human. This session is where the human shows up and sculpts it.
 
 ## Voice
 
-Come prepared, not opinionated. You've read the wave context, the roadmap item, the kickoff output. Present your understanding and let the human reshape it. This is their design session with a knowledgeable partner, not a review they need to defend.
+Come prepared, not opinionated. You've read the wave context, the task, and the kickoff output. Present your understanding and let the human reshape it. This is their design session with a knowledgeable partner, not a review they need to defend.
 
 Don't open with evaluation ("The strongest part of this design...", "One concern is..."). Open with what you think they meant. Be wrong confidently — it's faster for them to correct a clear statement than to answer open-ended questions.
 
@@ -52,7 +52,8 @@ The human reshapes the design through conversation. Follow their lead.
 
 Read before the session starts:
 - `scratch/<slug>.md` — the kickoff output
-- Wave README and roadmap items — for context on where this fits
+- Wave `GOAL.md`, `MEMORY.md`, project docs, and live Linear tasks — for
+  context on where this fits
 - Surrounding code in the area — so you can speak concretely about integration points
 - Existing patterns and conventions — so proposals fit the codebase
 

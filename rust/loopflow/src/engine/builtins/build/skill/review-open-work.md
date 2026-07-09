@@ -12,7 +12,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -34,7 +34,7 @@ Run the scan headlessly before discussion. Gather:
 - Open PRs authored by the user: `gh pr list --author @me --state open --json number,title,headRefName,url,isDraft,mergeStateStatus,statusCheckRollup,updatedAt`
 - Remote branches authored by the user: `lf op branches list --user @me`
 - Stale candidates: `lf op branches list --user @me --stale 60d`
-- Wave entries under `wave/`: each README, roadmap item counts by priority bucket, recent commits touching the wave area, associated open PRs
+- Wave entries under `wave/`: GOAL/MEMORY/project docs, open task counts by local project, recent commits touching the wave area, associated open PRs
 - Merge status for each branch: ahead/behind main, CI status when a PR exists, whether a branch is merged or squash-merged
 - Wave attribution for each worktree and branch:
   - Worktrees: use the engine's worktree resolver output and sibling worktree convention. Do not invent another naming scheme.
@@ -61,7 +61,7 @@ Write `scratch/open-work.md` before asking anything:
 
 | Wave | Vision progress | Recent activity | Recommendation |
 |---|---|---|---|
-| redesign | 2 of 4 pillars shipped, third in flight | 3 PRs in 2wk, all roadmap-linked | **continue** |
+| redesign | 2 of 4 pillars shipped, third in flight | 3 PRs in 2wk, all task-linked | **continue** |
 | chatgui | Core UX still not usable | 14 commits, mostly refactors | **busy without progress — reduce scope or abandon** |
 ```
 
@@ -79,7 +79,7 @@ Judge waves by progress toward README Goals/Vision, not activity counts. Commit 
 Walk each row with the user.
 
 - **ship**: dispatch `lf ship` in that worktree as a background job. Do not wait. Log to `scratch/ship-logs/<branch>.log` in the main repo.
-- **ship-partial**: dispatch `lf ship` the same way; the ship flow defaults toward landing and deferring leftovers into the wave roadmap.
+- **ship-partial**: dispatch `lf ship` the same way; the ship flow defaults toward landing and deferring leftovers into Linear tasks.
 - **abandon**: after confirmation, use the existing abandon path for worktrees or delete local/remote branches directly when no worktree exists.
 - **prune**: batch remote-only branch deletes for one `lf op branches prune ...` command at the end.
 
@@ -115,7 +115,7 @@ Update `scratch/open-work.md`:
 
 ## Archival conventions
 
-Infer archive conventions from the repo instead of hardcoding them. Look for `wave/old/`, archive wording in READMEs, empty roadmaps, deprecated frontmatter, or long periods with no commits touching the area. Mark inferred archives as low-priority and say why. If ambiguous, ask during discussion.
+Infer archive conventions from the repo instead of hardcoding them. Look for `wave/old/`, archive wording in READMEs, empty task lists, deprecated frontmatter, or long periods with no commits touching the area. Mark inferred archives as low-priority and say why. If ambiguous, ask during discussion.
 
 ## Guardrails
 

@@ -11,7 +11,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -20,8 +20,8 @@ re-derive what these already record.
 ## Scope
 
 The chord-wave's area lists member wave directories. Each directory contains a
-README (vision, strategy, goals, risks, metrics) and roadmap work items
-(the roadmap). This step reads all of it, plus the living state around it.
+`GOAL.md`, `MEMORY.md`, project docs, and live Linear tasks. This step reads all
+of it, plus the living state around it.
 
 Member wave names come from those directory names. If the chord-wave area
 contains `wave/chord-model/` and `wave/signals/`, the wave names are
@@ -32,7 +32,8 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 1. **Read wave configs.** For each member wave directory in the area:
    - `GOAL.md` — intent, measures, process judgment, and the Linear handle
    - `MEMORY.md` — what the wave has learned and decided
-   - The live roadmap — `lf op pm show --wave <wave-name>` (Linear is the source of truth; there are no local roadmap files)
+   - `projects/*.md` — measured bets and KRs
+   - Live tasks — `lf op pm show --wave <wave-name>` (Linear is the source of truth; there are no local task lists)
 
 2. **Read runtime state.** For each member wave:
    - `wave/<wave-name>/.wave-endpoint` — a live wave server publishes its

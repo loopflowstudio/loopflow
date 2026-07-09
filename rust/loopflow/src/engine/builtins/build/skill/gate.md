@@ -13,7 +13,7 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- If a `wave/<name>/` directory matches this work, skim its roadmap and items.
+- If a `wave/<name>/` directory matches this work, skim its `GOAL.md`, `MEMORY.md`, `projects/`, and live tasks (`lf op pm show --wave <name>`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -121,8 +121,8 @@ Make the change easy to review.
 
 6. **Wave alignment** (if running in a wave context)
    - Does the shipped code advance the wave's Goals?
-   - Were any known Risks from the wave README introduced or ignored?
-   - Are there observable Metrics to note in the review doc?
+   - Were any known risks from `GOAL.md`, `MEMORY.md`, or project docs introduced or ignored?
+   - Are there observable project KRs or measures to note in the review doc?
 
 ## Scope
 

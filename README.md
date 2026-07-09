@@ -1,6 +1,6 @@
 # Loopflow
 
-Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it works a roadmap, delegates the implementation to workers, remembers what it learns, and shows you every live session.
+Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it works Linear tasks, delegates the implementation to workers, remembers what it learns, and shows you every live session.
 
 Start a wave by hand and steer it interactively. As it earns trust, let it loop — picking work, dispatching flows, and reacting to changes on its own.
 
@@ -21,8 +21,9 @@ workers: 2
 
 ## Objective
 
-Keep the design system coherent. Each loop: read the roadmap, pick the next
-design task, dispatch a worker to build it, and fold what changed into memory.
+Keep the design system coherent. Each loop: read the Linear tasks, pick the next
+useful design move, dispatch a worker to build it, and fold what changed into
+memory.
 
 ## Measures
 
@@ -71,7 +72,7 @@ lf build "unify button variants" --wave designer --dispatch
 
 Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its intent in view. Their PRs are how results flow back to the wave.
 
-Run a roadmap task as a bounded task flowloop:
+Run a task as a bounded task flowloop:
 
 ```bash
 lf task "fix the flaky chord-timeout test" --wave designer
@@ -113,7 +114,7 @@ commands for long-term coordination.
 
 ```bash
 lf debug -c    # paste an error, watch it fix
-lf op pm show --wave designer   # print the wave's live Linear roadmap
+lf op pm show --wave designer   # print the wave's live Linear tasks
 lf design      # interactive design session
 lf gstack/office-hours   # run a built-in gstack skill
 lf office-hours          # same thing — bare name works when unambiguous
@@ -366,7 +367,7 @@ lf op auth linear     # connect Linear with OAuth
 lf op auth disconnect github
 ```
 
-The roadmap lives in Linear. Pin a wave to its Linear project in `wave/<name>/GOAL.md` frontmatter — `lf op pm init` writes this for you:
+Tasks live in Linear. Pin a wave to its Linear project in `wave/<name>/GOAL.md` frontmatter — `lf op pm init` writes this for you:
 
 ```yaml
 # wave/designer/GOAL.md frontmatter
@@ -377,14 +378,16 @@ pm:
 ```bash
 lf op branches list --user @me --stale 60d   # preview stale remote branches
 lf op branches prune --user @me --stale 60d  # delete after confirmation
-lf op pm init --wave designer                # connect/create the Linear project, write linear_project into GOAL.md
-lf op pm show --wave designer                # print the wave's live Linear roadmap
-lf op pm update --wave designer --title "Add dark mode" --notes "..."   # create a task
-lf op pm update --wave designer --id 1207... --title "..." --status done # update or close a task
-lf op pm status                              # show linked waves
+lf op pm init --wave designer                # connect/create the Linear project
+lf op pm show --wave designer                # group live tasks by local project
+lf op pm show --wave designer --project ui   # filter to one local project
+lf op pm task create --wave designer --project ui --title "Add dark mode" --notes "..."
+lf op pm task done --id 1207... --pr "..."   # close a shipped task
+lf op pm sync --plan                         # show Linear/task/project drift
+lf op pm status                              # show linked waves and task counts
 ```
 
-`lf op pm` reads and edits the roadmap directly in Linear — there is no local mirror and nothing to sync. Issue descriptions and comments are Markdown, which Linear renders natively.
+`lf op pm` reads and edits tasks directly in Linear. Local projects stay in `wave/<wave>/projects/`; Linear tasks attach to them with labels named `project:<slug>`. Issue descriptions and comments are Markdown, which Linear renders natively.
 
 The `loopflow` Python package is a library only (wire models).
 Use the install script or cargo to install `lf` and `lfd`.

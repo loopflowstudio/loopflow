@@ -73,12 +73,19 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 |------|--------------|------|
 | **Skill** | Runs a prompt with assembled context | `.lf/skills/*.md` |
 | **Flow** | Chains skills together | `.lf/flows/*.yaml` |
+| **Wave** | Durable operating context with memory, cadence, chat, and project selection | `wave/<name>/` |
 | **Goal** | A wave's intent and loop prompt | `wave/<name>/GOAL.md` |
+| **Project** | Measured bet inside exactly one wave | `wave/<name>/projects/*.md` |
+| **Task** | Concrete work that advances a project | Linear via `lf op pm` |
 | **Memory** | What a wave remembers between loops | `wave/<name>/MEMORY.md` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
 | **Cron** | Scheduled supplementary flow | goal frontmatter |
 
-A wave is a named agent with a goal. Everything that defines it — goal, memory, routing judgment, crons — is authored in the repo. Crons live in `GOAL.md` frontmatter and are fired by the wave's resident flowloop. lfd serves wave status and live sessions to clients.
+A wave is a named agent with a goal. Everything that defines its durable
+operating context — goal, memory, projects, routing judgment, crons — is
+authored in the repo. Concrete tasks live in Linear. Crons live in `GOAL.md`
+frontmatter and are fired by the wave's resident flowloop. lfd serves wave
+status and live sessions to clients.
 
 ```markdown
 ---
@@ -95,7 +102,7 @@ Run one loop iteration for this wave.
 
 ## Process
 
-Read the roadmap, pick the next useful move, and dispatch the appropriate flow.
+Read the live tasks, pick the next useful move, and dispatch the appropriate flow.
 ```
 
 ---

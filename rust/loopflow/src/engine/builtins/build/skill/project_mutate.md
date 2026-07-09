@@ -14,6 +14,8 @@ and merged PRs with `gh`.
 ## Work
 
 - Check off a KR only after verifying its observable condition yourself.
+  Endurance KRs mean what they say: a counted streak isn't satisfied by one
+  good day, and any human rescue inside an unattended window resets it.
 - Renew self-renewing KRs by rewriting their line in the doc.
 - Tasks still running and nothing left to decompose → hand the wait to the
   runner with a recheck on the state you are waiting for (e.g. a

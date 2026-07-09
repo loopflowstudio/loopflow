@@ -7,7 +7,7 @@ Pursue the wave objective.
 
 ## Orientation
 
-Read GOAL/MEMORY, recent chat, worker state, and the live roadmap. Trust worker
+Read GOAL/MEMORY, project docs, live Linear tasks, recent chat, and worker state. Trust worker
 summaries; do not reread worker transcripts.
 
 ## Work

@@ -52,6 +52,12 @@ pub struct PmProject {
     pub name: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmLabel {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmItem {
     pub id: String,
@@ -69,6 +75,8 @@ pub struct PmItemCreate {
     pub name: String,
     pub description: String,
     pub rank: u32,
+    #[serde(default)]
+    pub label_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

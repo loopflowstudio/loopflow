@@ -162,31 +162,50 @@ Headless release automation does not require a runner-local agent CLI. If the `r
 
 ## lf op pm
 
-Read and edit a wave's roadmap. The roadmap lives in Linear — `lf op pm` talks to it directly, so there is no local mirror and nothing to sync.
+Read and edit a wave's Linear tasks. Each wave is backed by one Linear project;
+local projects live under `wave/<wave>/projects/` and tasks attach to them with
+labels named `project:<slug>`.
 
 ```bash
-lf op pm show --wave designer                              # print the wave's live Linear roadmap
-lf op pm update --wave designer --title "Add dark mode"    # create a task
-lf op pm update --wave designer --id 1207... --title "..." # update a task
-lf op pm update --wave designer --id 1207... --status done # close a task
-lf op pm init --wave designer                              # connect/create the Linear project, write linear_project into GOAL.md
-lf op pm status                                            # show linked waves
+lf op pm status                                                     # show linked waves and task counts
+lf op pm sync --plan                                                # report Linear/local drift
+lf op pm show --wave designer                                       # group tasks by local project
+lf op pm show --wave designer --project ui                          # filter to one local project
+lf op pm task create --wave designer --project ui --title "Dark mode"
+lf op pm task update --id 1207... --title "Refine dark mode"
+lf op pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
+lf op pm task move --id 1207... --wave designer --project api
+lf op pm rename --wave designer --title "Designer"                  # rename the backing Linear project
+lf op pm init --wave designer                                       # connect/create the Linear project
 ```
 
 | Command | What it does |
 |---------|--------------|
-| `show` | Print the wave's live roadmap from Linear |
-| `update` | Create a task (no `--id`), or update/close one (`--id`; `--status done` closes it) |
+| `status` | Show linked waves, backing Linear project names, and task counts by local project |
+| `show` | Print Linear tasks grouped by local project; `--project` filters to one project |
+| `task create` | Create a Linear task, optionally attached to a local project |
+| `task update` | Edit an existing Linear task |
+| `task done` | Close a Linear task and optionally comment with a PR link |
+| `task move` | Move a task to another wave's Linear project and attach a local project label |
+| `sync --plan` | Report backing Linear project drift, missing labels, stranded Linear projects, and unassigned tasks |
+| `rename` | Rename the Linear project backing a wave |
 | `init` | Connect or create the wave's Linear project and write `linear_project` into `wave/<name>/GOAL.md` |
-| `status` | Show which waves are linked to a Linear project |
 
 | Flag | Description |
 |------|-------------|
 | `--wave NAME` | Target wave (defaults to the current branch's wave) |
+| `--project SLUG` | Local project from `wave/<wave>/projects/<slug>.md` |
 | `--id TASK-ID` | Existing Linear issue to update or close |
 | `--title` | Task title (required when creating) |
 | `--notes` | Task notes/description |
-| `--status done` | Close the task |
+| `--pr URL` | PR link to comment on a closed or updated task |
+
+`lf op pm update` remains as a compatibility alias for create/update/done:
+
+```bash
+lf op pm update --wave designer --project ui --title "Add dark mode"
+lf op pm update --id 1207... --status done --pr "https://github.com/acme/app/pull/42"
+```
 
 Connect Linear first with `lf op auth linear`. `lf op pm init` pins the project into `GOAL.md`:
 

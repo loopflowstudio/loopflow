@@ -6,7 +6,7 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmResult, RATE_LIMIT_RETRIES,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmLabel, PmProject, PmResult, RATE_LIMIT_RETRIES,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
@@ -31,7 +31,7 @@ const CREATE_TEAM_MUTATION: &str = r#"mutation CreateTeam($name: String!, $key: 
   }
 }"#;
 
-const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, $description: String!, $teamId: String!) {
+const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, $description: String!, $teamId: ID!) {
   projectCreate(input: { name: $name, description: $description, teamIds: [$teamId] }) {
     project {
       id
@@ -39,7 +39,15 @@ const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, 
   }
 }"#;
 
-const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $after: String, $first: Int!) {
+const UPDATE_PROJECT_MUTATION: &str = r#"mutation UpdateProject($id: ID!, $name: String!) {
+  projectUpdate(id: $id, input: { name: $name }) {
+    project {
+      id
+    }
+  }
+}"#;
+
+const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: ID!, $after: String, $first: Int!) {
   project(id: $projectId) {
     issues(first: $first, after: $after) {
       nodes {
@@ -68,15 +76,15 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
   }
 }"#;
 
-const CREATE_ITEM_MUTATION: &str = r#"mutation CreateIssue($teamId: String!, $projectId: String!, $title: String!, $description: String!, $stateId: String) {
-  issueCreate(input: { teamId: $teamId, projectId: $projectId, title: $title, description: $description, stateId: $stateId }) {
+const CREATE_ITEM_MUTATION: &str = r#"mutation CreateIssue($teamId: ID!, $projectId: ID!, $title: String!, $description: String!, $stateId: ID, $labelIds: [ID!]) {
+  issueCreate(input: { teamId: $teamId, projectId: $projectId, title: $title, description: $description, stateId: $stateId, labelIds: $labelIds }) {
     issue {
       id
     }
   }
 }"#;
 
-const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: String!, $title: String, $description: String) {
+const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: ID!, $title: String, $description: String) {
   issueUpdate(id: $id, input: { title: $title, description: $description }) {
     issue {
       id
@@ -84,7 +92,15 @@ const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: String!, $title:
   }
 }"#;
 
-const COMPLETE_ITEM_MUTATION: &str = r#"mutation CompleteIssue($id: String!, $stateId: String!) {
+const MOVE_ITEM_MUTATION: &str = r#"mutation MoveIssueToProject($id: ID!, $projectId: ID!) {
+  issueUpdate(id: $id, input: { projectId: $projectId }) {
+    issue {
+      id
+    }
+  }
+}"#;
+
+const COMPLETE_ITEM_MUTATION: &str = r#"mutation CompleteIssue($id: ID!, $stateId: ID!) {
   issueUpdate(id: $id, input: { stateId: $stateId }) {
     issue {
       id
@@ -109,7 +125,7 @@ const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowSta
   }
 }"#;
 
-const LIST_TEAM_PROJECTS_QUERY: &str = r#"query ListTeamProjects($teamId: String!) {
+const LIST_TEAM_PROJECTS_QUERY: &str = r#"query ListTeamProjects($teamId: ID!) {
   team(id: $teamId) {
     projects {
       nodes {
@@ -120,7 +136,31 @@ const LIST_TEAM_PROJECTS_QUERY: &str = r#"query ListTeamProjects($teamId: String
   }
 }"#;
 
-const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: String!, $body: String!) {
+const LIST_LABELS_QUERY: &str = r#"query ListIssueLabels($teamId: ID!) {
+  issueLabels(filter: { team: { id: { eq: $teamId } } }) {
+    nodes {
+      id
+      name
+    }
+  }
+}"#;
+
+const CREATE_LABEL_MUTATION: &str = r##"mutation CreateIssueLabel($teamId: ID!, $name: String!) {
+  issueLabelCreate(input: { teamId: $teamId, name: $name, color: "#4f46e5" }) {
+    issueLabel {
+      id
+      name
+    }
+  }
+}"##;
+
+const ADD_ISSUE_LABEL_MUTATION: &str = r#"mutation AddIssueLabel($id: ID!, $labelId: ID!) {
+  issueAddLabel(id: $id, labelId: $labelId) {
+    success
+  }
+}"#;
+
+const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: ID!, $body: String!) {
   commentCreate(input: { issueId: $issueId, body: $body }) {
     comment {
       id
@@ -275,7 +315,21 @@ impl LinearClient {
         Ok(response.project_create.project.id)
     }
 
-    pub async fn list_projects(&self, team_id: &str) -> PmResult<Vec<PmProject>> {
+    pub async fn rename_project(&self, project_id: &str, name: &str) -> PmResult<()> {
+        let _: Value = self
+            .graphql(
+                UPDATE_PROJECT_MUTATION,
+                json!({
+                    "id": project_id,
+                    "name": name,
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn list_projects(&self) -> PmResult<Vec<PmProject>> {
+        let team_id = self.resolve_team_id().await?;
         let response: TeamProjectsData = self
             .graphql(LIST_TEAM_PROJECTS_QUERY, json!({ "teamId": team_id }))
             .await?;
@@ -289,6 +343,45 @@ impl LinearClient {
                 name: project.name,
             })
             .collect())
+    }
+
+    pub async fn list_labels(&self) -> PmResult<Vec<PmLabel>> {
+        let team_id = self.resolve_team_id().await?;
+        let response: LabelsData = self
+            .graphql(LIST_LABELS_QUERY, json!({ "teamId": team_id }))
+            .await?;
+        Ok(response
+            .issue_labels
+            .nodes
+            .into_iter()
+            .map(|label| PmLabel {
+                id: label.id,
+                name: label.name,
+            })
+            .collect())
+    }
+
+    pub async fn ensure_label(&self, name: &str) -> PmResult<String> {
+        if let Some(label) = self
+            .list_labels()
+            .await?
+            .into_iter()
+            .find(|label| label.name == name)
+        {
+            return Ok(label.id);
+        }
+
+        let team_id = self.resolve_team_id().await?;
+        let response: LabelCreateData = self
+            .graphql(
+                CREATE_LABEL_MUTATION,
+                json!({
+                    "teamId": team_id,
+                    "name": name,
+                }),
+            )
+            .await?;
+        Ok(response.issue_label_create.issue_label.id)
     }
 
     pub async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
@@ -339,6 +432,7 @@ impl LinearClient {
                     "title": item.name,
                     "description": item.description,
                     "stateId": state_id,
+                    "labelIds": &item.label_ids,
                 }),
             )
             .await?;
@@ -358,6 +452,32 @@ impl LinearClient {
                     "id": item_id,
                     "title": update.name,
                     "description": update.description,
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn move_item_to_project(&self, item_id: &str, project_id: &str) -> PmResult<()> {
+        let _: Value = self
+            .graphql(
+                MOVE_ITEM_MUTATION,
+                json!({
+                    "id": item_id,
+                    "projectId": project_id,
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn add_label_to_item(&self, item_id: &str, label_id: &str) -> PmResult<()> {
+        let _: Value = self
+            .graphql(
+                ADD_ISSUE_LABEL_MUTATION,
+                json!({
+                    "id": item_id,
+                    "labelId": label_id,
                 }),
             )
             .await?;
@@ -453,6 +573,18 @@ struct IssuePayload {
 }
 
 #[derive(Deserialize)]
+struct LabelCreateData {
+    #[serde(rename = "issueLabelCreate")]
+    issue_label_create: LabelPayload,
+}
+
+#[derive(Deserialize)]
+struct LabelPayload {
+    #[serde(rename = "issueLabel")]
+    issue_label: LabelNode,
+}
+
+#[derive(Deserialize)]
 struct IdNode {
     id: String,
 }
@@ -508,6 +640,8 @@ struct LabelConnection {
 
 #[derive(Deserialize)]
 struct LabelNode {
+    #[serde(default)]
+    id: String,
     name: String,
 }
 
@@ -605,6 +739,12 @@ struct ProjectsConnection {
 struct ProjectNode {
     id: String,
     name: String,
+}
+
+#[derive(Deserialize)]
+struct LabelsData {
+    #[serde(rename = "issueLabels")]
+    issue_labels: LabelConnection,
 }
 
 async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response) -> PmResult<T> {
@@ -810,6 +950,7 @@ mod tests {
                     name: "Implement client".to_string(),
                     description: "Build the GraphQL adapter".to_string(),
                     rank: 7,
+                    label_ids: Vec::new(),
                 },
             )
             .await
@@ -875,6 +1016,7 @@ mod tests {
                     name: "Implement client".to_string(),
                     description: "Build the GraphQL adapter".to_string(),
                     rank: 7,
+                    label_ids: Vec::new(),
                 },
             )
             .await

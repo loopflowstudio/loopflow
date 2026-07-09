@@ -4,6 +4,15 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 
 ## Quick Reference
 
+**Wave planning:**
+- Wave = durable operating context; project = measured bet inside one wave; task = concrete work under a project
+- Every project belongs to exactly one wave; no orphan projects and no project subtrees
+- Waves own memory, cadence, budget, chat, and project selection
+- Projects own KRs and closure criteria; they do not own memory or cadence
+- Tasks own implementation, investigation, docs, or shipped changes
+- Individual technical-debt cleanup is a task; a standing debt frontier can be a project
+- KRs should read as proof: observable end states, not backlog bullets or implementation receipts
+
 **Python:**
 - Use `uv run` or activate `.venv` before any Python command
 - Prefix private functions with `_`
@@ -95,6 +104,13 @@ When writing CLI code with Typer:
 - Pass args through to underlying tools rather than re-implementing
 - Default to sensible behavior (e.g., whole repo as context)
 
+When editing builtin skills (`engine/builtins/**`):
+- Skills must be self-contained: never reference repo-relative docs or files —
+  the skill runs in repos that don't have them. Inline the compressed guidance;
+  the long form lives in this repo's docs for humans.
+- Doctrine rides only where it's exercised: teach a rule in the skill that uses
+  it, not in every context (LOOPFLOW.md is paid for on every run, everywhere).
+
 When editing `README.md` files:
 - Examples first, explanation after—show `lf debug -c`, then say what it does
 - Action-focused tables: "What it does" not "What it is"
@@ -151,6 +167,20 @@ Every line of code must earn its place. Readable code is not terse code; don't s
 * Checks for impossible conditions
 
 Start with minimal data structures and APIs. If the core is right, trimming excess at the edges is straightforward.
+
+## Wave Planning
+
+Use three planning nouns, and keep them distinct by kind rather than size:
+
+- **Wave**: a durable operating context with memory, cadence, budget, chat, and judgment about which projects matter next.
+- **Project**: a measured bet inside exactly one wave, expressed as a definition plus KRs.
+- **Task**: a concrete implementation step, investigation, document, or shipped change that advances a project.
+
+Do not make recursive project trees. If a project wants subprojects, either split it into sibling projects under the same wave, promote the durable operating context into a wave, or demote the pieces into tasks. For now, do not create orphan or ephemeral projects; every project has one parent wave.
+
+Good projects are either completable behavioral improvements or standing quality frontiers. "Wave Chat works from CLI and Mac" can be a project. "Technical Architecture stays legible and minimally simple" can be a project. "Collapse `lfd` and `lfq`" is a task under a project, not a project by itself.
+
+Write project KRs as proof. A KR should state an observable condition that would let a maintainer say "this bet now holds." Avoid mixing the KR with task lists, implementation receipts, or Linear issue ids. Put those in tasks and PR notes.
 
 # Development Environment
 

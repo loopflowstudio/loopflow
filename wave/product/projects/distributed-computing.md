@@ -9,8 +9,8 @@ the user has to reconcile.
 - A wave delegates real work to a second machine for one week with wave
   identity, repo context, and audit trail intact throughout — the remote
   runs are indistinguishable in the record except for their host.
-- Reattach, interrupt, report, and recover succeed across local and remote
-  workers N/N trials over that week.
+- Reattach, interrupt, report, and recover each succeed across local and remote
+  workers in 5/5 trials over that week.
 - Trust, credential, spend, and ownership boundaries are explicit and hold
   unattended — no remote run exceeds its authority or budget in the window.
 - One vocabulary survives the distribution: a month of mixed local/remote

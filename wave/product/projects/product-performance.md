@@ -5,10 +5,10 @@ steerable while waves, runs, chats, workers, and audit records accumulate.
 
 ## KRs
 
-- Core user paths hold their named latency budgets for a month of real
-  accumulated data — list waves, open a wave, send/steer chat, inspect
-  audit, attach to a run — measured on the living workspace, never a demo
-  state.
+- The five core paths — list waves, open a wave, acknowledge send/steer chat,
+  open audit, attach to a run — each have an explicit p95 latency budget before
+  the proof window starts and hold it for a month of real accumulated data,
+  measured on the living workspace rather than a demo state.
 - Budgets are enforced by gates: a regression fails visibly before release,
   demonstrated by at least one caught regression or one full quarter of
   green measured releases.

@@ -69,11 +69,11 @@ public struct WaveService: @unchecked Sendable {
     }
 
     public func startAuthFlow(provider: AuthProvider) async throws -> AuthFlow {
-        throw unsupported("Provider auth is no longer read through lfd HTTP; run `lf op auth \(provider.rawValue)`.")
+        throw unsupported("Provider auth is no longer read through lfd HTTP; run `lf auth \(provider.rawValue)`.")
     }
 
     public func disconnectProvider(provider: AuthProvider) async throws -> AuthProviderStatus {
-        throw unsupported("Provider auth is no longer mutated through lfd HTTP; run `lf op auth disconnect \(provider.rawValue)`.")
+        throw unsupported("Provider auth is no longer mutated through lfd HTTP; run `lf auth disconnect \(provider.rawValue)`.")
     }
 
     public func listWaves(repo: RepoTarget) async throws -> [Wave] {

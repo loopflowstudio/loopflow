@@ -218,8 +218,12 @@ stream. There is no machine-wide telemetry socket.
 
 1. **Registry queries** (`RegistryQuery`)
    - Discovery + history: which waves exist (running and stopped), a wave's
-     runs, its attention — `lf ls/status/runs --json` over `lfdb`
+     runs, its attention, and telemetry traces — `lf ls/status/runs/trace/doctor
+     --json` over `lfdb`
    - A point-in-time snapshot, re-run on a cadence; not a stream
+
+Open **Go → Telemetry** for the selected run's process flamechart, additive
+cost waterfall, cache-hit history, and seven-day silence ribbon.
 
 2. **Per-wave SSE** (`WaveChatConnection` in `WaveChatClient.swift`)
    - One connection per wave the UI is watching, off that wave's `/events`

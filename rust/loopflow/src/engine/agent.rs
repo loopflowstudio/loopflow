@@ -916,12 +916,15 @@ pub fn launch_agent(
 
     // Harness-specific environment setup.
     let agent = launch.agent.as_deref().unwrap_or("claude");
-    let (harness, _) = parse_agent(agent);
+    let (harness, model) = parse_agent(agent);
     apply_harness_env(&harness, &mut cmd, process);
     // Name the provider the run spends through. An agent we don't recognize
     // records no provider rather than inventing one.
     if let Some(kind) = crate::harness::HarnessKind::parse(&harness) {
         crate::journal::record_provider(kind.as_str());
+    }
+    if let Some(model) = model {
+        crate::journal::record_model(&model);
     }
 
     if process.auto && process.stream {

@@ -130,6 +130,12 @@ cargo test -p loopflow golden_prompt
 uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after prompt changes
 ```
 
+Migration coverage includes a drifted-database fixture, not only a fresh
+schema chain. `the_migration_starts_the_ledger_empty` seeds the pre-057
+`run_events` shape and proves the identity cutover truncates ambiguous history,
+then recreates `process_id` as `NOT NULL`. A separate storage regression proves
+the rebuilt table rejects vocabulary drift.
+
 ## E2E Tests
 
 Shell-based workflows for CLI and live HTTP API behavior.

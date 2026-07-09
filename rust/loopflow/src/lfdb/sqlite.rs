@@ -145,6 +145,7 @@ impl SqliteStore {
         )?;
 
         super::migrations::apply_sqlite(&conn)?;
+        validate_run_events_schema(&conn)?;
         migrate_plaintext_provider_tokens(&mut conn)?;
 
         Ok(Self {
@@ -251,6 +252,17 @@ impl SqliteStore {
                 .map(crate::lfdb::rows::unix_to_datetime),
         })
     }
+}
+
+fn validate_run_events_schema(conn: &Connection) -> StoreResult<()> {
+    conn.prepare(
+        "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree,
+                wave, node, event, command, flow, skill, step_index, error,
+                input_tokens, output_tokens, cache_read_tokens, cost_usd,
+                duration_secs, provider, model, context
+         FROM run_events LIMIT 0",
+    )?;
+    Ok(())
 }
 
 impl SqliteStore {
@@ -1363,12 +1375,14 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO run_events (
-                run_id, seq, ts, repo, worktree, wave, node, event, command,
+                run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
                 flow, skill, step_index, error, input_tokens, output_tokens,
-                cache_read_tokens, cost_usd, duration_secs, provider
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                cache_read_tokens, cost_usd, duration_secs, provider, model
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 row.run_id,
+                row.process_id,
+                row.parent_process_id,
                 row.seq,
                 row.ts,
                 row.repo,
@@ -1387,6 +1401,7 @@ impl SqliteStore {
                 row.cost_usd,
                 row.duration_secs,
                 row.provider,
+                row.model,
             ],
         )?;
         Ok(())
@@ -1394,9 +1409,9 @@ impl SqliteStore {
 
     pub fn list_run_events_since(&self, since_unix: i64) -> StoreResult<Vec<RunEventRow>> {
         self.query_run_events(
-            "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
+            "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
                     flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs, provider
+                    cache_read_tokens, cost_usd, duration_secs, provider, model
              FROM run_events WHERE ts >= ?1 ORDER BY ts, run_id, seq",
             params![since_unix],
         )
@@ -1406,9 +1421,9 @@ impl SqliteStore {
     pub fn run_events_matching(&self, run_id: &str) -> StoreResult<Vec<RunEventRow>> {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
         self.query_run_events(
-            "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
+            "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
                     flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs, provider
+                    cache_read_tokens, cost_usd, duration_secs, provider, model
              FROM run_events WHERE run_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
         )
@@ -1424,24 +1439,27 @@ impl SqliteStore {
         let rows = stmt.query_map(params, |row| {
             Ok(RunEventRow {
                 run_id: row.get(0)?,
-                seq: row.get(1)?,
-                ts: row.get(2)?,
-                repo: row.get(3)?,
-                worktree: row.get(4)?,
-                wave: row.get(5)?,
-                node: row.get(6)?,
-                event: row.get(7)?,
-                command: row.get(8)?,
-                flow: row.get(9)?,
-                skill: row.get(10)?,
-                step_index: row.get(11)?,
-                error: row.get(12)?,
-                input_tokens: row.get(13)?,
-                output_tokens: row.get(14)?,
-                cache_read_tokens: row.get(15)?,
-                cost_usd: row.get(16)?,
-                duration_secs: row.get(17)?,
-                provider: row.get(18)?,
+                process_id: row.get(1)?,
+                parent_process_id: row.get(2)?,
+                seq: row.get(3)?,
+                ts: row.get(4)?,
+                repo: row.get(5)?,
+                worktree: row.get(6)?,
+                wave: row.get(7)?,
+                node: row.get(8)?,
+                event: row.get(9)?,
+                command: row.get(10)?,
+                flow: row.get(11)?,
+                skill: row.get(12)?,
+                step_index: row.get(13)?,
+                error: row.get(14)?,
+                input_tokens: row.get(15)?,
+                output_tokens: row.get(16)?,
+                cache_read_tokens: row.get(17)?,
+                cost_usd: row.get(18)?,
+                duration_secs: row.get(19)?,
+                provider: row.get(20)?,
+                model: row.get(21)?,
             })
         })?;
         let mut events = Vec::new();

@@ -57,6 +57,8 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
             Ok(())
         }
         Some(Commands::Release { cmd }) => execute_release(repo, cmd, progress),
+        Some(Commands::Doctor { json }) => crate::lf::commands::doctor::run(json)
+            .map_err(|error| OpsError::Message(error.to_string())),
         _ => Err(unsupported()),
     }
 }
@@ -183,7 +185,7 @@ fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -
 /// agent, reads interactively, or manages waves has no place in a flow step.
 fn unsupported() -> OpsError {
     OpsError::Message(
-        "op item must be one of pr open, pr submit, pr land, pr abandon, rebase, commit, or release"
+        "op item must be one of pr open, pr submit, pr land, pr abandon, rebase, commit, release, or doctor"
             .to_string(),
     )
 }

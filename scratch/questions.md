@@ -71,3 +71,15 @@ environment tax decides where it can run today:
 **Assumption taken:** harvest cadenza first, because it validated immediately
 and it is the one non-loopflow repo already in the ledger. Slice 1 is the
 harvester, not the runner — the corpus is the asset, and it costs no tokens.
+
+## 5. `SpanDto` represents processes, not skill boundaries
+
+The telemetry design says both that no two spans may share a `process_id` and
+that `own_spend` diffs consecutive boundaries within one `process_id`. Those
+cannot both describe the same DTO: flow and skill boundary rows reuse their
+process's id by contract.
+
+**Assumption taken:** `lf trace --json` returns one `SpanDto` per process, so
+the process tree and lineage stay truthful. `own_spend` remains the one shared
+cumulative-diff implementation and accepts boundary-shaped spans for chart
+series, but the trace API never synthesizes fake process ids for skill frames.

@@ -19,8 +19,9 @@ use crate::lfdb::RunEventRow;
 const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
 pub const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
+pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 
-/// Serializes tests that mutate process-global env (LF_HOME, LF_RUN_ID).
+/// Serializes tests that mutate process-global env (LF_HOME and run identity).
 /// Every test in the crate that touches these vars must hold this lock —
 /// the ledger path is resolved from env at write time.
 #[cfg(test)]
@@ -34,11 +35,16 @@ pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
 thread_local! {
     static RUN_CONTEXT: RefCell<Option<RunContext>> = const { RefCell::new(None) };
     static PENDING_USAGE: RefCell<PendingUsage> = const { RefCell::new(PendingUsage::new()) };
+    static PENDING_MODEL: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 #[derive(Debug, Clone)]
 struct RunContext {
     run_id: LfdId,
+    process_id: LfdId,
+    parent_process_id: Option<LfdId>,
+    /// Serialized argv captured at run start so terminal rows name their work.
+    command: Option<String>,
     /// File-journal directory. Written in any git repo (main, wave worktree,
     /// or plain worktree); None only when the journal can't be git-excluded.
     /// The daemon's poller tails wave worktrees; the SQLite ledger records
@@ -118,6 +124,16 @@ pub fn record_provider(provider: &'static str) {
     });
 }
 
+pub fn record_model(model: &str) {
+    PENDING_MODEL.with(|cell| {
+        *cell.borrow_mut() = Some(model.to_string());
+    });
+}
+
+fn snapshot_model() -> Option<String> {
+    PENDING_MODEL.with(|cell| cell.borrow().clone())
+}
+
 fn snapshot_usage() -> Option<PendingUsage> {
     PENDING_USAGE.with(|cell| {
         let usage = *cell.borrow();
@@ -128,6 +144,9 @@ fn snapshot_usage() -> Option<PendingUsage> {
 fn clear_usage() {
     PENDING_USAGE.with(|cell| {
         *cell.borrow_mut() = PendingUsage::new();
+    });
+    PENDING_MODEL.with(|cell| {
+        *cell.borrow_mut() = None;
     });
 }
 
@@ -272,6 +291,7 @@ fn try_emit(
         if context.minted_run_id {
             std::env::remove_var(LF_RUN_ID_ENV);
         }
+        std::env::remove_var(LF_PROCESS_ID_ENV);
         clear_context();
         clear_usage();
     }
@@ -300,6 +320,11 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
 
     let row = RunEventRow {
         run_id: event.run_id.as_str().to_string(),
+        process_id: context.process_id.as_str().to_string(),
+        parent_process_id: context
+            .parent_process_id
+            .as_ref()
+            .map(|id| id.as_str().to_string()),
         seq,
         ts: event.ts.unix_timestamp(),
         repo: context.repo.clone(),
@@ -310,7 +335,8 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
         command: event
             .command
             .as_ref()
-            .and_then(|argv| serde_json::to_string(argv).ok()),
+            .and_then(|argv| serde_json::to_string(argv).ok())
+            .or_else(|| context.command.clone()),
         flow: event.flow.clone(),
         skill: event.skill.clone(),
         step_index: event.index.map(i64::from),
@@ -321,6 +347,7 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
         cost_usd: usage.and_then(|u| u.cost_usd),
         duration_secs: usage.and_then(|u| u.duration_secs),
         provider: usage.and_then(|u| u.provider).map(str::to_string),
+        model: snapshot_model(),
     };
 
     match open_ledger() {
@@ -425,6 +452,10 @@ fn ensure_run_context(
         }
     };
 
+    let parent_process_id = std::env::var(LF_PROCESS_ID_ENV).ok().map(LfdId::from_raw);
+    let process_id = LfdId::default();
+    std::env::set_var(LF_PROCESS_ID_ENV, process_id.as_str());
+
     // Write the file journal wherever we can, wave or not — the daemon's
     // poller only tails wave worktrees today, but the record should exist in
     // any repo. Fall back to ledger-only when the journal can't be
@@ -448,14 +479,19 @@ fn ensure_run_context(
     let repo = main_repo
         .as_deref()
         .unwrap_or(repo_root)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(str::to_string);
+        .display()
+        .to_string();
 
     let context = RunContext {
         run_id,
+        process_id,
+        parent_process_id,
+        command: fields
+            .command
+            .as_ref()
+            .and_then(|argv| serde_json::to_string(argv).ok()),
         run_dir,
-        repo,
+        repo: Some(repo),
         wave: wave_name.clone(),
         seq: 0,
         minted_run_id,
@@ -680,6 +716,8 @@ mod tests {
         let home = tempfile::TempDir::new().expect("ledger home");
         std::env::set_var("LF_HOME", home.path());
         let previous = std::env::var(super::LF_RUN_ID_ENV).ok();
+        let previous_process = std::env::var(super::LF_PROCESS_ID_ENV).ok();
+        std::env::remove_var(super::LF_PROCESS_ID_ENV);
         match value {
             Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
             None => std::env::remove_var(super::LF_RUN_ID_ENV),
@@ -689,6 +727,10 @@ mod tests {
         match previous {
             Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
             None => std::env::remove_var(super::LF_RUN_ID_ENV),
+        }
+        match previous_process {
+            Some(value) => std::env::set_var(super::LF_PROCESS_ID_ENV, value),
+            None => std::env::remove_var(super::LF_PROCESS_ID_ENV),
         }
         result
     }
@@ -700,6 +742,7 @@ mod tests {
         super::clear_context();
         super::clear_usage();
         std::env::remove_var(super::LF_RUN_ID_ENV);
+        std::env::remove_var(super::LF_PROCESS_ID_ENV);
         let home = tempfile::TempDir::new().expect("ledger home");
         std::env::set_var("LF_HOME", home.path());
         (guard, home)
@@ -838,20 +881,15 @@ mod tests {
         assert!(is_clean(repo.path()).expect("journal stays git-excluded"));
 
         // And the machine-grain ledger has the run, with usage on the
-        // terminal event and a null wave. Filter by this repo's unique name —
-        // concurrent tests may write other repos' rows into the ledger.
-        let repo_name = repo.path().file_name().unwrap().to_str().unwrap();
+        // terminal event and a null wave. LF_HOME points this test at its own
+        // store, so every row here belongs to this invocation.
         let store = super::open_ledger().expect("ledger");
-        let events: Vec<_> = store
-            .list_run_events_since(0)
-            .expect("ledger rows")
-            .into_iter()
-            .filter(|event| event.repo.as_deref() == Some(repo_name))
-            .collect();
+        let events = store.list_run_events_since(0).expect("ledger rows");
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].node, "run");
         assert_eq!(events[0].event, "started");
         assert!(events[0].repo.is_some());
+        assert!(std::path::Path::new(events[0].repo.as_deref().unwrap()).is_absolute());
         assert_eq!(events[0].wave, None);
         assert!(events[0]
             .command
@@ -862,6 +900,57 @@ mod tests {
         assert_eq!(events[1].input_tokens, Some(100));
         assert_eq!(events[1].output_tokens, Some(20));
         assert_eq!(events[1].cache_read_tokens, Some(5));
+        assert_eq!(events[0].process_id, events[1].process_id);
+        assert_eq!(events[1].command, events[0].command);
+    }
+
+    #[test]
+    fn a_nested_lf_gets_its_own_span_and_names_its_parent() {
+        let _guard = journal_test_guard();
+        let repo = TestRepo::new();
+        let fields = started_fields(&["lf".to_string(), "wave".to_string()], repo.path(), "main");
+
+        let parent = super::ensure_run_context(repo.path(), &fields)
+            .expect("parent context")
+            .expect("parent");
+        super::clear_context();
+        let child = super::ensure_run_context(repo.path(), &fields)
+            .expect("child context")
+            .expect("child");
+
+        assert_ne!(parent.process_id, child.process_id);
+        assert_eq!(child.parent_process_id, Some(parent.process_id));
+        super::clear_context();
+        std::env::remove_var(super::LF_PROCESS_ID_ENV);
+        std::env::remove_var(super::LF_RUN_ID_ENV);
+    }
+
+    #[test]
+    fn a_terminal_row_names_the_work_its_started_row_named() {
+        let _guard = journal_test_guard();
+        let repo = TestRepo::new();
+        let command = vec!["lf".to_string(), "gate".to_string()];
+
+        emit(
+            repo.path(),
+            LfNode::Run,
+            LfEventType::Started,
+            started_fields(&command, repo.path(), "main"),
+        );
+        emit(
+            repo.path(),
+            LfNode::Run,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        );
+
+        let events = super::open_ledger()
+            .expect("ledger")
+            .list_run_events_since(0)
+            .expect("events");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].command, events[0].command);
+        assert!(events[1].command.as_deref().unwrap_or("").contains("gate"));
     }
 
     #[test]

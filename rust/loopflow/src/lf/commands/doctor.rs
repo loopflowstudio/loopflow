@@ -10,8 +10,9 @@
 //! Checks are pure functions of the rows, so they are tested without a store.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use time::{Duration, OffsetDateTime};
 
 use crate::journal::open_ledger;
@@ -23,14 +24,15 @@ use crate::lfdb::RunEventRow;
 const NODES: [&str; 3] = ["run", "flow", "skill"];
 const EVENTS: [&str; 4] = ["started", "completed", "errored", "escalated"];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Status {
     Ok,
     Warn,
     Fail,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Check {
     pub name: &'static str,
     pub status: Status,
@@ -62,13 +64,29 @@ impl Check {
 }
 
 /// Exits non-zero when any check fails, so a cron can gate on it.
-pub fn run() -> Result<()> {
+#[derive(Debug, serde::Serialize)]
+struct DoctorReport<'a> {
+    rows: usize,
+    checks: &'a [Check],
+}
+
+pub fn run(json: bool) -> Result<()> {
     let events = open_ledger()?.list_run_events_since(0)?;
     let checks = audit(&events);
-    print_checks(&checks, events.len());
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&DoctorReport {
+                rows: events.len(),
+                checks: &checks,
+            })?
+        );
+    } else {
+        print_checks(&checks, events.len());
+    }
 
     if checks.iter().any(|check| check.status == Status::Fail) {
-        std::process::exit(1);
+        return Err(anyhow!("run ledger audit failed"));
     }
     Ok(())
 }
@@ -82,6 +100,7 @@ pub fn audit(events: &[RunEventRow]) -> Vec<Check> {
         check_vocabulary(events),
         check_attribution(events),
         check_identity(events),
+        check_lineage(events),
         check_coverage(events),
     ]
 }
@@ -169,9 +188,7 @@ fn check_vocabulary(events: &[RunEventRow]) -> Check {
     )
 }
 
-/// `run_id` names a tree of processes: a nested `lf` inherits `LF_RUN_ID`. When
-/// one id carries several commands, no reader can say which process spent the
-/// tokens on a terminal row that names no command at all.
+/// A process may name only one command, and its terminal row names that work.
 fn check_attribution(events: &[RunEventRow]) -> Check {
     let mut commands: HashMap<&str, HashSet<&str>> = HashMap::new();
     let mut terminal = 0usize;
@@ -179,7 +196,10 @@ fn check_attribution(events: &[RunEventRow]) -> Check {
 
     for event in events {
         if let Some(command) = event.command.as_deref() {
-            commands.entry(&event.run_id).or_default().insert(command);
+            commands
+                .entry(&event.process_id)
+                .or_default()
+                .insert(command);
         }
         if event.node == "run" && event.event != "started" {
             terminal += 1;
@@ -189,64 +209,83 @@ fn check_attribution(events: &[RunEventRow]) -> Check {
         }
     }
 
-    let shared = commands.values().filter(|set| set.len() > 1).count();
-    if shared == 0 && terminal_unnamed == 0 {
+    let ambiguous = commands.values().filter(|set| set.len() > 1).count();
+    if ambiguous == 0 && terminal_unnamed == 0 {
         return Check::ok("attribution", "every terminal row names its work");
     }
     Check::fail(
         "attribution",
         format!(
-            "{shared} run_id(s) carry >1 command; {terminal_unnamed}/{terminal} terminal rows name no command, flow, or skill"
+            "{ambiguous} process_id(s) carry >1 command; {terminal_unnamed}/{terminal} terminal rows name no command, flow, or skill"
         ),
     )
 }
 
-/// `repo` is a basename, so temp git roots mint a fresh "identity" each run.
+/// Repo identity is the absolute main-repo root, never a basename.
 fn check_identity(events: &[RunEventRow]) -> Check {
-    let repos: HashSet<&str> = events.iter().filter_map(|e| e.repo.as_deref()).collect();
-    let junk = repos
+    let repos: HashSet<Option<&str>> = events.iter().map(|event| event.repo.as_deref()).collect();
+    let invalid = repos
         .iter()
-        .filter(|repo| looks_like_temp_root(repo))
+        .filter(|repo| repo.is_none_or(|repo| !Path::new(repo).is_absolute()))
         .count();
-    if junk == 0 {
+    if invalid == 0 {
         return Check::ok(
             "identity",
-            format!("{} repo value(s), all stable", repos.len()),
+            format!("{} repo value(s), all absolute", repos.len()),
         );
     }
-    Check::warn(
+    Check::fail(
         "identity",
         format!(
-            "{junk}/{} repo value(s) look like temp roots — `repo` is a basename, not an identity",
+            "{invalid}/{} repo value(s) are missing or not absolute",
             repos.len()
         ),
     )
 }
 
-fn looks_like_temp_root(repo: &str) -> bool {
-    let trimmed = repo.trim_start_matches('.');
-    trimmed.starts_with("tmp") || trimmed.starts_with("temp")
+fn check_lineage(events: &[RunEventRow]) -> Check {
+    let processes: HashMap<&str, &str> = events
+        .iter()
+        .map(|event| (event.process_id.as_str(), event.run_id.as_str()))
+        .collect();
+    let dangling: HashSet<&str> = events
+        .iter()
+        .filter_map(|event| {
+            let parent = event.parent_process_id.as_deref()?;
+            (processes.get(parent).copied() != Some(event.run_id.as_str())).then_some(parent)
+        })
+        .collect();
+    if dangling.is_empty() {
+        return Check::ok("lineage", "every parent process resolves");
+    }
+    Check::fail(
+        "lineage",
+        format!(
+            "{} parent process id(s) are missing or belong to another trace",
+            dangling.len()
+        ),
+    )
 }
 
 /// A run that launched an agent and recorded no tokens is a run whose cost is
 /// lost. Skill rows prove an agent ran; the terminal row should carry the spend.
 fn check_coverage(events: &[RunEventRow]) -> Check {
-    let agent_runs: HashSet<&str> = events
+    let agent_processes: HashSet<&str> = events
         .iter()
-        .filter(|e| e.node == "skill" || e.node == "step")
-        .map(|e| e.run_id.as_str())
+        .filter(|event| event.node == "skill" || event.provider.is_some())
+        .map(|event| event.process_id.as_str())
         .collect();
-    if agent_runs.is_empty() {
+    if agent_processes.is_empty() {
         return Check::ok("coverage", "no agent-bearing runs recorded");
     }
 
     let with_tokens: HashSet<&str> = events
         .iter()
         .filter(|e| e.node == "run" && e.event != "started" && e.input_tokens.is_some())
-        .map(|e| e.run_id.as_str())
+        .map(|event| event.process_id.as_str())
         .collect();
-    let covered = agent_runs.intersection(&with_tokens).count();
-    let total = agent_runs.len();
+    let covered = agent_processes.intersection(&with_tokens).count();
+    let total = agent_processes.len();
     let pct = (covered as f64 / total as f64) * 100.0;
 
     let detail = format!("{covered}/{total} agent-bearing runs carry tokens ({pct:.0}%)");
@@ -286,7 +325,7 @@ fn print_checks(checks: &[Check], rows: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{audit, check_continuity, looks_like_temp_root, Status};
+    use super::{audit, check_continuity, Status};
     use crate::lfdb::RunEventRow;
 
     const DAY: i64 = 86_400;
@@ -294,9 +333,11 @@ mod tests {
     fn row(run_id: &str, ts: i64, node: &str, event: &str) -> RunEventRow {
         RunEventRow {
             run_id: run_id.to_string(),
+            process_id: run_id.to_string(),
+            parent_process_id: None,
             seq: 0,
             ts,
-            repo: Some("loopflow".to_string()),
+            repo: Some("/src/loopflow".to_string()),
             worktree: None,
             wave: None,
             node: node.to_string(),
@@ -312,6 +353,7 @@ mod tests {
             cost_usd: None,
             duration_secs: None,
             provider: None,
+            model: None,
         }
     }
 
@@ -376,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn one_run_id_carrying_two_commands_is_unattributable() {
+    fn one_process_carrying_two_commands_is_unattributable() {
         let rows = [
             named(row("shared", DAY, "run", "started"), r#"["lf","wave"]"#),
             named(row("shared", DAY, "run", "started"), r#"["lf","op","pm"]"#),
@@ -387,7 +429,7 @@ mod tests {
             .find(|c| c.name == "attribution")
             .unwrap();
         assert_eq!(check.status, Status::Fail);
-        assert!(check.detail.contains("1 run_id"), "{}", check.detail);
+        assert!(check.detail.contains("1 process_id"), "{}", check.detail);
     }
 
     #[test]
@@ -402,11 +444,37 @@ mod tests {
     }
 
     #[test]
-    fn temp_roots_are_not_identities() {
-        assert!(looks_like_temp_root("tmp.Rf5ZtVARiJ"));
-        assert!(looks_like_temp_root(".tmpzt80hK"));
-        assert!(!looks_like_temp_root("loopflow"));
-        assert!(!looks_like_temp_root("manabot"));
+    fn two_processes_in_one_trace_are_attributable() {
+        let mut parent = named(row("shared", DAY, "run", "completed"), r#"["lf","wave"]"#);
+        parent.process_id = "parent".to_string();
+        let mut child = named(row("shared", DAY, "run", "completed"), r#"["lf","pm"]"#);
+        child.process_id = "child".to_string();
+        child.parent_process_id = Some("parent".to_string());
+        assert_eq!(status_of(&[parent, child], "attribution"), Status::Ok);
+    }
+
+    #[test]
+    fn a_repo_basename_fails_identity() {
+        let mut event = row("a", DAY, "run", "completed");
+        event.repo = Some("loopflow".to_string());
+        assert_eq!(status_of(&[event], "identity"), Status::Fail);
+    }
+
+    #[test]
+    fn a_dangling_parent_process_id_fails_the_doctor() {
+        let mut event = row("a", DAY, "run", "completed");
+        event.parent_process_id = Some("missing".to_string());
+        assert_eq!(status_of(&[event], "lineage"), Status::Fail);
+    }
+
+    #[test]
+    fn a_parent_from_another_trace_fails_lineage() {
+        let mut parent = row("trace-a", DAY, "run", "completed");
+        parent.process_id = "parent".to_string();
+        let mut child = row("trace-b", DAY, "run", "completed");
+        child.process_id = "child".to_string();
+        child.parent_process_id = Some("parent".to_string());
+        assert_eq!(status_of(&[parent, child], "lineage"), Status::Fail);
     }
 
     #[test]
@@ -416,5 +484,13 @@ mod tests {
             row("a", DAY, "run", "completed"),
         ];
         assert_eq!(status_of(&rows, "coverage"), Status::Warn);
+    }
+
+    #[test]
+    fn an_inline_agent_with_provider_and_tokens_is_covered() {
+        let mut terminal = row("a", DAY, "run", "completed");
+        terminal.provider = Some("claude".to_string());
+        terminal.input_tokens = Some(100);
+        assert_eq!(status_of(&[terminal], "coverage"), Status::Ok);
     }
 }

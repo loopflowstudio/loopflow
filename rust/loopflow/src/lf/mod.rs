@@ -251,7 +251,11 @@ pub enum Commands {
     /// Show token usage and cost by repo and provider (from the local ledger)
     Usage,
     /// Audit the local run ledger: continuity, vocabulary, attribution, coverage
-    Doctor,
+    Doctor {
+        /// Emit the audit as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// List every wave in the registry (running and stopped), marking which
     /// have a live server. Local-only query over the shared ledger.
     Ls {
@@ -278,6 +282,9 @@ pub enum Commands {
     Trace {
         /// Run id from `lf runs` (a unique prefix is enough)
         run_id: String,
+        /// Emit the process tree as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Post a message into a wave's thread (worker reports, child-wave
     /// escalations, proactive FYIs). Reads stdin when TEXT is omitted.

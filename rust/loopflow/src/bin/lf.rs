@@ -598,13 +598,15 @@ fn main() -> anyhow::Result<()> {
                     .map_err(anyhow::Error::from)
             }),
             Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
-            Some(Commands::Doctor) => loopflow::lf::commands::doctor::run(),
+            Some(Commands::Doctor { json }) => loopflow::lf::commands::doctor::run(*json),
             Some(Commands::Ls { json }) => loopflow::lf::commands::waves::ls(*json),
             Some(Commands::Status { wave, json }) => {
                 loopflow::lf::commands::waves::status(wave.as_deref(), *json)
             }
             Some(Commands::Runs { json }) => loopflow::lf::commands::runs::list(*json),
-            Some(Commands::Trace { run_id }) => loopflow::lf::commands::runs::trace(run_id),
+            Some(Commands::Trace { run_id, json }) => {
+                loopflow::lf::commands::runs::trace(run_id, *json)
+            }
             Some(Commands::Chat { text, from, target }) => {
                 loopflow::lf::commands::chat::run(text, from.as_deref(), target)
             }
@@ -687,7 +689,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Wave { .. })
         | Some(Commands::Task { .. })
         | Some(Commands::Usage)
-        | Some(Commands::Doctor)
+        | Some(Commands::Doctor { .. })
         | Some(Commands::Ls { .. })
         | Some(Commands::Status { .. })
         | Some(Commands::Runs { .. })

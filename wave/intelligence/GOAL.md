@@ -1,5 +1,7 @@
 ---
-crons: []
+crons:
+  - flow: telemetry-daily
+    schedule: '0 0 8 * * * *'
 pm:
   provider: linear
   linear_project: '0e2c75ee-a287-467b-988c-2c83f0f3cbba'

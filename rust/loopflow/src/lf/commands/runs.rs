@@ -4,7 +4,7 @@
 //! (`run_events`, written by every `lf` invocation) plus the prompt logs on
 //! disk. Local-only: nothing is fetched from anywhere.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
@@ -44,45 +44,47 @@ pub fn list(json: bool) -> Result<()> {
 
     let colors = Colors::default();
     println!(
-        "{bold}{time:<12}  {repo:<14}  {wave:<10}  {label:<24}  {dur:>8}  {tokens:>10}  {status:<7}  ID{reset}",
+        "{bold}{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<7}  TRACE/SPAN{reset}",
         bold = colors.bold,
         reset = colors.reset,
         time = "TIME",
         repo = "REPO",
         wave = "WAVE",
         label = "RUN",
-        dur = "DURATION",
         tokens = "TOKENS",
+        cost = "COST",
+        agent = "AGENT",
         status = "STATUS",
     );
     for run in &summaries {
         println!(
-            "{time:<12}  {repo:<14}  {wave:<10}  {label:<24}  {dur:>8}  {tokens:>10}  {status:<7}  {id}",
+            "{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<7}  {run}/{span}",
             time = format_time(run.started),
-            repo = truncate(run.repo.as_deref().unwrap_or("-"), 14),
+            repo = truncate(&display_repo(run.repo.as_deref()), 14),
             wave = truncate(run.wave.as_deref().unwrap_or("-"), 10),
-            label = truncate(&run.label, 24),
-            dur = run
-                .ended
-                .map(|end| format_duration(end - run.started))
-                .unwrap_or_else(|| "…".to_string()),
+            label = truncate(&run.label, 22),
             tokens = format_tokens(run.total_tokens()),
+            cost = run
+                .cost_usd
+                .map(format_cost)
+                .unwrap_or_else(|| "-".to_string()),
+            agent = truncate(&format_agent(run.provider.as_deref(), run.model.as_deref()), 18),
             status = run.status,
-            id = short_id(&run.run_id),
+            run = short_id(&run.run_id),
+            span = short_id(&run.process_id),
         );
     }
     Ok(())
 }
 
 /// `lf trace <run-id>`: reconstruct one run (id may be a unique prefix).
-pub fn trace(run_id: &str) -> Result<()> {
+pub fn trace(run_id: &str, json: bool) -> Result<()> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let events = store
         .run_events_matching(run_id)
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
 
-    let mut ids: Vec<&str> = events.iter().map(|e| e.run_id.as_str()).collect();
-    ids.dedup();
+    let ids: BTreeSet<&str> = events.iter().map(|event| event.run_id.as_str()).collect();
     match ids.len() {
         0 => return Err(anyhow!("no run matching '{run_id}' in the ledger")),
         1 => {}
@@ -94,14 +96,16 @@ pub fn trace(run_id: &str) -> Result<()> {
         }
     }
 
+    let spans = trace_spans(&events);
+    if json {
+        println!("{}", serde_json::to_string(&spans)?);
+        return Ok(());
+    }
+
     let colors = Colors::default();
     let full_id = events[0].run_id.clone();
-    let start = events.first().expect("nonempty").ts;
-    let end = events
-        .iter()
-        .rev()
-        .find(|e| e.node == "run" && e.event != "started")
-        .map(|e| e.ts);
+    let start = spans.iter().map(|span| span.started_at).min().unwrap_or(0);
+    let end = spans.iter().filter_map(|span| span.ended_at).max();
 
     let header = &events[0];
     println!(
@@ -116,9 +120,6 @@ pub fn trace(run_id: &str) -> Result<()> {
             .map(|w| format!("  wave:{w}"))
             .unwrap_or_default(),
     );
-    if let Some(argv) = header.command.as_deref().and_then(parse_argv) {
-        println!("  command   {}", argv.join(" "));
-    }
     if let Some(worktree) = header.worktree.as_deref() {
         println!("  worktree  {worktree}");
     }
@@ -129,96 +130,17 @@ pub fn trace(run_id: &str) -> Result<()> {
             .unwrap_or_else(|| "running".to_string()),
     );
 
-    // Skill/flow timeline with per-skill durations and token deltas (token
-    // fields on skill boundaries are cumulative snapshots).
-    let mut open: BTreeMap<String, i64> = BTreeMap::new();
-    let mut last_tokens: i64 = 0;
-    for event in &events {
-        let key = match (
-            event.node.as_str(),
-            event.skill.as_deref(),
-            event.flow.as_deref(),
-        ) {
-            ("skill", Some(skill), _) => {
-                format!("skill:{skill}:{}", event.step_index.unwrap_or(0))
-            }
-            ("flow", _, flow) => format!("flow:{}", flow.unwrap_or("")),
-            _ => continue,
-        };
-        let name = event
-            .skill
-            .as_deref()
-            .or(event.flow.as_deref())
-            .unwrap_or("?")
-            .to_string();
-        match event.event.as_str() {
-            "started" => {
-                open.insert(key, event.ts);
-                if event.node == "flow" {
-                    println!("  flow      {name}");
-                }
-            }
-            "completed" | "errored" | "escalated" => {
-                let started = open.remove(&key);
-                if event.node == "skill" {
-                    let tokens = event
-                        .input_tokens
-                        .unwrap_or(0)
-                        .saturating_add(event.output_tokens.unwrap_or(0));
-                    let delta = (tokens - last_tokens).max(0);
-                    if tokens > 0 {
-                        last_tokens = tokens;
-                    }
-                    println!(
-                        "  ├─ {name:<20}  {dur:>8}  {tokens:>10}  {status}",
-                        dur = started
-                            .map(|s| format_duration(event.ts - s))
-                            .unwrap_or_default(),
-                        tokens = if delta > 0 {
-                            format_tokens(delta)
-                        } else {
-                            String::new()
-                        },
-                        status = match event.event.as_str() {
-                            "completed" => "ok".to_string(),
-                            other => format!(
-                                "{other}{}",
-                                event
-                                    .error
-                                    .as_deref()
-                                    .map(|e| format!(": {}", truncate(e, 60)))
-                                    .unwrap_or_default()
-                            ),
-                        },
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // Terminal run row: totals + error.
-    if let Some(terminal) = events
+    print_span_tree(&spans);
+    let total_cost: f64 = spans.iter().filter_map(|span| span.cost_usd).sum();
+    let total_tokens: i64 = spans
         .iter()
-        .rev()
-        .find(|e| e.node == "run" && e.event != "started")
-    {
-        let tokens = terminal.input_tokens.unwrap_or(0) + terminal.output_tokens.unwrap_or(0);
-        let mut line = format!("  status    {}", status_label(&terminal.event));
-        if tokens > 0 {
-            line.push_str(&format!("   tokens {}", format_tokens(tokens)));
-        }
-        if let Some(cache) = terminal.cache_read_tokens.filter(|c| *c > 0) {
-            line.push_str(&format!(" (+{} cache read)", format_tokens(cache)));
-        }
-        if let Some(cost) = terminal.cost_usd {
-            line.push_str(&format!("   cost ${cost:.2}"));
-        }
-        println!("{line}");
-        if let Some(error) = terminal.error.as_deref() {
-            println!("  error     {}", truncate(error, 200));
-        }
-    }
+        .map(|span| span.input_tokens.unwrap_or(0) + span.output_tokens.unwrap_or(0))
+        .sum();
+    println!(
+        "  total     {}   {}",
+        format_tokens(total_tokens),
+        format_cost(total_cost)
+    );
 
     for path in prompt_logs(&full_id) {
         println!("  prompt    {}", path.display());
@@ -233,6 +155,8 @@ pub fn trace(run_id: &str) -> Result<()> {
 #[derive(Debug)]
 struct RunSummary {
     run_id: String,
+    process_id: String,
+    parent_process_id: Option<String>,
     repo: Option<String>,
     wave: Option<String>,
     label: String,
@@ -241,6 +165,11 @@ struct RunSummary {
     status: &'static str,
     input_tokens: i64,
     output_tokens: i64,
+    cache_read_tokens: i64,
+    cost_usd: Option<f64>,
+    duration_secs: Option<f64>,
+    provider: Option<String>,
+    model: Option<String>,
 }
 
 impl RunSummary {
@@ -255,6 +184,9 @@ impl RunSummary {
 #[derive(Debug, serde::Serialize)]
 struct RunLedgerEntry {
     id: String,
+    run_id: String,
+    process_id: String,
+    parent_process_id: Option<String>,
     repo: Option<String>,
     wave: Option<String>,
     label: String,
@@ -263,12 +195,20 @@ struct RunLedgerEntry {
     ended: Option<i64>,
     input_tokens: i64,
     output_tokens: i64,
+    cache_read_tokens: i64,
+    cost_usd: Option<f64>,
+    duration_secs: Option<f64>,
+    provider: Option<String>,
+    model: Option<String>,
 }
 
 impl From<&RunSummary> for RunLedgerEntry {
     fn from(run: &RunSummary) -> Self {
         Self {
-            id: run.run_id.clone(),
+            id: run.process_id.clone(),
+            run_id: run.run_id.clone(),
+            process_id: run.process_id.clone(),
+            parent_process_id: run.parent_process_id.clone(),
             repo: run.repo.clone(),
             wave: run.wave.clone(),
             label: run.label.clone(),
@@ -277,19 +217,24 @@ impl From<&RunSummary> for RunLedgerEntry {
             ended: run.ended,
             input_tokens: run.input_tokens,
             output_tokens: run.output_tokens,
+            cache_read_tokens: run.cache_read_tokens,
+            cost_usd: run.cost_usd,
+            duration_secs: run.duration_secs,
+            provider: run.provider.clone(),
+            model: run.model.clone(),
         }
     }
 }
 
 fn summarize(events: &[RunEventRow]) -> Vec<RunSummary> {
-    let mut by_run: BTreeMap<&str, Vec<&RunEventRow>> = BTreeMap::new();
+    let mut by_process: BTreeMap<&str, Vec<&RunEventRow>> = BTreeMap::new();
     for event in events {
-        by_run.entry(&event.run_id).or_default().push(event);
+        by_process.entry(&event.process_id).or_default().push(event);
     }
 
-    by_run
+    by_process
         .into_iter()
-        .map(|(run_id, events)| {
+        .map(|(process_id, events)| {
             let started = events.iter().map(|e| e.ts).min().unwrap_or(0);
             let terminal = events
                 .iter()
@@ -297,17 +242,14 @@ fn summarize(events: &[RunEventRow]) -> Vec<RunSummary> {
                 .find(|e| e.node == "run" && e.event != "started");
             let label = events
                 .iter()
-                .find_map(|e| e.flow.clone())
+                .find_map(|e| e.command.as_deref().and_then(command_label))
+                .or_else(|| events.iter().find_map(|e| e.flow.clone()))
                 .or_else(|| events.iter().find_map(|e| e.skill.clone()))
-                .or_else(|| {
-                    events
-                        .iter()
-                        .find_map(|e| e.command.as_deref().and_then(parse_argv))
-                        .map(|argv| argv.into_iter().skip(1).collect::<Vec<_>>().join(" "))
-                })
                 .unwrap_or_else(|| "-".to_string());
             RunSummary {
-                run_id: run_id.to_string(),
+                run_id: events[0].run_id.clone(),
+                process_id: process_id.to_string(),
+                parent_process_id: events[0].parent_process_id.clone(),
                 repo: events.iter().find_map(|e| e.repo.clone()),
                 wave: events.iter().find_map(|e| e.wave.clone()),
                 label,
@@ -318,9 +260,149 @@ fn summarize(events: &[RunEventRow]) -> Vec<RunSummary> {
                     .unwrap_or("running"),
                 input_tokens: terminal.and_then(|e| e.input_tokens).unwrap_or(0),
                 output_tokens: terminal.and_then(|e| e.output_tokens).unwrap_or(0),
+                cache_read_tokens: terminal.and_then(|e| e.cache_read_tokens).unwrap_or(0),
+                cost_usd: terminal.and_then(|e| e.cost_usd),
+                duration_secs: terminal.and_then(|e| e.duration_secs),
+                provider: terminal
+                    .and_then(|event| event.provider.clone())
+                    .or_else(|| events.iter().rev().find_map(|event| event.provider.clone())),
+                model: terminal
+                    .and_then(|event| event.model.clone())
+                    .or_else(|| events.iter().rev().find_map(|event| event.model.clone())),
             }
         })
         .collect()
+}
+
+/// One process in a run trace. A trace is the `run_id`; a span is the
+/// `process_id`. All fields are required or explicitly optional so this wire
+/// shape fails loudly when producer and consumer drift.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
+pub struct SpanDto {
+    pub run_id: String,
+    pub process_id: String,
+    pub parent_process_id: Option<String>,
+    pub node: String,
+    pub name: Option<String>,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub status: String,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub cache_read_tokens: Option<i64>,
+    pub cost_usd: Option<f64>,
+    pub duration_secs: Option<f64>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+}
+
+fn trace_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
+    let mut by_process: BTreeMap<&str, Vec<&RunEventRow>> = BTreeMap::new();
+    for event in events {
+        by_process.entry(&event.process_id).or_default().push(event);
+    }
+    let mut spans: Vec<_> = by_process
+        .into_values()
+        .map(|mut process_events| {
+            process_events.sort_by_key(|event| (event.ts, event.seq));
+            let started = process_events
+                .iter()
+                .find(|event| event.node == "run" && event.event == "started")
+                .copied()
+                .unwrap_or(process_events[0]);
+            let terminal = process_events
+                .iter()
+                .rev()
+                .find(|event| event.node == "run" && event.event != "started")
+                .copied();
+            let boundary = terminal.unwrap_or_else(|| {
+                process_events
+                    .last()
+                    .copied()
+                    .expect("process has an event")
+            });
+            SpanDto {
+                run_id: started.run_id.clone(),
+                process_id: started.process_id.clone(),
+                parent_process_id: started.parent_process_id.clone(),
+                node: "run".to_string(),
+                name: started
+                    .command
+                    .as_deref()
+                    .and_then(parse_argv)
+                    .map(|argv| argv.join(" ")),
+                started_at: started.ts,
+                ended_at: terminal.map(|event| event.ts),
+                status: terminal
+                    .map(|event| event.event.clone())
+                    .unwrap_or_else(|| "open".to_string()),
+                input_tokens: boundary.input_tokens,
+                output_tokens: boundary.output_tokens,
+                cache_read_tokens: boundary.cache_read_tokens,
+                cost_usd: boundary.cost_usd,
+                duration_secs: boundary.duration_secs,
+                provider: process_events
+                    .iter()
+                    .rev()
+                    .find_map(|event| event.provider.clone()),
+                model: process_events
+                    .iter()
+                    .rev()
+                    .find_map(|event| event.model.clone()),
+            }
+        })
+        .collect();
+    spans.sort_by_key(|span| (span.started_at, span.process_id.clone()));
+    spans
+}
+
+/// Convert cumulative boundary readings into the spend attributable to each
+/// boundary. Diffing lives here so CLI and dashboard consumers share one rule.
+pub fn own_spend(spans: &[SpanDto]) -> Vec<SpanDto> {
+    let mut previous: BTreeMap<&str, BoundaryUsage> = BTreeMap::new();
+    spans
+        .iter()
+        .map(|span| {
+            let prior = previous
+                .get(span.process_id.as_str())
+                .copied()
+                .unwrap_or_default();
+            let mut own = span.clone();
+            own.input_tokens = diff_i64(span.input_tokens, prior.input_tokens);
+            own.output_tokens = diff_i64(span.output_tokens, prior.output_tokens);
+            own.cache_read_tokens = diff_i64(span.cache_read_tokens, prior.cache_read_tokens);
+            own.cost_usd = diff_f64(span.cost_usd, prior.cost_usd);
+            own.duration_secs = diff_f64(span.duration_secs, prior.duration_secs);
+            previous.insert(
+                span.process_id.as_str(),
+                BoundaryUsage {
+                    input_tokens: span.input_tokens,
+                    output_tokens: span.output_tokens,
+                    cache_read_tokens: span.cache_read_tokens,
+                    cost_usd: span.cost_usd,
+                    duration_secs: span.duration_secs,
+                },
+            );
+            own
+        })
+        .collect()
+}
+
+#[derive(Clone, Copy, Default)]
+struct BoundaryUsage {
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    cache_read_tokens: Option<i64>,
+    cost_usd: Option<f64>,
+    duration_secs: Option<f64>,
+}
+
+fn diff_i64(value: Option<i64>, previous: Option<i64>) -> Option<i64> {
+    value.map(|value| value.saturating_sub(previous.unwrap_or(0)).max(0))
+}
+
+fn diff_f64(value: Option<f64>, previous: Option<f64>) -> Option<f64> {
+    value.map(|value| (value - previous.unwrap_or(0.0)).max(0.0))
 }
 
 fn status_label(event: &str) -> &'static str {
@@ -332,8 +414,82 @@ fn status_label(event: &str) -> &'static str {
     }
 }
 
+fn print_span_tree(spans: &[SpanDto]) {
+    let mut children: BTreeMap<Option<&str>, Vec<&SpanDto>> = BTreeMap::new();
+    for span in spans {
+        children
+            .entry(span.parent_process_id.as_deref())
+            .or_default()
+            .push(span);
+    }
+    for roots in children.values_mut() {
+        roots.sort_by_key(|span| (span.started_at, span.process_id.as_str()));
+    }
+    let process_ids: BTreeSet<&str> = spans
+        .iter()
+        .map(|span| span.process_id.as_str())
+        .collect();
+    let mut roots: Vec<_> = spans
+        .iter()
+        .filter(|span| {
+            span.parent_process_id
+                .as_deref()
+                .is_none_or(|parent| !process_ids.contains(parent))
+        })
+        .collect();
+    roots.sort_by_key(|span| (span.started_at, span.process_id.as_str()));
+    for root in roots {
+        print_span(root, 1, &children);
+    }
+}
+
+fn print_span(span: &SpanDto, depth: usize, children: &BTreeMap<Option<&str>, Vec<&SpanDto>>) {
+    let indent = "  ".repeat(depth);
+    let name = span.name.as_deref().unwrap_or("?");
+    let duration = span
+        .ended_at
+        .map(|ended| format_duration(ended - span.started_at))
+        .unwrap_or_else(|| "open".to_string());
+    let tokens = span.input_tokens.unwrap_or(0) + span.output_tokens.unwrap_or(0);
+    let cost = span.cost_usd.map(format_cost).unwrap_or_default();
+    let agent = format_agent(span.provider.as_deref(), span.model.as_deref());
+    println!(
+        "{indent}├─ {name:<28} {duration:>8} {tokens:>10} {cost:>8} {agent:<18} {status:<9} span:{id}",
+        name = truncate(name, 28),
+        tokens = format_tokens(tokens),
+        status = span.status,
+        id = short_id(&span.process_id),
+    );
+    if let Some(nested) = children.get(&Some(span.process_id.as_str())) {
+        for child in nested {
+            print_span(child, depth + 1, children);
+        }
+    }
+}
+
 fn parse_argv(json: &str) -> Option<Vec<String>> {
     serde_json::from_str(json).ok()
+}
+
+fn command_label(json: &str) -> Option<String> {
+    parse_argv(json).map(|argv| argv.into_iter().skip(1).collect::<Vec<_>>().join(" "))
+}
+
+fn format_agent(provider: Option<&str>, model: Option<&str>) -> String {
+    match (provider, model) {
+        (Some(provider), Some(model)) => format!("{provider}:{model}"),
+        (Some(provider), None) => provider.to_string(),
+        (None, Some(model)) => model.to_string(),
+        (None, None) => "-".to_string(),
+    }
+}
+
+fn display_repo(repo: Option<&str>) -> String {
+    repo.and_then(|value| std::path::Path::new(value).file_name())
+        .and_then(|value| value.to_str())
+        .or(repo)
+        .unwrap_or("-")
+        .to_string()
 }
 
 /// Prompt/context logs for a run: `~/.lf/logs/<repo>/<worktree>/*-<id>-*.md`.
@@ -416,6 +572,10 @@ fn format_tokens(value: i64) -> String {
     }
 }
 
+fn format_cost(value: f64) -> String {
+    format!("${value:.2}")
+}
+
 fn truncate(value: &str, width: usize) -> String {
     if value.chars().count() <= width {
         return value.to_string();
@@ -426,15 +586,17 @@ fn truncate(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_duration, format_tokens, summarize};
+    use super::{format_duration, format_tokens, own_spend, summarize, trace_spans, SpanDto};
     use crate::lfdb::RunEventRow;
 
     fn row(run_id: &str, seq: i64, ts: i64, node: &str, event: &str) -> RunEventRow {
         RunEventRow {
             run_id: run_id.to_string(),
+            process_id: run_id.to_string(),
+            parent_process_id: None,
             seq,
             ts,
-            repo: Some("loopflow".to_string()),
+            repo: Some("/src/loopflow".to_string()),
             worktree: None,
             wave: None,
             node: node.to_string(),
@@ -450,6 +612,7 @@ mod tests {
             cost_usd: None,
             duration_secs: None,
             provider: None,
+            model: None,
         }
     }
 
@@ -477,6 +640,78 @@ mod tests {
         let summaries = summarize(&events);
         assert_eq!(summaries[0].status, "running");
         assert_eq!(summaries[0].ended, None);
+    }
+
+    #[test]
+    fn two_processes_sharing_a_run_id_summarize_separately() {
+        let mut parent_start = row("66863649", 0, 100, "run", "started");
+        parent_start.process_id = "parent".to_string();
+        parent_start.command = Some(r#"["lf","wave","intel"]"#.to_string());
+        let mut parent_end = parent_start.clone();
+        parent_end.seq = 1;
+        parent_end.ts = 120;
+        parent_end.event = "completed".to_string();
+        parent_end.cost_usd = Some(1.25);
+
+        let mut child_start = row("66863649", 0, 105, "run", "started");
+        child_start.process_id = "child".to_string();
+        child_start.parent_process_id = Some("parent".to_string());
+        child_start.command = Some(r#"["lf","pm","show"]"#.to_string());
+        let mut child_end = child_start.clone();
+        child_end.seq = 1;
+        child_end.ts = 110;
+        child_end.event = "errored".to_string();
+        child_end.cost_usd = Some(0.05);
+
+        let summaries = summarize(&[parent_start, child_start, child_end, parent_end]);
+        assert_eq!(summaries.len(), 2);
+        let parent = summaries
+            .iter()
+            .find(|summary| summary.process_id == "parent")
+            .unwrap();
+        let child = summaries
+            .iter()
+            .find(|summary| summary.process_id == "child")
+            .unwrap();
+        assert_eq!(parent.label, "wave intel");
+        assert_eq!(parent.cost_usd, Some(1.25));
+        assert_eq!(child.label, "pm show");
+        assert_eq!(child.cost_usd, Some(0.05));
+        assert_eq!(child.status, "error");
+    }
+
+    #[test]
+    fn a_span_that_never_closed_is_open_not_zero_width() {
+        let spans = trace_spans(&[row("abc", 0, 100, "run", "started")]);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].status, "open");
+        assert_eq!(spans[0].ended_at, None);
+    }
+
+    #[test]
+    fn own_spend_diffs_consecutive_boundaries_within_a_process() {
+        let boundary = |cost, input| SpanDto {
+            run_id: "trace".to_string(),
+            process_id: "span".to_string(),
+            parent_process_id: None,
+            node: "skill".to_string(),
+            name: Some("implement".to_string()),
+            started_at: input,
+            ended_at: Some(input + 1),
+            status: "completed".to_string(),
+            input_tokens: Some(input),
+            output_tokens: Some(input / 10),
+            cache_read_tokens: Some(0),
+            cost_usd: Some(cost),
+            duration_secs: Some(input as f64 / 10.0),
+            provider: Some("claude".to_string()),
+            model: Some("opus".to_string()),
+        };
+        let own = own_spend(&[boundary(1.0, 100), boundary(1.25, 150)]);
+        assert_eq!(own[0].cost_usd, Some(1.0));
+        assert_eq!(own[1].cost_usd, Some(0.25));
+        assert_eq!(own[1].input_tokens, Some(50));
+        assert_eq!(own[1].output_tokens, Some(5));
     }
 
     #[test]

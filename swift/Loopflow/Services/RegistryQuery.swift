@@ -70,6 +70,19 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([RunLedgerEntry].self, from: stdout)
     }
 
+    /// One run's process tree. Open spans carry no end timestamp; consumers
+    /// render them to the trace's last recorded timestamp, never to now.
+    public func trace(runID: String) async throws -> [TraceSpan] {
+        let stdout = try await run(["trace", runID, "--json"], nil)
+        return try Self.decode([TraceSpan].self, from: stdout)
+    }
+
+    /// The ledger's self-audit, including continuity and lineage tripwires.
+    public func doctor() async throws -> DoctorReport {
+        let stdout = try await run(["doctor", "--json"], nil)
+        return try Self.decode(DoctorReport.self, from: stdout)
+    }
+
     private static func decode<T: Decodable>(_ type: T.Type, from stdout: String) throws -> T {
         // `lf` prints one JSON line; trim any surrounding whitespace/newline.
         let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -216,6 +229,9 @@ struct AttentionSnapshot: Decodable {
 /// seconds, `wave` a name (not an id).
 public struct RunLedgerEntry: Decodable, Sendable, Identifiable {
     public let id: String
+    public let runId: String
+    public let processId: String
+    public let parentProcessId: String?
     public let repo: String?
     public let wave: String?
     public let label: String
@@ -224,12 +240,71 @@ public struct RunLedgerEntry: Decodable, Sendable, Identifiable {
     public let ended: Int?
     public let inputTokens: Int
     public let outputTokens: Int
+    public let cacheReadTokens: Int
+    public let costUsd: Double?
+    public let durationSecs: Double?
+    public let provider: String?
+    public let model: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, repo, wave, label, status, started, ended
+        case id, repo, wave, label, status, started, ended, provider, model
+        case runId = "run_id"
+        case processId = "process_id"
+        case parentProcessId = "parent_process_id"
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
+        case cacheReadTokens = "cache_read_tokens"
+        case costUsd = "cost_usd"
+        case durationSecs = "duration_secs"
     }
+}
+
+/// One process in `lf trace --json`. Mirrors Rust `SpanDto` exactly.
+public struct TraceSpan: Decodable, Sendable, Identifiable {
+    public var id: String { processId }
+
+    public let runId: String
+    public let processId: String
+    public let parentProcessId: String?
+    public let node: String
+    public let name: String?
+    public let startedAt: Int
+    public let endedAt: Int?
+    public let status: String
+    public let inputTokens: Int?
+    public let outputTokens: Int?
+    public let cacheReadTokens: Int?
+    public let costUsd: Double?
+    public let durationSecs: Double?
+    public let provider: String?
+    public let model: String?
+
+    enum CodingKeys: String, CodingKey {
+        case node, name, status, provider, model
+        case runId = "run_id"
+        case processId = "process_id"
+        case parentProcessId = "parent_process_id"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case cacheReadTokens = "cache_read_tokens"
+        case costUsd = "cost_usd"
+        case durationSecs = "duration_secs"
+    }
+}
+
+public struct DoctorReport: Decodable, Sendable {
+    public let rows: Int
+    public let checks: [DoctorCheck]
+}
+
+public struct DoctorCheck: Decodable, Sendable, Identifiable {
+    public var id: String { name }
+
+    public let name: String
+    public let status: String
+    public let detail: String
 }
 
 private enum RegistrySnapshotDate {

@@ -160,6 +160,21 @@ All three default to the invoking context's wave (`LFD_WAVE_ID` env, else the wo
 | `-w, --wave NAME` | Target a wave by name |
 | `--parent` | Target the invoking wave's parent (`lf chat` / `lf memory`) |
 
+## Reading the Local Ledger
+
+```bash
+lf runs                         # one row per process, with trace/span ids
+lf trace 66863649               # render the nested process tree
+lf trace 66863649 --json        # feed the Telemetry dashboard
+lf usage                        # additive terminal-process spend
+lf doctor                       # audit continuity, identity, lineage, coverage
+lf doctor --json                # machine-readable audit
+```
+
+`run_id` identifies the whole trace. Each nested `lf` process gets its own
+`process_id`, and terminal rows carry their own command, tokens, cost, provider,
+and model. `lf trace` leaves killed processes open instead of hiding them.
+
 ## What's Included by Default
 
 Every skill automatically includes:

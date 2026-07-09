@@ -241,6 +241,12 @@ enum LocalWaveAgentLauncher {
         guard let result = run([lfPath] + subargs, cwd: cwd) else {
             throw WaveLaunchError.launchFailed("Failed to spawn: lf \(subargs.joined(separator: " "))")
         }
+        // `lf doctor --json` exits 1 when a check fails, but its stdout is the
+        // report the telemetry dashboard must show. A red monitor cannot hide
+        // itself behind the query runner's generic non-zero handling.
+        if subargs == ["doctor", "--json"], !result.stdout.isEmpty {
+            return result.stdout
+        }
         guard result.status == 0 else {
             let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             throw WaveLaunchError.launchFailed(

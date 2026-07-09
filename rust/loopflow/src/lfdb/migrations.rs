@@ -234,6 +234,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "056_run_events_provider",
         sql: include_str!("migrations/056_run_events_provider.sql"),
     },
+    Migration {
+        version: "057_run_events_identity",
+        sql: include_str!("migrations/057_run_events_identity.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the
@@ -569,6 +573,52 @@ mod drift_tests {
             .unwrap();
         assert_eq!(index, 7);
         assert_eq!(skill, "ci-fix");
+    }
+
+    #[test]
+    fn the_migration_starts_the_ledger_empty() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE run_events (
+                 run_id TEXT NOT NULL,
+                 seq BIGINT NOT NULL,
+                 ts BIGINT NOT NULL,
+                 node TEXT NOT NULL,
+                 event TEXT NOT NULL,
+                 provider TEXT
+             );
+             INSERT INTO run_events (run_id, seq, ts, node, event)
+             VALUES ('legacy', 0, 1, 'step', 'started');
+             CREATE TABLE schema_migrations (
+                 version TEXT PRIMARY KEY,
+                 applied_at INTEGER NOT NULL
+             );",
+        )
+        .unwrap();
+        for migration in migrations() {
+            if migration.version != "057_run_events_identity" {
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, 0)",
+                    rusqlite::params![migration.version],
+                )
+                .unwrap();
+            }
+        }
+
+        apply_sqlite(&conn).unwrap();
+
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM run_events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
+        let process_not_null: i64 = conn
+            .query_row(
+                "SELECT \"notnull\" FROM pragma_table_info('run_events') WHERE name='process_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(process_not_null, 1);
     }
 
     #[test]

@@ -61,6 +61,8 @@ pub struct ForkRun {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunEventRow {
     pub run_id: String,
+    pub process_id: String,
+    pub parent_process_id: Option<String>,
     pub seq: i64,
     pub ts: i64,
     pub repo: Option<String>,
@@ -78,9 +80,11 @@ pub struct RunEventRow {
     pub cache_read_tokens: Option<i64>,
     pub cost_usd: Option<f64>,
     pub duration_secs: Option<f64>,
-    /// The harness the tokens were spent through. NULL on rows recorded before
-    /// `056_run_events_provider`, and on runs that never launched an agent.
+    /// The harness the tokens were spent through. NULL when the process never
+    /// launched an agent.
     pub provider: Option<String>,
+    /// The configured model, when the agent launch names one.
+    pub model: Option<String>,
 }
 
 /// Summed token usage and cost for one group of `run_events` rows. `provider`
@@ -1697,6 +1701,8 @@ mod tests {
     fn event_row(run_id: &str, seq: i64, node: &str, event: &str) -> RunEventRow {
         RunEventRow {
             run_id: run_id.to_string(),
+            process_id: run_id.to_string(),
+            parent_process_id: None,
             seq,
             ts: seq,
             repo: Some("/repo".to_string()),
@@ -1715,6 +1721,7 @@ mod tests {
             cost_usd: None,
             duration_secs: None,
             provider: None,
+            model: None,
         }
     }
 
@@ -1803,22 +1810,24 @@ mod tests {
 
         // A child `lf` inherits LF_RUN_ID, so one run_id can carry a terminal
         // row from each process. Their tokens add; they do not overwrite.
-        let rows = [
-            with_usage(
-                event_row("shared", 1, "run", "completed"),
-                Some("w1"),
-                "claude",
-                (100, 10, 0),
-                0.10,
-            ),
-            with_usage(
-                event_row("shared", 2, "run", "completed"),
-                Some("w1"),
-                "claude",
-                (5, 1, 0),
-                0.01,
-            ),
-        ];
+        let mut parent = with_usage(
+            event_row("shared", 1, "run", "completed"),
+            Some("w1"),
+            "claude",
+            (100, 10, 0),
+            0.10,
+        );
+        parent.process_id = "parent".to_string();
+        let mut child = with_usage(
+            event_row("shared", 2, "run", "completed"),
+            Some("w1"),
+            "claude",
+            (5, 1, 0),
+            0.01,
+        );
+        child.process_id = "child".to_string();
+        child.parent_process_id = Some("parent".to_string());
+        let rows = [parent, child];
         for row in &rows {
             store.insert_run_event(row).expect("insert run event");
         }
@@ -1827,6 +1836,44 @@ mod tests {
         assert_eq!(report.by_provider.len(), 1);
         assert_eq!(report.by_provider[0].input_tokens, 105);
         assert!((report.by_provider[0].cost_usd - 0.11).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_closed_vocabulary_rejects_an_unknown_node() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let store = SqliteStore::new(&db_path).expect("store should open");
+        let row = event_row("bad-node", 0, "task", "started");
+        let error = store
+            .insert_run_event(&row)
+            .expect_err("unknown node must violate the ledger contract");
+        assert!(error.to_string().contains("CHECK constraint failed"));
+    }
+
+    #[test]
+    fn store_open_rejects_a_recorded_migration_with_a_drifted_ledger() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        {
+            let conn = rusqlite::Connection::open(&db_path).expect("open sqlite db");
+            conn.execute_batch(
+                "CREATE TABLE schema_migrations (
+                     version TEXT PRIMARY KEY,
+                     applied_at INTEGER NOT NULL
+                 );
+                 CREATE TABLE run_events (run_id TEXT NOT NULL);",
+            )
+            .unwrap();
+            for migration in super::migrations::migrations() {
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, 0)",
+                    rusqlite::params![migration.version],
+                )
+                .unwrap();
+            }
+        }
+
+        let error = SqliteStore::new(&db_path)
+            .expect_err("a ledger that lies about migration 057 must fail open");
+        assert!(error.to_string().contains("process_id"));
     }
 
     #[tokio::test]

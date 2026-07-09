@@ -35,7 +35,12 @@ use serde::Deserialize;
 
 use crate::flowloop::pass::{run_pass, PassOptions};
 use crate::flowloop::run::FlowloopRun;
+use crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV;
 use crate::ops::{OpsError, OpsResult};
+use crate::wave::wire::{
+    DetachedLoopRequest, DetachedLoopResponse, RESIDENT_TOKEN_HEADER, SUBAGENT_TOKEN_ENV,
+    SUBAGENT_TOKEN_HEADER,
+};
 
 const LOOP_FILE: &str = "scratch/loop.yaml";
 const DEFAULT_MAX_PASSES: u32 = 8;
@@ -78,22 +83,101 @@ pub struct LoopFile {
     pub recheck: Option<String>,
 }
 
-/// `lf task "<seed>"` and friends: place a worktree through the wave
+/// `lf loop <flow> "<seed>"`: place a worktree through the wave
 /// registry, then loop the flow over it until the loop file says done.
 pub fn run_flowloop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<()> {
+    require_loop_flow(repo, &options.flow)?;
     let wave_name = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
-    let run = FlowloopRun::start(&wave_name, &options.flow, seed.to_string())?;
+    let mut run = FlowloopRun::start(&wave_name, &options.flow, seed.to_string())?;
     let worktree = run.worktree();
     eprintln!(
         "flowloop {} running in {}",
         options.flow,
         worktree.display()
     );
-    let result = drive(&worktree, seed, options, |flow, seed, pass_options| {
-        run_pass(&worktree, flow, seed, pass_options)
-    });
+    let result = drive(
+        &worktree,
+        seed,
+        options,
+        |pass, flow, seed, pass_options| {
+            run.start_pass(pass)?;
+            run_pass(&worktree, flow, seed, pass_options)
+        },
+    );
     run.finish(result)
+}
+
+/// Resolve the loop target before creating a worktree. A skill is not a
+/// one-step flow by implication: loop callers name a flow explicitly.
+pub(crate) fn require_loop_flow(repo: &Path, flow: &str) -> OpsResult<()> {
+    crate::engine::load_flow(flow, repo)
+        .map(|_| ())
+        .map_err(|err| OpsError::Message(format!("cannot loop flow '{flow}': {err}")))
+}
+
+/// Ask the live wave server to own the same loop invocation and return its
+/// read-only inspection session. The server, not this short-lived CLI, owns
+/// launch and observation.
+pub fn detach_flowloop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<String> {
+    let wave = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
+        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
+    let origin = crate::engine::wave_context::wave_origin(repo);
+    let endpoint = std::env::var(WAVE_SERVER_ENDPOINT_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| crate::engine::wave_context::read_endpoint_pointer(&origin, &wave))
+        .ok_or_else(|| {
+            OpsError::Message(format!(
+                "wave '{wave}' has no live server; start it with `lf wave {wave}`"
+            ))
+        })?;
+    let (header, token) = detached_loop_credential(&origin, &wave).ok_or_else(|| {
+        OpsError::Message(format!(
+            "wave '{wave}' has no loop-launch credential; restart its live server"
+        ))
+    })?;
+    let request = DetachedLoopRequest {
+        flow: options.flow.clone(),
+        seed: seed.to_string(),
+        max_passes: options.max_passes,
+        pass_timeout_secs: options.pass_timeout.as_secs(),
+        wall_clock_secs: options.wall_clock.as_secs(),
+        poll_secs: options.poll.as_secs(),
+        max_turns: options.max_turns,
+    };
+    let url = format!("http://{endpoint}/loops");
+    let response = reqwest::blocking::Client::new()
+        .post(&url)
+        .header(header, token)
+        .json(&request)
+        .send()
+        .map_err(|err| OpsError::Message(format!("POST {url} failed: {err}")))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|err| OpsError::Message(format!("reading {url} response failed: {err}")))?;
+    if !status.is_success() {
+        return Err(OpsError::Message(format!(
+            "wave loop door refused ({status}): {body}"
+        )));
+    }
+    let response: DetachedLoopResponse = serde_json::from_str(&body)
+        .map_err(|err| OpsError::Parse(format!("invalid loop response: {err}")))?;
+    Ok(response.session)
+}
+
+fn detached_loop_credential(origin: &Path, wave: &str) -> Option<(&'static str, String)> {
+    if let Some(token) = std::env::var(SUBAGENT_TOKEN_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return Some((SUBAGENT_TOKEN_HEADER, token));
+    }
+    crate::wave::server::read_resident_token(origin, wave)
+        .map(|token| (RESIDENT_TOKEN_HEADER, token))
 }
 
 /// The standing instruction appended to every pass's seed: the generic
@@ -122,7 +206,7 @@ fn drive(
     worktree: &Path,
     seed: &str,
     options: &LoopOptions,
-    mut pass: impl FnMut(&str, &str, &PassOptions) -> OpsResult<()>,
+    mut pass: impl FnMut(u32, &str, &str, &PassOptions) -> OpsResult<()>,
 ) -> OpsResult<()> {
     let started = Instant::now();
     let pass_options = PassOptions {
@@ -135,7 +219,7 @@ fn drive(
         })?;
         eprintln!("{} pass {n}/{}", options.flow, options.max_passes);
         let pass_seed = format!("{seed}\n\n{}", loop_instruction(n, options.max_passes));
-        pass(&options.flow, &pass_seed, &pass_options)?;
+        pass(n, &options.flow, &pass_seed, &pass_options)?;
 
         match take_loop_file(worktree)? {
             LoopFile { done: true, .. } => return Ok(()),
@@ -240,7 +324,7 @@ mod tests {
     fn done_stops_the_loop_at_the_boundary() {
         let tmp = tempfile::tempdir().unwrap();
         let mut passes = 0;
-        drive(tmp.path(), "seed", &options(8), |_, _, _| {
+        drive(tmp.path(), "seed", &options(8), |_, _, _, _| {
             passes += 1;
             write_loop_file(tmp.path(), "done: true\n");
             Ok(())
@@ -254,7 +338,7 @@ mod tests {
     fn missing_file_keeps_passing_until_the_cap_escalates() {
         let tmp = tempfile::tempdir().unwrap();
         let mut passes = 0;
-        let err = drive(tmp.path(), "seed", &options(3), |_, _, _| {
+        let err = drive(tmp.path(), "seed", &options(3), |_, _, _, _| {
             passes += 1;
             Ok(())
         })
@@ -269,7 +353,7 @@ mod tests {
         let flag = tmp.path().join("merged");
         std::fs::write(&flag, "").unwrap();
         let mut passes = 0;
-        drive(tmp.path(), "seed", &options(8), |_, _, _| {
+        drive(tmp.path(), "seed", &options(8), |_, _, _, _| {
             passes += 1;
             if passes == 1 {
                 // Submitted; wait for the (already-set) external bit.
@@ -292,7 +376,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let mut opts = options(8);
         opts.wall_clock = Duration::from_millis(50);
-        let err = drive(tmp.path(), "seed", &opts, |_, _, _| {
+        let err = drive(tmp.path(), "seed", &opts, |_, _, _, _| {
             write_loop_file(tmp.path(), "recheck: false\n");
             Ok(())
         })
@@ -303,11 +387,19 @@ mod tests {
     #[test]
     fn garbage_loop_file_is_an_error_not_a_silent_continue() {
         let tmp = tempfile::tempdir().unwrap();
-        let err = drive(tmp.path(), "seed", &options(8), |_, _, _| {
+        let err = drive(tmp.path(), "seed", &options(8), |_, _, _, _| {
             write_loop_file(tmp.path(), ": not yaml [");
             Ok(())
         })
         .expect_err("unparseable file errors");
         assert!(err.to_string().contains("unparseable"));
+    }
+
+    #[test]
+    fn loop_target_must_resolve_to_a_flow() {
+        let tmp = tempfile::tempdir().unwrap();
+        require_loop_flow(tmp.path(), "task").expect("builtin task flow");
+        let err = require_loop_flow(tmp.path(), "definitely-not-a-flow").unwrap_err();
+        assert!(err.to_string().contains("not found"));
     }
 }

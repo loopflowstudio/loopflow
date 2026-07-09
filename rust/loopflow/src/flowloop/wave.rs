@@ -60,7 +60,6 @@ use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRend
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
 use crate::flowloop::pass::lf_command;
 use crate::wave::journal::{ellipsize, MessageId, MessageOp, PendingMessage};
-use crate::wave::memory::Memory;
 use crate::wave::resident::ListenerClient;
 use crate::wave::runtime::InboxItem;
 use crate::wave::supervisor::sleep_until_opt;
@@ -195,8 +194,7 @@ pub fn path_for_children() -> OsString {
 /// wake that opened the pass. Reads GOAL.md and MEMORY.md from the ORIGIN
 /// repo (reads are free; writes go through the listener's doors).
 fn wave_pass_seed(origin_repo: &Path, wave: &str, wake: &str) -> String {
-    let memory = Memory::for_wave(origin_repo, wave);
-    let seed = build_goal_seed(origin_repo, wave, &memory);
+    let seed = build_goal_seed(origin_repo, wave);
     format!(
         "{seed}\n\n{}\n\n{}\n\n<wake>\n{wake}\n</wake>",
         orchestration_discipline(wave),
@@ -206,21 +204,21 @@ fn wave_pass_seed(origin_repo: &Path, wave: &str, wake: &str) -> String {
 
 /// The wave's rendered `GOAL.md` plus current memory, or a minimal-but-real
 /// fallback when there's no `GOAL.md` so the flowloop still has an identity.
-fn build_goal_seed(repo: &Path, wave: &str, memory: &Memory) -> String {
+fn build_goal_seed(repo: &Path, wave: &str) -> String {
+    let memory = crate::engine::wave_context::gather_wave_memory(repo, wave).unwrap_or_default();
     match load_goal(wave, repo) {
         Ok(goal) => {
             let ctx = GoalRenderContext {
                 flows: available_flow_names(repo),
-                memory: memory.read(),
+                memory,
             };
             render_goal(&goal, &ctx)
         }
         Err(_) => {
-            let mem = memory.read();
-            let mem_block = if mem.trim().is_empty() {
+            let mem_block = if memory.trim().is_empty() {
                 "(memory is empty)".to_string()
             } else {
-                mem
+                memory
             };
             format!(
                 "You are the agent of the '{wave}' wave. Drive the wave's goal \
@@ -238,13 +236,13 @@ fn orchestration_discipline(wave: &str) -> String {
     format!(
         "You are the flowloop of the '{wave}' wave — its long-running orchestrator.\n\
          Discipline:\n\
-         - Never grind inline. Read state, decide, dispatch work to subagents \
-         via `lf <flow> \"<task>\" --wave {wave} --dispatch` (use \
-         `--stack <run-id>` for dependent work or `--fork` for independent work), curate what you learn into memory, and answer the \
-         human.\n\
-         - Exception: trivial, single-file, sub-minute work is done inline \
-         without dispatch; dispatch is for real units of work.\n\
-         - Keep turns short — decisions and dispatches, not implementation.\n\
+         - Read state and filed tasks, then inhabit one loop whose next move \
+         needs this wave's live memory/chat: `lf loop <flow> \"<task>\" \
+         --wave {wave}`. This is one blocking tool call.\n\
+         - Delegate self-sufficient work with the same command plus `--detach`. \
+         Detached hands must report with `lf chat`, publish learnings with \
+         `lf memory add`, and leave done as a PR.\n\
+         - Keep turns centered on selection, sequencing, and authored reports.\n\
          - Trust worker summaries; never re-read worker transcripts.\n\
          - A human message is steering: answer it directly and adjust course \
          before returning to the goal."
@@ -488,6 +486,19 @@ impl WaveFlowloop {
                     }
                 }
                 _ = &mut timeout => {
+                    // A foreground `lf loop` is one long tool call inside this
+                    // pass. Its registry row is presence: renew the lease while
+                    // any hand is still active instead of hanging up on live
+                    // work at the ordinary pass boundary.
+                    let workers = self.fetch_in_flight().await;
+                    if self.end.is_some() {
+                        wait_task.abort();
+                        return;
+                    }
+                    if !workers.is_empty() {
+                        timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
+                        continue;
+                    }
                     wait_task.abort();
                     self.finish_failed_pass(&format!(
                         "wave timed out after {}s",
@@ -1148,6 +1159,43 @@ mod tests {
             loop_.runtime.flowloop_state() == FlowloopState::Idle
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn active_child_loop_renews_the_pass_lease() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let config = FlowloopConfig {
+            heartbeat_idle: Duration::from_secs(600),
+            pass_timeout: Duration::from_millis(80),
+            max_turns: None,
+        };
+        let loop_ = boot_with(tmp, config, "sleep 0.25; echo inhabited").await;
+        assert!(loop_.runtime.journal_run_observed(
+            "run-child",
+            "session-child",
+            "task",
+            "foreground loop"
+        ));
+        loop_
+            .runtime
+            .deliver_user_message("go".into(), MessageOp::Message);
+        wait_for("pass spawned", || loop_.pass_count() == 1).await;
+        wait_for("long pass completed", || {
+            loop_.runtime.thread_snapshot().iter().any(|turn| {
+                turn.role == ChatRole::Assistant
+                    && turn.status == Lifecycle::Completed
+                    && turn.text.contains("inhabited")
+            })
+        })
+        .await;
+        assert!(
+            !loop_
+                .runtime
+                .thread_snapshot()
+                .iter()
+                .any(|turn| turn.status == Lifecycle::Failed),
+            "presence renewed the lease instead of timing out"
+        );
     }
 
     /// An interrupt mid-pass kills the child and finalizes the turn

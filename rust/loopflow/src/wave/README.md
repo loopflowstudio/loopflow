@@ -49,10 +49,11 @@ the respawn affordance, and one day the human-in-the-seat affordance.
   the flowloop dispatches with judgment. Mid-pass due dates fire at the
   boundary; occurrences older than 24h are missed, not replayed. The
   daemon's cron poller and `wave_crons` table died in the collapse.
-- **The flowloop orchestrates, never grinds.** Each pass's seed is the
-  rendered `GOAL.md` plus the coordinating-session discipline; heavy work is
-  dispatched to subagents (`lf <flow> "task" --wave <wave> --dispatch`,
-  synchronously in a placed worktree). The LISTENER polls the shared store
+- **The flowloop inhabits or delegates.** Each pass's seed is the rendered
+  `GOAL.md` plus the coordinating-session discipline. It inhabits one
+  context-sensitive hand with `lf loop <flow> "task" --wave <wave>` and
+  delegates self-sufficient work with `--detach`; both use placed worktrees.
+  The LISTENER polls the shared store
   and journals `RunObserved`/`RunCompleted` observations — every ~10s and
   once per `GET /resident/context` (the resident calls it before each pass).
 - **Interrupts kill the pass child.** The resident sends an `Interrupting`

@@ -68,6 +68,8 @@ pub struct RunSnapshot {
     pub id: String,
     pub flow: String,
     pub task: Option<String>,
+    /// Current execution step; generic flowloops publish their pass here.
+    pub step_index: u32,
     pub status: String,
     pub branch: String,
     pub worktree: String,
@@ -201,6 +203,7 @@ fn snapshot_run(run: Run) -> RunSnapshot {
         id: run.id.to_string(),
         flow: run.flow,
         task: run.task,
+        step_index: run.step_index,
         status: run_status_str(run.status).to_string(),
         branch: run.branch,
         worktree: run.worktree,
@@ -417,6 +420,7 @@ mod tests {
                 id: "run-1".into(),
                 flow: "implement".into(),
                 task: Some("wire it".into()),
+                step_index: 2,
                 status: "running".into(),
                 branch: "b".into(),
                 worktree: "/wt".into(),
@@ -439,6 +443,7 @@ mod tests {
         assert_eq!(value["wave"]["name"], "goals");
         assert_eq!(value["flowloop"], serde_json::Value::Null);
         assert_eq!(value["runs"][0]["flow"], "implement");
+        assert_eq!(value["runs"][0]["step_index"], 2);
         assert_eq!(value["attention"][0]["kind"], "interactive");
     }
 }

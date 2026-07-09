@@ -8,8 +8,8 @@ Mutate the project honestly. The loop's termination mechanics are in the
 
 ## Orientation
 
-Read the KR set in `scratch/<branch>.md`; check running tasks with `lf runs`
-and merged PRs with `gh`.
+Read the KR set in `scratch/<branch>.md`; check filed tasks with `lf pm show`,
+running tasks with `lf runs`, and merged PRs with `gh`.
 
 ## Work
 

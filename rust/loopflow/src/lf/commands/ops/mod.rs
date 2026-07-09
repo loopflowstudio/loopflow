@@ -388,7 +388,11 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 );
             }
         }
-        PmCommand::Show { wave, project } => {
+        PmCommand::Show {
+            wave,
+            project,
+            json,
+        } => {
             let result = crate::ops::pm::pm_show(
                 &repo_root,
                 &crate::ops::pm::PmShowOptions {
@@ -397,7 +401,20 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 },
                 progress,
             )?;
-            print_pm_show_result(&result);
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({
+                        "wave": result.wave,
+                        "provider": result.provider,
+                        "project": result.project,
+                        "local_project": result.local_project,
+                        "items": result.items,
+                    }))?
+                );
+            } else {
+                print_pm_show_result(&result);
+            }
         }
         PmCommand::Update {
             wave,

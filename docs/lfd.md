@@ -5,7 +5,10 @@ title: lfd Daemon Reference
 
 # lfd Daemon Reference
 
-`lfd` runs the loopflow daemon: the HTTP read surface, session registry, GitHub webhook ingress translated to `lf` execs, provider token refresh, and worktree cleanup. It dispatches no agent work; each wave's resident flowloop and ordinary `lf --dispatch` / `--stack` / `--fork` invocations own agent execution.
+`lfd` runs the loopflow daemon: the HTTP read surface, session registry,
+GitHub webhook ingress translated to `lf` execs, provider token refresh, and
+worktree cleanup. It launches no agent work; each wave's resident flowloop and
+its server-owned `lf loop … --detach` hands own agent execution.
 
 ## Run Native lfd
 
@@ -213,7 +216,9 @@ Cancel the session:
 curl -s -X POST "$LFD_ADDR/v0/sessions/<session_id>/cancel"
 ```
 
-The attach endpoint marks the session attached and returns tmux connection info. For day-to-day use, `tmux ls` and `tmux attach -t <name>` go straight to the session.
+The attach endpoint marks the session attached and returns tmux connection
+info. Use `tmux ls` and `tmux attach -r -t <name>` for read-only inspection;
+steering goes through the wave thread so it remains journaled.
 
 ## GitHub webhooks
 

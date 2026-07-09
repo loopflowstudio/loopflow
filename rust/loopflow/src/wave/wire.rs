@@ -59,6 +59,27 @@ pub const SUBAGENT_TOKEN_HEADER: &str = "x-lf-subagent-token";
 /// process it spawns) so a subagent can reach its wave's exec door via `lfq`.
 pub const SUBAGENT_TOKEN_ENV: &str = "LF_SUBAGENT_TOKEN";
 
+/// `POST /loops` request: one generic flowloop invocation. Every field is
+/// required; the client sends the effective caps so detached and blocking
+/// execution have the same contract.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DetachedLoopRequest {
+    pub flow: String,
+    pub seed: String,
+    pub max_passes: u32,
+    pub pass_timeout_secs: u64,
+    pub wall_clock_secs: u64,
+    pub poll_secs: u64,
+    pub max_turns: Option<u32>,
+}
+
+/// `POST /loops` response: the server-owned, read-only-inspectable tmux
+/// session. The loop's durable state remains the run ledger and its reports.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DetachedLoopResponse {
+    pub session: String,
+}
+
 /// One ordered increment from the resident's harness stream, applied by the
 /// listener's fold ([`crate::wave::runtime::WaveRuntime::apply_resident_delta`]).
 ///
@@ -330,5 +351,32 @@ mod tests {
         assert_eq!(finished.flow, None);
         assert_eq!(finished.task, None);
         assert_eq!(finished.summary.as_deref(), Some("session failed"));
+    }
+
+    #[test]
+    fn detached_loop_wire_requires_effective_caps() {
+        let request = DetachedLoopRequest {
+            flow: "task".into(),
+            seed: "ship it".into(),
+            max_passes: 8,
+            pass_timeout_secs: 1800,
+            wall_clock_secs: 7200,
+            poll_secs: 60,
+            max_turns: None,
+        };
+        let decoded: DetachedLoopRequest =
+            serde_json::from_value(serde_json::to_value(&request).unwrap()).unwrap();
+        assert_eq!(decoded, request);
+        assert!(
+            serde_json::from_value::<DetachedLoopRequest>(serde_json::json!({
+                "flow": "task",
+                "seed": "ship it",
+                "max_passes": 8,
+                "pass_timeout_secs": 1800,
+                "wall_clock_secs": 7200,
+                "max_turns": null
+            }))
+            .is_err()
+        );
     }
 }

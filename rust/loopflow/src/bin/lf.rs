@@ -7,7 +7,7 @@ use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
-use loopflow::lf::{Cli, Commands};
+use loopflow::lf::{Cli, Commands, ProjectCommand};
 
 /// What `reorder_args` needs to know about the CLI, derived from the clap
 /// definition so it can never drift from it (the old hand-maintained lists
@@ -313,7 +313,7 @@ fn run_target_in_repo(
 }
 
 fn placement_requested(cli: &Cli) -> bool {
-    cli.dispatch || cli.stack.is_some() || cli.fork
+    cli.stack.is_some() || cli.fork
 }
 
 fn inner_placement_invocation(command: &[String]) -> anyhow::Result<(Cli, Vec<String>)> {
@@ -332,7 +332,7 @@ fn strip_placement_args(command: &[String]) -> Vec<String> {
     let mut args = command.iter().peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--dispatch" | "--fork" => {}
+            "--fork" => {}
             "--stack" => {
                 let _ = args.next();
             }
@@ -360,11 +360,7 @@ fn run_placed_target(
     } else {
         loopflow::lfd::executor::Placement::Fresh
     };
-    let target_branch = if cli.dispatch {
-        loopflow::engine::git::current_branch(repo_root)?
-    } else {
-        None
-    };
+    let target_branch: Option<String> = None;
 
     let runtime = tokio::runtime::Runtime::new()?;
     let store: loopflow::lfdb::SharedStore = std::sync::Arc::new(runtime.block_on(async {
@@ -577,9 +573,10 @@ fn main() -> anyhow::Result<()> {
             }) => in_repo_runtime(&args, |_| {
                 loopflow::wave::run(name, *force, *no_flowloop, *flowloop_only)
             }),
-            Some(Commands::Task {
-                seed,
+            Some(Commands::Loop {
                 flow,
+                seed,
+                detach,
                 wave,
                 max_passes,
                 pass_timeout_secs,
@@ -594,8 +591,32 @@ fn main() -> anyhow::Result<()> {
                 options.wall_clock = std::time::Duration::from_secs(*wall_clock_secs);
                 options.poll = std::time::Duration::from_secs(*poll_secs);
                 options.max_turns = max_turns.or(cli.max_turns);
-                loopflow::flowloop::driver::run_flowloop(repo, seed, &options)
-                    .map_err(anyhow::Error::from)
+                if *detach {
+                    let session = loopflow::flowloop::driver::detach_flowloop(repo, seed, &options)
+                        .map_err(anyhow::Error::from)?;
+                    println!("detached {flow} loop in tmux session {session}");
+                    println!("inspect: tmux attach -r -t {session}");
+                    Ok(())
+                } else {
+                    loopflow::flowloop::driver::run_flowloop(repo, seed, &options)
+                        .map_err(anyhow::Error::from)
+                }
+            }),
+            Some(Commands::Project {
+                cmd: ProjectCommand::Promote { slug, wave },
+            }) => in_repo_runtime(&args, |repo| {
+                let parent = wave
+                    .clone()
+                    .or_else(|| loopflow::ops::resolve_wave_name(repo, None))
+                    .ok_or_else(|| anyhow::anyhow!("cannot determine parent wave"))?;
+                let message = format!(
+                    "Promote project '{slug}' from parent wave '{parent}'. Complete the authored migration, PM move, parent link, and residency checks."
+                );
+                run_target("project-promote", Some(&message), &cli, &args)?;
+                let session = loopflow::ops::project::complete_promotion(repo, &parent, slug)
+                    .map_err(anyhow::Error::from)?;
+                println!("promoted {slug} from {parent}; residency: {session}");
+                Ok(())
             }),
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)
@@ -695,7 +716,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::SyncSkills { .. })
         | Some(Commands::Cron { .. })
         | Some(Commands::Wave { .. })
-        | Some(Commands::Task { .. })
+        | Some(Commands::Loop { .. })
         | Some(Commands::Usage { .. })
         | Some(Commands::Tokens { .. })
         | Some(Commands::Doctor { .. })
@@ -708,6 +729,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Wavechat { .. })
         | Some(Commands::Memory { .. })
         | Some(Commands::Ssh { .. }) => None,
+        Some(Commands::Project { .. }) => Some("project-promote".to_string()),
     }
 }
 
@@ -724,8 +746,9 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "wave", "task", "flow",
-            "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace", "help",
+            ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "wave", "loop",
+            "project", "flow", "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace",
+            "help",
         ] {
             assert!(tables.commands.contains(command), "command {command}");
         }
@@ -766,7 +789,6 @@ mod tests {
             "--diff",
             "--no-diff",
             "--no-loopflow",
-            "--dispatch",
             "--fork",
             "-h",
             "--help",
@@ -810,17 +832,17 @@ mod tests {
             "lf".to_string(),
             "implement".to_string(),
             "ship it".to_string(),
-            "--dispatch".to_string(),
+            "--fork".to_string(),
         ];
         let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "--dispatch", "implement", "ship it"]);
+        assert_eq!(result, vec!["lf", "--fork", "implement", "ship it"]);
     }
 
     #[test]
-    fn placed_inner_invocation_strips_dispatch() {
+    fn placed_inner_invocation_strips_fork() {
         let command: Vec<String> = [
             "lf",
-            "--dispatch",
+            "--fork",
             "-b",
             "--wave",
             "goals",
@@ -842,6 +864,33 @@ mod tests {
         assert!(inner_cli.batch);
         assert_eq!(inner_cli.wave.as_deref(), Some("goals"));
         assert!(matches!(inner_cli.command, Some(Commands::External(_))));
+    }
+
+    #[test]
+    fn loop_parses_blocking_and_detached_forms() {
+        let blocking = Cli::try_parse_from(["lf", "loop", "task", "ship it"]).unwrap();
+        assert!(matches!(
+            blocking.command,
+            Some(Commands::Loop {
+                detach: false,
+                flow,
+                seed,
+                ..
+            }) if flow == "task" && seed == "ship it"
+        ));
+
+        let detached =
+            Cli::try_parse_from(["lf", "loop", "project", "hold the KR frontier", "--detach"])
+                .unwrap();
+        assert!(matches!(
+            detached.command,
+            Some(Commands::Loop { detach: true, flow, .. }) if flow == "project"
+        ));
+    }
+
+    #[test]
+    fn removed_dispatch_flag_is_rejected() {
+        assert!(Cli::try_parse_from(["lf", "--dispatch", "implement", "ship it"]).is_err());
     }
 
     #[test]

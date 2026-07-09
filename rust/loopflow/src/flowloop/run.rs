@@ -63,6 +63,17 @@ impl FlowloopRun {
         PathBuf::from(&self.run.worktree)
     }
 
+    /// Publish loop progress on the run fields read by `lf status`.
+    pub fn start_pass(&mut self, pass: u32) -> OpsResult<()> {
+        self.run.step_index = pass;
+        self.runtime.block_on(async {
+            self.store
+                .update_run(&self.run)
+                .await
+                .map_err(|err| OpsError::Message(format!("failed to record flowloop pass: {err}")))
+        })
+    }
+
     /// Record the loop's outcome on the run, then return it unchanged.
     pub fn finish(mut self, result: OpsResult<()>) -> OpsResult<()> {
         self.runtime.block_on(async {

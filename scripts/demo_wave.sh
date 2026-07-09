@@ -176,7 +176,7 @@ hr "launch · lf wave $WAVE (detached tmux: $TMUX_SESSION)"
 tmux new-session -d -s "$TMUX_SESSION" -c "$DEMO_REPO" "$LF_BIN wave $WAVE"
 say "one command, two processes: the listener boots, then spawns the resident"
 say "(lf wave $WAVE --flowloop-only) — both narrate into the same pane."
-say "watch it live in another terminal:  tmux attach -t $TMUX_SESSION"
+say "watch it live in another terminal:  tmux attach -r -t $TMUX_SESSION"
 poll "endpoint published ($ENDPOINT_FILE)" 90 test -s "$ENDPOINT_FILE" || {
     warn "server never published its endpoint; last tmux output:"
     tmux capture-pane -p -t "$TMUX_SESSION" | tail -20

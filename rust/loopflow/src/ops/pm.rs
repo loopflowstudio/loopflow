@@ -578,7 +578,7 @@ async fn apply_update(
         None => {
             let Some(title) = options.title.as_ref() else {
                 return Err(OpsError::Message(
-                    "`lf op pm update --title` is required when creating a task".to_string(),
+                    "`lf pm update --title` is required when creating a task".to_string(),
                 ));
             };
             progress.status(&format!(

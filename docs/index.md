@@ -76,7 +76,7 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 | **Wave** | Durable operating context with memory, cadence, chat, and project selection | `wave/<name>/` |
 | **Goal** | A wave's intent and loop prompt | `wave/<name>/GOAL.md` |
 | **Project** | Measured bet inside exactly one wave | `wave/<name>/projects/*.md` |
-| **Task** | Concrete work that advances a project | Linear via `lf op pm` |
+| **Task** | Concrete work that advances a project | Linear via `lf pm` |
 | **Memory** | What a wave remembers between loops | `wave/<name>/MEMORY.md` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
 | **Cron** | Scheduled supplementary flow | goal frontmatter |

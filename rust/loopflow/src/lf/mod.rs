@@ -306,7 +306,7 @@ pub enum Commands {
         #[arg(long, conflicts_with = "steer")]
         from: Option<String>,
         /// Inject into a live steer-capable turn; otherwise queue.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "parent")]
         steer: bool,
         #[command(flatten)]
         target: WaveTargetArgs,
@@ -972,6 +972,7 @@ mod tests {
             Cli::try_parse_from(["lf", "chat", "--steer", "--from", "ci", "change course"])
                 .is_err()
         );
+        assert!(Cli::try_parse_from(["lf", "chat", "--steer", "--parent", "x"]).is_err());
 
         // --wave and --parent are mutually exclusive.
         assert!(Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--parent", "x"]).is_err());

@@ -30,12 +30,9 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   client attribution and `lf chat --parent` transport. This branch implements
   the requested execution, memory, promotion, control, backlog, doctrine, and
   Mac surfaces without silently changing that wire protocol.
-- Two agents wrote this worktree at once during compress: HEAD advanced under a
-  running skill (`lf pr open: prepare branch`) while unrelated files were being
-  edited. Both writers converged on the same reduction (`step_index`, dropping
-  the derived `queued`), so the tree is coherent, but nothing enforces one
-  writer per worktree. Whether that is a wave-home invariant or a lock is open.
-- `exec_door_pins_detached_loops_to_its_wave`, `sse_late_subscriber_watches_the_
-  open_turn_grow_and_finalize`, and `events_inbox_scope_replays_pending_and_
-  streams_ops` fail at HEAD, unrelated to the playhead reduction. Left for the
-  writer who owns the exec-door and SSE work.
+- Two agents wrote this worktree at once. HEAD advanced under a running skill
+  while unrelated files were being edited, and the two writers left a
+  self-contradicting test behind — one updated the frame it waited for, the
+  other left the assertion on the old shape. Nothing enforces one writer per
+  worktree. Whether that is a wave-home invariant or a lock is open; until it
+  is settled, check for a live agent before working a wave worktree.

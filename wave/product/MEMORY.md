@@ -56,7 +56,7 @@ they mean the Mac surface.
   `WavePlanParserTests` first.
 - **Vocabulary locked:** *Run* = ledger entry (reuses lfd's existing `Run` DTO);
   *session* = a live run's attachable tmux (`/attach`, `TerminalSession`); *exec*
-  retired from the frontend (stays flowloop's word for how a run is born).
+  retired from the frontend (stays loop's word for how a run is born).
 - **Slice 1 is local & file-first** — reads the wave dir directly, no new wire
   shape. Plan renders only when local files exist; remote/iOS/authorless waves
   fall back to WaveChat-only. Projects are modeled with `tasks`, left empty in

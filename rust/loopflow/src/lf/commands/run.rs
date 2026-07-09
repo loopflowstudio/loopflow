@@ -74,6 +74,40 @@ struct PromptBuild {
     fast_path: Option<String>,
 }
 
+/// A headless skill turn ready for the live session harness. The caller owns
+/// the session and sends `input` as its first turn, which keeps session
+/// streaming and steering available instead of hiding the body in a child
+/// `lf` process.
+#[derive(Debug)]
+pub(crate) struct PreparedHarnessTurn {
+    pub config: AgentConfig,
+    pub input: String,
+    pub harness: String,
+    pub model: Option<String>,
+}
+
+pub(crate) fn prepare_harness_turn(
+    skill: &str,
+    message: &str,
+    wave: &str,
+    max_turns: Option<u32>,
+) -> Result<PreparedHarnessTurn> {
+    let cli = Cli {
+        batch: true,
+        wave: Some(wave.to_string()),
+        max_turns,
+        ..Cli::default()
+    };
+    let mut built = build_prompt(Some(skill), Some(message), &cli)?;
+    let input = std::mem::take(&mut built.agent_config.task_prompt);
+    Ok(PreparedHarnessTurn {
+        config: built.agent_config,
+        input,
+        harness: built.harness,
+        model: built.model,
+    })
+}
+
 fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
     let start = Instant::now();
     let repo_root = find_repo_root()?;

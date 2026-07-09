@@ -5,7 +5,7 @@
 //! per-machine, never committed): the wave channel's under the origin repo,
 //! a work-line channel's inside its own worktree (see
 //! [`crate::wave::channel`]). Every projection is a fold over it: the
-//! thread is the conversation events, the flowloop state is the last `FlowloopState`
+//! thread is the conversation events, the loop state is the last `LoopState`
 //! event, the message queue is `UserMessage`s not yet named in any
 //! `TurnStarted.answers` or `TurnSteered.answers`. Store is truth; the SSE
 //! broadcast bus is liveness.
@@ -36,7 +36,8 @@ use time::OffsetDateTime;
 
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::wave::state::FlowloopState;
+use crate::wave::playhead::{BodyProvenance, Playhead, PlayheadEvent};
+use crate::wave::state::LoopState;
 
 /// Current journal format version, stamped on every line.
 const FORMAT_VERSION: u32 = 1;
@@ -70,7 +71,7 @@ pub enum MessageOp {
     Interrupt,
     /// An attributed emission (`lf chat`): a worker report, child-wave
     /// escalation, or CLI FYI. Lands in the thread as an attributed statement
-    /// AND queues for the flowloop exactly like `Message` — same consumption
+    /// AND queues for the loop exactly like `Message` — same consumption
     /// machinery, `TurnStarted.answers` can name it.
     Say,
 }
@@ -187,6 +188,9 @@ pub enum EventKind {
         /// Consumption marker: the queued user messages this turn's prompt
         /// consumed. Queue = `UserMessage`s not named in any `answers`.
         answers: Vec<MessageId>,
+        /// Exact body attempt producing this assistant span. Instantaneous
+        /// injected turns carry `None`.
+        body: Option<BodyProvenance>,
     },
     TurnItem {
         turn_id: String,
@@ -213,12 +217,20 @@ pub enum EventKind {
         turn_id: String,
         status: Lifecycle,
         usage: Usage,
+        termination_reason: Option<String>,
     },
-    // -- flowloop lifecycle --
-    FlowloopState {
-        from: FlowloopState,
-        to: FlowloopState,
+    // -- loop lifecycle --
+    LoopState {
+        from: LoopState,
+        to: LoopState,
         reason: String,
+    },
+    /// One durable playhead transition plus the complete state after it. The
+    /// event explains why the cursor moved; the snapshot makes restart replay
+    /// exact without re-running scheduling decisions.
+    PlayheadChanged {
+        event: PlayheadEvent,
+        playhead: Playhead,
     },
     // -- orchestration (observations, not commands) --
     RunObserved {
@@ -383,7 +395,9 @@ impl Narrator {
                     ellipsize(text, 60)
                 ))
             }
-            EventKind::TurnStarted { turn_id, answers } => {
+            EventKind::TurnStarted {
+                turn_id, answers, ..
+            } => {
                 let turn = self.turn_mut(turn_id);
                 turn.items = 0;
                 turn.text_shown = false;
@@ -402,10 +416,10 @@ impl Narrator {
                     )),
                     ConversationItem::Message { text, .. } => {
                         if turn.text_shown {
-                            debug(format!("  flowloop: \"{}\"", ellipsize(text, 120)))
+                            debug(format!("  loop: \"{}\"", ellipsize(text, 120)))
                         } else {
                             turn.text_shown = true;
-                            info(format!("flowloop: \"{}\"", ellipsize(text, 80)))
+                            info(format!("loop: \"{}\"", ellipsize(text, 80)))
                         }
                     }
                     ConversationItem::Thought { text, .. } => {
@@ -437,6 +451,7 @@ impl Narrator {
                 turn_id,
                 status,
                 usage,
+                ..
             } => {
                 let items = self.finish_turn(turn_id);
                 let plural = if items == 1 { "" } else { "s" };
@@ -446,9 +461,42 @@ impl Narrator {
                     usage_segment(usage)
                 ))
             }
-            EventKind::FlowloopState { from, to, reason } => {
+            EventKind::LoopState { from, to, reason } => {
                 info(format!("state {} → {} ({reason})", from.name(), to.name()))
             }
+            EventKind::PlayheadChanged { event, .. } => match event {
+                PlayheadEvent::Initialized { flow, .. } => {
+                    info(format!("playhead initialized · {flow}"))
+                }
+                PlayheadEvent::FlowEnqueued { flow, .. } => {
+                    info(format!("playhead enqueued · {flow}"))
+                }
+                PlayheadEvent::InvocationStarted { flow, .. } => {
+                    info(format!("playhead entered · {flow}"))
+                }
+                PlayheadEvent::InvocationCompleted { flow, .. } => {
+                    info(format!("playhead completed · {flow}"))
+                }
+                PlayheadEvent::StepStarted { step, .. } => {
+                    info(format!("playhead now · {} / {}", step.flow, step.step))
+                }
+                PlayheadEvent::StepCompleted { step, .. } => info(format!(
+                    "playhead completed · {} / {}",
+                    step.flow, step.step
+                )),
+                PlayheadEvent::StepSkipped { step, reason, .. } => info(format!(
+                    "playhead skipped · {} / {} ({reason})",
+                    step.flow, step.step
+                )),
+                PlayheadEvent::StepFailed { step, reason, .. } => info(format!(
+                    "playhead failed · {} / {} ({reason})",
+                    step.flow, step.step
+                )),
+                PlayheadEvent::StepInterrupted { step, reason, .. } => info(format!(
+                    "playhead interrupted · {} / {} ({reason})",
+                    step.flow, step.step
+                )),
+            },
             EventKind::RunObserved {
                 run_id, flow, task, ..
             } => info(format!(
@@ -502,7 +550,7 @@ impl Narrator {
 }
 
 /// Flatten whitespace and cap at `max` chars (with an ellipsis when cut).
-/// Shared with the flowloop's heartbeat prompt, where the flattening keeps
+/// Shared with the loop's heartbeat prompt, where the flattening keeps
 /// multi-line worker tasks from breaking the one-line `<in_flight>` format.
 pub(crate) fn ellipsize(text: &str, max: usize) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -688,7 +736,7 @@ impl Journal {
     }
 }
 
-/// The thread and flowloop state materialized from a journal.
+/// The thread and loop state materialized from a journal.
 #[derive(Debug)]
 pub struct ThreadFold {
     /// User turns and finalized assistant turns, in commit order (user turns
@@ -697,8 +745,11 @@ pub struct ThreadFold {
     /// Turns started but never finished — the crash tail. The boot janitor
     /// finalizes these as `Failed`.
     pub open: Vec<ChatTurn>,
-    /// Last `FlowloopState` transition's destination; `Idle` if none.
-    pub state: FlowloopState,
+    /// Last `LoopState` transition's destination; `Idle` if none.
+    pub state: LoopState,
+    /// Last durable playhead snapshot, absent before the first resident or
+    /// enqueue initializes the default wave flow.
+    pub playhead: Option<Playhead>,
     /// User messages not named by any `TurnStarted.answers` or
     /// `TurnSteered.answers` (minus what `MessagesRequeued` restored); this
     /// seeds the scheduler queue on restart.
@@ -719,7 +770,7 @@ pub struct ThreadFold {
 }
 
 /// The thread-visible turn a `ChannelOpened` event materializes: a bylined
-/// statement, never queued for the flowloop (only `UserMessage` rows feed the
+/// statement, never queued for the loop (only `UserMessage` rows feed the
 /// pending queue). Shared by the fold and the live append so replay and the
 /// live thread agree byte for byte.
 pub fn channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
@@ -733,7 +784,7 @@ pub fn channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
 }
 
 /// The thread-visible turn a `RunCompleted` observation materializes: the
-/// worker's ending as a bylined statement, never queued for the flowloop (only
+/// worker's ending as a bylined statement, never queued for the loop (only
 /// `UserMessage` rows feed the pending queue). Covers the died-silently case
 /// — a worker that never reported still ends visibly, failure summary on the
 /// wire. Shared by the fold and the live append so replay and the live
@@ -789,7 +840,8 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut turns: Vec<ChatTurn> = Vec::new();
     // In-order list, not a map: the crash tail keeps its start order.
     let mut open: Vec<ChatTurn> = Vec::new();
-    let mut state = FlowloopState::Idle;
+    let mut state = LoopState::Idle;
+    let mut playhead: Option<Playhead> = None;
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
     let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
     let mut consumed_messages: HashSet<MessageId> = HashSet::new();
@@ -817,7 +869,11 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 }
                 messages.insert(id.clone(), message);
             }
-            EventKind::TurnStarted { turn_id, answers } => {
+            EventKind::TurnStarted {
+                turn_id,
+                answers,
+                body,
+            } => {
                 mark_consumed(&mut pending_messages, &mut consumed_messages, answers);
                 claims_by_open_turn.insert(turn_id.clone(), answers.clone());
                 open.push(ChatTurn {
@@ -828,6 +884,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     items: Vec::new(),
                     created_at: event.at_rfc3339(),
                     from: None,
+                    body: body.clone(),
                 });
             }
             EventKind::TurnItem { turn_id, item } => {
@@ -842,7 +899,10 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 turn.absorb_item(item.clone());
             }
             EventKind::TurnFinished {
-                turn_id, status, ..
+                turn_id,
+                status,
+                termination_reason,
+                ..
             } => {
                 let Some(pos) = open.iter().position(|t| &t.id == turn_id) else {
                     tracing::warn!(
@@ -854,11 +914,20 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 };
                 let mut turn = open.remove(pos);
                 turn.status = *status;
+                if let Some(body) = turn.body.as_mut() {
+                    body.ended_at = Some(event.at_rfc3339());
+                    body.termination_reason = termination_reason.clone();
+                }
                 claims_by_open_turn.remove(turn_id);
                 turns.push(turn);
             }
-            EventKind::FlowloopState { to, .. } => {
+            EventKind::LoopState { to, .. } => {
                 state = to.clone();
+            }
+            EventKind::PlayheadChanged {
+                playhead: snapshot, ..
+            } => {
+                playhead = Some(snapshot.clone());
             }
             // Steer consumption affects the queue fold, not the thread: the
             // steered text is already a user turn via its `UserMessage` row.
@@ -907,6 +976,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         turns,
         open,
         state,
+        playhead,
         pending_messages,
         messages,
         open_claims,
@@ -1079,6 +1149,7 @@ mod tests {
             EventKind::TurnStarted {
                 turn_id: "turn-2".into(),
                 answers: vec![MessageId("msg-1".into())],
+                body: None,
             },
             EventKind::TurnItem {
                 turn_id: "turn-2".into(),
@@ -1101,10 +1172,11 @@ mod tests {
                     cache_read_tokens: None,
                     cost_usd: Some(0.01),
                 },
+                termination_reason: None,
             },
-            EventKind::FlowloopState {
-                from: FlowloopState::Idle,
-                to: FlowloopState::Turning {
+            EventKind::LoopState {
+                from: LoopState::Idle,
+                to: LoopState::Turning {
                     turn_id: "turn-2".into(),
                 },
                 reason: "turn opened".into(),
@@ -1178,6 +1250,7 @@ mod tests {
             EventKind::TurnStarted {
                 turn_id: "turn-2".into(),
                 answers: vec![],
+                body: None,
             },
             EventKind::TurnItem {
                 turn_id: "turn-2".into(),
@@ -1232,10 +1305,11 @@ mod tests {
                 turn_id: "turn-2".into(),
                 status: Lifecycle::Completed,
                 usage: Usage::empty(),
+                termination_reason: None,
             },
-            EventKind::FlowloopState {
-                from: FlowloopState::Idle,
-                to: FlowloopState::Turning {
+            EventKind::LoopState {
+                from: LoopState::Idle,
+                to: LoopState::Turning {
                     turn_id: "turn-2".into(),
                 },
                 reason: "turn opened".into(),
@@ -1321,9 +1395,9 @@ mod tests {
             "chat ← (steer) \"focus on the journal tests first\" (msg-3)"
         );
 
-        let n = render(EventKind::FlowloopState {
-            from: FlowloopState::Idle,
-            to: FlowloopState::Turning {
+        let n = render(EventKind::LoopState {
+            from: LoopState::Idle,
+            to: LoopState::Turning {
                 turn_id: "turn-4".into(),
             },
             reason: "turn opened".into(),
@@ -1333,6 +1407,7 @@ mod tests {
         let n = render(EventKind::TurnStarted {
             turn_id: "turn-4".into(),
             answers: vec![MessageId("msg-1".into()), MessageId("msg-2".into())],
+            body: None,
         });
         assert_eq!(n.line, "turn turn-4 opened (answers: msg-1, msg-2)");
 
@@ -1348,7 +1423,7 @@ mod tests {
         assert_eq!(n.level, NarrationLevel::Info);
         assert_eq!(
             n.line,
-            "flowloop: \"Checking the worker reports, then answering the chat.\""
+            "loop: \"Checking the worker reports, then answering the chat.\""
         );
 
         let n = render(EventKind::TurnItem {
@@ -1399,6 +1474,7 @@ mod tests {
                 cache_read_tokens: Some(182_000),
                 cost_usd: Some(0.42),
             },
+            termination_reason: None,
         });
         assert_eq!(
             n.line,
@@ -1456,7 +1532,7 @@ mod tests {
     }
 
     /// `ChannelOpened` folds into a thread-visible bylined turn (never queued
-    /// for the flowloop) and its run id lands in the idempotence guard.
+    /// for the loop) and its run id lands in the idempotence guard.
     #[test]
     fn fold_materializes_channel_opened_as_a_dispatch_turn() {
         let events = vec![Event {
@@ -1475,7 +1551,7 @@ mod tests {
         assert_eq!(fold.turns[0].id, "turn-1");
         assert!(
             fold.pending_messages.is_empty(),
-            "a channel opening never queues for the flowloop"
+            "a channel opening never queues for the loop"
         );
         assert!(fold.opened_channel_runs.contains("run-7"));
     }
@@ -1497,6 +1573,7 @@ mod tests {
             narrator.render(&EventKind::TurnStarted {
                 turn_id: turn.into(),
                 answers: vec![],
+                body: None,
             });
             let n = narrator.render(&EventKind::TurnItem {
                 turn_id: turn.into(),
@@ -1511,6 +1588,7 @@ mod tests {
                 turn_id: turn.into(),
                 status: Lifecycle::Completed,
                 usage: Usage::empty(),
+                termination_reason: None,
             });
         }
     }
@@ -1524,11 +1602,12 @@ mod tests {
         events.push(journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers: vec![],
+            body: None,
         }));
         let turn_id = "turn-2".to_string();
-        events.push(journal.append(|_| EventKind::FlowloopState {
-            from: FlowloopState::Idle,
-            to: FlowloopState::Turning {
+        events.push(journal.append(|_| EventKind::LoopState {
+            from: LoopState::Idle,
+            to: LoopState::Turning {
                 turn_id: turn_id.clone(),
             },
             reason: "turn opened".into(),
@@ -1563,6 +1642,7 @@ mod tests {
             turn_id: turn_id.clone(),
             status: Lifecycle::Completed,
             usage: Usage::empty(),
+            termination_reason: None,
         }));
 
         let fold = fold_thread(&events);
@@ -1577,7 +1657,7 @@ mod tests {
         assert_eq!(assistant.status, Lifecycle::Completed);
         assert_eq!(
             fold.state,
-            FlowloopState::Turning {
+            LoopState::Turning {
                 turn_id: turn_id.clone()
             }
         );
@@ -1607,11 +1687,7 @@ mod tests {
         assert_eq!(fold.turns.len(), 1);
         assert_eq!(fold.turns[0].role, ChatRole::User);
         assert_eq!(fold.turns[0].from.as_deref(), Some("worker"));
-        assert_eq!(
-            fold.pending_messages.len(),
-            1,
-            "say queues for the flowloop"
-        );
+        assert_eq!(fold.pending_messages.len(), 1, "say queues for the loop");
         assert_eq!(fold.pending_messages[0].op, MessageOp::Say);
         assert_eq!(
             fold.pending_messages[0]
@@ -1631,6 +1707,7 @@ mod tests {
                 kind: EventKind::TurnStarted {
                     turn_id: "turn-2".into(),
                     answers: vec![MessageId("msg-1".into())],
+                    body: None,
                 },
             },
         ];
@@ -1675,6 +1752,7 @@ mod tests {
         let started = journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers: vec![],
+            body: None,
         });
         let turn_id = match &started.kind {
             EventKind::TurnStarted { turn_id, .. } => turn_id.clone(),

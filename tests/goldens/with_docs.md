@@ -52,7 +52,7 @@ or by land.
 
 ## Inhabit and Delegate Work
 
-Run work through a flowloop. Inhabit one loop in the foreground when its next
+Run work through a loop. Inhabit one loop in the foreground when its next
 move needs the wave's live memory and thread in the room; delegate
 self-sufficient work by detaching the same command:
 
@@ -80,10 +80,10 @@ they came in: when a human's message reaches you, reply in your own turn
 text. Everything proactive goes through `lf`:
 
 - `lf chat "<note>"` - report outcomes, FYIs, and blockers to the wave's
-  thread; the post wakes the wave's flowloop like any message. One short
+  thread; the post wakes the wave's loop like any message. One short
   paragraph: what landed, links, anything surprising. Pipe stdin for longer.
 - `lf chat --parent "<report>"` - escalate to the parent wave.
-- `lf sub` - listen to your wave: follow its live events (turns, flowloop state,
+- `lf sub` - listen to your wave: follow its live events (turns, loop state,
   memory) until killed. Outside a wave it exits silently.
 - `lf memory add "<fact>"` - record a durable learning. `lf memory update`
   rewrites the whole file from stdin.

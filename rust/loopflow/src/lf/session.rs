@@ -479,7 +479,7 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: crate::lfd::types::SessionUse::WaveAgent,
-            skill: "flowloop".to_string(),
+            skill: "loop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo".to_string(),
             argv: Vec::new(),

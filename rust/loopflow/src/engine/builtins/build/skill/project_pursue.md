@@ -8,7 +8,7 @@ Pursue the open KRs.
 ## Orientation
 
 Read the KR set in `scratch/<branch>.md` and the wave's GOAL/MEMORY. The
-project flowloop owns the KR set, not a product PR. KRs are proof-shaped end
+project loop owns the KR set, not a product PR. KRs are proof-shaped end
 states; tasks are the concrete work that advances them. Filed tasks live in
 Linear; running hands live in `lf runs`; merged PRs are closure evidence.
 

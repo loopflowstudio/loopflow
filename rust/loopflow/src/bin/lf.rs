@@ -472,7 +472,7 @@ fn main() -> anyhow::Result<()> {
     // survive as an orphan. The `termination` feature extends the handler
     // to SIGTERM and SIGHUP: `tmux kill-session` delivers SIGHUP, which
     // otherwise bypasses every cleanup (observed live: it orphaned the wave
-    // flowloop's codex app-server pair and left a stale .wave-endpoint).
+    // loop's codex app-server pair and left a stale .wave-endpoint).
     ctrlc::set_handler(|| {
         loopflow::engine::agent::run_interrupt_cleanups();
         loopflow::engine::agent::kill_child_if_running();
@@ -558,42 +558,46 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Cron { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
             }
-            Some(Commands::Wave {
-                name,
-                force,
-                no_flowloop,
-                flowloop_only,
-            }) => in_repo_runtime(&args, |_| {
-                loopflow::wave::run(name, *force, *no_flowloop, *flowloop_only)
-            }),
             Some(Commands::Loop {
-                flow,
+                name,
                 seed,
+                force,
                 detach,
-                wave,
                 max_passes,
                 pass_timeout_secs,
                 wall_clock_secs,
                 poll_secs,
                 max_turns,
             }) => in_repo_runtime(&args, |repo| {
+                let Some(seed) = seed else {
+                    return loopflow::wave::run(name, *force);
+                };
                 let mut options =
-                    loopflow::flowloop::driver::LoopOptions::new(flow.clone(), wave.clone());
+                    loopflow::flowloop::driver::LoopOptions::new(name.clone(), cli.wave.clone());
                 options.max_passes = *max_passes;
                 options.pass_timeout = std::time::Duration::from_secs(*pass_timeout_secs);
                 options.wall_clock = std::time::Duration::from_secs(*wall_clock_secs);
                 options.poll = std::time::Duration::from_secs(*poll_secs);
                 options.max_turns = max_turns.or(cli.max_turns);
                 if *detach {
-                    let session = loopflow::flowloop::driver::detach_flowloop(repo, seed, &options)
+                    let session = loopflow::flowloop::driver::detach_loop(repo, seed, &options)
                         .map_err(anyhow::Error::from)?;
-                    println!("detached {flow} loop in tmux session {session}");
+                    println!("detached {name} loop in tmux session {session}");
                     println!("inspect: tmux attach -r -t {session}");
                     Ok(())
                 } else {
-                    loopflow::flowloop::driver::run_flowloop(repo, seed, &options)
+                    loopflow::flowloop::driver::run_loop(repo, seed, &options)
                         .map_err(anyhow::Error::from)
                 }
+            }),
+            Some(Commands::Enqueue { flow }) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::playhead::enqueue(repo, cli.wave.as_deref(), flow)
+            }),
+            Some(Commands::Skip) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::playhead::skip(repo, cli.wave.as_deref())
+            }),
+            Some(Commands::FlowStep { flow, index, seed }) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::flow::run_step(flow, *index, seed, &cli, repo)
             }),
             Some(Commands::Project {
                 cmd: ProjectCommand::Promote { slug, wave },
@@ -708,8 +712,10 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Pm { .. })
         | Some(Commands::SyncSkills { .. })
         | Some(Commands::Cron { .. })
-        | Some(Commands::Wave { .. })
         | Some(Commands::Loop { .. })
+        | Some(Commands::Enqueue { .. })
+        | Some(Commands::Skip)
+        | Some(Commands::FlowStep { .. })
         | Some(Commands::Usage { .. })
         | Some(Commands::Tokens { .. })
         | Some(Commands::Doctor { .. })
@@ -860,16 +866,27 @@ mod tests {
     }
 
     #[test]
-    fn loop_parses_blocking_and_detached_forms() {
+    fn loop_parses_mind_blocking_and_detached_forms() {
+        let mind = Cli::try_parse_from(["lf", "loop", "goals"]).unwrap();
+        assert!(matches!(
+            mind.command,
+            Some(Commands::Loop {
+                name,
+                seed: None,
+                detach: false,
+                ..
+            }) if name == "goals"
+        ));
+
         let blocking = Cli::try_parse_from(["lf", "loop", "task", "ship it"]).unwrap();
         assert!(matches!(
             blocking.command,
             Some(Commands::Loop {
                 detach: false,
-                flow,
-                seed,
+                name,
+                seed: Some(seed),
                 ..
-            }) if flow == "task" && seed == "ship it"
+            }) if name == "task" && seed == "ship it"
         ));
 
         let detached =
@@ -877,8 +894,13 @@ mod tests {
                 .unwrap();
         assert!(matches!(
             detached.command,
-            Some(Commands::Loop { detach: true, flow, .. }) if flow == "project"
+            Some(Commands::Loop { detach: true, name, seed: Some(_), .. }) if name == "project"
         ));
+    }
+
+    #[test]
+    fn old_wave_surface_is_rejected() {
+        assert!(Cli::try_parse_from(["lf", "wave", "goals", "--loop-only"]).is_err());
     }
 
     #[test]

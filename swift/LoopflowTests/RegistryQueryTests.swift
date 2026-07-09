@@ -53,7 +53,7 @@ struct RegistryQueryTests {
         let json = """
         {
           "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
-          "flowloop":"turning",
+          "loop_state":"turning",
           "runs":[{"id":"run-1","flow":"implement","task":"wire it","step_index":2,"status":"running","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null}],
           "attention":[{"id":"att-1","kind":"interactive","status":"surfaced","title":"needs a human","summary":"review the design","run_id":"run-1","surfaced_at":"2026-07-06T00:00:00Z"}]
         }
@@ -64,7 +64,7 @@ struct RegistryQueryTests {
         }
 
         let result = try await query.status(wave: "goals", waveId: "wave-1", cwd: nil)
-        #expect(result.flowloop == "turning")
+        #expect(result.loopState == "turning")
         #expect(result.runs.map(\.id) == ["run-1"])
         #expect(result.runs[0].waveId == "wave-1")
         #expect(result.runs[0].status == .running)

@@ -11,7 +11,7 @@ pub struct PassOptions {
     pub max_turns: Option<u32>,
 }
 
-/// One bounded, headless pass of ANY flow in a worktree — the flowloop
+/// One bounded, headless pass of ANY flow in a worktree — the loop
 /// primitive. The tiers bind their `<tier>-pass` flows here, but a skill
 /// loop or a scan flow loops the same way: `lf -b <flow>`, killed on
 /// timeout.
@@ -54,7 +54,7 @@ pub(crate) fn run_with_timeout(
             let _ = child.kill();
             let _ = child.wait();
             return Err(OpsError::Message(format!(
-                "flowloop pass timed out after {}s",
+                "loop pass timed out after {}s",
                 timeout.as_secs()
             )));
         }

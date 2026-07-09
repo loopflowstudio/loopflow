@@ -53,5 +53,22 @@
     }
   ],
   "created_at": "2026-07-03T18:30:00Z",
-  "from": "worker"
+  "from": "worker",
+  "body": {
+    "body_id": "body-3",
+    "invocation_id": "inv-wave-1",
+    "step_path": "1",
+    "flow": "wave",
+    "step": "wave_pursue",
+    "iteration": 2,
+    "session_id": "session-3",
+    "harness": "codex",
+    "model": "gpt-5",
+    "host": "devbox",
+    "worktree": "/home/user/project",
+    "run_id": null,
+    "started_at": "2026-07-03T18:30:00Z",
+    "ended_at": null,
+    "termination_reason": null
+  }
 }

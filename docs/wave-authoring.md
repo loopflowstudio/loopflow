@@ -118,13 +118,13 @@ does not hold a task list, status table, or independent memory.
 
 Loopflow's architecture is legible from the top down: the key data structures
 and APIs explain the system, the implementation follows that map, and obsolete
-pre-flowloop concepts do not linger as alternate design.
+pre-loop concepts do not linger as alternate design.
 
 ## KRs
 
 - Top-down architecture documentation is complete, published, and centered on the key data structures and public APIs.
 - Every data structure and API in the architecture is ratified as minimally simple for its purpose.
-- The codebase, prompts, docs, and UI contain no stale pre-flowloop technical design language.
+- The codebase, prompts, docs, and UI contain no stale pre-loop technical design language.
 ```
 
 KRs should read as proof under duration: observable end states that show the
@@ -196,10 +196,10 @@ project it advances so a worker knows when to stop.
 |-------|-------------|
 | `workers` | Parallelism for dispatched work. `0` means "don't auto-dispatch" |
 | `agent` | Preferred agent harness/model |
-| `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident flowloop |
+| `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident loop |
 | `pm.linear_project` | Linear project id backing the wave's tasks (written by `lf pm init`) |
 
-The resident flowloop reads `crons:` directly from this frontmatter and opens a system pass when a schedule comes due; edits land without a restart. See [Crons](waves.md#crons).
+The resident loop reads `crons:` directly from this frontmatter and opens a system pass when a schedule comes due; edits land without a restart. See [Crons](waves.md#crons).
 
 ---
 
@@ -252,7 +252,7 @@ In **Loopflow**, a wave's detail view groups its live work — the wave agent se
 
 ### Crons
 
-Crons live in `GOAL.md` frontmatter; the wave's resident flowloop fires each due schedule as a system pass and dispatches the flow with judgment. `workers: 0` is valid for a wave that only runs scheduled flows:
+Crons live in `GOAL.md` frontmatter; the wave's resident loop fires each due schedule as a system pass and dispatches the flow with judgment. `workers: 0` is valid for a wave that only runs scheduled flows:
 
 ```markdown
 <!-- wave/governance/GOAL.md -->

@@ -152,7 +152,7 @@ lf wavechat intelligence                    # watch and speak from one terminal 
 | Command | What it does |
 |---------|--------------|
 | `lf chat [TEXT]` | Post a message into a wave's thread; reads stdin when TEXT is omitted. Outside any wave the publish drops silently (exit 0), so the verb is safe in every prompt |
-| `lf sub [WAVE] [--json]` | Follow a wave's live events (turns, flowloop state, memory) until killed; exits 0 with a note when no wave resolves |
+| `lf sub [WAVE] [--json]` | Follow a wave's live events (turns, loop state, memory) until killed; exits 0 with a note when no wave resolves |
 | `lf wavechat [WAVE]` | Replay and follow a wave's live events while typed lines post to its thread; `/status` reads health and `/quit` leaves |
 | `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 

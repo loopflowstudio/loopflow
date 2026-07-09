@@ -50,7 +50,7 @@ Git/PR/PM ops             Clients
 | Skill | `.lf/skills/` and built-ins | `engine` |
 | Flow | `.lf/flows/` and built-ins | `engine` |
 | Direction | `.lf/directions/` | `engine` prompt assembly |
-| Wave goal | `wave/<name>/GOAL.md` | `lf wave` server + resident flowloop |
+| Wave goal | `wave/<name>/GOAL.md` | `lf wave` server + resident loop |
 | Wave memory | `wave/<name>/MEMORY.md` | wave agent |
 | Task | Linear | `lf pm` and wave flows |
 | Session | lfdb | `lf` runs and placement flags |

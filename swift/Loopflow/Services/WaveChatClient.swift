@@ -43,7 +43,7 @@ public enum WaveEndpoint {
 /// because `URLSession.AsyncBytes.lines` silently drops empty lines — and the
 /// empty line is precisely what terminates an SSE frame. (Observed live: with
 /// `.lines`, no frame boundary ever fired, so nothing the server streamed —
-/// replay, turns, flowloop state — reached the UI.) Comment lines (`:` keep-alive
+/// replay, turns, loop state — reached the UI.) Comment lines (`:` keep-alive
 /// pings) drop; `event:` names the pending frame; `data:` lines accumulate,
 /// joined by `\n`; a blank line emits the frame when it carries data.
 struct SSEFrameParser {
@@ -87,9 +87,9 @@ struct SSEFrameParser {
     }
 }
 
-/// The wave flowloop's live state, streamed as `state` SSE events (the event data
+/// The wave loop's live state, streamed as `state` SSE events (the event data
 /// is the bare state name). The composer keys its verb off it.
-public enum WaveFlowloopState: String, Equatable, Sendable {
+public enum WaveLoopState: String, Equatable, Sendable {
     case idle
     case turning
     case interrupting
@@ -99,7 +99,7 @@ public enum WaveFlowloopState: String, Equatable, Sendable {
 /// How a posted message asks to be handled — the required `op` of the
 /// `POST /messages {op, text}` body. Explicit at the API, never inferred.
 public enum WaveMessageOp: String, Equatable, Sendable {
-    /// Queued; the flowloop's next turn answers it.
+    /// Queued; the loop's next turn answers it.
     case message
     /// Into the live turn (server degrades to a queued message when the
     /// harness can't steer or nothing is turning).
@@ -109,7 +109,7 @@ public enum WaveMessageOp: String, Equatable, Sendable {
     case interrupt
 }
 
-/// What the composer's buttons should do for a flowloop state + text presence.
+/// What the composer's buttons should do for a loop state + text presence.
 public enum ComposerVerb: Equatable, Sendable {
     case send            // POST op=message
     case steer           // POST op=steer
@@ -129,7 +129,7 @@ public struct ComposerVerbs: Equatable, Sendable {
 /// Verb selection: idle+text = Send; turning+text = Steer (Interrupt & Send
 /// one keypress away); turning+empty = Interrupt. While interrupting, text
 /// degrades to a queued Send and a bare re-interrupt is pointless (disabled).
-public func composerVerbs(state: WaveFlowloopState, hasText: Bool) -> ComposerVerbs {
+public func composerVerbs(state: WaveLoopState, hasText: Bool) -> ComposerVerbs {
     switch (state, hasText) {
     case (.turning, true):
         return ComposerVerbs(primary: .steer, primaryEnabled: true, secondary: .interruptAndSend)
@@ -143,7 +143,7 @@ public func composerVerbs(state: WaveFlowloopState, hasText: Bool) -> ComposerVe
 }
 
 /// `POST /messages {op, text}` response: the appended user turn (null for a
-/// bare interrupt) plus the flowloop-state name at acceptance. Mirrors Rust
+/// bare interrupt) plus the loop-state name at acceptance. Mirrors Rust
 /// `PostMessageResponse` (wave/server.rs); pinned by the
 /// `post_message_response.json` fixture in ContractTests.
 struct PostMessageResponse: Decodable {
@@ -197,9 +197,11 @@ public final class WaveChatConnection {
 
     public private(set) var turns: [ChatTurn] = []
     public private(set) var phase: Phase = .idle
-    /// Last flowloop state seen — sent once on subscribe, again on every
+    /// Last loop state seen — sent once on subscribe, again on every
     /// transition, and echoed by `POST /messages` responses.
-    public private(set) var flowloopState: WaveFlowloopState = .idle
+    public private(set) var loopState: WaveLoopState = .idle
+    /// Durable invocation stack, current step, local queue, and return point.
+    public private(set) var playhead: PlayheadView?
     /// Last `memory` frame's summary — the wave's most recent MEMORY.md
     /// curation. Live-only (no replay); exposed for the UI to adopt later.
     public private(set) var memorySummary: String?
@@ -262,9 +264,40 @@ public final class WaveChatConnection {
         if let turn = posted.turn {
             upsert(turn)
         }
-        if let state = WaveFlowloopState(rawValue: posted.state) {
-            flowloopState = state
+        if let state = WaveLoopState(rawValue: posted.state) {
+            loopState = state
         }
+    }
+
+    public func enqueue(_ flow: String) async throws {
+        let trimmed = flow.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        playhead = try await postPlayhead(
+            path: "/playhead/enqueue",
+            body: ["flow": trimmed]
+        )
+    }
+
+    public func skip() async throws {
+        playhead = try await postPlayhead(path: "/playhead/skip", body: nil)
+    }
+
+    private func postPlayhead(path: String, body: [String: String]?) async throws -> PlayheadView {
+        guard let endpoint = currentEndpoint,
+              let url = URL(string: "http://\(endpoint)\(path)") else {
+            throw WaveChatError.notRunning
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw WaveChatError.badStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+        return try decoder.decode(PlayheadView.self, from: data)
     }
 
     // MARK: - Discovery + streaming loop
@@ -306,9 +339,10 @@ public final class WaveChatConnection {
         // A fresh stream replays the server's full transcript. Drop the previous
         // generation first: after a server restart, turn ids and sequences start
         // over, and stale high-sequence turns would interleave with the replay.
-        // The flowloop state resets too; the server's first frame is a `state` event.
+        // The loop state resets too; the server's first frame is a `state` event.
         turns = []
-        flowloopState = .idle
+        loopState = .idle
+        playhead = nil
         lastOp = nil
         phase = .live
 
@@ -324,7 +358,7 @@ public final class WaveChatConnection {
     }
 
     /// One SSE frame off `/events`. Three event names: `state` carries the
-    /// bare flowloop-state name (sent on subscribe and on every transition);
+    /// bare loop-state name (sent on subscribe and on every transition);
     /// `turn` carries a whole turn — re-sent under the same id as it grows,
     /// then a terminal frame at finalization, every frame replacing the
     /// previous state of its id; `memory` carries a MEMORY.md curation
@@ -337,8 +371,14 @@ public final class WaveChatConnection {
     /// debug — never silent. Internal for tests.
     func handle(event: String, data: String) {
         if event == "state" {
-            guard let state = WaveFlowloopState(rawValue: data) else { return }
-            flowloopState = state
+            guard let state = WaveLoopState(rawValue: data) else { return }
+            loopState = state
+            return
+        }
+        if event == "playhead" {
+            guard let json = data.data(using: .utf8),
+                  let snapshot = try? decoder.decode(PlayheadView.self, from: json) else { return }
+            playhead = snapshot
             return
         }
         if event == "memory" {

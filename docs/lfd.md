@@ -7,7 +7,7 @@ title: lfd Daemon Reference
 
 `lfd` runs the loopflow daemon: the HTTP read surface, session registry,
 GitHub webhook ingress translated to `lf` execs, provider token refresh, and
-worktree cleanup. It launches no agent work; each wave's resident flowloop and
+worktree cleanup. It launches no agent work; each wave's resident loop and
 its server-owned `lf loop … --detach` hands own agent execution.
 
 ## Run Native lfd
@@ -232,7 +232,7 @@ Webhooks translate inward through the daemon. The current demo path keeps CI
 and main-push events as attributed chat notifications; queue maintenance runs
 in-process.
 
-- check_run failure → `lf chat --wave <wave> "CI failed: …"` (the wave's flowloop decides how to fix)
+- check_run failure → `lf chat --wave <wave> "CI failed: …"` (the wave's loop decides how to fix)
 - PR merged → reconcile stacked queue state for matching waves
 - push to main → `lf chat --wave <wave> "main moved: …"` for each wave in the repo
 

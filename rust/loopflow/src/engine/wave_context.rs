@@ -678,6 +678,7 @@ mod tests {
             items: Vec::new(),
             created_at: "1970-01-01T00:00:00Z".to_string(),
             from: None,
+            body: None,
         }
     }
 
@@ -758,6 +759,7 @@ mod tests {
         journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers: vec![MessageId("msg-1".to_string())],
+            body: None,
         });
         journal.append(|_| EventKind::TurnItem {
             turn_id: "turn-2".to_string(),
@@ -771,6 +773,7 @@ mod tests {
             turn_id: "turn-2".to_string(),
             status: Lifecycle::Completed,
             usage: Usage::empty(),
+            termination_reason: None,
         });
     }
 

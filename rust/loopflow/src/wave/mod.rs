@@ -11,13 +11,13 @@
 //! - supervises the resident ([`supervisor`]): process liveness, the respawn
 //!   ladder, the interrupt janitor.
 //!
-//! The resident (`lf wave <name> --flowloop-only`, [`resident`]) owns the
+//! The resident (`lf wave <name> --loop-only`, [`resident`]) owns the
 //! pass scheduler, runs in the wave's `<repo>.<wave>` worktree, consumes its
 //! own wave's `/events?inbox=true` subscription, and publishes ordered turn
 //! deltas back through the resident door. The wire between them is [`wire`].
 //!
 //! ```text
-//!   lf wave <name>                      lf wave <name> --flowloop-only
+//!   lf wave <name>                      lf wave <name> --loop-only
 //!   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
 //!   │ LISTENER (origin repo)│──────────▶│ RESIDENT (<repo>.<wave>) │
 //!   │ pens · folds · doors  │           │ pass scheduler           │
@@ -28,8 +28,8 @@
 //!
 //! Default `lf wave <name>` boots the listener and spawns the resident as a
 //! child `lf` process — keeper spawns tenant, one command, today's UX.
-//! `--no-flowloop` serves a dormant channel (`/health` reads `flowloop: null`);
-//! `--flowloop-only` attaches a resident to an existing listener.
+//! `--no-loop` serves a dormant channel (`/health` reads `loop_state: null`);
+//! `--loop-only` attaches a resident to an existing listener.
 //!
 //! Truth is the per-wave append-only [`journal`] (JSONL under `.lf/journal/
 //! waves/<name>/` in the ORIGIN repo — the listener serves from the origin
@@ -50,6 +50,7 @@
 pub(crate) mod channel;
 pub mod journal;
 pub(crate) mod memory;
+pub mod playhead;
 
 pub(crate) mod registry;
 pub mod resident;
@@ -75,34 +76,28 @@ use crate::wave::runtime::WaveRuntime;
 
 /// Whether the listener spawns (and supervises) a resident.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FlowloopPolicy {
-    /// Spawn `lf wave <name> --flowloop-only` as a child and keep it alive
+pub enum LoopPolicy {
+    /// Spawn `lf wave <name> --loop-only` as a child and keep it alive
     /// (respawn ladder, immediate respawn on a human message).
     Spawn,
     /// Serve dormant: pens, folds, and doors only — `/health` reads
-    /// `flowloop: null` until a resident attaches by hand.
+    /// `loop_state: null` until a resident attaches by hand.
     Dormant,
 }
 
-/// `lf wave <name>` — start the wave. `flowloop_only` runs the resident half
-/// against an existing listener; otherwise this boots the listener (from the
-/// ORIGIN repo — the worktree bootstrap lives with the resident) and, unless
-/// `no_flowloop`, spawns the resident as a child process. Blocks until stopped
-/// (Ctrl-C).
-pub fn run(name: &str, force: bool, no_flowloop: bool, flowloop_only: bool) -> Result<()> {
-    if flowloop_only {
+/// `lf loop <name>` — start the named mind. A server-spawned child carries
+/// the resident endpoint/token in env and enters the resident half; the human
+/// invocation boots the listener and supervises that same command.
+pub fn run(name: &str, force: bool) -> Result<()> {
+    if std::env::var_os(WAVE_SERVER_ENDPOINT_ENV).is_some()
+        && std::env::var_os(wire::RESIDENT_TOKEN_ENV).is_some()
+    {
         return resident::run(name);
     }
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let wave = resolve_wave_name(&main_repo, Some(name))
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
-    let flowloop = if no_flowloop {
-        FlowloopPolicy::Dormant
-    } else {
-        FlowloopPolicy::Spawn
-    };
-
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let registry_config = resolve_registry(&main_repo, &wave, force).await;
@@ -111,7 +106,7 @@ pub fn run(name: &str, force: bool, no_flowloop: bool, flowloop_only: bool) -> R
             wave,
             registry_config,
             force,
-            flowloop,
+            LoopPolicy::Spawn,
             shutdown_signal(),
         )
         .await
@@ -154,9 +149,9 @@ async fn resolve_registry(
     }
 }
 
-/// The production resident spawner: `lf wave <wave> --flowloop-only`, run by this
+/// The production resident spawner: `lf loop <wave>`, run by this
 /// same executable, endpoint + token + wave-session context in env. The
-/// resident's stdout/stderr inherit — one `lf wave` terminal shows both
+/// resident's stdout/stderr inherit — one `lf loop` terminal shows both
 /// halves, today's UX.
 // TODO(M1): keep this shutdown contract in the wave/supervisor owner: stand
 // the respawn ladder down before terminating the resident, honor interrupt
@@ -173,9 +168,8 @@ fn resident_spawner(
         let exe = std::env::current_exe()?;
         let mut command = tokio::process::Command::new(exe);
         command
-            .arg("wave")
+            .arg("loop")
             .arg(&wave)
-            .arg("--flowloop-only")
             .current_dir(&repo_root)
             .env(WAVE_SERVER_ENDPOINT_ENV, &endpoint)
             .env(wire::RESIDENT_TOKEN_ENV, &token)
@@ -199,7 +193,7 @@ fn resident_spawner(
 }
 
 /// Serve the wave until `shutdown` resolves. Vendor-free by construction:
-/// no harness, no vendor process — the resident (spawned per `flowloop`, or
+/// no harness, no vendor process — the resident (spawned per `loop_policy`, or
 /// attached by hand) owns those. `registry_config` is `None` in tests that
 /// exercise the server without a registry store; `force` rides separately
 /// because the endpoint-file floor must honor it even when there is no
@@ -209,7 +203,7 @@ async fn serve(
     wave: String,
     registry_config: Option<registry::RegistryConfig>,
     force: bool,
-    flowloop: FlowloopPolicy,
+    loop_policy: LoopPolicy,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
     // File-level one-brain floor, before anything else: an existing pointer
@@ -248,7 +242,7 @@ async fn serve(
     let mut registration: Option<registry::Registration> = None;
     let mut registered: Option<(SharedStore, crate::lfd::id::LfdId)> = None;
     // Wave-session context handed to the spawned resident: a bare `lf`
-    // inside the flowloop self-registers under this wave with the listener's
+    // inside the loop self-registers under this wave with the listener's
     // session as its parent (see lf::session for the env contract).
     let mut session_env: Vec<(String, String)> = Vec::new();
     if let Some(config) = registry_config {
@@ -322,7 +316,7 @@ async fn serve(
     }
 
     // The resident door: a per-boot token, published beside the endpoint
-    // pointer so `--flowloop-only` residents can attach (same trust domain).
+    // pointer so `--loop-only` residents can attach (same trust domain).
     let token = server::generate_resident_token();
     let door = server::ResidentDoor::new(token.clone());
     server::write_resident_token(&repo_root, &wave, &token)?;
@@ -336,8 +330,8 @@ async fn serve(
     // The keeper's watch: resident liveness, respawn ladder, interrupt
     // janitor. Runs even dormant — the pen-side anti-wedges (janitor, attach
     // probe) never depend on who spawned the resident.
-    let spawner = match flowloop {
-        FlowloopPolicy::Spawn => Some(resident_spawner(
+    let spawner = match loop_policy {
+        LoopPolicy::Spawn => Some(resident_spawner(
             wave.clone(),
             repo_root.clone(),
             addr.to_string(),
@@ -345,12 +339,12 @@ async fn serve(
             subagent_door.mint(),
             session_env,
         )),
-        FlowloopPolicy::Dormant => None,
+        LoopPolicy::Dormant => None,
     };
     // Build the supervisor before spawning so the attach door can hold its
-    // handle: an attached resident (`--flowloop-only`) signals the keeper to
+    // handle: an attached resident (`--loop-only`) signals the keeper to
     // stand the respawn ladder down, so the deadline never spawns a second
-    // flowloop over it.
+    // loop over it.
     let supervisor = supervisor::Supervisor::new(
         runtime.clone(),
         door.clone(),
@@ -381,9 +375,9 @@ async fn serve(
     println!(
         "lf wave · {wave} · listener on http://{addr}{} \
          (Ctrl-C to stop, RUST_LOG=loopflow=debug for the firehose)",
-        match flowloop {
-            FlowloopPolicy::Spawn => " · spawning resident",
-            FlowloopPolicy::Dormant => " · dormant (--no-flowloop)",
+        match loop_policy {
+            LoopPolicy::Spawn => " · spawning resident",
+            LoopPolicy::Dormant => " · dormant (--no-loop)",
         }
     );
 
@@ -445,10 +439,11 @@ mod tests {
             items: Vec::new(),
             created_at: "1970-01-01T00:00:00Z".to_string(),
             from: None,
+            body: None,
         }
     }
 
-    /// Inject a finalized assistant turn, as a completed flowloop turn would land.
+    /// Inject a finalized assistant turn, as a completed loop turn would land.
     fn narrate(runtime: &WaveRuntime, text: &str) {
         runtime.append_finalized_turn(progress_turn(text), Vec::new());
     }
@@ -573,7 +568,7 @@ mod tests {
         assert_eq!(body["state"], "idle");
 
         // The message is in the thread; the resident answers it at its next
-        // turn (flowloop scheduling is covered in flowloop/wave.rs tests).
+        // turn (loop scheduling is covered in loop/wave.rs tests).
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].role, ChatRole::User);
@@ -742,15 +737,15 @@ mod tests {
     }
 
     /// `/health` splits channel liveness from the resident: `status` says
-    /// the channel serves; `flowloop` is null while no resident was ever spawned
-    /// or attached (`--no-flowloop` serves dormant), then carries the resident's
+    /// the channel serves; `loop_state` is null while no resident was ever spawned
+    /// or attached (`--no-loop` serves dormant), then carries the resident's
     /// state — a dead resident on a live channel reads `serving` + `failed`.
     #[tokio::test]
-    async fn health_splits_channel_liveness_from_the_flowloop() {
+    async fn health_splits_channel_liveness_from_the_loop() {
         let (base, runtime, _tmp) = boot().await;
         narrate(&runtime, "first");
 
-        // Dormant: no resident ever — flowloop is null, the channel serves.
+        // Dormant: no resident ever — loop is null, the channel serves.
         let body: serde_json::Value = reqwest::get(format!("{base}/health"))
             .await
             .unwrap()
@@ -758,14 +753,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body["status"], "serving", "status is channel liveness");
-        assert!(
-            body["flowloop"].is_null(),
-            "dormant channel has no flowloop"
-        );
+        assert!(body["loop_state"].is_null(), "dormant channel has no loop");
         assert_eq!(body["wave"], "ship");
         assert_eq!(body["turns"], 1);
 
-        // A resident exists: flowloop reports its state.
+        // A resident exists: loop reports its state.
         runtime.set_resident_expected();
         let body: serde_json::Value = reqwest::get(format!("{base}/health"))
             .await
@@ -773,11 +765,11 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert_eq!(body["flowloop"], "idle", "flowloop is the resident's state");
+        assert_eq!(body["loop_state"], "idle", "loop is the resident's state");
 
         // The resident dies; the channel keeps serving.
         runtime.transition(
-            crate::wave::state::FlowloopState::Failed {
+            crate::wave::state::LoopState::Failed {
                 reason: "vendor gone".into(),
             },
             "test",
@@ -789,7 +781,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body["status"], "serving");
-        assert_eq!(body["flowloop"], "failed");
+        assert_eq!(body["loop_state"], "failed");
     }
 
     /// The resident door end to end over HTTP: auth gates on the token,
@@ -815,10 +807,10 @@ mod tests {
         }
         assert!(!runtime.resident_expected());
 
-        // A failed flowloop + attach: the fresh resident IS the revival.
+        // A failed loop + attach: the fresh resident IS the revival.
         runtime.set_resident_expected();
         runtime.transition(
-            crate::wave::state::FlowloopState::Failed {
+            crate::wave::state::LoopState::Failed {
                 reason: "old resident died".into(),
             },
             "test",
@@ -834,7 +826,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(attach["wave"], "ship");
-        assert_eq!(runtime.flowloop_state().name(), "idle", "attach revives");
+        assert_eq!(runtime.loop_state().name(), "idle", "attach revives");
 
         // Deltas through the door: a whole turn, in order, one batch.
         let deltas: serde_json::Value = client
@@ -1127,6 +1119,7 @@ mod tests {
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
             cost_usd: None,
+            reason: None,
         });
         let frames = client
             .frames_until(|f| {
@@ -1140,7 +1133,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sse_state_events_track_the_flowloop_live() {
+    async fn sse_state_events_track_the_loop_live() {
         let (base, runtime, _tmp) = boot().await;
 
         // Subscribe while idle: the first frame is the current state.
@@ -1158,6 +1151,7 @@ mod tests {
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
             cost_usd: None,
+            reason: None,
         });
         let states = client.states_until(|s| s.len() >= 3).await;
         assert_eq!(states, vec!["idle", "turning", "idle"]);
@@ -1188,6 +1182,7 @@ mod tests {
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
             cost_usd: None,
+            reason: None,
         });
         let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
             .await
@@ -1310,7 +1305,7 @@ mod tests {
         let events = journal::read_events(&child_journal);
         assert_eq!(events.len(), 1);
         // The report also folds UP: a child `say` forwards to the wave as
-        // attributed speech so the flowloop hears its workers (the report
+        // attributed speech so the loop hears its workers (the report
         // doctrine). The child journal keeps its own copy above.
         let forwarded = runtime.thread_snapshot();
         assert_eq!(forwarded.len(), 1, "the report reached the wave thread");
@@ -1478,7 +1473,7 @@ mod tests {
         assert!(!acc_one.contains("wave turn"), "no primary frames");
         assert!(
             !acc_one.contains("event: state"),
-            "no flowloop on a child channel"
+            "no loop on a child channel"
         );
 
         // A name outside the family is a 404.
@@ -1506,7 +1501,7 @@ mod tests {
                 "ship".into(),
                 None,
                 false,
-                FlowloopPolicy::Dormant,
+                LoopPolicy::Dormant,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1574,7 +1569,7 @@ mod tests {
                 "ship".into(),
                 None,
                 false,
-                FlowloopPolicy::Dormant,
+                LoopPolicy::Dormant,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1610,7 +1605,7 @@ mod tests {
                 "ship".into(),
                 None,
                 false,
-                FlowloopPolicy::Dormant,
+                LoopPolicy::Dormant,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1628,7 +1623,7 @@ mod tests {
             "ship".into(),
             None,
             false,
-            FlowloopPolicy::Dormant,
+            LoopPolicy::Dormant,
             async {
                 let _ = shutdown_rx2.await;
             },
@@ -1705,7 +1700,7 @@ mod tests {
                 "ship".into(),
                 Some(config),
                 false,
-                FlowloopPolicy::Dormant,
+                LoopPolicy::Dormant,
                 async {
                     let _ = shutdown_rx.await;
                 },
@@ -1786,7 +1781,7 @@ mod tests {
                 force: false,
             }),
             false,
-            FlowloopPolicy::Dormant,
+            LoopPolicy::Dormant,
             async {
                 let _ = shutdown_rx.await;
             },

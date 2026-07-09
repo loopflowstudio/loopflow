@@ -5,7 +5,7 @@ use std::path::Path;
 use tracing::warn;
 
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
-/// The wave's resident flowloop reads these and opens a system pass when a
+/// The wave's resident loop reads these and opens a system pass when a
 /// schedule comes due (`crate::flowloop::wave`) — no daemon poller, no table.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WaveCronDef {
@@ -235,7 +235,7 @@ mod tests {
         assert_eq!(pm.linear_project.as_deref(), Some("lin-123"));
     }
 
-    /// Crons live in GOAL.md frontmatter — the resident flowloop's schedule
+    /// Crons live in GOAL.md frontmatter — the resident loop's schedule
     /// source. Legacy `triggers:` keys are simply unknown fields now.
     #[test]
     fn read_wave_config_parses_crons_and_ignores_legacy_triggers() {

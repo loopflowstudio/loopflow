@@ -84,7 +84,7 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 A wave is a named agent with a goal. Everything that defines its durable
 operating context — goal, memory, projects, routing judgment, crons — is
 authored in the repo. Concrete tasks live in Linear. Crons live in `GOAL.md`
-frontmatter and are fired by the wave's resident flowloop. lfd serves wave
+frontmatter and are fired by the wave's resident loop. lfd serves wave
 status and live sessions to clients.
 
 ```markdown

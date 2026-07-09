@@ -1,5 +1,7 @@
 ---
-crons: []
+crons:
+  - flow: wave
+    schedule: "0 0 0 * * * *"
 pm:
   provider: linear
   linear_project: '9ee88f2a-ef37-46c7-b201-d197db3ccae0'

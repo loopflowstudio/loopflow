@@ -83,7 +83,6 @@ impl LfExec {
     fn queue_reconcile(wave: &str) -> Self {
         Self {
             args: vec![
-                "op".to_string(),
                 "queue".to_string(),
                 "reconcile".to_string(),
                 "--wave".to_string(),
@@ -928,6 +927,29 @@ mod tests {
             .await
             .expect("plan none");
         assert!(none.is_empty());
+    }
+
+    /// Every planned argv must resolve to a real `lf` subcommand. Bare
+    /// `Cli::try_parse_from` is not enough: `lf` accepts external subcommands,
+    /// so a stale verb (`op queue reconcile`) parses fine and then fails at
+    /// exec time as a silent no-op. Assert we landed on a known command.
+    #[test]
+    fn planned_execs_resolve_to_known_lf_commands() {
+        use clap::Parser;
+
+        for exec in [
+            LfExec::queue_reconcile("ship"),
+            LfExec::chat("ship", "main moved".to_string(), "github"),
+        ] {
+            let argv = std::iter::once("lf".to_string()).chain(exec.args.iter().cloned());
+            let cli = crate::lf::Cli::try_parse_from(argv)
+                .unwrap_or_else(|err| panic!("{:?} must parse: {err}", exec.args));
+            assert!(
+                !matches!(cli.command, Some(crate::lf::Commands::External(_))),
+                "{:?} fell through to an external subcommand — stale verb",
+                exec.args
+            );
+        }
     }
 
     /// A deleted branch removes the sibling worktree that was on it, and leaves

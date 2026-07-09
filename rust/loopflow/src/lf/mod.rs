@@ -1047,7 +1047,7 @@ mod tests {
     }
 
     #[test]
-    fn op_advance_parses_optional_wave() {
+    fn advance_parses_optional_wave() {
         let cli = Cli::try_parse_from(["lf", "advance"]).expect("parse");
         assert!(matches!(
             cli.command,
@@ -1056,7 +1056,7 @@ mod tests {
 
         let cli = Cli::try_parse_from(["lf", "advance", "-w", "goals"]).expect("parse");
         let Some(Commands::Advance { wave }) = cli.command else {
-            panic!("expected op advance command");
+            panic!("expected advance command");
         };
         assert_eq!(wave.as_deref(), Some("goals"));
     }
@@ -1117,7 +1117,7 @@ mod tests {
     }
 
     #[test]
-    fn op_pr_accepts_model_override() {
+    fn pr_open_accepts_model_override() {
         let cli = Cli::try_parse_from(["lf", "pr", "open", "-m", "codex"]).expect("parse");
         let Some(Commands::Pr {
             cmd: Some(PrCommand::Open { model, title, body }),
@@ -1132,7 +1132,7 @@ mod tests {
     }
 
     #[test]
-    fn top_level_model_reaches_op_command() {
+    fn top_level_model_reaches_pr_open() {
         let cli = Cli::try_parse_from(["lf", "-m", "codex", "pr", "open"]).expect("parse");
         let Some(Commands::Pr {
             cmd: Some(PrCommand::Open { model, title, body }),

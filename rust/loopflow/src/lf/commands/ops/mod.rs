@@ -91,51 +91,6 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
     }
 }
 
-pub fn run_rebase(onto: Option<&str>, plan: bool) -> Result<()> {
-    let progress = CliProgress;
-    rebase_current(onto, plan, &progress)
-}
-
-pub fn run_commit(
-    message: Option<&str>,
-    push: bool,
-    no_add: bool,
-    cli_model: Option<&str>,
-) -> Result<()> {
-    let progress = CliProgress;
-    commit_current(message, push, !no_add, cli_model, &progress)
-}
-
-pub fn run_next(create_pr: bool, no_rebase: bool, cli_model: Option<&str>) -> Result<()> {
-    let progress = CliProgress;
-    next_branch_cmd(create_pr, !no_rebase, cli_model, &progress)
-}
-
-pub fn run_advance(wave: Option<&str>) -> Result<()> {
-    advance_cmd(wave)
-}
-
-pub fn run_sync() -> Result<()> {
-    sync_current()
-}
-
-pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
-    sync_skills_cmd(yes, !no_prune)
-}
-
-pub fn run_worktree_command(cmd: &WtCommand) -> Result<()> {
-    run_worktree(cmd)
-}
-
-pub fn run_shell_command(cmd: &ShellCommand) -> Result<()> {
-    run_shell(cmd)
-}
-
-pub fn run_branches_command(cmd: &BranchesCommand) -> Result<()> {
-    let progress = CliProgress;
-    run_branches(cmd, &progress)
-}
-
 pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
     let progress = CliProgress;
     match cmd {
@@ -156,19 +111,10 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
     }
 }
 
-pub fn run_pm(cmd: &PmCommand) -> Result<()> {
-    let progress = CliProgress;
-    pm_cmd(cmd, &progress)
-}
-
 pub fn run_queue(cmd: &QueueCommand) -> Result<()> {
     match cmd {
         QueueCommand::Reconcile { wave } => crate::ops::queue::reconcile_queue_cmd(wave.as_deref()),
     }
-}
-
-pub fn run_doctor(brewfile: bool) -> Result<()> {
-    doctor(brewfile)
 }
 
 struct CliProgress;
@@ -197,7 +143,8 @@ impl Progress for CliProgress {
     }
 }
 
-fn rebase_current(onto: Option<&str>, plan_only: bool, progress: &impl Progress) -> Result<()> {
+pub fn run_rebase(onto: Option<&str>, plan_only: bool) -> Result<()> {
+    let progress = &CliProgress;
     let repo_root = find_repo_root()?;
     let started = Instant::now();
     let plan = plan_rebase(&repo_root, onto)?;
@@ -260,46 +207,45 @@ fn print_rebase_plan(plan: &crate::ops::RebasePlan) {
     println!("agent_launched: false");
 }
 
-fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    match land(&repo_root, options, progress) {
-        Ok(_) => {}
+/// Run a PR-mutating op; on a rebase conflict, launch the rebase agent to
+/// resolve it and retry once. A second conflict is a real error.
+fn with_rebase_retry<T>(
+    repo_root: &Path,
+    label: &str,
+    progress: &impl Progress,
+    op: impl Fn(&Path) -> Result<T, OpsError>,
+) -> Result<T> {
+    match op(repo_root) {
+        Ok(value) => Ok(value),
         Err(OpsError::RebaseConflict { onto, detail }) => {
             let context = format!(
                 "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
             );
             progress.status("Launching rebase agent to resolve conflicts...");
-            launch_skill_agent(&repo_root, "rebase", Some(&context))?;
-            progress.status("Retrying land after rebase...");
-            land(&repo_root, options, progress)?;
+            launch_skill_agent(repo_root, "rebase", Some(&context))?;
+            progress.status(&format!("Retrying {label} after rebase..."));
+            op(repo_root).map_err(Into::into)
         }
-        Err(err) => return Err(err.into()),
-    };
+        Err(err) => Err(err.into()),
+    }
+}
 
+fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
+    let repo_root = find_repo_root()?;
     // The wave home stays put on land — no rotation, no cd.
+    with_rebase_retry(&repo_root, "land", progress, |repo| {
+        land(repo, options, progress)
+    })?;
     Ok(())
 }
 
 fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    match submit(&repo_root, options, progress) {
-        Ok(_) => {
-            progress.status("Ready to land — click merge on the PR once checks pass.");
-            Ok(())
-        }
-        Err(OpsError::RebaseConflict { onto, detail }) => {
-            let context = format!(
-                "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
-            );
-            progress.status("Launching rebase agent to resolve conflicts...");
-            launch_skill_agent(&repo_root, "rebase", Some(&context))?;
-            progress.status("Retrying submit after rebase...");
-            submit(&repo_root, options, progress)?;
-            progress.status("Ready to land — click merge on the PR once checks pass.");
-            Ok(())
-        }
-        Err(err) => Err(err.into()),
-    }
+    with_rebase_retry(&repo_root, "submit", progress, |repo| {
+        submit(repo, options, progress)
+    })?;
+    progress.status("Ready to land — click merge on the PR once checks pass.");
+    Ok(())
 }
 
 fn open_pr(
@@ -309,35 +255,17 @@ fn open_pr(
     progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let result = match create_or_update_pr(
-        &repo_root,
-        &PrOptions {
-            title: title.clone(),
-            body: body.clone(),
-            agent: agent_override.map(str::to_string),
-        },
-        progress,
-    ) {
-        Ok(result) => result,
-        Err(OpsError::RebaseConflict { onto, detail }) => {
-            let context = format!(
-                "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
-            );
-            progress.status("Launching rebase agent to resolve conflicts...");
-            launch_skill_agent(&repo_root, "rebase", Some(&context))?;
-            progress.status("Retrying PR creation after rebase...");
-            create_or_update_pr(
-                &repo_root,
-                &PrOptions {
-                    title,
-                    body,
-                    agent: agent_override.map(str::to_string),
-                },
-                progress,
-            )?
-        }
-        Err(err) => return Err(err.into()),
-    };
+    let result = with_rebase_retry(&repo_root, "PR creation", progress, |repo| {
+        create_or_update_pr(
+            repo,
+            &PrOptions {
+                title: title.clone(),
+                body: body.clone(),
+                agent: agent_override.map(str::to_string),
+            },
+            progress,
+        )
+    })?;
     println!("{}", result.url);
     Ok(())
 }
@@ -353,7 +281,7 @@ fn pr_status() -> Result<()> {
     Ok(())
 }
 
-fn sync_skills_cmd(yes: bool, prune: bool) -> Result<()> {
+pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
     if !yes {
         if !std::io::stdin().is_terminal() {
             return Err(anyhow!(
@@ -369,7 +297,7 @@ fn sync_skills_cmd(yes: bool, prune: bool) -> Result<()> {
     }
 
     let report = sync_skills(&SkillSyncOptions {
-        prune,
+        prune: !no_prune,
         global_home: None,
     })?;
     println!(
@@ -380,7 +308,7 @@ fn sync_skills_cmd(yes: bool, prune: bool) -> Result<()> {
     Ok(())
 }
 
-fn sync_current() -> Result<()> {
+pub fn run_sync() -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_branch = get_default_branch(&repo_root)?;
     let ok = crate::engine::git::sync_main(&repo_root, &main_branch)?;
@@ -390,28 +318,23 @@ fn sync_current() -> Result<()> {
     Ok(())
 }
 
-fn next_branch_cmd(
-    create_pr: bool,
-    rebase: bool,
-    agent_override: Option<&str>,
-    progress: &impl Progress,
-) -> Result<()> {
+pub fn run_next(create_pr: bool, no_rebase: bool, agent_override: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
     let result = next_branch(
         &repo_root,
         &NextOptions {
             create_pr,
-            rebase,
+            rebase: !no_rebase,
             wave_name: None,
             agent: agent_override.map(str::to_string),
         },
-        progress,
+        &CliProgress,
     )?;
     println!("{}", result.new_branch);
     Ok(())
 }
 
-fn advance_cmd(wave: Option<&str>) -> Result<()> {
+pub fn run_advance(wave: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
     let wave = crate::ops::util::resolve_wave_name(&repo_root, wave)
         .ok_or_else(|| anyhow!("cannot determine wave name (pass --wave)"))?;
@@ -420,25 +343,24 @@ fn advance_cmd(wave: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn commit_current(
+pub fn run_commit(
     message: Option<&str>,
     push: bool,
-    add: bool,
+    no_add: bool,
     agent_override: Option<&str>,
-    progress: &impl Progress,
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
     let _ = commit_workflow(
         &repo_root,
         &CommitOptions {
-            add,
+            add: !no_add,
             push,
             create_draft_pr: true,
             message: message.map(str::to_string),
             agent: agent_override.map(str::to_string),
             ..CommitOptions::for_task("commit")
         },
-        progress,
+        &CliProgress,
     )?;
     Ok(())
 }
@@ -456,7 +378,8 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
     Ok(())
 }
 
-fn pm_cmd(cmd: &PmCommand, progress: &impl Progress) -> Result<()> {
+pub fn run_pm(cmd: &PmCommand) -> Result<()> {
+    let progress = &CliProgress;
     let repo_root = find_repo_root()?;
     let list_all_waves = || -> Result<Vec<String>> {
         let wave_dir = repo_root.join("wave");
@@ -901,7 +824,8 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn run_branches(cmd: &BranchesCommand, progress: &impl Progress) -> Result<()> {
+pub fn run_branches(cmd: &BranchesCommand) -> Result<()> {
+    let progress = &CliProgress;
     let repo_root = find_repo_root()?;
     match cmd {
         BranchesCommand::List { filters } => {
@@ -999,7 +923,7 @@ fn print_branch_candidates(candidates: &[crate::ops::BranchCandidate]) {
     }
 }
 
-fn run_worktree(cmd: &WtCommand) -> Result<()> {
+pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
         WtCommand::Create {
             name,
@@ -1656,7 +1580,7 @@ fn wt_ci(watch: bool, logs: bool) -> Result<()> {
     }
 }
 
-fn run_shell(cmd: &ShellCommand) -> Result<()> {
+pub fn run_shell(cmd: &ShellCommand) -> Result<()> {
     match cmd {
         ShellCommand::Init { shell } => shell_init(shell.as_deref()),
         ShellCommand::Install { shell } => shell_install(shell.as_deref()),
@@ -2033,7 +1957,7 @@ fn brewfile_contents() -> String {
     out
 }
 
-fn doctor(brewfile: bool) -> Result<()> {
+pub fn run_doctor(brewfile: bool) -> Result<()> {
     if brewfile {
         print!("{}", brewfile_contents());
         return Ok(());

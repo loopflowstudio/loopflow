@@ -107,7 +107,7 @@ mod tests {
     }
 
     /// Valid argv reaches the exec path and returns a structured result. `lf
-    /// `lf doctor` is read-only (dependency check) — a safe verb to actually
+    /// doctor` is read-only (dependency check) — a safe verb to actually
     /// run against the real binary in-tree via `CARGO_BIN_EXE_lf`.
     /// The door lives inside the auth-protected `/v0` nest: a request with no
     /// bearer token is refused before any exec. With the token it clears auth

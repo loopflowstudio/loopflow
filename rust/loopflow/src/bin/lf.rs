@@ -536,9 +536,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Pr { cmd }) => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.model.as_deref())
             }),
-            Some(Commands::Wt { cmd }) => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::ops::run_worktree_command(cmd)
-            }),
+            Some(Commands::Wt { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_wt(cmd))
+            }
             Some(Commands::Rebase { plan, onto }) => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::ops::run_rebase(onto.as_deref(), *plan)
             }),
@@ -563,15 +563,15 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Pm { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_pm(cmd))
             }
-            Some(Commands::Branches { cmd }) => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::ops::run_branches_command(cmd)
-            }),
+            Some(Commands::Branches { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_branches(cmd))
+            }
             Some(Commands::Queue { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_queue(cmd))
             }
-            Some(Commands::Shell { cmd }) => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::ops::run_shell_command(cmd)
-            }),
+            Some(Commands::Shell { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_shell(cmd))
+            }
             Some(Commands::Sync) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_sync())
             }

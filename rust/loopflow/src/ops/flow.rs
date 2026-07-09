@@ -20,106 +20,9 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
 
     let cli = Cli::try_parse_from(argv)
         .map_err(|err| OpsError::Message(format!("invalid op item: {err}")))?;
-    execute_parsed_command(repo, cli.command, progress)
-}
 
-fn execute_parsed_command(
-    repo: &Path,
-    command: Option<Commands>,
-    progress: &impl Progress,
-) -> OpsResult<()> {
-    match command {
-        Some(Commands::Pr {
-            cmd:
-                Some(PrCommand::Land {
-                    strict,
-                    local,
-                    create_pr,
-                    worktree,
-                    message,
-                    title,
-                    body,
-                }),
-        }) => {
-            land(
-                repo,
-                &LandOptions {
-                    strict,
-                    local,
-                    create_pr,
-                    worktree,
-                    commit_message: message,
-                    pr_title: title,
-                    pr_body: body,
-                    agent: None,
-                },
-                progress,
-            )?;
-            Ok(())
-        }
-        Some(Commands::Pr {
-            cmd:
-                Some(PrCommand::Submit {
-                    strict,
-                    create_pr,
-                    worktree,
-                    message,
-                    title,
-                    body,
-                }),
-        }) => {
-            submit(
-                repo,
-                &LandOptions {
-                    strict,
-                    local: false,
-                    create_pr,
-                    worktree,
-                    commit_message: message,
-                    pr_title: title,
-                    pr_body: body,
-                    agent: None,
-                },
-                progress,
-            )?;
-            Ok(())
-        }
-        Some(Commands::Pr {
-            cmd: Some(PrCommand::Open {
-                model: _,
-                title,
-                body,
-            }),
-        }) => {
-            create_or_update_pr(
-                repo,
-                &PrOptions {
-                    title,
-                    body,
-                    agent: None,
-                },
-                progress,
-            )?;
-            Ok(())
-        }
-        Some(Commands::Pr {
-            cmd: Some(PrCommand::Abandon { force, branch }),
-        }) => {
-            abandon_branch(
-                repo,
-                &AbandonOptions {
-                    branch,
-                    force,
-                },
-                progress,
-            )?;
-            Ok(())
-        }
-        Some(Commands::Pr {
-            cmd: None | Some(PrCommand::Status),
-        }) => Err(OpsError::Message(
-            "op item does not support pr status".to_string(),
-        )),
+    match cli.command {
+        Some(Commands::Pr { cmd: Some(pr) }) => execute_pr(repo, pr, progress),
         Some(Commands::Rebase { plan, onto }) => {
             if plan {
                 return Ok(());
@@ -193,68 +96,135 @@ fn execute_parsed_command(
             )?;
             Ok(())
         }
-        Some(Commands::Release { cmd }) => match cmd {
-            ReleaseCommand::Run { version, target } => {
-                release_run(
-                    repo,
-                    version.as_deref().unwrap_or("patch"),
-                    target.as_deref(),
-                    progress,
-                )?;
-                Ok(())
-            }
-            ReleaseCommand::Check { target } => {
-                release_check(repo, target.as_deref())?;
-                Ok(())
-            }
-            ReleaseCommand::Notes {
-                version,
-                prev_tag,
-                target,
-            } => {
-                release_notes(repo, &version, prev_tag.as_deref(), target.as_deref(), progress)?;
-                Ok(())
-            }
-            ReleaseCommand::Bump { version, target } => {
-                release_bump(repo, &version, target.as_deref(), progress)
-            }
-            ReleaseCommand::Tag { version, target } => {
-                release_tag(repo, &version, target.as_deref())?;
-                Ok(())
-            }
-            ReleaseCommand::Status { target } => {
-                release_status(repo, target.as_deref())?;
-                Ok(())
-            }
-        },
-        Some(
-            Commands::Auth { .. }
-            | Commands::Branches { .. }
-            | Commands::Chat { .. }
-            | Commands::Cron { .. }
-            | Commands::Doctor { .. }
-            | Commands::External(_)
-            | Commands::Flow { .. }
-            | Commands::Inline { .. }
-            | Commands::Ls { .. }
-            | Commands::Memory { .. }
-            | Commands::Pm { .. }
-            | Commands::Queue { .. }
-            | Commands::Runs { .. }
-            | Commands::Shell { .. }
-            | Commands::Skill { .. }
-            | Commands::Ssh { .. }
-            | Commands::Status { .. }
-            | Commands::Sub { .. }
-            | Commands::Task { .. }
-            | Commands::Trace { .. }
-            | Commands::Usage
-            | Commands::Wave { .. }
-            | Commands::Wt { .. },
-        )
-        | None => Err(OpsError::Message(
-            "op item must be one of pr open, pr submit, pr land, pr abandon, rebase, sync, sync-skills, advance, next, commit, or release"
-                .to_string(),
-        )),
+        Some(Commands::Release { cmd }) => execute_release(repo, cmd, progress),
+        _ => Err(unsupported()),
     }
+}
+
+fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResult<()> {
+    match cmd {
+        PrCommand::Land {
+            strict,
+            local,
+            create_pr,
+            worktree,
+            message,
+            title,
+            body,
+        } => {
+            land(
+                repo,
+                &LandOptions {
+                    strict,
+                    local,
+                    create_pr,
+                    worktree,
+                    commit_message: message,
+                    pr_title: title,
+                    pr_body: body,
+                    agent: None,
+                },
+                progress,
+            )?;
+            Ok(())
+        }
+        PrCommand::Submit {
+            strict,
+            create_pr,
+            worktree,
+            message,
+            title,
+            body,
+        } => {
+            submit(
+                repo,
+                &LandOptions {
+                    strict,
+                    local: false,
+                    create_pr,
+                    worktree,
+                    commit_message: message,
+                    pr_title: title,
+                    pr_body: body,
+                    agent: None,
+                },
+                progress,
+            )?;
+            Ok(())
+        }
+        PrCommand::Open {
+            model: _,
+            title,
+            body,
+        } => {
+            create_or_update_pr(
+                repo,
+                &PrOptions {
+                    title,
+                    body,
+                    agent: None,
+                },
+                progress,
+            )?;
+            Ok(())
+        }
+        PrCommand::Abandon { force, branch } => {
+            abandon_branch(repo, &AbandonOptions { branch, force }, progress)?;
+            Ok(())
+        }
+        PrCommand::Status => Err(unsupported()),
+    }
+}
+
+fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -> OpsResult<()> {
+    match cmd {
+        ReleaseCommand::Run { version, target } => {
+            release_run(
+                repo,
+                version.as_deref().unwrap_or("patch"),
+                target.as_deref(),
+                progress,
+            )?;
+            Ok(())
+        }
+        ReleaseCommand::Check { target } => {
+            release_check(repo, target.as_deref())?;
+            Ok(())
+        }
+        ReleaseCommand::Notes {
+            version,
+            prev_tag,
+            target,
+        } => {
+            release_notes(
+                repo,
+                &version,
+                prev_tag.as_deref(),
+                target.as_deref(),
+                progress,
+            )?;
+            Ok(())
+        }
+        ReleaseCommand::Bump { version, target } => {
+            release_bump(repo, &version, target.as_deref(), progress)
+        }
+        ReleaseCommand::Tag { version, target } => {
+            release_tag(repo, &version, target.as_deref())?;
+            Ok(())
+        }
+        ReleaseCommand::Status { target } => {
+            release_status(repo, target.as_deref())?;
+            Ok(())
+        }
+    }
+}
+
+/// Flow `op:` items drive the mechanical verbs only; anything that launches an
+/// agent, reads interactively, or manages waves has no place in a flow step.
+fn unsupported() -> OpsError {
+    OpsError::Message(
+        "op item must be one of pr open, pr submit, pr land, pr abandon, rebase, sync, \
+         sync-skills, advance, next, commit, or release"
+            .to_string(),
+    )
 }

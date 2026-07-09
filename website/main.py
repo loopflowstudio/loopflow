@@ -288,7 +288,7 @@ DOCS_NAV = [
     ("Get Started", "getting-started"),
     # Reference
     ("lf", "lf"),
-    ("lf op", "lfop"),
+    ("lf ops", "ops"),
     ("lfd", "lfd"),
     ("Config", "config"),
     ("Troubleshooting", "troubleshooting"),
@@ -311,8 +311,8 @@ curl -fsSL https://loopflow.studio/install.sh | sh && lf init
 ## Commands
 lf <skill>           Run a skill (design, implement, review, etc.)
 lf debug -c         Fix error from clipboard
-lf op pr            Create PR from current branch
-lf op wt create X   Create worktree for feature X
+lf pr open          Create PR from current branch
+lf wt create X      Create worktree for feature X
 lf wave X           Start wave X's server (its resident flowloop)
 lf q worker run X --flow build --task "..."   Dispatch a PR-producing worker
 lf chat -w X "..."  Post into wave X's thread
@@ -332,7 +332,7 @@ Roadmap: the wave's work queue, provider-backed (e.g. Linear).
 /docs              Overview and quick start
 /docs/waves        Waves (goal agents, memory, workers)
 /docs/lf           lf command reference
-/docs/lfop         lf op command reference
+/docs/ops          lf operations reference
 /docs/lfd          lfd (daemon) reference
 /docs/config       Configuration options
 

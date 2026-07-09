@@ -1,4 +1,4 @@
-//! `lf wave <name>` — the wave as two processes: a LISTENER and a RESIDENT.
+//! `lf loop <name>` — one mind implemented as a listener and resident pair.
 //!
 //! The listener (this module's `serve`) is the channel made durable — pure
 //! hear / check / fold / tell, vendor-free:
@@ -11,13 +11,13 @@
 //! - supervises the resident ([`supervisor`]): process liveness, the respawn
 //!   ladder, the interrupt janitor.
 //!
-//! The resident (`lf wave <name> --loop-only`, [`resident`]) owns the
+//! The resident ([`resident`]) owns the
 //! pass scheduler, runs in the wave's `<repo>.<wave>` worktree, consumes its
 //! own wave's `/events?inbox=true` subscription, and publishes ordered turn
 //! deltas back through the resident door. The wire between them is [`wire`].
 //!
 //! ```text
-//!   lf wave <name>                      lf wave <name> --loop-only
+//!   lf loop <name>                      internal resident invocation
 //!   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
 //!   │ LISTENER (origin repo)│──────────▶│ RESIDENT (<repo>.<wave>) │
 //!   │ pens · folds · doors  │           │ pass scheduler           │
@@ -26,10 +26,9 @@
 //!              └────────── /events?inbox=true ───────┘
 //! ```
 //!
-//! Default `lf wave <name>` boots the listener and spawns the resident as a
-//! child `lf` process — keeper spawns tenant, one command, today's UX.
-//! `--no-loop` serves a dormant channel (`/health` reads `loop_state: null`);
-//! `--loop-only` attaches a resident to an existing listener.
+//! `lf loop <name>` boots the listener and spawns the resident as the same
+//! command carrying private endpoint/token environment. The split is runtime
+//! plumbing, not a second product surface.
 //!
 //! Truth is the per-wave append-only [`journal`] (JSONL under `.lf/journal/
 //! waves/<name>/` in the ORIGIN repo — the listener serves from the origin
@@ -76,12 +75,12 @@ use crate::wave::runtime::WaveRuntime;
 
 /// Whether the listener spawns (and supervises) a resident.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LoopPolicy {
-    /// Spawn `lf wave <name> --loop-only` as a child and keep it alive
+enum LoopPolicy {
+    /// Spawn the internal resident child and keep it alive
     /// (respawn ladder, immediate respawn on a human message).
     Spawn,
-    /// Serve dormant: pens, folds, and doors only — `/health` reads
-    /// `loop_state: null` until a resident attaches by hand.
+    /// Test-only listener with no resident.
+    #[cfg(test)]
     Dormant,
 }
 
@@ -316,19 +315,19 @@ async fn serve(
     }
 
     // The resident door: a per-boot token, published beside the endpoint
-    // pointer so `--loop-only` residents can attach (same trust domain).
+    // pointer so the resident can attach (same trust domain).
     let token = server::generate_resident_token();
     let door = server::ResidentDoor::new(token.clone());
     server::write_resident_token(&repo_root, &wave, &token)?;
 
     // The exec door's authority: a per-subagent capability set. Minted into
     // when the resident is spawned (below) and validated on `/v0/exec`. In
-    // memory, per boot — no store, no schema. A dormant channel spawns no
+    // memory, per boot — no store, no schema. Listener-only tests spawn no
     // resident, so the set stays empty and `/exec` accepts nothing.
     let subagent_door = server::SubagentDoor::new();
 
     // The keeper's watch: resident liveness, respawn ladder, interrupt
-    // janitor. Runs even dormant — the pen-side anti-wedges (janitor, attach
+    // janitor. Runs even without a spawner — the pen-side anti-wedges (janitor, attach
     // probe) never depend on who spawned the resident.
     let spawner = match loop_policy {
         LoopPolicy::Spawn => Some(resident_spawner(
@@ -339,10 +338,11 @@ async fn serve(
             subagent_door.mint(),
             session_env,
         )),
+        #[cfg(test)]
         LoopPolicy::Dormant => None,
     };
     // Build the supervisor before spawning so the attach door can hold its
-    // handle: an attached resident (`--loop-only`) signals the keeper to
+    // handle: an attached resident signals the keeper to
     // stand the respawn ladder down, so the deadline never spawns a second
     // loop over it.
     let supervisor = supervisor::Supervisor::new(
@@ -373,11 +373,12 @@ async fn serve(
         server::remove_resident_token(&cleanup_repo, &cleanup_wave, &cleanup_token);
     });
     println!(
-        "lf wave · {wave} · listener on http://{addr}{} \
+        "lf loop · {wave} · listener on http://{addr}{} \
          (Ctrl-C to stop, RUST_LOG=loopflow=debug for the firehose)",
         match loop_policy {
             LoopPolicy::Spawn => " · spawning resident",
-            LoopPolicy::Dormant => " · dormant (--no-loop)",
+            #[cfg(test)]
+            LoopPolicy::Dormant => " · dormant test listener",
         }
     );
 
@@ -738,7 +739,7 @@ mod tests {
 
     /// `/health` splits channel liveness from the resident: `status` says
     /// the channel serves; `loop_state` is null while no resident was ever spawned
-    /// or attached (`--no-loop` serves dormant), then carries the resident's
+    /// or attached, then carries the resident's
     /// state — a dead resident on a live channel reads `serving` + `failed`.
     #[tokio::test]
     async fn health_splits_channel_liveness_from_the_loop() {
@@ -1753,7 +1754,7 @@ mod tests {
         let wave_row = make_wave_row("ship");
         store.create_wave(&wave_row).await.expect("seed wave");
 
-        // A live brain, registered as another `lf wave` would be.
+        // A live brain, registered as another `lf loop` would be.
         let first = registry::RegistryConfig {
             store: store.clone(),
             wave: wave_row.clone(),

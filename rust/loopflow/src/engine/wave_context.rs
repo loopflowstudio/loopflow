@@ -15,7 +15,7 @@
 //!
 //! Read path — reads only, the wave server stays the single writer:
 //! 1. live server: `GET /conversation` at the `wave/<name>/.wave-endpoint`
-//!    discovery pointer (the same file `lf wave` publishes);
+//!    discovery pointer (the same file `lf loop` publishes);
 //! 2. no live server: a read-only fold over the wave's journal
 //!    ([`crate::wave::journal::read_events`] — never truncates, never
 //!    creates);

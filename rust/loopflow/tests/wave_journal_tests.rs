@@ -72,7 +72,7 @@ fn body_for_current(runtime: &WaveRuntime, body_id: &str) -> BodyProvenance {
     BodyProvenance {
         body_id: body_id.to_string(),
         invocation_id: step.invocation_id,
-        step_path: step.step_path,
+        step_index: step.index,
         flow: step.flow,
         step: step.step,
         iteration: step.iteration,
@@ -204,7 +204,10 @@ async fn restart_interrupts_the_abandoned_body_without_advancing_the_playhead() 
         first_step,
         "a process crash retries instead of silently advancing"
     );
-    let turn = rt.thread_snapshot().pop().expect("recovered assistant turn");
+    let turn = rt
+        .thread_snapshot()
+        .pop()
+        .expect("recovered assistant turn");
     assert_eq!(turn.status, Lifecycle::Failed);
     let body = turn.body.expect("turn keeps body provenance");
     assert_eq!(body.body_id, "body-1");

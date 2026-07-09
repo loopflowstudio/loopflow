@@ -8,7 +8,7 @@ const OPENCODE_REGISTRY_FILE: &str = "runtime/opencode-servers.json";
 
 /// Outcome of reaping orphaned opencode `serve` processes. Public so the
 /// per-wave runtime can call [`reap_orphaned_opencode_servers`] at startup to
-/// clear servers left behind by a crashed `lf wave`.
+/// clear servers left behind by a crashed `lf loop`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OpenCodeReapReport {
     pub reaped: u32,

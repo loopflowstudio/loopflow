@@ -1,5 +1,5 @@
-//! Live smoke for the full two-process wave topology: a real `lf wave`
-//! listener that spawns a real resident (`lf wave --loop-only`), which runs
+//! Live smoke for the full two-process wave topology: a real `lf loop`
+//! listener that spawns an internal resident, which runs
 //! the real codex app-server.
 //!
 //! Ignored by default: it needs the codex CLI on PATH, ChatGPT auth, and
@@ -70,14 +70,14 @@ async fn wave_two_process_live_smoke() {
 
     // The listener; it spawns the resident itself (keeper spawns tenant).
     let mut listener = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["wave", "demo"])
+        .args(["loop", "demo"])
         .current_dir(&repo)
         // A private registry so the smoke never touches the machine's ~/.lf.
         .env("LFD_DB_PATH", tmp.path().join("lfd.db"))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn lf wave");
+        .expect("spawn lf loop");
 
     let endpoint_file = repo.join("wave/demo/.wave-endpoint");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);

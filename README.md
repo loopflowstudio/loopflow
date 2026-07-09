@@ -38,7 +38,7 @@ change crosses component or product boundaries.
 Run the wave in your terminal:
 
 ```bash
-lf wave designer             # the wave's server: one persistent loop, until Ctrl-C
+lf loop designer             # the wave's server: one persistent loop, until Ctrl-C
 lf chat "ship the button audit first"     # post into its thread (any process can)
 lf memory add "buttons: variants unified" # curate what it knows
 ```
@@ -46,10 +46,10 @@ lf memory add "buttons: variants unified" # curate what it knows
 Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
 `tmux attach -r -t <name>` to inspect one without writing into its session.
 
-`lf wave <name>` starts a long-lived server at the repo's main checkout (the
-wave's journal and endpoint live at the origin); the resident loop — one
-persistent codex thread — enters the wave's worktree to work. Progress and
-chat are a single conversation: human messages steer a live turn by default,
+`lf loop <name>` starts a long-lived server at the repo's main checkout (the
+wave's journal and endpoint live at the origin); its playhead enters the wave's
+worktree and gives each flow step a live harness session. Progress and chat are
+a single conversation: human messages steer the body now playing by default,
 attributed messages (workers, scripts) queue for the next one, and interrupt
 finalizes a partial turn. Truth is an append-only journal, so a restart keeps
 the whole thread. `lf chat` and `lf memory` are the message doors for loops,
@@ -61,7 +61,7 @@ and `scripts/demo_wave.sh` for the guided demo.
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 
 ```bash
-lf wave s3           # the s3 (control) charter
+lf loop s3           # the s3 (control) charter
 ```
 
 The wave agent inhabits one context-sensitive loop and delegates
@@ -83,6 +83,9 @@ lf loop task "fix the flaky chord-timeout test" --wave designer
 `lf loop` takes a flow and free text, creates a worktree, and repeats the flow
 until its bit flips (`task`: when the PR merges). Linear holds filed work,
 `lf runs` holds active hands, and merged PRs record done.
+
+The second positional argument is the distinction: `lf loop designer` starts
+the named mind; `lf loop task "fix it"` runs a bounded child Loop.
 
 ### Crons
 
@@ -304,7 +307,7 @@ If no `router:` is specified, a generic routing agent picks a path based on scra
 Once you're chaining skills into flows, you're ready to ride a wave. Write its `wave/<name>/GOAL.md`, then run the agent:
 
 ```bash
-lf wave engbot             # start the wave agent
+lf loop engbot             # start the wave agent
 ```
 
 Directions compose extra nuance into any skill or flow the wave dispatches.
@@ -345,7 +348,7 @@ Install the Rust binaries directly with cargo.
 ## Inhabit, Delegate, Observe
 
 ```bash
-lf wave engbot       # start the wave agent (Ctrl-C to stop)
+lf loop engbot       # start the wave agent (Ctrl-C to stop)
 lf loop implement "Add the endpoint" --wave engbot --detach
 tmux ls              # list live sessions — the wave agent and its workers
 tmux attach -r -t <name>  # inspect without direct control

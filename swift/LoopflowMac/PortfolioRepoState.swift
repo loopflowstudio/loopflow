@@ -33,7 +33,7 @@ final class PortfolioRepoState {
 
     /// Create a wave file-first: a wave IS its markdown. Write
     /// `wave/<name>/GOAL.md` (+ an empty MEMORY.md) into the repo — the same
-    /// shape the registry overlays when the wave is started (`lf wave <name>`,
+    /// shape the registry overlays when the wave is started (`lf loop <name>`,
     /// the Start button). No POST; the row is not the wave.
     ///
     /// Wave state lives at the ORIGIN repo: every reader (endpoint discovery,

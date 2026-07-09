@@ -190,7 +190,7 @@ pub enum EventKind {
         answers: Vec<MessageId>,
         /// Exact body attempt producing this assistant span. Instantaneous
         /// injected turns carry `None`.
-        body: Option<BodyProvenance>,
+        body: Option<Box<BodyProvenance>>,
     },
     TurnItem {
         turn_id: String,
@@ -230,7 +230,7 @@ pub enum EventKind {
     /// exact without re-running scheduling decisions.
     PlayheadChanged {
         event: PlayheadEvent,
-        playhead: Playhead,
+        playhead: Box<Playhead>,
     },
     // -- orchestration (observations, not commands) --
     RunObserved {
@@ -479,6 +479,9 @@ impl Narrator {
                 }
                 PlayheadEvent::StepStarted { step, .. } => {
                     info(format!("playhead now · {} / {}", step.flow, step.step))
+                }
+                PlayheadEvent::BodySessionUpdated { session_id, .. } => {
+                    info(format!("playhead session · {session_id}"))
                 }
                 PlayheadEvent::StepCompleted { step, .. } => info(format!(
                     "playhead completed · {} / {}",
@@ -884,7 +887,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     items: Vec::new(),
                     created_at: event.at_rfc3339(),
                     from: None,
-                    body: body.clone(),
+                    body: body.as_deref().cloned(),
                 });
             }
             EventKind::TurnItem { turn_id, item } => {
@@ -925,9 +928,23 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 state = to.clone();
             }
             EventKind::PlayheadChanged {
-                playhead: snapshot, ..
+                event,
+                playhead: snapshot,
             } => {
-                playhead = Some(snapshot.clone());
+                if let PlayheadEvent::BodySessionUpdated {
+                    body_id,
+                    session_id,
+                } = event
+                {
+                    if let Some(body) = open
+                        .iter_mut()
+                        .filter_map(|turn| turn.body.as_mut())
+                        .find(|body| &body.body_id == body_id)
+                    {
+                        body.session_id = Some(session_id.clone());
+                    }
+                }
+                playhead = Some(snapshot.as_ref().clone());
             }
             // Steer consumption affects the queue fold, not the thread: the
             // steered text is already a user turn via its `UserMessage` row.

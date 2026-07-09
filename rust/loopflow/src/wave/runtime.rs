@@ -304,7 +304,7 @@ impl WaveRuntime {
                 for event in events {
                     journal.append(|_| EventKind::PlayheadChanged {
                         event,
-                        playhead: state.clone(),
+                        playhead: Box::new(state.clone()),
                     });
                 }
             }
@@ -488,7 +488,7 @@ impl WaveRuntime {
         let view = playhead.view();
         inner.journal.append(|_| EventKind::PlayheadChanged {
             event,
-            playhead: playhead.clone(),
+            playhead: Box::new(playhead.clone()),
         });
         inner.playhead = Some(playhead);
         let _ = self.playhead_tx.send(view.clone());
@@ -538,6 +538,27 @@ impl WaveRuntime {
         self.journal_playhead_locked(&mut inner, events)
     }
 
+    pub fn update_body_session(
+        &self,
+        body_id: &str,
+        session_id: &str,
+    ) -> anyhow::Result<PlayheadView> {
+        let mut inner = self.inner();
+        let event = inner
+            .playhead
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("playhead is not initialized"))?
+            .update_body_session(body_id, session_id)?;
+        let view = self.journal_playhead_locked(&mut inner, vec![event])?;
+        if let Some(turn) = inner.open_turn.as_mut() {
+            if let Some(body) = turn.body.as_mut().filter(|body| body.body_id == body_id) {
+                body.session_id = Some(session_id.to_string());
+                let _ = self.turn_tx.send(TurnFrame::share(turn.clone()));
+            }
+        }
+        Ok(view)
+    }
+
     /// Skip a selected step that has no live body (for example after a body
     /// failed and the resident could not restart). A live body must instead
     /// receive [`InboxItem::Skip`] so its terminal turn closes before advance.
@@ -558,7 +579,7 @@ impl WaveRuntime {
         let body = BodyProvenance {
             body_id: body_id.clone(),
             invocation_id: step.invocation_id,
-            step_path: step.step_path,
+            step_index: step.index,
             flow: step.flow,
             step: step.step,
             iteration: step.iteration,
@@ -589,7 +610,7 @@ impl WaveRuntime {
         for event in events {
             inner.journal.append(|_| EventKind::PlayheadChanged {
                 event,
-                playhead: playhead.clone(),
+                playhead: Box::new(playhead.clone()),
             });
         }
         let view = playhead.view();
@@ -1173,7 +1194,7 @@ impl WaveRuntime {
         let started = inner.journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers,
-            body: turn.body.clone(),
+            body: turn.body.clone().map(Box::new),
         });
         let turn_id = format!("turn-{}", started.seq);
         if !turn.text.is_empty() {
@@ -1240,6 +1261,14 @@ impl WaveRuntime {
             ResidentDelta::BodyStarted { body } => {
                 if let Err(err) = self.start_body(body) {
                     tracing::warn!(error = %err, "resident body start rejected");
+                }
+            }
+            ResidentDelta::BodySessionUpdated {
+                body_id,
+                session_id,
+            } => {
+                if let Err(err) = self.update_body_session(&body_id, &session_id) {
+                    tracing::warn!(error = %err, "resident body session update rejected");
                 }
             }
             ResidentDelta::BodyFinished {
@@ -1316,7 +1345,7 @@ impl WaveRuntime {
         let event = inner.journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers,
-            body: body.clone(),
+            body: body.clone().map(Box::new),
         });
         let turn_id = format!("turn-{}", event.seq);
         self.transition_locked(

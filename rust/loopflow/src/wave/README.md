@@ -1,9 +1,9 @@
 # wave — the listener and the resident
 
-`lf wave <name>` starts a wave as **two processes**:
+`lf loop <name>` starts a wave as **two processes**:
 
 ```
-  lf wave <name>                      lf wave <name> --loop-only
+  lf loop <name>                      internal resident invocation
   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
   │ LISTENER (origin repo)│──────────▶│ RESIDENT (<repo>.<wave>) │
   │ pens · folds · doors  │           │ wave runner · queue │
@@ -18,31 +18,28 @@
   observations, keeps the registry seat and the discovery pointer, and
   supervises the resident. It serves from the **origin repo** and creates no
   worktrees.
-- **The resident** is the wave's loop (see `loop/wave.rs`): every
-  turn is one `wave` flow (`wave_clarify → wave_pursue → wave_mutate`)
-  run as a bounded headless child — no persistent vendor thread; continuity
-  is GOAL.md + memory + the chat journal riding every pass's seed. It
+- **The resident** is the wave's Loop (see `flowloop/wave.rs`): the durable
+  playhead selects one flow step, starts one live harness session as that
+  step's body, then advances only when the body completes or the user skips.
+  Continuity is the journaled thread, playhead, GOAL.md, and memory. It
   bootstraps and enters the wave's `<repo>.<wave>` sibling worktree — passes
   never run in the main checkout. Its input is its own wave's
   `/events?inbox=true` subscription (the same machinery as `lf sub`); its
   output is ordered turn deltas through the token-gated resident door. It
   never touches a journal file — the single writer stays with the listener.
 
-One command runs both: the listener spawns the resident as a child `lf`
-process (keeper spawns tenant) and both narrate into the same terminal.
-`--no-loop` serves a dormant channel (`/health` reads `loop_state: null`);
-`--loop-only` attaches a resident to an existing listener by hand — also
-the respawn affordance, and one day the human-in-the-seat affordance.
+One command runs both: the listener spawns the resident as the same `lf loop`
+command carrying private endpoint/token environment. The two processes are
+runtime plumbing, not two user-facing modes.
 
-- **One loop, two inputs.** Chat and progress share the same context. A
-  message while idle starts a pass immediately. Messages during a pass queue
-  (append-and-coalesce, never rejected) and one boundary pass drains them
-  all — steering folds at pass boundaries by design, there is no mid-pass
-  injection. The RESIDENT declares what it consumed in its `TurnOpened`
+- **One Loop, one thread.** Chat and progress share the same context. A
+  message while idle reaches the next body. A steer while a compatible
+  harness is active is injected with `send_input`; unsupported harnesses
+  queue it for the next body. The resident declares what it consumed in its `TurnOpened`
   delta's `answers`, and the listener validates against its pending fold
-  before journaling `TurnStarted.answers`. Quiet for 4 hours with an empty
-  queue → a heartbeat pass nudges the next orchestration skill, carrying the
-  `<in_flight>` worker fold fetched from `GET /resident/context`.
+  before journaling `TurnStarted.answers`; live inputs append
+  `TurnSteered.answers`. With no explicit continuation queued, the default
+  `wave` flow advances continuously and wraps to its next iteration.
 - **Crons are the third deadline.** `crons: [{flow, schedule}]` in the
   wave's `GOAL.md` frontmatter (re-read live, no restart); a due schedule
   while idle opens a system pass — "cron due: <flow> — dispatch it" — and
@@ -56,8 +53,8 @@ the respawn affordance, and one day the human-in-the-seat affordance.
   The LISTENER polls the shared store
   and journals `RunObserved`/`RunCompleted` observations — every ~10s and
   once per `GET /resident/context` (the resident calls it before each pass).
-- **Interrupts kill the pass child.** The resident sends an `Interrupting`
-  state delta, kills the child, and closes the turn
+- **Interrupts stop the active harness.** The resident sends an `Interrupting`
+  state delta, stops the body, and closes the turn
   (`TurnFinished{interrupted}`); non-empty interrupt text queues for the
   next pass. The listener keeps its own 20s janitor for a resident gone
   fully silent: past it the open turn force-finalizes server-side and late
@@ -77,7 +74,7 @@ the respawn affordance, and one day the human-in-the-seat affordance.
   session row in the shared store (source `wave_server`, endpoint + pid in
   `env`; the db IS the registry). The row is marked terminal on shutdown or
   any termination signal; a crashed listener's row is closed by the next
-  boot's pid probe. A second `lf wave` refuses to start naming the live
+  boot's pid probe. A second `lf loop` refuses to start naming the live
   session unless `--force` takes over. A wave the store has never seen gets
   its row created at boot. No registry store on the machine → warn once, run
   fully functional, with one file-level floor: a `.wave-endpoint` that
@@ -89,9 +86,9 @@ per-machine, never committed. The in-process state (`WaveRuntime`) is a fold
 of it: the `thread` and the loop state are rebuilt from the journal on
 boot, so a restart keeps the full conversation and turn ids continue
 monotonically. The journal event vocabulary predates the pass model —
-`TurnStarted`/`TurnItem`/`TurnSteered`/`TurnFinished`/`LoopState` are
-all journaled by the listener on receipt from the wire (`TurnSteered` is
-vestigial: pass-based residents never emit it). `wave/<name>/MEMORY.md`
+`TurnStarted`/`TurnItem`/`TurnSteered`/`TurnFinished`/`LoopState` and
+`PlayheadChanged` are journaled by the listener on receipt from the wire.
+`wave/<name>/MEMORY.md`
 seeds the loop (read from the origin repo), and the live listener holds
 its pen: `lf memory update` POSTs the compiled checkpoint. `lf memory add`
 publishes a replayable fact to the stream without accreting raw bullets into
@@ -182,17 +179,20 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 
 | Method + path             | Behavior |
 |---------------------------|----------|
-| `GET /health`             | `{status, loop_state, wave, turns, workers, uptime_seconds}`; `status` is channel liveness — always `serving` while the process answers; `loop_state` is the loop's state (`idle \| turning \| interrupting \| failed`), or null while no resident was ever spawned or attached (`--no-loop` serves dormant) — a live channel whose resident died reads `serving` + `failed`; `workers` counts observed in-flight worker runs |
+| `GET /health`             | `{status, loop_state, wave, turns, workers, uptime_seconds}`; `status` is channel liveness; `loop_state` is `idle \| turning \| interrupting \| failed`; `workers` counts observed in-flight worker runs |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread; `?limit=N` tails the last N turns (open turn included) |
 | `GET /events`             | SSE, the family's one unified stream. Scope: `?channel=<name>` (one channel), `?prefix=<name>` (subtree), default = whole family; names outside the family 404. Event names: `state` (loop-state name, on subscribe + every transition; primary only), `turn` (a `Turn` JSON; replay then live; child-channel turns carry an extra `"channel"` key; ids repeat — each frame replaces the client's previous state for that (channel, id)), `memory-add` (full added facts since the last externalization, replay then live; primary only), `memory` (curation summaries, live-only; primary only), and — only with `?inbox=true`, the resident's subscription — `inbox` (`{id, op, text, from}`; pending replay + live ops; bare interrupts ride `id: null`). |
-| `POST /messages {op, text, from?, channel?}` | `op` required: `message` (human speech: queued, the next pass answers it), `steer` (degrades to `message` — steering folds at pass boundaries), `interrupt` (kill the open pass; non-empty text queues for the next pass), or `say` (an attributed emission — `lf chat`; `from {session_id?, label}` required for `say`, rejected otherwise). `channel` null = the wave channel; a child name lands in that work line's journal (404 outside the family). Returns `{turn, state}`. |
+| `POST /messages {op, text, from?, channel?}` | `op` required: `message` (next body), `steer` (inject into the active steer-capable harness, otherwise queue), `interrupt` (stop the active body; non-empty text queues for the retry), or `say` (attributed `lf chat`). Returns `{turn, state}`. |
+| `GET /playhead`           | Durable invocation stack, active body, `now`, `next`, local queue, and return target. |
+| `POST /playhead/enqueue {flow}` | Enqueue a flow FIFO at the innermost invocation and return the updated playhead. |
+| `POST /playhead/skip`     | Stop and skip the current body, or advance a failed idle step, without destroying its route. |
 | `POST /channels {name, run_id}` | The dispatch knock: journals `ChannelOpened` on the wave channel. Idempotent on `run_id`; 404 outside the family. Returns `{turn}`. |
 | `GET /memory`             | `{content}` — the wave's MEMORY.md (origin repo). |
 | `GET /memory/log`         | `{facts}` — add-stream facts since the last curation, oldest first. |
 | `POST /memory {op, content, summary}` | `op`: `update` replaces `MEMORY.md`; `add` publishes one replayable fact. `summary` null → first non-empty content line. Returns `{summary}`. |
 | `POST /resident/attach {pid}` | Resident door (token-gated): register the resident's pid, revive a failed loop. Returns `{wave}`. |
 | `POST /resident/deltas {deltas}` | Resident door (token-gated): ordered turn deltas → the journal fold. Returns `{accepted}`. |
-| `GET /resident/context`   | Resident door (token-gated): `{in_flight}`; freshens the store observations. |
+| `GET /resident/context`   | Resident door (token-gated): `{in_flight, playhead}`; freshens the store observations. |
 
 ### Turn
 
@@ -204,7 +204,8 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
   "status": "pending | running | completed | failed | interrupted",
   "items": [ ConversationItem, … ],
   "created_at": "2026-07-04T00:42:03.412861Z",
-  "from": "worker"
+  "from": "worker",
+  "body": null
 }
 ```
 
@@ -217,9 +218,9 @@ across all sources. `from` is the speaker byline of an attributed emission
 ## Demo
 
 ```
-lf wave demo
-# → lf wave · demo · listener on http://127.0.0.1:52306 · spawning resident (Ctrl-C to stop, …)
-# → lf wave · demo · resident loop · listener http://127.0.0.1:52306 · worktree …/demo-repo.demo
+lf loop demo
+# → lf loop · demo · listener on http://127.0.0.1:52306 · spawning resident (Ctrl-C to stop, …)
+# → lf loop · demo · resident · listener http://127.0.0.1:52306 · worktree …/demo-repo.demo
 
 curl 127.0.0.1:52306/health
 curl -X POST 127.0.0.1:52306/messages -H 'content-type: application/json' \

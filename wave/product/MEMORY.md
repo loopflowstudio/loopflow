@@ -65,7 +65,7 @@ they mean the Mac surface.
   wiring it into `WaveProject.tasks` is unbuilt, and the Swift side must read the
   label rather than invent its own grouping.
 - Not yet built: runs ledger renderer, live pubsub wiring, Linear task loading,
-  remote/`lf wave show` plan query (slices 2–4).
+  remote/`lf loop show` plan query (slices 2–4).
 
 ## Swift data path — RegistryQuery is the single reader
 
@@ -160,7 +160,7 @@ they mean the Mac surface.
   live-tailnet CI round-trip (coverage is script syntax + Config/ConnectionStore
   tests); no bundled TLS inside lfd (rejected alternative, not a gap).
 - Product gap (belongs to the infrastructure wave): **no
-  `lf wave stop <name>`**. Killing out-of-band means raw `tmux kill-session` or
+  `lf loop stop <name>`**. Killing out-of-band means raw `tmux kill-session` or
   `lf op reset-waves` (kills every `lf-*` session — too broad); a wave killed
   out-of-band leaves its registry row `status: running` forever, only the probed
   LIVE column tells the truth. Wants a single-wave stop verb that kills the

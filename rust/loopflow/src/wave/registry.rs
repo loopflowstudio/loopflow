@@ -1,6 +1,6 @@
 //! The wave server's seat in the shared session registry — store-direct.
 //!
-//! `lf wave <name>` is its own process; no daemon launches or supervises it.
+//! `lf loop <name>` is its own process; no daemon launches or supervises it.
 //! The shared local store (the same SQLite db lfd serves from — the db IS
 //! the registry) carries two facts this module owns:
 //!
@@ -15,7 +15,7 @@
 //!   it, unless `force` takes over (kill the recorded pid / tmux session,
 //!   cancel the row). Graceful shutdown and Ctrl-C mark the row terminal;
 //!   lfd's session reconciliation (pid probe on `wave_server` rows) covers a
-//!   crash, and so does the boot-time probe of the next `lf wave`.
+//!   crash, and so does the boot-time probe of the next `lf loop`.
 //!
 //! - **Observation.** [`StoreObserver`] polls the store — this wave's worker
 //!   sessions and runs — and journals confirmed worker facts:
@@ -724,7 +724,7 @@ mod tests {
         }
     }
 
-    /// A wave_server WaveAgent row as a previous `lf wave` would have left it.
+    /// A wave_server WaveAgent row as a previous `lf loop` would have left it.
     fn server_session(wave: &Wave, pid: u32) -> Session {
         Session {
             id: LfdId::new(),

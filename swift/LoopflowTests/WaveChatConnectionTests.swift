@@ -165,6 +165,43 @@ struct WaveChatConnectionTests {
         #expect(conn.turns.isEmpty)
     }
 
+    @Test("playhead events expose location queue and return target")
+    func playheadEventsExposeNavigation() {
+        let conn = connection()
+        let json = """
+        {
+          "stack": [{
+            "id": "inv-wave", "flow": "wave",
+            "steps": [{"name":"pursue","kind":"skill"}],
+            "cursor": 0, "iteration": 3,
+            "queue": [{
+              "id":"inv-review", "flow":"review-design",
+              "steps":[{"name":"clarify","kind":"skill"}]
+            }]
+          }],
+          "active": null,
+          "now": {
+            "invocation_id":"inv-wave", "flow":"wave",
+            "step":"pursue", "kind":"skill", "index":0, "total":1,
+            "iteration":3
+          },
+          "next": {
+            "invocation_id":"inv-review", "flow":"review-design",
+            "step":"clarify", "kind":"skill", "index":0, "total":1,
+            "iteration":0
+          },
+          "return_to": null
+        }
+        """
+
+        conn.handle(event: "playhead", data: json)
+
+        #expect(conn.playhead?.now?.step == "pursue")
+        #expect(conn.playhead?.next?.flow == "review-design")
+        #expect(conn.playhead?.stack.last?.queue.map(\.flow) == ["review-design"])
+        #expect(conn.turns.isEmpty)
+    }
+
     @Test("message ops encode to the wire values the server expects")
     func opWireEncoding() {
         #expect(WaveMessageOp.message.rawValue == "message")

@@ -257,7 +257,7 @@ fn body_provenance(step: &StepRef, cwd: &Path) -> BodyProvenance {
     BodyProvenance {
         body_id: uuid::Uuid::new_v4().to_string(),
         invocation_id: step.invocation_id.clone(),
-        step_path: step.step_path.clone(),
+        step_index: step.index,
         flow: step.flow.clone(),
         step: step.step.clone(),
         iteration: step.iteration,
@@ -304,12 +304,7 @@ type CreateBodyHarness = Box<
 >;
 
 type PrepareBodyHarness = Box<
-    dyn Fn(
-            &str,
-            &str,
-            &str,
-            Option<u32>,
-        ) -> Result<crate::lf::commands::run::PreparedHarnessTurn>
+    dyn Fn(&str, &str, &str, Option<u32>) -> Result<crate::lf::commands::run::PreparedHarnessTurn>
         + Send,
 >;
 
@@ -512,8 +507,8 @@ impl WaveLoop {
         };
         let seed = wave_pass_seed(&self.origin_repo, &self.wave, &wake);
         let answers = answers.into_iter().map(|id| id.0).collect();
-        let live_skill = step.kind == StepKind::Skill
-            && matches!(&self.backend, BodyBackend::Harness { .. });
+        let live_skill =
+            step.kind == StepKind::Skill && matches!(&self.backend, BodyBackend::Harness { .. });
         if live_skill {
             self.run_harness_pass(step, seed, answers, inbox_rx).await;
         } else {
@@ -540,9 +535,7 @@ impl WaveLoop {
                 spawn_wave_step(&self.cwd, &step, &seed, self.config.max_turns)
             }
             #[cfg(test)]
-            BodyBackend::Process(spawn) => {
-                spawn(&self.cwd, &step, &seed, self.config.max_turns)
-            }
+            BodyBackend::Process(spawn) => spawn(&self.cwd, &step, &seed, self.config.max_turns),
         };
         let child = match child {
             Ok(child) => child,
@@ -686,6 +679,7 @@ impl WaveLoop {
             return;
         }
         body.session_id = harness.provider_session_id();
+        let mut body_session_id = body.session_id.clone();
         let body_id = body.body_id.clone();
         self.open_body(body, answers).await;
         if self.end.is_some() {
@@ -696,7 +690,10 @@ impl WaveLoop {
             let _ = harness.stop().await;
             self.finish_failed_pass(
                 &body_id,
-                &format!("failed to start {} / {} turn: {err:#}", step.flow, step.step),
+                &format!(
+                    "failed to start {} / {} turn: {err:#}",
+                    step.flow, step.step
+                ),
             )
             .await;
             return;
@@ -748,6 +745,16 @@ impl WaveLoop {
                         self.finish_failed_pass(&body_id, "harness event stream closed").await;
                         return;
                     };
+                    if body_session_id.is_none() {
+                        tokio::task::yield_now().await;
+                        if let Some(session_id) = harness.provider_session_id() {
+                            body_session_id = Some(session_id.clone());
+                            self.send(vec![ResidentDelta::BodySessionUpdated {
+                                body_id: body_id.clone(),
+                                session_id,
+                            }]).await;
+                        }
+                    }
                     match event {
                         ConversationEvent::TextDelta { content, .. } => {
                             self.send(vec![ResidentDelta::TurnText { text: content }]).await;
@@ -840,11 +847,7 @@ impl WaveLoop {
         .await;
     }
 
-    async fn steer_harness(
-        &mut self,
-        message: PendingMessage,
-        harness: &mut dyn Harness,
-    ) -> bool {
+    async fn steer_harness(&mut self, message: PendingMessage, harness: &mut dyn Harness) -> bool {
         if !self.seen.insert(message.id.clone()) {
             return false;
         }
@@ -862,22 +865,15 @@ impl WaveLoop {
         };
         if let Err(err) = harness.send_input(&text).await {
             tracing::warn!(error = %err, "live steering failed; requeueing message");
-            self.send(vec![ResidentDelta::MessagesRequeued {
-                ids: vec![id],
-            }])
-            .await;
+            self.send(vec![ResidentDelta::MessagesRequeued { ids: vec![id] }])
+                .await;
             self.queue.push(message);
             return false;
         }
         true
     }
 
-    async fn interrupt_harness(
-        &mut self,
-        body_id: &str,
-        harness: &mut dyn Harness,
-        skip: bool,
-    ) {
+    async fn interrupt_harness(&mut self, body_id: &str, harness: &mut dyn Harness, skip: bool) {
         self.send(vec![ResidentDelta::LoopState {
             to: ResidentStateTo::Interrupting,
             reason: "user interrupt".to_string(),
@@ -899,10 +895,9 @@ impl WaveLoop {
         let _ = harness.stop().await;
         match status {
             Lifecycle::Completed => {
-                if let Err(err) = crate::lf::commands::flow::commit_skill_work(
-                    &self.cwd,
-                    &step.step,
-                ) {
+                if let Err(err) =
+                    crate::lf::commands::flow::commit_skill_work(&self.cwd, &step.step)
+                {
                     self.finish_failed_pass(
                         body_id,
                         &format!("failed to commit {}: {err:#}", step.step),
@@ -927,7 +922,10 @@ impl WaveLoop {
                 self.idle_since = Instant::now();
             }
             Lifecycle::Interrupted => self.finish_interrupted_pass(body_id, false).await,
-            Lifecycle::Failed => self.finish_failed_pass(body_id, "harness turn failed").await,
+            Lifecycle::Failed => {
+                self.finish_failed_pass(body_id, "harness turn failed")
+                    .await
+            }
             Lifecycle::Pending | Lifecycle::Running => {
                 self.finish_failed_pass(body_id, "harness ended without a terminal status")
                     .await;
@@ -1133,13 +1131,13 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
-    use async_trait::async_trait;
     use crate::chat::turns::{ChatRole, ChatTurn};
     use crate::harness::Capabilities;
     use crate::wave::journal::{journal_path, Attribution, EventKind, Journal};
     use crate::wave::runtime::WaveRuntime;
     use crate::wave::server::{self, ResidentDoor};
     use crate::wave::state::LoopState;
+    use async_trait::async_trait;
 
     /// The rig: a REAL listener (runtime + router with the resident door)
     /// and a resident (subscription follower + `run_loop_with` and a
@@ -1372,7 +1370,8 @@ mod tests {
         }
 
         fn provider_session_id(&self) -> Option<String> {
-            Some("vendor-session".to_string())
+            (!self.inputs.lock().expect("inputs lock").is_empty())
+                .then(|| "vendor-session".to_string())
         }
     }
 
@@ -1463,6 +1462,15 @@ mod tests {
         .await;
 
         assert_eq!(inputs.lock().unwrap()[1], "finish");
+        let completed = runtime
+            .thread_snapshot()
+            .into_iter()
+            .find(|turn| turn.role == ChatRole::Assistant)
+            .expect("assistant turn");
+        assert_eq!(
+            completed.body.and_then(|body| body.session_id),
+            Some("vendor-session".to_string())
+        );
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("journal");
         assert!(events.iter().any(|event| matches!(
             &event.kind,

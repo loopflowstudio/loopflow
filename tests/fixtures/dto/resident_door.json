@@ -19,9 +19,9 @@
           "id": "inv-wave-1",
           "flow": "wave",
           "steps": [
-            { "path": "0", "name": "wave_clarify", "kind": "skill" },
-            { "path": "1", "name": "wave_pursue", "kind": "skill" },
-            { "path": "2", "name": "wave_mutate", "kind": "skill" }
+            { "name": "wave_clarify", "kind": "skill" },
+            { "name": "wave_pursue", "kind": "skill" },
+            { "name": "wave_mutate", "kind": "skill" }
           ],
           "cursor": 1,
           "iteration": 2,
@@ -32,7 +32,6 @@
       "now": {
         "invocation_id": "inv-wave-1",
         "flow": "wave",
-        "step_path": "1",
         "step": "wave_pursue",
         "kind": "skill",
         "index": 1,
@@ -42,14 +41,12 @@
       "next": {
         "invocation_id": "inv-wave-1",
         "flow": "wave",
-        "step_path": "2",
         "step": "wave_mutate",
         "kind": "skill",
         "index": 2,
         "total": 3,
         "iteration": 2
       },
-      "queued": [],
       "return_to": null
     }
   }

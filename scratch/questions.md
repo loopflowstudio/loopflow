@@ -1,13 +1,10 @@
 # Unresolved scope
 
-- The live wave pass still runs as a captured one-shot `lf -b flow wave`
-  process. Inbox messages journal immediately and queue at the pass boundary;
-  they are not yet injected into the running Codex harness at tool boundaries,
-  and assistant text journals when the pass exits rather than incrementally.
-  Closing this requires moving `loop/wave.rs` onto the existing session
-  harness API instead of adding stdin control to execs. Detached loops are
-  deliberately headless and tmux is documented/read back as `attach -r`, so
-  the old unjournaled mutation door is closed meanwhile.
+- Skill steps run in the live harness and Codex steering journals and streams
+  incrementally. Claude and OpenCode expose no true mid-turn steer capability,
+  so their input queues to the next body. Composite top-level flow nodes still
+  run through the internal headless step fallback; promoting branch/loop
+  internals into first-class playhead paths is separate graph-runtime work.
 - Project promotion can create the child PM project and move its labeled tasks,
   but the PM provider abstraction has no remove-label operation. The promotion
   skill records residual `project:<slug>` labels here when it cannot remove
@@ -30,3 +27,12 @@
   client attribution and `lf chat --parent` transport. This branch implements
   the requested execution, memory, promotion, control, backlog, doctrine, and
   Mac surfaces without silently changing that wire protocol.
+- Two agents wrote this worktree at once during compress: HEAD advanced under a
+  running skill (`lf pr open: prepare branch`) while unrelated files were being
+  edited. Both writers converged on the same reduction (`step_index`, dropping
+  the derived `queued`), so the tree is coherent, but nothing enforces one
+  writer per worktree. Whether that is a wave-home invariant or a lock is open.
+- `exec_door_pins_detached_loops_to_its_wave`, `sse_late_subscriber_watches_the_
+  open_turn_grow_and_finalize`, and `events_inbox_scope_replays_pending_and_
+  streams_ops` fail at HEAD, unrelated to the playhead reduction. Left for the
+  writer who owns the exec-door and SSE work.

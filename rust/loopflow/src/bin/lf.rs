@@ -684,8 +684,8 @@ fn main() -> anyhow::Result<()> {
 
 /// Session label for agent-launching invocations; `None` for utility commands
 /// (`lf pr`, `lf usage`, `lf chat`, `lf sub`, `lf memory`, `lf -l`) and
-/// `lf wave`, which never self-register (placement creates the worker's row;
-/// `lf wave` registers as the wave's agent session; chat/memory are
+/// `lf loop`, which never self-register (placement creates the worker's row;
+/// `lf loop` registers as the wave's agent session; chat/memory are
 /// one-shot POSTs attributed via the env they inherit).
 fn run_label(cli: &Cli) -> Option<String> {
     if cli.list {
@@ -900,7 +900,7 @@ mod tests {
 
     #[test]
     fn old_wave_surface_is_rejected() {
-        assert!(Cli::try_parse_from(["lf", "wave", "goals", "--loop-only"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wave", "goals"]).is_err());
     }
 
     #[test]

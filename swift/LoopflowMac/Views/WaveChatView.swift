@@ -130,7 +130,7 @@ struct WaveChatView: View {
                 playheadFact("return", playhead?.returnTo.map { "\($0.flow) / \($0.step)" })
             }
 
-            if let queued = playhead?.queued, !queued.isEmpty {
+            if let queued = playhead?.stack.last?.queue, !queued.isEmpty {
                 Text("queued  " + queued.map(\.flow).joined(separator: "  →  "))
                     .font(Typography.caption())
                     .foregroundStyle(palette.textSecondary)
@@ -168,14 +168,18 @@ struct WaveChatView: View {
     private func bodyBoundary(_ body: BodyProvenance, status: Lifecycle) -> some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text("body  \(body.bodyId)")
                 Text("invocation  \(body.invocationId)")
-                Text("step path  \(body.stepPath)")
+                Text("step index  \(body.stepIndex)")
                 Text("session  \(body.sessionId ?? "—")")
                 Text("harness  \(body.harness ?? "—") · model  \(body.model ?? "—")")
                 Text("host  \(body.host)")
                 Text("worktree  \(body.worktree)")
+                Text("run  \(body.runId ?? "—")")
+                Text("started  \(body.startedAt)")
+                Text("finished  \(body.endedAt ?? "—")")
                 if let reason = body.terminationReason {
-                    Text("ended  \(reason)")
+                    Text("reason  \(reason)")
                 }
             }
             .font(Typography.caption())

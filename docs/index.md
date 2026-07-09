@@ -22,7 +22,7 @@ lf debug -c                       # fix it
 
 ```bash
 # author wave/engbot/GOAL.md, then:
-lf wave engbot       # start the wave agent (Ctrl-C to stop)
+lf loop engbot       # start the wave agent (Ctrl-C to stop)
 tmux ls              # live sessions — the wave agent and its workers
 tmux attach -r -t <name>  # inspect one work
 ```

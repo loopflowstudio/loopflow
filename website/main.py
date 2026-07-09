@@ -313,7 +313,7 @@ lf <skill>           Run a skill (design, implement, review, etc.)
 lf debug -c         Fix error from clipboard
 lf pr open          Create PR from current branch
 lf wt create X      Create worktree for feature X
-lf wave X           Start wave X's server (its resident loop)
+lf loop X           Start wave X's server (its resident loop)
 lf q worker run X --flow build --task "..."   Dispatch a PR-producing worker
 lf chat -w X "..."  Post into wave X's thread
 

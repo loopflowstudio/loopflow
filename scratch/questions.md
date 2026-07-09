@@ -31,25 +31,30 @@ the endurance KRs are measured by hand?
 project files, never the live tasks. If a task in Linear contradicts a KR here,
 this pass did not see it. Needs `lf auth linear` before the next wave loop.
 
-## 3. "Progress in my other projects" is adoption, not instrumentation
+## 3. manabot's missing runs were data loss, not non-adoption
 
-Two of the four projects have never appeared in the run ledger:
+An earlier reading of this said manabot had not been driven through loopflow
+since 2026-05-18. That was wrong — it read prompt-log filenames, and an
+`lf op shell init zsh` writes a journal but no prompt log.
 
-| project | last `lf` run | ledger rows |
-|---|---|---|
-| loopflow | 2026-07-09 | 2720 |
-| cadenza | 2026-07-06 | 161 |
-| manabot | 2026-05-18 | 0 |
-| hootro | 2026-06-20 | 0 |
+`lf` ran in manabot four times on 2026-07-09 (`.lf/journal/runs/*/events.jsonl`,
+15:30 UTC). The ledger has zero rows for all four run ids, because the ledger
+was deaf: the `step_index`/`skill_index` drift broke `insert_run_event`, and
+`ledger_insert` swallows the error into `debug!`.
 
-manabot committed heavily on 2026-07-09 without loopflow. So the portfolio
-measure — cost and cycle time per landed change, per repo — cannot see half the
-portfolio, and no eval harness changes that. manabot and hootro are currently a
-live, uninstrumented counterfactual.
+| | |
+|---|---|
+| last ledger write | 2026-07-08 14:59:28 UTC |
+| first write after the 055 repair | 2026-07-09 20:12:00 UTC |
+| silent outage | **29.2 hours**, every repo on this machine |
 
-Open: is the goal to *drive* manabot and hootro through loopflow (making them
-measurable, and the portfolio claim real), or to leave them as the control arm?
-Both are defensible. They are different projects.
+Fixed forward: the first ledger failure per process now logs at `warn!`. The
+schema drift was an accident; a best-effort write that whispers would have
+hidden the next one too.
+
+Standing question, now separable from the bug: hootro really is dormant (no
+`.lf/journal`, nothing since 2026-06-19). Is it meant to be driven through
+loopflow, or left as the control arm? Both are defensible.
 
 ## 4. Which corpus does the eval harvester target first?
 

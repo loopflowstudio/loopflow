@@ -5,10 +5,11 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::id::LfdId;
@@ -322,13 +323,37 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
     match open_ledger() {
         Ok(store) => {
             if let Err(err) = store.insert_run_event(&row) {
-                debug!(error = %err, run_id = %row.run_id, "ledger insert failed");
+                if first_ledger_failure() {
+                    warn!(error = %err, run_id = %row.run_id, "ledger insert failed — this run is not being recorded");
+                } else {
+                    debug!(error = %err, run_id = %row.run_id, "ledger insert failed");
+                }
             }
         }
         Err(err) => {
-            debug!(error = %err, "ledger unavailable");
+            if first_ledger_failure() {
+                warn!(error = %err, "ledger unavailable — runs are not being recorded");
+            } else {
+                debug!(error = %err, "ledger unavailable");
+            }
         }
     }
+}
+
+/// True exactly once per process. A ledger write must never fail a run, but a
+/// silent best-effort write turns a schema break into invisible data loss: a
+/// `step_index`/`skill_index` drift once cost 29 hours of run history while
+/// every reader failed loudly and every writer whispered at `debug!`. Say it
+/// once, at a level someone runs; stay quiet after so a broken ledger does not
+/// drown the run's own output.
+fn first_ledger_failure() -> bool {
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    claim_first(&WARNED)
+}
+
+/// True for the first caller only.
+fn claim_first(flag: &AtomicBool) -> bool {
+    !flag.swap(true, Ordering::Relaxed)
 }
 
 /// Open the local ledger store, creating and migrating it if needed.
@@ -591,6 +616,21 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 
 #[cfg(test)]
 mod tests {
+    use super::claim_first;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn a_ledger_failure_is_loud_once_then_quiet() {
+        // A silent best-effort write hid a 29-hour ledger outage: every reader
+        // failed loudly while every writer whispered at debug!. Warn once, at a
+        // level someone runs; stay quiet after so a broken ledger cannot drown
+        // the run's own output.
+        let flag = AtomicBool::new(false);
+        assert!(claim_first(&flag), "first failure must be loud");
+        assert!(!claim_first(&flag), "later failures must stay quiet");
+        assert!(!claim_first(&flag));
+    }
+
     use super::{
         emit, events_path, read_events, runs_root, test_env_lock, LfEvent, LfEventFields,
         LfEventType, LfNode,

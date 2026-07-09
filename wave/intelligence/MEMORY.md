@@ -84,6 +84,16 @@ structure the model proposes.
   while CI stayed green. `055_run_events_step_index_repair` converges it.
   Trace work must be exercised against a real ledger copy, not a fresh db.
 
+- **A silent best-effort write is worse than the bug it hides.** `ledger_insert`
+  degraded failures to `debug!`, so when the `step_index` drift broke
+  `insert_run_event`, every ledger write on the machine vanished for 29.2 hours
+  (2026-07-08 14:59 UTC → 2026-07-09 20:12 UTC) across every repo — while the
+  readers failed loudly on every invocation. manabot ran `lf` four times during
+  the outage; its `.lf/journal` has the runs, the ledger has none. The first
+  ledger failure per process now logs at `warn!`. Read "the wave never ran
+  there" as a hypothesis, not a fact: check `.lf/journal` before concluding
+  non-adoption, because a command that writes no prompt log still journals.
+
 - **A migration's version id is its identity, not its content.** Editing an
   already-applied migration file never re-runs it; the divergence becomes
   permanent and silent. Repair forward with a new migration listed in

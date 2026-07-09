@@ -136,23 +136,34 @@ question — "is loopflow moving the portfolio" — is answerable from the ledge
 with no LLM spend at all: cost and wall-clock per landed PR, per repo, per
 month.
 
-Today it cannot be answered, and the reason is adoption, not instrumentation:
+Today it cannot be answered, and the reason is data loss:
 
-| project | last `lf` run | ledger rows |
+| project | driven by `lf`? | ledger rows |
 |---|---|---|
-| loopflow | 2026-07-09 | 2720 |
-| cadenza | 2026-07-06 | 161 |
-| manabot | 2026-05-18 | 0 |
-| hootro | 2026-06-20 | 0 |
+| loopflow | yes, daily | 2720 |
+| cadenza | yes | 161 |
+| manabot | **yes, on 2026-07-09** | **0 — dropped** |
+| hootro | dormant since 2026-06-19 | 0 |
 
-manabot committed heavily on 2026-07-09 without loopflow. It is not a gap in
-the telemetry; it is the live counterfactual. Worth knowing before claiming the
-harness moves the portfolio.
+manabot ran `lf` four times on 2026-07-09 (its `.lf/journal` proves it) and the
+ledger recorded none of them. The `step_index` drift broke `insert_run_event`,
+and `ledger_insert` swallows failures into `debug!` — so every write on this
+machine was silently dropped from 2026-07-08 14:59 UTC until the 055 repair at
+2026-07-09 20:12 UTC. **29.2 hours, every repo.** The readers screamed; the
+writer whispered.
+
+That asymmetry is worse than the drift, because drift is an accident and a
+silent best-effort write hides the *next* accident too. Fixed forward: the first
+ledger failure per process now logs at `warn!`.
 
 The ledger is also only 5 days deep (`run_events` arrived in migration 047,
 earliest row 2026-07-04), and its `repo` column is polluted with basenames like
 `src`, `tmp.Rf5ZtVARiJ`, `.tmpzt80hK`. Any month-long KR is measuring from
 2026-08-04 at the earliest, and needs a repo identity worth grouping by.
+
+The portfolio measure therefore has a prerequisite the A/B does not: the ledger
+must be trusted to have *seen* the work. A KR that counts gap-days is not
+bookkeeping — it is the thing that would have caught this in an hour.
 
 ## Slices
 

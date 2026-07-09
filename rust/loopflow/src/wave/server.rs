@@ -612,13 +612,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
             | Commands::Rebase { .. }
             | Commands::Commit { .. }
             | Commands::Release { .. }
-            | Commands::Pm { .. }
-            | Commands::Branches { .. }
-            | Commands::Queue { .. }
-            | Commands::Sync
-            | Commands::Next { .. }
-            | Commands::Advance { .. }
-            | Commands::SyncSkills { .. },
+            | Commands::Pm { .. },
         ) => ExecVerdict::Allow,
         Some(Commands::Auth { .. }) => ExecVerdict::Deny("auth".to_string()),
         Some(Commands::Chat { .. })
@@ -662,8 +656,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         // `lf cron` schedules recurring execution — a persistence/escalation
         // vector, not part of the commit/dispatch escape hatch.
         Some(Commands::Cron { .. }) => ExecVerdict::Deny("cron".to_string()),
-        Some(Commands::Doctor { .. }) => ExecVerdict::Deny("doctor".to_string()),
-        Some(Commands::Shell { .. }) => ExecVerdict::Deny("shell".to_string()),
+        Some(Commands::SyncSkills { .. }) => ExecVerdict::Deny("sync-skills".to_string()),
         // Bare `lf` (interactive launch) has no verb the door can run.
         None => ExecVerdict::Deny("lf".to_string()),
     }

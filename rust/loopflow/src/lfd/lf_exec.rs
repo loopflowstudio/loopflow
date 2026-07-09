@@ -29,7 +29,7 @@ pub(crate) struct LfExecResult {
 /// Validate that `argv` parses as an `lf` command. Returns the clap error
 /// rendered for the caller on failure — the door refuses to exec argv that
 /// would not parse. `argv` is the command line *after* the binary name
-/// (e.g. `["next", "--create-pr"]`).
+/// (e.g. `["pr", "land", "--create-pr"]`).
 pub(crate) fn validate_lf_argv(argv: &[String]) -> Result<(), String> {
     use clap::error::ErrorKind;
     use clap::Parser;
@@ -99,13 +99,13 @@ mod tests {
 
     #[test]
     fn valid_mechanical_verb_parses() {
-        assert!(validate_lf_argv(&argv(&["next", "--create-pr"])).is_ok());
+        assert!(validate_lf_argv(&argv(&["commit", "--message", "checkpoint"])).is_ok());
         assert!(validate_lf_argv(&argv(&["pr", "land", "--strict"])).is_ok());
     }
 
     #[test]
     fn unknown_flag_is_rejected_before_exec() {
-        let err = validate_lf_argv(&argv(&["next", "--nonesuch"]))
+        let err = validate_lf_argv(&argv(&["pr", "land", "--nonesuch"]))
             .expect_err("unknown flag must not parse");
         assert!(err.contains("--nonesuch") || err.to_lowercase().contains("unexpected"));
     }
@@ -131,7 +131,7 @@ mod tests {
         // rendering — the problem, a usage line, and the try-help hint — not a
         // bare string. (Unknown *subcommands* aren't errors: `lf` accepts
         // external subcommands, same as the CLI, so they fail at exec time.)
-        let err = validate_lf_argv(&argv(&["next", "--nonesuch"]))
+        let err = validate_lf_argv(&argv(&["pr", "land", "--nonesuch"]))
             .expect_err("unknown flag must not parse");
         assert!(err.contains("--nonesuch"), "names the bad token: {err}");
         assert!(

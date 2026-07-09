@@ -188,44 +188,8 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: PmCommand,
     },
-    /// Remote branch operations
-    Branches {
-        #[command(subcommand)]
-        cmd: BranchesCommand,
-    },
-    /// Merge-queue maintenance for stacked wave runs
-    Queue {
-        #[command(subcommand)]
-        cmd: QueueCommand,
-    },
-    /// Shell integration
-    Shell {
-        #[command(subcommand)]
-        cmd: ShellCommand,
-    },
-    /// Update local main to match origin
-    Sync,
-    /// Create next iteration branch
-    Next {
-        #[arg(short = 'c', long = "create-pr")]
-        create_pr: bool,
-        #[arg(long = "no-rebase")]
-        no_rebase: bool,
-    },
-    /// Rotate a recurring wave onto a fresh branch (pushed with upstream)
-    Advance {
-        /// Wave name (default: inferred from the worktree)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-    },
-    /// Check loopflow dependencies
-    Doctor {
-        /// Print the generated Brewfile (from the declared dependency list) and exit
-        #[arg(long, hide = true)]
-        brewfile: bool,
-    },
-    /// Compile loopflow skills into your home vendor Skills directories
-    #[command(name = "sync-skills")]
+    /// Compile loopflow skills into your home vendor Skills directories.
+    #[command(name = "sync-skills", hide = true)]
     SyncSkills {
         /// Confirm writes under ~/ without prompting
         #[arg(short = 'y', long = "yes")]
@@ -513,59 +477,6 @@ pub enum CronCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum QueueCommand {
-    /// Run one reconcile pass: stack-status inference, draft/ready flips,
-    /// lazy head rebase, queue-block attention writes
-    Reconcile {
-        /// Only this wave (default: every wave with queue state)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum BranchesCommand {
-    /// Preview remote branches by filter
-    List {
-        #[command(flatten)]
-        filters: BranchFilterArgs,
-    },
-    /// Delete remote branches by filter
-    Prune {
-        #[command(flatten)]
-        filters: BranchFilterArgs,
-        /// Show what would be pruned without deleting anything
-        #[arg(long = "dry-run")]
-        dry_run: bool,
-        /// Skip confirmation
-        #[arg(short = 'y', long = "yes")]
-        yes: bool,
-    },
-}
-
-#[derive(Args, Debug, Clone)]
-pub struct BranchFilterArgs {
-    /// Branches authored by user (`@me` for current git user)
-    #[arg(long = "user")]
-    pub user: Option<String>,
-    /// Branches whose name includes this wave segment
-    #[arg(long = "wave")]
-    pub wave: Option<String>,
-    /// No commits in the last duration (for example 30d, 2w)
-    #[arg(long = "stale")]
-    pub stale: Option<String>,
-    /// First unique commit before YYYY-MM-DD
-    #[arg(long = "created-before")]
-    pub created_before: Option<String>,
-    /// Only branches already merged into main
-    #[arg(long = "merged")]
-    pub merged: bool,
-    /// Include branches with open PRs
-    #[arg(long = "include-open-prs")]
-    pub include_open_prs: bool,
-}
-
-#[derive(Subcommand, Debug)]
 pub enum PmCommand {
     /// Connect (or create) the wave's Linear project; write linear_project to GOAL.md
     Init {
@@ -836,25 +747,6 @@ pub enum WtCommand {
     },
 }
 
-#[derive(Subcommand, Debug)]
-pub enum ShellCommand {
-    /// Print shell integration code
-    Init {
-        /// Shell to generate for (bash, zsh, fish)
-        shell: Option<String>,
-    },
-    /// Install shell integration to config file
-    Install {
-        /// Shell to install for (bash, zsh, fish)
-        shell: Option<String>,
-    },
-    /// Run a shell directive
-    Directive {
-        #[arg(trailing_var_arg = true)]
-        command: Vec<String>,
-    },
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1044,76 +936,6 @@ mod tests {
         };
         assert_eq!(fact, "one fact");
         assert!(target.parent);
-    }
-
-    #[test]
-    fn advance_parses_optional_wave() {
-        let cli = Cli::try_parse_from(["lf", "advance"]).expect("parse");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Advance { wave: None })
-        ));
-
-        let cli = Cli::try_parse_from(["lf", "advance", "-w", "goals"]).expect("parse");
-        let Some(Commands::Advance { wave }) = cli.command else {
-            panic!("expected advance command");
-        };
-        assert_eq!(wave.as_deref(), Some("goals"));
-    }
-
-    #[test]
-    fn branches_list_accepts_filters() {
-        let cli =
-            Cli::try_parse_from(["lf", "branches", "list", "--user", "@me", "--stale", "60d"])
-                .expect("parse");
-        let Some(Commands::Branches {
-            cmd:
-                BranchesCommand::List {
-                    filters:
-                        BranchFilterArgs {
-                            user,
-                            stale,
-                            merged,
-                            ..
-                        },
-                },
-        }) = cli.command
-        else {
-            panic!("expected branches list command");
-        };
-
-        assert_eq!(user.as_deref(), Some("@me"));
-        assert_eq!(stale.as_deref(), Some("60d"));
-        assert!(!merged);
-    }
-
-    #[test]
-    fn branches_prune_accepts_yes_and_dry_run() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "branches",
-            "prune",
-            "--wave",
-            "redesign",
-            "--dry-run",
-            "-y",
-        ])
-        .expect("parse");
-        let Some(Commands::Branches {
-            cmd:
-                BranchesCommand::Prune {
-                    filters: BranchFilterArgs { wave, .. },
-                    dry_run,
-                    yes,
-                },
-        }) = cli.command
-        else {
-            panic!("expected branches prune command");
-        };
-
-        assert_eq!(wave.as_deref(), Some("redesign"));
-        assert!(dry_run);
-        assert!(yes);
     }
 
     #[test]

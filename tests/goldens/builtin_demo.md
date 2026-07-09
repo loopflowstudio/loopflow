@@ -17,7 +17,6 @@ lf pr submit                     # prep + mark ready + assign to you; you click 
 lf pr land                       # hands-off: submit, then arm auto-merge
 lf rebase --plan              # show reset/rebase strategy
 lf rebase                     # apply the planned update
-lf next                       # preserve worktree, fresh branch
 lf wt create my-feature       # sibling worktree, root branch from main (default)
 lf wt create thing --child parent # stack a child under parent
 lf wt switch my-feature       # cd to a worktree (wave name, leaf, or branch)

@@ -3,15 +3,14 @@ use std::path::Path;
 use clap::Parser;
 
 use crate::engine::flow::Op;
-use crate::engine::git::{get_default_branch, sync_main};
-use crate::engine::{sync_skills, SkillSyncOptions};
+use crate::engine::git::get_default_branch;
 use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, land, next_branch, rebase_with_recovery,
-    release_bump, release_check, release_notes, release_run, release_status, release_tag, submit,
-    AbandonOptions, CommitOptions, LandOptions, NextOptions, PrOptions, RebaseOptions,
+    abandon_branch, commit_workflow, create_or_update_pr, land, rebase_with_recovery, release_bump,
+    release_check, release_notes, release_run, release_status, release_tag, submit, AbandonOptions,
+    CommitOptions, LandOptions, PrOptions, RebaseOptions,
 };
 
 pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> OpsResult<()> {
@@ -34,45 +33,6 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
                 &RebaseOptions {
                     onto: onto_ref,
                     push: true,
-                },
-                progress,
-            )?;
-            Ok(())
-        }
-        Some(Commands::Sync) => {
-            let base = get_default_branch(repo)?;
-            if !sync_main(repo, &base)? {
-                return Err(OpsError::Message(
-                    "working tree dirty; sync aborted".to_string(),
-                ));
-            }
-            Ok(())
-        }
-        Some(Commands::SyncSkills { yes: _, no_prune }) => {
-            sync_skills(&SkillSyncOptions {
-                prune: !no_prune,
-                global_home: None,
-            })?;
-            Ok(())
-        }
-        Some(Commands::Advance { wave }) => {
-            let wave = crate::ops::util::resolve_wave_name(repo, wave.as_deref())
-                .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
-            let branch = crate::ops::advance_branch(repo, &wave)?;
-            progress.status(&format!("Advanced to branch: {branch}"));
-            Ok(())
-        }
-        Some(Commands::Next {
-            create_pr,
-            no_rebase,
-        }) => {
-            next_branch(
-                repo,
-                &NextOptions {
-                    create_pr,
-                    rebase: !no_rebase,
-                    wave_name: None,
-                    agent: None,
                 },
                 progress,
             )?;
@@ -223,8 +183,7 @@ fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -
 /// agent, reads interactively, or manages waves has no place in a flow step.
 fn unsupported() -> OpsError {
     OpsError::Message(
-        "op item must be one of pr open, pr submit, pr land, pr abandon, rebase, sync, \
-         sync-skills, advance, next, commit, or release"
+        "op item must be one of pr open, pr submit, pr land, pr abandon, rebase, commit, or release"
             .to_string(),
     )
 }

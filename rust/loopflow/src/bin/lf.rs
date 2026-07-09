@@ -563,30 +563,6 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Pm { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_pm(cmd))
             }
-            Some(Commands::Branches { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_branches(cmd))
-            }
-            Some(Commands::Queue { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_queue(cmd))
-            }
-            Some(Commands::Shell { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_shell(cmd))
-            }
-            Some(Commands::Sync) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_sync())
-            }
-            Some(Commands::Next {
-                create_pr,
-                no_rebase,
-            }) => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::ops::run_next(*create_pr, *no_rebase, cli.model.as_deref())
-            }),
-            Some(Commands::Advance { wave }) => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::ops::run_advance(wave.as_deref())
-            }),
-            Some(Commands::Doctor { brewfile }) => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::ops::run_doctor(*brewfile)
-            }),
             Some(Commands::SyncSkills { yes, no_prune }) => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune)
             }),
@@ -705,13 +681,6 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Auth { .. })
         | Some(Commands::Release { .. })
         | Some(Commands::Pm { .. })
-        | Some(Commands::Branches { .. })
-        | Some(Commands::Queue { .. })
-        | Some(Commands::Shell { .. })
-        | Some(Commands::Sync)
-        | Some(Commands::Next { .. })
-        | Some(Commands::Advance { .. })
-        | Some(Commands::Doctor { .. })
         | Some(Commands::SyncSkills { .. })
         | Some(Commands::Cron { .. })
         | Some(Commands::Wave { .. })
@@ -741,34 +710,8 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":",
-            "pr",
-            "wt",
-            "rebase",
-            "commit",
-            "auth",
-            "release",
-            "pm",
-            "branches",
-            "queue",
-            "shell",
-            "sync",
-            "next",
-            "advance",
-            "doctor",
-            "sync-skills",
-            "wave",
-            "task",
-            "flow",
-            "skill",
-            "chat",
-            "memory",
-            "usage",
-            "ls",
-            "status",
-            "runs",
-            "trace",
-            "help",
+            ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "wave", "task", "flow",
+            "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace", "help",
         ] {
             assert!(tables.commands.contains(command), "command {command}");
         }

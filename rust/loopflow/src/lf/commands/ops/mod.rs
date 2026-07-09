@@ -15,18 +15,14 @@ use crate::engine::{
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_skill;
 use crate::lf::output::Colors;
-use crate::lf::{
-    BranchFilterArgs, BranchesCommand, CronCommand, PmCommand, PmTaskCommand, PrCommand,
-    QueueCommand, ReleaseCommand, ShellCommand, WtCommand,
-};
+use crate::lf::{CronCommand, PmCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, current_pr, land, list_branch_candidates,
-    next_branch, plan_rebase, prune_branches, rebase_class_name, rebase_strategy_name,
-    rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
-    release_tag, submit, AbandonOptions, BranchFilterOptions, BranchListOptions,
-    BranchPruneOptions, CommitOptions, CronSpec, LandOptions, NextOptions, PrOptions, Progress,
-    RebaseOptions, SystemLaunchctl,
+    abandon_branch, commit_workflow, create_or_update_pr, current_pr, land, next_branch,
+    plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, release_bump,
+    release_check, release_notes, release_run, release_status, release_tag, submit, AbandonOptions,
+    CommitOptions, CronSpec, LandOptions, NextOptions, PrOptions, Progress, RebaseOptions,
+    SystemLaunchctl,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -108,12 +104,6 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
         }
         ReleaseCommand::Tag { version, target } => release_tag_cmd(version, target.as_deref()),
         ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
-    }
-}
-
-pub fn run_queue(cmd: &QueueCommand) -> Result<()> {
-    match cmd {
-        QueueCommand::Reconcile { wave } => crate::ops::queue::reconcile_queue_cmd(wave.as_deref()),
     }
 }
 
@@ -824,105 +814,6 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub fn run_branches(cmd: &BranchesCommand) -> Result<()> {
-    let progress = &CliProgress;
-    let repo_root = find_repo_root()?;
-    match cmd {
-        BranchesCommand::List { filters } => {
-            let candidates =
-                list_branch_candidates(&repo_root, &branch_list_options(filters, true))?;
-            print_branch_candidates(&candidates);
-        }
-        BranchesCommand::Prune {
-            filters,
-            dry_run,
-            yes,
-        } => {
-            let candidates = prune_branches(
-                &repo_root,
-                &branch_prune_options(filters, *dry_run, *yes),
-                progress,
-            )?;
-            if *dry_run {
-                print_branch_candidates(&candidates);
-            } else if !candidates.is_empty() {
-                println!("Deleted {} remote branch(es).", candidates.len());
-            }
-        }
-    }
-    Ok(())
-}
-
-fn branch_list_options(
-    filters: &BranchFilterArgs,
-    default_user_if_empty: bool,
-) -> BranchListOptions {
-    BranchListOptions {
-        filters: branch_filter_options(filters),
-        default_user_if_empty,
-    }
-}
-
-fn branch_prune_options(
-    filters: &BranchFilterArgs,
-    dry_run: bool,
-    yes: bool,
-) -> BranchPruneOptions {
-    BranchPruneOptions {
-        filters: branch_filter_options(filters),
-        dry_run,
-        yes,
-    }
-}
-
-fn branch_filter_options(filters: &BranchFilterArgs) -> BranchFilterOptions {
-    BranchFilterOptions {
-        user: filters.user.clone(),
-        wave: filters.wave.clone(),
-        stale: filters.stale.clone(),
-        created_before: filters.created_before.clone(),
-        merged: filters.merged,
-        include_open_prs: filters.include_open_prs,
-    }
-}
-
-fn print_branch_candidates(candidates: &[crate::ops::BranchCandidate]) {
-    if candidates.is_empty() {
-        println!("No remote branches match.");
-        return;
-    }
-
-    let max_branch = candidates
-        .iter()
-        .map(|candidate| candidate.branch.len())
-        .max()
-        .unwrap_or(0);
-    for candidate in candidates {
-        let status = if candidate.protected {
-            format!(
-                "protected: {}",
-                candidate.protect_reason.as_deref().unwrap_or("safety")
-            )
-        } else if candidate.open_pr {
-            "open PR".to_string()
-        } else if candidate.merged {
-            "merged".to_string()
-        } else {
-            "active".to_string()
-        };
-        let wave = candidate.wave.as_deref().unwrap_or("-");
-        println!(
-            "{:<width$}  {:>4}d  {}  {:<12}  {}",
-            candidate.branch,
-            candidate.age_days,
-            candidate.last_commit_date,
-            status,
-            wave,
-            width = max_branch,
-        );
-    }
-}
-
 pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
         WtCommand::Create {
@@ -1580,87 +1471,6 @@ fn wt_ci(watch: bool, logs: bool) -> Result<()> {
     }
 }
 
-pub fn run_shell(cmd: &ShellCommand) -> Result<()> {
-    match cmd {
-        ShellCommand::Init { shell } => shell_init(shell.as_deref()),
-        ShellCommand::Install { shell } => shell_install(shell.as_deref()),
-        ShellCommand::Directive { command } => shell_directive(command),
-    }
-}
-
-fn shell_init(shell: Option<&str>) -> Result<()> {
-    let shell = shell.unwrap_or("zsh");
-    let init = match shell {
-        "zsh" => SHELL_INIT_ZSH,
-        "bash" => SHELL_INIT_BASH,
-        _ => return Err(anyhow!("unsupported shell: {}", shell)),
-    };
-    println!("{}", init);
-    Ok(())
-}
-
-fn shell_install(shell: Option<&str>) -> Result<()> {
-    let shell = shell
-        .map(|value| value.to_string())
-        .or_else(|| std::env::var("SHELL").ok())
-        .unwrap_or_else(|| "zsh".to_string());
-    let shell_name = if shell.contains("bash") {
-        "bash"
-    } else {
-        "zsh"
-    };
-    let (config_path, install_line) = match shell_name {
-        "bash" => (
-            dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".bashrc"),
-            SHELL_INSTALL_LINE_BASH,
-        ),
-        _ => (
-            dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".zshrc"),
-            SHELL_INSTALL_LINE_ZSH,
-        ),
-    };
-
-    if let Ok(content) = std::fs::read_to_string(&config_path) {
-        if content.contains("lf shell init") {
-            println!("Already installed in {}", config_path.display());
-            return Ok(());
-        }
-    }
-
-    std::fs::create_dir_all(
-        config_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new(".")),
-    )?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&config_path)?;
-    use std::io::Write;
-    writeln!(file, "\n{}", install_line)?;
-    println!("Installed to {}", config_path.display());
-    println!(
-        "Restart your shell or run: source {}",
-        config_path.display()
-    );
-    Ok(())
-}
-
-fn shell_directive(command: &[String]) -> Result<()> {
-    if command.is_empty() {
-        return Err(anyhow!("command required"));
-    }
-    let line = command.join(" ");
-    if !write_shell_directive(&line)? {
-        println!("{}", line);
-    }
-    Ok(())
-}
-
 fn write_shell_directive(command: &str) -> Result<bool> {
     let directive = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
     let Some(path) = directive else {
@@ -1674,61 +1484,6 @@ fn write_shell_directive(command: &str) -> Result<bool> {
     writeln!(file, "{}", command)?;
     Ok(true)
 }
-
-const SHELL_INIT_ZSH: &str = r#"# loopflow shell integration for zsh
-#
-# Enables directory switching after commands that emit shell directives
-# (for example `lf wt create`, `lf wt switch`, `lf pr land`).
-
-if command -v lf >/dev/null 2>&1; then
-    lf() {
-        local directive_file exit_code=0
-        directive_file="$(mktemp)"
-
-        LOOPFLOW_DIRECTIVE_FILE="$directive_file" command lf "$@" || exit_code=$?
-
-        if [[ -s "$directive_file" ]]; then
-            source "$directive_file"
-            if [[ $exit_code -eq 0 ]]; then
-                exit_code=$?
-            fi
-        fi
-
-        rm -f "$directive_file"
-        return "$exit_code"
-    }
-fi
-"#;
-
-const SHELL_INIT_BASH: &str = r#"# loopflow shell integration for bash
-#
-# Enables directory switching after commands that emit shell directives
-# (for example `lf wt create`, `lf wt switch`, `lf pr land`).
-
-if command -v lf >/dev/null 2>&1; then
-    lf() {
-        local directive_file exit_code=0
-        directive_file="$(mktemp)"
-
-        LOOPFLOW_DIRECTIVE_FILE="$directive_file" command lf "$@" || exit_code=$?
-
-        if [[ -s "$directive_file" ]]; then
-            source "$directive_file"
-            if [[ $exit_code -eq 0 ]]; then
-                exit_code=$?
-            fi
-        fi
-
-        rm -f "$directive_file"
-        return "$exit_code"
-    }
-fi
-"#;
-
-const SHELL_INSTALL_LINE_ZSH: &str =
-    "if command -v lf >/dev/null 2>&1; then eval \"$(command lf shell init zsh)\"; fi";
-const SHELL_INSTALL_LINE_BASH: &str =
-    "if command -v lf >/dev/null 2>&1; then eval \"$(command lf shell init bash)\"; fi";
 
 // ==========================================================================
 // Skill agent fallback

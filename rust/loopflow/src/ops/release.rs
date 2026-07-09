@@ -15,6 +15,7 @@ use crate::engine::worktrees::{create_wave_worktree, main_repo_root};
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::land::{land, LandOptions};
+use crate::ops::pr::PrCopy;
 use crate::ops::progress::Progress;
 use crate::ops::util::command_exists;
 
@@ -402,6 +403,7 @@ fn prepare_release_in_worktree(
     )?;
 
     let pr = current_pr_summary(wt_path)?;
+    let pr_copy = release_pr_copy(wt_path, target, version)?;
 
     progress.status("Enqueuing release PR for merge...");
     land(
@@ -412,8 +414,8 @@ fn prepare_release_in_worktree(
             create_pr: false,
             worktree: None,
             commit_message: None,
-            pr_title: None,
-            pr_body: None,
+            pr_title: Some(pr_copy.title),
+            pr_body: Some(pr_copy.body),
             agent: None,
         },
         progress,
@@ -574,6 +576,13 @@ fn release_commit_message(target: &ReleaseTarget, version: &str) -> String {
     } else {
         format!("release: {} v{version}", target.name)
     }
+}
+
+fn release_pr_copy(repo: &Path, target: &ReleaseTarget, version: &str) -> OpsResult<PrCopy> {
+    Ok(PrCopy {
+        title: release_commit_message(target, version),
+        body: fs::read_to_string(repo.join("RELEASE_NOTES.md"))?,
+    })
 }
 
 fn current_pr_summary(repo: &Path) -> OpsResult<GhPrSummary> {
@@ -1942,6 +1951,18 @@ version = "2.0.0"
             workflow: None,
         };
         assert_eq!(target_tag(&target, "2.0.0"), "cli/v2.0.0");
+    }
+
+    #[test]
+    fn release_pr_copy_uses_generated_release_notes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = default_release_target(tmp.path());
+        write_release_notes(tmp.path(), "## Highlights\n\n- Releases work.", "1.2.3").unwrap();
+
+        let copy = release_pr_copy(tmp.path(), &target, "1.2.3").unwrap();
+
+        assert_eq!(copy.title, "release: v1.2.3");
+        assert_eq!(copy.body, "# v1.2.3\n\n## Highlights\n\n- Releases work.");
     }
 
     // ======================================================================

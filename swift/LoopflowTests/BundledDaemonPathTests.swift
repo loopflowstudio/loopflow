@@ -75,6 +75,43 @@ struct BundledDaemonPathTests {
         #expect(once.contains("/opt/homebrew/bin"))
     }
 
+    // The regression that motivated asking the login shell: codex installs via
+    // npm into a version-manager directory (~/.nvm/versions/node/<v>/bin) that
+    // no fixed candidate list can name. Under the GUI PATH alone, spawning the
+    // codex app-server failed with ENOENT and every wave mind died on startup.
+    //
+    // Asserted against whatever the user's shell actually reports, so the test
+    // says something true on any machine: every directory the interactive login
+    // shell has, an enriched GUI child has too.
+    @Test("enriched PATH covers every directory the user's login shell provides")
+    func enrichedPathCoversLoginShellDirectories() throws {
+        guard let shellPath = interactiveLoginShellPath() else { return }
+
+        let enriched = Set(
+            GUIProcessEnvironment.enrichedPath(from: Self.guiPath)
+                .split(separator: ":").map(String.init)
+        )
+
+        for dir in shellPath.split(separator: ":").map(String.init) {
+            #expect(enriched.contains(dir), "login shell PATH entry missing from enriched PATH: \(dir)")
+        }
+    }
+
+    // Independent of GUIProcessEnvironment's own shell plumbing — if both were
+    // broken the same way, the test above would still pass vacuously.
+    private func interactiveLoginShellPath() -> String? {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        guard FileManager.default.isExecutableFile(atPath: shell) else { return nil }
+
+        guard let result = try? spawnAndWait(
+            shell,
+            args: ["-ilc", "printf '%s' \"$PATH\""],
+            env: ["PATH": Self.guiPath, "HOME": FileManager.default.homeDirectoryForCurrentUser.path]
+        ), result.exit == 0, !result.stdout.isEmpty else { return nil }
+
+        return result.stdout
+    }
+
     // Reproduces the Ghostty failure mode: once a surface is opened, Ghostty
     // spawns `/usr/bin/login -flp ... /bin/bash --noprofile --norc -c 'exec -l tmux ...'`.
     // The `--noprofile --norc` flags mean bash doesn't resource any login files,

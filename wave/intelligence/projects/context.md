@@ -10,13 +10,12 @@ from the knobs we refuse to add as from the text we write.
 
 - Evidence-cited editing is the standing practice: for a month, every
   prompt/skill/flow change lands with a cited run failure or cost trace and
-  a follow-up run showing the intended behavior — the nine tier skills get
-  their citations first.
-- Median tokens per comparable run trends down across a month of real runs
-  without first-pass gate regression.
+  a follow-up run showing the intended behavior; zero uncited changes land.
+- Median tokens per comparable run is lower after a month of real runs than
+  before it, with no first-pass gate regression.
 - Zero-config excellence, repeated: 3/3 fresh repos reach a landed PR with
-  nothing configured; the config-surface audit removes knobs and the
-  non-configurability doctrine holds for a month without a new knob.
+  nothing configured, and the non-configurability doctrine holds for a month
+  without a new knob.
 - Bus reports stay foldable: a week in which the wave acts on every child
   report without opening a single child transcript.
 - Context generation earns its place continuously: what rides into each

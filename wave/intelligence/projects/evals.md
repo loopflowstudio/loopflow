@@ -13,7 +13,6 @@ and every change to the system stays answerable to that comparison forever.
 - The suite runs on cadence for a quarter — weekly and on every release —
   without manual repair; a broken eval is a stop-the-line event.
 - Prompt/skill/flow changes are gated by eval regressions for a month:
-  zero ungated changes land, and the quality-proxy question stays answered
-  (the proxy is the eval).
+  zero ungated changes land.
 - Any capability claim made in chat or docs is rerunnable on demand (one
   command) the day it's made.

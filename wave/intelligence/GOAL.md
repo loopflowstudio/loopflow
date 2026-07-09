@@ -22,14 +22,14 @@ Projects do not own memory, cadence, child projects, or task lists.
 ## Bounds
 
 - No remote telemetry, global run server, or vector-store dependency.
-- No cross-machine journal replay, Letta dependency, or memory server above
-  the wave.
+- No cross-machine journal replay, and no vendor memory backend (Letta and
+  kin) taken on as a dependency.
 
 ## Cron
 
-- `daily` -> audit context size, trace coverage, and externalization gaps; if
-  a run cannot explain what the model saw or why it behaved differently, make
-  that the next task.
+- `daily` -> audit context size, trace coverage, and eval freshness; if a run
+  cannot explain what the model saw or why it behaved differently, make that
+  the next task.
 - `weekly` -> inspect recent local run evidence, choose one prompt/context
   edit that measurement justifies, and file or dispatch it.
 
@@ -37,7 +37,10 @@ Projects do not own memory, cadence, child projects, or task lists.
 
 Read the projects, then start from evidence, not vibes: read the ledger, prompt
 artifact, eval result, or context boundary that should answer the question, and
-only then choose work. Instrument a blind spot when no measurement exists; edit
-a prompt, context surface, or builtin when the evidence already points. Move
-lessons between builtins and repo agent docs only after real runs prove the
+only then choose work. Run the reader before trusting it — a measurement taken
+against a fresh store proves nothing about the long-lived one that holds the
+history, and a surface nobody has queried on real data is a surface that does
+not work. Instrument a blind spot when no measurement exists; edit a prompt,
+context surface, or builtin when the evidence already points. Move lessons
+between builtins and repo agent docs only after real runs prove the
 distinction.

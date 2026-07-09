@@ -89,9 +89,14 @@ lf loop task "..." &    # background solve — concurrency, the only reason to
 Entering a task or project flowloop inherently forks a worktree. That is not a
 cost to weigh; it is what the verb means.
 
-### Channels are topics
+### Two wires: the bus and the thread
 
-One string does three jobs today. Split them:
+The `say` op is two different things fused. Today it is both agent-to-agent
+signaling (wakes the flowloop, coalesces into the inbox) and the human chat
+(folds into the thread the Mac renders). Every steering problem in this design
+traces to that fusion. Split them.
+
+**The bus** — pubsub, agent-to-agent only. Channels are topics:
 
 - **Channel** — a topic. What the stream is about. Any `lf` exec may post to or
   listen on any channel it has the capability for.
@@ -99,33 +104,27 @@ One string does three jobs today. Split them:
 - **Family head** — routing. Which server holds the pen, which journal file.
   Keep it; it is a fact about single-writer discipline, not about meaning.
 
-`wave/<wave>/user` is the live-to-user channel — the one thread, the one the Mac
-renders. For now, only the wave publishes to it. A hand's report reaches the
-human when the wave relays it; that is the wave curating its own thread, which
-is what "one chat interface" means. It costs one wave pass of latency.
-
 **Writes go down. Reads go up.** Publish is permitted iff
 `matches_prefix(target, writer_channel)` — your channel and its subtree — with
-`writer_channel` derived server-side from the token. A child publishes to
-`<self>/report`; the parent *subscribes*. No upward write exists anywhere. The
-prefix rule is total, with zero exceptions.
+`writer_channel` derived server-side from the token. A hand narrates to
+`<self>` and authors reports to `<self>/report`; the parent *subscribes* to
+reports and not narration. A child wave likewise. No upward write exists
+anywhere. The prefix rule is total, with zero exceptions — `lf chat --parent`
+becomes sugar for `--channel <self>/report`, and `driver.rs:206` stops being a
+crossing: the child was always talking in its own room, and the parent was
+always the one who chose to listen.
 
-`lf chat --parent` becomes sugar for `--channel <self>/report`. `driver.rs:206`
-stops being a crossing: the child was always talking in its own room, and the
-parent was always the one who chose to listen.
-
-**Wake is subscription.** A wave wakes on `<wave>/user` and on `<child>/report`
-for each child. Its own hands narrate to `<wave>/run/<id>`, which it does not
-subscribe to — so a wave inhabiting a task cannot wake itself. Not guarded
-against; structurally impossible once narration and address are different
-things.
+**Wake is subscription.** The flowloop wakes on reports, heartbeat, and cron.
+It does not subscribe to its own narration — so a wave inhabiting a task cannot
+wake itself. Not guarded against; structurally impossible once narration and
+address are different things. A hand that finishes silently is a hand that
+never reported, and that is legible as its failure.
 
 Security consequence, not optional. `sender_attribution()` (`chat.rs:302`)
 builds the byline from the caller's env, and the wire carries
 `from: Option<Attribution>` (`server.rs:334`). Client-claimed. That is safe only
-while the channel is ownership-derived — you could write where you lived and
-nowhere else, so the address pinned the byline. Topics unpin it: a leaked worker
-token would post to the human's channel as the wave. **The token names the
+while the channel is ownership-derived — the address pinned the byline. Topics
+unpin it: a leaked worker token would post as the wave. **The token names the
 writer; the writer does not get to say.**
 
 Cost, in `channel.rs`. Ownership naming inverts a channel to a worktree
@@ -135,6 +134,56 @@ many processes post to it. Journals move to the origin; retention becomes
 per-topic policy rather than a side effect of branch deletion. The FLAGGED
 archive note (`~/.lf/journal/<repo>/<worktree>`) stops being a fallback and
 becomes the design.
+
+**The thread** — the human surface. Not a topic. One UI-level thread per wave:
+journal-backed, durable, never resets. The human is not on the bus.
+
+### The thread is the product; the session is the current body
+
+There is no separate chat LLM. The human connects to **the running pass
+itself** — the session initialized with `wave_clarify`/`wave_pursue`/
+`wave_mutate`, given the skill's seed as its first message, and then live to
+the user interactively. The persona changes out from under you as the flow
+moves through its skills, and that is honest: you are talking to the wave *at
+a phase*. The UI shows one thread while the underlying harness rotates —
+per-skill sessions, per-pass processes, even per-skill vendors
+(`default_agent:` is skill frontmatter).
+
+The scheduler already holds the inbox open during a pass —
+`run_pass`'s `select!` (`wave.rs:439`) is `biased` toward the inbox and beats
+pass completion. Mid-pass there are two verbs today: `Interrupt` kills the
+child; everything else queues for the boundary
+(`messages_during_a_pass_coalesce_into_one_boundary_pass`). The change is one
+arm: forward the message **into the child's live session** (streaming-input
+harness mode) instead of queuing it. Interrupt and coalescing survive
+unchanged — restart-the-flowloop is a steering lever that already exists and is
+already journaled.
+
+Responsiveness becomes tool-boundary granularity (seconds to a minute), not
+pass-boundary (30min–4h). When no pass is running, a human message journals,
+wakes a pass, and the human is attached from birth. One thread either way.
+
+What #845 established survives fully: session lifetime equals pass lifetime, no
+resident LLM, log as truth. The session is disposable; the thread is durable.
+
+Three seams:
+
+- **The journal, not the harness transcript, is the continuity.** Every body
+  receives recent chat history at birth — `<lf:wave-chat-recent>` already rides
+  every launch (`wave_context.rs`: 12 turns, newest survive), and under this
+  design it stops being context flavoring and becomes the mechanism that makes
+  session rotation invisible: every body wakes up mid-conversation, already
+  caught up. Which forces a rule: every in-session exchange journals *as it
+  happens*. User messages already do (the `say` op); the pass's replies ship at
+  the boundary today (`ship_output`) and must journal incrementally instead —
+  anything said mid-session that isn't journaled is invisible to the next body.
+- **`pass_timeout` will hang up on the user.** The timeout arm in the same
+  `select!` kills the child at 30 minutes flat, mid-sentence if the human is
+  mid-conversation. Presence extends the lease, or interactive passes get
+  different caps.
+- **Chat spends the engine's context.** The conversation lands in the working
+  pass's window. That was the only genuine advantage of a separate face agent,
+  and it is the price of one head.
 
 ### What a hand is
 
@@ -371,7 +420,10 @@ pane on it, not a place to navigate to.
   backgrounded, in which worktree, at which pass. This is the `<in_flight>` fold
   and `lf runs`, surfaced.
 - **Backlog** — filed-but-not-running tasks, now that they exist.
-- **Thread** — the one chat. Hands' bylines resolve here; subwaves do not.
+- **Thread** — the one chat: the journal-backed fold, live-attached to the
+  running pass's session when one exists. Reports surface here; subwaves do
+  not. The phase currently holding the pen (clarify / pursue / mutate) can show
+  as presence.
 
 The design constraint is the one from the model: a session is not a
 conversation. Rendering each active session as its own chat is precisely how
@@ -409,13 +461,16 @@ The wave answers from its own memory. It has inhabited `technical-architecture`
 `developer-efficiency` and `release-stability` run backgrounded, reporting up.
 `lf runs` shows hands; nothing there is a conversation.
 
-Steer the blocked one without leaving the thread:
+Steer without leaving the thread:
 
 ```bash
 lf chat "actually skip the migration, just gate it"
 ```
 
-The next pass of the task loop hears it, because a hand reads its wave.
+If a pass is live, the message lands inside its running session at the next
+tool boundary — seconds, not a pass boundary. If not, it journals and the pass
+it wakes is born already caught up, because every mind receives recent chat at
+birth.
 
 Open Loopflow Mac on the same wave: one screen, the thread plus KRs, open PRs,
 and active sessions. The screen has no second conversation on it.
@@ -427,36 +482,60 @@ lf chat --wave release-stability "drop the flaky retry, delete the test"
 
 A second room, because you asked for one. The parent stops overhearing.
 
+## Resolved along the way
+
+- **Buffer vs byline** was never a choice: the bus carries narration and
+  reports; the thread is not a topic at all.
+- **A separate chat LLM vs the flowloop** was a false pair: the chat is an
+  attachment mode on the running pass. One head; the thread outlives its
+  bodies.
+- **Does a loop child re-read the wave live?** Yes, verified: no `env_clear`
+  in the pass-spawn path, and `FlowloopRun` worktrees are wave-named
+  (`<repo>.<wave>.<run-id>`), so ambient resolution lands on the wave with or
+  without `LFD_WAVE_ID`. The ear is at pass granularity.
+- **The finish-wake hole**: done is a report on `<self>/report`; the flowloop
+  subscribes to reports, not narration. A hand that finishes silently never
+  reported — legible as its failure.
+
 ## Open questions
 
-*(Resolved: buffer vs byline was never a choice — it is two topics.
-`<wave>/run/<id>` is the firehose, `<wave>/user` is the thread, and the Mac
-panes are subscriptions.)*
+**Is inhabitation a flow-swap or just a blocking loop?** §1 says the wave's own
+pass becomes the project flow (its reasoning in its own transcript, hands do
+code). The demo blocks on `lf loop task` — a child process with a *private*
+transcript, which breaks the trichotomy's cost table ("inhabit spends my
+context budget" is false for a subprocess). Either inhabit = flow-swap and the
+wave thinks *as* the project, or inhabit dissolves into "block on one loop" and
+§1 mostly dies. The doc currently sells both.
 
-**What is the topic vocabulary?** `<wave>/user` and `<wave>/run/<id>` and
-`<child>/report` fall out of the design. `<wave>/prs`, `<wave>/runs` fall out of
-the Mac panes. Whether those are topics or store queries is undecided, and it
-decides whether the UI is a subscriber or a poller.
+**Who owns a backgrounded loop?** Shell `&` from inside a pass makes the loop a
+grandchild of a process that dies in ≤30min. Server-owned detach
+(`lf loop task --detach`, residency supervises, parks it in a named session)
+fits everything else and gives read-only tmux something to attach to. But then
+the `&` in this doc's own examples is wrong as written.
 
-**Retention per topic.** `<wave>/run/<id>` should probably still die with its
-worktree; `<wave>/user` must not. Once journals live in the origin, nothing
-deletes them by accident, which was previously the only retention policy.
+**Do project loops exist?** A delegated project's bit is "all KRs true" —
+weeks, against `max_passes: 8`, held by a hand with no memory. Weeks-long bets
+that accumulate learnings are mind-shaped. The clean alternative: tasks
+delegate; projects inhabit or promote; only waves reside. That collapses the
+verb table onto the noun table — task↔delegate, project↔inhabit-or-promote,
+wave↔reside — and rewrites the demo, which currently backgrounds two projects.
 
-**Does a `lf loop` child inherit `LFD_WAVE_ID`?** If yes, a flowloop's ear is at
-pass granularity and §5 (the tmux door) closes for free. If no, everything about
-steering a hand changes. Check first; it is one grep and it decides three
-sections.
+**Topic vocabulary and retention.** `<self>` and `<self>/report` fall out of
+the design; whether the Mac panes (PRs, runs, KRs) are topics or store queries
+decides whether the UI is a subscriber or a poller. Narration topics can die
+with their worktrees; the thread's journal must not. Notation: pick dots or
+slashes — `matches_prefix` speaks dots.
 
-**Can a hand grow hands?** `family_head()` takes the first dot segment, so
-`goals.a.b` is flat under `goals` and the namespace tolerates it. Whether a task
-loop may run `lf loop task &` is policy. *Only minds delegate* is the tighter
-answer.
+**Can a hand grow hands?** The namespace tolerates `goals.a.b`. *Only minds
+delegate* is the tighter answer.
 
-**Depth.** Two levels is probably the honest limit — a grandchild's news reaches
-the root only if its parent re-authors it, and nothing structural says so.
+**Depth.** Two levels is probably the honest limit — a grandchild's news
+reaches the root only if its parent re-authors it, and nothing structural says
+so.
 
 **"Delegate all but one" is still procedural, at arity N−1.** Two projects
-contending on the same files should not both run, and the real parallelism unit
-is in-flight runs, not projects. *Parallelism degree equals project count* is a
-legible invariant, and legibility may beat optimality for something a human
-steers — but it is a choice, not a consequence of this design.
+contending on the same files should not both run, and the real parallelism
+unit is in-flight runs, not projects. *Parallelism degree equals project
+count* is a legible invariant, and legibility may beat optimality for
+something a human steers — but it is a choice, not a consequence of this
+design.

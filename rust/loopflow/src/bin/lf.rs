@@ -598,6 +598,7 @@ fn main() -> anyhow::Result<()> {
                     .map_err(anyhow::Error::from)
             }),
             Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
+            Some(Commands::Doctor) => loopflow::lf::commands::doctor::run(),
             Some(Commands::Ls { json }) => loopflow::lf::commands::waves::ls(*json),
             Some(Commands::Status { wave, json }) => {
                 loopflow::lf::commands::waves::status(wave.as_deref(), *json)
@@ -686,6 +687,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Wave { .. })
         | Some(Commands::Task { .. })
         | Some(Commands::Usage)
+        | Some(Commands::Doctor)
         | Some(Commands::Ls { .. })
         | Some(Commands::Status { .. })
         | Some(Commands::Runs { .. })

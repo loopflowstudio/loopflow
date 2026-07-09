@@ -91,17 +91,20 @@ pub fn record_usage(input: Option<u64>, output: Option<u64>, cache_read: Option<
 }
 
 /// Record the stream's final cost/duration report for the current run.
+///
+/// Every usage field on a ledger row is cumulative to that point in the run, so
+/// a reader diffs consecutive rows for a per-skill figure and reads the terminal
+/// row for the run total. Cost used to overwrite instead of accumulate, which
+/// made a multi-skill run report only its last agent invocation's cost — and a
+/// run's cost could *fall* between skills, which no running total ever does.
 pub fn record_result(cost_usd: Option<f64>, duration_secs: Option<f64>) {
     PENDING_USAGE.with(|cell| {
         let mut usage = cell.borrow_mut();
-        if cost_usd.is_some() {
-            usage.cost_usd = cost_usd;
+        if let Some(cost) = cost_usd {
+            usage.cost_usd = Some(usage.cost_usd.unwrap_or(0.0) + cost);
         }
-        if duration_secs.is_some() {
-            usage.duration_secs = match usage.duration_secs {
-                Some(existing) => Some(existing + duration_secs.unwrap_or(0.0)),
-                None => duration_secs,
-            };
+        if let Some(duration) = duration_secs {
+            usage.duration_secs = Some(usage.duration_secs.unwrap_or(0.0) + duration);
         }
         usage.seen = true;
     });
@@ -616,6 +619,30 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_usage_field_accumulates_across_a_multi_skill_run() {
+        // A ledger row's usage is cumulative to that point. Cost once
+        // overwrote, so a run could report a *lower* cost after a later skill
+        // and `lf usage` summed only the final skill's spend.
+        super::clear_usage();
+        super::record_usage(Some(100), Some(10), Some(5));
+        super::record_result(Some(1.00), Some(2.0));
+        super::record_usage(Some(50), Some(5), Some(0));
+        super::record_result(Some(0.25), Some(3.0));
+
+        let usage = super::snapshot_usage().expect("usage seen");
+        assert_eq!(usage.input_tokens, 150);
+        assert_eq!(usage.output_tokens, 15);
+        assert_eq!(usage.cache_read_tokens, 5);
+        assert_eq!(usage.duration_secs, Some(5.0));
+        assert_eq!(
+            usage.cost_usd,
+            Some(1.25),
+            "cost must accumulate, not overwrite"
+        );
+        super::clear_usage();
+    }
+
     use super::claim_first;
     use std::sync::atomic::AtomicBool;
 

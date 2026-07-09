@@ -250,6 +250,8 @@ pub enum Commands {
     },
     /// Show token usage and cost by repo and provider (from the local ledger)
     Usage,
+    /// Audit the local run ledger: continuity, vocabulary, attribution, coverage
+    Doctor,
     /// List every wave in the registry (running and stopped), marking which
     /// have a live server. Local-only query over the shared ledger.
     Ls {

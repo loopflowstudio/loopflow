@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod chat;
+pub mod doctor;
 pub mod flow;
 pub mod list;
 pub mod memory;

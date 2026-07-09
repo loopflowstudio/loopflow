@@ -89,7 +89,7 @@ memory.
 
 - **Quality**: daemon migrations are transactional.
 - **Quality**: webhook security is enabled by default.
-- **Done means**: a landed PR of real product code, roadmap item closed and PR-linked.
+- **Done means**: a landed PR of real product code, Linear task closed and PR-linked.
 
 ## Process
 
@@ -221,8 +221,8 @@ The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist
 
 Run the wave agent and it works one move at a time:
 
-1. **Read** — its `GOAL.md`, `MEMORY.md`, the roadmap, and any work already in flight.
-2. **Decide** — pick the next useful move against the roadmap and metrics.
+1. **Read** — its `GOAL.md`, `MEMORY.md`, Linear tasks, and any work already in flight.
+2. **Decide** — pick the next useful move against the task list and metrics.
 3. **Dispatch** — hand a scoped task to a worker, which runs a flow in its own worktree and opens a PR:
 
    ```bash
@@ -230,13 +230,13 @@ Run the wave agent and it works one move at a time:
    ```
 
 4. **Watch** — the PR is how the worker reports back. The agent reads its diff, checks, and comments.
-5. **Remember** — the agent folds what shipped into `MEMORY.md` and updates the roadmap.
+5. **Remember** — the agent folds what shipped into `MEMORY.md` and updates Linear tasks.
 
 The wave agent coordinates; it rarely writes code itself. Substantial work becomes a worker session you can watch and steer; only atomic fixes are done inline.
 
 ### Fold, Don't Drop
 
-When an item ships, its context — what was learned, what changed, what downstream items should know — folds forward into memory and the remaining roadmap. Nothing is lost. When the roadmap empties, the wave directory persists as a record of what was built.
+When a task ships, its context — what was learned, what changed, what downstream tasks should know — folds forward into memory and the remaining Linear tasks. Nothing is lost. When the open task list empties, the wave directory persists as a record of what was built.
 
 ---
 

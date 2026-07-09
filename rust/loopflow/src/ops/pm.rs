@@ -1,7 +1,7 @@
 //! `lf op pm` — read and write a wave's PM tasks directly in a provider.
 //!
 //! The PM provider is the single source of truth for a wave's tasks. There is
-//! no local mirror: every command here talks to the PM space pinned by the
+//! no local mirror: every command here talks to the Linear project pinned by the
 //! wave's `pm.*_project` frontmatter. Local measured bets live in
 //! `wave/<wave>/projects/` and map to provider labels named `project:<slug>`.
 
@@ -144,7 +144,7 @@ pub struct PmTaskMoveResult {
 
 // ── Client + PM-space resolution ────────────────────────────────────
 
-/// A wave's PM client bound to its provider PM space.
+/// A wave's PM client bound to its provider Linear project.
 pub(crate) struct PmContext {
     pub client: PmClient,
     pub provider: PmProviderKind,
@@ -266,7 +266,7 @@ fn read_project(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<Str
     Some(project).filter(|project| !project.trim().is_empty())
 }
 
-/// Whether a wave has a PM space pinned for its resolved provider.
+/// Whether a wave has a Linear project pinned for its resolved provider.
 fn wave_has_pm_project(repo: &Path, wave: &str) -> bool {
     resolve_provider(repo, wave)
         .ok()
@@ -289,7 +289,7 @@ async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     let project = read_project(repo, wave, provider).ok_or_else(|| {
         OpsError::Message(format!(
             "wave/{wave}/GOAL.md has no `pm.{}`. \
-             Run `lf op pm init --wave {wave}` to connect its PM space.",
+             Run `lf op pm init --wave {wave}` to connect its Linear project.",
             provider.project_key()
         ))
     })?;
@@ -423,7 +423,7 @@ async fn pm_init_async(
     let provider = resolve_provider(repo, &wave)?;
     if let Some(existing) = read_project(repo, &wave, provider) {
         progress.status(&format!(
-            "wave/{wave} already linked to {provider} project {existing}"
+            "wave/{wave} already linked to {provider} Linear project {existing}"
         ));
         return Ok(PmInitResult {
             wave,
@@ -433,7 +433,9 @@ async fn pm_init_async(
     }
 
     let client = build_client(repo, provider).await?;
-    progress.status(&format!("creating {provider} project for wave/{wave}"));
+    progress.status(&format!(
+        "creating {provider} Linear project for wave/{wave}"
+    ));
     let project_id = client
         .create_project(&title_case(&wave), "")
         .await
@@ -486,7 +488,7 @@ async fn fetch_items(
     progress: &impl Progress,
 ) -> OpsResult<PmShowResult> {
     progress.status(&format!(
-        "fetching {} PM space {} for wave/{wave}",
+        "fetching {} Linear project {} for wave/{wave}",
         ctx.provider, ctx.project
     ));
     let mut items = ctx
@@ -592,7 +594,7 @@ async fn apply_update(
                 ));
             };
             progress.status(&format!(
-                "creating {} task in PM space {} for wave/{wave}",
+                "creating {} task in Linear project {} for wave/{wave}",
                 ctx.provider, ctx.project
             ));
             let id = ctx
@@ -806,7 +808,7 @@ async fn pm_sync_async(
             linked_project_ids.insert(project);
         } else {
             diagnostics.push(PmSyncDiagnostic {
-                message: format!("wave/{wave} has no PM space"),
+                message: format!("wave/{wave} has no Linear project"),
             });
         }
     }
@@ -817,7 +819,7 @@ async fn pm_sync_async(
         .copied()
         .unwrap_or(PmProviderKind::Linear);
     let client = build_client(repo, provider).await?;
-    progress.status(&format!("checking {provider} PM spaces and labels"));
+    progress.status(&format!("checking {provider} Linear projects and labels"));
     let spaces = client.list_projects().await.map_err(pm_to_ops)?;
     let labels = client.list_labels().await.map_err(pm_to_ops)?;
     let label_names: BTreeSet<String> = labels.into_iter().map(|label| label.name).collect();
@@ -830,7 +832,7 @@ async fn pm_sync_async(
         if !linked_project_ids.contains(&space.id) {
             diagnostics.push(PmSyncDiagnostic {
                 message: format!(
-                    "PM space `{}` ({}) is not linked by any local wave",
+                    "Linear project `{}` ({}) is not linked by any local wave",
                     space.name, space.id
                 ),
             });
@@ -846,7 +848,7 @@ async fn pm_sync_async(
         match spaces_by_id.get(&space_id) {
             Some(actual) if actual != &expected_space_name => {
                 let message = format!(
-                    "rename PM space `{actual}` ({space_id}) to `{expected_space_name}` for wave/{wave}"
+                    "rename Linear project `{actual}` ({space_id}) to `{expected_space_name}` for wave/{wave}"
                 );
                 if options.plan {
                     actions.push(PmSyncAction { message });
@@ -859,7 +861,7 @@ async fn pm_sync_async(
                 }
             }
             None => diagnostics.push(PmSyncDiagnostic {
-                message: format!("wave/{wave} points at missing PM space {space_id}"),
+                message: format!("wave/{wave} points at missing Linear project {space_id}"),
             }),
             _ => {}
         }
@@ -941,7 +943,7 @@ async fn pm_space_rename_async(
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
     let ctx = resolve_context(repo, &wave).await?;
     progress.status(&format!(
-        "renaming {} PM space {} to {}",
+        "renaming {} Linear project {} to {}",
         ctx.provider, ctx.project, options.title
     ));
     ctx.client
@@ -975,7 +977,7 @@ async fn pm_task_move_async(
     let label = project_label(&options.project);
     let label_id = ctx.client.ensure_label(&label).await.map_err(pm_to_ops)?;
     progress.status(&format!(
-        "moving {} task {} to wave/{wave} PM space {}",
+        "moving {} task {} to wave/{wave} Linear project {}",
         ctx.provider, options.id, ctx.project
     ));
     ctx.client

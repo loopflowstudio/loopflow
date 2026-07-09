@@ -654,12 +654,12 @@ pub enum PmCommand {
         #[arg(long = "title")]
         title: String,
     },
-    /// PM-space operations
+    /// Linear project operations
     Space {
         #[command(subcommand)]
         cmd: PmSpaceCommand,
     },
-    /// PM-task operations
+    /// Linear task operations
     Task {
         #[command(subcommand)]
         cmd: PmTaskCommand,

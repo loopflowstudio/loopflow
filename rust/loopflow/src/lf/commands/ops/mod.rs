@@ -18,11 +18,10 @@ use crate::lf::output::Colors;
 use crate::lf::{CronCommand, PmCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, current_pr, land, next_branch,
-    plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, release_bump,
-    release_check, release_notes, release_run, release_status, release_tag, submit, AbandonOptions,
-    CommitOptions, CronSpec, LandOptions, NextOptions, PrOptions, Progress, RebaseOptions,
-    SystemLaunchctl,
+    abandon_branch, commit_workflow, create_or_update_pr, current_pr, land, plan_rebase,
+    rebase_class_name, rebase_strategy_name, rebase_with_recovery, release_bump, release_check,
+    release_notes, release_run, release_status, release_tag, submit, AbandonOptions, CommitOptions,
+    CronSpec, LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -295,41 +294,6 @@ pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
         report.written.len(),
         report.pruned.len()
     );
-    Ok(())
-}
-
-pub fn run_sync() -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_branch = get_default_branch(&repo_root)?;
-    let ok = crate::engine::git::sync_main(&repo_root, &main_branch)?;
-    if !ok {
-        return Err(anyhow!("working tree dirty; sync aborted"));
-    }
-    Ok(())
-}
-
-pub fn run_next(create_pr: bool, no_rebase: bool, agent_override: Option<&str>) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let result = next_branch(
-        &repo_root,
-        &NextOptions {
-            create_pr,
-            rebase: !no_rebase,
-            wave_name: None,
-            agent: agent_override.map(str::to_string),
-        },
-        &CliProgress,
-    )?;
-    println!("{}", result.new_branch);
-    Ok(())
-}
-
-pub fn run_advance(wave: Option<&str>) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let wave = crate::ops::util::resolve_wave_name(&repo_root, wave)
-        .ok_or_else(|| anyhow!("cannot determine wave name (pass --wave)"))?;
-    let new_branch = crate::ops::advance_branch(&repo_root, &wave)?;
-    println!("{new_branch}");
     Ok(())
 }
 

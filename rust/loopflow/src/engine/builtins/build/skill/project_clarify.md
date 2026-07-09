@@ -20,7 +20,10 @@ Concrete tasks live outside the KR set.
 
 - If the doc's KR set is measurable (each KR states an observable condition
   you could check with a command or a look), leave it alone.
-- Otherwise write it: 2–10 KRs, each one line, each checkable. KRs should read
+- Otherwise write it: 2–10 KRs, each one line, each checkable. Shape each
+  KR as proof under duration — counted streaks on real work, unattended
+  windows ("over one week... zero rescues"), never capability checkboxes
+  that pass once on a demo. KRs should read
   as proof that the bet holds, not backlog bullets, implementation receipts,
   issue ids, or status notes. Milestone KRs retire when true; self-renewing KRs
   say what respawns them.

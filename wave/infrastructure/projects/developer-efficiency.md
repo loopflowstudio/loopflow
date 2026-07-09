@@ -6,11 +6,11 @@ unless they need attention.
 
 ## KRs
 
-- Avoidable human-in-the-loop setup or repair steps found in agent runs fall
-  to zero for one full week.
-- Credential expiries for Linear, GitHub, and vendor agents pre-empt instead
-  of blocking runs.
+- Avoidable human-in-the-loop setup or repair steps found in agent runs
+  fall to zero and stay there for one full week of real runs.
+- Credential expiries pre-empt for a month: zero runs blocked by an expired
+  Linear, GitHub, or vendor token.
 - The full local pre-land verification path has measured budgets and stays
-  within them.
-- Worktree, stacking, and wave-home operations hold across the normal
-  development lifecycle without manual repair.
+  inside them for a month of landings.
+- A week of normal development — branches, stacks, worktrees, wave homes,
+  landings — requires zero manual git surgery.

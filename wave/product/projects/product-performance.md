@@ -5,10 +5,13 @@ steerable while waves, runs, chats, workers, and audit records accumulate.
 
 ## KRs
 
-- Core user paths have named latency budgets across CLI, Mac, and iOS: list
-  waves, open a wave, send or steer chat, inspect audit, and attach to a run.
-- Performance measurements run against real accumulated wave data, not empty
-  demo state.
-- Regressions fail visibly before release.
-- Slow paths preserve control: the user can still see state, interrupt work,
-  and recover without waiting on full hydration.
+- Core user paths hold their named latency budgets for a month of real
+  accumulated data — list waves, open a wave, send/steer chat, inspect
+  audit, attach to a run — measured on the living workspace, never a demo
+  state.
+- Budgets are enforced by gates: a regression fails visibly before release,
+  demonstrated by at least one caught regression or one full quarter of
+  green measured releases.
+- Slow paths preserve control under the worst week of data we have: state
+  visible, interrupt available, recovery possible without waiting on full
+  hydration.

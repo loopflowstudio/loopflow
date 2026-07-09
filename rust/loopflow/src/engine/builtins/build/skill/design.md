@@ -96,11 +96,11 @@ This is the natural session exit point. The user's answer determines what to run
    Each project belongs to this wave, has no child projects, and carries a
    definition plus proof-shaped `## KRs`.
 5. Connect and seed tasks in Linear:
-   - `lf op pm init --wave <name>` creates/links the Linear project and writes
+   - `lf op pm init --wave <name>` creates/links the Linear PM space and writes
      `linear_project` into `GOAL.md`.
-   - File the opening items with `lf op pm update --title "…" --notes "…"` —
-     the urgent and next-step work, one task each. Tasks start in Linear, not on
-     disk.
+   - File the opening items with
+     `lf op pm update --project <project> --title "…" --notes "…"` — the urgent
+     and next-step work, one task each. Tasks start in Linear, not on disk.
 6. The first item you expect to build now becomes the design doc for this branch
    (`scratch/<branch>.md`).
 7. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`.

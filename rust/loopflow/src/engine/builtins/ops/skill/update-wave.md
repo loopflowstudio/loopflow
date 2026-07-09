@@ -29,7 +29,7 @@ Before starting, orient yourself in this branch:
   open questions and assumptions).
 - Read `wave/<wave>/GOAL.md` and `MEMORY.md`.
 - Read `wave/<wave>/projects/*.md`.
-- Read the live roadmap: `lf op pm show` (add `--wave <name>` if ambiguous).
+- Read the live PM tasks: `lf op pm show` (add `--wave <name>` if ambiguous).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 ## Goal
@@ -42,7 +42,7 @@ Whether you're cleaning up after a build, reconciling scratch analysis, or both:
 - Project docs still describe the live measured bets truthfully — if a branch
   changes a project's definition or KR set, update the relevant file under
   `wave/<wave>/projects/`.
-- The roadmap in Linear reflects reality: shipped work is closed, new work is
+- The PM tasks in Linear reflect reality: shipped work is closed, new work is
   filed, stale items are corrected — all through `lf op pm update`.
 - `scratch/` is trimmed to what a reviewer needs (see below).
 
@@ -55,9 +55,9 @@ failure mode than duplicating it.**
 Every scratch file with future-relevant content must land somewhere durable:
 
 - Decisions, learnings, gotchas, patterns established → fold into `MEMORY.md`.
-- Concrete future work (a next step, a follow-up, a discovered bug) → file it on
-  the roadmap with `lf op pm update --title "…" --notes "…"`.
-- Open questions about future work → `MEMORY.md`, or a roadmap item if it's
+- Concrete future work (a next step, a follow-up, a discovered bug) → file it as
+  a PM task with `lf op pm update --project <project> --title "…" --notes "…"`.
+- Open questions about future work → `MEMORY.md`, or a PM task if it's
   actionable.
 - If content overlaps what's already in `MEMORY.md`, merge it — don't skip it.
 

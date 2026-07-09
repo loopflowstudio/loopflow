@@ -6,11 +6,13 @@ the user has to reconcile.
 
 ## KRs
 
-- A wave can delegate work to another machine while preserving wave identity,
-  repo context, and audit trail.
-- Reattach, interrupt, report, and recover work across local and remote
-  workers.
-- Remote execution has explicit trust, credential, spend, and ownership
-  boundaries.
-- Moving work across machines does not create a second product vocabulary or a
-  second source of truth.
+- A wave delegates real work to a second machine for one week with wave
+  identity, repo context, and audit trail intact throughout — the remote
+  runs are indistinguishable in the record except for their host.
+- Reattach, interrupt, report, and recover succeed across local and remote
+  workers N/N trials over that week.
+- Trust, credential, spend, and ownership boundaries are explicit and hold
+  unattended — no remote run exceeds its authority or budget in the window.
+- One vocabulary survives the distribution: a month of mixed local/remote
+  operation adds zero second product concepts and zero second sources of
+  truth.

@@ -1,13 +1,18 @@
 # Auditability
 
 Every product surface shows enough truth to trust the system. Curation helps
-the user read; it never replaces the raw record.
+the user read; it never replaces the raw record — and that includes the
+system's own planning record: every claim points back to its receipt.
 
 ## KRs
 
-- Chat traffic, run history, worker reports, and flowloop outcomes are
-  inspectable without transcript spelunking.
-- A user can drill from wave state to run detail to attachable session.
-- Each visible state carries its reason: failed, waiting, running, idle,
-  blocked, or done.
-- Curation and summaries always point back to the raw record they summarize.
+- One week of real operation answers every "what is this wave doing?" from
+  the product surfaces — each drop to raw transcripts or files is logged as
+  a failure of this bet.
+- Drill-down holds end to end, every time: wave state -> run detail ->
+  attachable live session, N/N attempts across a week.
+- Every visible state carries its reason (failed, waiting, running, idle,
+  blocked, done) for the full lifetime of a wave, not just at steady state.
+- Curation always points back: for a month, every summary, retained fact,
+  and project-file claim drills to the raw record or audit evidence that
+  justifies it — `pm doctor`-class checks find zero orphaned claims.

@@ -8,17 +8,17 @@ from the knobs we refuse to add as from the text we write.
 
 ## KRs
 
-- Evidence-cited edits: every prompt/skill/flow change lands with a cited
-  local run failure or cost trace and a follow-up run showing the intended
-  behavior. The nine tier skills (wave/project/task × clarify/pursue/
-  mutate) are the current targets — shipped unmeasured.
-- Median tokens per comparable run trends down without first-pass gate
-  regression (re-baselined once trace feeds usage).
-- Zero-config excellence: a fresh repo works superbly with nothing
-  configured; the config-surface audit removes knobs and writes down the
-  non-configurability doctrine.
-- The agent bus carries reports worth folding: a child's report is complete
-  enough to act on without reading its transcript.
-- Context generation earns its place: what rides into each pass seed and
-  each child's prompt (<lf:wave-memory>, <lf:wave-chat-recent>, folds) is
-  measured, bounded, and shown to help.
+- Evidence-cited editing is the standing practice: for a month, every
+  prompt/skill/flow change lands with a cited run failure or cost trace and
+  a follow-up run showing the intended behavior — the nine tier skills get
+  their citations first.
+- Median tokens per comparable run trends down across a month of real runs
+  without first-pass gate regression.
+- Zero-config excellence, repeated: 3/3 fresh repos reach a landed PR with
+  nothing configured; the config-surface audit removes knobs and the
+  non-configurability doctrine holds for a month without a new knob.
+- Bus reports stay foldable: a week in which the wave acts on every child
+  report without opening a single child transcript.
+- Context generation earns its place continuously: what rides into each
+  pass seed and child prompt is measured and bounded, and stays inside its
+  budget as history accumulates.

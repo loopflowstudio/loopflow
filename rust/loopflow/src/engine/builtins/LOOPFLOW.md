@@ -112,17 +112,20 @@ sibling projects, promote the operating context into a wave, or demote the
 pieces into tasks.
 
 Project definitions and KRs live in `wave/<wave>/projects/<project>.md`.
-Concrete tasks live in Linear. There are no local task lists and nothing to sync
-— `lf op pm` reads and edits the wave's Linear project directly.
+Concrete tasks live in Linear. There are no local task lists. `lf op pm` reads
+and edits the wave's Linear PM space; tasks attach to local projects with
+`project:<slug>` labels.
 
 ```bash
-lf op pm show                                          # the wave's live roadmap
-lf op pm update --title "..." --notes "..."            # file a new task
+lf op pm show                                          # the wave's live PM tasks
+lf op pm show --project wave-chat                      # filter by local project
+lf op pm update --project wave-chat --title "..." --notes "..." # file a labeled task
 lf op pm update --id <task-id> --status done --pr <url> # close a shipped task with its PR link
 lf op pm update --id <task-id> --title "..."           # edit an existing task
+lf op pm sync --plan                                   # report PM drift
 ```
 
-Close a shipped task with `--status done --pr <url>` so the roadmap carries a
+Close a shipped task with `--status done --pr <url>` so the task carries a
 pointer back to the work. The PR link posts as a comment; it never clobbers the
 task's description.
 

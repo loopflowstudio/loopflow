@@ -8,15 +8,16 @@ cold starts without growing a second brain.
 
 ## KRs
 
-- Each wave has one steward thread that owns human-facing conversation.
-- `lf chat` carries worker reports, escalations, and outcomes into that
-  thread.
-- Send, steer, interrupt, and resume actions target the right session without
-  exposing runtime plumbing.
-- The steward thread survives app restart, process reattachment, and replay in
-  5/5 dogfood trials.
-- No learning is lost across land, branch, machine move, or compaction.
-- MEMORY.md answers "decided / constrained / in flight" at a glance and stays
-  prompt-sized as facts accumulate indefinitely.
-- Memory changes can point to a cited chat event, worker report, or run trace
-  that justified the retained fact.
+- One steward thread stays coherent through a month of real use: reports
+  folded, decisions traceable, no reset required and no second thread
+  spawned to escape the first.
+- The thread survives every boundary it meets in a week of dogfood — app
+  restart, process reattach, replay, land, branch, machine move — 5/5
+  trials each, with zero learnings lost.
+- Every retained fact cites its source: for a month of memory changes, each
+  one points to the chat event, worker report, or run trace that justified
+  it — unsourced facts are failure events.
+- MEMORY.md stays prompt-sized while facts accumulate for a month, and
+  still answers "decided / constrained / in flight" at a glance.
+- Send, steer, interrupt, and resume hit the right session 100% of a
+  week's uses without exposing runtime plumbing.

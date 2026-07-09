@@ -7,12 +7,13 @@ deployments only: no remote telemetry server, ever (a bound, not a gap).
 
 ## KRs
 
-- Runs reconstructable end-to-end: prompt, context, flow/skill shape,
-  spawned work, cost, time, result.
-- `run_token_usage` is fed at run completion (0 rows against 152 runs
-  today; the schema and upsert path already exist) and `lf usage` shows
-  real numbers; cost and per-skill dimensions get schema homes.
-- Empirical stats over your own history are a usable surface (which flows
-  run hot, what they cost, how they trend).
-- A recorded run can be replayed against the same context for debugging
-  and for evals; paved-road deviations are visible in the record.
+- A month of runs is 100% reconstructable — prompt, context, flow/skill
+  shape, spawned work, cost, time, result — verified by random spot-audits
+  that succeed N/N.
+- `run_token_usage` is fed continuously from the day it's wired: zero
+  gap-days in a month (0 rows against 152 runs today; the schema and
+  upsert path already exist), and cost + per-skill dimensions get homes.
+- Any run from the last month can be replayed against its recorded context
+  for debugging and for evals.
+- The stats surface answers the standing questions — what runs hot, what
+  it costs, how it trends — in one query, on real history.

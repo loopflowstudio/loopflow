@@ -127,28 +127,38 @@ pre-flowloop concepts do not linger as alternate design.
 - The codebase, prompts, docs, and UI contain no stale pre-flowloop technical design language.
 ```
 
-KRs should read as proof: observable end states that show the bet now holds.
+KRs should read as proof under duration: observable end states that show the
+bet holds, demonstrated on real work over a stated window — not capability
+checkboxes that pass once on a demo. The strongest KRs share four properties:
+
+- **Endurance over capability.** Not "the loop can fix a failing build" but
+  "over one week, every dispatched loop lands or stops with an actionable
+  record — zero silent stalls."
+- **Counted.** Streaks, N/N trials, consecutive cycles: "four consecutive
+  weekly releases with zero manual repair," "5/5 restarts lose nothing."
+- **Unattended.** The window counts only if no human repaired anything
+  inside it. A rescue resets the streak.
+- **Falsifiable on real load.** Measured against the living workspace as
+  history accumulates, never a fresh demo state; a miss produces a visible
+  failure event, not a shrug.
+
 Avoid backlog bullets, implementation receipts, status, and issue ids. Put
-concrete work in Linear tasks.
+concrete work in tasks.
 
 ```markdown
-# Weak: task bundle pretending to be a project
-# One system
-
+# Weak: capability checkboxes
 ## KRs
+- The agent can fix a failing build.
+- Reports are visible in the app.
+- Memory is saved.
 
-- Collapse lfd/lfq into lf.
-- Retire chord/member vocabulary.
-- Unify the operating prompt.
-
-# Strong: standing quality frontier
-# Technical Architecture
-
+# Strong: proof under duration
 ## KRs
-
-- Top-down architecture documentation is complete, published, and centered on the key data structures and public APIs.
-- Every data structure and API in the architecture is ratified as minimally simple for its purpose.
-- The codebase, prompts, docs, and UI contain no stale pre-flowloop technical design language.
+- Over one week of real work, every dispatched loop lands its PR unattended
+  or stops with an actionable record — zero silent stalls, zero rescues.
+- The thread survives every restart it meets in a week of daily use, 5/5,
+  with zero learnings lost.
+- Four consecutive weekly releases complete with no manual repair.
 ```
 
 ### The Roadmap

@@ -6,10 +6,12 @@ pre-flowloop concepts do not linger as alternate design.
 
 ## KRs
 
-- Top-down architecture documentation is complete, published, and centered on
-  the key data structures and public APIs.
-- Every data structure and API in the architecture is ratified as minimally
-  simple for its purpose, with no duplicate owner, hidden mirror, or
-  compatibility shim unless explicitly justified.
-- The codebase, prompts, docs, and UI contain no stale pre-flowloop technical
-  design language that can mislead future work.
+- Top-down architecture documentation exists, is prompt-read by the waves
+  that work on the system, and stays true: four consecutive weekly drift
+  checks find zero owners, mirrors, or shims the map doesn't name.
+- A month of landed PRs maps cleanly onto the documented structures — any
+  PR that needs a concept the map lacks either updates the map or is
+  evidence this KR failed.
+- Stale pre-flowloop design language reaches zero across code, prompts,
+  docs, and UI — and stays at zero for a month after the sweep, verified by
+  the same check that got it there.

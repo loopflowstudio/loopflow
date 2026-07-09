@@ -587,7 +587,7 @@ pub struct BranchFilterArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum PmCommand {
-    /// Connect (or create) the wave's Linear project; write linear_project to GOAL.md
+    /// Connect (or create) the wave's PM space; write linear_project to GOAL.md
     Init {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
@@ -598,23 +598,29 @@ pub enum PmCommand {
         #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
         all: bool,
     },
-    /// Print the wave's live Linear roadmap
+    /// Print the wave's live PM tasks
     Show {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+        /// Local project slug from wave/<wave>/projects/
+        #[arg(short = 'p', long = "project")]
+        project: Option<String>,
     },
-    /// Create, edit, or close a roadmap task in Linear
+    /// Create, edit, or close a PM task
     Update {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+        /// Local project slug from wave/<wave>/projects/
+        #[arg(short = 'p', long = "project")]
+        project: Option<String>,
         /// Existing task id to edit or close; omit to create a new task
         #[arg(long = "id")]
         id: Option<String>,
         /// Task title
         #[arg(long = "title")]
-        title: String,
+        title: Option<String>,
         /// Task notes/description
         #[arg(long = "notes")]
         notes: Option<String>,
@@ -625,11 +631,70 @@ pub enum PmCommand {
         #[arg(long = "pr")]
         pr: Option<String>,
     },
-    /// Show roadmap status for linked waves
+    /// Show PM task status for linked waves
     Status {
         /// Wave name (all PM-enabled waves if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+    },
+    /// Diagnose wave/project/task drift
+    Doctor,
+    /// Reconcile low-risk PM drift
+    Sync {
+        /// Print the planned changes without applying them
+        #[arg(long = "plan")]
+        plan: bool,
+    },
+    /// PM-space operations
+    Space {
+        #[command(subcommand)]
+        cmd: PmSpaceCommand,
+    },
+    /// PM-task operations
+    Task {
+        #[command(subcommand)]
+        cmd: PmTaskCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PmSpaceCommand {
+    /// Rename the wave's PM space
+    Rename {
+        /// Wave name (auto-detected if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// PM space title
+        #[arg(long = "title")]
+        title: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PmTaskCommand {
+    /// Move a task into a wave PM space and attach a local project label
+    Move {
+        /// Existing task id to move
+        #[arg(long = "id")]
+        id: String,
+        /// Destination wave
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Destination local project slug
+        #[arg(short = 'p', long = "project")]
+        project: String,
+    },
+    /// Import tasks from one wave's PM space into another wave/project
+    Import {
+        /// Source wave
+        #[arg(long = "from-wave")]
+        from_wave: String,
+        /// Destination wave
+        #[arg(long = "to-wave")]
+        to_wave: String,
+        /// Destination local project slug
+        #[arg(short = 'p', long = "project")]
+        project: String,
     },
 }
 
@@ -842,19 +907,29 @@ mod tests {
             Cli::try_parse_from(["lf", "op", "pm", "show", "--wave", "goals"]).expect("parse");
         let Some(Commands::Op {
             op: OpsCommand::Pm {
-                cmd: PmCommand::Show { wave },
+                cmd: PmCommand::Show { wave, project },
             },
         }) = cli.command
         else {
             panic!("expected pm show command");
         };
         assert_eq!(wave.as_deref(), Some("goals"));
+        assert_eq!(project, None);
     }
 
     #[test]
     fn pm_update_parses_create_and_close() {
         let cli = Cli::try_parse_from([
-            "lf", "op", "pm", "update", "--title", "Ship it", "--notes", "details",
+            "lf",
+            "op",
+            "pm",
+            "update",
+            "--project",
+            "wave-chat",
+            "--title",
+            "Ship it",
+            "--notes",
+            "details",
         ])
         .expect("parse");
         let Some(Commands::Op {
@@ -863,6 +938,7 @@ mod tests {
                     cmd:
                         PmCommand::Update {
                             wave,
+                            project,
                             id,
                             title,
                             notes,
@@ -875,8 +951,9 @@ mod tests {
             panic!("expected pm update command");
         };
         assert_eq!(wave, None);
+        assert_eq!(project.as_deref(), Some("wave-chat"));
         assert_eq!(id, None);
-        assert_eq!(title, "Ship it");
+        assert_eq!(title.as_deref(), Some("Ship it"));
         assert_eq!(notes.as_deref(), Some("details"));
         assert_eq!(status, None);
         assert_eq!(pr, None);
@@ -888,8 +965,6 @@ mod tests {
             "update",
             "--id",
             "123",
-            "--title",
-            "Ship it",
             "--status",
             "done",
             "--pr",

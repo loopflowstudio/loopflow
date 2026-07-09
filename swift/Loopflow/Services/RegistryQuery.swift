@@ -70,6 +70,14 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([RunLedgerEntry].self, from: stdout)
     }
 
+    /// Filed PM tasks for one wave. Active runs remain a separate registry
+    /// query; callers subtract running task ids/titles to render backlog.
+    public func backlog(wave: String, cwd: String?) async throws -> [BacklogItem] {
+        let stdout = try await run(["pm", "show", "--wave", wave, "--json"], cwd)
+        let snapshot = try Self.decode(PmShowSnapshot.self, from: stdout)
+        return snapshot.items.filter { !$0.completed }
+    }
+
     private static func decode<T: Decodable>(_ type: T.Type, from stdout: String) throws -> T {
         // `lf` prints one JSON line; trim any surrounding whitespace/newline.
         let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -82,6 +90,29 @@ public struct RegistryQuery: Sendable {
             throw RegistryQueryError("lf query JSON did not decode: \(error)")
         }
     }
+}
+
+private struct PmShowSnapshot: Decodable {
+    let wave: String
+    let provider: String
+    let project: String
+    let localProject: String?
+    let items: [BacklogItem]
+
+    enum CodingKeys: String, CodingKey {
+        case wave, provider, project, items
+        case localProject = "local_project"
+    }
+}
+
+public struct BacklogItem: Decodable, Sendable, Identifiable, Hashable {
+    public let id: String
+    public let name: String
+    public let description: String
+    public let rank: Int
+    public let completed: Bool
+    public let labels: [String]
+    public let assignee: String?
 }
 
 // MARK: - Wire snapshots (mirror the Rust `--json` types)
@@ -142,6 +173,7 @@ struct RunSnapshot: Decodable {
     let id: String
     let flow: String
     let task: String?
+    let stepIndex: Int
     let status: String
     let branch: String
     let worktree: String
@@ -152,6 +184,7 @@ struct RunSnapshot: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case id, flow, task, status, branch, worktree, error
+        case stepIndex = "step_index"
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case prURL = "pr_url"
@@ -168,6 +201,7 @@ struct RunSnapshot: Decodable {
             task: task,
             repo: repo,
             status: RunStatus(lfToken: status),
+            stepIndex: stepIndex,
             worktree: worktree.isEmpty ? nil : worktree,
             branch: branch.isEmpty ? nil : branch,
             error: error,

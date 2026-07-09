@@ -220,7 +220,7 @@ struct WaveChatView: View {
             guard let conn = connection, conn.repoPath == repoPath, conn.waveName == waveName else { return }
             launch = .failed(
                 "Wave didn't come up. Check the tmux session for what went wrong: "
-                    + "tmux attach -t \(PortfolioRepoState.waveAgentSessionName(repoPath: repoPath, waveName: waveName))"
+                    + "tmux attach -r -t \(PortfolioRepoState.waveAgentSessionName(repoPath: repoPath, waveName: waveName))"
             )
         }
     }

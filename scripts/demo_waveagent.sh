@@ -31,7 +31,7 @@ rm -f "$tmp"
 hr "3. Live sessions are watchable and enterable"
 echo "tmux is the session cockpit:"
 echo "  tmux ls                 # list live agent + dispatch sessions"
-echo "  tmux attach -t <name>   # drop into one to answer an interactive step"
+echo "  tmux attach -r -t <name>   # inspect one; steer through wave chat"
 echo
 echo "(Requires active dispatched sessions; dispatch with 'lf q worker run'.)"
 

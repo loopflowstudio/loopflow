@@ -24,7 +24,7 @@ lf debug -c                       # fix it
 # author wave/engbot/GOAL.md, then:
 lf wave engbot       # start the wave agent (Ctrl-C to stop)
 tmux ls              # live sessions — the wave agent and its workers
-tmux attach -t <name>  # watch one work
+tmux attach -r -t <name>  # inspect one work
 ```
 
 ---

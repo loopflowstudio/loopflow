@@ -17,32 +17,35 @@ You author wave files under `wave/<name>/`:
 | **`projects/*.md`** | One measured bet per file, with KRs and closure criteria |
 
 Tasks live in Linear. Run the agent and it works a loop: read its projects,
-tasks, and memory; pick the next move; dispatch a worker; watch the PR; and fold
+tasks, and memory; pick the next move; inhabit or delegate a loop; watch the PR; and fold
 what changed back into memory.
 
 ```bash
 lf wave shipper            # start the wave agent
 tmux ls                    # the wave agent and every worker it launches
-tmux attach -t <name>      # jump into one
+tmux attach -r -t <name>   # inspect one without direct control
 ```
 
-The wave agent coordinates; workers do the implementation. When the agent picks a substantial task it dispatches one:
+The wave agent can inhabit one loop and delegate self-sufficient work:
 
 ```bash
-lf build "add retry to token refresh" --wave shipper --dispatch
+lf loop build "add retry to token refresh" --wave shipper
+lf loop build "audit retry callers" --wave shipper --detach
 ```
 
 A worker runs the flow in its own worktree, opens a PR, and reports back. It inherits the wave's `GOAL.md` and `MEMORY.md`, so it builds with the wave's intent in view.
 
-By default each worker gets a fresh sibling worktree — `<repo>.<wave>.<run-id>` — off the default branch, with its own branch and PR. Placement flags change that:
+Each loop gets a fresh sibling worktree — `<repo>.<wave>.<run-id>` — off the
+default branch, with its own branch and PR:
 
 ```bash
-lf build "…" --wave shipper --dispatch        # separate worktree for this task
-lf build "…" --wave shipper --stack <run-id> # stack on that run's branch
-lf build "…" --wave shipper --fork           # independent branch from the review base
+lf loop task "…" --wave shipper           # foreground: block until done
+lf loop task "…" --wave shipper --detach  # background: server-owned
 ```
 
-`--dispatch` creates a placed worktree and blocks until the normal `lf` run exits. `--stack` starts dependent work on top of an unlanded run's branch; `--fork` starts an independent branch from the review base.
+Both forms create the same placed worktree. `--detach` changes attention and
+ownership, not execution: the server launches a headless loop and the caller
+returns immediately.
 
 Waves are independent by default. When one process needs to report into a wave, post into its thread — `lf chat --wave <name> "…"` works from any process, including another wave's flowloop.
 
@@ -105,7 +108,7 @@ Or run manually: `lfd serve`. Watch progress in Loopflow.
 ```bash
 lf wave <name>          # start the wave agent (Ctrl-C to stop)
 tmux ls                 # live sessions — the wave agent and its workers
-tmux attach -t <name>   # attach to one; agent output lives here
+tmux attach -r -t <name>   # inspect one; stdin stays closed
 ```
 
 To remove a wave, delete `wave/<name>/` and its worktree (`lf wt remove <name>`).

@@ -98,16 +98,12 @@ pub struct Cli {
     #[arg(long = "no-loopflow")]
     pub no_loopflow: bool,
 
-    /// Run this invocation in a separate worktree targeting the current branch
-    #[arg(long, conflicts_with_all = ["stack", "fork"])]
-    pub dispatch: bool,
-
     /// Run this invocation in a worktree stacked on a parent run
-    #[arg(long, value_name = "RUN_ID", conflicts_with_all = ["dispatch", "fork"])]
+    #[arg(long, value_name = "RUN_ID", conflicts_with = "fork")]
     pub stack: Option<String>,
 
     /// Run this invocation in a separate worktree forked from the review base
-    #[arg(long, conflicts_with_all = ["dispatch", "stack"])]
+    #[arg(long, conflicts_with = "stack")]
     pub fork: bool,
 }
 
@@ -221,14 +217,15 @@ pub enum Commands {
         #[arg(long, conflicts_with = "no_flowloop")]
         flowloop_only: bool,
     },
-    /// Run a task as a bounded flowloop: loop task until the PR merges
-    Task {
-        /// What to do — free text; the flow's skills clarify it into a design
-        /// doc and drive one small PR to merged
-        seed: String,
-        /// Loop a different flow (any flow is loopable)
-        #[arg(long = "flow", default_value = "task")]
+    /// Run a flow repeatedly in a fresh worktree until its termination bit flips
+    Loop {
+        /// Flow to loop (`task`, `project`, or any other flow)
         flow: String,
+        /// The loop's whole handoff
+        seed: String,
+        /// Ask the live wave server to own the loop and return immediately
+        #[arg(long)]
+        detach: bool,
         /// Wave name (default: inferred from the current worktree/branch)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
@@ -247,6 +244,11 @@ pub enum Commands {
         /// Maximum agent turns per pass
         #[arg(long = "max-turns")]
         max_turns: Option<u32>,
+    },
+    /// Project lifecycle operations
+    Project {
+        #[command(subcommand)]
+        cmd: ProjectCommand,
     },
     /// Show token usage by repo and provider (from a running lfd)
     Usage,
@@ -395,6 +397,18 @@ pub enum MemoryCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum ProjectCommand {
+    /// Promote a project into a resident child wave through the authored flow
+    Promote {
+        /// Project slug under wave/<parent>/projects/
+        slug: String,
+        /// Parent wave (default: ambient wave)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum PrCommand {
     /// Show current branch's PR state
     Status,
@@ -497,6 +511,9 @@ pub enum PmCommand {
         /// Local project slug from wave/<wave>/projects/
         #[arg(short = 'p', long = "project")]
         project: Option<String>,
+        /// Emit the task snapshot as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Create, edit, or close a Linear task
     Update {
@@ -795,13 +812,19 @@ mod tests {
     fn pm_show_accepts_wave_flag() {
         let cli = Cli::try_parse_from(["lf", "pm", "show", "--wave", "goals"]).expect("parse");
         let Some(Commands::Pm {
-            cmd: PmCommand::Show { wave, project },
+            cmd:
+                PmCommand::Show {
+                    wave,
+                    project,
+                    json,
+                },
         }) = cli.command
         else {
             panic!("expected pm show command");
         };
         assert_eq!(wave.as_deref(), Some("goals"));
         assert_eq!(project, None);
+        assert!(!json);
     }
 
     #[test]

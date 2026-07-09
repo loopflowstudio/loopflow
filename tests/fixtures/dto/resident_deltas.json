@@ -18,7 +18,7 @@
         "id": "t-1",
         "name": "Bash",
         "status": "completed",
-        "input": "lf implement \"parser\" --wave ship --dispatch",
+        "input": "lf loop implement \"parser\" --wave ship --detach",
         "output": null
       }
     },

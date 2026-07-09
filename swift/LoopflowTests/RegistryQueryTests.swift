@@ -54,7 +54,7 @@ struct RegistryQueryTests {
         {
           "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
           "flowloop":"turning",
-          "runs":[{"id":"run-1","flow":"implement","task":"wire it","status":"running","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null}],
+          "runs":[{"id":"run-1","flow":"implement","task":"wire it","step_index":2,"status":"running","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null}],
           "attention":[{"id":"att-1","kind":"interactive","status":"surfaced","title":"needs a human","summary":"review the design","run_id":"run-1","surfaced_at":"2026-07-06T00:00:00Z"}]
         }
         """
@@ -68,6 +68,7 @@ struct RegistryQueryTests {
         #expect(result.runs.map(\.id) == ["run-1"])
         #expect(result.runs[0].waveId == "wave-1")
         #expect(result.runs[0].status == .running)
+        #expect(result.runs[0].stepIndex == 2)
         #expect(result.attention.map(\.id) == ["att-1"])
         #expect(result.attention[0].waveId == "wave-1")
         #expect(result.attention[0].kind == .interactive)
@@ -80,8 +81,8 @@ struct RegistryQueryTests {
           "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
           "mind":null,
           "runs":[
-            {"id":"run-1","flow":"implement","task":null,"status":"completed","branch":"b","worktree":"/wt","started_at":"2026-07-06T00:00:00Z","ended_at":null,"error":null,"pr_url":null},
-            {"id":"run-2","flow":"gate","task":null,"status":"new-token","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null}
+            {"id":"run-1","flow":"implement","task":null,"step_index":0,"status":"completed","branch":"b","worktree":"/wt","started_at":"2026-07-06T00:00:00Z","ended_at":null,"error":null,"pr_url":null},
+            {"id":"run-2","flow":"gate","task":null,"step_index":0,"status":"new-token","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null}
           ],
           "attention":[]
         }
@@ -111,6 +112,25 @@ struct RegistryQueryTests {
         #expect(runs[0].wave == "goals")
         #expect(runs[0].status == "ok")
         #expect(runs[0].ended == 110)
+    }
+
+    @Test("PM snapshot exposes only filed open backlog")
+    func backlogDecodesOpenTasks() async throws {
+        let json = """
+        {"wave":"goals","provider":"linear","project":"p1","local_project":null,"items":[
+          {"id":"TASK-1","name":"Ship loop","description":"","rank":1,"completed":false,"labels":["project:runtime"],"assignee":null},
+          {"id":"TASK-2","name":"Already done","description":"","rank":2,"completed":true,"labels":[],"assignee":"user-1"}
+        ]}
+        """
+        let query = RegistryQuery { args, cwd in
+            #expect(args == ["pm", "show", "--wave", "goals", "--json"])
+            #expect(cwd == "/tmp/repo")
+            return json
+        }
+
+        let items = try await query.backlog(wave: "goals", cwd: "/tmp/repo")
+        #expect(items.map(\.id) == ["TASK-1"])
+        #expect(items[0].labels == ["project:runtime"])
     }
 
     @Test("run status accepts lf runs folded ok token")

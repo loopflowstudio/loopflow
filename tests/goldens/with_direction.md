@@ -50,27 +50,26 @@ The sibling naming convention (`<repo>.<name>`) is load-bearing: worktrees
 created elsewhere aren't recognized by `lf wt` (list, switch, up/down, prune)
 or by land.
 
-## Delegate Work
+## Inhabit and Delegate Work
 
-Dispatch an `lf` flow or skill for real implementation work. A dispatched child
-inherits loopflow context: operating guidance, scratch notes, explicit docs,
-wave context, and skill instructions. Inline edits in the coordinating session do not, and they
-bloat the transcript with work that belongs in a child.
-
-Inside a Wave loop, dispatch with:
+Run work through a flowloop. Inhabit one loop in the foreground when its next
+move needs the wave's live memory and thread in the room; delegate
+self-sufficient work by detaching the same command:
 
 ```bash
-lf <flow> "<task>" --wave <wave> --dispatch
+lf loop <flow> "<task>" --wave <wave>           # inhabit: block until its bit flips
+lf loop <flow> "<task>" --wave <wave> --detach  # delegate: server-owned background loop
 ```
 
-This spawns the child as its own attachable tmux session — not an inline
-shell-out — so it's independently monitorable and steerable. List live
-sessions with `tmux ls` and drop into one with `tmux attach -t <name>` to
-answer an interactive skill.
+Both forms fork a worktree, keep a private transcript, and re-read the wave's
+memory and thread at pass boundaries. Blocking spends this pass inside one long
+tool call, so the wave cannot reply until the inner loop returns. Detach only
+when the seed is the whole handoff.
 
-Inline edits are only for trivial fixes smaller than the cost of dispatching.
-When you do one, say why. Keep the coordinating session about decisions,
-sequencing, and reading results back.
+A detached loop is headless and non-interactive. Its contract is durable writes:
+PRs record done, `lf chat` reports progress/completion, and `lf memory add`
+records learnings as they happen. Invisible work is failed work. Inspect its
+terminal read-only with `tmux attach -r -t <name>`; never type into it.
 
 ## Speak
 
@@ -85,8 +84,7 @@ text. Everything proactive goes through `lf`:
   paragraph: what landed, links, anything surprising. Pipe stdin for longer.
 - `lf chat --parent "<report>"` - escalate to the parent wave.
 - `lf sub` - listen to your wave: follow its live events (turns, flowloop state,
-  memory) until killed. Workers may run it in a background terminal to
-  receive steering mid-task. Outside a wave it exits silently.
+  memory) until killed. Outside a wave it exits silently.
 - `lf memory add "<fact>"` - record a durable learning. `lf memory update`
   rewrites the whole file from stdin.
 - `wave/<name>/MEMORY.md` is server-owned - never edit the file directly.
@@ -115,6 +113,10 @@ Project definitions and KRs live in `wave/<wave>/projects/<project>.md`.
 Concrete tasks live in Linear. There are no local task lists. `lf pm` reads
 and edits the wave's Linear project; tasks attach to local projects with
 `project:<slug>` labels.
+
+Tasks may be filed before they run. Read the backlog when selecting work; a
+task moves from filed, to a running loop, to a merged PR. Do not let filing
+become a substitute for selection.
 
 ```bash
 lf pm show                                          # the wave's live PM tasks

@@ -44,7 +44,7 @@ lf memory add "buttons: variants unified" # curate what it knows
 ```
 
 Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
-`tmux attach -t <name>` to jump into one.
+`tmux attach -r -t <name>` to inspect one without writing into its session.
 
 `lf wave <name>` starts a long-lived server at the repo's main checkout (the
 wave's journal and endpoint live at the origin); the resident flowloop — one
@@ -64,10 +64,12 @@ The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one
 lf wave s3           # the s3 (control) charter
 ```
 
-The wave agent coordinates; it rarely writes code itself. When it picks a substantial task it dispatches a **worker** — a scoped agent that runs a flow, opens a PR, and reports back:
+The wave agent inhabits one context-sensitive loop and delegates
+self-sufficient work. Both forms run in scoped worktrees and report back:
 
 ```bash
-lf build "unify button variants" --wave designer --dispatch
+lf loop build "unify button variants" --wave designer           # inhabit
+lf loop build "audit the settings panes" --wave designer --detach # delegate
 ```
 
 Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its intent in view. Their PRs are how results flow back to the wave.
@@ -75,13 +77,12 @@ Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its int
 Run a task as a bounded task flowloop:
 
 ```bash
-lf task "fix the flaky chord-timeout test" --wave designer
+lf loop task "fix the flaky chord-timeout test" --wave designer
 ```
 
-`lf task` takes free text, creates a task worktree, and loops `task`
-over it until the PR merges. The open runs with a task flow ARE the wave's
-open tasks (`lf runs`); the merged PR is the record of done — no tracker
-required.
+`lf loop` takes a flow and free text, creates a worktree, and repeats the flow
+until its bit flips (`task`: when the PR merges). Linear holds filed work,
+`lf runs` holds active hands, and merged PRs record done.
 
 ### Crons
 
@@ -341,13 +342,13 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf --bin lf
 ```
 Install the Rust binaries directly with cargo.
 
-## Dispatch and Observe
+## Inhabit, Delegate, Observe
 
 ```bash
 lf wave engbot       # start the wave agent (Ctrl-C to stop)
-lf implement "Add the endpoint" --wave engbot --dispatch
+lf loop implement "Add the endpoint" --wave engbot --detach
 tmux ls              # list live sessions — the wave agent and its workers
-tmux attach -t <name>  # attach to one
+tmux attach -r -t <name>  # inspect without direct control
 ```
 
 Read `wave/engbot/GOAL.md` and `wave/engbot/MEMORY.md` for a wave's state, or

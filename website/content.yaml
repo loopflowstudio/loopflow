@@ -111,4 +111,4 @@ homepage:
         - type: "output"
           content: "dispatch · worker: build \"generate invoices\""
         - type: "output"
-          content: "session billing-w3 · tmux attach -t billing-w3"
+          content: "session billing-w3 · tmux attach -r -t billing-w3"

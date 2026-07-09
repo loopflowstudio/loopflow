@@ -24,7 +24,7 @@
 //! Wave state (journal, endpoint pointer, MEMORY.md) lives under the ORIGIN
 //! repo — a worktree resolves its main repo first.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -220,9 +220,89 @@ pub fn gather_wave_chat(repo_root: &Path, wave: &str) -> Option<String> {
 /// `lf memory log` command still prints oldest to newest.
 pub fn gather_wave_memory(repo_root: &Path, wave: &str) -> Option<String> {
     let origin = wave_origin(repo_root);
-    let base = crate::wave::memory::Memory::for_wave(&origin, wave).read();
-    let adds = live_memory_adds(&origin, wave).or_else(|| journal_memory_adds(&origin, wave));
-    render_wave_memory(adds.unwrap_or_default(), &base)
+    let chain = memory_wave_chain(wave).unwrap_or_else(|| vec![wave.to_string()]);
+    gather_memory_chain(&origin, &chain)
+}
+
+/// Resolve lexical memory scope through the registry. Chat intentionally does
+/// not call this: a child wave inherits facts, never its parent's mailbox.
+fn memory_wave_chain(wave: &str) -> Option<Vec<String>> {
+    let wave = wave.to_string();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().ok()?;
+        rt.block_on(async {
+            let store = crate::lfdb::open_existing_store().await?;
+            memory_wave_chain_from_store(&store, &wave).await
+        })
+    })
+    .join()
+    .ok()
+    .flatten()
+}
+
+async fn memory_wave_chain_from_store(
+    store: &crate::lfdb::Store,
+    wave: &str,
+) -> Option<Vec<String>> {
+    let mut current = store.get_wave_by_name(wave).await.ok().flatten()?;
+    let mut seen = HashSet::new();
+    let mut chain = Vec::new();
+    loop {
+        if !seen.insert(current.id().clone()) {
+            tracing::warn!(
+                wave,
+                "cycle in parent_wave_id; using the acyclic memory prefix"
+            );
+            break;
+        }
+        chain.push(current.name().to_string());
+        let Some(parent) = current.parent_wave_id() else {
+            break;
+        };
+        current = match store.get_wave(parent).await.ok().flatten() {
+            Some(parent) => parent,
+            None => {
+                tracing::warn!(wave, parent = %parent, "missing parent wave in memory scope");
+                break;
+            }
+        };
+    }
+    chain.reverse();
+    Some(chain)
+}
+
+fn gather_memory_chain(origin: &Path, chain: &[String]) -> Option<String> {
+    let scoped = chain
+        .iter()
+        .filter_map(|wave| {
+            let base = crate::wave::memory::Memory::for_wave(origin, wave).read();
+            let adds = live_memory_adds(origin, wave)
+                .or_else(|| journal_memory_adds(origin, wave))
+                .unwrap_or_default();
+            render_wave_memory(adds, &base).map(|memory| (wave.clone(), memory))
+        })
+        .collect::<Vec<_>>();
+    if scoped.is_empty() {
+        return None;
+    }
+    if chain.len() == 1 {
+        return scoped.into_iter().next().map(|(_, memory)| memory);
+    }
+    let leaf = chain.last()?;
+    Some(
+        scoped
+            .into_iter()
+            .map(|(wave, memory)| {
+                let ownership = if &wave == leaf {
+                    "owned by"
+                } else {
+                    "inherited from"
+                };
+                format!("## Memory {ownership} {wave}\n\n{memory}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    )
 }
 
 /// Turn/char budget for the parent-wave section of a work line's overlay —
@@ -749,6 +829,54 @@ mod tests {
 
         let memory = gather_wave_memory(tmp.path(), "goals").expect("memory");
         assert_eq!(memory, "- newest\n- oldest\n\n# Goals\n\ncompiled");
+    }
+
+    #[tokio::test]
+    async fn child_memory_walks_parent_scope_while_chat_stays_local() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(
+            tmp.path().join("lfd.db"),
+        ))
+        .await
+        .unwrap();
+        let parent = crate::lfd::types::Wave::new(
+            crate::lfd::id::LfdId::new(),
+            "platform".into(),
+            tmp.path().display().to_string(),
+        );
+        let child = crate::lfd::types::Wave::new(
+            crate::lfd::id::LfdId::new(),
+            "release".into(),
+            tmp.path().display().to_string(),
+        )
+        .with_parent(parent.id().clone());
+        store.create_wave(&parent).await.unwrap();
+        store.create_wave(&child).await.unwrap();
+        std::fs::create_dir_all(tmp.path().join("wave/platform")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("wave/release")).unwrap();
+        std::fs::write(
+            tmp.path().join("wave/platform/MEMORY.md"),
+            "Parent constraint.",
+        )
+        .unwrap();
+        std::fs::write(tmp.path().join("wave/release/MEMORY.md"), "Child decision.").unwrap();
+
+        let chain = memory_wave_chain_from_store(&store, "release")
+            .await
+            .expect("scope resolves");
+        assert_eq!(chain, ["platform", "release"]);
+        let memory = gather_memory_chain(tmp.path(), &chain).expect("memory renders");
+        assert!(memory.contains("## Memory inherited from platform\n\nParent constraint."));
+        assert!(memory.contains("## Memory owned by release\n\nChild decision."));
+        assert!(
+            memory.find("Parent constraint.").unwrap() < memory.find("Child decision.").unwrap()
+        );
+
+        seed_journal(tmp.path(), "platform", "parent-only chat");
+        seed_journal(tmp.path(), "release", "child-only chat");
+        let chat = gather_wave_chat(tmp.path(), "release").expect("child chat");
+        assert!(chat.contains("child-only chat"));
+        assert!(!chat.contains("parent-only chat"));
     }
 
     /// Canned one-shot HTTP server: the "existing test-server pattern"

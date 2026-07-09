@@ -102,6 +102,10 @@
 //!   "work line <name> opened" (journaled as `ChannelOpened`, idempotent on
 //!   `run_id` — a repeated knock returns `{turn: null}`). 404 outside the
 //!   family.
+//! - `POST /loops {flow, seed, caps…}` → `{session}` — capability-gated
+//!   detached flowloop launch. The listener starts a headless `lf loop` in a
+//!   named tmux session; callers may inspect it with `tmux attach -r`, never
+//!   write through its stdin. The blocking form never crosses this door.
 //! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
 //!   origin repo. Wave-level only: memory is wave identity, channels don't
 //!   have it.
@@ -116,6 +120,7 @@
 //!
 //! `Turn` is [`crate::chat::turns::ChatTurn`].
 
+use std::collections::HashSet;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -143,9 +148,9 @@ use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::state::FlowloopState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
-    AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, OpFrame,
-    PostDeltasRequest, PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
-    SUBAGENT_TOKEN_HEADER,
+    AttachRequest, AttachResponse, ContextResponse, DetachedLoopRequest, DetachedLoopResponse,
+    InFlightWorker, InboxFrame, OpFrame, PostDeltasRequest, PostDeltasResponse,
+    RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER, SUBAGENT_TOKEN_HEADER,
 };
 
 /// Basename of the discovery pointer under `wave/<name>/`.
@@ -416,7 +421,126 @@ struct ServerState {
     subagent: SubagentDoor,
     observer: Option<Arc<StoreObserver>>,
     supervisor: Option<SupervisorHandle>,
+    loops: DetachedLoopSupervisor,
     started_at: OffsetDateTime,
+}
+
+/// Detached loop ownership lives with the listener. Tmux keeps the child
+/// inspectable without granting stdin (`tmux attach -r`); this set is the
+/// listener's live supervision view and is pruned when a session exits.
+#[derive(Debug, Clone, Default)]
+struct DetachedLoopSupervisor {
+    sessions: Arc<Mutex<HashSet<String>>>,
+}
+
+impl DetachedLoopSupervisor {
+    async fn launch(
+        &self,
+        repo_root: &Path,
+        wave: &str,
+        request: &DetachedLoopRequest,
+    ) -> Result<String, String> {
+        let session = detached_loop_session_name(wave);
+        let command = detached_loop_command(request, wave)?;
+        let status = tokio::process::Command::new("tmux")
+            .args([
+                "new-session",
+                "-d",
+                "-s",
+                &session,
+                "-c",
+                &repo_root.display().to_string(),
+                "/bin/zsh",
+                "-lc",
+                &command,
+            ])
+            .status()
+            .await
+            .map_err(|err| format!("tmux failed to spawn detached loop: {err}"))?;
+        if !status.success() {
+            return Err("tmux failed to launch detached loop".to_string());
+        }
+        let _ = tokio::process::Command::new("tmux")
+            .args(["set-option", "-t", &session, "mouse", "on"])
+            .status()
+            .await;
+
+        self.sessions
+            .lock()
+            .expect("detached loop session lock poisoned")
+            .insert(session.clone());
+        let sessions = Arc::clone(&self.sessions);
+        let watched = session.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                match crate::lfd::executor::helpers::tmux_session_exists(&watched).await {
+                    Ok(true) => continue,
+                    Ok(false) => break,
+                    Err(err) => {
+                        tracing::warn!(session = watched, %err, "detached loop probe failed");
+                        continue;
+                    }
+                }
+            }
+            sessions
+                .lock()
+                .expect("detached loop session lock poisoned")
+                .remove(&watched);
+            tracing::info!(session = watched, "detached loop ended");
+        });
+        Ok(session)
+    }
+}
+
+fn detached_loop_session_name(wave: &str) -> String {
+    let wave: String = wave
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let run = uuid::Uuid::new_v4().simple().to_string();
+    format!("lf-loop-{wave}-{}", &run[..8])
+}
+
+fn detached_loop_argv(executable: &Path, request: &DetachedLoopRequest, wave: &str) -> Vec<String> {
+    let mut argv = vec![
+        executable.display().to_string(),
+        "loop".to_string(),
+        request.flow.clone(),
+        request.seed.clone(),
+        "--wave".to_string(),
+        wave.to_string(),
+        "--max-passes".to_string(),
+        request.max_passes.to_string(),
+        "--pass-timeout-secs".to_string(),
+        request.pass_timeout_secs.to_string(),
+        "--wall-clock-secs".to_string(),
+        request.wall_clock_secs.to_string(),
+        "--poll-secs".to_string(),
+        request.poll_secs.to_string(),
+    ];
+    if let Some(max_turns) = request.max_turns {
+        argv.push("--max-turns".to_string());
+        argv.push(max_turns.to_string());
+    }
+    argv
+}
+
+fn detached_loop_command(request: &DetachedLoopRequest, wave: &str) -> Result<String, String> {
+    let executable =
+        std::env::current_exe().map_err(|err| format!("cannot resolve lf executable: {err}"))?;
+    let command = detached_loop_argv(&executable, request, wave)
+        .iter()
+        .map(|arg| crate::lfd::executor::helpers::shell_escape(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Ok(format!("unset LFD_SESSION_INHERITED; exec {command}"))
 }
 
 /// Build the router over a running [`WaveRuntime`]. `observer` is the store
@@ -441,6 +565,7 @@ pub fn router(
         subagent,
         observer,
         supervisor,
+        loops: DetachedLoopSupervisor::default(),
         started_at: OffsetDateTime::now_utc(),
     };
     Router::new()
@@ -449,6 +574,7 @@ pub fn router(
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
         .route("/channels", post(channels_handler))
+        .route("/loops", post(loops_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
         .route("/v0/exec", post(exec_handler))
         .route("/memory/log", get(memory_log_handler))
@@ -567,7 +693,7 @@ enum ExecVerdict {
 /// The wave `/v0/exec` door's verb allowlist — the F1 containment fix.
 ///
 /// The door is the sandboxed subagent's escape hatch: it exists so a worker
-/// can COMMIT and DISPATCH in the outwave despite its own worktree's
+/// can COMMIT and DELEGATE in the outwave despite its own worktree's
 /// `.git`-write lock. It is NOT a general remote `lf`. `validate_lf_argv`
 /// only proves an argv *parses*, so without this a leaked subagent token (or
 /// a prompt-injected LLM holding it) could run ANY verb — rotate credentials,
@@ -578,22 +704,17 @@ enum ExecVerdict {
 /// - Git/GitHub/pm/release/queue commands EXCEPT `auth` — the commit-and-land path.
 /// - `chat`, `memory` — a worker reporting up and curating wave memory.
 /// - the read verbs `ls`/`status`/`runs`/`sub`/`trace`/`usage` — inspection.
-/// - the dispatch path: a flow/skill run or an inline prompt carrying
-///   `--dispatch`, which lands in a FRESH sandboxed worktree.
+/// - `loop … --detach`, whose only execution path is a server-owned fresh
+///   worktree.
 ///
 /// Rejected:
 /// - `auth` — credential rotation is never the escape hatch's job.
 /// - `wave …` — wave lifecycle (start / `--force` take-over / dormant serve).
-/// - `task …` — starts a long-running task flowloop; dispatch it from the
-///   wave flowloop, not through this unsandboxed exec door.
-/// - any flow / inline prompt WITHOUT `--dispatch` — that would run an
-///   arbitrary LLM prompt unsandboxed in the outwave, the exact power this
-///   door must not hand a leaked token.
-///
-/// Note the escape hatch's real invocation is `lf --dispatch <flow> …` (the
-/// `--dispatch` flag PRECEDES the flow name — clap's external-subcommand
-/// capture swallows everything after the flow token, so a trailing
-/// `--dispatch` would be an argument to the flow, not the top-level flag).
+/// - blocking `loop …` — the door process would itself become the long-lived
+///   owner, bypassing the listener's supervision.
+/// - every direct flow / skill / inline prompt — those would run an arbitrary
+///   LLM prompt unsandboxed in the outwave, the exact power this door must not
+///   hand a leaked token.
 fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
     use crate::lf::{Cli, Commands};
     use clap::Parser;
@@ -623,32 +744,17 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         | Some(Commands::Sub { .. })
         | Some(Commands::Trace { .. })
         | Some(Commands::Usage) => ExecVerdict::Allow,
-        // A flow/skill run or an inline prompt: allowed only when it will land
-        // in a sandboxed worktree (`--dispatch`), never run in the outwave.
+        Some(Commands::Loop { detach: true, .. }) => ExecVerdict::Allow,
+        Some(Commands::Loop { detach: false, .. }) => ExecVerdict::Deny("loop".to_string()),
         Some(Commands::External(parts)) => {
-            if cli.dispatch {
-                ExecVerdict::Allow
-            } else {
-                let flow = parts.first().cloned().unwrap_or_else(|| "flow".to_string());
-                ExecVerdict::Deny(flow)
-            }
+            ExecVerdict::Deny(parts.first().cloned().unwrap_or_else(|| "flow".to_string()))
         }
         Some(Commands::Flow { name, .. }) | Some(Commands::Skill { name, .. }) => {
-            if cli.dispatch {
-                ExecVerdict::Allow
-            } else {
-                ExecVerdict::Deny(name.clone())
-            }
+            ExecVerdict::Deny(name.clone())
         }
-        Some(Commands::Inline { .. }) => {
-            if cli.dispatch {
-                ExecVerdict::Allow
-            } else {
-                ExecVerdict::Deny(":".to_string())
-            }
-        }
+        Some(Commands::Inline { .. }) => ExecVerdict::Deny(":".to_string()),
         Some(Commands::Wave { .. }) => ExecVerdict::Deny("wave".to_string()),
-        Some(Commands::Task { .. }) => ExecVerdict::Deny("task".to_string()),
+        Some(Commands::Project { .. }) => ExecVerdict::Deny("project".to_string()),
         // `lf ssh` forwards the local credential bundle to a remote host and
         // runs an arbitrary command there — the exact power a leaked token
         // must not reach.
@@ -705,6 +811,48 @@ async fn exec_handler(
         stdout: result.stdout,
         stderr: result.stderr,
     }))
+}
+
+/// `POST /loops` — launch one generic flowloop in a fresh worktree and return
+/// immediately. Both resident and subagent credentials are accepted: a human
+/// shell beside the wave reads the resident token file, while sandboxed hands
+/// inherit only the narrower subagent capability. Either route can launch only
+/// this worktree-forcing primitive.
+async fn loops_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(request): Json<DetachedLoopRequest>,
+) -> Result<Json<DetachedLoopResponse>, (StatusCode, String)> {
+    if state.subagent.authorize(&headers).is_err() && state.resident.authorize(&headers).is_err() {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "missing or wrong loop-launch credential".to_string(),
+        ));
+    }
+    if request.flow.trim().is_empty() || request.seed.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "flow and seed are required".to_string(),
+        ));
+    }
+    if request.max_passes == 0
+        || request.pass_timeout_secs == 0
+        || request.wall_clock_secs == 0
+        || request.poll_secs == 0
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "loop caps and poll interval must be positive".to_string(),
+        ));
+    }
+    crate::flowloop::driver::require_loop_flow(state.runtime.repo_root(), &request.flow)
+        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
+    let session = state
+        .loops
+        .launch(state.runtime.repo_root(), state.runtime.name(), &request)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    Ok(Json(DetachedLoopResponse { session }))
 }
 
 async fn conversation_handler(
@@ -1398,7 +1546,7 @@ mod tests {
 
     /// The escape hatch's real work passes the verb policy: committing and
     /// landing through git/PR commands, reporting via `chat`/`memory`, inspecting via the
-    /// read verbs, and dispatching a flow into a sandboxed worktree.
+    /// read verbs, and delegating a flowloop into a sandboxed worktree.
     #[test]
     fn wave_exec_policy_permits_the_escape_hatch_essentials() {
         for command in [
@@ -1412,9 +1560,8 @@ mod tests {
             argv(&["runs"]),
             argv(&["sub"]),
             argv(&["trace", "deadbeef"]),
-            // The dispatch path: `--dispatch` precedes the flow name.
-            argv(&["--dispatch", "implement", "ship it"]),
-            argv(&["--dispatch", "-b", "review"]),
+            argv(&["loop", "task", "ship it", "--detach"]),
+            argv(&["loop", "review", "audit the diff", "--detach"]),
         ] {
             assert_eq!(
                 wave_exec_verdict(&command),
@@ -1424,8 +1571,8 @@ mod tests {
         }
     }
 
-    /// Credentials and wave lifecycle are refused, and a flow run WITHOUT
-    /// `--dispatch` (which would execute an arbitrary prompt unsandboxed in the
+    /// Credentials and wave lifecycle are refused, and a blocking loop or
+    /// direct flow (which would execute an arbitrary prompt unsandboxed in the
     /// outwave) is refused — the F1 containment the door exists to enforce.
     #[test]
     fn wave_exec_policy_rejects_dangerous_verbs() {
@@ -1435,8 +1582,8 @@ mod tests {
             argv(&["wave", "ship"]),
             argv(&["wave", "ship", "--force"]),
             argv(&["task", "ship it"]),
+            argv(&["loop", "task", "ship it"]),
             argv(&["sync-skills", "--yes"]),
-            // A flow / inline prompt with no `--dispatch`: no sandbox.
             argv(&["implement", "ship it"]),
             argv(&[":", "do", "something"]),
         ];
@@ -1460,8 +1607,8 @@ mod tests {
             ExecVerdict::Deny("wave".to_string())
         );
         assert_eq!(
-            wave_exec_verdict(&argv(&["task", "ship it"])),
-            ExecVerdict::Deny("task".to_string())
+            wave_exec_verdict(&argv(&["loop", "task", "ship it"])),
+            ExecVerdict::Deny("loop".to_string())
         );
         assert_eq!(
             wave_exec_verdict(&argv(&["sync-skills", "--yes"])),
@@ -1471,6 +1618,57 @@ mod tests {
             wave_exec_verdict(&argv(&["implement", "ship it"])),
             ExecVerdict::Deny("implement".to_string())
         );
+    }
+
+    #[test]
+    fn detached_loop_command_forces_the_server_owned_blocking_form() {
+        let request = DetachedLoopRequest {
+            flow: "task".into(),
+            seed: "fix 'quoted' behavior".into(),
+            max_passes: 8,
+            pass_timeout_secs: 1800,
+            wall_clock_secs: 7200,
+            poll_secs: 60,
+            max_turns: Some(20),
+        };
+        let argv = detached_loop_argv(Path::new("/opt/lf"), &request, "platform");
+        assert_eq!(
+            &argv[..4],
+            ["/opt/lf", "loop", "task", "fix 'quoted' behavior"]
+        );
+        assert!(argv.windows(2).any(|pair| pair == ["--wave", "platform"]));
+        assert!(!argv.iter().any(|arg| arg == "--detach"));
+    }
+
+    #[tokio::test]
+    async fn loop_door_requires_capability_before_validating_or_launching() {
+        let (base, token, _tmp) = boot_exec().await;
+        let request = DetachedLoopRequest {
+            flow: String::new(),
+            seed: "ship it".into(),
+            max_passes: 8,
+            pass_timeout_secs: 1800,
+            wall_clock_secs: 7200,
+            poll_secs: 60,
+            max_turns: None,
+        };
+        let client = reqwest::Client::new();
+        let unauthorized = client
+            .post(format!("{base}/loops"))
+            .json(&request)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        let invalid = client
+            .post(format!("{base}/loops"))
+            .header(SUBAGENT_TOKEN_HEADER, token)
+            .json(&request)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(invalid.status(), reqwest::StatusCode::BAD_REQUEST);
     }
 
     /// A minted subagent token authorizes but a forbidden verb still 400s over

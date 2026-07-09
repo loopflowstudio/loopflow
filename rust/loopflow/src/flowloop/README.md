@@ -7,8 +7,8 @@ caps. There are no tiers in code: "task" and "project" are just flows we
 define.
 
 ```
-lf task "fix the flaky chord-timeout test"     # loop task to a merged PR
-lf task "…" --flow scan-pass                   # loop any flow the same way
+lf loop task "fix the flaky chord-timeout test"  # inhabit until the PR merges
+lf loop scan-pass "scan the runtime" --detach    # delegate the same primitive
 ```
 
 **The termination bit is one generic contract, identical for every
@@ -32,16 +32,20 @@ skills of purpose-built loop flows discuss it with context — for
 observing MERGED means flipping the bit. Self-report in a reply counts for
 nothing; only the file does.
 
-**No backlog.** A task exists in two states: a running `lf` run, and a
-merged PR. The open runs with a task flow ARE the wave's open tasks
-(`lf runs`, the wave heartbeat's `<in_flight>` fold); the PR is the record
-of done. Intent that isn't running yet lives in GOAL.md, memory, and chat —
-not in a tracker.
+**Backlogs are allowed.** A task has three visible states: filed in Linear,
+running as an `lf loop`, and merged as a PR. Waves read the filed backlog when
+selecting; `lf runs` and the heartbeat's `<in_flight>` fold show the active
+hands. Filing intent is legitimate, but never substitutes for selection.
+
+Foreground and detached loops are one primitive. Foreground inhabitation
+blocks the caller until the bit flips. `--detach` asks the live wave server to
+own the loop in a named tmux session; attach with `tmux attach -r` for
+read-only inspection. Both execute headlessly and fork a worktree.
 
 ## Layout
 
 - `pass.rs` — one bounded, headless run of any flow in a worktree
-  (`lf -b <flow>`, killed on timeout) — the loopable unit.
+  (`lf -b flow <flow>`, killed on timeout) — the loopable unit.
 - `driver.rs` — the loop: place → pass → read the loop file → done / recheck
   / continue, under caps (max passes, wall clock; exhaustion escalates via
   `lf chat --parent`).

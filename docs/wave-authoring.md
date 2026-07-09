@@ -226,7 +226,7 @@ Run the wave agent and it works one move at a time:
 3. **Dispatch** — hand a scoped task to a worker, which runs a flow in its own worktree and opens a PR:
 
    ```bash
-   lf build "wrap SQLite migrations in a transaction" --wave infra --dispatch
+   lf loop build "wrap SQLite migrations in a transaction" --wave infra --detach
    ```
 
 4. **Watch** — the PR is how the worker reports back. The agent reads its diff, checks, and comments.
@@ -245,7 +245,7 @@ When a task ships, its context — what was learned, what changed, what downstre
 ```bash
 lf wave mywave              # start the wave agent (Ctrl-C to stop)
 tmux ls                     # the wave agent and every worker it launched
-tmux attach -t <name>       # jump into one; agent output lives here
+tmux attach -r -t <name>    # inspect one; agent output lives here
 ```
 
 In **Loopflow**, a wave's detail view groups its live work — the wave agent session, worker runs, PR state, and anything needing your attention.

@@ -16,5 +16,7 @@ Read the task seed in `<lf:message>`, then `scratch/<branch>.md` and
 - Add or update tests for user-visible behavior.
 - Run the narrowest verification that covers the touched code.
 - Use `lf pr open` when the branch has a reviewable PR-shaped change.
+- At a detached pass boundary, report concrete progress with `lf chat` and
+  publish durable learnings with `lf memory add`; the transcript is private.
 
 Stay scoped to the task. Put follow-up scope in `scratch/questions.md`.

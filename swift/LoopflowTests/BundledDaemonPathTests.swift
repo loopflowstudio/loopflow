@@ -13,10 +13,10 @@ struct BundledDaemonPathTests {
     private static let guiPath = "/usr/bin:/bin:/usr/sbin:/sbin"
 
     @Test("tmux resolves under the enriched PATH a GUI-launched daemon would see")
-    func tmuxResolvesUnderEnrichedPath() throws {
+    func tmuxResolvesUnderEnrichedPath() async throws {
         guard isToolInstalledSomewhere("tmux") else { return }
 
-        let enriched = GUIProcessEnvironment.enrichedPath(from: Self.guiPath)
+        let enriched = await GUIProcessEnvironment.shared.resolvedPath(from: Self.guiPath)
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -41,9 +41,9 @@ struct BundledDaemonPathTests {
     // Reproduces the exact failure mode the terminal panel hit in production:
     // Loopflow's TmuxSession spawns `/usr/bin/env tmux ...` with the GUI-minimal
     // environment, so `env` can't find tmux and exits 127. With
-    // GUIProcessEnvironment.enriched applied, the same invocation succeeds.
+    // GUIProcessEnvironment's resolved environment applied, the same invocation succeeds.
     @Test("env tmux works with enriched env, fails with the bare GUI env")
-    func envTmuxReproducesAndFixes() throws {
+    func envTmuxReproducesAndFixes() async throws {
         guard isToolInstalledSomewhere("tmux") else { return }
 
         let guiEnv = ["PATH": Self.guiPath]
@@ -56,23 +56,61 @@ struct BundledDaemonPathTests {
         #expect(bare.exit == 127, "expected env to fail to resolve tmux under the GUI PATH alone")
         #expect(bare.stderr.contains("tmux"), "expected stderr to mention tmux; got: \(bare.stderr)")
 
+        let resolvedEnvironment = await GUIProcessEnvironment.shared.resolved(guiEnv)
         let enriched = try spawnAndWait(
             "/usr/bin/env",
             args: ["tmux", "-V"],
-            env: GUIProcessEnvironment.enriched(guiEnv)
+            env: resolvedEnvironment
         )
         #expect(enriched.exit == 0, "tmux should resolve under enriched env; stderr: \(enriched.stderr)")
         #expect(enriched.stdout.contains("tmux"))
     }
 
     @Test("enrichment is idempotent and preserves existing PATH entries")
-    func enrichmentIsIdempotent() {
-        let once = GUIProcessEnvironment.enrichedPath(from: Self.guiPath)
-        let twice = GUIProcessEnvironment.enrichedPath(from: once)
+    func enrichmentIsIdempotent() async {
+        let once = await GUIProcessEnvironment.shared.resolvedPath(from: Self.guiPath)
+        let twice = await GUIProcessEnvironment.shared.resolvedPath(from: once)
 
         #expect(once == twice)
         #expect(once.contains("/usr/bin"))
         #expect(once.contains("/opt/homebrew/bin"))
+    }
+
+    @Test("preparing returns while shell discovery is still running")
+    func preparationDoesNotBlock() async {
+        let probe = ShellPathProbe(path: "/Users/example/.nvm/bin", blocked: true)
+        let resolver = GUIProcessEnvironment(readLoginShellPath: { probe.read() })
+        await resolver.prepare()
+        await probe.waitUntilStarted()
+
+        probe.release()
+        let path = await resolver.resolvedPath(from: Self.guiPath)
+        #expect(path.split(separator: ":").first == "/Users/example/.nvm/bin")
+    }
+
+    @Test("failed shell discovery resolves to the fixed fallback")
+    func failedDiscoveryUsesFallback() async {
+        let resolver = GUIProcessEnvironment(readLoginShellPath: { nil })
+        let path = await resolver.resolvedPath(from: Self.guiPath)
+
+        #expect(path.contains("/opt/homebrew/bin"))
+        #expect(path.hasSuffix(Self.guiPath))
+    }
+
+    @Test("concurrent child launches share one shell discovery")
+    func concurrentResolutionIsCoalesced() async {
+        let probe = ShellPathProbe(path: "/Users/example/.nvm/bin", blocked: true)
+        let resolver = GUIProcessEnvironment(readLoginShellPath: { probe.read() })
+        let first = Task { await resolver.resolvedPath(from: Self.guiPath) }
+
+        await probe.waitUntilStarted()
+        let second = Task { await resolver.resolvedPath(from: Self.guiPath) }
+        probe.release()
+
+        let firstPath = await first.value
+        let secondPath = await second.value
+        #expect(firstPath == secondPath)
+        #expect(probe.callCount == 1)
     }
 
     // The regression that motivated asking the login shell: codex installs via
@@ -84,11 +122,11 @@ struct BundledDaemonPathTests {
     // says something true on any machine: every directory the interactive login
     // shell has, an enriched GUI child has too.
     @Test("enriched PATH covers every directory the user's login shell provides")
-    func enrichedPathCoversLoginShellDirectories() throws {
-        guard let shellPath = interactiveLoginShellPath() else { return }
+    func enrichedPathCoversLoginShellDirectories() async throws {
+        let shellPath = try #require(interactiveLoginShellPath())
 
         let enriched = Set(
-            GUIProcessEnvironment.enrichedPath(from: Self.guiPath)
+            await GUIProcessEnvironment.shared.resolvedPath(from: Self.guiPath)
                 .split(separator: ":").map(String.init)
         )
 
@@ -105,11 +143,14 @@ struct BundledDaemonPathTests {
 
         guard let result = try? spawnAndWait(
             shell,
-            args: ["-ilc", "printf '%s' \"$PATH\""],
+            args: ["-ilc", "/usr/bin/printenv PATH"],
             env: ["PATH": Self.guiPath, "HOME": FileManager.default.homeDirectoryForCurrentUser.path]
         ), result.exit == 0, !result.stdout.isEmpty else { return nil }
 
         return result.stdout
+            .split(whereSeparator: \.isNewline)
+            .last
+            .map(String.init)
     }
 
     // Reproduces the Ghostty failure mode: once a surface is opened, Ghostty
@@ -119,7 +160,7 @@ struct BundledDaemonPathTests {
     // bare GUI PATH, `exec -l tmux` fails with "tmux: not found"; under our
     // enriched env it resolves.
     @Test("bash --noprofile --norc -c 'exec tmux' works with enriched env, fails with bare GUI env")
-    func ghosttyStyleBashExecReproducesAndFixes() throws {
+    func ghosttyStyleBashExecReproducesAndFixes() async throws {
         guard isToolInstalledSomewhere("tmux") else { return }
 
         let guiEnv = ["PATH": Self.guiPath]
@@ -131,19 +172,20 @@ struct BundledDaemonPathTests {
         )
         #expect(bare.exit != 0, "expected bare GUI env to fail under Ghostty-style bash invocation")
 
+        let resolvedEnvironment = await GUIProcessEnvironment.shared.resolved(guiEnv)
         let enriched = try spawnAndWait(
             "/bin/bash",
             args: ["--noprofile", "--norc", "-c", "exec tmux -V"],
-            env: GUIProcessEnvironment.enriched(guiEnv)
+            env: resolvedEnvironment
         )
         #expect(enriched.exit == 0, "tmux should resolve under enriched env; stderr: \(enriched.stderr)")
         #expect(enriched.stdout.contains("tmux"))
     }
 
     @Test("enriched env preserves non-PATH keys and upgrades PATH")
-    func enrichedPreservesOtherKeys() {
+    func enrichedPreservesOtherKeys() async {
         let input = ["PATH": Self.guiPath, "HOME": "/Users/example", "CUSTOM": "value"]
-        let result = GUIProcessEnvironment.enriched(input)
+        let result = await GUIProcessEnvironment.shared.resolved(input)
 
         #expect(result["HOME"] == "/Users/example")
         #expect(result["CUSTOM"] == "value")
@@ -167,6 +209,58 @@ struct BundledDaemonPathTests {
         let exit: Int32
         let stdout: String
         let stderr: String
+    }
+
+    private final class ShellPathProbe: @unchecked Sendable {
+        private let path: String
+        private let gate: DispatchSemaphore?
+        private let lock = NSLock()
+        private var calls = 0
+        private var started = false
+        private var startWaiters: [CheckedContinuation<Void, Never>] = []
+
+        init(path: String, blocked: Bool) {
+            self.path = path
+            gate = blocked ? DispatchSemaphore(value: 0) : nil
+        }
+
+        var callCount: Int {
+            lock.withLock { calls }
+        }
+
+        func waitUntilStarted() async {
+            await withCheckedContinuation { continuation in
+                let resumeNow = lock.withLock {
+                    if started {
+                        return true
+                    }
+                    startWaiters.append(continuation)
+                    return false
+                }
+                if resumeNow {
+                    continuation.resume()
+                }
+            }
+        }
+
+        func read() -> String? {
+            let waiters = lock.withLock {
+                calls += 1
+                started = true
+                let waiters = startWaiters
+                startWaiters.removeAll()
+                return waiters
+            }
+            for waiter in waiters {
+                waiter.resume()
+            }
+            gate?.wait()
+            return path
+        }
+
+        func release() {
+            gate?.signal()
+        }
     }
 
     private func spawnAndWait(

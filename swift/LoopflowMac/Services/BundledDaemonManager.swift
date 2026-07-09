@@ -148,7 +148,7 @@ final class BundledDaemonManager {
             let port = try allocatePort()
 
             if settings.preferNativeMode {
-                try startNativeDaemon(
+                try await startNativeDaemon(
                     token: token,
                     port: port,
                     connectWithPhone: settings.connectWithPhone
@@ -161,14 +161,14 @@ final class BundledDaemonManager {
                         connectWithPhone: settings.connectWithPhone
                     )
                 } catch {
-                    try startNativeDaemon(
+                    try await startNativeDaemon(
                         token: token,
                         port: port,
                         connectWithPhone: settings.connectWithPhone
                     )
                 }
             } else {
-                try startNativeDaemon(
+                try await startNativeDaemon(
                     token: token,
                     port: port,
                     connectWithPhone: settings.connectWithPhone
@@ -223,7 +223,7 @@ final class BundledDaemonManager {
         resetRuntime()
     }
 
-    private func startNativeDaemon(token: String, port: Int, connectWithPhone: Bool) throws {
+    private func startNativeDaemon(token: String, port: Int, connectWithPhone: Bool) async throws {
         let dbPath = try sqlitePath()
         let process = Process()
         guard let lfdPath = executableProvider("lfd") else {
@@ -233,7 +233,7 @@ final class BundledDaemonManager {
         process.executableURL = lfdPath
         process.arguments = ["serve", Self.bundledMarkerArgument]
 
-        var env = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
+        var env = await GUIProcessEnvironment.shared.resolved(ProcessInfo.processInfo.environment)
         env["LFD_HTTP_ADDR"] = connectWithPhone ? "0.0.0.0:\(port)" : "127.0.0.1:\(port)"
         env["LFD_DB_PATH"] = dbPath.path
         env["LFD_AUTH_TOKEN"] = token

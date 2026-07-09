@@ -40,8 +40,12 @@ final class TmuxSession {
     }
 
     nonisolated static func killSessionIfExists(named sessionName: String) throws {
+        let environment = GUIProcessEnvironment.fallback(ProcessInfo.processInfo.environment)
         do {
-            _ = try runCommandSync(["tmux", "kill-session", "-t", sessionName])
+            _ = try runCommandSync(
+                ["tmux", "kill-session", "-t", sessionName],
+                environment: environment
+            )
         } catch let TmuxError.commandFailed(_, _, detail)
             where detail.localizedCaseInsensitiveContains("can't find session") {
             return
@@ -53,10 +57,16 @@ final class TmuxSession {
     }
 
     private func runCommand(_ args: [String]) async throws -> String {
-        try Self.runCommandSync(args)
+        let environment = await GUIProcessEnvironment.shared.resolved(ProcessInfo.processInfo.environment)
+        return try await Task.detached(priority: .userInitiated) {
+            try Self.runCommandSync(args, environment: environment)
+        }.value
     }
 
-    private nonisolated static func runCommandSync(_ args: [String]) throws -> String {
+    private nonisolated static func runCommandSync(
+        _ args: [String],
+        environment: [String: String]
+    ) throws -> String {
         let process = Process()
         let stdout = Pipe()
         let stderr = Pipe()
@@ -64,7 +74,7 @@ final class TmuxSession {
         process.arguments = args
         process.standardOutput = stdout
         process.standardError = stderr
-        process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)
+        process.environment = environment
 
         try process.run()
         process.waitUntilExit()

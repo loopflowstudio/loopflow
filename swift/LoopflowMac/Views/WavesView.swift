@@ -523,8 +523,8 @@ struct WavesView: View {
     private func refreshAuthoredWaves() async {
         if RepoState.uiTestMode() != nil { return }
         let paths = repos.map(\.path)
+        let liveSessions = await LocalWaveAgentLauncher.tmuxSessionNames()
         authoredWavesByRepo = await Task.detached {
-            let liveSessions = LocalWaveAgentLauncher.tmuxSessionNames()
             var result: [String: [AuthoredWaveSnapshot]] = [:]
             for path in paths {
                 result[path] = Self.authoredWaves(inRepo: path, liveTmuxSessionNames: liveSessions)

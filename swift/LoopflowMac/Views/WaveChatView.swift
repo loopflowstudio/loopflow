@@ -197,9 +197,7 @@ struct WaveChatView: View {
         let waveName = waveName
         Task {
             do {
-                try await Task.detached {
-                    try LocalWaveAgentLauncher.launchWave(repoPath: repoPath, waveName: waveName)
-                }.value
+                try await LocalWaveAgentLauncher.launchWave(repoPath: repoPath, waveName: waveName)
             } catch {
                 launch = .failed(error.localizedDescription)
                 return

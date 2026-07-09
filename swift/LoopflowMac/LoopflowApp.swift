@@ -2,11 +2,20 @@ import SwiftUI
 import AppKit
 import Loopflow
 
-private func enrichProcessPathForGUILaunch() {
+private func prepareProcessPathForGUILaunch() {
     let existing = ProcessInfo.processInfo.environment["PATH"]
-    let enriched = GUIProcessEnvironment.enrichedPath(from: existing)
-    guard enriched != existing else { return }
-    setenv("PATH", enriched, 1)
+    let fallback = GUIProcessEnvironment.fallbackPath(from: existing)
+    if fallback != existing {
+        setenv("PATH", fallback, 1)
+    }
+
+    guard !AppRuntime.isAutomatedTest else { return }
+    Task.detached(priority: .userInitiated) {
+        await GUIProcessEnvironment.shared.prepare()
+        let resolved = await GUIProcessEnvironment.shared.resolvedPath(from: fallback)
+        guard resolved != fallback else { return }
+        setenv("PATH", resolved, 1)
+    }
 }
 
 @MainActor
@@ -38,10 +47,10 @@ struct LoopflowApp: App {
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
         bootstrapLoopflowApp()
-        // Enrich our own process PATH before any children spawn, so tools launched
-        // through Ghostty surfaces and `--noprofile --norc` shells can find tmux,
-        // git, and agent CLIs that live in Homebrew or ~/.local/bin.
-        enrichProcessPathForGUILaunch()
+        // Install the fixed fallback before any child can spawn. Shell discovery
+        // continues off the main actor; explicit launchers await it, while
+        // inherited terminal processes pick up the resolved global PATH.
+        prepareProcessPathForGUILaunch()
         if !AppRuntime.isAutomatedTest {
             Task { @MainActor in
                 SharedDaemon.eagerStart()

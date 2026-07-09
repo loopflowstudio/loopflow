@@ -226,6 +226,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "054_step_to_skill",
         sql: include_str!("migrations/054_step_to_skill.sql"),
     },
+    Migration {
+        version: "057_runs_step_index_repair",
+        sql: include_str!("migrations/057_runs_step_index_repair.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the
@@ -237,6 +241,7 @@ const RENAME_CONVERGENCE_MIGRATIONS: &[&str] = &[
     "049_runs_rename",
     "050_drop_trigger_organs",
     "053_drop_wave_primary_flow",
+    "057_runs_step_index_repair",
 ];
 
 /// Per-migration failures that mean "the db is already in the target state":
@@ -543,5 +548,32 @@ mod drift_tests {
         assert!(recorded);
         // Idempotent on re-run.
         apply_sqlite(&conn).unwrap();
+    }
+
+    #[test]
+    fn runs_step_index_repair_converges_a_pre_release_schema() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_sqlite(&conn).unwrap();
+        conn.execute_batch("ALTER TABLE runs RENAME COLUMN step_index TO skill_index")
+            .unwrap();
+        conn.execute(
+            "DELETE FROM schema_migrations WHERE version='057_runs_step_index_repair'",
+            [],
+        )
+        .unwrap();
+
+        apply_sqlite(&conn).unwrap();
+
+        let has_step_index: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('runs') WHERE name='step_index'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            has_step_index,
+            "skill_index should be renamed to step_index"
+        );
     }
 }

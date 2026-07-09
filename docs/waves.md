@@ -69,7 +69,7 @@ Run one loop iteration for the shipper wave.
 
 ## Process
 
-Read the roadmap and dispatch the appropriate flow for the next useful move.
+Read the live tasks and dispatch the appropriate flow for the next useful move.
 ```
 
 Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due mid-turn fires at the next turn boundary; occurrences older than 24 hours are missed, not replayed.

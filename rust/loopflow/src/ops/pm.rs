@@ -132,7 +132,7 @@ pub struct PmTaskMoveResult {
     pub project: String,
 }
 
-// ── Client + PM-space resolution ────────────────────────────────────
+// ── Client + Linear project resolution ──────────────────────────────
 
 /// A wave's PM client bound to its provider Linear project.
 pub(crate) struct PmContext {
@@ -804,44 +804,44 @@ async fn pm_sync_async(
         .unwrap_or(PmProviderKind::Linear);
     let client = build_client(repo, provider).await?;
     progress.status(&format!("checking {provider} Linear projects and labels"));
-    let spaces = client.list_projects().await.map_err(pm_to_ops)?;
+    let linear_projects = client.list_projects().await.map_err(pm_to_ops)?;
     let labels = client.list_labels().await.map_err(pm_to_ops)?;
     let label_names: BTreeSet<String> = labels.into_iter().map(|label| label.name).collect();
 
-    let spaces_by_id: BTreeMap<String, String> = spaces
+    let linear_projects_by_id: BTreeMap<String, String> = linear_projects
         .iter()
-        .map(|space| (space.id.clone(), space.name.clone()))
+        .map(|project| (project.id.clone(), project.name.clone()))
         .collect();
-    for space in &spaces {
-        if !linked_project_ids.contains(&space.id) {
+    for project in &linear_projects {
+        if !linked_project_ids.contains(&project.id) {
             diagnostics.push(format!(
                 "Linear project `{}` ({}) is not linked by any local wave",
-                space.name, space.id
+                project.name, project.id
             ));
         }
     }
 
     for wave in &waves {
         let provider = resolve_provider(repo, wave)?;
-        let Some(space_id) = read_project(repo, wave, provider) else {
+        let Some(linear_project_id) = read_project(repo, wave, provider) else {
             continue;
         };
-        let expected_space_name = title_case(wave);
-        match spaces_by_id.get(&space_id) {
-            Some(actual) if actual != &expected_space_name => {
+        let expected_linear_project_name = title_case(wave);
+        match linear_projects_by_id.get(&linear_project_id) {
+            Some(actual) if actual != &expected_linear_project_name => {
                 let message = format!(
-                    "rename Linear project `{actual}` ({space_id}) to `{expected_space_name}` for wave/{wave}"
+                    "rename Linear project `{actual}` ({linear_project_id}) to `{expected_linear_project_name}` for wave/{wave}"
                 );
                 if !options.plan {
                     client
-                        .rename_project(&space_id, &expected_space_name)
+                        .rename_project(&linear_project_id, &expected_linear_project_name)
                         .await
                         .map_err(pm_to_ops)?;
                 }
                 actions.push(message);
             }
             None => diagnostics.push(format!(
-                "wave/{wave} points at missing Linear project {space_id}"
+                "wave/{wave} points at missing Linear project {linear_project_id}"
             )),
             _ => {}
         }
@@ -858,7 +858,10 @@ async fn pm_sync_async(
         }
 
         let local_project_set: BTreeSet<String> = local_projects.into_iter().collect();
-        let items = client.list_items(&space_id).await.map_err(pm_to_ops)?;
+        let items = client
+            .list_items(&linear_project_id)
+            .await
+            .map_err(pm_to_ops)?;
         let mut open_by_project: BTreeMap<String, usize> = BTreeMap::new();
         for item in &items {
             let project_labels = item_project_labels(item);

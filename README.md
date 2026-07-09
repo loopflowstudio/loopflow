@@ -1,6 +1,6 @@
 # Loopflow
 
-Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it works a roadmap, delegates the implementation to workers, remembers what it learns, and shows you every live session.
+Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it works Linear tasks, delegates the implementation to workers, remembers what it learns, and shows you every live session.
 
 Start a wave by hand and steer it interactively. As it earns trust, let it loop — picking work, dispatching flows, and reacting to changes on its own.
 
@@ -21,8 +21,9 @@ workers: 2
 
 ## Objective
 
-Keep the design system coherent. Each loop: read the roadmap, pick the next
-design task, dispatch a worker to build it, and fold what changed into memory.
+Keep the design system coherent. Each loop: read the Linear tasks, pick the next
+useful design move, dispatch a worker to build it, and fold what changed into
+memory.
 
 ## Measures
 
@@ -71,7 +72,7 @@ lf build "unify button variants" --wave designer --dispatch
 
 Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its intent in view. Their PRs are how results flow back to the wave.
 
-Run a roadmap task as a bounded task flowloop:
+Run a task as a bounded task flowloop:
 
 ```bash
 lf task "fix the flaky chord-timeout test" --wave designer

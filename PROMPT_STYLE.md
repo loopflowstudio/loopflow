@@ -151,7 +151,7 @@ output comes down to five marks.
 
 ```markdown
 # Thin — technically valid, but it can't steer a loop
-Read the roadmap, pick the next useful move, dispatch the appropriate flow, and
+Read the live tasks, pick the next useful move, dispatch the appropriate flow, and
 leave loopflow closer to done.
 
 # Makeover — identity, verbs, and a north the loop can be held to

@@ -102,7 +102,7 @@ Run one loop iteration for this wave.
 
 ## Process
 
-Read the roadmap, pick the next useful move, and dispatch the appropriate flow.
+Read the live tasks, pick the next useful move, and dispatch the appropriate flow.
 ```
 
 ---

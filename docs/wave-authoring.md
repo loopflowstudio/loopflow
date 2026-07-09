@@ -81,7 +81,7 @@ workers: 2
 
 ## Objective
 
-Harden the daemon. Each loop: read the roadmap and memory, pick the next useful
+Harden the daemon. Each loop: read Linear tasks and memory, pick the next useful
 move, dispatch a worker to build it, watch the PR, and fold what shipped into
 memory.
 

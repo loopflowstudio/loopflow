@@ -87,8 +87,8 @@ This is the natural session exit point. The user's answer determines what to run
      `pm.linear_project`)
    - body (the loop prompt): Objective, Measures, Cron if any, and Process. Put
      routing judgment in Process, not frontmatter.
-   - **No roadmap table, no status indicators, no item lists** — the roadmap
-     lives in Linear.
+   - **No roadmap table, no status indicators, no item lists** — tasks live in
+     Linear.
 3. Write `wave/<name>/MEMORY.md` — seed it with the load-bearing context from the
    Detail phase (key decisions, constraints, what's known). Short is fine.
 4. Create `wave/<name>/projects/` with one file per measured bet. A project is
@@ -96,7 +96,7 @@ This is the natural session exit point. The user's answer determines what to run
    Each project belongs to this wave, has no child projects, and carries a
    definition plus proof-shaped `## KRs`.
 5. Connect and seed tasks in Linear:
-   - `lf op pm init --wave <name>` creates/links the Linear PM space and writes
+   - `lf op pm init --wave <name>` creates/links the Linear project and writes
      `linear_project` into `GOAL.md`.
    - File the opening items with
      `lf op pm update --project <project> --title "…" --notes "…"` — the urgent
@@ -108,7 +108,7 @@ This is the natural session exit point. The user's answer determines what to run
    - `lf implement` (for the immediate item)
    - `lf ship`
 
-Once breaking things up, be aggressive about commit boundaries—each roadmap item should be independently shippable.
+Once breaking things up, be aggressive about commit boundaries—each task should be independently shippable.
 
 ## What makes a good design doc
 

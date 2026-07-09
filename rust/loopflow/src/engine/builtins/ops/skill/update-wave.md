@@ -49,7 +49,7 @@ Whether you're cleaning up after a build, reconciling scratch analysis, or both:
 ## Bias: fold into MEMORY, don't drop
 
 `scratch/` is cleared on land. Anything left there is lost. Anything folded into
-`MEMORY.md` — or pushed to the roadmap — survives. **Dropping content is a worse
+`MEMORY.md` — or filed as a Linear task — survives. **Dropping content is a worse
 failure mode than duplicating it.**
 
 Every scratch file with future-relevant content must land somewhere durable:
@@ -68,10 +68,9 @@ fold it. If it only describes what was already built, let it go.
 ## Workflow
 
 1. Read the diff (if any) to understand what this branch built.
-2. Read `GOAL.md`, `MEMORY.md`, and the live roadmap (`lf op pm show`).
+2. Read `GOAL.md`, `MEMORY.md`, and the live PM tasks (`lf op pm show`).
 3. Read `wave/<wave>/projects/*.md` and `scratch/` — every file, completely.
-4. **Reconcile the roadmap against reality.** For each item on the Linear
-   roadmap, ask:
+4. **Reconcile Linear tasks against reality.** For each task, ask:
    - **Shipped?** If this branch (or main) crossed its finish line, close it:
      `lf op pm update --id <task-id> --status done`.
    - **Accurate?** If the item's description no longer matches the codebase,
@@ -106,7 +105,7 @@ When `scratch/` holds a proposal and no wave exists yet, create one:
    the proposal (key decisions, constraints, what's known). It can be short.
 3. Create `wave/<wave>/projects/` with one file per measured bet. Each project
    gets a definition and `## KRs`.
-4. Connect the roadmap: `lf op pm init --wave <name>` creates/links the wave's
+4. Connect Linear: `lf op pm init --wave <name>` creates/links the wave's
    Linear project and writes `linear_project` into `GOAL.md`.
 5. File the opening tasks in Linear with `lf op pm update` — the urgent and
    next-step work, one task each. Tasks start in Linear, not on disk.
@@ -131,7 +130,7 @@ pm:
 - The milestones or shape of the work ahead.
 
 **GOAL.md must not contain:** a roadmap table, status indicators
-(shipped/in-progress/planned), or item lists. The roadmap is in Linear.
+(shipped/in-progress/planned), or item lists. Tasks are in Linear.
 
 ### Projects
 
@@ -156,8 +155,8 @@ projects, or issue mirrors. Put concrete work in Linear.
 
 ## Coherence
 
-Roadmap items go stale — the codebase moves, other waves ship, intent evolves.
-When you find incoherent items on the roadmap, fix them in place through
+Linear tasks go stale — the codebase moves, other waves ship, intent evolves.
+When you find incoherent tasks, fix them in place through
 `lf op pm update`:
 
 - **Finish line moved** — the goal was reached a different way → close the item.
@@ -175,7 +174,7 @@ doesn't need human review.
 
 A wave with a current `GOAL.md` and `MEMORY.md` but nothing new to build is
 **silent** — alive, watching its area, not proposing work. That's a healthy
-state, not a failure. An empty roadmap is fine. Shipping mediocre work to avoid
+state, not a failure. An empty Linear task list is fine. Shipping mediocre work to avoid
 being empty trains the user to ignore the wave; staying quiet until there's
 something genuinely compelling earns trust that compounds.
 
@@ -189,6 +188,6 @@ Updated `wave/<wave>/MEMORY.md`, project docs when KRs moved, `GOAL.md` if
 intent moved, task state in Linear that reflects reality, and a trimmed
 `scratch/`.
 
-**"No changes needed" is only valid when scratch/ is empty and the roadmap
-already matches reality.** If scratch has files, something must move into
-`MEMORY.md`, the roadmap, or both.
+**"No changes needed" is only valid when scratch/ is empty and Linear tasks
+already match reality.** If scratch has files, something must move into
+`MEMORY.md`, Linear tasks, or both.

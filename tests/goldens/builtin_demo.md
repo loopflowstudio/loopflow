@@ -96,7 +96,7 @@ Use these unconditionally. Outside any wave they drop silently (exit 0) -
 publish-to-no-subscriber is correct pubsub, never a blocker. A wave whose
 server is down errors instead; note it and move on.
 
-## The Roadmap Lives in Linear
+## Tasks Live in Linear
 
 Use three planning nouns:
 
@@ -114,7 +114,7 @@ pieces into tasks.
 
 Project definitions and KRs live in `wave/<wave>/projects/<project>.md`.
 Concrete tasks live in Linear. There are no local task lists. `lf op pm` reads
-and edits the wave's Linear PM space; tasks attach to local projects with
+and edits the wave's Linear project; tasks attach to local projects with
 `project:<slug>` labels.
 
 ```bash
@@ -145,7 +145,7 @@ be a project.
 - `scratch/<branch>.md` - design doc for the current work
 - `scratch/questions.md` - open questions, blockers, assumptions
 - `lf memory add "<fact>"` - durable wave learnings; `wave/<name>/MEMORY.md` is
-  server-owned, never edited directly (roadmap goes to Linear, above)
+  server-owned, never edited directly (tasks go to Linear, above)
 - Code - the actual work
 
 ## Checkpoint And Proceed

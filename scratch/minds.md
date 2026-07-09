@@ -45,31 +45,33 @@ persists and re-reads each pass. The two only appear to coincide today.
 
 ### Three verbs
 
-| Verb | Whose mind | Whose hands | Cost |
-|---|---|---|---|
-| **Inhabit** | mine | mine | serialization; the work's turns spend my context budget |
-| **Delegate** | mine | other | a private transcript — every learning that stayed inside it |
-| **Promote** | other | other | residency: a process, an endpoint, a cadence, a budget |
+| Verb | What it is | Cost |
+|---|---|---|
+| **Inhabit** | `lf loop <flow> "..."` and wait | serialization — the wave is one long tool call until the bit flips |
+| **Delegate** | the same command, detached | parallelism's price — you find out at report boundaries |
+| **Promote** | grant residency | a process, an endpoint, a cadence, a budget; the parent stops overhearing |
 
-There is no fourth cell. "Other mind, my hands" does not exist.
+Inhabit and delegate are **the same command**, differing only in whether the
+wave waits. Inhabiting is not a mode of the wave — the wave flow never changes,
+`spawn_wave_pass` stays `"wave"` — it is the wave LLM choosing to run
+`lf loop project ...` and block. There is still no fourth cell: "other mind, my
+hands" does not exist.
 
-**Inhabit** is the default. A wave with one project *is* that project for the
-duration. `spawn_wave_pass` hard-codes `.arg("flow").arg("wave")`; that string
-becomes the flow the wave is currently inhabiting.
+Both forms fork a worktree and keep a private transcript. What distinguishes
+them is attention: a blocking loop is where the wave's time goes, and where its
+thread's ear goes (see the seam below). Every loop child re-reads the wave's
+live memory and thread at each of its pass boundaries, so in read-set terms the
+work always runs inside the wave's mind — foreground or background.
 
-**Delegate** when the work neither needs your memory nor should change it. The
-first half is the seed test `project_pursue.md` already states: *"The seed is
-the task's whole handoff — make it computable on its own."* The second half is
-context hygiene — delegation is a deliberate refusal to let the work's detail
-into your read set. That is the real content of the transcript-bloat argument,
-which turns out to be principled rather than incidental.
+**Delegate** when the work neither needs your attention nor deserves it yet.
+The seed test `project_pursue.md` already states: *"The seed is the task's
+whole handoff — make it computable on its own."* Detaching is also context
+hygiene — a refusal to let the work's detail occupy your attention. That is the
+real content of the transcript-bloat argument, which turns out to be principled
+rather than incidental.
 
-Parallelism sits outside both. It is an orthogonal reason to fork: sometimes
-you would rather inhabit and cannot, because two things must move at once. Then
-you pay the transcript cost whether you wanted to or not, and the summary-back
-is the repair.
-
-**Promote** when you need to steer it while it runs.
+**Promote** when you need to steer it while it runs — a second thread, a second
+ear, on purpose.
 
 ### Waves are the only minds
 
@@ -82,8 +84,8 @@ There is no way to launch a mind without promoting to a wave. Task and project
 flowloops are runnable *from within* a mind:
 
 ```bash
-lf loop task "..."      # block on solve — the wave's own pass drives it
-lf loop task "..." &    # background solve — concurrency, the only reason to
+lf loop task "..."           # block on solve — the wave waits for the bit
+lf loop task "..." --detach  # background solve — server-owned; concurrency, the only reason to
 ```
 
 Entering a task or project flowloop inherently forks a worktree. That is not a
@@ -282,79 +284,65 @@ unattributed write, after `cf4aa764` took an append lock on everything else.
 
 ## Changes
 
-### 1. The wave inhabits (`flowloop/wave.rs`)
+### 1. `lf loop` — inhabiting is a call, not a mode
 
-`spawn_wave_pass` hard-codes `.arg("flow").arg("wave")` (`wave.rs:643`). Make it
-the flow the wave is currently inhabiting; default `wave`.
+Inhabiting is the wave LLM choosing to run `lf loop project "..."` and wait.
+Nothing about the wave changes: `spawn_wave_pass` stays hard-coded `"wave"`,
+the wave scheduler never reads `scratch/loop.yaml`, there is no flow field and
+no lease machinery. The bit lives in the loop's own worktree, where the driver
+already reads it; caps, `recheck`, and escalation run under the normal driver
+with a wave for a parent — exactly as today. (An earlier draft swapped the
+wave's own flow instead. This answer deletes that entire mechanism.)
 
-The hierarchy level is exactly one function call. `run_flowloop`
-(`driver.rs:83`) does two separable things:
+Entering a task or project flowloop always forks a worktree, so the wave home
+never lands and `lf pr land`'s `scratch/*` sweep never touches it.
 
-```rust
-let run = FlowloopRun::start(&wave_name, &options.flow, seed)?;   // mints worktree + row + channel
-let result = drive(&worktree, seed, options, |flow, seed, opts| { // the loop
-    run_pass(&worktree, flow, seed, opts)
-});
-```
+**Blocking is a long tool call.** While `lf loop` runs foreground, the wave's
+pass is inside one tool invocation: the human attached to the wave session gets
+no reply until it returns. Steering still lands — the loop's children re-read
+the wave's thread at *their* pass boundaries — so blocking trades the thread's
+tool-boundary ear for the inner loop's pass-boundary ear. Say it in the pursue
+skill so waves block knowingly.
 
-`drive()` needs no run row, no channel, no store. Inhabiting means looping
-without minting the run.
+**A running child extends the lease.** `pass_timeout: 1800s` would kill a
+blocked pass a quarter of the way through a 2h loop. The rule generalizes from
+the human case: presence extends the lease, and a live child loop is presence.
 
-The wave's scheduler must learn to read `scratch/loop.yaml`, which it currently
-ignores, and interpret `done: true` as *lease over, revert to `wave`* rather
-than *loop over*.
+**Detached loops are server-owned.** `lf loop task "..." --detach` asks the
+wave server to spawn and supervise the loop — the server is the long-lived
+process, so it is the right parent, and it can park the loop in a named session
+for read-only attach. Plain `&` half-works today (the orphan re-parents, its
+store row completes) and *keeping it working* is the simplicity tripwire: the
+moment shell backgrounding can't survive, the loop has grown too entangled with
+its parent pass. `--detach` adds ownership, not a requirement.
 
-Three things do not transfer:
+**`--dispatch` should go.** `lf loop <flow> --detach` covers it. That means
+rewriting `wave_exec_verdict`, which keys its whole allowlist on the flag:
+*"any flow / inline prompt WITHOUT `--dispatch`"* is the deny arm keeping a
+leaked subagent token from running an arbitrary LLM prompt unsandboxed in the
+outwave. **That security property must survive the rename.**
 
-- **Caps are written for a tight loop.** `max_passes: 8`, `wall_clock: 7200s`
-  assume back-to-back passes. An inhabited loop advances one pass per wake
-  (heartbeat is 4h), so eight passes is a week and the wall clock fires after
-  two hours having done one. Caps must be lease-relative or dropped.
-- **Exhaustion escalates to a parent the root wave does not have.**
-  `loop_instruction` promises it; `chat.rs` says a root wave errors on
-  `--parent`. Unreachable today because waves have no bit. Reachable the moment
-  one reads a bit.
-- **`recheck` is a third wake source, free.** `drive()` polls the predicate
-  between passes; the wave's scheduler has inbox and heartbeat and no notion of
-  *the world changed*. An inhabited task whose bit is
-  `gh pr view … | grep -q MERGED` wants exactly that wake, and it is what
-  closes the cadence gap against a dispatched loop.
+**The detached-loop contract: write where the wave reads.** Memory accumulates
+at the wave level — a hand has none of its own — so a detached loop is only as
+real as its writes to the wave's surfaces:
 
-### 2. `lf loop` — a hand, foreground or backgrounded
+- **PRs** — the record of done; the merge is the bit.
+- **Reports** (`<self>/report`) — progress and completion through the wave chat
+  system; these wake the wave.
+- **`lf memory add`** — learnings land in the wave's memory as they happen,
+  not in a transcript that dies with the worktree.
 
-Entering a task or project flowloop always forks a worktree. So the wave home
-never lands, `lf pr land`'s `scratch/*` sweep never runs in the outwave, and
-`scratch/loop.yaml` is safe there as the inhabited loop's bit. The rule protects
-itself.
+A weeks-scale project loop that is merging PRs, reporting at boundaries, and
+recording learnings is fully legible from the wave's thread without anyone
+reading its transcript. One that writes to none of these is invisible, and
+invisible work is failed work — the loop skills should say so.
 
-`lf loop task "..."` blocks: the wave's pass drives it. `lf loop task "..." &`
-backgrounds it — concurrency, which is the only reason to.
-
-Foreground is where the caps collide. A wave pass has `pass_timeout: 1800s`; a
-task loop has `wall_clock: 7200s`. Blocking, the hand outlives its parent pass
-and is killed. Either the caps invert, or the wave pass *is* the loop's driver.
-And while blocked, the wave cannot answer chat — the inbox coalesces to a
-boundary two hours out. Unless the ear is at pass granularity, in which case it
-did not close, it **moved**: your message reaches the task pass, which is the
-thing actually working. Blocking means the wave lends its ear to its hand.
-
-Background needs an owner. `spawn_wave_pass` sets `kill_on_drop(true)`, but a
-shell-backgrounded grandchild survives its parent. `FlowloopRun::start` mints a
-store row so it shows in `lf runs` and the `<in_flight>` fold — nothing reaps
-the process. `--dispatch` at least parked it in a named tmux session.
-
-If `lf loop <flow> &` covers everything `--dispatch` did, `--dispatch` should
-go. That means rewriting `wave_exec_verdict`, which keys its whole allowlist on
-the flag: *"any flow / inline prompt WITHOUT `--dispatch`"* is the deny arm
-keeping a leaked subagent token from running an arbitrary LLM prompt unsandboxed
-in the outwave. **That security property must survive the rename.**
-
-### 3. Memory walks the chain; chat does not (`wave_context.rs`)
+### 2. Memory walks the chain; chat does not (`wave_context.rs`)
 
 `<lf:wave-memory>` walks `parent_wave_id`. `<lf:wave-chat-recent>` stops at the
 wave. One function assembles both today.
 
-### 4. `lf project promote <slug>` — a flow
+### 3. `lf project promote <slug>` — a flow
 
 Mechanical: `wave/<parent>/projects/<slug>.md` → `wave/<slug>/GOAL.md`; set
 `parent_wave_id`; publish `.wave-endpoint`; start residency. PM: the subwave
@@ -373,7 +361,7 @@ Under the scope chain, promotion is reversible: demotion folds the child's
 `MEMORY.md` into the parent's and drops the residency. Without it, promotion is
 a ratchet — two copies of every shared fact, one of which rots.
 
-### 5. Close the tmux door
+### 4. Close the tmux door
 
 `tmux attach -r` is read-only and keeps the debugging window. What stdin is
 currently load-bearing on: LOOPFLOW.md advertises attach to *"answer an
@@ -387,7 +375,7 @@ headless, so the second may be nearly true today and merely undocumented.
 **Check this before writing the rule down** — it decides whether "no direct
 control" is a doctrine change or a feature.
 
-### 6. Backlogs are allowed
+### 5. Backlogs are allowed
 
 Agents may file tasks without running them. No enforcement that a task be solved
 to be added.
@@ -406,7 +394,7 @@ already reads live Linear tasks, so the plumbing exists. What "no backlog"
 prevented was a tracker filling with intent nobody will do, and nothing else in
 this design prevents it.
 
-### 7. Mac surface
+### 6. Mac surface
 
 Each of these needs an MVP in Loopflow Mac, alongside Goals and Projects. The
 wave is the only mind, so the wave is the only screen — everything below is a
@@ -429,7 +417,7 @@ The design constraint is the one from the model: a session is not a
 conversation. Rendering each active session as its own chat is precisely how
 this design gets undone in the UI after being right in the runtime.
 
-### 8. Doctrine
+### 7. Doctrine
 
 `wave_pursue.md`'s frontmatter reads *"Delegate wave work through project and
 task flowloops."* Its escape clause — *"Run execs directly only for hot, now
@@ -458,8 +446,9 @@ lf chat "how's release stability?"
 The wave answers from its own memory. It has inhabited `technical-architecture`
 — the project whose next move needed the thread — and drives it with
 `lf loop task "..."`, blocking, in a forked worktree, to a merged PR.
-`developer-efficiency` and `release-stability` run backgrounded, reporting up.
-`lf runs` shows hands; nothing there is a conversation.
+`developer-efficiency` and `release-stability` run as detached loops,
+server-owned, reporting up. `lf runs` shows hands; nothing there is a
+conversation.
 
 Steer without leaving the thread:
 
@@ -496,29 +485,23 @@ A second room, because you asked for one. The parent stops overhearing.
 - **The finish-wake hole**: done is a report on `<self>/report`; the flowloop
   subscribes to reports, not narration. A hand that finishes silently never
   reported — legible as its failure.
+- **Inhabitation is a call, not a mode.** The wave LLM chooses to run
+  `lf loop project ...` and wait. No flow-swap, no lease machinery, no bit in
+  the wave home; the earlier draft's whole §1 mechanism deleted itself.
+- **Detached loops are server-owned.** `--detach` over `&` — but `&` continuing
+  to half-work is kept as the bash-simplicity tripwire: the day shell
+  backgrounding can't survive, the loop has grown too entangled with its
+  parent.
+- **Project loops exist** — `lf loop project ...` is the inhabitation verb
+  itself. The weeks-vs-`max_passes` tension is real but the memory concern
+  is not: hands hold `lf memory add`, so learnings land in the wave as they
+  happen.
 
 ## Open questions
 
-**Is inhabitation a flow-swap or just a blocking loop?** §1 says the wave's own
-pass becomes the project flow (its reasoning in its own transcript, hands do
-code). The demo blocks on `lf loop task` — a child process with a *private*
-transcript, which breaks the trichotomy's cost table ("inhabit spends my
-context budget" is false for a subprocess). Either inhabit = flow-swap and the
-wave thinks *as* the project, or inhabit dissolves into "block on one loop" and
-§1 mostly dies. The doc currently sells both.
-
-**Who owns a backgrounded loop?** Shell `&` from inside a pass makes the loop a
-grandchild of a process that dies in ≤30min. Server-owned detach
-(`lf loop task --detach`, residency supervises, parks it in a named session)
-fits everything else and gives read-only tmux something to attach to. But then
-the `&` in this doc's own examples is wrong as written.
-
-**Do project loops exist?** A delegated project's bit is "all KRs true" —
-weeks, against `max_passes: 8`, held by a hand with no memory. Weeks-long bets
-that accumulate learnings are mind-shaped. The clean alternative: tasks
-delegate; projects inhabit or promote; only waves reside. That collapses the
-verb table onto the noun table — task↔delegate, project↔inhabit-or-promote,
-wave↔reside — and rewrites the demo, which currently backgrounds two projects.
+**Caps for a project loop.** `max_passes: 8` and `wall_clock: 7200s` fit a
+task's merge horizon, not a project's KR horizon. Per-flow defaults, or
+per-invocation overrides in the pursue skill's vocabulary.
 
 **Topic vocabulary and retention.** `<self>` and `<self>/report` fall out of
 the design; whether the Mac panes (PRs, runs, KRs) are topics or store queries

@@ -425,10 +425,7 @@ fn print_span_tree(spans: &[SpanDto]) {
     for roots in children.values_mut() {
         roots.sort_by_key(|span| (span.started_at, span.process_id.as_str()));
     }
-    let process_ids: BTreeSet<&str> = spans
-        .iter()
-        .map(|span| span.process_id.as_str())
-        .collect();
+    let process_ids: BTreeSet<&str> = spans.iter().map(|span| span.process_id.as_str()).collect();
     let mut roots: Vec<_> = spans
         .iter()
         .filter(|span| {

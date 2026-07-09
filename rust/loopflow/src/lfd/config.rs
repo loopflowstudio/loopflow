@@ -22,7 +22,6 @@ const DEFAULT_HTTP_AUTH_FAILURES_PER_MINUTE: u32 = 12;
 /// deployments set `auth.token` or `LFD_AUTH_TOKEN` from Doppler or another
 /// secret store.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct AuthConfig {
     /// Optional session-token override for embedded launches and self-hosted deployments.
     pub token: Option<SecretString>,
@@ -71,8 +70,11 @@ impl LfdConfig {
 
 const DEFAULT_OUTPUT_LOG_RETENTION_DAYS: u32 = 7;
 
+/// Unknown keys are ignored, not rejected. A key we removed still sits in
+/// config files on machines that predate the removal, and `mode: native` —
+/// dropped with the postgres backend in 944909ae — was enough to make `lfd`
+/// panic on every start, in a crash loop, long after nothing read it.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RawLfdConfig {
     #[serde(default)]
     auth: AuthConfig,
@@ -440,23 +442,25 @@ mod tests {
         assert!(config.http_security.trusted_proxy_cidrs.is_empty());
     }
 
+    /// A key we removed still sits in config files on machines that predate the
+    /// removal. `mode: native` outlived the postgres backend by months and made
+    /// every `lfd` start panic, in a crash loop, long after nothing read it. An
+    /// obsolete key is ignored; the keys that remain still parse.
     #[test]
-    fn removed_mode_yaml_is_rejected() {
-        let err =
-            serde_yaml_ng::from_str::<RawLfdConfig>("mode: removed").expect_err("mode removed");
-
-        assert!(err.to_string().contains("unknown field `mode`"));
-    }
-
-    #[test]
-    fn removed_executor_yaml_is_rejected() {
+    fn a_removed_key_is_ignored_rather_than_bricking_the_daemon() {
         let raw = r#"
+mode: native
 executor:
   type: docker
+output_log_retention_days: 3
 "#;
-        let err = serde_yaml_ng::from_str::<RawLfdConfig>(raw).expect_err("executor removed");
+        let config = serde_yaml_ng::from_str::<RawLfdConfig>(raw)
+            .expect("obsolete keys must not fail the parse")
+            .resolve()
+            .expect("resolves");
 
-        assert!(err.to_string().contains("unknown field `executor`"));
+        assert_eq!(config.output_log_retention_days, 3);
+        assert!(config.auth.token.is_none());
     }
 
     #[test]

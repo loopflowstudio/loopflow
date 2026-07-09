@@ -92,32 +92,54 @@ from `runs.snapshot_pr` — 7 of 171 rows have one, all from `break-test`.
 `~/.local/bin/lf` is older than this branch and has none of those flags.
 
 ```bash
-# 1. new lf on PATH
-cargo build --bin lf
-export PATH="$PWD/target/debug:$PATH"
-
-# 2. the ledger answers for itself — expect exit 0, six green checks
-lf doctor
-
-# 3. a trace with real spans, nesting, cost, model, and an `open` frame
-lf runs
-lf trace db8a254f          # or any id from `lf runs`
-
-# 4. the app. NOT `swift run` — that builds a bare executable, and
-#    NotificationService dies on `bundleProxyForCurrentProcess is nil`.
-cd swift && xcodegen generate
-xcodebuild -project LoopflowSwift.xcodeproj -scheme LoopflowMac \
-  -configuration Debug -destination 'platform=macOS' \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-open ~/Library/Developer/Xcode/DerivedData/LoopflowSwift-*/Build/Products/Debug/Loopflow.app
+# the whole demo
+uv run python scripts/loopflow-dev.py run-debug
 ```
+
+That builds `lf`, `lfd`, and the app; installs them into
+`~/Applications/Loopflow Dev.app`; and launches it with stdout streaming. The
+app resolves `lf` from **its own bundle** before `PATH`, so the dashboard reads
+this branch's ledger surfaces (`lf runs/trace/doctor --json`) rather than
+whatever `lf` happens to be installed.
 
 Then **Go → Telemetry (⌘1)**. Four cards: run flamechart, cost waterfall,
 cache-hit ratio, ledger silence.
 
-The app must inherit the same `PATH`, so launch it from that shell (`open` does).
-If the charts are empty, `lf doctor --json` from the app's environment is the
-first thing to check.
+To poke the same data from the terminal:
+
+```bash
+export PATH="$PWD/target/debug:$PATH"
+lf doctor                 # exit 0, six green checks
+lf runs                   # one row per process, TRACE/SPAN columns
+lf trace <id>             # the process tree: nesting, per-span cost, model
+```
+
+### If "Telemetry" is missing from the Go menu
+
+You are running a stale binary. Check that before debugging anything else:
+
+```bash
+D="$HOME/Applications/Loopflow Dev.app/Contents/MacOS"
+strings "$D/Loopflow" | grep -c "Run flamechart"    # 1 = has the charts, 0 = stale
+```
+
+Three ways this has actually gone wrong, in descending order of likelihood:
+
+1. **A different app.** `/Applications/Loopflow.app` and
+   `~/Applications/Loopflow.app` predate the dashboard entirely. `run-debug`
+   installs `~/Applications/Loopflow Dev.app` — a separate bundle id.
+2. **The bundle ran a stale executable.** `swift build` names the product
+   `LoopflowMac`, but `Info.plist` declares `CFBundleExecutable = Loopflow`.
+   `_install_dev_app` used to copy the fresh build under its own name, so macOS
+   kept launching whatever `Loopflow` was already there — and codesigning bumped
+   the stale binary's mtime, so it looked freshly built. Fixed; the installer now
+   reads the plist and copies to that name.
+3. **`swift run LoopflowMac`.** Don't. It produces a bare executable, and
+   `NotificationService` dies on `bundleProxyForCurrentProcess is nil`. The app
+   needs a real bundle, which is what `run-debug` builds.
+
+If the menu is there but the cards are empty, run
+`"$D/lf" doctor --json` — the Swift layer shells out to exactly that.
 
 ### `lf wavechat`
 

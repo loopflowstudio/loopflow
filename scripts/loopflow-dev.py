@@ -404,6 +404,11 @@ def cmd_run_debug(with_lfd: bool = False, repo: Path = REPO_ROOT) -> int:
     _install_dev_app()
     print("Logs: ~/Library/Logs/Loopflow/")
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
+    # The app resolves `lf` from its own bundle before PATH, so the dashboard
+    # reads this branch's ledger surfaces (`lf runs/trace/doctor --json`) rather
+    # than whatever `lf` happens to be installed.
+    print(f"Bundled lf: {DEV_APP}/Contents/MacOS/lf")
+    print("Telemetry dashboard: Go → Telemetry (⌘1)")
     _print_run_debug_checklist()
     print("Press Ctrl+C to quit")
     print("---")
@@ -906,13 +911,42 @@ def _ensure_dev_signing_identity() -> str:
     return identity
 
 
+def _bundle_executable_name(info_plist: Path) -> str:
+    """The binary macOS actually launches, per CFBundleExecutable."""
+    result = run_capture(
+        ["/usr/libexec/PlistBuddy", "-c", "Print :CFBundleExecutable", str(info_plist)]
+    )
+    name = (result.stdout or "").strip()
+    if result.returncode != 0 or not name:
+        raise RuntimeError(f"Could not read CFBundleExecutable from {info_plist}")
+    return name
+
+
+def _remove_stale_executables(macos_dir: Path, keep: str) -> None:
+    """Drop a previously-installed binary under the build product's own name.
+
+    Leaving `LoopflowMac` beside `Loopflow` is harmless but confusing: it is the
+    fresh build, and it is the one nothing runs.
+    """
+    stale = macos_dir / "LoopflowMac"
+    if stale.name != keep and stale.exists():
+        stale.unlink()
+
+
 def _install_dev_app() -> None:
     """Install debug build to stable location for permissions persistence."""
     app_dir = DEV_APP / "Contents"
     (app_dir / "MacOS").mkdir(parents=True, exist_ok=True)
     (app_dir / "Resources").mkdir(parents=True, exist_ok=True)
 
-    shutil.copy(SWIFT_DIR / ".build" / "debug" / "LoopflowMac", app_dir / "MacOS")
+    # `swift build` names the product LoopflowMac, but Info.plist declares
+    # CFBundleExecutable = Loopflow, so that is the name macOS launches. Copying
+    # the build under its own name leaves whatever `Loopflow` was already there
+    # to run forever: the app keeps starting a stale binary while the fresh one
+    # sits beside it, and codesigning bumps the stale mtime so it even looks new.
+    executable = _bundle_executable_name(SWIFT_DIR / "LoopflowMac" / "Info.plist")
+    shutil.copy(SWIFT_DIR / ".build" / "debug" / "LoopflowMac", app_dir / "MacOS" / executable)
+    _remove_stale_executables(app_dir / "MacOS", keep=executable)
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     _apply_dev_identity(app_dir / "Info.plist")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Loopflow.sdef", app_dir / "Resources")

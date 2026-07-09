@@ -35,11 +35,9 @@ use serde::Deserialize;
 
 use crate::flowloop::pass::{run_pass, PassOptions};
 use crate::flowloop::run::FlowloopRun;
-use crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV;
 use crate::ops::{OpsError, OpsResult};
 use crate::wave::wire::{
-    DetachedLoopRequest, DetachedLoopResponse, RESIDENT_TOKEN_HEADER, SUBAGENT_TOKEN_ENV,
-    SUBAGENT_TOKEN_HEADER,
+    DetachedLoopRequest, DetachedLoopResponse, RESIDENT_TOKEN_HEADER, SUBAGENT_TOKEN_HEADER,
 };
 
 const LOOP_FILE: &str = "scratch/loop.yaml";
@@ -123,10 +121,7 @@ pub fn detach_flowloop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsRes
     let wave = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
     let origin = crate::engine::wave_context::wave_origin(repo);
-    let endpoint = std::env::var(WAVE_SERVER_ENDPOINT_ENV)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    let endpoint = crate::lfq::env_endpoint()
         .or_else(|| crate::engine::wave_context::read_endpoint_pointer(&origin, &wave))
         .ok_or_else(|| {
             OpsError::Message(format!(
@@ -168,12 +163,10 @@ pub fn detach_flowloop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsRes
     Ok(response.session)
 }
 
+/// A sandboxed hand presents its own subagent capability; a shell beside the
+/// wave falls back to the resident token file.
 fn detached_loop_credential(origin: &Path, wave: &str) -> Option<(&'static str, String)> {
-    if let Some(token) = std::env::var(SUBAGENT_TOKEN_ENV)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    {
+    if let Some(token) = crate::lfq::subagent_token() {
         return Some((SUBAGENT_TOKEN_HEADER, token));
     }
     crate::wave::server::read_resident_token(origin, wave)

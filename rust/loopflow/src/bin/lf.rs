@@ -360,8 +360,6 @@ fn run_placed_target(
     } else {
         loopflow::lfd::executor::Placement::Fresh
     };
-    let target_branch: Option<String> = None;
-
     let runtime = tokio::runtime::Runtime::new()?;
     let store: loopflow::lfdb::SharedStore = std::sync::Arc::new(runtime.block_on(async {
         loopflow::lfdb::open_existing_store().await.ok_or_else(|| {
@@ -377,14 +375,9 @@ fn run_placed_target(
             .await?
             .ok_or_else(|| anyhow::anyhow!("wave '{wave_name}' not found in the registry"))?;
         let run_id = loopflow::lfd::id::LfdId::new();
-        let mut run = loopflow::lfd::executor::create_run_for_placement(
-            &store,
-            &wave,
-            &run_id,
-            &placement,
-            target_branch.as_deref(),
-        )
-        .await?;
+        let mut run =
+            loopflow::lfd::executor::create_run_for_placement(&store, &wave, &run_id, &placement)
+                .await?;
         run.flow = name.trim_end_matches(':').to_string();
         run.task = message.map(str::to_string);
         store.update_run(&run).await?;

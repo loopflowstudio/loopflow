@@ -2,7 +2,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
-use tracing::{error, info, warn};
+use tracing::warn;
 
 use time::OffsetDateTime;
 
@@ -11,7 +11,7 @@ use crate::engine::git::{
 };
 use crate::engine::worktrees::{
     branch_exists, ensure_wave_worktree as ensure_wave_worktree_lease, schedule_upstream_sync,
-    short_run_id, worker_id, worktree_dir,
+    worker_id, worktree_dir,
 };
 
 use crate::lfd::id::LfdId;
@@ -19,7 +19,6 @@ use crate::lfd::types::{
     Run, RunStackStatus, RunStatus, Session, Wave, WaveStatus, DEFAULT_WAVE_FLOW,
 };
 use crate::lfdb::SharedStore;
-use crate::ops::{rebase_with_recovery, Progress, RebaseOptions};
 
 // TODO(M1): extract dispatch into crate::dispatch. lfd/executor should not own
 // placement, worktree creation, tmux launch wiring, or the run env contract.
@@ -44,7 +43,6 @@ pub async fn create_run_for_placement(
     wave: &Wave,
     run_id: &LfdId,
     placement: &Placement,
-    target_branch: Option<&str>,
 ) -> anyhow::Result<Run> {
     let stack_runs = store.list_stack_runs(wave.id()).await?;
     let last_run = stack_runs.last().cloned();
@@ -79,8 +77,8 @@ pub async fn create_run_for_placement(
 
     let ((wt_path, branch), run_target_branch) = match placement {
         Placement::Fresh => (
-            create_run_worktree(main_repo, wave.name(), run_id.as_str(), target_branch)?,
-            target_branch.unwrap_or("main").to_string(),
+            create_run_worktree(main_repo, wave.name(), run_id.as_str())?,
+            "main".to_string(),
         ),
         Placement::Stack { .. } => {
             let parent = lineage_parent
@@ -147,47 +145,17 @@ pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result
     Ok((lease.path.to_string_lossy().to_string(), lease.branch))
 }
 
-/// Create a run-scoped worker worktree.
-///
-/// Fresh placement: a stamped worker branch (`<user>/<wave>.<run-id>.<ts>`)
-/// forked from the default branch — independent PR, independent land.
-///
-/// When `target_branch` is `Some` and not `"main"`, the worktree instead
-/// tracks that branch directly (e.g. a fix dispatched onto a PR branch).
+/// Create a run-scoped worker worktree: a stamped worker branch
+/// (`<user>/<wave>.<run-id>.<ts>`) forked from the default branch —
+/// independent PR, independent land.
 pub(crate) fn create_run_worktree(
     main_repo: &Path,
     wave_name: &str,
     run_id: &str,
-    target_branch: Option<&str>,
 ) -> anyhow::Result<(String, String)> {
     let id = worker_id(main_repo, wave_name, run_id)?;
     let run_wt = worktree_dir(main_repo, &id);
 
-    let is_targeted = target_branch
-        .map(|b| !b.is_empty() && b != "main")
-        .unwrap_or(false);
-    if is_targeted {
-        // Targeted dispatch: track the specified branch directly through a
-        // run-local branch, so git push from the worktree lands on it.
-        let tb = target_branch.expect("checked above");
-        fetch(main_repo, "origin", tb)?;
-        let run_branch = format!("{tb}-run-{}", short_run_id(run_id));
-        let remote_ref = format!("origin/{tb}");
-        worktree_add(
-            main_repo,
-            &run_wt,
-            &run_branch,
-            WorktreeBranch::Track {
-                remote: &remote_ref,
-            },
-        )?;
-        sync_existing_worktree(main_repo, &run_wt, &run_branch)?;
-        // Return the target branch (not the run-local branch) so the run
-        // record tracks which remote branch it pushes to.
-        return Ok((run_wt.to_string_lossy().to_string(), tb.to_string()));
-    }
-
-    // Fresh: own worker branch off the default branch.
     let default_branch = get_default_branch(main_repo)?;
     let _ = sync_main(main_repo, &default_branch);
     let branch = id.branch();
@@ -425,29 +393,68 @@ pub(crate) fn tmux_shell_command(session: &Session, tail: &str) -> String {
 /// Callers own the session row's lifecycle (start on `Ok`, fail on `Err`).
 pub(crate) async fn launch_session_in_tmux(session: &Session, tail: &str) -> Result<()> {
     let shell_command = tmux_shell_command(session, tail);
+    spawn_tmux_session(&session.tmux_name, &session.cwd, &shell_command).await
+}
+
+/// Launch an `lf` argv detached in its own tmux session, inspectable with
+/// `tmux attach -r`. Shares [`tmux_shell_command`]'s `unset
+/// LFD_SESSION_INHERITED` invariant: a fresh tmux server inherits the
+/// launcher's env, and a registered launcher would leak its session identity
+/// into the child's login shell.
+pub(crate) async fn spawn_detached_lf(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
+    let command = argv
+        .iter()
+        .map(|arg| shell_escape(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    spawn_tmux_session(
+        session,
+        &cwd.display().to_string(),
+        &format!("unset LFD_SESSION_INHERITED; exec {command}"),
+    )
+    .await
+}
+
+/// Start a detached tmux session running `shell_command`, with mouse mode on
+/// so scroll events reach tmux rather than the inner shell.
+async fn spawn_tmux_session(session: &str, cwd: &str, shell_command: &str) -> Result<()> {
     let status = tokio::process::Command::new("tmux")
         .args([
             "new-session",
             "-d",
             "-s",
-            &session.tmux_name,
+            session,
             "-c",
-            &session.cwd,
+            cwd,
             "/bin/zsh",
             "-lc",
-            &shell_command,
+            shell_command,
         ])
         .status()
         .await
         .map_err(|err| anyhow!("tmux failed to spawn: {err}"))?;
     if !status.success() {
-        return Err(anyhow!("tmux failed to launch terminal session"));
+        return Err(anyhow!("tmux failed to launch session '{session}'"));
     }
     let _ = tokio::process::Command::new("tmux")
-        .args(["set-option", "-t", &session.tmux_name, "mouse", "on"])
+        .args(["set-option", "-t", session, "mouse", "on"])
         .status()
         .await;
     Ok(())
+}
+
+/// tmux forbids `.` and `:` in session names; keep the conservative safe set.
+pub(crate) fn tmux_session_slug(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 fn append_lf_run_options(
@@ -471,70 +478,6 @@ fn append_lf_run_options(
     }
     cmd.push("-w".to_string());
     cmd.push(wave_name.to_string());
-}
-
-fn sync_existing_worktree(main_repo: &Path, worktree: &Path, branch: &str) -> anyhow::Result<()> {
-    if branch.is_empty() {
-        return Ok(());
-    }
-
-    dual_rebase(main_repo, worktree, branch)
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct TracingProgress;
-
-impl Progress for TracingProgress {
-    fn status(&self, msg: &str) {
-        info!("{msg}");
-    }
-
-    fn error(&self, msg: &str) {
-        error!("{msg}");
-    }
-
-    fn warning(&self, msg: &str) {
-        warn!("{msg}");
-    }
-
-    fn confirm(&self, _msg: &str) -> bool {
-        true
-    }
-}
-
-fn dual_rebase(main_repo: &Path, worktree: &Path, branch: &str) -> Result<()> {
-    let progress = TracingProgress;
-    rebase_onto_if_available(main_repo, worktree, branch, &progress)?;
-
-    let default_branch = get_default_branch(main_repo)?;
-    rebase_onto_if_available(main_repo, worktree, &default_branch, &progress)?;
-    Ok(())
-}
-
-fn rebase_onto_if_available(
-    main_repo: &Path,
-    worktree: &Path,
-    branch: &str,
-    progress: &impl Progress,
-) -> Result<()> {
-    if fetch(main_repo, "origin", branch).is_err() {
-        return Ok(());
-    }
-
-    let remote_ref = format!("origin/{branch}");
-    if rev_parse(main_repo, &remote_ref).is_err() {
-        return Ok(());
-    }
-
-    rebase_with_recovery(
-        worktree,
-        &RebaseOptions {
-            onto: remote_ref,
-            push: false,
-        },
-        progress,
-    )?;
-    Ok(())
 }
 
 #[cfg(test)]

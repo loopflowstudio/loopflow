@@ -78,7 +78,7 @@ async fn run_creates_worktree() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh, None)
+    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh)
         .await
         .unwrap();
 
@@ -99,7 +99,7 @@ async fn run_creates_branch() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh, None)
+    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh)
         .await
         .unwrap();
 
@@ -123,7 +123,7 @@ async fn run_worktree_follows_naming_convention() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh, None)
+    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh)
         .await
         .unwrap();
 
@@ -146,10 +146,10 @@ async fn run_records_parent_lineage() {
     let wave = make_wave(&repo.path().to_string_lossy(), "lineage");
     store.create_wave(&wave).await.unwrap();
 
-    let run1 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh, None)
+    let run1 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh)
         .await
         .unwrap();
-    let run2 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh, None)
+    let run2 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh)
         .await
         .unwrap();
 
@@ -167,7 +167,7 @@ async fn fresh_placement_creates_run_scoped_worktree_off_default_branch() {
     store.create_wave(&wave).await.unwrap();
 
     let run_id = LfdId::new();
-    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh, None)
+    let run = create_run_for_placement(&store, &wave, &run_id, &Placement::Fresh)
         .await
         .unwrap();
 
@@ -205,10 +205,10 @@ async fn fresh_placements_do_not_collide() {
     let wave = make_wave(&repo.path().to_string_lossy(), "swarm");
     store.create_wave(&wave).await.unwrap();
 
-    let run1 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh, None)
+    let run1 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh)
         .await
         .unwrap();
-    let run2 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh, None)
+    let run2 = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh)
         .await
         .unwrap();
 
@@ -223,7 +223,7 @@ async fn stack_placement_forks_from_parent_branch_with_lineage() {
     let wave = make_wave(&repo.path().to_string_lossy(), "tower");
     store.create_wave(&wave).await.unwrap();
 
-    let parent = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh, None)
+    let parent = create_run_for_placement(&store, &wave, &LfdId::new(), &Placement::Fresh)
         .await
         .unwrap();
 
@@ -241,7 +241,7 @@ async fn stack_placement_forks_from_parent_branch_with_lineage() {
     let placement = Placement::Stack {
         parent_run_id: parent.id.clone(),
     };
-    let child = create_run_for_placement(&store, &wave, &child_id, &placement, None)
+    let child = create_run_for_placement(&store, &wave, &child_id, &placement)
         .await
         .unwrap();
 
@@ -277,7 +277,7 @@ async fn stack_placement_rejects_unknown_parent() {
     let placement = Placement::Stack {
         parent_run_id: LfdId::new(),
     };
-    let result = create_run_for_placement(&store, &wave, &LfdId::new(), &placement, None).await;
+    let result = create_run_for_placement(&store, &wave, &LfdId::new(), &placement).await;
     assert!(result
         .unwrap_err()
         .to_string()

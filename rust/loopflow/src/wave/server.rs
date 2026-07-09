@@ -1730,7 +1730,7 @@ mod tests {
             .post(format!("{base}/v0/exec"))
             .header(SUBAGENT_TOKEN_HEADER, token)
             .json(&serde_json::json!({
-                "argv": ["loop", "task", "ship it", "--wave", "another-wave", "--detach"],
+                "argv": ["--wave", "another-wave", "loop", "task", "ship it", "--detach"],
                 "cwd": null
             }))
             .send()

@@ -914,7 +914,7 @@ mod tests {
 
     /// The resident's subscription scope: `?inbox=true` replays the pending
     /// queue as `inbox` frames and streams live ops (bare interrupts
-    /// included, id-less).
+    /// included, as their own `kind`-tagged control frame).
     #[tokio::test]
     async fn events_inbox_scope_replays_pending_and_streams_ops() {
         let (base, runtime, _tmp) = boot().await;
@@ -945,7 +945,7 @@ mod tests {
                 Ok(Ok(0)) | Err(_) => break,
                 Ok(Ok(n)) => {
                     acc.push_str(&String::from_utf8_lossy(&buf[..n]));
-                    if acc.contains("queued before") && acc.contains(r#""id":null"#) {
+                    if acc.contains("queued before") && acc.contains(r#""kind":"interrupt""#) {
                         break;
                     }
                 }
@@ -958,8 +958,8 @@ mod tests {
             "the pending queue replays: {acc}"
         );
         assert!(
-            acc.contains(r#""id":null"#) && acc.contains(r#""op":"interrupt""#),
-            "a live bare interrupt rides id-less: {acc}"
+            acc.contains(r#""kind":"interrupt""#),
+            "a live bare interrupt rides as a tagged control frame: {acc}"
         );
     }
 
@@ -1111,7 +1111,7 @@ mod tests {
         client
             .frames_until(|f| {
                 f.iter().any(|t| {
-                    t.id == open.id && t.text == "thinking\nmore" && t.status == Lifecycle::Running
+                    t.id == open.id && t.text == "thinkingmore" && t.status == Lifecycle::Running
                 })
             })
             .await;
@@ -1130,7 +1130,8 @@ mod tests {
             .await;
         let last = frames.iter().rfind(|t| t.id == open.id).unwrap();
         assert_eq!(last.status, Lifecycle::Completed, "terminal frame is last");
-        assert_eq!(last.text, "thinking\nmore");
+        // Stream fragments concatenate exactly; no newline is welded between them.
+        assert_eq!(last.text, "thinkingmore");
     }
 
     #[tokio::test]

@@ -731,9 +731,8 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "wave", "loop",
-            "project", "flow", "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace",
-            "help",
+            ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "loop", "project",
+            "flow", "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace", "help",
         ] {
             assert!(tables.commands.contains(command), "command {command}");
         }
@@ -884,9 +883,23 @@ mod tests {
         ));
     }
 
+    /// `wave` was renamed to `loop`. The parser can't reject it outright —
+    /// the `external_subcommand` catch-all claims any unmatched verb — so the
+    /// property that actually holds is that it no longer names a built-in
+    /// command. The exec door denies `External` on top of that.
     #[test]
-    fn old_wave_surface_is_rejected() {
-        assert!(Cli::try_parse_from(["lf", "wave", "goals"]).is_err());
+    fn old_wave_surface_is_no_longer_a_builtin_command() {
+        let cli = Cli::try_parse_from(["lf", "wave", "goals"]).expect("falls through to external");
+        assert!(
+            matches!(cli.command, Some(Commands::External(parts)) if parts[0] == "wave"),
+            "`wave` survives only as an external verb, not a wave command"
+        );
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "loop", "goals"])
+                .expect("the replacement")
+                .command,
+            Some(Commands::Loop { .. })
+        ));
     }
 
     #[test]

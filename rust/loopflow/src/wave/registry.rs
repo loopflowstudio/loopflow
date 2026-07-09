@@ -228,7 +228,7 @@ pub async fn register(config: &RegistryConfig, endpoint: &str) -> StoreResult<Re
         cwd: config.cwd.clone(),
         argv: vec![
             "lf".to_string(),
-            "wave".to_string(),
+            "loop".to_string(),
             config.wave.name().clone(),
         ],
         env: std::collections::BTreeMap::from([
@@ -735,7 +735,7 @@ mod tests {
             skill: "loop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
-            argv: vec!["lf".to_string(), "wave".to_string(), wave.name().clone()],
+            argv: vec!["lf".to_string(), "loop".to_string(), wave.name().clone()],
             env: BTreeMap::from([
                 (
                     WAVE_SERVER_ENDPOINT_ENV.to_string(),

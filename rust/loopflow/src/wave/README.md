@@ -14,11 +14,10 @@
 
 - **The listener** is the channel made durable — hear / check / fold / tell,
   **vendor-free**. It holds the wave's one journal pen (work-line channels are
-  ephemeral bus topics and journal nothing), serves the doors, folds the
-  store's worker observations, keeps the registry seat and the discovery
-  pointer, and
-  supervises the resident. It serves from the **origin repo** and creates no
-  worktrees.
+  bus addresses and journal nothing), serves the doors, folds the store's
+  worker observations and its hands' bus broadcasts, keeps the registry seat
+  and the discovery pointer, and supervises the resident. It serves from the
+  **origin repo** and creates no worktrees.
 - **The resident** is the wave's Loop (see `flowloop/wave.rs`): the durable
   playhead selects one flow step, starts one live harness session as that
   step's body, then advances only when the body completes or the user skips.
@@ -93,7 +92,8 @@ Truth is the per-wave append-only journal —
 per-machine, never committed. One journal per served mind, zero per channel: a
 journal buys delivery to a subscriber who was absent at publish time, which is
 a need minds have and topics never do. A work line's report reaches the wave as
-one attributed copy in *this* journal; nothing is written in its worktree. The in-process state (`WaveRuntime`) is a fold
+one attributed copy in *this* journal, folded off the bus; nothing is written in
+its worktree. The in-process state (`WaveRuntime`) is a fold
 of it: the `thread` and the loop state are rebuilt from the journal on
 boot, so a restart keeps the full conversation and turn ids continue
 monotonically. The journal event vocabulary predates the pass model —
@@ -136,44 +136,49 @@ don't consume this wire):
   a remote loop can hold the seat, the token becomes a gatekeeper-issued
   credential.
 
-## Channels
+## Two wires: the bus and the thread
 
-A CHANNEL is a named stream — journal + thread + subscribability. The wave's
-own channel is its name (`goals`), journal under the origin repo. A work
-line's channel is the ownership name — exactly the worktree basename minus
-the repo prefix (`goals.148e0e02`) — journal IN that worktree
-(`.lf/journal/waves/<channel>/journal.jsonl`): it travels with the branch
-and dies with it (channels are conversations, not records). The listener
-serves the whole FAMILY: it holds the pen for every child journal (all pens
-in one process), folds each channel separately, and the family view folds
-upward. Child channels have no loop and no memory — pure streams. Names
-are topics, dots are the tree; subscription is by name or prefix. Placed `lf`
-runs mint the work line's channel with its worktree — journal initialized
-there, `LFD_CHANNEL` in the worker's env, and one `POST /channels` knock so
-the wave's thread shows "work line <name> opened".
+**The bus** is the `bus_messages` table in the shared store — nothing else.
+`lf radio` publishes with an INSERT; every subscriber polls forward from an id
+cursor. No server is in the path, so publishing works with zero loopflow
+processes running and two detached hands hear each other with no wave awake. A
+sweeper drops rows past a wall-clock window on every publish: the bus is a
+wire, not a log. Channel names are addresses (`goals`, `goals.148e0e02`), dots
+are the tree, and subscription is by prefix. `lf sub [CHANNEL] [--json]` tunes
+in — you hear what is said while you listen, and nothing published before you
+tuned in replays.
 
-The speech surface is `lf chat` — the same verb for loops, workers,
-humans, and scripts (the one-door exec convention). It resolves its target
-CHANNEL from context (`LFD_CHANNEL`, else `LFD_WAVE_ID`, else the worktree
-name — inside a work-line worktree that is the work line's own channel: speak
-locally; `--parent` walks `parent_wave_id` through the registry; `--wave
-<name>` is explicit, dotted names addressing a work line through its family
-head), then finds the FAMILY HEAD's live endpoint via its WaveAgent session
-row (falling back to `.wave-endpoint`). `--steer` POSTs `steer`, which reaches
-a live steer-capable turn and otherwise queues. Bare `lf chat` POSTs an
-attributed `say`; `--from` overrides its byline. Publish-to-no-subscriber
-drops: with no wave context anywhere, `lf chat` and
-`lf memory` writes exit 0 with one stderr note. A resolvable wave whose server
-is down errors instead (mail to a dead wave bounces, it doesn't vanish).
-Dispatched workers finish with an `lf chat` report — it arrives in the thread
-with a `from` byline and wakes the loop like any input.
+The byline is testimony and the channel is evidence. With no server in the
+path, client-submitted attribution is the only kind possible: `lf radio`
+derives its byline from the ambient identity it already resolves for routing
+(`LFD_CHANNEL`, else `LFD_WAVE_ID`, else the worktree name), `--from` overrides
+it, and the row carries both. A forged byline is not prevented — it shows up as
+a mismatch with the channel it arrived on.
 
-`lf sub [NAME] [--json]` is the read half: follow the family's `/events`
-stream (turns, loop state, memory curation, memory adds) until killed,
-reconnecting with backoff and re-resolving the endpoint across server
-restarts. `lf sub goals` follows the whole family; `lf sub goals.148e0e02`
-follows one work line. The resident is the subscription's second customer —
-same machinery, plus the inbox scope.
+A served mind is just another subscriber ([`bus.rs`]). Its `BusListener` polls
+its family's channels from a **durable** cursor, records what it hears as one
+attributed copy in its own journal, and wakes its loop. So a mind asleep when a
+hand reported catches up on wake. Beyond the sweep window the report is gone,
+and the cursor jump is announced in the thread rather than swallowed — the PR
+and `lf runs` remain the records of record. A mind never wakes itself: rows
+bylined with its own channel are read and skipped.
+
+**The thread** is the human surface — journaled, durable, replayed — and it
+stays SSE on the listener. `lf chat` resolves its target wave from context
+(`LFD_CHANNEL`, else `LFD_WAVE_ID`, else the worktree name; `--parent` walks
+`parent_wave_id` through the registry; `--wave <name>` is explicit, a dotted
+name resolving to its family head), then finds that wave's live endpoint via
+its WaveAgent session row (falling back to `.wave-endpoint`). `--steer` POSTs
+`steer`, which reaches a live steer-capable turn and otherwise queues. Bare `lf
+chat` POSTs an attributed `say`; `--from` overrides its byline. With no wave
+context anywhere, `lf chat` and `lf memory` writes exit 0 with one stderr note.
+A resolvable wave whose server is down errors instead (mail to a dead wave
+bounces, it doesn't vanish).
+
+`lf wavechat` reads that stream and writes into it from one pane. The resident
+is the subscription's second customer — same machinery, plus the inbox scope.
+Placed `lf` runs carry `LFD_CHANNEL` in the worker's env and knock once on
+`POST /channels` so the wave's thread shows "work line <name> opened".
 
 The context flows back out the same way: every `lf` run born inside a wave
 inherits ambient context by CHANNEL in its assembled prompt —
@@ -194,8 +199,8 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 |---------------------------|----------|
 | `GET /health`             | `{status, loop_state, wave, turns, workers, uptime_seconds}`; `status` is channel liveness; `loop_state` is `idle \| turning \| interrupting \| failed`; `workers` counts observed in-flight worker runs |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread; `?limit=N` tails the last N turns (open turn included) |
-| `GET /events`             | SSE, the family's one unified stream. Scope: `?channel=<name>` (one channel), `?prefix=<name>` (subtree), default = whole family; names outside the family 404. Event names: `state` (loop-state name, on subscribe + every transition; primary only), `turn` (a `Turn` JSON; replay then live; child-channel turns carry an extra `"channel"` key; ids repeat — each frame replaces the client's previous state for that (channel, id)), `memory-add` (full added facts since the last externalization, replay then live; primary only), `memory` (curation summaries, live-only; primary only), and — only with `?inbox=true`, the resident's subscription — `inbox` (`{id, op, text, from}`; pending replay + live ops; bare interrupts ride `id: null`). |
-| `POST /messages {op, text, from?, channel?}` | `op` required: `message` (next body), `steer` (inject into the active steer-capable harness, otherwise queue), `interrupt` (stop the active body; non-empty text queues for the retry), or `say` (attributed report/FYI). Returns `{turn, state}`. |
+| `GET /events`             | SSE, the served mind's thread. No channel scoping — agent broadcast is the bus, not this door. Event names: `state` (loop-state name, on subscribe + every transition), `turn` (a `Turn` JSON; replay then live; ids repeat — each frame replaces the client's previous state for that id), `memory-add` (full added facts since the last externalization, replay then live), `memory` (curation summaries, live-only), and — only with `?inbox=true`, the resident's subscription — `inbox` (`{id, op, text, from}`; pending replay + live ops; bare interrupts ride `id: null`). |
+| `POST /messages {op, text, from?}` | `op` required: `message` (next body), `steer` (inject into the active steer-capable harness, otherwise queue), `interrupt` (stop the active body; non-empty text queues for the retry), or `say` (attributed report/FYI). Returns `{turn, state}`. |
 | `GET /playhead`           | Durable invocation stack, active body, `now`, `next`, local queue, and return target. |
 | `POST /playhead/enqueue {flow}` | Enqueue a flow FIFO at the innermost invocation and return the updated playhead. |
 | `POST /playhead/skip`     | Stop and skip the current body, or advance a failed idle step, without destroying its route. |

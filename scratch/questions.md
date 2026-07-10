@@ -31,8 +31,11 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   moved, the prefix write-gate sketch is dropped in favor of open publish with
   honest bylines, and the verb splits with the wires: `lf radio` is the agent
   bus, `lf chat` is the human client for a served mind's thread, `lf serve`
-  stays lifecycle. `lf radio` and `lf chat` deliberately share one transport
-  and one door — postgres and psql, not two implementations of one wire.
+  stays lifecycle. §9 then split the *transports* too: radio and chat no longer
+  share a door. Radio is an INSERT into `bus_messages`; chat is `POST /messages`
+  on the mind's listener. The postgres/psql analogy held only while the bus was
+  a broker; once the db is the bus, sharing a wire would mean putting a server
+  back in the publish path.
 - **The byline is stamped from the channel, not from the token.** §8 says "the
   token names the writer"; it cannot yet. `SubagentDoor` mints one token per
   boot and hands it to every descendant, so the server has no way to tell which
@@ -44,7 +47,8 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   thread, and the doctrine now points there. Superseded by `minds.md` §9: the
   bus moves to the shared store, no server sits in the publish path, and the
   byline becomes client-submitted testimony recorded beside the channel's
-  evidence — per-hand tokens stop being needed.
+  evidence — per-hand tokens stop being needed. §9 landed; the byline is now
+  whatever the client wrote, next to the channel it arrived on.
 - **A detached loop's driver holds no subscription.** §8's model assumed one,
   live for the loop's lifetime, queueing steers in memory. The driver has no
   such thing, so `lf radio --channel <hand>` reaches `lf sub` listeners and
@@ -54,7 +58,10 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   fast path is a decision about whether a hand deserves a private steer channel
   at all, not a bug to fix on the way past. `minds.md` §9 makes both answers
   cheap: on a store bus the hand's ear is a poll cursor, held or deliberately
-  not.
+  not. §9 landed and the fork stays unresolved: no driver polls its own channel,
+  so a steer on a hand's channel still reaches only live `lf sub` listeners. The
+  wave's thread remains the ear a hand reliably has, and the doctrine still says
+  so.
 - **`lf wavechat` and `lf chat` now overlap.** The rebase onto main picked up
   `lf wavechat` — a one-pane TUI that both follows a wave's events and posts
   typed lines into its thread. This branch splits that surface three ways:
@@ -80,3 +87,32 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   checkout. Concurrent editing corrupts a file; concurrent rebasing corrupts
   history. The store lease in `minds.md` §9 / Next-session item 5 is the fix;
   it should cover `.git`'s sequencer state, not just the worktree's files.
+
+Assumptions taken while implementing §9 (`minds.md`, "the bus is the store"):
+
+- **Sweep window is one hour, swept on publish.** The design says "a wall-clock
+  window" and does not name it. One hour is long enough that a mind asleep
+  between passes catches its hands' reports and short enough that the table
+  never reads as a log. The sweep rides every `publish_bus` rather than a
+  background task, because a bus nobody writes to needs no cleaning — and a
+  timer would be a process in a path the whole design exists to empty.
+- **A mind skips rows bylined with its own channel.** Not in the design. Without
+  it, a mind steering a hand (`lf radio -c goals.<run>`) folds its own steer back
+  into its own thread and wakes its own loop with it. The rule is honest — a mind
+  does not report to itself — and it is what makes §9's "a mind speaking on a
+  hand's channel is bylined as the mind" safe to land.
+- **`lf sub` is now a bus verb only.** The design's demo requires it to work with
+  zero processes, which the SSE follower cannot. That follower moved verbatim to
+  `lf/commands/thread.rs`, where it still backs `lf wavechat` (replay, backoff,
+  reconnect, the human render). `lf sub` never opens a socket. The overlap
+  question above ("`lf wavechat` and `lf chat` now overlap") is untouched by
+  this: wavechat is still chat + a thread reader, just no longer chat + sub.
+- **A cursor jump is announced as a `say` from `bus`.** The design asks for the
+  miss to be "visible (the journal shows the cursor jump)". A journaled `say`
+  bylined `bus` is the cheapest thing that both journals it and puts it in front
+  of the loop. It costs one turn in the thread on a wave that slept past the
+  window.
+- **The bus needs the store to exist, not to be created.** `lf radio` uses
+  `open_existing_store`, so on a machine with no `~/.lf/lfd.db` it drops with
+  exit 0 and a note, exactly as `lf chat` drops with no wave. Publishing does not
+  mint a registry.

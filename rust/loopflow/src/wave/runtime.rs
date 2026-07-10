@@ -1938,10 +1938,6 @@ mod tests {
         assert_eq!(thread[1].status, Lifecycle::Completed);
     }
 
-    /// Fold-upward doctrine: a `say` on a CHILD channel journals there AND
-    /// lands on the primary channel's inbox as attributed speech, so the
-    /// loop's next turn can answer it. The child's own journal keeps its
-    /// record; consumption is parent-side.
     /// Family membership compares against the SANITIZED wave name: a wave
     /// whose name sanitizes (`web/ui` → `web-ui`) mints `web-ui.<run>`
     /// channels — those must pass `in_family`, and the raw name still

@@ -82,28 +82,32 @@ text. Everything proactive goes through `lf`:
 - `lf radio "<note>"` - the agent bus: report up when you finish, fail, or get
   stuck. Broadcast, not delivery - whoever is tuned in hears it, nobody
   guarantees receipt; it is not a log and not a notebook. Bare, it publishes on
-  your own channel, and that report is the one thing the wave records: one
-  attributed copy in its journal, which wakes its loop. One short paragraph;
-  pipe stdin for longer.
+  your own channel, and a served wave records that report: one attributed copy
+  in its journal, which wakes its loop. One short paragraph; pipe stdin for
+  longer.
 - `lf radio --parent "<report>"` - escalate to the parent wave.
 - `lf radio --channel <name> "<msg>"` - broadcast on another channel. Whoever
-  is tuned in hears it now; nothing is delivered to a hand that is mid-pass.
-  Say it on the wave's thread instead when a hand must act on it - hands
-  re-read that thread at every pass boundary.
-- `lf sub [<channel>]` - tune in: follow live events (turns, loop state,
-  memory) until killed. Bare, your own wave; `<channel>` listens to a hand.
+  is tuned in hears it; nothing is delivered to a hand that is mid-pass. Say it
+  on the wave's thread instead when a hand must act on it - hands re-read that
+  thread at every pass boundary.
+- `lf sub [<channel>]` - tune in to the bus: hear what is broadcast on a
+  channel and its descendants while you listen. Bare, your own channel;
+  `<channel>` listens to a hand. Nothing said before you tuned in replays.
 - `lf memory add "<fact>"` - record a durable learning. `lf memory update`
   rewrites the whole file from stdin.
 - `wave/<name>/MEMORY.md` is server-owned - never edit the file directly.
 
-The byline is server-stamped from the channel, so a report cannot claim to be
-another speaker. Speak on your own channel; a channel's name is who it is.
+The byline you write is testimony, not proof: it rides in the record beside the
+channel the message arrived on, so a claim that does not match its channel is
+visible to everyone reading. Speak on your own channel; a channel's name is who
+it is.
 
 `lf chat` is the human's conversation with a served mind - the durable,
 replayed thread. It is not an agent verb; agents use `lf radio`. Use these
-unconditionally. Outside any wave they drop silently (exit 0) -
-publish-to-no-subscriber is correct pubsub, never a blocker. A wave whose
-server is down errors instead; note it and move on.
+unconditionally. The bus is a table, not a server: `lf radio` and `lf sub` work
+whether or not any wave is running, and a wave asleep when you reported hears
+you when it wakes. Outside any wave they drop silently (exit 0) -
+publish-to-no-subscriber is correct pubsub, never a blocker.
 
 ## Tasks Live in Linear
 

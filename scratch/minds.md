@@ -435,6 +435,12 @@ covered by its chat-command tests and the live-body done-when test.
 | §8 `lf radio` = the agent bus; `lf chat` = the human↔mind thread; one transport, two verbs | `lf/mod.rs`, `bin/lf.rs`, `lf/commands/chat.rs` |
 | §8 Doctrine: LOOPFLOW.md teaches radio; the five skills escalate with `lf radio --parent` | `engine/builtins/**` |
 | §8 A hand reads its wave's thread — the two-section work-line overlay collapses | `engine/wave_context.rs` (`gather_channel_chat`) |
+| §9 The db IS the bus: `bus_messages` + `bus_cursors`, publish is an INSERT, sweep rides the publish (1h window) | `lfdb/migrations/059_bus.sql`, `lfdb/sqlite.rs`, `lfdb/mod.rs` |
+| §9 `lf radio` is its own command with no server in the path; `--steer` is a parse error | `lf/commands/radio.rs`, `lf/mod.rs`, `bin/lf.rs` |
+| §9 `lf sub` polls the bus by prefix; the SSE thread-follower moved out to back `lf wavechat` | `lf/commands/sub.rs`, `lf/commands/thread.rs` |
+| §9 The listener demotes to a subscriber: durable cursor, exactly-once fold, visible cursor jump past the window | `wave/bus.rs`, `wave/mod.rs` |
+| §9 Broker deleted: `family_tx`, `ChannelFrame`, `tagged_turn_json`, `deliver_to_channel`, `subscribe_channels`, `?channel=`/`?prefix=`, `/messages`'s `channel` | `wave/runtime.rs`, `wave/server.rs`, `wave/channel.rs`, `lf/commands/chat.rs` |
+| §9 Doctrine: LOOPFLOW.md's radio block loses the "wave must be running" caveat; byline reads as testimony | `engine/builtins/LOOPFLOW.md`, `wave/README.md` |
 
 **Not built.** Each is a real gap, not a rough edge.
 
@@ -501,12 +507,12 @@ resolver consolidation, `require_loop_flow` inline. Kept deliberately:
 Work that is schedulable now, ordered by what unblocks the most. Everything here
 is ours to write; nothing waits on anyone else.
 
-1. **§9: the bus is the store, not the listener.** Supersedes both of the §8
-   gaps that used to sit here: per-hand tokens die (with no server in the
-   publish path, bylines are client-submitted testimony beside the channel's
-   evidence), and the detached driver's missing subscription becomes a cheap
-   poll cursor. See §9's four done-whens; the deletion list is large and the
-   demo is serverless.
+1. **A hand's ear.** §9 left this fork open and it stays open: the detached
+   driver holds no subscription, so a `lf radio --channel goals.<run>` steer
+   still reaches only whoever is tuned in right now. The wave's thread remains
+   the ear a hand reliably has (it re-reads at every pass boundary). The bus
+   makes the poll cheap — `read_bus_after` from a cursor in the driver's pass
+   boundary — but nothing is built.
 2. **Reduction leftovers from the review pass** (findings already triaged;
    1, 2, and 5's stale-hint bug are applied in the tree): factor the shared
    inbox-interrupt arms and lift the lease-renewal block (finding 3 — take
@@ -870,6 +876,15 @@ What falls out:
 
 #### Done when: publishing needs no server
 
+**Landed.** Verified against the built binary with an isolated `LF_HOME`, no
+`lf serve` anywhere: `lf sub ship` tuned in first, then two hands exchanged
+messages on each other's channels and both lines printed within a poll interval
+(250 ms). A broadcast on the out-of-prefix channel `other` was not heard. The
+sweeper: a row aged past the 1 h window vanished on the next publish, and the id
+kept climbing (AUTOINCREMENT, so no cursor ever rewinds). Size: 1440 realistic
+reports — a full day at one a minute — is 127 KB of content; only the ~60 inside
+the window are ever resident.
+
 - With zero loopflow processes running, `lf radio "note"` exits 0 and the row
   is in the bus table. `lf sub <channel>` in another terminal, started first,
   prints it within a poll interval. No HTTP anywhere in the path.
@@ -879,6 +894,16 @@ What falls out:
 
 #### Done when: a sleeping mind catches up
 
+**Landed.** `wave::bus::BusListener` holds the durable cursor (`bus_cursors`,
+keyed by the wave's channel name). Tests:
+`a_sleeping_mind_catches_up_exactly_once` boots, kills, publishes with the mind
+down, restarts twice, and finds one copy;
+`a_swept_report_leaves_a_visible_cursor_jump` sweeps two unread frames and finds
+the note `bus cursor jumped 0 → 3: 2 broadcast(s) aged past the sweep window` in
+the thread ahead of the surviving report. One rule added beyond the design: a
+mind skips rows bylined with its own channel, so steering a hand never wakes the
+steerer.
+
 - Serve a wave, kill it, have a hand `lf radio` a report, restart the wave:
   the report lands in its thread, attributed, exactly once — the cursor, not
   luck, decides. Repeat the restart; still exactly once.
@@ -887,12 +912,27 @@ What falls out:
 
 #### Done when: byline is testimony, channel is evidence
 
+**Landed.** `lf radio --from ci -c ship.a "all green"` from inside `ship.a`
+prints `[ship.a] ci: all green` on a subscriber: byline `ci`, arrival channel
+`ship.a`, mismatch in the record. Nothing derives identity server-side —
+`radio.rs` writes the byline the client resolved, and the runtime's
+channel-stamping path is deleted.
+
 - Every row carries the client-submitted byline and the arrival channel; the
   reader can see both. No code path derives identity server-side.
 - `lf radio --from ci` on a hand's channel produces a row whose byline says
   `ci` and whose channel says the hand — the mismatch is in the record.
 
 #### Done when: the broker is gone
+
+**Landed.** Each of `family_tx`, `ChannelFrame`, `tagged_turn_json`,
+`deliver_to_channel`, `subscribe_channels` greps to zero across Rust, Swift, and
+Python; `/events` has no scope query and `/messages` has no `channel` field
+(only `POST /channels`, §8's dispatch knock, still spells the word).
+`lf radio --steer` is `error: unexpected argument '--steer' found`. `radio.rs`
+imports `wave::channel` and `wave::runtime` for name mechanics and nothing from
+`wave::server`. `lf sub` no longer opens a socket at all; the SSE follower it
+used to own now lives in `lf/commands/thread.rs` and backs `lf wavechat`.
 
 - `family_tx`, `ChannelFrame`, tagged `/events` frames, `?channel=`/`?prefix=`
   scopes, the `channel` field on `/messages`, and radio's endpoint resolution

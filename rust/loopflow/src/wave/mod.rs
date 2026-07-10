@@ -3,10 +3,11 @@
 //! The listener (this module's `serve`) is the channel made durable — pure
 //! hear / check / fold / tell, vendor-free:
 //!
-//! - holds every journal pen (the wave channel + the family's work lines);
+//! - holds the mind's one journal pen;
 //! - serves the doors: `/messages`, `/events`, `/memory`, `/health`,
 //!   `/channels`, and the token-gated resident door ([`server`]);
-//! - folds the store's worker facts ([`registry::StoreObserver`]);
+//! - folds the store's worker facts ([`registry::StoreObserver`]) and its
+//!   hands' broadcasts off the shared-store bus ([`bus::BusListener`]);
 //! - keeps the registry seat and the discovery pointer;
 //! - supervises the resident ([`supervisor`]): process liveness, the respawn
 //!   ladder, the interrupt janitor.

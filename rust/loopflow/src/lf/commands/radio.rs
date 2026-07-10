@@ -29,6 +29,7 @@ use anyhow::{anyhow, Result};
 
 use crate::engine::wave_context::{resolve_ambient_channel, AmbientWaveRef};
 use crate::lf::commands::chat::CliContext;
+use crate::lfd::types::Wave;
 use crate::lfdb::SharedStore;
 use crate::wave::channel::family_head;
 use crate::wave::runtime::wave_channel_name;
@@ -57,18 +58,15 @@ pub(crate) async fn run_with_context(
         eprintln!("no registry store here; broadcast dropped");
         return Ok(());
     };
-    let own = ambient_channel(context, store).await;
-    let Some(channel) = target_channel(store, channel, parent, own.as_deref()).await? else {
+    let ambient = ambient_wave(context, store).await;
+    let own = ambient.as_ref().map(AmbientWave::channel);
+    let Some(channel) = target_channel(store, channel, parent, ambient.as_ref()).await? else {
         eprintln!("no wave here; broadcast dropped");
         return Ok(());
     };
     // Testimony: what the client says it is. `--from` is the machine-speech
     // label (`--from ci`); bare, a speaker names its own channel.
-    let byline = from_label
-        .or(own.as_deref())
-        .unwrap_or("cli")
-        .trim()
-        .to_string();
+    let byline = from_label.or(own).unwrap_or("cli").trim().to_string();
     let text = message_text(text_args, std::io::stdin())?;
 
     store
@@ -78,20 +76,53 @@ pub(crate) async fn run_with_context(
     Ok(())
 }
 
-/// The invoking context's channel name: the shared ambient rule, with the
-/// id arm resolved through the store to a wave name.
-pub(crate) async fn ambient_channel(context: &CliContext, store: &SharedStore) -> Option<String> {
+/// What the caller is: its channel, plus the wave row behind it when the
+/// registry knows one. The row is what `--parent` walks — never the channel
+/// name, which is sanitized (`web/ui` mints `web-ui`) and would not find its
+/// own registry row by name.
+#[derive(Debug)]
+pub(crate) struct AmbientWave {
+    channel: String,
+    row: Option<Wave>,
+}
+
+impl AmbientWave {
+    fn channel(&self) -> &str {
+        &self.channel
+    }
+}
+
+/// The invoking context: the shared ambient rule (`LFD_CHANNEL`, else
+/// `LFD_WAVE_ID`, else the worktree name), with the wave row resolved when the
+/// registry has it.
+pub(crate) async fn ambient_wave(context: &CliContext, store: &SharedStore) -> Option<AmbientWave> {
     match resolve_ambient_channel(
         context.env_channel.as_deref(),
         context.env_wave_id.as_deref(),
         context.repo.as_deref(),
     )? {
         AmbientWaveRef::Id(id) => {
-            let wave = store.get_wave(&id.parse().ok()?).await.ok().flatten()?;
-            Some(wave_channel_name(wave.name()))
+            let row = store.get_wave(&id.parse().ok()?).await.ok().flatten()?;
+            Some(AmbientWave {
+                channel: wave_channel_name(row.name()),
+                row: Some(row),
+            })
         }
-        AmbientWaveRef::Name(name) => Some(name),
+        AmbientWaveRef::Name(name) => {
+            let row = store
+                .get_wave_by_name(family_head(&name))
+                .await
+                .ok()
+                .flatten();
+            Some(AmbientWave { channel: name, row })
+        }
     }
+}
+
+/// The invoking context's channel name — what a subscriber tunes in to by
+/// default.
+pub(crate) async fn ambient_channel(context: &CliContext, store: &SharedStore) -> Option<String> {
+    Some(ambient_wave(context, store).await?.channel)
 }
 
 /// Where the broadcast lands: an explicit channel, the parent wave's channel,
@@ -100,33 +131,34 @@ async fn target_channel(
     store: &SharedStore,
     channel: Option<&str>,
     parent: bool,
-    own: Option<&str>,
+    ambient: Option<&AmbientWave>,
 ) -> Result<Option<String>> {
     if let Some(channel) = channel {
         return Ok(Some(channel.to_string()));
     }
     if !parent {
-        return Ok(own.map(str::to_string));
+        return Ok(ambient.map(|ambient| ambient.channel.clone()));
     }
-    let own = own.ok_or_else(|| {
-        anyhow!(
-            "cannot resolve the invoking wave for --parent: no LFD_CHANNEL or \
+    let own = ambient
+        .and_then(|ambient| ambient.row.as_ref())
+        .ok_or_else(|| {
+            anyhow!(
+                "cannot resolve the invoking wave for --parent: no LFD_CHANNEL or \
              LFD_WAVE_ID in env and no registered wave matches this worktree"
-        )
-    })?;
-    let head = family_head(own);
-    let row = store
-        .get_wave_by_name(head)
-        .await?
-        .ok_or_else(|| anyhow!("--parent: the registry has no wave named '{head}'"))?;
-    let parent_id = row.parent_wave_id().ok_or_else(|| {
+            )
+        })?;
+    let parent_id = own.parent_wave_id().ok_or_else(|| {
         anyhow!(
-            "wave '{head}' has no parent — it is a root wave; the human \
-             fall-through arrives with Decisions"
+            "wave '{}' has no parent — it is a root wave; the human \
+             fall-through arrives with Decisions",
+            own.name()
         )
     })?;
     let parent = store.get_wave(parent_id).await?.ok_or_else(|| {
-        anyhow!("wave '{head}' names parent {parent_id}, but no such wave exists")
+        anyhow!(
+            "wave '{}' names parent {parent_id}, but the registry has no such wave",
+            own.name()
+        )
     })?;
     Ok(Some(wave_channel_name(parent.name())))
 }
@@ -160,6 +192,27 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         )
+    }
+
+    fn make_wave(name: &str, repo: &Path, parent: Option<&crate::lfd::id::LfdId>) -> Wave {
+        Wave {
+            id: crate::lfd::id::LfdId::new(),
+            name: name.to_string(),
+            goal: String::new(),
+            metrics: Vec::new(),
+            repo: repo.display().to_string(),
+            worktree: String::new(),
+            branch: String::new(),
+            status: crate::lfd::types::WaveStatus::Idle,
+            iteration: 0,
+            cycle_start_iteration: 0,
+            direction: Vec::new(),
+            area: Vec::new(),
+            paused: false,
+            created_at: Some(time::OffsetDateTime::now_utc()),
+            workers: 1,
+            parent_wave_id: parent.cloned(),
+        }
     }
 
     fn context(store: Option<SharedStore>, channel: Option<&str>) -> CliContext {
@@ -249,6 +302,56 @@ mod tests {
             .await
             .expect("dropped broadcast exits 0");
         assert!(store.read_bus_after(0).await.expect("bus rows").is_empty());
+    }
+
+    /// `--parent` walks the registry row, not the channel name. A wave whose
+    /// name sanitizes (`web/ui` → channel `web-ui`) would never find itself by
+    /// channel name, so escalation resolves through `LFD_WAVE_ID`'s row.
+    #[tokio::test]
+    async fn parent_escalation_walks_the_wave_row_of_a_sanitized_name() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let parent = make_wave("goals", tmp.path(), None);
+        store.create_wave(&parent).await.expect("seed parent");
+        let child = make_wave("web/ui", tmp.path(), Some(parent.id()));
+        store.create_wave(&child).await.expect("seed child");
+
+        let context = CliContext {
+            store: Some(store.clone()),
+            repo: None,
+            env_wave_id: Some(child.id().as_str().to_string()),
+            env_channel: None,
+        };
+        run_with_context(&context, &["blocked".into()], None, true, None)
+            .await
+            .expect("escalate");
+
+        let rows = store.read_bus_after(0).await.expect("bus rows");
+        assert_eq!(rows[0].channel, "goals", "it landed on the parent");
+        assert_eq!(rows[0].byline, "web-ui", "bylined with its own channel");
+    }
+
+    /// A root wave has nowhere to escalate, and says so.
+    #[tokio::test]
+    async fn parent_of_a_root_wave_is_a_clear_error() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let root = make_wave("goals", tmp.path(), None);
+        store.create_wave(&root).await.expect("seed root");
+
+        let context = CliContext {
+            store: Some(store),
+            repo: None,
+            env_wave_id: Some(root.id().as_str().to_string()),
+            env_channel: None,
+        };
+        let err = run_with_context(&context, &["blocked".into()], None, true, None)
+            .await
+            .expect_err("root has no parent");
+        assert!(
+            err.to_string().contains("wave 'goals' has no parent"),
+            "{err}"
+        );
     }
 
     #[test]

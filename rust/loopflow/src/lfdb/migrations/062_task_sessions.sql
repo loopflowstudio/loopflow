@@ -7,7 +7,6 @@ CREATE TABLE task_sessions (
     project_id TEXT NOT NULL,
     project_slug TEXT NOT NULL,
     project_name TEXT NOT NULL,
-    project_context TEXT NOT NULL,
     wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE RESTRICT,
     wave_name TEXT NOT NULL,
     status TEXT NOT NULL,

@@ -290,6 +290,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "062_task_sessions",
         sql: include_str!("migrations/062_task_sessions.sql"),
     },
+    Migration {
+        version: "062_task_project_context",
+        sql: include_str!("migrations/062_task_project_context.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the

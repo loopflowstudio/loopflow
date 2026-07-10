@@ -22,8 +22,8 @@ re-derive what these already record.
 ## Scope
 
 The chord-wave's area lists member wave directories. Each directory contains a
-`GOAL.md`, `MEMORY.md`, project docs, and live Linear tasks. This step reads all
-of it, plus the living state around it.
+`GOAL.md` and `MEMORY.md`; Linear-owned projects and tasks are read from the
+local PM snapshot. This step reads all of it, plus the living state around it.
 
 Member wave names come from those directory names. If the chord-wave area
 contains `wave/chord-model/` and `wave/signals/`, the wave names are
@@ -118,5 +118,5 @@ evaluate quality. That's assess's job.
 **Staleness.** Run the commands. Don't rely on memory or cached state. The scan must
 reflect the repo as it is right now.
 
-**Partial reads.** Read every item file in every member wave. Skipping items means
-the assessment will miss things.
+**Partial reads.** Read every Project and task in each member wave's PM snapshot.
+Skipping planning state means the assessment will miss things.

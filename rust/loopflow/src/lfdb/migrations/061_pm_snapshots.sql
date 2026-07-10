@@ -7,4 +7,3 @@ CREATE TABLE pm_snapshots (
     payload TEXT NOT NULL,
     PRIMARY KEY (repo, wave)
 );
-

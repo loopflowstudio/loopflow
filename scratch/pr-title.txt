@@ -1,1 +1,1 @@
-lf radio: make agent bus operations explicit
+lf: make radio and Linear planning explicit

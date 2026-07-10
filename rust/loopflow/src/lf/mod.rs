@@ -664,6 +664,13 @@ pub enum PmProjectCommand {
         #[arg(long = "kr", required = true)]
         krs: Vec<String>,
     },
+    /// Archive a Linear Project and refresh the wave snapshot
+    Archive {
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        #[arg(short = 'p', long = "project")]
+        project: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -904,6 +911,33 @@ mod tests {
         assert_eq!(wave, None);
         assert_eq!(wave_flag, None);
         assert!(all);
+    }
+
+    #[test]
+    fn pm_project_archive_accepts_wave_and_project() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "pm",
+            "project",
+            "archive",
+            "--wave",
+            "product",
+            "--project",
+            "wave-chat",
+        ])
+        .expect("parse");
+        let Some(Commands::Pm {
+            cmd:
+                PmCommand::Project {
+                    cmd: PmProjectCommand::Archive { wave, project },
+                },
+        }) = cli.command
+        else {
+            panic!("expected pm project archive command");
+        };
+
+        assert_eq!(wave.as_deref(), Some("product"));
+        assert_eq!(project, "wave-chat");
     }
 
     #[test]

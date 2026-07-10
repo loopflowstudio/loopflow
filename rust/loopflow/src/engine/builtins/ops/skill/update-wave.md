@@ -132,24 +132,18 @@ pm:
 
 ### Projects
 
-Projects are measured bets inside the wave. Write one file per live project:
+Projects are measured bets inside the wave. Store the definition and KRs in
+Linear Project content:
 
-```markdown
-# Technical Architecture
-
-Loopflow's architecture is legible from the top down: the key data structures
-and APIs explain the system, the implementation follows that map, and obsolete
-pre-loop concepts do not linger as alternate design.
-
-## KRs
-
-- Top-down architecture documentation is complete, published, and centered on the key data structures and public APIs.
-- Every data structure and API in the architecture is ratified as minimally simple for its purpose.
-- The codebase, prompts, docs, and UI contain no stale pre-loop technical design language.
+```bash
+lf pm project create --wave infrastructure --title "Technical Architecture" \
+  --definition "Loopflow's architecture is legible from the top down." \
+  --kr "Top-down architecture documentation is complete and published." \
+  --kr "Every public API is ratified as minimally simple for its purpose."
 ```
 
-**Project docs must not contain:** task lists, status indicators, child
-projects, or issue mirrors. Put concrete work in Linear.
+Do not create a repository project file or duplicate tasks in the KR set.
+Concrete work stays in Linear Issues under the Project.
 
 ## Coherence
 

@@ -401,18 +401,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             };
             let result = crate::ops::pm::pm_show(&repo_root, &options, progress)?;
             if *json {
-                println!(
-                    "{}",
-                    serde_json::to_string(&serde_json::json!({
-                        "wave": result.wave,
-                        "provider": result.provider,
-                        "initiative": result.initiative,
-                        "project": result.project,
-                        "synced_at": result.synced_at,
-                        "projects": result.projects,
-                        "items": result.items,
-                    }))?
-                );
+                println!("{}", serde_json::to_string(&result)?);
             } else {
                 print_pm_show_result(&result);
             }
@@ -561,6 +550,21 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     definition.clone(),
                     krs.clone(),
                 ),
+                PmProjectCommand::Archive { wave, project } => {
+                    let result = crate::ops::pm::pm_project_archive(
+                        &repo_root,
+                        &crate::ops::pm::PmProjectArchiveOptions {
+                            wave: wave.clone(),
+                            project: project.clone(),
+                        },
+                        progress,
+                    )?;
+                    println!(
+                        "{}: archived project:{} ({})",
+                        result.wave, result.slug, result.id
+                    );
+                    return Ok(());
+                }
             };
             let result = crate::ops::pm::pm_project_write(
                 &repo_root,

@@ -25,7 +25,8 @@ child's work.
 4. Initialize the child's Linear Initiative with `lf pm init --wave <slug>`,
    recreate the measured bet there with `lf pm project create`, and move every
    source task with `lf pm task move --id <id> --wave <slug> --project <slug>`.
-   Archive the parent Linear Project only after the child snapshot is complete.
+   Only after the child snapshot is complete, remove the duplicate parent bet
+   with `lf pm project archive --wave <parent> --project <slug>`.
 6. Add a child `Process` instruction requiring its first pass to report the
    newly owned definition and KRs in its own thread, then publish that concise
    report to the parent with `lf radio pub --parent`.

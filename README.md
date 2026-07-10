@@ -399,6 +399,7 @@ lf pm sync --wave designer                # refresh the local SQLite snapshot
 lf pm show --wave designer                # read projects and tasks locally
 lf pm show --wave designer --project ui   # filter to one Linear Project
 lf pm project update --wave designer --project ui --definition "..." --kr "..."
+lf pm project archive --wave designer --project retired-bet
 lf pm task create --wave designer --project ui --title "Add dark mode" --notes "..."
 lf pm task done --id 1207... --pr "..."   # close a shipped task
 lf pm sync --plan                         # compare without writing SQLite

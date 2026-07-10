@@ -189,6 +189,7 @@ struct RegistryQueryTests {
         let plan = try await query.plan(wave: "goals", objective: "Ship it.", cwd: "/tmp/repo")
         #expect(plan.objective == "Ship it.")
         #expect(plan.projects[0].id == "runtime")
+        #expect(plan.projects[0].definition == "Run reliably.")
         #expect(plan.projects[0].krs[0].proof == .holds)
     }
 

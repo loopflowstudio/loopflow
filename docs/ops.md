@@ -113,6 +113,7 @@ lf pm sync --wave designer                                       # refresh SQLit
 lf pm show --wave designer                                       # read projects and tasks locally
 lf pm show --wave designer --project ui                          # filter to one project
 lf pm project update --wave designer --project ui --definition "..." --kr "..."
+lf pm project archive --wave designer --project retired-bet
 lf pm task create --wave designer --project ui --title "Dark mode"
 lf pm task update --id 1207... --title "Refine dark mode"
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
@@ -125,7 +126,7 @@ lf pm init --wave designer                                       # connect the I
 |---------|--------------|
 | `status` | Show linked waves, backing Linear Initiative names, and task counts by Project |
 | `show` | Export the SQLite Project/task snapshot; `--project` filters it |
-| `project create/update` | Write Linear Project definitions and KRs, then refresh SQLite |
+| `project create/update/archive` | Write or retire Linear Projects, then refresh SQLite |
 | `task create` | Create a Linear task attached to a Project |
 | `task update` | Edit an existing Linear task |
 | `task done` | Close a Linear task and optionally comment with a PR link |

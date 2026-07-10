@@ -8,15 +8,17 @@ Mutate the project honestly. The loop's termination mechanics are in the
 
 ## Orientation
 
-Read the KR set in `scratch/<branch>.md`; check filed tasks with `lf pm show`,
-running tasks with `lf runs`, and merged PRs with `gh`.
+Read the authoritative KR set with `lf pm show --wave <wave> --project
+<project> --json`; check filed tasks in that snapshot, running tasks with `lf
+runs`, and merged PRs with `gh`.
 
 ## Work
 
 - Check off a KR only after verifying its observable condition yourself.
   Endurance KRs mean what they say: a counted streak isn't satisfied by one
   good day, and any human rescue inside an unattended window resets it.
-- Renew self-renewing KRs by rewriting their line in the doc.
+- Renew self-renewing KRs with `lf pm project update`; the write refreshes the
+  local SQLite snapshot before returning.
 - Tasks still running and nothing left to decompose → hand the wait to the
   runner with a recheck on the state you are waiting for (e.g. a
   `gh pr view` on a task's PR).

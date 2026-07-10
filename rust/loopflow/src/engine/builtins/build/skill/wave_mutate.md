@@ -16,7 +16,7 @@ terminates; it changes shape.
   its condition verifiably holds — endurance KRs mean what they say (a
   counted streak isn't satisfied by one good day; a human rescue inside an
   unattended window resets it). Write changed KRs with `lf pm project update`;
-  archive dead bets in Linear.
+  archive dead bets with `lf pm project archive`.
 - Add durable learnings with `lf memory add` or rewrite memory through the
   server-owned memory command when the accumulated facts need curation.
 - Launch, retire, reset, or split sub-waves when the objective needs a new

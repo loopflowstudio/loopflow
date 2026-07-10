@@ -101,6 +101,12 @@ const UPDATE_PROJECT_MUTATION: &str = r#"mutation UpdateProject($id: String!, $n
   }
 }"#;
 
+const ARCHIVE_PROJECT_MUTATION: &str = r#"mutation ArchiveProject($id: String!) {
+  projectArchive(id: $id) {
+    success
+  }
+}"#;
+
 const ATTACH_PROJECT_MUTATION: &str = r#"mutation AttachProject($initiativeId: String!, $projectId: String!) {
   initiativeToProjectCreate(input: { initiativeId: $initiativeId, projectId: $projectId }) {
     initiativeToProject {
@@ -165,7 +171,7 @@ const COMPLETE_ITEM_MUTATION: &str = r#"mutation CompleteIssue($id: String!, $st
   }
 }"#;
 
-const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowStates($teamId: ID!) {
+const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowStates($teamId: String!) {
   workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "completed" } }) {
     nodes {
       id
@@ -173,7 +179,7 @@ const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowSta
   }
 }"#;
 
-const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowStates($teamId: ID!) {
+const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowStates($teamId: String!) {
   workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "unstarted" } }) {
     nodes {
       id
@@ -428,6 +434,23 @@ impl LinearClient {
         Ok(())
     }
 
+    pub async fn archive_project(&self, project_id: &str) -> PmResult<()> {
+        let response: ProjectArchiveData = self
+            .graphql(
+                ARCHIVE_PROJECT_MUTATION,
+                json!({
+                    "id": project_id,
+                }),
+            )
+            .await?;
+        if !response.project_archive.success {
+            return Err(PmError::Message(format!(
+                "Linear did not archive Project {project_id}"
+            )));
+        }
+        Ok(())
+    }
+
     pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<PmProject>> {
         let mut after = None;
         let mut projects = Vec::new();
@@ -613,6 +636,17 @@ struct GraphqlErrorExtensions {
 struct ProjectCreateData {
     #[serde(rename = "projectCreate")]
     project_create: ProjectPayload,
+}
+
+#[derive(Deserialize)]
+struct ProjectArchiveData {
+    #[serde(rename = "projectArchive")]
+    project_archive: SuccessPayload,
+}
+
+#[derive(Deserialize)]
+struct SuccessPayload {
+    success: bool,
 }
 
 #[derive(Deserialize)]
@@ -937,6 +971,8 @@ mod tests {
             MOVE_ITEM_MUTATION,
             COMPLETE_ITEM_MUTATION,
             CREATE_COMMENT_MUTATION,
+            LIST_COMPLETED_WORKFLOW_STATES_QUERY,
+            LIST_UNSTARTED_WORKFLOW_STATES_QUERY,
         ] {
             assert!(!query.contains(": ID!"));
         }
@@ -1092,6 +1128,33 @@ mod tests {
             .as_str()
             .expect("content")
             .contains("Replies survive every restart boundary"));
+    }
+
+    #[tokio::test]
+    async fn archive_project_uses_linear_archive_mutation() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "projectArchive": { "success": true } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-9".to_string()),
+            base_url,
+        );
+
+        client
+            .archive_project("project-1")
+            .await
+            .expect("archive project");
+
+        let requests = requests.lock().await;
+        let archive: Value = serde_json::from_str(&requests[0].body).expect("archive json");
+        assert!(archive["query"]
+            .as_str()
+            .expect("query")
+            .contains("projectArchive"));
+        assert_eq!(archive["variables"]["id"], "project-1");
     }
 
     #[tokio::test]

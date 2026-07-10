@@ -8,9 +8,9 @@ Pursue the wave objective.
 ## Orientation
 
 Resolve the exact wave from the prompt or its `wave/<wave>/GOAL.md`; never infer
-an approximate name. Read GOAL/MEMORY, project docs, recent chat, and worker
-state. Read live Linear tasks when the exact wave has PM configured. If that
-reader fails, report the failure once and select from project KRs and memory;
+an approximate name. Read GOAL/MEMORY, the local PM snapshot, recent chat, and
+worker state. If the PM reader fails, report the failure once and select from
+memory;
 repairing PM or auth is not this wave's new objective. Trust worker summaries;
 do not reread worker transcripts.
 

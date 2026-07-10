@@ -44,7 +44,7 @@ pub struct PmShowOptions {
     pub project: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PmShowResult {
     pub wave: String,
     pub provider: PmProviderKind,
@@ -153,6 +153,19 @@ pub struct PmProjectWriteResult {
     pub created: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct PmProjectArchiveOptions {
+    pub wave: Option<String>,
+    pub project: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmProjectArchiveResult {
+    pub wave: String,
+    pub id: String,
+    pub slug: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct PmSnapshot {
     projects: Vec<PmProject>,
@@ -239,6 +252,12 @@ impl PmClient {
                     )
                     .await
             }
+        }
+    }
+
+    async fn archive_project(&self, project_id: &str) -> PmResult<()> {
+        match self {
+            Self::Linear(client) => client.archive_project(project_id).await,
         }
     }
 
@@ -1009,6 +1028,37 @@ pub fn pm_project_write(
     block_on_pm(pm_project_write_async(repo, options, progress))
 }
 
+pub fn pm_project_archive(
+    repo: &Path,
+    options: &PmProjectArchiveOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmProjectArchiveResult> {
+    block_on_pm(pm_project_archive_async(repo, options, progress))
+}
+
+async fn pm_project_archive_async(
+    repo: &Path,
+    options: &PmProjectArchiveOptions,
+    progress: &impl Progress,
+) -> OpsResult<PmProjectArchiveResult> {
+    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let ctx = resolve_context(repo, &wave).await?;
+    let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
+    let project = find_project(&projects, &wave, &options.project)?;
+    progress.status(&format!("archiving Linear Project `{}`", project.name));
+    ctx.client
+        .archive_project(&project.id)
+        .await
+        .map_err(pm_to_ops)?;
+    let result = PmProjectArchiveResult {
+        wave: wave.clone(),
+        id: project.id.clone(),
+        slug: project.slug.clone(),
+    };
+    refresh_pm_snapshot(repo, &wave, &ctx).await?;
+    Ok(result)
+}
+
 async fn pm_project_write_async(
     repo: &Path,
     options: &PmProjectWriteOptions,
@@ -1469,6 +1519,39 @@ mod tests {
         let error = ensure_unique_project_slugs(&projects, "product")
             .expect_err("duplicate slug must fail");
         assert!(error.to_string().contains("both derive slug `wave-chat`"));
+    }
+
+    #[test]
+    fn show_result_serializes_the_complete_local_snapshot() {
+        let result = PmShowResult {
+            wave: "product".to_string(),
+            provider: PmProviderKind::Linear,
+            initiative: "initiative-1".to_string(),
+            project: None,
+            synced_at: 42,
+            projects: vec![PmProject {
+                id: "project-1".to_string(),
+                slug: "wave-chat".to_string(),
+                name: "Wave Chat".to_string(),
+                summary: "Stay in flow.".to_string(),
+                definition: "Conversation stays in flow.".to_string(),
+                krs: vec![PmKr {
+                    text: "Replies survive restarts.".to_string(),
+                    holds: true,
+                }],
+                initiative_ids: vec!["initiative-1".to_string()],
+            }],
+            items: Vec::new(),
+        };
+
+        let value = serde_json::to_value(result).expect("serialize PM show result");
+        assert_eq!(value["synced_at"], 42);
+        assert_eq!(
+            value["projects"][0]["definition"],
+            "Conversation stays in flow."
+        );
+        assert_eq!(value["projects"][0]["krs"][0]["holds"], true);
+        assert_eq!(value["items"], serde_json::json!([]));
     }
 
     #[test]

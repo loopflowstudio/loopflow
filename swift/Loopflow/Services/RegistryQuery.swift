@@ -90,7 +90,7 @@ public struct RegistryQuery: Sendable {
                 WaveProject(
                     id: project.slug,
                     title: project.name,
-                    summary: project.summary.isEmpty ? nil : project.summary,
+                    definition: project.definition.isEmpty ? nil : project.definition,
                     krs: project.krs.map {
                         WaveKeyResult(text: $0.text, proof: $0.holds ? .holds : .open)
                     }

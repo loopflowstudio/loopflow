@@ -3,8 +3,9 @@
 ## Decision
 
 Linear is the sole durable source for projects, their definitions and KRs, and
-tasks. A wave keeps only its objective and its stable Linear Initiative binding
-in `GOAL.md`. There is no `wave/<wave>/projects/` representation.
+tasks. A wave keeps its identity and stable Linear Initiative binding in
+`GOAL.md`; it does not keep a project representation there or under
+`wave/<wave>/projects/`.
 
 The machine SQLite registry is a read model, not another authoring surface.
 `lf pm sync` fetches each linked Initiative, its Projects, and their Issues and

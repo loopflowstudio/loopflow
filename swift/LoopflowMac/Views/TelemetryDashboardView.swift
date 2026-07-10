@@ -93,10 +93,6 @@ struct TelemetryDashboardView: View {
         }
         .background(palette.background)
         .task { await refresh() }
-        .onChange(of: selectedRepo) { _, _ in
-            focusPath = ""
-            Task { await loadCodebase() }
-        }
     }
 
     /// A boundary with no skill is a run that never entered one — an inline
@@ -117,7 +113,7 @@ struct TelemetryDashboardView: View {
             }
             Spacer()
             if repos.count > 1 {
-                Picker("Repo", selection: $selectedRepo) {
+                Picker("Repo", selection: repoSelection) {
                     ForEach(repos, id: \.self) { repo in
                         Text(shortRepoName(repo)).tag(Optional(repo))
                     }
@@ -144,6 +140,22 @@ struct TelemetryDashboardView: View {
     private var codebaseTitle: String {
         guard let node = focusedNode else { return "Codebase flame" }
         return "Codebase flame · \(node.lines.formatted()) lines · \(compactTokens(node.tokens)) tokens"
+    }
+
+    /// User selection owns one codebase load. Programmatic selection during a
+    /// refresh assigns `selectedRepo` directly and the refresh awaits its load,
+    /// avoiding two concurrent year-long history walks on first launch.
+    private var repoSelection: Binding<String?> {
+        Binding(
+            get: { selectedRepo },
+            set: { repo in
+                selectedRepo = repo
+                focusPath = ""
+                codebase = nil
+                growth = []
+                Task { await loadCodebase() }
+            }
+        )
     }
 
     /// The subtree the flame is showing. A focus path that no longer exists (the
@@ -261,8 +273,13 @@ struct TelemetryDashboardView: View {
         defer { isLoading = false }
         do {
             spend = try await RegistryQueryLocal.shared.spend(days: Self.windowDays)
-            doctor = try? await RegistryQueryLocal.shared.doctor()
             errorMessage = nil
+            do {
+                doctor = try await RegistryQueryLocal.shared.doctor()
+            } catch {
+                doctor = nil
+                errorMessage = error.localizedDescription
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -276,19 +293,24 @@ struct TelemetryDashboardView: View {
     /// was removed). That is a missing chart — but say why, because a silently
     /// empty chart is indistinguishable from a codebase of size zero.
     private func loadCodebase() async {
-        guard let selectedRepo else {
+        guard let repo = selectedRepo else {
             codebase = nil
             growth = []
             codebaseError = "No repo in the ledger to measure"
             return
         }
         do {
-            codebase = try await RegistryQueryLocal.shared.codebase(repoPath: selectedRepo)
-            growth = try await RegistryQueryLocal.shared.codebaseHistory(
-                repoPath: selectedRepo, days: Self.codebaseDays
+            let nextCodebase = try await RegistryQueryLocal.shared.codebase(repoPath: repo)
+            guard selectedRepo == repo else { return }
+            let nextGrowth = try await RegistryQueryLocal.shared.codebaseHistory(
+                repoPath: repo, days: Self.codebaseDays
             )
+            guard selectedRepo == repo else { return }
+            codebase = nextCodebase
+            growth = nextGrowth
             codebaseError = nil
         } catch {
+            guard selectedRepo == repo else { return }
             codebase = nil
             growth = []
             codebaseError = error.localizedDescription

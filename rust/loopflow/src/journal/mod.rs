@@ -117,18 +117,18 @@ pub fn record_result(cost_usd: Option<f64>, duration_secs: Option<f64>) {
     });
 }
 
-/// Name the harness the current run is spending tokens through, and the model
-/// it drove. Recorded without marking usage seen — a launch that reports no
-/// tokens names an agent but should not materialize a row.
-pub fn record_provider(provider: &'static str) {
+/// Name the harness the current agent launch is spending tokens through, and
+/// the model it drove. Recorded without marking usage seen — a launch that
+/// reports no tokens names an agent but should not materialize a row.
+///
+/// Set both fields together. A process may launch several agents, and an
+/// unconfigured model on the second launch must clear the first launch's model
+/// rather than producing a fictitious `codex:opus` boundary.
+pub fn record_agent(provider: Option<&'static str>, model: Option<&str>) {
     PENDING_USAGE.with(|cell| {
-        cell.borrow_mut().provider = Some(provider);
-    });
-}
-
-pub fn record_model(model: &str) {
-    PENDING_USAGE.with(|cell| {
-        cell.borrow_mut().model = Some(model.to_string());
+        let mut usage = cell.borrow_mut();
+        usage.provider = provider;
+        usage.model = model.map(str::to_string);
     });
 }
 
@@ -666,6 +666,23 @@ mod tests {
             Some(1.25),
             "cost must accumulate, not overwrite"
         );
+        super::clear_usage();
+    }
+
+    #[test]
+    fn each_agent_launch_replaces_provider_and_model_attribution() {
+        super::clear_usage();
+        super::record_agent(Some("claude"), Some("opus"));
+        super::record_usage(Some(100), Some(10), None);
+        let first = super::snapshot_usage().expect("first usage");
+        assert_eq!(first.provider, Some("claude"));
+        assert_eq!(first.model.as_deref(), Some("opus"));
+
+        super::record_agent(Some("codex"), None);
+        super::record_usage(Some(50), Some(5), None);
+        let second = super::snapshot_usage().expect("second usage");
+        assert_eq!(second.provider, Some("codex"));
+        assert_eq!(second.model, None, "the prior launch's model must not leak");
         super::clear_usage();
     }
 

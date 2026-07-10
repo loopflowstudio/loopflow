@@ -194,8 +194,8 @@ fn summarize(events: &[RunEventRow]) -> Vec<RunLedgerEntry> {
         .map(|(process_id, events)| {
             let terminal = events
                 .iter()
-                .rev()
-                .find(|e| e.node == "run" && e.event != "started");
+                .filter(|e| e.node == "run" && e.event != "started")
+                .max_by_key(|event| event.seq);
             RunLedgerEntry {
                 id: process_id.to_string(),
                 run_id: events[0].run_id.clone(),
@@ -239,6 +239,9 @@ pub struct SpanDto {
     pub run_id: String,
     pub process_id: String,
     pub parent_process_id: Option<String>,
+    /// Event position within the process. Together with `process_id`, this is
+    /// the stable identity of a boundary row.
+    pub seq: i64,
     pub node: String,
     pub name: Option<String>,
     pub repo: Option<String>,
@@ -265,7 +268,7 @@ fn trace_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
     let mut spans: Vec<_> = by_process
         .into_values()
         .map(|mut process_events| {
-            process_events.sort_by_key(|event| (event.ts, event.seq));
+            process_events.sort_by_key(|event| event.seq);
             let started = process_events
                 .iter()
                 .find(|event| event.node == "run" && event.event == "started")
@@ -286,6 +289,7 @@ fn trace_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
                 run_id: started.run_id.clone(),
                 process_id: started.process_id.clone(),
                 parent_process_id: started.parent_process_id.clone(),
+                seq: started.seq,
                 node: "run".to_string(),
                 name: started
                     .command
@@ -333,15 +337,16 @@ pub(crate) fn boundary_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
         .filter(|event| event.input_tokens.is_some())
         .filter(|event| (event.node == "run" || event.node == "skill") && event.event != "started")
         .collect();
-    // own_spend diffs against the previous boundary in the same process, so the
-    // rows must reach it in the order the process produced them.
-    rows.sort_by_key(|event| (event.ts, event.seq));
+    // own_spend diffs against the previous boundary in the same process. `seq`
+    // is the production order; wall time can jump backwards under clock sync.
+    rows.sort_by_key(|event| (event.process_id.as_str(), event.seq));
 
     rows.into_iter()
         .map(|event| SpanDto {
             run_id: event.run_id.clone(),
             process_id: event.process_id.clone(),
             parent_process_id: event.parent_process_id.clone(),
+            seq: event.seq,
             node: event.node.clone(),
             name: event.skill.clone().or_else(|| {
                 event
@@ -719,11 +724,26 @@ mod tests {
     }
 
     #[test]
+    fn boundary_spend_follows_process_sequence_when_wall_time_moves_backwards() {
+        let mut first = row("trace", 1, 200, "skill", "completed");
+        first.input_tokens = Some(100);
+        let mut second = row("trace", 2, 100, "run", "completed");
+        second.input_tokens = Some(150);
+
+        let spend = own_spend(&boundary_spans(&[first, second]));
+        assert_eq!(spend[0].seq, 1);
+        assert_eq!(spend[0].input_tokens, Some(100));
+        assert_eq!(spend[1].seq, 2);
+        assert_eq!(spend[1].input_tokens, Some(50));
+    }
+
+    #[test]
     fn own_spend_diffs_consecutive_boundaries_within_a_process() {
         let boundary = |cost, input| SpanDto {
             run_id: "trace".to_string(),
             process_id: "span".to_string(),
             parent_process_id: None,
+            seq: input,
             node: "skill".to_string(),
             name: Some("implement".to_string()),
             repo: Some("/repo".to_string()),
@@ -766,6 +786,22 @@ mod tests {
         let value = serde_json::to_value(&running[0]).expect("serialize");
         assert_eq!(value["ended"], serde_json::Value::Null);
         assert_eq!(value["status"], "running");
+    }
+
+    #[test]
+    fn repeated_skill_boundaries_have_distinct_wire_identity() {
+        let mut events = vec![
+            row("trace", 1, 100, "skill", "completed"),
+            row("trace", 2, 100, "skill", "completed"),
+        ];
+        for event in &mut events {
+            event.skill = Some("implement".to_string());
+            event.input_tokens = Some(10 * event.seq);
+        }
+
+        let boundaries = boundary_spans(&events);
+        assert_eq!(boundaries.len(), 2);
+        assert_ne!(boundaries[0].seq, boundaries[1].seq);
     }
 
     #[test]

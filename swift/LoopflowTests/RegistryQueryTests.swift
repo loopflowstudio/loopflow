@@ -119,7 +119,7 @@ struct RegistryQueryTests {
     @Test("lf usage --json preserves lineage and unspent spans")
     func spendDecodes() async throws {
         let json = """
-        [{"run_id":"abc","process_id":"child","parent_process_id":"parent","node":"run","name":"lf pm show","started_at":100,"ended_at":null,"status":"open","input_tokens":null,"output_tokens":null,"cache_read_tokens":null,"cost_usd":null,"duration_secs":null,"provider":null,"model":null}]
+        [{"run_id":"abc","process_id":"child","parent_process_id":"parent","seq":7,"node":"run","name":"lf pm show","repo":null,"wave":null,"flow":null,"skill":null,"started_at":100,"ended_at":null,"status":"open","input_tokens":null,"output_tokens":null,"cache_read_tokens":null,"cost_usd":null,"duration_secs":null,"provider":null,"model":null}]
         """
         let query = RegistryQuery { args, _ in
             #expect(args == ["usage", "--json", "--days", "30"])
@@ -128,6 +128,7 @@ struct RegistryQueryTests {
 
         let spans = try await query.spend()
         #expect(spans[0].processId == "child")
+        #expect(spans[0].id == "child-7")
         #expect(spans[0].parentProcessId == "parent")
         #expect(spans[0].status == "open")
         #expect(spans[0].endedAt == nil)

@@ -13,13 +13,11 @@ use crate::lfd::types::{
 use crate::lfdb::catalog::{list_runs_query, list_waves_query, sql, Query, SqlDialect};
 use crate::lfdb::rows::{
     map_chat_memory_block_row, map_chat_message_row, map_fork_run_row, map_live_pr_state_row,
-    map_repo_edge_row, map_repo_provider_usage_row, map_repo_row, map_run_row, map_summary_row,
-    map_wave_row, now_unix, serialize_pr,
+    map_repo_edge_row, map_repo_row, map_run_row, map_summary_row, map_wave_row, now_unix,
+    serialize_pr,
 };
 use crate::lfdb::token_crypto;
-use crate::lfdb::{
-    ForkRun, ForkRunStatus, RepoProviderUsage, RunEventRow, StoreError, StoreResult,
-};
+use crate::lfdb::{ForkRun, ForkRunStatus, RunEventRow, StoreError, StoreResult};
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
@@ -1333,16 +1331,6 @@ impl SqliteStore {
             ],
         )?;
         Ok(())
-    }
-
-    /// Sum token usage and cost out of the run ledger, one row per (repo,
-    /// provider). Coarser rollups are folds of these rows; the ledger does not
-    /// aggregate them a second time.
-    pub fn aggregate_token_usage(&self) -> StoreResult<Vec<RepoProviderUsage>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::AggregateTokenUsageByRepoProvider))?;
-        let rows = stmt.query_map([], |row| Ok(map_repo_provider_usage_row(row)))?;
-        rows.map(|row| row?).collect()
     }
 
     // Run ledger (`run_events`): the machine-grain, append-only record of

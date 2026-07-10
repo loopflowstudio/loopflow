@@ -145,12 +145,14 @@ lf memory                                   # print the wave's MEMORY.md
 lf memory add "buttons: variants unified"   # publish one replayable fact
 lf memory log                               # print facts added since the last update
 lf memory update < MEMORY.md                # replace it from stdin
+lf wavechat intelligence                    # watch and speak from one terminal pane
 ```
 
 | Command | What it does |
 |---------|--------------|
 | `lf chat [TEXT]` | Post a message into a wave's thread; reads stdin when TEXT is omitted. Outside any wave the publish drops silently (exit 0), so the verb is safe in every prompt |
 | `lf sub [WAVE] [--json]` | Follow a wave's live events (turns, flowloop state, memory) until killed; exits 0 with a note when no wave resolves |
+| `lf wavechat [WAVE]` | Replay and follow a wave's live events while typed lines post to its thread; `/status` reads health and `/quit` leaves |
 | `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 
 All three default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
@@ -166,7 +168,8 @@ All three default to the invoking context's wave (`LFD_WAVE_ID` env, else the wo
 lf runs                         # one row per process, with trace/span ids
 lf trace 66863649               # render the nested process tree
 lf trace 66863649 --json        # feed the Telemetry dashboard
-lf usage                        # additive terminal-process spend
+lf usage                        # additive spend by repo and provider
+lf usage --json --days 30       # additive skill/run boundary rows
 lf doctor                       # audit continuity, identity, lineage, coverage
 lf doctor --json                # machine-readable audit
 ```
@@ -174,6 +177,17 @@ lf doctor --json                # machine-readable audit
 `run_id` identifies the whole trace. Each nested `lf` process gets its own
 `process_id`, and terminal rows carry their own command, tokens, cost, provider,
 and model. `lf trace` leaves killed processes open instead of hiding them.
+
+## Measuring Codebase Weight
+
+```bash
+lf tokens                       # lines and model tokens by tracked path
+lf tokens --days 365            # daily history, grouped by file extension
+lf tokens --json                # token-weighted tree for other tools
+```
+
+`lf tokens` counts with the same tokenizer used by the context budget. It skips
+untracked and non-UTF-8 files; history walks git blobs without checking them out.
 
 ## What's Included by Default
 

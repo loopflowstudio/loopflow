@@ -3,7 +3,7 @@ use crate::lfd::types::{
     ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PullRequest, Repo, RepoEdge,
     RepoId, Run, RunStackStatus, RunStatus, Summary, Wave, WaveStatus,
 };
-use crate::lfdb::{ForkRun, ForkRunStatus, RepoProviderUsage, StoreError, StoreResult};
+use crate::lfdb::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 
 // -- Row helpers --------------------------------------------------------------
 
@@ -218,18 +218,6 @@ pub fn map_chat_memory_block_row(row: &rusqlite::Row<'_>) -> StoreResult<ChatMem
         content: text(row, 2)?,
         position: int(row, 3)? as u32,
         updated_at: Some(unix_to_datetime(bigint(row, 4)?)),
-    })
-}
-
-/// SELECT repo, provider, SUM(input), SUM(output), SUM(cache_read), SUM(cost_usd)
-pub fn map_repo_provider_usage_row(row: &rusqlite::Row<'_>) -> StoreResult<RepoProviderUsage> {
-    Ok(RepoProviderUsage {
-        repo: opt_text(row, 0)?,
-        provider: opt_text(row, 1)?,
-        input_tokens: bigint(row, 2)?.max(0) as u64,
-        output_tokens: bigint(row, 3)?.max(0) as u64,
-        cache_read_tokens: bigint(row, 4)?.max(0) as u64,
-        cost_usd: row.get(5)?,
     })
 }
 

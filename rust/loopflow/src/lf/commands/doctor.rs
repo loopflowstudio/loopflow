@@ -26,6 +26,7 @@ const EVENTS: [&str; 4] = ["started", "completed", "errored", "escalated"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Status {
     Ok,
     Warn,
@@ -95,8 +96,9 @@ pub fn audit(events: &[RunEventRow]) -> Vec<Check> {
     if events.is_empty() {
         return vec![Check::warn("continuity", "ledger is empty")];
     }
+    let now = OffsetDateTime::now_utc().unix_timestamp();
     vec![
-        check_continuity(events),
+        check_continuity(events, now),
         check_vocabulary(events),
         check_attribution(events),
         check_identity(events),
@@ -112,17 +114,20 @@ const MAX_SILENCE_HOURS: f64 = 24.0;
 
 /// A day the ledger recorded nothing is a day it may not have been listening —
 /// but so is a long silence inside two busy days. Measure both.
-fn check_continuity(events: &[RunEventRow]) -> Check {
+fn check_continuity(events: &[RunEventRow], now: i64) -> Check {
     let days: BTreeSet<_> = events.iter().filter_map(|e| day_of(e.ts)).collect();
-    let (Some(first), Some(last)) = (days.first(), days.last()) else {
+    let (Some(first), Some(last_event_day)) = (days.first(), days.last()) else {
         return Check::warn("continuity", "no timestamps");
     };
+    let last = day_of(now)
+        .map(|today| today.max(*last_event_day))
+        .unwrap_or(*last_event_day);
 
     let mut gaps = Vec::new();
     let mut cursor = *first;
-    while cursor < *last {
+    while cursor < last {
         cursor += Duration::days(1);
-        if cursor < *last && !days.contains(&cursor) {
+        if cursor < last && !days.contains(&cursor) {
             gaps.push(cursor.to_string());
         }
     }
@@ -135,7 +140,7 @@ fn check_continuity(events: &[RunEventRow]) -> Check {
         );
     }
 
-    let silence = longest_silence_hours(events);
+    let silence = longest_silence_hours(events, now);
     if silence > MAX_SILENCE_HOURS {
         return Check::warn(
             "continuity",
@@ -150,9 +155,12 @@ fn check_continuity(events: &[RunEventRow]) -> Check {
     )
 }
 
-/// The largest interval between consecutive recorded events, in hours.
-fn longest_silence_hours(events: &[RunEventRow]) -> f64 {
+/// The largest interval between consecutive recorded events or between the
+/// latest event and now, in hours. The tail matters most during an active
+/// outage: until a later write succeeds, there is no second event to expose it.
+fn longest_silence_hours(events: &[RunEventRow], now: i64) -> f64 {
     let mut stamps: Vec<i64> = events.iter().map(|event| event.ts).collect();
+    stamps.push(now);
     stamps.sort_unstable();
     stamps
         .windows(2)
@@ -377,7 +385,7 @@ mod tests {
             row("a", DAY, "run", "completed"),
             row("b", DAY * 3, "run", "completed"),
         ];
-        let check = check_continuity(&rows);
+        let check = check_continuity(&rows, DAY * 3);
         assert_eq!(check.status, Status::Fail);
         assert!(check.detail.contains("1 gap-day"), "{}", check.detail);
     }
@@ -391,7 +399,7 @@ mod tests {
             row("b", DAY + 3600, "run", "completed"),       // day 1, 01:00
             row("c", DAY * 2 + 79_200, "run", "completed"), // day 2, 22:00
         ];
-        let check = check_continuity(&rows);
+        let check = check_continuity(&rows, DAY * 2 + 79_200);
         assert_eq!(check.status, Status::Warn, "{}", check.detail);
         assert!(check.detail.contains("silence"), "{}", check.detail);
     }
@@ -403,7 +411,23 @@ mod tests {
             row("b", DAY + 3600, "run", "completed"),
             row("c", DAY * 2, "run", "completed"),
         ];
-        assert_eq!(check_continuity(&rows).status, Status::Ok);
+        assert_eq!(check_continuity(&rows, DAY * 2).status, Status::Ok);
+    }
+
+    #[test]
+    fn an_active_silence_after_the_last_event_is_caught() {
+        let rows = [
+            row("a", DAY, "run", "completed"),
+            row("b", DAY + 3600, "run", "completed"),
+        ];
+
+        let check = check_continuity(&rows, DAY + 26 * 3600);
+        assert_eq!(check.status, Status::Warn, "{}", check.detail);
+        assert!(
+            check.detail.contains("25.0h of silence"),
+            "{}",
+            check.detail
+        );
     }
 
     #[test]

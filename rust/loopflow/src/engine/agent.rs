@@ -918,14 +918,11 @@ pub fn launch_agent(
     let agent = launch.agent.as_deref().unwrap_or("claude");
     let (harness, model) = parse_agent(agent);
     apply_harness_env(&harness, &mut cmd, process);
-    // Name the provider the run spends through. An agent we don't recognize
-    // records no provider rather than inventing one.
-    if let Some(kind) = crate::harness::HarnessKind::parse(&harness) {
-        crate::journal::record_provider(kind.as_str());
-    }
-    if let Some(model) = model {
-        crate::journal::record_model(&model);
-    }
+    // Name this launch's agent. Set both fields even when one is absent so a
+    // later launch cannot inherit the previous launch's attribution.
+    let provider =
+        crate::harness::HarnessKind::parse(&harness).map(crate::harness::HarnessKind::as_str);
+    crate::journal::record_agent(provider, model.as_deref());
 
     if process.auto && process.stream {
         // Stream mode: capture stdout line by line

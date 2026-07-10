@@ -39,7 +39,6 @@ pub(crate) enum Query {
     DeleteChatMemoryBlock,
     ResetStaleActiveWaves,
     ListChildWaves,
-    AggregateTokenUsageByRepoProvider,
     ListRunsActiveOrEndedSince,
 }
 
@@ -76,7 +75,6 @@ impl Query {
         Self::DeleteChatMemoryBlock,
         Self::ResetStaleActiveWaves,
         Self::ListChildWaves,
-        Self::AggregateTokenUsageByRepoProvider,
         Self::ListRunsActiveOrEndedSince,
     ];
 }
@@ -216,20 +214,6 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     // ListChildWaves — a chord's contents are its children, ordered by creation.
     QueryDef {
         template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    goal, metrics, parent_wave_id,\n                    repo, worktree, branch, status, iteration, cycle_start_iteration\n             FROM waves\n             WHERE parent_wave_id = {p1}\n             ORDER BY created_at ASC",
-        sqlite_override: None,
-    },
-    // AggregateTokenUsageByRepoProvider — the ledger's only usage aggregate.
-    // Coarser rollups (per provider, the grand total) are folds of these rows,
-    // done in Rust: a run with no repo carries a NULL key and still lands in
-    // the fold, so the query and the rollup agree by construction.
-    //
-    // Only terminal run rows are summed. Skill-boundary rows carry a
-    // *cumulative* snapshot of the run so far, so summing every row would
-    // count the same tokens once per skill. A run_id is shared by a run and
-    // the nested `lf` processes it spawns, but each process contributes at
-    // most one terminal row with its own totals, so the sum stays additive.
-    QueryDef {
-        template: "SELECT repo, provider,\n                    CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT),\n                    CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT),\n                    CAST(COALESCE(SUM(cache_read_tokens), 0) AS BIGINT),\n                    COALESCE(SUM(cost_usd), 0.0)\n             FROM run_events\n             WHERE node = 'run'\n               AND event IN ('completed', 'errored', 'escalated')\n               AND input_tokens IS NOT NULL\n             GROUP BY repo, provider\n             ORDER BY repo, provider",
         sqlite_override: None,
     },
     // ListRunsActiveOrEndedSince — the push bridge's working set: every

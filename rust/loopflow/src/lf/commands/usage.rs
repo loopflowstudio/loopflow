@@ -3,9 +3,8 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 
 use crate::journal::open_ledger;
-use crate::lf::commands::runs::{boundary_spans, own_spend};
+use crate::lf::commands::runs::{boundary_spans, own_spend, SpanDto};
 use crate::lf::output::{format_cost, format_int, truncate, Colors};
-use crate::lfdb::RepoProviderUsage;
 
 const REPO_WIDTH: usize = 32;
 const PROVIDER_WIDTH: usize = 12;
@@ -25,7 +24,9 @@ pub fn run(json: bool, days: u32) -> Result<()> {
     if json {
         return print_spend_json(days);
     }
-    print_report(&open_ledger()?.aggregate_token_usage()?);
+    let events = open_ledger()?.list_run_events_since(0)?;
+    let spend = own_spend(&boundary_spans(&events));
+    print_report(&aggregate_spend(&spend));
     Ok(())
 }
 
@@ -44,7 +45,7 @@ fn or_unattributed(value: Option<&str>) -> &str {
 }
 
 /// A running sum over `(repo, provider)` rows — the only grain the ledger
-/// aggregates. Every coarser row in this table is one of these.
+/// reports. Every coarser row in this table is one of these.
 #[derive(Default)]
 struct Totals {
     input: u64,
@@ -54,7 +55,7 @@ struct Totals {
 }
 
 impl Totals {
-    fn add(&mut self, row: &RepoProviderUsage) {
+    fn add(&mut self, row: &UsageRow) {
         self.input += row.input_tokens;
         self.output += row.output_tokens;
         self.cache += row.cache_read_tokens;
@@ -72,7 +73,50 @@ impl Totals {
     }
 }
 
-fn print_report(rows: &[RepoProviderUsage]) {
+/// Spend attributed to one `(repo, provider)` pair. This is folded from the
+/// same per-boundary rows emitted by `--json`: terminal-only SQL cannot assign
+/// a flow that uses Claude for one skill and Codex for another.
+#[derive(Debug, PartialEq)]
+struct UsageRow {
+    repo: Option<String>,
+    provider: Option<String>,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cost_usd: f64,
+}
+
+fn aggregate_spend(spend: &[SpanDto]) -> Vec<UsageRow> {
+    let mut rows: BTreeMap<(Option<String>, Option<String>), Totals> = BTreeMap::new();
+    for span in spend {
+        let input = span.input_tokens.unwrap_or(0).max(0) as u64;
+        let output = span.output_tokens.unwrap_or(0).max(0) as u64;
+        let cache = span.cache_read_tokens.unwrap_or(0).max(0) as u64;
+        let cost = span.cost_usd.unwrap_or(0.0).max(0.0);
+        if input == 0 && output == 0 && cache == 0 && cost == 0.0 {
+            continue;
+        }
+        let totals = rows
+            .entry((span.repo.clone(), span.provider.clone()))
+            .or_default();
+        totals.input += input;
+        totals.output += output;
+        totals.cache += cache;
+        totals.cost += cost;
+    }
+    rows.into_iter()
+        .map(|((repo, provider), totals)| UsageRow {
+            repo,
+            provider,
+            input_tokens: totals.input,
+            output_tokens: totals.output,
+            cache_read_tokens: totals.cache,
+            cost_usd: totals.cost,
+        })
+        .collect()
+}
+
+fn print_report(rows: &[UsageRow]) {
     if rows.is_empty() {
         println!("No token usage recorded yet.");
         return;
@@ -159,11 +203,11 @@ fn short_repo(repo: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{or_unattributed, short_repo, Totals};
-    use crate::lfdb::RepoProviderUsage;
+    use super::{aggregate_spend, or_unattributed, short_repo, Totals, UsageRow};
+    use crate::lf::commands::runs::SpanDto;
 
-    fn row(repo: Option<&str>, provider: Option<&str>, input: u64, cost: f64) -> RepoProviderUsage {
-        RepoProviderUsage {
+    fn row(repo: Option<&str>, provider: Option<&str>, input: u64, cost: f64) -> UsageRow {
+        UsageRow {
             repo: repo.map(str::to_string),
             provider: provider.map(str::to_string),
             input_tokens: input,
@@ -208,5 +252,66 @@ mod tests {
         assert_eq!(claude.input, 150);
         assert_eq!(claude.cost, 1.5);
         assert_eq!(grand.input, 157);
+    }
+
+    fn boundary(process: &str, seq: i64, provider: &str, input: i64) -> SpanDto {
+        SpanDto {
+            run_id: "trace".to_string(),
+            process_id: process.to_string(),
+            parent_process_id: None,
+            seq,
+            node: "skill".to_string(),
+            name: Some("implement".to_string()),
+            repo: Some("/src/loopflow".to_string()),
+            wave: None,
+            flow: Some("ship".to_string()),
+            skill: Some("implement".to_string()),
+            started_at: seq,
+            ended_at: Some(seq),
+            status: "completed".to_string(),
+            input_tokens: Some(input),
+            output_tokens: Some(0),
+            cache_read_tokens: Some(0),
+            cost_usd: Some(input as f64 / 100.0),
+            duration_secs: None,
+            provider: Some(provider.to_string()),
+            model: None,
+        }
+    }
+
+    #[test]
+    fn mixed_provider_flow_spend_stays_with_each_provider() {
+        let rows = aggregate_spend(&[
+            boundary("process", 1, "claude", 100),
+            boundary("process", 2, "codex", 25),
+        ]);
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.provider.as_deref() == Some("claude"))
+                .expect("claude row")
+                .input_tokens,
+            100
+        );
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.provider.as_deref() == Some("codex"))
+                .expect("codex row")
+                .input_tokens,
+            25
+        );
+    }
+
+    #[test]
+    fn processes_sharing_a_trace_remain_additive() {
+        let rows = aggregate_spend(&[
+            boundary("parent", 1, "claude", 100),
+            boundary("child", 1, "claude", 5),
+        ]);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].input_tokens, 105);
+        assert!((rows[0].cost_usd - 1.05).abs() < f64::EPSILON);
     }
 }

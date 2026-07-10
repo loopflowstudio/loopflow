@@ -56,8 +56,8 @@ pub struct ForkRun {
 
 /// One row of the machine-grain run ledger (`run_events`): a lifecycle event
 /// for a run, flow, or skill, written directly by `lf` (and by `lfd`) into the
-/// local store. Token/cost fields are populated on terminal run events when
-/// the stream reported them.
+/// local store. Token/cost fields are cumulative snapshots populated on skill
+/// boundaries and terminal run events when the stream reported them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunEventRow {
     pub run_id: String,
@@ -85,20 +85,6 @@ pub struct RunEventRow {
     pub provider: Option<String>,
     /// The configured model, when the agent launch names one.
     pub model: Option<String>,
-}
-
-/// Summed token usage and cost for one (repo, provider) pair — the finest
-/// grain the ledger aggregates, and the only one queried: every coarser
-/// rollup is a fold of these rows. `repo` and `provider` are optional because
-/// rows recorded before those dimensions existed carry neither.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RepoProviderUsage {
-    pub repo: Option<String>,
-    pub provider: Option<String>,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_tokens: u64,
-    pub cost_usd: f64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1693,116 +1679,6 @@ mod tests {
             provider: None,
             model: None,
         }
-    }
-
-    /// Attach usage to a row: (input, output, cache_read) tokens and cost.
-    fn with_usage(
-        mut row: RunEventRow,
-        wave: Option<&str>,
-        provider: &str,
-        tokens: (i64, i64, i64),
-        cost: f64,
-    ) -> RunEventRow {
-        row.wave = wave.map(str::to_string);
-        row.provider = Some(provider.to_string());
-        row.input_tokens = Some(tokens.0);
-        row.output_tokens = Some(tokens.1);
-        row.cache_read_tokens = Some(tokens.2);
-        row.cost_usd = Some(cost);
-        row
-    }
-
-    #[test]
-    fn token_usage_sums_terminal_rows_and_skips_skill_snapshots() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let store = SqliteStore::new(&db_path).expect("store should open");
-
-        let rows = [
-            event_row("a", 1, "run", "started"),
-            // A skill boundary carries a *cumulative* snapshot of the run so
-            // far, so summing every row would count its tokens twice.
-            with_usage(
-                event_row("a", 2, "skill", "completed"),
-                Some("w1"),
-                "claude",
-                (60, 30, 900),
-                0.10,
-            ),
-            with_usage(
-                event_row("a", 3, "run", "completed"),
-                Some("w1"),
-                "claude",
-                (100, 50, 1500),
-                0.25,
-            ),
-            // Run b belongs to no wave — it still belongs in the rollup.
-            with_usage(
-                event_row("b", 1, "run", "completed"),
-                None,
-                "codex",
-                (200, 80, 0),
-                0.10,
-            ),
-        ];
-        for row in &rows {
-            store.insert_run_event(row).expect("insert run event");
-        }
-
-        let report = store.aggregate_token_usage().expect("aggregate");
-
-        let claude = report
-            .iter()
-            .find(|row| row.provider.as_deref() == Some("claude"))
-            .expect("claude row");
-        assert_eq!(
-            claude.input_tokens, 100,
-            "skill snapshot must not double-count"
-        );
-        assert_eq!(claude.cache_read_tokens, 1500);
-        assert_eq!(claude.cost_usd, 0.25);
-
-        // A wave-less run still aggregates: the grain is (repo, provider).
-        let codex = report
-            .iter()
-            .find(|row| row.provider.as_deref() == Some("codex"))
-            .expect("codex belongs in the rollup despite having no wave");
-        assert_eq!(codex.input_tokens, 200);
-        assert_eq!(codex.cost_usd, 0.10);
-    }
-
-    #[test]
-    fn token_usage_is_additive_across_processes_sharing_a_run_id() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let store = SqliteStore::new(&db_path).expect("store should open");
-
-        // A child `lf` inherits LF_RUN_ID, so one run_id can carry a terminal
-        // row from each process. Their tokens add; they do not overwrite.
-        let mut parent = with_usage(
-            event_row("shared", 1, "run", "completed"),
-            Some("w1"),
-            "claude",
-            (100, 10, 0),
-            0.10,
-        );
-        parent.process_id = "parent".to_string();
-        let mut child = with_usage(
-            event_row("shared", 2, "run", "completed"),
-            Some("w1"),
-            "claude",
-            (5, 1, 0),
-            0.01,
-        );
-        child.process_id = "child".to_string();
-        child.parent_process_id = Some("parent".to_string());
-        let rows = [parent, child];
-        for row in &rows {
-            store.insert_run_event(row).expect("insert run event");
-        }
-
-        let report = store.aggregate_token_usage().expect("aggregate");
-        assert_eq!(report.len(), 1);
-        assert_eq!(report[0].input_tokens, 105);
-        assert!((report[0].cost_usd - 0.11).abs() < f64::EPSILON);
     }
 
     #[test]

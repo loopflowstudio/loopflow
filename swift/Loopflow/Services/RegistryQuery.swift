@@ -15,9 +15,10 @@
 import Foundation
 
 /// One `lf` query failed — the subprocess errored, or its JSON didn't decode.
-public struct RegistryQueryError: Error, Sendable {
+public struct RegistryQueryError: LocalizedError, Sendable {
     public let message: String
     public init(_ message: String) { self.message = message }
+    public var errorDescription: String? { message }
 }
 
 /// Runs an `lf` argv (already including the subcommand, e.g. `["ls","--json"]`)
@@ -278,13 +279,14 @@ public struct RunLedgerEntry: Decodable, Sendable, Identifiable {
 
 /// One process in `lf trace --json`. Mirrors Rust `SpanDto` exactly.
 public struct TraceSpan: Decodable, Sendable, Identifiable {
-    /// A process contributes several boundaries (one per skill, one terminal),
-    /// so the process id alone is not unique across a spend query.
-    public var id: String { "\(processId)-\(startedAt)-\(node)-\(skill ?? name ?? "")" }
+    /// A process contributes several boundaries. Their event sequence is the
+    /// stable discriminator even when one skill completes twice in one second.
+    public var id: String { "\(processId)-\(seq)" }
 
     public let runId: String
     public let processId: String
     public let parentProcessId: String?
+    public let seq: Int
     public let node: String
     public let name: String?
     public let repo: String?
@@ -314,7 +316,7 @@ public struct TraceSpan: Decodable, Sendable, Identifiable {
     public var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
 
     enum CodingKeys: String, CodingKey {
-        case node, name, status, provider, model, repo, wave, flow, skill
+        case seq, node, name, status, provider, model, repo, wave, flow, skill
         case runId = "run_id"
         case processId = "process_id"
         case parentProcessId = "parent_process_id"

@@ -266,7 +266,7 @@ pub enum Commands {
         #[arg(long, default_value_t = 30)]
         days: u32,
     },
-    /// Audit the local run ledger: continuity, vocabulary, attribution, coverage
+    /// Audit the local run ledger: continuity, vocabulary, attribution, identity, lineage, coverage
     Doctor {
         /// Emit the audit as JSON
         #[arg(long)]

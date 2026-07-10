@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# demo_wave.sh — guided live demo of the wave (`lf loop`), two processes:
+# demo_wave.sh — guided live demo of the wave (`lf serve`), two processes:
 # the LISTENER (journal pens, doors, supervisor — vendor-free) and the
-# RESIDENT it spawns (the same `lf loop` command with private server env,
+# RESIDENT it spawns (`lf __resident`, with private server env,
 # running in the wave's own worktree).
 #
 # Walks the whole surface against a throwaway repo: boot + discovery (both
@@ -172,7 +172,7 @@ pause
 
 # ---------- launch --------------------------------------------------------
 
-hr "launch · lf loop $WAVE (detached tmux: $TMUX_SESSION)"
+hr "launch · lf serve $WAVE (detached tmux: $TMUX_SESSION)"
 tmux new-session -d -s "$TMUX_SESSION" -c "$DEMO_REPO" "$LF_BIN loop $WAVE"
 say "one command, two processes: the listener boots, then spawns the resident"
 say "the listener and resident both narrate into the same pane."
@@ -327,10 +327,10 @@ if [[ -z "$ORPHANS" ]]; then
 else
     warn "orphaned codex pids: $ORPHANS"
 fi
-if ! pgrep -f "lf loop $WAVE" >/dev/null 2>&1; then
+if ! pgrep -f "lf serve $WAVE" >/dev/null 2>&1; then
     ok "no orphaned resident (the listener SIGTERMs its tenant on shutdown)"
 else
-    warn "Loop process still running: $(pgrep -f "lf loop $WAVE")"
+    warn "Loop process still running: $(pgrep -f "lf serve $WAVE")"
 fi
 journal_types
 say "demo repo kept for inspection: $DEMO_REPO"

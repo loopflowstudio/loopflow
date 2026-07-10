@@ -38,7 +38,7 @@ change crosses component or product boundaries.
 Run the wave in your terminal:
 
 ```bash
-lf loop designer             # the wave's server: one persistent loop, until Ctrl-C
+lf serve designer             # the wave's server: one persistent loop, until Ctrl-C
 lf chat --steer "ship the button audit first" # steer the live body, else queue
 lf memory add "buttons: variants unified" # curate what it knows
 ```
@@ -46,7 +46,7 @@ lf memory add "buttons: variants unified" # curate what it knows
 Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
 `tmux attach -r -t <name>` to inspect one without writing into its session.
 
-`lf loop <name>` starts a long-lived server at the repo's main checkout (the
+`lf serve <name>` starts a long-lived server at the repo's main checkout (the
 wave's journal and endpoint live at the origin); its playhead enters the wave's
 worktree and gives each flow step a live harness session. Progress and chat are
 a single conversation: `lf chat --steer` reaches the body now playing (and
@@ -61,7 +61,7 @@ and `scripts/demo_wave.sh` for the guided demo.
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 
 ```bash
-lf loop s3           # the s3 (control) charter
+lf serve s3           # the s3 (control) charter
 ```
 
 The wave agent inhabits one context-sensitive loop and delegates
@@ -84,8 +84,10 @@ lf loop task "fix the flaky chord-timeout test" --wave designer
 until its bit flips (`task`: when the PR merges). Linear holds filed work,
 `lf runs` holds active hands, and merged PRs record done.
 
-The second positional argument is the distinction: `lf loop designer` starts
-the named mind; `lf loop task "fix it"` runs a bounded child Loop.
+Two commands, two kinds of run. `lf serve designer` boots a mind: a listener, a
+thread, a playhead — something you can chat with while it works. `lf loop task
+"fix it"` runs a bounded child loop in batch: no chat surface, reports at its
+boundaries. Serving is for waves; looping is for the work a wave hands off.
 
 ### Crons
 
@@ -307,7 +309,7 @@ If no `router:` is specified, a generic routing agent picks a path based on scra
 Once you're chaining skills into flows, you're ready to ride a wave. Write its `wave/<name>/GOAL.md`, then run the agent:
 
 ```bash
-lf loop engbot             # start the wave agent
+lf serve engbot             # start the wave agent
 ```
 
 Directions compose extra nuance into any skill or flow the wave dispatches.
@@ -348,7 +350,7 @@ Install the Rust binaries directly with cargo.
 ## Inhabit, Delegate, Observe
 
 ```bash
-lf loop engbot       # start the wave agent (Ctrl-C to stop)
+lf serve engbot       # start the wave agent (Ctrl-C to stop)
 lf loop implement "Add the endpoint" --wave engbot --detach
 tmux ls              # list live sessions — the wave agent and its workers
 tmux attach -r -t <name>  # inspect without direct control

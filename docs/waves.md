@@ -21,7 +21,7 @@ tasks, and memory; pick the next move; inhabit or delegate a loop; watch the PR;
 what changed back into memory.
 
 ```bash
-lf loop shipper            # start the wave agent
+lf serve shipper            # start the wave agent
 tmux ls                    # the wave agent and every worker it launches
 tmux attach -r -t <name>   # inspect one without direct control
 ```
@@ -106,7 +106,7 @@ Or run manually: `lfd serve`. Watch progress in Loopflow.
 ## Managing Waves
 
 ```bash
-lf loop <name>          # start the wave agent (Ctrl-C to stop)
+lf serve <name>          # start the wave agent (Ctrl-C to stop)
 tmux ls                 # live sessions — the wave agent and its workers
 tmux attach -r -t <name>   # inspect one; stdin stays closed
 ```

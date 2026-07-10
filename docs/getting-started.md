@@ -153,7 +153,7 @@ Ready to automate? Waves run your workflows continuously.
 Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter sets machine config such as `workers:`, `crons:`, and `pm:`), then run the agent:
 
 ```bash
-lf loop shipper
+lf serve shipper
 ```
 
 The wave agent inhabits one loop and delegates self-sufficient work
@@ -170,7 +170,7 @@ tmux ls               # live agent sessions
 tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Stop a wave with Ctrl-C in its `lf loop` session.
+Stop a wave with Ctrl-C in its `lf serve` session.
 
 ### Browse flows
 
@@ -180,7 +180,7 @@ Stop a wave with Ctrl-C in its `lf loop` session.
 
 `lfd` serves the same resolved catalog at `/v0/catalog?repo=/path/to/repo`, including builtin definitions and any `.lf/flows/*.yaml` or `.lf/skills/*.md` overrides in the repo.
 
-You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf loop <name>` runs them and Loopflow picks them up.
+You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf serve <name>` runs them and Loopflow picks them up.
 
 [Wave Authoring Guide →](wave-authoring.md) · [Waves Reference →](waves.md)
 

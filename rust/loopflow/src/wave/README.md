@@ -1,9 +1,9 @@
 # wave — the listener and the resident
 
-`lf loop <name>` starts a wave as **two processes**:
+`lf serve <name>` starts a wave as **two processes**:
 
 ```
-  lf loop <name>                      internal resident invocation
+  lf serve <name>                     lf __resident <name>
   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
   │ LISTENER (origin repo)│──────────▶│ RESIDENT (<repo>.<wave>) │
   │ pens · folds · doors  │           │ wave runner · queue │
@@ -28,9 +28,16 @@
   output is ordered turn deltas through the token-gated resident door. It
   never touches a journal file — the single writer stays with the listener.
 
-One command runs both: the listener spawns the resident as the same `lf loop`
-command carrying private endpoint/token environment. The two processes are
-runtime plumbing, not two user-facing modes.
+The listener spawns the resident by name — `lf __resident <name>` — carrying
+private endpoint/token environment. The two processes are runtime plumbing, not
+two user-facing modes, and the hidden subcommand keeps them that way.
+
+An earlier design ran both halves from one `lf loop <name>` command, choosing
+which half to be by checking whether the endpoint and token were present in the
+environment. Any process that inherited a parent wave's environment — a tmux
+child, a promoted subwave — then booted the wrong half by accident. Serving is
+now `lf serve`, batch looping is `lf loop`, and the body is `lf __resident`.
+Environment configures a process; it no longer decides what the process is.
 
 - **One Loop, one thread.** Chat and progress share the same context. A
   message while idle reaches the next body. A steer while a compatible
@@ -74,7 +81,7 @@ runtime plumbing, not two user-facing modes.
   session row in the shared store (source `wave_server`, endpoint + pid in
   `env`; the db IS the registry). The row is marked terminal on shutdown or
   any termination signal; a crashed listener's row is closed by the next
-  boot's pid probe. A second `lf loop` refuses to start naming the live
+  boot's pid probe. A second `lf serve` refuses to start naming the live
   session unless `--force` takes over. A wave the store has never seen gets
   its row created at boot. No registry store on the machine → warn once, run
   fully functional, with one file-level floor: a `.wave-endpoint` that
@@ -112,10 +119,11 @@ don't consume this wire):
   `{wave}`) and `GET /resident/context` (`{in_flight}`; serving it freshens
   the store fold).
 - **Listener → resident**: `GET /events?inbox=true` adds `inbox` SSE frames
-  to the primary subscription — `{id, op, text, from}` per resident-directed
-  op, the pending queue replayed on connect, bare interrupts live-only with
-  `id: null`. The default `/events` stream is byte-identical to the
-  pre-resident wire.
+  to the primary subscription — `{kind: "message", id, op, text, from}` per
+  resident-directed op, the pending queue replayed on connect. Bare interrupts
+  and skips are live-only control frames (`{kind: "interrupt"}`) carrying no
+  id, because nothing is journaled. The default `/events` stream is
+  byte-identical to the pre-resident wire.
 - **Auth (stopgap)**: the resident door requires this boot's token in the
   `x-lf-resident-token` header. The listener generates it at bind, passes it
   to a spawned resident via `LF_WAVE_RESIDENT_TOKEN`, and publishes it at
@@ -219,9 +227,9 @@ across all sources. `from` is the speaker byline of an attributed emission
 ## Demo
 
 ```
-lf loop demo
-# → lf loop · demo · listener on http://127.0.0.1:52306 · spawning resident (Ctrl-C to stop, …)
-# → lf loop · demo · resident · listener http://127.0.0.1:52306 · worktree …/demo-repo.demo
+lf serve demo
+# → lf serve · demo · listener on http://127.0.0.1:52306 · spawning resident (Ctrl-C to stop, …)
+# → lf serve · demo · resident · listener http://127.0.0.1:52306 · worktree …/demo-repo.demo
 
 curl 127.0.0.1:52306/health
 curl -X POST 127.0.0.1:52306/messages -H 'content-type: application/json' \

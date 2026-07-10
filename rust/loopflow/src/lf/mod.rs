@@ -199,15 +199,30 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: CronCommand,
     },
-    /// Start a named mind. With a seed, run a bounded child loop for that flow.
-    Loop {
-        /// Wave name, or flow name when a seed is supplied
+    /// Serve a mind: boot its listener, thread, and residency. Steerable.
+    ///
+    /// By convention this is the wave loop's entrypoint — a served mind is one
+    /// you can chat with while it runs. `lf loop` is the batch counterpart.
+    Serve {
+        /// Wave name
         name: String,
-        /// A child loop's whole handoff; omit to run the named wave
-        seed: Option<String>,
         /// Take over even if another live wave session is registered
         #[arg(long)]
         force: bool,
+    },
+    /// Internal: the resident body a listener spawns for its own wave. Never
+    /// booted by hand — `lf serve` owns the listener half.
+    #[command(name = "__resident", hide = true)]
+    Resident {
+        /// Wave name
+        name: String,
+    },
+    /// Run a bounded child loop for a flow, to its bit. Batch: no chat surface.
+    Loop {
+        /// Flow name
+        name: String,
+        /// The loop's whole handoff — computable on its own
+        seed: String,
         /// Ask the live wave server to own the loop and return immediately
         #[arg(long)]
         detach: bool,

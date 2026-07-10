@@ -25,11 +25,13 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   persist whether the owner was the foreground wave pass or the listener's
   detached tmux supervisor. The Mac screen therefore shows pass/worktree and
   liveness without inventing an unreliable foreground/background label.
-- The broader bus/thread rewrite from `scratch/minds.md` remains separate from
-  this Changes implementation: channel addressing still carries the existing
-  client attribution and `lf chat --parent` transport. This branch implements
-  the requested execution, memory, promotion, control, backlog, doctrine, and
-  Mac surfaces without silently changing that wire protocol.
+- The bus/thread scope changed mid-branch, deliberately: channels became
+  ephemeral pubsub wires and journaling became a property of served minds only
+  (`scratch/minds.md` §8, with done-whens). Child journals delete rather than
+  move; attribution becomes server-stamped; the prefix write-gate sketch is
+  dropped in favor of open publish with honest bylines. Until §8's done-whens
+  hold, chat still carries client-supplied `from` and work lines still write
+  worktree journals nobody reads.
 - Two agents wrote this worktree at once. HEAD advanced under a running skill
   while unrelated files were being edited, and the two writers left a
   self-contradicting test behind — one updated the frame it waited for, the

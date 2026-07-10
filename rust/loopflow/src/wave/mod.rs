@@ -84,15 +84,19 @@ enum LoopPolicy {
     Dormant,
 }
 
-/// `lf loop <name>` — start the named mind. A server-spawned child carries
-/// the resident endpoint/token in env and enters the resident half; the human
-/// invocation boots the listener and supervises that same command.
-pub fn run(name: &str, force: bool) -> Result<()> {
-    if std::env::var_os(WAVE_SERVER_ENDPOINT_ENV).is_some()
-        && std::env::var_os(wire::RESIDENT_TOKEN_ENV).is_some()
-    {
-        return resident::run(name);
-    }
+/// The hidden subcommand a listener spawns for its own resident body. Named
+/// here so the spawner and the CLI cannot drift apart silently.
+pub(crate) const RESIDENT_SUBCOMMAND: &str = "__resident";
+
+/// `lf serve <name>` — boot the named mind's listener and supervise its
+/// resident. The steerable half: an endpoint, a thread, a cadence.
+///
+/// The listener spawns its resident body as `lf __resident <name>`. That is an
+/// explicit command, not an ambient one: an earlier design branched here on
+/// whether the resident endpoint/token were present in env, which meant any
+/// process holding a parent's env — a tmux child, a promoted subwave — booted
+/// the wrong half by accident.
+pub fn serve(name: &str, force: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
     let wave = resolve_wave_name(&main_repo, Some(name))
@@ -100,7 +104,7 @@ pub fn run(name: &str, force: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let registry_config = resolve_registry(&main_repo, &wave, force).await;
-        serve(
+        run_listener(
             main_repo,
             wave,
             registry_config,
@@ -110,6 +114,12 @@ pub fn run(name: &str, force: bool) -> Result<()> {
         )
         .await
     })
+}
+
+/// `lf __resident <name>` — the resident body a listener spawns for its own
+/// wave. Attaches to the endpoint/token its parent listener put in env.
+pub fn resident(name: &str) -> Result<()> {
+    resident::run(name)
 }
 
 /// Open the machine's shared registry and resolve this wave's row, creating
@@ -150,7 +160,7 @@ async fn resolve_registry(
 
 /// The production resident spawner: `lf loop <wave>`, run by this
 /// same executable, endpoint + token + wave-session context in env. The
-/// resident's stdout/stderr inherit — one `lf loop` terminal shows both
+/// resident's stdout/stderr inherit — one `lf serve` terminal shows both
 /// halves, today's UX.
 // TODO(M1): keep this shutdown contract in the wave/supervisor owner: stand
 // the respawn ladder down before terminating the resident, honor interrupt
@@ -167,7 +177,7 @@ fn resident_spawner(
         let exe = std::env::current_exe()?;
         let mut command = tokio::process::Command::new(exe);
         command
-            .arg("loop")
+            .arg(RESIDENT_SUBCOMMAND)
             .arg(&wave)
             .current_dir(&repo_root)
             .env(WAVE_SERVER_ENDPOINT_ENV, &endpoint)
@@ -197,7 +207,7 @@ fn resident_spawner(
 /// exercise the server without a registry store; `force` rides separately
 /// because the endpoint-file floor must honor it even when there is no
 /// registry config at all.
-async fn serve(
+async fn run_listener(
     repo_root: PathBuf,
     wave: String,
     registry_config: Option<registry::RegistryConfig>,
@@ -373,7 +383,7 @@ async fn serve(
         server::remove_resident_token(&cleanup_repo, &cleanup_wave, &cleanup_token);
     });
     println!(
-        "lf loop · {wave} · listener on http://{addr}{} \
+        "lf serve · {wave} · listener on http://{addr}{} \
          (Ctrl-C to stop, RUST_LOG=loopflow=debug for the firehose)",
         match loop_policy {
             LoopPolicy::Spawn => " · spawning resident",
@@ -430,6 +440,28 @@ mod tests {
     use crate::wave::journal::MessageOp;
     use crate::wave::server::ResidentDoor;
     use crate::wave::wire::{ResidentDelta, RESIDENT_TOKEN_HEADER};
+
+    /// Serving a mind and looping a flow are different entrypoints, and the
+    /// listener spawns its resident body by name. Nothing here reads the
+    /// environment: an `lf` process inheriting `WAVE_SERVER_ENDPOINT` and
+    /// `RESIDENT_TOKEN` — a tmux child, a promoted subwave — becomes whichever
+    /// half its argv says, not whichever half its parent happened to be.
+    #[test]
+    fn the_listener_spawns_its_resident_body_by_name() {
+        use crate::lf::{Cli, Commands};
+        use clap::Parser;
+
+        let cli = Cli::try_parse_from(["lf", RESIDENT_SUBCOMMAND, "goals"])
+            .expect("the spawner's subcommand must be one the CLI accepts");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Resident { name }) if name == "goals"
+        ));
+
+        // The batch verb cannot name a wave, so the spawner could not have
+        // reached the resident half through `lf loop` even by accident.
+        assert!(Cli::try_parse_from(["lf", "loop", "goals"]).is_err());
+    }
 
     fn progress_turn(text: &str) -> ChatTurn {
         ChatTurn {
@@ -1498,7 +1530,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
         let handle = tokio::spawn(async move {
-            serve(
+            run_listener(
                 repo2,
                 "ship".into(),
                 None,
@@ -1566,7 +1598,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
         let handle = tokio::spawn(async move {
-            serve(
+            run_listener(
                 repo2,
                 "ship".into(),
                 None,
@@ -1602,7 +1634,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
         let first = tokio::spawn(async move {
-            serve(
+            run_listener(
                 repo2,
                 "ship".into(),
                 None,
@@ -1620,7 +1652,7 @@ mod tests {
 
         // Second server: probed live, refused, pointer untouched.
         let (_shutdown_tx2, shutdown_rx2) = tokio::sync::oneshot::channel::<()>();
-        let err = serve(
+        let err = run_listener(
             repo.clone(),
             "ship".into(),
             None,
@@ -1697,7 +1729,7 @@ mod tests {
             force: false,
         };
         let handle = tokio::spawn(async move {
-            serve(
+            run_listener(
                 repo2,
                 "ship".into(),
                 Some(config),
@@ -1772,7 +1804,7 @@ mod tests {
         };
 
         let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        let err = serve(
+        let err = run_listener(
             tmp.path().to_path_buf(),
             "ship".into(),
             Some(registry::RegistryConfig {

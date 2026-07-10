@@ -558,10 +558,15 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Cron { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
             }
+            Some(Commands::Serve { name, force }) => {
+                in_repo_runtime(&args, |_| loopflow::wave::serve(name, *force))
+            }
+            Some(Commands::Resident { name }) => {
+                in_repo_runtime(&args, |_| loopflow::wave::resident(name))
+            }
             Some(Commands::Loop {
                 name,
                 seed,
-                force,
                 detach,
                 max_passes,
                 pass_timeout_secs,
@@ -569,9 +574,6 @@ fn main() -> anyhow::Result<()> {
                 poll_secs,
                 max_turns,
             }) => in_repo_runtime(&args, |repo| {
-                let Some(seed) = seed else {
-                    return loopflow::wave::run(name, *force);
-                };
                 let mut options =
                     loopflow::flowloop::driver::LoopOptions::new(name.clone(), cli.wave.clone());
                 options.max_passes = *max_passes;
@@ -715,6 +717,8 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Pm { .. })
         | Some(Commands::SyncSkills { .. })
         | Some(Commands::Cron { .. })
+        | Some(Commands::Serve { .. })
+        | Some(Commands::Resident { .. })
         | Some(Commands::Loop { .. })
         | Some(Commands::Enqueue { .. })
         | Some(Commands::Skip)
@@ -867,26 +871,17 @@ mod tests {
         assert!(matches!(inner_cli.command, Some(Commands::External(_))));
     }
 
+    /// Batch and steerable are different entrypoints, not one verb reading its
+    /// environment. `lf loop` always names a flow and always carries a seed.
     #[test]
-    fn loop_parses_mind_blocking_and_detached_forms() {
-        let mind = Cli::try_parse_from(["lf", "loop", "goals"]).unwrap();
-        assert!(matches!(
-            mind.command,
-            Some(Commands::Loop {
-                name,
-                seed: None,
-                detach: false,
-                ..
-            }) if name == "goals"
-        ));
-
+    fn loop_parses_blocking_and_detached_batch_forms() {
         let blocking = Cli::try_parse_from(["lf", "loop", "task", "ship it"]).unwrap();
         assert!(matches!(
             blocking.command,
             Some(Commands::Loop {
                 detach: false,
                 name,
-                seed: Some(seed),
+                seed,
                 ..
             }) if name == "task" && seed == "ship it"
         ));
@@ -896,12 +891,40 @@ mod tests {
                 .unwrap();
         assert!(matches!(
             detached.command,
-            Some(Commands::Loop { detach: true, name, seed: Some(_), .. }) if name == "project"
+            Some(Commands::Loop { detach: true, name, .. }) if name == "project"
+        ));
+
+        // A seedless loop has nothing to run: it is a parse error, not a wave.
+        assert!(Cli::try_parse_from(["lf", "loop", "goals"]).is_err());
+    }
+
+    /// Serving a mind is its own command. Nothing about the ambient
+    /// environment can turn one of these into the other.
+    #[test]
+    fn serve_and_resident_are_distinct_entrypoints() {
+        let served = Cli::try_parse_from(["lf", "serve", "goals"]).unwrap();
+        assert!(matches!(
+            served.command,
+            Some(Commands::Serve { name, force: false }) if name == "goals"
+        ));
+
+        let forced = Cli::try_parse_from(["lf", "serve", "goals", "--force"]).unwrap();
+        assert!(matches!(
+            forced.command,
+            Some(Commands::Serve { force: true, .. })
+        ));
+
+        // The listener's own body — hidden, but spellable, because the
+        // listener spawns it by name rather than by leaking env.
+        let body = Cli::try_parse_from(["lf", "__resident", "goals"]).unwrap();
+        assert!(matches!(
+            body.command,
+            Some(Commands::Resident { name }) if name == "goals"
         ));
     }
 
-    /// `wave` was renamed to `loop`. The parser can't reject it outright —
-    /// the `external_subcommand` catch-all claims any unmatched verb — so the
+    /// `wave` became `serve`. The parser can't reject it outright — the
+    /// `external_subcommand` catch-all claims any unmatched verb — so the
     /// property that actually holds is that it no longer names a built-in
     /// command. The exec door denies `External` on top of that.
     #[test]
@@ -912,10 +935,10 @@ mod tests {
             "`wave` survives only as an external verb, not a wave command"
         );
         assert!(matches!(
-            Cli::try_parse_from(["lf", "loop", "goals"])
+            Cli::try_parse_from(["lf", "serve", "goals"])
                 .expect("the replacement")
                 .command,
-            Some(Commands::Loop { .. })
+            Some(Commands::Serve { .. })
         ));
     }
 

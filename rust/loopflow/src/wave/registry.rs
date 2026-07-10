@@ -1,6 +1,6 @@
 //! The wave server's seat in the shared session registry — store-direct.
 //!
-//! `lf loop <name>` is its own process; no daemon launches or supervises it.
+//! `lf serve <name>` is its own process; no daemon launches or supervises it.
 //! The shared local store (the same SQLite db lfd serves from — the db IS
 //! the registry) carries two facts this module owns:
 //!
@@ -15,7 +15,7 @@
 //!   it, unless `force` takes over (kill the recorded pid / tmux session,
 //!   cancel the row). Graceful shutdown and Ctrl-C mark the row terminal;
 //!   lfd's session reconciliation (pid probe on `wave_server` rows) covers a
-//!   crash, and so does the boot-time probe of the next `lf loop`.
+//!   crash, and so does the boot-time probe of the next `lf serve`.
 //!
 //! - **Observation.** [`StoreObserver`] polls the store — this wave's worker
 //!   sessions and runs — and journals confirmed worker facts:
@@ -228,7 +228,7 @@ pub async fn register(config: &RegistryConfig, endpoint: &str) -> StoreResult<Re
         cwd: config.cwd.clone(),
         argv: vec![
             "lf".to_string(),
-            "loop".to_string(),
+            "serve".to_string(),
             config.wave.name().clone(),
         ],
         env: std::collections::BTreeMap::from([
@@ -735,7 +735,7 @@ mod tests {
             skill: "loop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
-            argv: vec!["lf".to_string(), "loop".to_string(), wave.name().clone()],
+            argv: vec!["lf".to_string(), "serve".to_string(), wave.name().clone()],
             env: BTreeMap::from([
                 (
                     WAVE_SERVER_ENDPOINT_ENV.to_string(),

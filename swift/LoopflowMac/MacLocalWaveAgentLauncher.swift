@@ -1,8 +1,8 @@
-// Launches and probes the local `lf loop <name>` process backing a WaveChat pane.
+// Launches and probes the local `lf serve <name>` process backing a WaveChat pane.
 //
 // Loopflow is a viewer, never a participant: launching a wave is the human's act
 // through the same door as a terminal — a detached tmux session running
-// `lf loop <name>` with the wave's repo as cwd. The session belongs to tmux, not
+// `lf serve <name>` with the wave's repo as cwd. The session belongs to tmux, not
 // to Loopflow; quitting the app never kills a wave.
 
 #if os(macOS)
@@ -41,7 +41,7 @@ enum LocalWaveAgentLauncher {
         ) != nil
     }
 
-    /// Start `lf loop <name>` in a detached tmux session so it outlives Loopflow.
+    /// Start `lf serve <name>` in a detached tmux session so it outlives Loopflow.
     /// Refuses when the wave already has a tmux session or a live endpoint —
     /// the server enforces one brain per wave; we just avoid the doomed spawn.
     ///
@@ -125,14 +125,14 @@ enum LocalWaveAgentLauncher {
     }
 
     /// The detached tmux invocation: session named after the wave, cwd at the
-    /// wave's repo, running `lf loop <name>`.
+    /// wave's repo, running `lf serve <name>`.
     static func waveLaunchCommand(
         lfPath: String,
         sessionName: String,
         repoPath: String,
         waveName: String
     ) -> [String] {
-        ["tmux", "new-session", "-d", "-s", sessionName, "-c", repoPath, lfPath, "loop", waveName]
+        ["tmux", "new-session", "-d", "-s", sessionName, "-c", repoPath, lfPath, "serve", waveName]
     }
 
     /// Candidate lf binaries in trust order: the lf bundled inside Loopflow.app
@@ -163,12 +163,12 @@ enum LocalWaveAgentLauncher {
     }
 
     /// First candidate that actually has the `loop` subcommand. Resolving `lf`
-    /// from PATH can find a build that predates `lf loop`; it launches fine,
+    /// from PATH can find a build that predates `lf serve`; it launches fine,
     /// exits instantly, and the UI sits on a dead 20s wait (observed live) —
     /// so every candidate is capability-probed before it's trusted.
     ///
-    /// The probe is `lf help loop`, NOT `lf loop --help`: lf's arg reorderer
-    /// treats an unknown `loop` as a skill name, so `lf loop --help` prints the
+    /// The probe is `lf help serve`, NOT `lf serve --help`: lf's arg reorderer
+    /// treats an unknown `serve` as a skill name, so `lf serve --help` prints the
     /// root help and exits 0 even on a build without the subcommand. `lf help
     /// loop` exits 0 only when the subcommand exists, and clap answers it without touching
     /// any wave state.
@@ -177,7 +177,7 @@ enum LocalWaveAgentLauncher {
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
         pathEnv: String = GUIProcessEnvironment.enrichedPath(from: ProcessInfo.processInfo.environment["PATH"]),
         isExecutableFile: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
-        probe: (String) -> Bool = hasLoopCommand,
+        probe: (String) -> Bool = hasServeCommand,
         useCache: Bool = true
     ) throws -> String {
         let cacheKey = "\(originRepo)|\(bundled?.path ?? "")|\(pathEnv)"
@@ -206,13 +206,13 @@ enum LocalWaveAgentLauncher {
         }
         throw WaveLaunchError.noUsableLf(
             "No lf with the loop command. Rejected (each failed `lf help loop`, "
-                + "so it predates `lf loop`): " + candidates.joined(separator: ", ")
+                + "so it predates `lf serve`): " + candidates.joined(separator: ", ")
         )
     }
 
-    /// `lf help loop` exits 0 only when this build knows the subcommand.
-    static func hasLoopCommand(lfPath: String) -> Bool {
-        run([lfPath, "help", "loop"])?.status == 0
+    /// `lf help serve` exits 0 only when this build knows the subcommand.
+    static func hasServeCommand(lfPath: String) -> Bool {
+        run([lfPath, "help", "serve"])?.status == 0
     }
 
     static func tmuxSessionNames() -> Set<String> {
@@ -232,7 +232,7 @@ enum LocalWaveAgentLauncher {
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
     /// facts by shelling the daemonless `lf` over `lfdb`, not by streaming a
     /// center. Resolves the same loop-capable `lf` the launcher trusts (a build
-    /// old enough to lack `lf loop` also lacks these verbs), then execs it with
+    /// old enough to lack `lf serve` also lacks these verbs), then execs it with
     /// the enriched GUI PATH. Throws on a spawn failure or a non-zero exit.
     static func queryLf(_ subargs: [String], cwd: String?) throws -> String {
         let origin = cwd.map(WaveOrigin.resolve) ?? FileManager.default.currentDirectoryPath

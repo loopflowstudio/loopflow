@@ -23,7 +23,7 @@ struct LocalWaveAgentLauncherTests {
             "tmux", "new-session", "-d",
             "-s", "lf-loopflow-goals",
             "-c", "/Users/jack/src/loopflow",
-            "/Applications/Loopflow.app/Contents/MacOS/lf", "loop", "goals",
+            "/Applications/Loopflow.app/Contents/MacOS/lf", "serve", "goals",
         ])
     }
 
@@ -220,11 +220,11 @@ struct LocalWaveAgentLauncherTests {
 
         #expect(
             String(hint.characters)
-                == "Start it here, or run lf loop goals in a terminal — its conversation appears here live."
+                == "Start it here, or run lf serve goals in a terminal — its conversation appears here live."
         )
 
         let codeRuns = hint.runs.filter { $0.inlinePresentationIntent == .code }
-        #expect(codeRuns.map { String(hint.characters[$0.range]) } == ["lf loop goals"])
+        #expect(codeRuns.map { String(hint.characters[$0.range]) } == ["lf serve goals"])
     }
 }
 #endif

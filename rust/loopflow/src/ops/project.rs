@@ -116,12 +116,21 @@ async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> O
     Ok(())
 }
 
-async fn launch_residency(repo: &Path, wave: &str) -> OpsResult<()> {
-    let argv = [
-        resolve_lf_binary().display().to_string(),
-        "loop".to_string(),
+/// Promotion grants residency, so it boots a listener — `lf serve`, never
+/// `lf loop`. The child is spawned through tmux, which inherits the promoting
+/// pass's environment (`WAVE_SERVER_ENDPOINT`, `RESIDENT_TOKEN`). Naming the
+/// listener explicitly is what keeps that inheritance from deciding which half
+/// of the wave the child becomes.
+fn residency_argv(executable: &Path, wave: &str) -> Vec<String> {
+    vec![
+        executable.display().to_string(),
+        "serve".to_string(),
         wave.to_string(),
-    ];
+    ]
+}
+
+async fn launch_residency(repo: &Path, wave: &str) -> OpsResult<()> {
+    let argv = residency_argv(&resolve_lf_binary(), wave);
     spawn_detached_lf(&promotion_session_name(repo, wave), repo, &argv)
         .await
         .map_err(|err| OpsError::Message(format!("failed to start child wave residency: {err}")))
@@ -138,7 +147,26 @@ fn promotion_session_name(repo: &Path, wave: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lf::{Cli, Commands};
     use crate::lfdb::{open_store, StorageConfig};
+    use clap::Parser;
+
+    /// Promotion grants residency: the spawned child must be the steerable
+    /// half. `lf loop` would need a seed and would never publish an endpoint.
+    #[test]
+    fn promotion_spawns_a_listener_not_a_batch_loop() {
+        let argv = residency_argv(Path::new("/opt/lf"), "release-stability");
+        assert_eq!(argv, ["/opt/lf", "serve", "release-stability"]);
+
+        let full = std::iter::once("lf".to_string()).chain(argv.into_iter().skip(1));
+        assert!(
+            matches!(
+                Cli::try_parse_from(full).expect("promotion argv parses").command,
+                Some(Commands::Serve { name, force: false }) if name == "release-stability"
+            ),
+            "what promotion spawns must parse as the serve entrypoint"
+        );
+    }
 
     #[tokio::test]
     async fn link_parent_registers_the_promoted_wave_as_a_child() {

@@ -132,10 +132,28 @@ writer; the writer does not get to say.**
 Cost, in `channel.rs`. Ownership naming inverts a channel to a worktree
 (`child_worktree_path`), and *"its journal lives IN THAT WORKTREE… it travels
 with the branch and dies with it."* A topic cannot live in a worktree, because
-many processes post to it. Journals move to the origin; retention becomes
-per-topic policy rather than a side effect of branch deletion. The FLAGGED
-archive note (`~/.lf/journal/<repo>/<worktree>`) stops being a fallback and
-becomes the design.
+many processes post to it.
+
+The resolution is not to move the journals — it is to delete them. A journal
+buys exactly one thing over a broadcast bus: delivery to a subscriber who was
+not listening at publish time. That is a need **minds** have (their loop queues
+between passes; their thread replays on reconnect), never topics. So journaling
+is a property of minds, not channels: publishers journal nothing; a subscriber
+records what it needs to remember in its own journal. The wave already does
+this — every child `say` lands in the parent's journal attributed and queued
+(`runtime.rs` calls it the fold-upward doctrine, but it is really the parent's
+subscription, recorded in the parent's own journal). Once that copy exists the
+child journal has no reader: the Mac drops tagged frames, live subscribers ride
+the broadcast, and at land the file is deleted unread. It is not even a
+distributed record — the family head holds every pen, so the same process
+writes the duplicate into a different directory.
+
+One journal per served mind, zero per channel. `ChildChannel`, the
+consumption-local machinery, the worktree-liveness dance, and the FLAGGED
+archive fallback (`~/.lf/journal/<repo>/<worktree>`) all delete. A detached
+loop's driver holds a live subscription for its own lifetime and queues in
+memory — a queue that dies with its loop is honest, and the slow path (the hand
+re-reads the wave's thread each pass boundary) exists regardless.
 
 **The thread** — the human surface. Not a topic. One UI-level thread per wave:
 journal-backed, durable, never resets. The human is not on the bus.
@@ -401,6 +419,7 @@ covered by its chat-command tests and the live-body done-when test.
 | Change | Where |
 | --- | --- |
 | §1 `lf loop` — inhabit, delegate, `--detach`; `--dispatch` deleted | `bin/lf.rs`, `flowloop/driver.rs`, `wave/server.rs` |
+| Batch and steerable are separate entrypoints: `lf loop` vs `lf serve` | `lf/mod.rs`, `wave/mod.rs` |
 | Exec door pins a detached loop to its own wave | `wave/server.rs:774` |
 | §2 Memory walks the parent chain; chat stays local | `engine/wave_context.rs` |
 | §3 `lf project promote` — flow, skill, parent link, PM move | `ops/project.rs` |
@@ -414,7 +433,7 @@ covered by its chat-command tests and the live-body done-when test.
 
 | Gap | Consequence today |
 | --- | --- |
-| The bus/thread rewrite: channels-as-topics, writes-down/reads-up, server-stamped attribution | Chat still carries client-supplied `from`; no write-prefix gate exists. |
+| Channels-as-wires (§8, **in progress this branch**): child journals delete, server-stamped attribution, `lf radio` = the agent bus, `lf chat` narrows to the human↔mind thread | Until it lands: chat still carries client-supplied `from`, still doubles as the agent verb, and work lines still write worktree journals nobody reads. |
 | Mid-turn steer for Claude and OpenCode → *roadmap* | Only Codex steers; the others queue to the next body. Vendor-gated; the product question lives in `wave/product/projects/wave-chat.md`. |
 | Composite flow nodes (and/xor/or/loop) as first-class playhead frames | They run through the internal headless `__flow-step` fallback (`flowloop/wave.rs:311`). |
 | PM `project:<slug>` label removal on promotion → *roadmap* | The provider has no remove-label op; residual labels are recorded, not cleared. |
@@ -424,8 +443,26 @@ covered by its chat-command tests and the live-body done-when test.
 
 **Fixed after the fact** — defects this branch shipped and a later session repaired:
 
-- `lf project promote` spawned `lf wave <child>`, a subcommand this same branch
-  deleted. Promotion could never start residency. Now `lf loop <child>`.
+- **Promotion could never start residency, twice over.** It spawned
+  `lf wave <child>`, a subcommand this same branch deleted. Renaming it to
+  `lf loop <child>` was not enough: `lf loop <name>` chose between *booting a
+  listener* and *being a resident body* by reading `WAVE_SERVER_ENDPOINT` and
+  `RESIDENT_TOKEN` from the environment, and tmux hands a promoting pass's
+  environment straight to its child (verified empirically). The child wave's
+  resident would attach to its **parent's** listener with the parent's token —
+  a split brain surfacing as a 10-second timeout naming the wrong cause.
+
+  The verb is now split by what it does, not by what it inherited:
+
+  | Command | What it is |
+  | --- | --- |
+  | `lf serve <wave>` | boot a mind: listener, thread, playhead. Steerable. |
+  | `lf loop <flow> <seed>` | run a bounded child loop to its bit. Batch. |
+  | `lf __resident <wave>` | hidden; the body a listener spawns for itself. |
+
+  `seed` is now required on `lf loop`, which deleted an exec-door case by
+  construction (a seedless detached loop can no longer be spelled). Environment
+  configures a process; it no longer decides what the process is.
 - Three wave tests asserted pre-rename wire shapes (`"thinking\nmore"` for what
   is now exact stream concatenation; `{"id":null,"op":"interrupt"}` for what is
   now `{"kind":"interrupt"}`).
@@ -445,8 +482,12 @@ covered by its chat-command tests and the live-body done-when test.
 Work that is schedulable now, ordered by what unblocks the most. Everything here
 is ours to write; nothing waits on anyone else.
 
-1. **The bus/thread wires** (§"Two wires"). Server-stamped attribution and a
-   `matches_prefix` write gate. Settles the topic notation below.
+1. **Channels are wires, not records — pulled into this branch.** See §8 in
+   Changes for the model, the deletion list, and its done-whens. This subsumes
+   most of the old "bus/thread wires" item: server-stamped attribution ships
+   with it; the prefix write-gate sketch is dropped in favor of open publish
+   with honest bylines; the bus verb becomes `lf radio` and `lf chat` narrows
+   to the human↔served-mind thread.
 2. **Project-loop caps.** Needs dogfood data, not a guessed weeks-scale timeout.
    Run one real project loop first, then pick.
 3. **Composite playhead frames.** Promote branch/loop internals out of the
@@ -623,6 +664,96 @@ project would systematically starve the priority. Keep the one whose next move
 needs the wave's memory and chat in the room — the one you could not write a
 self-sufficient seed for. The delegation test and the seed test are the same
 test.
+
+### 8. Channels are wires, not records (this branch)
+
+A journal buys exactly one thing over a broadcast bus: delivery to a subscriber
+who wasn't listening at publish time. Minds need that (their loop queues
+between passes, their thread replays on reconnect); topics never do. So
+journaling is a property of minds, not channels: publishers journal nothing,
+and a subscriber records what it needs to remember in its own journal.
+
+The bus gets its own verb: **`lf radio`**. Agent-to-agent only — hands report
+up, minds steer down, `lf sub` tunes in. The name carries the contract for
+free: radio is broadcast, not delivery — you transmit, whoever's tuned in
+hears it, nobody guarantees receipt; miss it and it's gone. Channels were
+already radio vocabulary before the medium had a name, and a server-stamped
+byline is exactly how radio speech works ("this is goals.148e reporting").
+
+`lf chat` narrows to what the word actually means: a human conversing with a
+**served mind** — journaled, durable, replayed, because that surface is the
+product. Two words, two wires. The old `chat` was one verb fused across both,
+and that fusion is where every steering confusion in this design traced back
+to.
+
+The model, in full:
+
+- A channel is a name on the broadcast bus. Anyone may publish to any channel;
+  anyone may subscribe to any channel or prefix. No journal, no worktree
+  binding, no liveness precondition. A message published with no subscriber
+  listening is gone, and that is correct.
+- Attribution is the security boundary, not permission: the server stamps who
+  spoke from the caller's token. A client-supplied byline cannot spoof another
+  speaker. (This replaces the earlier prefix write-gate sketch — open publish
+  with honest bylines, rather than routing rules.)
+- The default conversation shape: launch a hand, listen on its channel, respond
+  into its channel when it needs steering. The wave's listener is always
+  connected, so everything it hears from its hands that matters lands in the
+  wave's own journal, attributed — that is today's "fold upward," which was
+  always really the parent's subscription.
+- A detached loop's driver holds its subscription for the loop's lifetime and
+  queues in memory. A queue that dies with its loop is honest; the slow path
+  (the hand re-reads the wave's thread each pass boundary) exists regardless.
+
+What deletes: `ChildChannel` and the per-worktree journal files, the
+consumption-local fold and its tests, the worktree-liveness dance ("channel has
+no live worktree"), the FLAGGED archive fallback, `lf chat`'s channel
+addressing and `--parent` transport (both become `lf radio`), and
+`channel.rs`'s definition of a channel as "journal + thread + subscribability"
+— it becomes name mechanics and broadcast only.
+
+#### Done when: no journal exists outside a served mind
+
+- The only journal files on disk live at `.lf/journal/waves/<wave>/` under the
+  origin repo — one per served mind. Running a detached loop end-to-end leaves
+  no journal in its worktree; `child_worktree_path` no longer exists in the
+  tree.
+- The deleted machinery's tests are deleted with it, not skipped. Full suite
+  green.
+
+#### Done when: two agents converse over a channel, live
+
+The demo, concretely — what the developer runs and sees:
+
+```bash
+lf serve goals                       # terminal 1: the mind
+lf loop task "fix the flaky test" --wave goals --detach   # terminal 2: a hand
+lf sub goals.<run>                   # terminal 2: watch the hand narrate, live
+lf radio --channel goals.<run> "skip the migration, just gate it"  # steer it
+```
+
+- The hand's report (`lf radio` from inside its worktree — bare, it publishes
+  on its own channel) appears in the wave's thread attributed `[goals.<run>]`,
+  queued for the loop — one copy, in the wave's journal, nowhere else.
+- The steer reaches the hand: its driver's live subscription picks it up and
+  the next pass acts on it. Kill the driver and the queued steer dies with it —
+  demonstrated, not apologized for.
+- A message published to a channel nobody is listening on writes no file
+  anywhere.
+- The byline on every frame is server-stamped; a forged `from` in the POST body
+  does not survive to subscribers.
+
+#### Done when: LOOPFLOW.md teaches radio as agent-to-agent comms
+
+- LOOPFLOW.md states the contract in one short block: `lf radio` is agents
+  talking to agents — report up when you finish, fail, or get stuck; broadcast,
+  not delivery; not a log, not a notebook, and not the human surface. `lf chat`
+  is the human's conversation with a served mind, and agents don't use it.
+- The listen/respond pattern (launch a hand → subscribe to its channel →
+  respond into it) rides in the loop skills that launch hands, not in every
+  context — doctrine only where it's exercised.
+- Nothing in the builtins still describes channel journals, worktree-bound
+  records, `chat` as an agent verb, or `--parent` as a special transport.
 
 ## MVP product proof
 

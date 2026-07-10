@@ -1,6 +1,6 @@
 //! The resident: the wave's loop as its own `lf` process.
 //!
-//! The server-spawned half of `lf loop <name>` runs here. It owns everything
+//! The server-spawned half of `lf serve <name>` runs here — `lf __resident <name>`. It owns everything
 //! vendor-shaped — the conversations harness, the scheduler
 //! ([`crate::flowloop::wave`]), the rendered GOAL.md seed — and NOTHING
 //! pen-shaped: it never touches a journal file. Its two connections to the
@@ -45,7 +45,7 @@ use crate::wave::wire::{
     RESIDENT_TOKEN_ENV, RESIDENT_TOKEN_HEADER,
 };
 
-/// Enter the resident half of `lf loop <name>` until its listener disappears.
+/// Enter the resident half of `lf serve <name>` until its listener disappears.
 pub fn run(name: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
@@ -71,7 +71,7 @@ pub fn run(name: &str) -> Result<()> {
     std::env::set_var("PATH", path_for_children());
 
     println!(
-        "lf loop · {wave} · resident · listener http://{endpoint} \
+        "lf serve · {wave} · resident · listener http://{endpoint} \
          · worktree {}",
         loop_cwd.display()
     );
@@ -142,7 +142,7 @@ fn resolve_attachment(
         .ok_or_else(|| {
             anyhow!(
                 "wave '{wave}' has no live listener (no {env} in env, no \
-                 wave/{wave}/{file}) — start one with `lf loop {wave}`",
+                 wave/{wave}/{file}) — start one with `lf serve {wave}`",
                 env = WAVE_SERVER_ENDPOINT_ENV,
                 file = server::ENDPOINT_FILE,
             )
@@ -358,9 +358,10 @@ mod tests {
     fn resolve_attachment_prefers_env_then_files_then_errors() {
         let tmp = tempfile::tempdir().expect("tempdir");
 
-        // Nothing anywhere: a clear error naming the fix.
+        // Nothing anywhere: a clear error naming the fix. The fix is to boot a
+        // listener (`lf serve`), never to run a batch loop.
         let err = resolve_attachment(None, None, tmp.path(), "ship").expect_err("no listener");
-        assert!(err.to_string().contains("lf loop ship"), "{err}");
+        assert!(err.to_string().contains("lf serve ship"), "{err}");
 
         // Files only (a separately attached resident).
         let addr: std::net::SocketAddr = "127.0.0.1:50607".parse().unwrap();

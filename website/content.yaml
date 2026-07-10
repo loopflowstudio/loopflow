@@ -105,7 +105,7 @@ homepage:
         - "Authentication built in — WorkOS OAuth via Loopflow Studio"
       terminal_lines:
         - type: "command"
-          content: "lf loop billing"
+          content: "lf serve billing"
         - type: "output"
           content: "wave agent · reading GOAL.md + MEMORY.md"
         - type: "output"

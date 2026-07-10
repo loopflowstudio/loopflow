@@ -736,17 +736,14 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         | Some(Commands::Usage { .. })
         | Some(Commands::Tokens { .. })
         | Some(Commands::Doctor { .. }) => ExecVerdict::Allow,
-        Some(Commands::Loop {
-            detach: true,
-            seed: Some(_),
-            ..
-        }) => ExecVerdict::Allow,
+        // A seedless loop can no longer be spelled: `seed` is required, so the
+        // "detach with nothing to run" case the door used to police is gone.
+        Some(Commands::Loop { detach: true, .. }) => ExecVerdict::Allow,
         Some(Commands::Loop { detach: false, .. }) => ExecVerdict::Deny("loop".to_string()),
-        Some(Commands::Loop {
-            detach: true,
-            seed: None,
-            ..
-        }) => ExecVerdict::Deny("loop".to_string()),
+        // Booting a listener, or a resident body against one, is wave
+        // lifecycle: the door process would become the long-lived owner.
+        Some(Commands::Serve { .. }) => ExecVerdict::Deny("serve".to_string()),
+        Some(Commands::Resident { .. }) => ExecVerdict::Deny("__resident".to_string()),
         Some(Commands::External(parts)) => {
             ExecVerdict::Deny(parts.first().cloned().unwrap_or_else(|| "flow".to_string()))
         }
@@ -1615,6 +1612,11 @@ mod tests {
             argv(&["wave", "ship", "--force"]),
             argv(&["task", "ship it"]),
             argv(&["loop", "task", "ship it"]),
+            // Both halves of a served mind are wave lifecycle: a leaked token
+            // must not boot a listener, nor a resident body against one.
+            argv(&["serve", "ship"]),
+            argv(&["serve", "ship", "--force"]),
+            argv(&["__resident", "ship"]),
             argv(&["sync-skills", "--yes"]),
             argv(&["implement", "ship it"]),
             argv(&[":", "do", "something"]),

@@ -121,7 +121,7 @@ pub fn detach_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<
         .or_else(|| crate::engine::wave_context::read_endpoint_pointer(&origin, &wave))
         .ok_or_else(|| {
             OpsError::Message(format!(
-                "wave '{wave}' has no live server; start it with `lf loop {wave}`"
+                "wave '{wave}' has no live server; start it with `lf serve {wave}`"
             ))
         })?;
     let (header, token) = detached_loop_credential(&origin, &wave).ok_or_else(|| {

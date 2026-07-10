@@ -187,7 +187,8 @@ lf tokens --json                # token-weighted tree for other tools
 ```
 
 `lf tokens` counts with the same tokenizer used by the context budget. It skips
-untracked and non-UTF-8 files; history walks git blobs without checking them out.
+untracked and non-UTF-8 files; a symlink counts its tracked link text instead of
+duplicating its target; history walks git blobs without checking them out.
 
 ## What's Included by Default
 

@@ -12,6 +12,8 @@
 //! Only tracked files are counted: `git ls-files` already honours `.gitignore`,
 //! so `target/`, `.build/`, and `node_modules/` never enter the total. A file
 //! that is not valid UTF-8 is a binary and is skipped rather than estimated.
+//! A tracked symlink weighs its link text, matching the blob Git stores; the
+//! target is already counted at its own tracked path.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -348,7 +350,15 @@ fn tracked_files(root: &Path) -> Result<Vec<PathBuf>> {
 /// A measured file. `None` for binaries: a token estimate over bytes that are
 /// not text is a number with no meaning, and a wrong number is worse than a gap.
 fn measure(path: &Path) -> Option<(usize, usize)> {
-    let text = String::from_utf8(std::fs::read(path).ok()?).ok()?;
+    let text = if path.is_symlink() {
+        std::fs::read_link(path)
+            .ok()?
+            .into_os_string()
+            .into_string()
+            .ok()?
+    } else {
+        String::from_utf8(std::fs::read(path).ok()?).ok()?
+    };
     Some((text.lines().count(), count_tokens(&text)))
 }
 
@@ -487,8 +497,8 @@ fn print_node(node: &CodeNode, total: usize, depth: usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        dominant_extensions, extension_of, insert, sort_by_tokens, CodeNode, MAX_EXTENSIONS,
-        NO_EXTENSION,
+        dominant_extensions, extension_of, insert, measure, sort_by_tokens, CodeNode,
+        MAX_EXTENSIONS, NO_EXTENSION,
     };
     use std::collections::BTreeMap;
     use std::path::Path;
@@ -577,5 +587,21 @@ mod tests {
         assert_eq!((a.tokens, b.tokens, c.tokens), (28, 28, 28));
         assert_eq!(c.path, "a/b/c.rs");
         assert!(c.children.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_weighs_its_link_text_not_the_target_again() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let target = dir.path().join("target.txt");
+        std::fs::write(&target, "expensive target content ".repeat(100)).expect("write target");
+        let link = dir.path().join("link.txt");
+        symlink("target.txt", &link).expect("create symlink");
+
+        let (lines, tokens) = measure(&link).expect("measure link");
+        assert_eq!(lines, 1);
+        assert_eq!(tokens, crate::engine::prompt::count_tokens("target.txt"));
     }
 }

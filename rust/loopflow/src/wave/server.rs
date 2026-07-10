@@ -768,6 +768,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         | Some(Commands::Runs { .. })
         | Some(Commands::Trace { .. })
         | Some(Commands::Usage { .. })
+        | Some(Commands::Context { .. })
         | Some(Commands::Tokens { .. })
         | Some(Commands::Doctor { .. }) => ExecVerdict::Allow,
         Some(Commands::RetiredSub { .. }) => ExecVerdict::Deny("sub".to_string()),

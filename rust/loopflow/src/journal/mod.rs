@@ -381,6 +381,27 @@ pub fn open_ledger() -> Result<SqliteStore, crate::lfdb::StoreError> {
     SqliteStore::new(&ledger_db_path())
 }
 
+/// Return explicit launch identity for durable trace capture.
+pub fn trace_capture_context(
+    worktree: &Path,
+    flow: Option<String>,
+    skill: Option<String>,
+) -> Option<crate::trace::TraceCaptureContext> {
+    let context = current_context()?;
+    Some(crate::trace::TraceCaptureContext {
+        run_id: context.run_id,
+        process_id: context.process_id,
+        repo: context
+            .repo
+            .map(PathBuf::from)
+            .unwrap_or_else(|| worktree.to_path_buf()),
+        worktree: worktree.to_path_buf(),
+        wave: context.wave,
+        flow,
+        skill,
+    })
+}
+
 #[cfg(not(test))]
 fn ledger_db_path() -> PathBuf {
     crate::lfd::default_db_path()

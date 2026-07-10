@@ -254,6 +254,14 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "061_pm_snapshots",
         sql: include_str!("migrations/061_pm_snapshots.sql"),
     },
+    // 061_pm_snapshots and 061_trace_capture share the 061_ numeric prefix but
+    // stored as distinct full version strings, like the 016_ pair above. Both
+    // are already applied to the long-lived ledger; renumbering either would
+    // re-run its CREATEs and strand a phantom schema_migrations row.
+    Migration {
+        version: "061_trace_capture",
+        sql: include_str!("migrations/061_trace_capture.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the

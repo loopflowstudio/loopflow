@@ -1,0 +1,1244 @@
+//! Durable, local capture of provider-facing prompts and observable agent events.
+
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use time::OffsetDateTime;
+
+use crate::chat::types::{ConversationEvent, TurnUsage};
+use crate::engine::prompt::count_tokens;
+use crate::engine::stream::{ResultSubtype, StreamEvent};
+use crate::lfd::id::LfdId;
+use crate::lfdb::{StoreError, StoreResult};
+
+pub const TRACE_SCHEMA_VERSION: u32 = 1;
+pub const TOKENIZER: &str = "cl100k_base";
+
+#[derive(Debug, Clone)]
+pub struct TraceCaptureContext {
+    pub run_id: LfdId,
+    pub process_id: LfdId,
+    pub repo: PathBuf,
+    pub worktree: PathBuf,
+    pub wave: Option<String>,
+    pub flow: Option<String>,
+    pub skill: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum ContextChannel {
+    System,
+    Task,
+}
+
+impl ContextChannel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Task => "task",
+        }
+    }
+
+    pub fn parse(value: &str) -> StoreResult<Self> {
+        match value {
+            "system" => Ok(Self::System),
+            "task" => Ok(Self::Task),
+            _ => Err(StoreError::InvalidData(format!(
+                "invalid context channel: {value}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum ContextCoverage {
+    Assembled,
+    ProviderTotalOnly,
+    Unknown,
+}
+
+impl ContextCoverage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Assembled => "assembled",
+            Self::ProviderTotalOnly => "provider_total_only",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum ContextAssetKind {
+    Loopflow,
+    Surface,
+    StructuredReply,
+    ProviderWrapper,
+    RepoInstructions,
+    Skill,
+    Direction,
+    WaveGoal,
+    Project,
+    WaveMemory,
+    WaveChat,
+    ParentSummary,
+    Docs,
+    Scratch,
+    Diff,
+    Clipboard,
+    UserMessage,
+    Assembly,
+}
+
+impl ContextAssetKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Loopflow => "loopflow",
+            Self::Surface => "surface",
+            Self::StructuredReply => "structured_reply",
+            Self::ProviderWrapper => "provider_wrapper",
+            Self::RepoInstructions => "repo_instructions",
+            Self::Skill => "skill",
+            Self::Direction => "direction",
+            Self::WaveGoal => "wave_goal",
+            Self::Project => "project",
+            Self::WaveMemory => "wave_memory",
+            Self::WaveChat => "wave_chat",
+            Self::ParentSummary => "parent_summary",
+            Self::Docs => "docs",
+            Self::Scratch => "scratch",
+            Self::Diff => "diff",
+            Self::Clipboard => "clipboard",
+            Self::UserMessage => "user_message",
+            Self::Assembly => "assembly",
+        }
+    }
+
+    pub fn parse(value: &str) -> StoreResult<Self> {
+        match value {
+            "loopflow" => Ok(Self::Loopflow),
+            "surface" => Ok(Self::Surface),
+            "structured_reply" => Ok(Self::StructuredReply),
+            "provider_wrapper" => Ok(Self::ProviderWrapper),
+            "repo_instructions" => Ok(Self::RepoInstructions),
+            "skill" => Ok(Self::Skill),
+            "direction" => Ok(Self::Direction),
+            "wave_goal" => Ok(Self::WaveGoal),
+            "project" => Ok(Self::Project),
+            "wave_memory" => Ok(Self::WaveMemory),
+            "wave_chat" => Ok(Self::WaveChat),
+            "parent_summary" => Ok(Self::ParentSummary),
+            "docs" => Ok(Self::Docs),
+            "scratch" => Ok(Self::Scratch),
+            "diff" => Ok(Self::Diff),
+            "clipboard" => Ok(Self::Clipboard),
+            "user_message" => Ok(Self::UserMessage),
+            "assembly" => Ok(Self::Assembly),
+            _ => Err(StoreError::InvalidData(format!(
+                "invalid context asset kind: {value}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum ContextScope {
+    System,
+    Repo,
+    Wave,
+    Project,
+    Task,
+    Step,
+    User,
+}
+
+impl ContextScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Repo => "repo",
+            Self::Wave => "wave",
+            Self::Project => "project",
+            Self::Task => "task",
+            Self::Step => "step",
+            Self::User => "user",
+        }
+    }
+
+    pub fn parse(value: &str) -> StoreResult<Self> {
+        match value {
+            "system" => Ok(Self::System),
+            "repo" => Ok(Self::Repo),
+            "wave" => Ok(Self::Wave),
+            "project" => Ok(Self::Project),
+            "task" => Ok(Self::Task),
+            "step" => Ok(Self::Step),
+            "user" => Ok(Self::User),
+            _ => Err(StoreError::InvalidData(format!(
+                "invalid context scope: {value}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContextAsset {
+    pub position: u32,
+    pub channel: ContextChannel,
+    pub kind: ContextAssetKind,
+    pub scope: ContextScope,
+    pub label: String,
+    pub source_path: Option<String>,
+    pub included_by: String,
+    pub content_sha256: String,
+    pub byte_start: u64,
+    pub byte_end: u64,
+    pub bytes: u64,
+    pub isolated_tokens: u64,
+    pub attributed_tokens: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum ContextDecisionKind {
+    Included,
+    Excluded,
+    Summarized,
+    StatOnly,
+    Truncated,
+    Deduplicated,
+}
+
+impl ContextDecisionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Included => "included",
+            Self::Excluded => "excluded",
+            Self::Summarized => "summarized",
+            Self::StatOnly => "stat_only",
+            Self::Truncated => "truncated",
+            Self::Deduplicated => "deduplicated",
+        }
+    }
+
+    pub fn parse(value: &str) -> StoreResult<Self> {
+        match value {
+            "included" => Ok(Self::Included),
+            "excluded" => Ok(Self::Excluded),
+            "summarized" => Ok(Self::Summarized),
+            "stat_only" => Ok(Self::StatOnly),
+            "truncated" => Ok(Self::Truncated),
+            "deduplicated" => Ok(Self::Deduplicated),
+            _ => Err(StoreError::InvalidData(format!(
+                "invalid context decision: {value}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContextDecision {
+    pub position: u32,
+    pub kind: String,
+    pub label: String,
+    pub source_path: Option<String>,
+    pub decision: ContextDecisionKind,
+    pub reason: String,
+    pub original_bytes: Option<u64>,
+    pub original_tokens: Option<u64>,
+    pub asset_position: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RenderedPromptChannel {
+    pub text: String,
+    pub tokens: u64,
+    pub assets: Vec<ContextAsset>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedTurnContext {
+    pub system: Option<RenderedPromptChannel>,
+    pub task: RenderedPromptChannel,
+    pub decisions: Vec<ContextDecision>,
+    pub coverage: ContextCoverage,
+    pub tokenizer: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContextAssetSpec {
+    pub channel: ContextChannel,
+    pub kind: ContextAssetKind,
+    pub scope: ContextScope,
+    pub label: String,
+    pub source_path: Option<String>,
+    pub included_by: String,
+    pub content: String,
+}
+
+impl PreparedTurnContext {
+    /// Capture the exact final provider strings. More specific attributed
+    /// sections can replace these assembly assets without changing storage.
+    pub fn from_prompts(system: &str, task: &str) -> Self {
+        let mut position = 0;
+        let system = (!system.is_empty()).then(|| {
+            let channel = prompt_channel(
+                system,
+                ContextChannel::System,
+                ContextScope::System,
+                "system prompt",
+                position,
+            );
+            position += 1;
+            channel
+        });
+        let task = prompt_channel(
+            task,
+            ContextChannel::Task,
+            ContextScope::Task,
+            "task prompt",
+            position,
+        );
+        Self {
+            system,
+            task,
+            decisions: Vec::new(),
+            coverage: ContextCoverage::Assembled,
+            tokenizer: TOKENIZER,
+        }
+    }
+
+    /// Attribute semantic source slices inside the exact final provider
+    /// strings. Unclaimed separators and wrappers become explicit assembly
+    /// assets, so byte and token accounting still covers the whole prompt.
+    pub fn from_attributed_prompts(
+        system: &str,
+        task: &str,
+        specs: Vec<ContextAssetSpec>,
+        decisions: Vec<ContextDecision>,
+    ) -> Self {
+        let mut position = 0;
+        let system_specs = specs
+            .iter()
+            .filter(|spec| spec.channel == ContextChannel::System)
+            .cloned()
+            .collect::<Vec<_>>();
+        let task_specs = specs
+            .into_iter()
+            .filter(|spec| spec.channel == ContextChannel::Task)
+            .collect::<Vec<_>>();
+        let system = (!system.is_empty()).then(|| {
+            render_attributed_channel(system, ContextChannel::System, system_specs, &mut position)
+        });
+        let task = render_attributed_channel(task, ContextChannel::Task, task_specs, &mut position);
+        let mut decisions = decisions;
+        let first_decision_position = decisions
+            .iter()
+            .map(|decision| decision.position)
+            .max()
+            .map_or(0, |position| position + 1);
+        for (offset, asset) in system
+            .iter()
+            .flat_map(|channel| channel.assets.iter())
+            .chain(task.assets.iter())
+            .filter(|asset| asset.kind != ContextAssetKind::Assembly)
+            .enumerate()
+        {
+            decisions.push(ContextDecision {
+                position: first_decision_position + offset as u32,
+                kind: asset.kind.as_str().to_string(),
+                label: asset.label.clone(),
+                source_path: asset.source_path.clone(),
+                decision: ContextDecisionKind::Included,
+                reason: format!("included by {}", asset.included_by),
+                original_bytes: Some(asset.bytes),
+                original_tokens: Some(asset.isolated_tokens),
+                asset_position: Some(asset.position),
+            });
+        }
+        Self {
+            system,
+            task,
+            decisions,
+            coverage: ContextCoverage::Assembled,
+            tokenizer: TOKENIZER,
+        }
+    }
+
+    pub fn total_tokens(&self) -> u64 {
+        self.system.as_ref().map_or(0, |channel| channel.tokens) + self.task.tokens
+    }
+
+    pub fn assets(&self) -> impl Iterator<Item = &ContextAsset> {
+        self.system
+            .iter()
+            .flat_map(|channel| channel.assets.iter())
+            .chain(self.task.assets.iter())
+    }
+}
+
+fn render_attributed_channel(
+    text: &str,
+    channel: ContextChannel,
+    specs: Vec<ContextAssetSpec>,
+    position: &mut u32,
+) -> RenderedPromptChannel {
+    let mut claimed: Vec<(usize, usize, ContextAssetSpec)> = Vec::new();
+    for spec in specs.into_iter().filter(|spec| !spec.content.is_empty()) {
+        let mut offset = 0;
+        while let Some(relative) = text[offset..].find(&spec.content) {
+            let start = offset + relative;
+            let end = start + spec.content.len();
+            if claimed
+                .iter()
+                .all(|(other_start, other_end, _)| end <= *other_start || start >= *other_end)
+            {
+                claimed.push((start, end, spec));
+                break;
+            }
+            offset = end;
+            if offset >= text.len() {
+                break;
+            }
+        }
+    }
+    claimed.sort_by_key(|(start, _, _)| *start);
+
+    let mut segments = Vec::new();
+    let mut cursor = 0;
+    for (start, end, spec) in claimed {
+        if start > cursor {
+            segments.push((
+                cursor,
+                start,
+                ContextAssetSpec {
+                    channel,
+                    kind: ContextAssetKind::Assembly,
+                    scope: if channel == ContextChannel::System {
+                        ContextScope::System
+                    } else {
+                        ContextScope::Task
+                    },
+                    label: "prompt assembly".to_string(),
+                    source_path: None,
+                    included_by: "provider_invocation".to_string(),
+                    content: text[cursor..start].to_string(),
+                },
+            ));
+        }
+        segments.push((start, end, spec));
+        cursor = end;
+    }
+    if cursor < text.len() || segments.is_empty() {
+        segments.push((
+            cursor,
+            text.len(),
+            ContextAssetSpec {
+                channel,
+                kind: ContextAssetKind::Assembly,
+                scope: if channel == ContextChannel::System {
+                    ContextScope::System
+                } else {
+                    ContextScope::Task
+                },
+                label: "prompt assembly".to_string(),
+                source_path: None,
+                included_by: "provider_invocation".to_string(),
+                content: text[cursor..].to_string(),
+            },
+        ));
+    }
+
+    let total_tokens = token_count(text);
+    let mut previous_tokens = 0_u64;
+    let segment_count = segments.len();
+    let mut assets = Vec::with_capacity(segment_count);
+    for (index, (start, end, spec)) in segments.into_iter().enumerate() {
+        let prefix_tokens = if index + 1 == segment_count {
+            total_tokens
+        } else {
+            token_count(&text[..end])
+        };
+        let attributed_tokens = prefix_tokens.saturating_sub(previous_tokens);
+        previous_tokens = prefix_tokens;
+        let slice = &text[start..end];
+        assets.push(ContextAsset {
+            position: *position,
+            channel,
+            kind: spec.kind,
+            scope: spec.scope,
+            label: spec.label,
+            source_path: spec.source_path,
+            included_by: spec.included_by,
+            content_sha256: hex::encode(Sha256::digest(slice.as_bytes())),
+            byte_start: start as u64,
+            byte_end: end as u64,
+            bytes: (end - start) as u64,
+            isolated_tokens: token_count(slice),
+            attributed_tokens,
+        });
+        *position += 1;
+    }
+    RenderedPromptChannel {
+        text: text.to_string(),
+        tokens: total_tokens,
+        assets,
+    }
+}
+
+fn prompt_channel(
+    text: &str,
+    channel: ContextChannel,
+    scope: ContextScope,
+    label: &str,
+    position: u32,
+) -> RenderedPromptChannel {
+    let tokens = token_count(text);
+    let bytes = text.len() as u64;
+    let asset = ContextAsset {
+        position,
+        channel,
+        kind: ContextAssetKind::Assembly,
+        scope,
+        label: label.to_string(),
+        source_path: None,
+        included_by: "provider_invocation".to_string(),
+        content_sha256: hex::encode(Sha256::digest(text.as_bytes())),
+        byte_start: 0,
+        byte_end: bytes,
+        bytes,
+        isolated_tokens: tokens,
+        attributed_tokens: tokens,
+    };
+    RenderedPromptChannel {
+        text: text.to_string(),
+        tokens,
+        assets: vec![asset],
+    }
+}
+
+fn token_count(text: &str) -> u64 {
+    if text.is_empty() {
+        0
+    } else {
+        count_tokens(text) as u64
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderInvocation {
+    pub context: PreparedTurnContext,
+    pub argv: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordedConversationEvent {
+    pub schema_version: u32,
+    pub seq: u64,
+    #[serde(with = "time::serde::rfc3339")]
+    pub ts: OffsetDateTime,
+    pub turn_id: Option<String>,
+    pub payload: RecordedConversationPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawProviderRecord {
+    pub schema_version: u32,
+    pub seq: u64,
+    #[serde(with = "time::serde::rfc3339")]
+    pub ts: OffsetDateTime,
+    pub stream: String,
+    pub line: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RecordedConversationPayload {
+    UserInput {
+        op: String,
+        text: String,
+    },
+    Conversation {
+        event: ConversationEvent,
+    },
+    LegacyText {
+        stream: String,
+        text: String,
+    },
+    LegacyTool {
+        name: String,
+        summary: String,
+    },
+    Usage {
+        usage: TurnUsage,
+    },
+    Result {
+        status: String,
+        cost_usd: Option<f64>,
+        duration_secs: Option<f64>,
+    },
+    CaptureError {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentLaunchRow {
+    pub id: String,
+    pub run_id: String,
+    pub process_id: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub repo: String,
+    pub worktree: String,
+    pub wave: Option<String>,
+    pub flow: Option<String>,
+    pub skill: Option<String>,
+    pub provider: String,
+    pub model: Option<String>,
+    pub surface: String,
+    pub capture_status: String,
+    pub incomplete_reason: Option<String>,
+    pub outcome: String,
+    pub artifact_dir: String,
+    pub conversation_path: String,
+    pub provider_events_path: Option<String>,
+    pub provider_session_id: Option<String>,
+    pub provider_session_path: Option<String>,
+    pub context_gather_ms: i64,
+    pub context_render_ms: i64,
+    pub context_persist_ms: i64,
+    pub conversation_event_count: i64,
+    pub conversation_bytes: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentTurnRow {
+    pub id: String,
+    pub launch_id: String,
+    pub ordinal: i64,
+    pub provider_turn_id: Option<String>,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub status: String,
+    pub input_op: String,
+    pub context_coverage: String,
+    pub tokenizer: String,
+    pub system_prompt_path: Option<String>,
+    pub task_prompt_path: String,
+    pub system_tokens: i64,
+    pub task_tokens: i64,
+    pub supplied_context_tokens: i64,
+    pub provider_input_tokens: Option<i64>,
+    pub provider_output_tokens: Option<i64>,
+    pub reasoning_tokens: Option<i64>,
+    pub cache_read_tokens: Option<i64>,
+    pub cache_write_tokens: Option<i64>,
+    pub cost_usd: Option<f64>,
+    pub first_event_seq: Option<i64>,
+    pub last_event_seq: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContextAssetRow {
+    pub turn_id: String,
+    #[serde(flatten)]
+    pub asset: ContextAsset,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContextDecisionRow {
+    pub turn_id: String,
+    #[serde(flatten)]
+    pub decision: ContextDecision,
+}
+
+#[derive(Debug, Clone)]
+pub struct CaptureHandle(Arc<Mutex<TraceCapture>>);
+
+#[derive(Debug, Clone)]
+pub struct CaptureStart {
+    pub provider: String,
+    pub model: Option<String>,
+    pub surface: String,
+    pub input_op: String,
+    pub gather_ms: u64,
+    pub render_ms: u64,
+    pub raw_provider: bool,
+}
+
+impl CaptureHandle {
+    pub fn artifact_dir(&self) -> PathBuf {
+        PathBuf::from(
+            &self
+                .0
+                .lock()
+                .expect("trace capture mutex poisoned")
+                .launch
+                .artifact_dir,
+        )
+    }
+
+    pub fn begin(
+        context: TraceCaptureContext,
+        prepared: PreparedTurnContext,
+        start: CaptureStart,
+    ) -> StoreResult<Self> {
+        let capture = TraceCapture::begin(context, prepared, start)?;
+        Ok(Self(Arc::new(Mutex::new(capture))))
+    }
+
+    pub fn record_raw(&self, stream: &str, line: &str) {
+        self.with_capture(|capture| capture.record_raw(stream, line));
+    }
+
+    pub fn record_stream_event(&self, event: &StreamEvent) {
+        self.with_capture(|capture| capture.record_stream_event(event));
+    }
+
+    pub fn record_conversation(&self, event: ConversationEvent) {
+        self.with_capture(|capture| capture.record_conversation(event));
+    }
+
+    pub fn record_user_input(&self, op: &str, text: &str) {
+        self.with_capture(|capture| {
+            capture.append_payload(RecordedConversationPayload::UserInput {
+                op: op.to_string(),
+                text: text.to_string(),
+            })
+        });
+    }
+
+    pub fn set_provider_session_id(&self, session_id: Option<String>) {
+        self.0
+            .lock()
+            .expect("trace capture mutex poisoned")
+            .launch
+            .provider_session_id = session_id;
+    }
+
+    pub fn finish(&self, outcome: &str, prompt_only: bool) -> StoreResult<()> {
+        self.0
+            .lock()
+            .expect("trace capture mutex poisoned")
+            .finish(outcome, prompt_only)
+    }
+
+    fn with_capture(&self, operation: impl FnOnce(&mut TraceCapture) -> StoreResult<()>) {
+        let mut capture = self.0.lock().expect("trace capture mutex poisoned");
+        if capture.failed.is_some() {
+            return;
+        }
+        if let Err(error) = operation(&mut capture) {
+            let message = error.to_string();
+            tracing::warn!(error = %message, launch_id = %capture.launch.id, "trace capture became partial");
+            let _ = capture.append_payload(RecordedConversationPayload::CaptureError {
+                message: message.clone(),
+            });
+            capture.failed = Some(message);
+        }
+    }
+}
+
+#[derive(Debug)]
+struct TraceCapture {
+    launch: AgentLaunchRow,
+    turn: AgentTurnRow,
+    conversation_path: PathBuf,
+    provider_path: Option<PathBuf>,
+    event_seq: u64,
+    provider_seq: u64,
+    usage: TurnUsage,
+    failed: Option<String>,
+}
+
+impl TraceCapture {
+    fn begin(
+        context: TraceCaptureContext,
+        prepared: PreparedTurnContext,
+        start: CaptureStart,
+    ) -> StoreResult<Self> {
+        validate_input_op(&start.input_op)?;
+        let persist_start = Instant::now();
+        let launch_id = LfdId::new().to_string();
+        let turn_id = LfdId::new().to_string();
+        let artifact_dir = trace_root()
+            .join(context.run_id.as_str())
+            .join(context.process_id.as_str())
+            .join(&launch_id);
+        create_private_dir(&artifact_dir)?;
+        let turns_dir = artifact_dir.join("turns");
+        create_private_dir(&turns_dir)?;
+
+        let system_path = prepared
+            .system
+            .as_ref()
+            .map(|system| {
+                let path = turns_dir.join("0001-system.md");
+                write_private(&path, system.text.as_bytes()).map(|_| path)
+            })
+            .transpose()?;
+        let task_path = turns_dir.join("0001-task.md");
+        write_private(&task_path, prepared.task.text.as_bytes())?;
+        let conversation_path = artifact_dir.join("conversation.jsonl");
+        write_private(&conversation_path, b"")?;
+        let provider_path = start
+            .raw_provider
+            .then(|| artifact_dir.join("provider.jsonl"));
+        if let Some(path) = &provider_path {
+            write_private(path, b"")?;
+        }
+
+        let started_at = OffsetDateTime::now_utc().unix_timestamp();
+        let system_tokens = prepared.system.as_ref().map_or(0, |channel| channel.tokens) as i64;
+        let task_tokens = prepared.task.tokens as i64;
+        let persist_ms = persist_start.elapsed().as_millis() as i64;
+        let launch = AgentLaunchRow {
+            id: launch_id,
+            run_id: context.run_id.to_string(),
+            process_id: context.process_id.to_string(),
+            started_at,
+            ended_at: None,
+            repo: context.repo.display().to_string(),
+            worktree: context.worktree.display().to_string(),
+            wave: context.wave,
+            flow: context.flow,
+            skill: context.skill,
+            provider: start.provider,
+            model: start.model,
+            surface: start.surface,
+            capture_status: "capturing".to_string(),
+            incomplete_reason: None,
+            outcome: "running".to_string(),
+            artifact_dir: artifact_dir.display().to_string(),
+            conversation_path: conversation_path.display().to_string(),
+            provider_events_path: provider_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            provider_session_id: None,
+            provider_session_path: None,
+            context_gather_ms: start.gather_ms as i64,
+            context_render_ms: start.render_ms as i64,
+            context_persist_ms: persist_ms,
+            conversation_event_count: 0,
+            conversation_bytes: 0,
+        };
+        let turn = AgentTurnRow {
+            id: turn_id.clone(),
+            launch_id: launch.id.clone(),
+            ordinal: 1,
+            provider_turn_id: None,
+            started_at,
+            ended_at: None,
+            status: "running".to_string(),
+            input_op: start.input_op.clone(),
+            context_coverage: prepared.coverage.as_str().to_string(),
+            tokenizer: prepared.tokenizer.to_string(),
+            system_prompt_path: system_path.map(|path| path.display().to_string()),
+            task_prompt_path: task_path.display().to_string(),
+            system_tokens,
+            task_tokens,
+            supplied_context_tokens: system_tokens + task_tokens,
+            provider_input_tokens: None,
+            provider_output_tokens: None,
+            reasoning_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            cost_usd: None,
+            first_event_seq: Some(0),
+            last_event_seq: None,
+        };
+        let assets = prepared
+            .assets()
+            .cloned()
+            .map(|asset| ContextAssetRow {
+                turn_id: turn_id.clone(),
+                asset,
+            })
+            .collect::<Vec<_>>();
+        let decisions = prepared
+            .decisions
+            .into_iter()
+            .map(|decision| ContextDecisionRow {
+                turn_id: turn_id.clone(),
+                decision,
+            })
+            .collect::<Vec<_>>();
+        crate::journal::open_ledger()?.insert_trace_capture(&launch, &turn, &assets, &decisions)?;
+
+        let mut capture = Self {
+            launch,
+            turn,
+            conversation_path,
+            provider_path,
+            event_seq: 0,
+            provider_seq: 0,
+            usage: TurnUsage::default(),
+            failed: None,
+        };
+        capture.append_payload(RecordedConversationPayload::UserInput {
+            op: start.input_op,
+            text: prepared.task.text,
+        })?;
+        Ok(capture)
+    }
+
+    fn append_payload(&mut self, payload: RecordedConversationPayload) -> StoreResult<()> {
+        let event = RecordedConversationEvent {
+            schema_version: TRACE_SCHEMA_VERSION,
+            seq: self.event_seq,
+            ts: OffsetDateTime::now_utc(),
+            turn_id: Some(self.turn.id.clone()),
+            payload,
+        };
+        let bytes = append_json_line(&self.conversation_path, &event)?;
+        self.event_seq += 1;
+        self.launch.conversation_event_count += 1;
+        self.launch.conversation_bytes += bytes as i64;
+        self.turn.last_event_seq = Some(event.seq as i64);
+        Ok(())
+    }
+
+    fn record_raw(&mut self, stream: &str, line: &str) -> StoreResult<()> {
+        let Some(provider_path) = self.provider_path.as_ref() else {
+            return Ok(());
+        };
+        let record = RawProviderRecord {
+            schema_version: TRACE_SCHEMA_VERSION,
+            seq: self.provider_seq,
+            ts: OffsetDateTime::now_utc(),
+            stream: stream.to_string(),
+            line: line.to_string(),
+        };
+        append_json_line(provider_path, &record)?;
+        self.provider_seq += 1;
+        Ok(())
+    }
+
+    fn record_stream_event(&mut self, event: &StreamEvent) -> StoreResult<()> {
+        let payload = match event {
+            StreamEvent::Text(text) => RecordedConversationPayload::LegacyText {
+                stream: "assistant".to_string(),
+                text: text.clone(),
+            },
+            StreamEvent::ToolUse { name, summary } => RecordedConversationPayload::LegacyTool {
+                name: name.clone(),
+                summary: summary.clone(),
+            },
+            StreamEvent::Usage {
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+            } => {
+                self.usage.input_tokens += input_tokens.unwrap_or(0);
+                self.usage.output_tokens += output_tokens.unwrap_or(0);
+                self.usage.cache_read_tokens = Some(
+                    self.usage.cache_read_tokens.unwrap_or(0) + cache_read_tokens.unwrap_or(0),
+                );
+                RecordedConversationPayload::Usage {
+                    usage: self.usage.clone(),
+                }
+            }
+            StreamEvent::Result {
+                subtype,
+                cost_usd,
+                duration_secs,
+            } => {
+                self.usage.cost_usd = *cost_usd;
+                RecordedConversationPayload::Result {
+                    status: match subtype {
+                        ResultSubtype::Success => "completed",
+                        ResultSubtype::Error => "failed",
+                    }
+                    .to_string(),
+                    cost_usd: *cost_usd,
+                    duration_secs: *duration_secs,
+                }
+            }
+        };
+        self.append_payload(payload)
+    }
+
+    fn record_conversation(&mut self, event: ConversationEvent) -> StoreResult<()> {
+        match &event {
+            ConversationEvent::TurnStarted { turn_id } => {
+                self.turn.provider_turn_id = Some(turn_id.clone());
+            }
+            ConversationEvent::TurnUsage { usage, .. } => {
+                self.usage = usage.clone();
+            }
+            _ => {}
+        }
+        self.append_payload(RecordedConversationPayload::Conversation { event })
+    }
+
+    fn finish(&mut self, outcome: &str, prompt_only: bool) -> StoreResult<()> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        self.launch.ended_at = Some(now);
+        self.launch.outcome = outcome.to_string();
+        self.launch.capture_status = if prompt_only {
+            "prompt_only".to_string()
+        } else if self.failed.is_some() {
+            "partial".to_string()
+        } else {
+            "complete".to_string()
+        };
+        self.launch.incomplete_reason = if prompt_only {
+            Some("provider conversation not captured by Loopflow".to_string())
+        } else {
+            self.failed.clone()
+        };
+        self.turn.ended_at = Some(now);
+        self.turn.status = if self.failed.is_some() {
+            "partial".to_string()
+        } else {
+            match outcome {
+                "completed" => "completed",
+                "interrupted" => "interrupted",
+                _ => "failed",
+            }
+            .to_string()
+        };
+        self.turn.provider_input_tokens = Some(self.usage.input_tokens as i64);
+        self.turn.provider_output_tokens = Some(self.usage.output_tokens as i64);
+        self.turn.reasoning_tokens = self.usage.reasoning_tokens.map(|value| value as i64);
+        self.turn.cache_read_tokens = self.usage.cache_read_tokens.map(|value| value as i64);
+        self.turn.cache_write_tokens = self.usage.cache_write_tokens.map(|value| value as i64);
+        self.turn.cost_usd = self.usage.cost_usd;
+        crate::journal::open_ledger()?.finish_trace_capture(&self.launch, &self.turn)
+    }
+}
+
+fn validate_input_op(value: &str) -> StoreResult<()> {
+    if matches!(value, "initial" | "message" | "steer" | "queued") {
+        return Ok(());
+    }
+    Err(StoreError::InvalidData(format!(
+        "invalid input op: {value}"
+    )))
+}
+
+pub fn trace_root() -> PathBuf {
+    if let Ok(home) = std::env::var("LF_HOME") {
+        return PathBuf::from(home).join("traces");
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".lf/traces")
+}
+
+fn create_private_dir(path: &Path) -> StoreResult<()> {
+    fs::create_dir_all(path)
+        .map_err(|error| StoreError::InvalidData(format!("create {}: {error}", path.display())))?;
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|error| {
+        StoreError::InvalidData(format!("set permissions on {}: {error}", path.display()))
+    })?;
+    Ok(())
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> StoreResult<()> {
+    let mut options = OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options
+        .open(path)
+        .map_err(|error| StoreError::InvalidData(format!("open {}: {error}", path.display())))?;
+    file.write_all(bytes)
+        .map_err(|error| StoreError::InvalidData(format!("write {}: {error}", path.display())))?;
+    #[cfg(unix)]
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|error| {
+            StoreError::InvalidData(format!("set permissions on {}: {error}", path.display()))
+        })?;
+    Ok(())
+}
+
+fn append_json_line<T: Serialize>(path: &Path, value: &T) -> StoreResult<usize> {
+    let mut bytes = serde_json::to_vec(value)?;
+    bytes.push(b'\n');
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options
+        .open(path)
+        .map_err(|error| StoreError::InvalidData(format!("open {}: {error}", path.display())))?;
+    file.write_all(&bytes)
+        .map_err(|error| StoreError::InvalidData(format!("append {}: {error}", path.display())))?;
+    Ok(bytes.len())
+}
+
+pub fn read_conversation(path: &Path) -> StoreResult<Vec<RecordedConversationEvent>> {
+    let file = fs::File::open(path)
+        .map_err(|error| StoreError::InvalidData(format!("open {}: {error}", path.display())))?;
+    let mut events = Vec::new();
+    let mut reader = BufReader::new(file);
+    loop {
+        let mut line = String::new();
+        let read = reader
+            .read_line(&mut line)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        if read == 0 {
+            break;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str(&line) {
+            Ok(event) => events.push(event),
+            Err(_) if !line.ends_with('\n') => break,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(events)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        read_conversation, CaptureHandle, ContextAssetKind, ContextAssetSpec, ContextChannel,
+        ContextScope, PreparedTurnContext, TraceCaptureContext,
+    };
+    use crate::lfd::id::LfdId;
+
+    #[test]
+    fn prompt_manifest_covers_exact_bytes_and_tokens() {
+        let prepared = PreparedTurnContext::from_prompts("system α", "task β");
+        let system = prepared.system.as_ref().expect("system channel");
+        assert_eq!(system.assets[0].channel, ContextChannel::System);
+        assert_eq!(system.assets[0].byte_end, system.text.len() as u64);
+        assert_eq!(
+            prepared
+                .assets()
+                .map(|asset| asset.attributed_tokens)
+                .sum::<u64>(),
+            prepared.total_tokens()
+        );
+    }
+
+    #[test]
+    fn empty_system_prompt_is_explicitly_absent() {
+        let prepared = PreparedTurnContext::from_prompts("", "task");
+        assert!(prepared.system.is_none());
+        assert_eq!(prepared.assets().count(), 1);
+    }
+
+    #[test]
+    fn conversation_reader_keeps_complete_crash_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        std::fs::write(
+            &path,
+            "{\"schema_version\":1,\"seq\":0,\"ts\":\"2026-07-10T00:00:00Z\",\"turn_id\":null,\"payload\":{\"type\":\"capture_error\",\"message\":\"x\"}}\n{\"schema_version\":",
+        )
+        .unwrap();
+        assert_eq!(read_conversation(&path).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn semantic_assets_and_assembly_cover_every_prompt_byte() {
+        let prepared = PreparedTurnContext::from_attributed_prompts(
+            "before GUIDE after",
+            "task",
+            vec![ContextAssetSpec {
+                channel: ContextChannel::System,
+                kind: ContextAssetKind::Loopflow,
+                scope: ContextScope::System,
+                label: "guide".to_string(),
+                source_path: None,
+                included_by: "test".to_string(),
+                content: "GUIDE".to_string(),
+            }],
+            Vec::new(),
+        );
+        assert_eq!(prepared.decisions.len(), 1);
+        assert_eq!(prepared.decisions[0].asset_position, Some(1));
+        let system = prepared.system.unwrap();
+        assert_eq!(system.assets.len(), 3);
+        assert_eq!(system.assets[1].kind, ContextAssetKind::Loopflow);
+        assert_eq!(
+            system.assets.iter().map(|asset| asset.bytes).sum::<u64>(),
+            system.text.len() as u64
+        );
+        assert_eq!(
+            system
+                .assets
+                .iter()
+                .map(|asset| asset.attributed_tokens)
+                .sum::<u64>(),
+            system.tokens
+        );
+    }
+
+    #[test]
+    fn capture_persists_private_artifacts_and_queryable_rows() {
+        let _guard = crate::journal::test_env_lock();
+        let previous = std::env::var_os("LF_HOME");
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let run_id = LfdId::new();
+        let context = TraceCaptureContext {
+            run_id: run_id.clone(),
+            process_id: LfdId::new(),
+            repo: home.path().to_path_buf(),
+            worktree: home.path().to_path_buf(),
+            wave: Some("intelligence".to_string()),
+            flow: None,
+            skill: Some("implement".to_string()),
+        };
+        let capture = CaptureHandle::begin(
+            context,
+            PreparedTurnContext::from_prompts("system", "task"),
+            super::CaptureStart {
+                provider: "codex".to_string(),
+                model: Some("gpt-5".to_string()),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: 1,
+                render_ms: 2,
+                raw_provider: true,
+            },
+        )
+        .unwrap();
+        capture.finish("completed", false).unwrap();
+
+        let store = crate::journal::open_ledger().unwrap();
+        let launches = store.agent_launches_matching(run_id.as_str()).unwrap();
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].capture_status, "complete");
+        assert!(std::path::Path::new(&launches[0].conversation_path).is_file());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&launches[0].conversation_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+
+        match previous {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
+        }
+    }
+}

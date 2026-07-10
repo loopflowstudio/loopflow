@@ -72,8 +72,10 @@ struct DoctorReport<'a> {
 }
 
 pub fn run(json: bool) -> Result<()> {
-    let events = open_ledger()?.list_run_events_since(0)?;
-    let checks = audit(&events);
+    let store = open_ledger()?;
+    let events = store.list_run_events_since(0)?;
+    let mut checks = audit(&events);
+    checks.push(check_capture(&store, &events)?);
     if json {
         println!(
             "{}",
@@ -90,6 +92,210 @@ pub fn run(json: bool) -> Result<()> {
         return Err(anyhow!("run ledger audit failed"));
     }
     Ok(())
+}
+
+fn check_capture(
+    store: &crate::lfdb::sqlite::SqliteStore,
+    events: &[RunEventRow],
+) -> Result<Check> {
+    let required_after = store.trace_capture_required_after()?;
+    let launches = store.agent_launches_since(required_after)?;
+    let launch_ids = launches
+        .iter()
+        .map(|launch| launch.id.clone())
+        .collect::<Vec<_>>();
+    let turns = store.agent_turns_for_launches(&launch_ids)?;
+    let turn_ids = turns.iter().map(|turn| turn.id.clone()).collect::<Vec<_>>();
+    let assets = store.context_assets_for_turns(&turn_ids)?;
+
+    let launch_processes: HashSet<&str> = launches
+        .iter()
+        .map(|launch| launch.process_id.as_str())
+        .collect();
+    let missing_launches: HashSet<&str> = events
+        .iter()
+        .filter(|event| event.ts >= required_after && event.provider.is_some())
+        .map(|event| event.process_id.as_str())
+        .filter(|process| !launch_processes.contains(process))
+        .collect();
+
+    let root = crate::trace::trace_root();
+    let mut failures = Vec::new();
+    let mut prompt_only = 0;
+    for launch in &launches {
+        if !Path::new(&launch.artifact_dir).starts_with(&root)
+            || !Path::new(&launch.conversation_path).starts_with(&root)
+        {
+            failures.push(format!(
+                "{} has a path outside {}",
+                launch.id,
+                root.display()
+            ));
+        }
+        if launch.capture_status == "prompt_only" {
+            prompt_only += 1;
+        }
+        if launch.capture_status == "partial" {
+            failures.push(format!("{} is partial", launch.id));
+        }
+        if launch.capture_status == "capturing"
+            && events.iter().any(|event| {
+                event.process_id == launch.process_id
+                    && event.node == "run"
+                    && event.event != "started"
+            })
+        {
+            failures.push(format!(
+                "{} stayed capturing after its process ended",
+                launch.id
+            ));
+        }
+        if launch.capture_status == "complete" {
+            match crate::trace::read_conversation(Path::new(&launch.conversation_path)) {
+                Ok(records) => {
+                    if records
+                        .windows(2)
+                        .any(|pair| pair[1].seq != pair[0].seq + 1)
+                    {
+                        failures.push(format!("{} has non-monotonic events", launch.id));
+                    }
+                }
+                Err(error) => failures.push(format!("{}: {error}", launch.id)),
+            }
+            if !turns.iter().any(|turn| {
+                turn.launch_id == launch.id
+                    && matches!(turn.status.as_str(), "completed" | "failed" | "interrupted")
+            }) {
+                failures.push(format!("{} has no terminal turn", launch.id));
+            }
+        }
+    }
+
+    let mut assets_by_turn: HashMap<&str, Vec<&crate::trace::ContextAssetRow>> = HashMap::new();
+    for asset in &assets {
+        assets_by_turn
+            .entry(asset.turn_id.as_str())
+            .or_default()
+            .push(asset);
+    }
+    for turn in turns
+        .iter()
+        .filter(|turn| turn.context_coverage == "assembled")
+    {
+        if !Path::new(&turn.task_prompt_path).is_file()
+            || turn
+                .system_prompt_path
+                .as_deref()
+                .is_some_and(|path| !Path::new(path).is_file())
+        {
+            failures.push(format!("{} is missing a prompt artifact", turn.id));
+        }
+        let Some(turn_assets) = assets_by_turn.get(turn.id.as_str()) else {
+            failures.push(format!("{} has no context assets", turn.id));
+            continue;
+        };
+        let system: u64 = turn_assets
+            .iter()
+            .filter(|row| row.asset.channel == crate::trace::ContextChannel::System)
+            .map(|row| row.asset.attributed_tokens)
+            .sum();
+        let task: u64 = turn_assets
+            .iter()
+            .filter(|row| row.asset.channel == crate::trace::ContextChannel::Task)
+            .map(|row| row.asset.attributed_tokens)
+            .sum();
+        if system as i64 != turn.system_tokens || task as i64 != turn.task_tokens {
+            failures.push(format!("{} has mismatched asset tokens", turn.id));
+        }
+    }
+
+    for process_id in launch_processes {
+        let terminal = events
+            .iter()
+            .filter(|event| event.process_id == process_id)
+            .filter(|event| event.node == "run" && event.event != "started")
+            .max_by_key(|event| event.seq);
+        let Some(terminal) = terminal else {
+            continue;
+        };
+        let process_launches: HashSet<&str> = launches
+            .iter()
+            .filter(|launch| launch.process_id == process_id)
+            .map(|launch| launch.id.as_str())
+            .collect();
+        let process_turns = turns
+            .iter()
+            .filter(|turn| process_launches.contains(turn.launch_id.as_str()))
+            .collect::<Vec<_>>();
+        let input: i64 = process_turns
+            .iter()
+            .filter_map(|turn| turn.provider_input_tokens)
+            .sum();
+        let output: i64 = process_turns
+            .iter()
+            .filter_map(|turn| turn.provider_output_tokens)
+            .sum();
+        let cache: i64 = process_turns
+            .iter()
+            .filter_map(|turn| turn.cache_read_tokens)
+            .sum();
+        if terminal.input_tokens.is_some_and(|value| value != input)
+            || terminal.output_tokens.is_some_and(|value| value != output)
+            || terminal
+                .cache_read_tokens
+                .is_some_and(|value| value != cache)
+        {
+            failures.push(format!(
+                "{process_id} turn usage disagrees with its terminal row"
+            ));
+        }
+    }
+
+    if !missing_launches.is_empty() {
+        failures.push(format!(
+            "{} agent-bearing process(es) have no launch",
+            missing_launches.len()
+        ));
+    }
+    if !failures.is_empty() {
+        return Ok(Check::fail(
+            "capture",
+            format!(
+                "{} failure(s); {} launches, {} turns, {} bytes: {}",
+                failures.len(),
+                launches.len(),
+                turns.len(),
+                launches
+                    .iter()
+                    .map(|launch| launch.conversation_bytes)
+                    .sum::<i64>(),
+                failures.into_iter().take(4).collect::<Vec<_>>().join("; ")
+            ),
+        ));
+    }
+    if prompt_only > 0 {
+        return Ok(Check::warn(
+            "capture",
+            format!(
+                "{} launches and {} turns are consistent; {prompt_only} interactive launch(es) are prompt-only",
+                launches.len(),
+                turns.len()
+            ),
+        ));
+    }
+    Ok(Check::ok(
+        "capture",
+        format!(
+            "{} launches, {} turns, {} assets, {} bytes",
+            launches.len(),
+            turns.len(),
+            assets.len(),
+            launches
+                .iter()
+                .map(|launch| launch.conversation_bytes)
+                .sum::<i64>()
+        ),
+    ))
 }
 
 pub fn audit(events: &[RunEventRow]) -> Vec<Check> {

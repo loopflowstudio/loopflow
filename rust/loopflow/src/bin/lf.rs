@@ -865,15 +865,33 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Usage { json, days }) => {
                 loopflow::lf::commands::usage::run(*json, *days)
             }
+            Some(Commands::Context {
+                days,
+                wave,
+                repo,
+                json,
+            }) => {
+                loopflow::lf::commands::context::run(*days, wave.as_deref(), repo.as_deref(), *json)
+            }
             Some(Commands::Doctor { json }) => loopflow::lf::commands::doctor::run(*json),
             Some(Commands::Ls { json }) => loopflow::lf::commands::waves::ls(*json),
             Some(Commands::Status { wave, json }) => {
                 loopflow::lf::commands::waves::status(wave.as_deref(), *json)
             }
             Some(Commands::Runs { json }) => loopflow::lf::commands::runs::list(*json),
-            Some(Commands::Trace { run_id, json }) => {
-                loopflow::lf::commands::runs::trace(run_id, *json)
-            }
+            Some(Commands::Trace {
+                run_id,
+                json,
+                events,
+                jsonl,
+                launch,
+            }) => loopflow::lf::commands::runs::trace(
+                run_id,
+                *json,
+                *events,
+                *jsonl,
+                launch.as_deref(),
+            ),
             Some(Commands::Chat {
                 text,
                 follow,
@@ -976,6 +994,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Skip)
         | Some(Commands::FlowStep { .. })
         | Some(Commands::Usage { .. })
+        | Some(Commands::Context { .. })
         | Some(Commands::Tokens { .. })
         | Some(Commands::Doctor { .. })
         | Some(Commands::Ls { .. })

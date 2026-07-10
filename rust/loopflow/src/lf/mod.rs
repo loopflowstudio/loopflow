@@ -281,6 +281,21 @@ pub enum Commands {
         #[arg(long, default_value_t = 30)]
         days: u32,
     },
+    /// Inspect supplied agent context and its contributing assets
+    Context {
+        /// Window in days
+        #[arg(long, default_value_t = 30)]
+        days: u32,
+        /// Filter by wave
+        #[arg(long)]
+        wave: Option<String>,
+        /// Filter by absolute main-repo path
+        #[arg(long)]
+        repo: Option<String>,
+        /// Emit the stable context dataset as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Audit the local run ledger: continuity, vocabulary, attribution, identity, lineage, coverage
     Doctor {
         /// Emit the audit as JSON
@@ -316,6 +331,15 @@ pub enum Commands {
         /// Emit the process tree as JSON
         #[arg(long)]
         json: bool,
+        /// Render the normalized recorded conversation
+        #[arg(long, conflicts_with = "json")]
+        events: bool,
+        /// Stream stored event objects as JSONL
+        #[arg(long, requires = "events")]
+        jsonl: bool,
+        /// Select one launch by id prefix
+        #[arg(long, requires = "events")]
+        launch: Option<String>,
     },
     /// Converse with a served mind's thread (humans); --follow replays it and
     /// --steer reaches the live body. Agents use `lf radio pub` for

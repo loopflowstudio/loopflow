@@ -1,11 +1,6 @@
-use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::header;
-use axum::response::Response;
 use axum::Json;
-use bytes::Bytes;
 use serde::Deserialize;
-use tokio_stream::wrappers::ReceiverStream;
 
 use crate::lfd::http::dto::{run_dto, ListResponse, RunDto};
 use crate::lfd::http::routes::{build_wave_queue_views, resolve_wave_id};
@@ -13,7 +8,6 @@ use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::live_pr::{build_live_pr_snapshot, run_live_pr_key};
-use crate::lfd::output::read_output_log;
 
 #[derive(Deserialize, Default)]
 pub struct ListRunsQuery {
@@ -46,56 +40,6 @@ pub async fn list_runs_for_wave_handler(
 ) -> ApiResult<ListResponse<RunDto>> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
     list_runs(&state, Some(wave_id), query).await
-}
-
-/// Replay a wave's most recent run output from its durable per-run log file.
-/// There is no live follow anymore: the old `/ws` output broadcast bus is gone
-/// (a wave writes its own logs), so this is a pure disk read — a snapshot of
-/// what's on disk, not a stream off a center.
-pub async fn wave_logs_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-) -> Result<
-    Response,
-    (
-        axum::http::StatusCode,
-        Json<crate::lfd::http::dto::ErrorResponse>,
-    ),
-> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-
-    // Most recent run for this wave (active or completed).
-    let latest_run = state
-        .store
-        .list_runs(Some(&wave_id), Some(1))
-        .await
-        .map_err(map_store_error)?
-        .into_iter()
-        .next();
-
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(128);
-
-    tokio::spawn(async move {
-        if let Some(run) = latest_run {
-            let output_dir = crate::lfd::default_output_dir();
-            if let Some((lines, _offset)) = read_output_log(&output_dir, &run.id.to_string()) {
-                for line in &lines {
-                    if tx.send(Ok(Bytes::from(format!("{line}\n")))).await.is_err() {
-                        return;
-                    }
-                }
-            }
-        }
-    });
-
-    let stream = ReceiverStream::new(rx);
-    let body = Body::from_stream(stream);
-    let mut response = Response::new(body);
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        header::HeaderValue::from_static("text/plain"),
-    );
-    Ok(response)
 }
 
 async fn list_runs(

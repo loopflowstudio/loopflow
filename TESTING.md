@@ -138,6 +138,20 @@ schema chain. `the_migration_starts_the_ledger_empty` seeds the pre-057
 then recreates `process_id` as `NOT NULL`. A separate storage regression proves
 the rebuilt table rejects vocabulary drift.
 
+Trace capture has focused storage, prompt-accounting, harness, and reader
+checks:
+
+```bash
+cargo test -p loopflow trace
+cargo test -p loopflow journal
+cargo test -p loopflow lfdb
+cargo test -p loopflow harness::conformance_tests
+```
+
+After schema or capture changes, run `lf trace`, `lf context --json`, and
+`lf doctor --json` against the long-lived local ledger. Fresh stores cannot
+expose applied-migration drift or missing production launch coverage.
+
 ## E2E Tests
 
 Shell-based workflows for CLI and live HTTP API behavior.

@@ -1,9 +1,9 @@
 use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::{
-    check_cli_available, durable_log_dir, launch_agent, load_config_or_default, parse_agent,
-    prepare_launch_prompt, write_prompt_log, AgentCapabilities, AgentConfig, Config,
-    ContextBreakdown, ContextSourceOverrides, LaunchPromptInput, LaunchTarget, ProcessConfig,
-    PromptComponents, SkillSyncOptions, StreamFormat, Surface,
+    check_cli_available, launch_agent, load_config_or_default, parse_agent, prepare_launch_prompt,
+    write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
+    LaunchPromptInput, LaunchTarget, ProcessConfig, PromptComponents, SkillSyncOptions,
+    StreamFormat, Surface,
 };
 use crate::lf::commands::util::{find_repo_root, launch_session};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -65,13 +65,15 @@ struct PromptBuild {
     process: ProcessConfig,
     capabilities: AgentCapabilities,
     components: PromptComponents,
-    breakdown: ContextBreakdown,
+    context: crate::trace::PreparedTurnContext,
     prompt: String,
     harness: String,
     model: Option<String>,
     skill_name: Option<String>,
     log_name: String,
     fast_path: Option<String>,
+    context_gather_ms: u64,
+    context_render_ms: u64,
 }
 
 /// A headless skill turn ready for the live session harness. The caller owns
@@ -82,8 +84,11 @@ struct PromptBuild {
 pub(crate) struct PreparedHarnessTurn {
     pub config: AgentConfig,
     pub input: String,
+    pub context: crate::trace::PreparedTurnContext,
     pub harness: String,
     pub model: Option<String>,
+    pub context_gather_ms: u64,
+    pub context_render_ms: u64,
 }
 
 pub(crate) fn prepare_harness_turn(
@@ -100,11 +105,17 @@ pub(crate) fn prepare_harness_turn(
     };
     let mut built = build_prompt(Some(skill), Some(message), &cli)?;
     let input = std::mem::take(&mut built.agent_config.task_prompt);
+    let system_prompt =
+        crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config);
+    let context = attributed_context(&built.components, &system_prompt, &input);
     Ok(PreparedHarnessTurn {
         config: built.agent_config,
         input,
+        context,
         harness: built.harness,
         model: built.model,
+        context_gather_ms: built.context_gather_ms,
+        context_render_ms: built.context_render_ms,
     })
 }
 
@@ -186,6 +197,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         elapsed_ms = prepare_start.elapsed().as_millis(),
         "prepared launch prompt"
     );
+    let context_gather_ms = prepare_start.elapsed().as_millis() as u64;
     let agent = prepared
         .config
         .agent
@@ -243,20 +255,28 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         }
     }
 
+    let components = prepared.components;
+    let effective_system =
+        crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
+    let render_start = Instant::now();
+    let context = attributed_context(&components, &effective_system, &agent_config.task_prompt);
+    let context_render_ms = render_start.elapsed().as_millis() as u64;
     Ok(PromptBuild {
         repo_root,
         config,
         agent_config,
         process,
         capabilities,
-        components: prepared.components,
-        breakdown: prepared.breakdown,
+        components,
+        context,
         prompt,
         harness,
         model,
         skill_name,
         log_name,
         fast_path,
+        context_gather_ms,
+        context_render_ms,
     })
 }
 
@@ -325,7 +345,7 @@ fn skill_launch_seed(
 
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
     let colors = Colors::new();
-    let header = format_context_header(&built.breakdown);
+    let header = format_context_header(&built.context, &built.components);
     let direction_names: Vec<String> = built
         .components
         .directions
@@ -368,14 +388,28 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     if forced_target.is_some() || !built.process.auto {
         info!("launching interactive vendor session");
-        launch_session(
+        let capture = begin_capture(
+            built,
+            &built.prompt,
+            "",
+            if cli.ide { "ide" } else { "tui" },
+        )?;
+        let result = launch_session(
             forced_target.unwrap_or(built.config.session.launch),
             &built.harness,
             built.model.as_deref(),
             &built.repo_root,
             &built.prompt,
+        );
+        capture.finish(
+            if result.is_ok() {
+                "completed"
+            } else {
+                "failed"
+            },
+            true,
         )?;
-        return Ok(());
+        return result;
     }
 
     let cli_check_start = Instant::now();
@@ -390,23 +424,25 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         "checked cli availability"
     );
 
-    let write_prompt_start = Instant::now();
-    write_prompt_log(&built.repo_root, &built.prompt, &built.log_name, None)?;
-    debug!(
-        elapsed_ms = write_prompt_start.elapsed().as_millis(),
-        "wrote prompt log"
-    );
+    let capture = begin_capture(
+        built,
+        &built.agent_config.task_prompt,
+        &crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config),
+        "headless",
+    )?;
 
     // Skill-launched skills clear the system prompt (the seed carries everything
     // in the task prompt). Don't write or pass a context file in that case: codex
     // treats an empty `model_instructions_file` as an error.
     let context_file_start = Instant::now();
-    let context_file = if built.agent_config.system_prompt.trim().is_empty() {
+    let effective_system =
+        crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config);
+    let context_file = if effective_system.trim().is_empty() {
         None
     } else {
         Some(write_prompt_log(
             &built.repo_root,
-            &built.agent_config.system_prompt,
+            &effective_system,
             &format!("{}.context", built.log_name),
             None,
         )?)
@@ -420,6 +456,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     let mut process = built.process.clone();
     process.context_file = context_file;
     process.stream_format = StreamFormat::Human(use_color);
+    process.capture = Some(capture.clone());
 
     // Set up directive relay so agent skills can issue shell directives
     // (e.g. `cd` after `lf pr land` rotates worktrees).
@@ -445,6 +482,11 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         relay_directives(&relay, target);
     }
 
+    let outcome = match &result {
+        Ok(result) if result.exit_code == 0 => "completed",
+        Ok(_) | Err(_) => "failed",
+    };
+    capture.finish(outcome, false)?;
     let result = result?;
     debug!(
         elapsed_ms = launch_start.elapsed().as_millis(),
@@ -454,15 +496,246 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     if result.exit_code == 0 {
         Ok(())
     } else {
-        let log_hint = durable_log_dir(&built.repo_root)
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "~/.lf/logs/".to_string());
         Err(anyhow!(
             "agent exited with code {}. Check {} for details.",
             result.exit_code,
-            log_hint
+            capture.artifact_dir().display()
         ))
     }
+}
+
+fn begin_capture(
+    built: &PromptBuild,
+    task_prompt: &str,
+    system_prompt: &str,
+    surface: &str,
+) -> Result<crate::trace::CaptureHandle> {
+    let context =
+        crate::journal::trace_capture_context(&built.repo_root, None, built.skill_name.clone())
+            .ok_or_else(|| anyhow!("trace capture identity is unavailable before agent launch"))?;
+    let prepared = attributed_context(&built.components, system_prompt, task_prompt);
+    crate::trace::CaptureHandle::begin(
+        context,
+        prepared,
+        crate::trace::CaptureStart {
+            provider: built.harness.clone(),
+            model: built.model.clone(),
+            surface: surface.to_string(),
+            input_op: "initial".to_string(),
+            gather_ms: built.context_gather_ms,
+            render_ms: built.context_render_ms,
+            raw_provider: surface == "headless",
+        },
+    )
+    .map_err(|error| anyhow!("failed to establish trace capture before agent launch: {error}"))
+}
+
+fn attributed_context(
+    components: &PromptComponents,
+    system_prompt: &str,
+    task_prompt: &str,
+) -> crate::trace::PreparedTurnContext {
+    use crate::engine::prompt::{DiffTier, DocumentSource};
+    use crate::trace::{
+        ContextAssetKind as Kind, ContextAssetSpec, ContextChannel, ContextDecision,
+        ContextDecisionKind, ContextScope as Scope,
+    };
+
+    let mut specs = Vec::new();
+    let mut push = |content: &str,
+                    kind: Kind,
+                    scope: Scope,
+                    label: String,
+                    source_path: Option<String>,
+                    included_by: &str| {
+        let channel = if system_prompt.contains(content) {
+            Some(ContextChannel::System)
+        } else if task_prompt.contains(content) {
+            Some(ContextChannel::Task)
+        } else {
+            None
+        };
+        if let Some(channel) = channel.filter(|_| !content.is_empty()) {
+            specs.push(ContextAssetSpec {
+                channel,
+                kind,
+                scope,
+                label,
+                source_path,
+                included_by: included_by.to_string(),
+                content: content.to_string(),
+            });
+        }
+    };
+
+    if components.operate {
+        push(
+            &crate::engine::prompt::loopflow_section(),
+            Kind::Loopflow,
+            Scope::System,
+            "Loopflow operating guide".to_string(),
+            None,
+            "operate",
+        );
+    }
+    push(
+        components.surface.instructions(),
+        Kind::Surface,
+        Scope::System,
+        format!("{:?} surface", components.surface),
+        None,
+        "surface",
+    );
+    for direction in &components.directions {
+        push(
+            &direction.content,
+            Kind::Direction,
+            Scope::Task,
+            direction.name.clone(),
+            None,
+            "direction",
+        );
+    }
+    if let Some(wave) = &components.wave {
+        push(
+            &format!("<lf:wave name=\"{wave}\">"),
+            Kind::WaveGoal,
+            Scope::Wave,
+            wave.clone(),
+            Some(format!("wave/{wave}/GOAL.md")),
+            "wave",
+        );
+    }
+    if let Some(memory) = &components.wave_memory {
+        push(
+            &memory.content,
+            Kind::WaveMemory,
+            Scope::Wave,
+            "wave memory".to_string(),
+            Some(memory.path.clone()),
+            "wave",
+        );
+    }
+    if let Some(chat) = &components.wave_chat {
+        push(
+            chat,
+            Kind::WaveChat,
+            Scope::Wave,
+            "recent wave chat".to_string(),
+            None,
+            "wave",
+        );
+    }
+    for document in &components.docs {
+        let kind = if document.source == DocumentSource::Scratch {
+            Kind::Scratch
+        } else if document.path.ends_with("AGENTS.md") || document.path.ends_with("CLAUDE.md") {
+            Kind::RepoInstructions
+        } else {
+            Kind::Docs
+        };
+        push(
+            &document.content,
+            kind,
+            Scope::Repo,
+            document.path.clone(),
+            Some(document.path.clone()),
+            "docs",
+        );
+    }
+    for document in &components.diff_files {
+        push(
+            &document.content,
+            Kind::Diff,
+            Scope::Repo,
+            document.path.clone(),
+            Some(document.path.clone()),
+            "diff_files",
+        );
+    }
+    if let Some(diff) = &components.diff {
+        push(
+            diff,
+            Kind::Diff,
+            Scope::Repo,
+            "branch diff".to_string(),
+            None,
+            "diff",
+        );
+    }
+    for summary in &components.summaries {
+        push(
+            &summary.content,
+            Kind::ParentSummary,
+            Scope::Task,
+            summary.path.clone(),
+            Some(summary.path.clone()),
+            "summary",
+        );
+    }
+    if let Some(clipboard) = &components.clipboard {
+        push(
+            clipboard,
+            Kind::Clipboard,
+            Scope::User,
+            "clipboard".to_string(),
+            None,
+            "clipboard",
+        );
+    }
+    if let Some(skill) = &components.skill {
+        if let Some(content) = &skill.content {
+            push(
+                content,
+                Kind::Skill,
+                Scope::Step,
+                skill.name.clone(),
+                None,
+                "skill",
+            );
+        } else {
+            push(
+                &skill.name,
+                Kind::Skill,
+                Scope::Step,
+                skill.name.clone(),
+                None,
+                "vendor_skill",
+            );
+        }
+    }
+    if let Some(message) = &components.message {
+        push(
+            message,
+            Kind::UserMessage,
+            Scope::User,
+            "user message".to_string(),
+            None,
+            "message",
+        );
+    }
+
+    let mut decisions = Vec::new();
+    if components.diff_tier == DiffTier::StatOnly {
+        decisions.push(ContextDecision {
+            position: 0,
+            kind: "diff".to_string(),
+            label: "branch diff".to_string(),
+            source_path: None,
+            decision: ContextDecisionKind::StatOnly,
+            reason: "unified diff exceeded the context tier limit".to_string(),
+            original_bytes: None,
+            original_tokens: None,
+            asset_position: None,
+        });
+    }
+
+    crate::trace::PreparedTurnContext::from_attributed_prompts(
+        system_prompt,
+        task_prompt,
+        specs,
+        decisions,
+    )
 }
 
 /// Forward safe shell directives from the agent's relay file to the real

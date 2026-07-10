@@ -141,7 +141,6 @@ pub fn router(state: HttpState) -> Router {
             "/waves/{wave_id}/runs",
             get(runs::list_runs_for_wave_handler),
         )
-        .route("/waves/{wave_id}/logs", get(runs::wave_logs_handler))
         .route("/runs", get(runs::list_runs_handler))
         .route("/worktrees", get(worktrees::list_worktrees_handler))
         .layer(DefaultBodyLimit::max(max_json_body_bytes))

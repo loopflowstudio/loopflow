@@ -63,6 +63,23 @@ or 5 GB/year compressed; even the unusually active last week projects to 45
 GB/year raw or 15 GB/year compressed against 201 GiB free. Persist first.
 Compression, content-addressed bodies, and rotation are later optimizations.
 
+### Current branch starting point
+
+This worktree already contains an unintegrated `rust/loopflow/src/trace.rs` and
+`061_trace_capture.sql` scaffold. Treat it as a head start, not as a completed
+slice. It currently stores one assembly asset per whole prompt, puts context
+timings on launches, writes absolute artifact paths, creates an empty raw file
+unconditionally, has no multi-turn context creation, and is not wired into the
+production launch/read/doctor paths. Its tables and enums also use the older
+mixed kind/scope taxonomy that this document replaces.
+
+As of 2026-07-10, the long-lived `~/.lf/lfd.db` does not list
+`061_trace_capture` in `schema_migrations`. The implementing pass must check
+that again before editing the migration. If still unapplied, replace the
+unlanded 061 scaffold in place. If it has been applied to a durable ledger,
+freeze 061 and add a 062 forward migration that preserves captured rows while
+converging to this schema. Never make the answer depend on a fresh test DB.
+
 ## Scope
 
 ### In this branch
@@ -106,10 +123,11 @@ Keep a 1:1 mapping with what actually happens:
 - **Context snapshot**: what Loopflow supplied for one turn. The initial turn
   is fully enumerable; resumed provider history may only have provider-reported
   totals, and must say so.
-- **Context asset**: one attributable region of a system/task prompt: operating
-  guide, surface instructions, repo instructions, skill, wave goal, project,
-  memory, recent chat, parent summary, docs, scratch, diff, clipboard, or user
-  message.
+- **Context asset**: one attributable region of a system/task prompt. Its kind
+  says what it is (instructions, goal, memory, document, diff, message); its
+  scope says where it came from (global, provider, repo, wave, project, task,
+  step, or user). Keep these axes separate so “goal” can be compared across
+  wave, project, task, and delegated-child boundaries.
 - **Conversation record**: an append-only normalized event stream, plus the raw
   provider lines Loopflow happened to observe.
 
@@ -141,6 +159,9 @@ Large bodies live on disk. SQLite owns searchable metadata and relationships.
 - Later turns omit `system.md` when Loopflow did not resend a system prompt.
 - Source content is recovered from byte ranges in these exact prompt files;
   context assets do not need separate body copies.
+- Artifact paths stored in SQLite are relative to `~/.lf/traces`; resolve them
+  through one traversal-safe path helper. `provider_session_path` is the sole
+  optional external path and is never treated as a Loopflow-owned artifact.
 - Directories are mode `0700`; files are `0600`. Everything is local and
   gitignored. Capture may contain pasted secrets or tool output, so no content
   is printed unless the user explicitly requests prompts/events.
@@ -153,7 +174,8 @@ Do not write transcript or prompt blobs into SQLite.
 
 ## Database schema
 
-Use the next available migration (`059_trace_capture.sql` on this branch).
+Use the next available migration (`061_trace_capture.sql` on this branch;
+`059_bus` and `060_provider_token_oauth_client_id` already exist).
 Migration numbers are identities: if another migration lands first, renumber
 forward rather than editing an applied migration.
 
@@ -244,13 +266,13 @@ CREATE TABLE context_assets (
     position BIGINT NOT NULL,
     channel TEXT NOT NULL CHECK (channel IN ('system', 'task')),
     kind TEXT NOT NULL CHECK (kind IN (
-        'loopflow', 'surface', 'structured_reply', 'provider_wrapper',
-        'repo_instructions', 'skill', 'direction',
-        'wave_goal', 'project', 'wave_memory', 'wave_chat', 'parent_summary',
-        'docs', 'scratch', 'diff', 'clipboard', 'user_message', 'assembly'
+        'operating_instructions', 'surface_instructions',
+        'provider_instructions', 'repo_instructions', 'skill_instructions',
+        'direction', 'goal', 'memory', 'chat', 'summary', 'document',
+        'scratch', 'diff', 'clipboard', 'user_message', 'assembly'
     )),
     scope TEXT NOT NULL CHECK (scope IN (
-        'system', 'repo', 'wave', 'project', 'task', 'step', 'user'
+        'global', 'provider', 'repo', 'wave', 'project', 'task', 'step', 'user'
     )),
     label TEXT NOT NULL,
     source_path TEXT,
@@ -271,10 +293,13 @@ CREATE TABLE context_decisions (
     turn_id TEXT NOT NULL REFERENCES agent_turns(id),
     position BIGINT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN (
-        'loopflow', 'surface', 'structured_reply', 'provider_wrapper',
-        'repo_instructions', 'skill', 'direction',
-        'wave_goal', 'project', 'wave_memory', 'wave_chat', 'parent_summary',
-        'docs', 'scratch', 'diff', 'clipboard', 'user_message', 'assembly'
+        'operating_instructions', 'surface_instructions',
+        'provider_instructions', 'repo_instructions', 'skill_instructions',
+        'direction', 'goal', 'memory', 'chat', 'summary', 'document',
+        'scratch', 'diff', 'clipboard', 'user_message', 'assembly'
+    )),
+    scope TEXT NOT NULL CHECK (scope IN (
+        'global', 'provider', 'repo', 'wave', 'project', 'task', 'step', 'user'
     )),
     label TEXT NOT NULL,
     source_path TEXT,
@@ -295,7 +320,10 @@ CREATE INDEX idx_context_decisions_decision ON context_decisions(decision);
 ```
 
 Drop the unused `run_events.context` column in the same forward migration and
-remove it from schema validation. It has no production data or API.
+remove it from schema validation. It has no production data or API. The
+migration must preserve every existing `run_events` row and its three indexes;
+the drifted-ledger test compares row count and summed terminal usage before and
+after migration.
 
 `agent_turns` is the source for per-turn usage. Existing cumulative
 `run_events` usage remains the process-boundary snapshot consumed by `lf usage`.
@@ -313,6 +341,14 @@ Put capture ownership under a new `trace` module, not in the product UI or
 provider adapters:
 
 ```rust
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(transparent)]
+pub struct AgentLaunchId(String);
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(transparent)]
+pub struct AgentTurnId(String);
+
 #[derive(Debug, Clone)]
 pub struct TraceCaptureContext {
     pub run_id: LfdId,
@@ -334,6 +370,45 @@ pub enum ContextChannel { System, Task }
 #[serde(rename_all = "snake_case")]
 pub enum ContextCoverage { Assembled, ProviderTotalOnly, Unknown }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum ContextAssetKind {
+    OperatingInstructions,
+    SurfaceInstructions,
+    ProviderInstructions,
+    RepoInstructions,
+    SkillInstructions,
+    Direction,
+    Goal,
+    Memory,
+    Chat,
+    Summary,
+    Document,
+    Scratch,
+    Diff,
+    Clipboard,
+    UserMessage,
+    Assembly,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum ContextScope { Global, Provider, Repo, Wave, Project, Task, Step, User }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum ContextDecisionKind {
+    Included,
+    Excluded,
+    Summarized,
+    StatOnly,
+    Truncated,
+    Deduplicated,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContextAsset {
     pub position: u32,
@@ -354,7 +429,8 @@ pub struct ContextAsset {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContextDecision {
     pub position: u32,
-    pub kind: String,
+    pub kind: ContextAssetKind,
+    pub scope: ContextScope,
     pub label: String,
     pub source_path: Option<String>,
     pub decision: ContextDecisionKind,
@@ -362,6 +438,16 @@ pub struct ContextDecision {
     pub original_bytes: Option<u64>,
     pub original_tokens: Option<u64>,
     pub asset_position: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptSection {
+    pub kind: ContextAssetKind,
+    pub scope: ContextScope,
+    pub label: String,
+    pub source_path: Option<String>,
+    pub included_by: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -386,13 +472,20 @@ pub struct ProviderInvocation {
     pub argv: Vec<String>,
 }
 
+#[derive(Debug)]
+pub struct ActiveAgentCapture {
+    pub launch_id: AgentLaunchId,
+    pub initial_turn_id: AgentTurnId,
+    // Owns the append writers and terminal-state transitions.
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordedConversationEvent {
     pub schema_version: u32,
     pub seq: u64,
     #[serde(with = "time::serde::rfc3339")]
     pub ts: OffsetDateTime,
-    pub turn_id: Option<String>,
+    pub turn_id: Option<AgentTurnId>,
     pub payload: RecordedConversationPayload,
 }
 
@@ -420,10 +513,30 @@ pub enum RecordedConversationPayload {
 
 DTOs and disk records get no serde defaults. Every absent field is explicitly
 `Option`. Public types derive `Debug`; growing enums are `#[non_exhaustive]`.
+The envelope `turn_id` is Loopflow’s stable turn id; vendor turn ids remain
+inside the provider event and the indexed `provider_turn_id` column.
+`ProviderInvocation.argv` participates in launch but is not persisted: capture
+provider/model/surface and observable events, never authentication environment,
+credentials, or command arguments that exist only to carry them.
 
 `ContextBreakdown` should not survive beside the new manifest as a second
 calculation. Derive the existing terminal header from `PreparedTurnContext` and
 its assets, then delete the old aggregate implementation.
+
+## One enforced launch gate
+
+All production paths that can spend provider tokens must call one
+`begin_agent_capture(context, invocation)` gate. It publishes the prompt
+artifacts and metadata, then returns `ActiveAgentCapture`; only after that may
+the caller invoke `launch_agent`, `Harness::start`, or the TUI/IDE handoff.
+Capture is not an optional callback on `AgentConfig`.
+
+Migrate and inventory the direct CLI/skill path, ops path, resident wave
+harness path (`prepare_harness_turn`/`run_harness_pass`), later steer/message
+turns, and interactive handoff. Keep the low-level `Harness` trait usable in
+provider conformance tests, but keep raw start helpers crate-private and make
+every production caller hold an active capture. The public production API
+should make bypassing the gate harder than using it.
 
 ## Context accounting
 
@@ -438,6 +551,16 @@ provider invocation builder finalizes strings and returns the exact
 Refactor the prompt formatter to emit ordered rendered sections. Each section
 knows its kind, scope, label, source path, and inclusion mechanism. Rendering
 concatenates those sections and records their byte ranges in the final channel.
+
+Do not flatten Loopflow-generated goals into `LaunchPromptInput.message` before
+attribution. Replace that single ambiguous input at its producers with ordered
+`PromptSection`s: CLI speech becomes `user_message/user`; a resident wave seed
+becomes `goal/wave`; a project or task seed becomes `goal/project` or
+`goal/task`; delegated intent becomes `goal/step` or `summary/step`. Migrate the
+wave, project, task, flow, and inline launch call sites together. This avoids
+having to scrape `<lf:...>` tags after rendering and makes “what parent intent
+did this child receive?” directly queryable. Provider-added wrappers become
+`provider_instructions/provider` sections during finalization.
 
 Token attribution has two values:
 
@@ -483,12 +606,22 @@ The core launch record is required. Failure to create the SQLite row, prompt
 files, or context assets aborts before vendor spend begins with an actionable
 error. A missing record must not be silent.
 
+SQLite and the filesystem cannot share a transaction. Use a recoverable
+two-phase publish: write prompt artifacts into a private staging directory,
+flush and atomically rename it to the final launch directory, then commit the
+launch/turn/assets/decisions in one SQLite transaction. If the database commit
+fails, remove the newly published directory best-effort and abort launch. If
+the process dies between rename and commit, `lf doctor` reports the orphan
+directory; no provider has started, so there is no unrecorded spend.
+
 ### 2. Persist the exact initial turn
 
 `prepare_launch_prompt` carries attributed sections into the provider builder;
 the resulting `ProviderInvocation` returns exact system/task bytes and the
 final `PreparedTurnContext`. Persist those bytes and all assets transactionally
-before calling the provider. Create the `agent_launches` and initial
+before calling the provider. Here “transactionally” means the two-phase
+artifact publish plus SQLite commit above, not a fictitious cross-store
+transaction. Create the `agent_launches` and initial
 `agent_turns` rows with `capturing`/`running` states.
 
 In-repo `.lf/prompts` files may still be written when a vendor needs a file.
@@ -507,6 +640,13 @@ For modern harnesses, insert a fan-out between the provider sender and the
 existing consumer. The fan-out appends every `ConversationEvent` in order, then
 forwards the unchanged event to `flowloop::wave` or the resident runtime. One
 writer sees every event; provider adapters do not each grow filesystem logic.
+
+Where a modern adapter receives a provider-native JSON notification before it
+normalizes it, send that payload through an optional raw-record sink owned by
+the same capture writer. The adapter may identify the provider stream but may
+not open files. When an SDK does not expose its original frame, record no fake
+raw event: the normalized stream remains the durable contract and
+`provider_events_path` stays absent.
 
 Persist emitted reasoning summaries/deltas when the provider supplies them.
 Do not infer or claim hidden reasoning.
@@ -544,6 +684,12 @@ Conversation append failure must not kill an already-running provider process.
 Warn once, append a `CaptureError` when possible, mark the launch partial, and
 make `lf doctor` fail. Do not silently continue for two weeks with empty data.
 
+Serialize each event into one buffer plus newline and issue one append while
+holding the launch writer lock. Flush after each record so a process crash
+leaves every acknowledged record readable; call `sync_data` at turn and launch
+terminal boundaries before committing the matching SQLite state. Readers
+ignore one unterminated crash-tail record, report it, and mark capture partial.
+
 ### 7. TUI and IDE handoff
 
 Persist exact prompts/context before handoff. Record provider and any announced
@@ -566,6 +712,7 @@ pub struct TraceDto {
     pub launches: Vec<AgentLaunchDto>,
     pub turns: Vec<AgentTurnDto>,
     pub assets: Vec<ContextAssetDto>,
+    pub decisions: Vec<ContextDecisionDto>,
 }
 ```
 
@@ -599,9 +746,16 @@ lf context [--days N] [--wave NAME] [--repo PATH] [--json]
 
 Human output has two sections:
 
-1. per-wave turn count, average/p50/p95 supplied context, average provider
-   input, complete/partial/prompt-only counts;
-2. asset-kind contribution totals and averages.
+1. per-wave launch/turn counts, average/p50/p95 **initial assembled context**,
+   average provider input across all turns where reported, and complete/
+   partial/prompt-only counts;
+2. asset-kind contribution totals and averages for those initial assembled
+   contexts, followed by follow-up-turn supplied input as a separate line.
+
+Do not mix tiny follow-up messages into the initial-context average. “Average
+context for a wave” means one initial assembled context per launch. Provider
+input across all turns is a second measure because it may include vendor-owned
+history that Loopflow cannot enumerate.
 
 JSON emits one payload:
 
@@ -631,7 +785,11 @@ Add a `capture` check after lineage:
 - asset attributed tokens reconcile exactly to system/task totals;
 - complete launches have parseable, monotonically sequenced conversation
   JSONL and a terminal turn;
-- DB paths remain inside `~/.lf/traces`;
+- Loopflow-owned DB paths are relative, traversal-safe, and resolve inside
+  `~/.lf/traces`; external vendor-session paths are checked only for current
+  availability;
+- staged/final artifact directories with no launch row are reported as
+  pre-launch orphans;
 - turn usage sums reconcile with the process’s terminal cumulative boundary;
 - missing raw vendor pointers are informational, not failures;
 - `prompt_only` is a warning, not a fabricated complete record;
@@ -667,7 +825,8 @@ branch testable; none is optional.
 
 ### Slice 1 — schema and artifact store
 
-- Add migration and typed lfdb rows/queries for launches, turns, and assets.
+- Add migration and typed lfdb rows/queries for launches, turns, assets, and
+  inclusion decisions.
 - Add `trace_capture_meta.required_after`.
 - Add safe artifact path construction and file permissions.
 - Add append/read helpers for normalized and raw JSONL.
@@ -675,10 +834,13 @@ branch testable; none is optional.
 
 ### Slice 2 — exact prompt manifest
 
+- Replace flattened generated messages at inline, wave, project, task, and
+  flow call sites with typed `PromptSection`s.
 - Refactor rendering into ordered attributed sections and finalize them at a
   provider invocation boundary after all provider-specific prompt mutation.
 - Replace `ContextBreakdown` with the exact `PreparedTurnContext` manifest.
-- Persist prompt bytes/assets before launch.
+- Persist prompt bytes, assets, inclusion decisions, and creation timings
+  before launch.
 - Derive the existing terminal context header from the manifest.
 - Keep runtime `.lf/prompts`; stop new durable `~/.lf/logs` copies.
 
@@ -686,6 +848,8 @@ branch testable; none is optional.
 
 - Capture user inputs.
 - Fan out all modern `ConversationEvent`s before runtime folding.
+- Tee provider-native notifications from modern adapters that already receive
+  them through the shared raw sink.
 - Tee one-shot raw lines and normalized `StreamEvent`s.
 - Persist turn usage and capture terminal states.
 - Mark TUI/IDE launches prompt-only with provider receipts.
@@ -727,6 +891,8 @@ branch testable; none is optional.
 
 ### Provider coverage
 
+- CLI, ops, resident-harness, and TUI/IDE fixture launches each have a durable
+  launch row before the fake provider observes its first start call.
 - Existing Claude, Codex, and OpenCode conformance fixtures are recorded and
   replayed through `RecordedConversationEvent` without losing event types.
 - User input precedes provider turn start.
@@ -734,17 +900,22 @@ branch testable; none is optional.
   usage, completion, interruption, and error events persist.
 - The one-shot stream path records raw stdout/stderr and normalized text/tool/
   usage/result events.
+- Modern adapter fixtures retain provider-native notifications when the adapter
+  receives them, without making raw capture a prerequisite for completeness.
 - TUI/IDE capture is prompt-only and never claims a transcript.
 
 ### Ledger and readers
 
 - Fresh migration builds all constraints and indexes.
-- A drifted pre-059 fixture migrates without touching historical run evidence.
+- A drifted pre-061 fixture migrates without touching historical run evidence.
+- Dropping `run_events.context` preserves row count, process ids, terminal
+  usage totals, and run/process/time indexes.
 - `lf trace --json` round-trips the full envelope.
 - `lf trace --events --jsonl` streams valid records for one launch.
 - `lf context --json` filters by days/wave/repo and carries enough ids to join
   every asset to one turn and trace.
-- Average/p50/p95 grouping counts each turn once, not once per asset.
+- Average/p50/p95 initial-context grouping counts each launch once, not each
+  turn or asset; all-turn provider aggregates count each eligible turn once.
 - `lf doctor` catches missing launch rows, bad paths, token mismatch, malformed
   JSONL, missing terminal turns, and usage disagreement.
 - Pre-`required_after` runs do not make capture permanently red.
@@ -779,50 +950,58 @@ workflows hold:
    separate implement/compress/lint/gate launches and turns rather than one
    overwritten context blob.
 
-7. **Graph two weeks later.** Seed fixtures for multiple days/waves, then run
-   `lf context --json --days 14`. The payload supports average context per wave,
-   daily context totals, and stacked asset-kind charts without reading files.
+7. **Audit a step contract.** Select the gate launch from that `lf code` trace.
+   Its manifest separately names the inherited task goal, gate skill
+   instructions, relevant repo/wave context, and any parent summary. A reviewer
+   can tell whether the step received its quality bar without reconstructing
+   today’s files or reading an undifferentiated prompt blob.
 
-8. **Keep provider totals honest.** A resumed multi-turn session records the
+8. **Graph two weeks later.** Seed fixtures for multiple days/waves, then run
+   `lf context --json --days 14`. The payload supports average context per wave,
+   daily initial-context totals, all-turn provider totals, and stacked
+   asset-kind charts without reading files or conflating follow-up messages
+   with launch context.
+
+9. **Keep provider totals honest.** A resumed multi-turn session records the
    exact new user input and provider-reported input tokens while marking hidden
    provider history `provider_total_only`.
 
-9. **Preserve failure.** A provider error and an interrupted turn retain every
+10. **Preserve failure.** A provider error and an interrupted turn retain every
    event observed before failure plus a terminal failed/interrupted turn. The
    launch can be capture-complete even though the work failed.
 
-10. **Survive a crash.** Kill a fixture writer mid-turn. The next reader returns
+11. **Survive a crash.** Kill a fixture writer mid-turn. The next reader returns
    all complete records, calls the launch partial, and explains why; it does not
    reject the whole trace or call it complete.
 
-11. **Degrade after deletion.** Delete a normalized conversation fixture.
+12. **Degrade after deletion.** Delete a normalized conversation fixture.
     Context averages still work, `lf trace` says which artifact is missing, and
     `lf doctor` fails capture integrity. Delete only the vendor pointer target;
     normalized browsing still works and doctor does not fail.
 
-12. **Tell the truth about interactive handoff.** Launch with TUI/IDE in a
+13. **Tell the truth about interactive handoff.** Launch with TUI/IDE in a
     fixture. Prompts/assets are durable, provider receipt is retained when
     known, and the launch says prompt-only instead of showing an empty complete
     transcript.
 
-13. **No silent outage.** Force the artifact root unwritable before launch.
+14. **No silent outage.** Force the artifact root unwritable before launch.
     Loopflow refuses to spend provider tokens. Force an append failure during a
     running turn; the run continues, emits one warning, and doctor later fails
     the partial capture.
 
-14. **Reconcile usage.** For a multi-turn agent launch, summed turn usage equals
+15. **Reconcile usage.** For a multi-turn agent launch, summed turn usage equals
     the terminal process snapshot under the existing cumulative rule. Skill and
     terminal boundaries still sum without double-counting.
 
-15. **Stay local.** Network inspection and code search show no telemetry upload,
+16. **Stay local.** Network inspection and code search show no telemetry upload,
     analytics SDK, or remote results service. All new bodies live below
     `~/.lf/traces` and all indexes in `~/.lf/lfd.db`.
 
-16. **Do not duplicate durable prompts.** A new run writes runtime prompt files
+17. **Do not duplicate durable prompts.** A new run writes runtime prompt files
     only where the vendor needs them and one durable copy under the trace root;
     it does not add a second durable file under `~/.lf/logs`.
 
-17. **Exercise the real ledger.** After focused tests, run a real two-turn
+18. **Exercise the real ledger.** After focused tests, run a real two-turn
     Claude or Codex probe, then `lf trace`, `lf context`, and `lf doctor` against
     the long-lived migrated ledger. All readers succeed and the new run is
     capture-complete.

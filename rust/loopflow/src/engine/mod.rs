@@ -50,11 +50,11 @@ pub use launch::{
     prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, PreparedLaunchPrompt,
 };
 pub use prompt::{
-    count_tokens, drop_native_instruction_docs, durable_log_dir, format_claude_system_prompt,
+    count_tokens, drop_native_instruction_docs, format_claude_system_prompt,
     format_claude_task_prompt, format_context_prompt, format_prompt, format_task_prompt,
-    gather_context, gather_documents, measure_context, write_prompt_log, ContextBreakdown,
-    DiffTier, Document, DocumentSource, GatherContextOpts, GatherSpec, GatheredContext,
-    PromptComponents, PromptFormatMode, RenderedPrompt, Surface,
+    gather_context, gather_documents, write_prompt_log, DiffTier, Document, DocumentSource,
+    GatherContextOpts, GatherSpec, GatheredContext, PromptComponents, PromptFormatMode,
+    RenderedPrompt, Surface,
 };
 pub use repo::find_repo_root;
 pub use skills::{sync_skills, SkillSyncOptions, SkillSyncReport};

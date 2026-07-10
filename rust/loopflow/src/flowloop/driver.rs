@@ -109,7 +109,9 @@ pub fn run_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<()>
 }
 
 /// Resolve the loop target before creating a worktree. A skill is not a
-/// one-step flow by implication: loop callers name a flow explicitly.
+/// one-step flow by implication: loop callers name a flow explicitly. Two
+/// doors share this gate: the CLI's blocking loop and the wave server's
+/// detached-loop launch.
 pub(crate) fn require_loop_flow(repo: &Path, flow: &str) -> OpsResult<()> {
     crate::engine::load_flow(flow, repo)
         .map(|_| ())
@@ -393,11 +395,17 @@ mod tests {
         assert!(err.to_string().contains("unparseable"));
     }
 
+    /// The flow resolves before any worktree exists: a bogus target is a
+    /// clean error from `run_loop` itself, not a half-placed run.
     #[test]
     fn loop_target_must_resolve_to_a_flow() {
         let tmp = tempfile::tempdir().unwrap();
-        require_loop_flow(tmp.path(), "task").expect("builtin task flow");
-        let err = require_loop_flow(tmp.path(), "definitely-not-a-flow").unwrap_err();
-        assert!(err.to_string().contains("not found"));
+        let err = run_loop(
+            tmp.path(),
+            "seed",
+            &LoopOptions::new("definitely-not-a-flow".into(), None),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("cannot loop flow"));
     }
 }

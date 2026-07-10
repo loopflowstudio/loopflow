@@ -286,6 +286,28 @@ enum LoopEnd {
     Failed(String),
 }
 
+/// What an inbox item means for the body now running (see
+/// [`WaveLoop::inbox_action`]). The caller owns teardown — that is the only
+/// part the two pass loops legitimately do differently.
+enum InboxAction {
+    /// Tear the body down; `skip` advances the playhead anyway.
+    Interrupt { skip: bool },
+    /// Not interrupt-shaped: deliver to the live body or queue for the next.
+    Deliver(InboxItem),
+    /// The listener hung up: tear down and end the loop.
+    ListenerGone,
+}
+
+/// What a fired pass-timeout means (see [`WaveLoop::timeout_action`]).
+enum TimeoutAction {
+    /// The loop already ended mid-fetch: tear down and return.
+    End,
+    /// Delegated work is still live: renew the pass lease and keep waiting.
+    Renew,
+    /// Nothing is running: the pass is out of time.
+    Expire,
+}
+
 /// How a pass child is spawned — a seam so tests can substitute a stub
 /// process for the real `lf -b wave` invocation.
 #[cfg(test)]
@@ -553,50 +575,34 @@ impl WaveLoop {
             tokio::select! {
                 biased;
                 item = inbox_rx.recv() => {
-                    match item {
-                        Some(InboxItem::Interrupt) => {
-                            self.interrupt_child(&body_id, &mut wait_task, false).await;
+                    match self.inbox_action(item) {
+                        InboxAction::Interrupt { skip } => {
+                            self.interrupt_child(&body_id, &mut wait_task, skip).await;
                             return;
                         }
-                        Some(InboxItem::Skip) => {
-                            self.interrupt_child(&body_id, &mut wait_task, true).await;
-                            return;
-                        }
-                        Some(InboxItem::Message(message)) if message.op == MessageOp::Interrupt => {
-                            if self.seen.insert(message.id.clone()) {
-                                self.queue.push(message);
-                            }
-                            self.interrupt_child(&body_id, &mut wait_task, false).await;
-                            return;
-                        }
-                        Some(item) => self.on_inbox(item).await,
-                        None => {
-                            self.end = Some(LoopEnd::ListenerGone);
+                        InboxAction::Deliver(item) => self.on_inbox(item).await,
+                        InboxAction::ListenerGone => {
                             wait_task.abort();
                             return;
                         }
                     }
                 }
                 _ = &mut timeout => {
-                    // A foreground `lf loop` is one long tool call inside this
-                    // pass. Its registry row is presence: renew the lease while
-                    // any hand is still active instead of hanging up on live
-                    // work at the ordinary pass boundary.
-                    let workers = self.fetch_in_flight().await;
-                    if self.end.is_some() {
-                        wait_task.abort();
-                        return;
+                    match self.timeout_action().await {
+                        TimeoutAction::End => {
+                            wait_task.abort();
+                            return;
+                        }
+                        TimeoutAction::Renew => {
+                            timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
+                            continue;
+                        }
+                        TimeoutAction::Expire => {
+                            wait_task.abort();
+                            self.finish_timed_out_pass(&body_id).await;
+                            return;
+                        }
                     }
-                    if !workers.is_empty() {
-                        timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
-                        continue;
-                    }
-                    wait_task.abort();
-                    self.finish_failed_pass(&body_id, &format!(
-                        "wave timed out after {}s",
-                        self.config.pass_timeout.as_secs()
-                    )).await;
-                    return;
                 }
                 result = &mut wait_task => {
                     match result {
@@ -707,32 +713,20 @@ impl WaveLoop {
             tokio::select! {
                 biased;
                 item = inbox_rx.recv() => {
-                    match item {
-                        Some(InboxItem::Interrupt) => {
-                            self.interrupt_harness(&body_id, harness.as_mut(), false).await;
+                    match self.inbox_action(item) {
+                        InboxAction::Interrupt { skip } => {
+                            self.interrupt_harness(&body_id, harness.as_mut(), skip).await;
                             return;
                         }
-                        Some(InboxItem::Skip) => {
-                            self.interrupt_harness(&body_id, harness.as_mut(), true).await;
-                            return;
-                        }
-                        Some(InboxItem::Message(message)) if message.op == MessageOp::Interrupt => {
-                            if self.seen.insert(message.id.clone()) {
-                                self.queue.push(message);
-                            }
-                            self.interrupt_harness(&body_id, harness.as_mut(), false).await;
-                            return;
-                        }
-                        Some(InboxItem::Message(message))
+                        InboxAction::Deliver(InboxItem::Message(message))
                             if message.op == MessageOp::Steer && supports_steer =>
                         {
                             if self.steer_harness(message, harness.as_mut()).await {
                                 timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
                             }
                         }
-                        Some(item) => self.on_inbox(item).await,
-                        None => {
-                            self.end = Some(LoopEnd::ListenerGone);
+                        InboxAction::Deliver(item) => self.on_inbox(item).await,
+                        InboxAction::ListenerGone => {
                             let _ = harness.stop().await;
                             return;
                         }
@@ -817,22 +811,22 @@ impl WaveLoop {
                     return;
                 }
                 _ = &mut timeout => {
-                    let workers = self.fetch_in_flight().await;
-                    if self.end.is_some() {
-                        let _ = harness.stop().await;
-                        return;
+                    match self.timeout_action().await {
+                        TimeoutAction::End => {
+                            let _ = harness.stop().await;
+                            return;
+                        }
+                        TimeoutAction::Renew => {
+                            timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
+                            continue;
+                        }
+                        TimeoutAction::Expire => {
+                            let _ = harness.interrupt().await;
+                            let _ = harness.stop().await;
+                            self.finish_timed_out_pass(&body_id).await;
+                            return;
+                        }
                     }
-                    if !workers.is_empty() {
-                        timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
-                        continue;
-                    }
-                    let _ = harness.interrupt().await;
-                    let _ = harness.stop().await;
-                    self.finish_failed_pass(&body_id, &format!(
-                        "wave timed out after {}s",
-                        self.config.pass_timeout.as_secs()
-                    )).await;
-                    return;
                 }
             }
         }
@@ -887,6 +881,56 @@ impl WaveLoop {
         let _ = harness.interrupt().await;
         let _ = harness.stop().await;
         self.finish_interrupted_pass(body_id, skip).await;
+    }
+
+    /// Classify an inbox item at a running body. Interrupt-shaped items
+    /// resolve here — including queueing an interrupt's text for the next
+    /// pass — so interrupt semantics stay in lockstep across the process and
+    /// harness loops. Everything else is handed back: the loops differ in
+    /// what a live body can absorb (a steer-capable harness takes input
+    /// mid-turn; a child process cannot).
+    fn inbox_action(&mut self, item: Option<InboxItem>) -> InboxAction {
+        match item {
+            Some(InboxItem::Interrupt) => InboxAction::Interrupt { skip: false },
+            Some(InboxItem::Skip) => InboxAction::Interrupt { skip: true },
+            Some(InboxItem::Message(message)) if message.op == MessageOp::Interrupt => {
+                if self.seen.insert(message.id.clone()) {
+                    self.queue.push(message);
+                }
+                InboxAction::Interrupt { skip: false }
+            }
+            Some(item) => InboxAction::Deliver(item),
+            None => {
+                self.end = Some(LoopEnd::ListenerGone);
+                InboxAction::ListenerGone
+            }
+        }
+    }
+
+    /// What a fired pass-timeout means right now. A foreground `lf loop` is
+    /// one long tool call inside this pass; its registry row is presence, so
+    /// live delegated work renews the lease instead of hanging up on it at
+    /// the ordinary pass boundary.
+    async fn timeout_action(&mut self) -> TimeoutAction {
+        let workers = self.fetch_in_flight().await;
+        if self.end.is_some() {
+            TimeoutAction::End
+        } else if !workers.is_empty() {
+            TimeoutAction::Renew
+        } else {
+            TimeoutAction::Expire
+        }
+    }
+
+    async fn finish_timed_out_pass(&mut self, body_id: &str) {
+        self.finish_failed_pass(
+            body_id,
+            &format!(
+                "wave timed out after {}s",
+                self.config.pass_timeout.as_secs()
+            ),
+        )
+        .await;
     }
 
     async fn finish_harness_pass(

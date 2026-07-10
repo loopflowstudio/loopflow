@@ -612,14 +612,10 @@ mod tests {
             serde_json::json!({
                 "op": "say",
                 "text": "run-7 landed: PR #12",
-                "from": { "session_id": "sess-7", "label": "worker" },
+                "from": "worker",
             }),
             serde_json::json!({ "op": "say", "text": "anon" }),
-            serde_json::json!({
-                "op": "message",
-                "text": "hello",
-                "from": { "session_id": null, "label": "cli" },
-            }),
+            serde_json::json!({ "op": "message", "text": "hello", "from": "cli" }),
         ] {
             let response = client
                 .post(format!("{base}/messages"))

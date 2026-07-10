@@ -168,23 +168,32 @@ pub struct Subscription {
     pub op_rx: broadcast::Receiver<OpFrame>,
 }
 
+/// The assistant turn in progress. `turn` is the snapshot the wire watches
+/// grow (status `Running`), re-broadcast on every content delta and committed
+/// to `thread` under the same id at finalization; the rest is bookkeeping that
+/// only means anything while the turn is open.
+#[derive(Debug)]
+struct OpenTurn {
+    turn: ChatTurn,
+    /// Usage accrued from this turn's `TurnUsage` deltas.
+    usage: Usage,
+    /// Prose fragments so far, for `Message` item ids (`"text-<n>"`).
+    text_items: usize,
+    /// Message ids this turn claimed (`TurnOpened.answers` plus any mid-turn
+    /// `TurnSteered.answers`). Requeued if the turn ends without completing.
+    claims: Vec<MessageId>,
+}
+
 /// Everything that must stay mutually consistent: the journal (truth), the
-/// thread cache (fold of it), the open-turn snapshot, the loop state (last
-/// transition).
+/// thread cache (fold of it), the open turn, the loop state (last transition).
 #[derive(Debug)]
 struct Inner {
     journal: Journal,
     thread: Vec<ChatTurn>,
-    /// The turn currently in progress, grown delta by delta (status
-    /// `Running`). Served after the finalized thread and re-broadcast on every
-    /// content delta so subscribers watch it grow; cleared at finalization,
-    /// when the terminal turn commits to `thread` under the same id.
-    open_turn: Option<ChatTurn>,
-    /// Usage accrued for the open turn from `TurnUsage` deltas.
-    open_usage: Usage,
-    /// Count of prose fragments in the open turn, for `Message` item ids
-    /// (`"text-<n>"`).
-    open_text_items: usize,
+    /// The turn currently in progress, or `None` between turns. Everything
+    /// that is only meaningful while a turn runs lives inside it, so closing a
+    /// turn is one `take()` rather than four fields reset in step.
+    open: Option<OpenTurn>,
     /// Set by a force-finalize (interrupt-deadline janitor, resident death):
     /// the journal already closed the turn, so late wire deltas for it —
     /// including the resident's own eventual `TurnFinished` — are dropped
@@ -207,10 +216,6 @@ struct Inner {
     /// Every journaled user message by id — requeues restore pending entries
     /// from it (an id alone can't rebuild the text/op/from).
     messages: HashMap<MessageId, PendingMessage>,
-    /// Message ids the OPEN turn claimed (`TurnOpened.answers` plus any
-    /// mid-turn `TurnSteered.answers`). Requeued if the turn ends without
-    /// completing; cleared on any close.
-    open_turn_claims: Vec<MessageId>,
     /// Run ids whose `ChannelOpened` is already journaled — the dispatch
     /// notification door's idempotence guard, folded from the journal.
     opened_channel_runs: HashSet<String>,
@@ -355,9 +360,7 @@ impl WaveRuntime {
             inner: Mutex::new(Inner {
                 journal,
                 thread: fold.turns,
-                open_turn: None,
-                open_usage: Usage::empty(),
-                open_text_items: 0,
+                open: None,
                 drop_deltas_until_opened: false,
                 state,
                 playhead,
@@ -365,7 +368,6 @@ impl WaveRuntime {
                 workers,
                 pending_messages: fold.pending_messages,
                 messages: fold.messages,
-                open_turn_claims: Vec::new(),
                 opened_channel_runs: fold.opened_channel_runs,
                 memory_adds: fold.memory_adds,
             }),
@@ -426,14 +428,14 @@ impl WaveRuntime {
     /// whole thread. `None` serves everything.
     pub fn thread_tail(&self, limit: Option<usize>) -> Vec<ChatTurn> {
         let inner = self.inner();
-        let open_count = usize::from(inner.open_turn.is_some());
+        let open_count = usize::from(inner.open.is_some());
         let total = inner.thread.len() + open_count;
         let take = limit.unwrap_or(total).min(total);
         let take_open = take.min(open_count);
         let take_thread = take - take_open;
         let mut turns = inner.thread[inner.thread.len() - take_thread..].to_vec();
         if take_open == 1 {
-            turns.extend(inner.open_turn.clone());
+            turns.extend(inner.open.as_ref().map(|open| open.turn.clone()));
         }
         turns
     }
@@ -442,7 +444,7 @@ impl WaveRuntime {
     /// `/health`'s counter.
     pub fn thread_len(&self) -> usize {
         let inner = self.inner();
-        inner.thread.len() + usize::from(inner.open_turn.is_some())
+        inner.thread.len() + usize::from(inner.open.is_some())
     }
 
     /// Current loop state, for `/health` and the composer.
@@ -538,10 +540,15 @@ impl WaveRuntime {
             .ok_or_else(|| anyhow::anyhow!("playhead is not initialized"))?
             .update_body_session(body_id, session_id)?;
         let view = self.journal_playhead_locked(&mut inner, vec![event])?;
-        if let Some(turn) = inner.open_turn.as_mut() {
-            if let Some(body) = turn.body.as_mut().filter(|body| body.body_id == body_id) {
+        if let Some(open) = inner.open.as_mut() {
+            if let Some(body) = open
+                .turn
+                .body
+                .as_mut()
+                .filter(|body| body.body_id == body_id)
+            {
                 body.session_id = Some(session_id.to_string());
-                let _ = self.turn_tx.send(TurnFrame::share(turn.clone()));
+                let _ = self.turn_tx.send(TurnFrame::share(open.turn.clone()));
             }
         }
         Ok(view)
@@ -920,27 +927,27 @@ impl WaveRuntime {
     /// turn or active body to finalize.
     pub fn force_finalize_open_turn(&self, status: Lifecycle, reason: &str) -> bool {
         let mut inner = self.inner();
-        let mut turn = inner.open_turn.take();
+        let open = inner.open.take();
         let active_body_id = inner
             .playhead
             .as_ref()
             .and_then(|playhead| playhead.active.as_ref())
             .map(|body| body.body_id.clone());
-        if turn.is_none() && active_body_id.is_none() {
+        if open.is_none() && active_body_id.is_none() {
             return false;
         }
 
-        if let Some(mut turn) = turn.take() {
+        if let Some(OpenTurn {
+            mut turn, claims, ..
+        }) = open
+        {
             inner.drop_deltas_until_opened = true;
-            inner.open_usage = Usage::empty();
-            inner.open_text_items = 0;
             let finished = inner.journal.append(|_| EventKind::TurnFinished {
                 turn_id: turn.id.clone(),
                 status,
                 usage: Usage::empty(),
                 termination_reason: Some(reason.to_string()),
             });
-            let claims = std::mem::take(&mut inner.open_turn_claims);
             if status != Lifecycle::Completed {
                 self.requeue_locked(&mut inner, &claims);
             }
@@ -1169,19 +1176,23 @@ impl WaveRuntime {
         // (the resident's adapter prevents this; a rogue sequence must not
         // wedge the fold). What the stale turn claimed is requeued — it never
         // answered it.
-        if let Some(mut stale) = inner.open_turn.take() {
+        if let Some(OpenTurn {
+            turn: mut stale,
+            usage,
+            claims,
+            ..
+        }) = inner.open.take()
+        {
             tracing::warn!(
                 turn_id = stale.id,
                 "TurnOpened over an open turn; closing the stale turn as failed"
             );
-            let stale_usage = std::mem::replace(&mut inner.open_usage, Usage::empty());
             inner.journal.append(|_| EventKind::TurnFinished {
                 turn_id: stale.id.clone(),
                 status: Lifecycle::Failed,
-                usage: stale_usage,
+                usage,
                 termination_reason: Some("stale open turn closed".to_string()),
             });
-            let claims = std::mem::take(&mut inner.open_turn_claims);
             self.requeue_locked(&mut inner, &claims);
             stale.status = Lifecycle::Failed;
             self.transition_locked(&mut inner, LoopState::Idle, "stale open turn closed");
@@ -1199,7 +1210,7 @@ impl WaveRuntime {
             return;
         }
         let answers = claim_answers(&mut inner, answers);
-        inner.open_turn_claims = answers.clone();
+        let claims = answers.clone();
         let body = inner
             .playhead
             .as_ref()
@@ -1228,9 +1239,12 @@ impl WaveRuntime {
             body,
         };
         let _ = self.turn_tx.send(TurnFrame::share(open.clone()));
-        inner.open_turn = Some(open);
-        inner.open_usage = Usage::empty();
-        inner.open_text_items = 0;
+        inner.open = Some(OpenTurn {
+            turn: open,
+            usage: Usage::empty(),
+            text_items: 0,
+            claims,
+        });
     }
 
     fn resident_turn_text(&self, text: String) {
@@ -1238,16 +1252,16 @@ impl WaveRuntime {
         if inner.drop_deltas_until_opened {
             return;
         }
-        if inner.open_turn.is_none() {
+        let Some(open) = inner.open.as_mut() else {
             tracing::warn!("text delta with no open turn; dropped");
             return;
-        }
+        };
         let item = ConversationItem::Message {
-            id: format!("text-{}", inner.open_text_items),
+            id: format!("text-{}", open.text_items),
             text,
             phase: Some("stream".to_string()),
         };
-        inner.open_text_items += 1;
+        open.text_items += 1;
         self.append_turn_item_locked(&mut inner, item);
     }
 
@@ -1256,7 +1270,7 @@ impl WaveRuntime {
         if inner.drop_deltas_until_opened {
             return;
         }
-        if inner.open_turn.is_none() {
+        if inner.open.is_none() {
             tracing::warn!("item delta with no open turn; dropped");
             return;
         }
@@ -1268,7 +1282,7 @@ impl WaveRuntime {
     /// the journal fold makes), and re-broadcast it so live subscribers watch
     /// the turn in progress.
     fn append_turn_item_locked(&self, inner: &mut Inner, item: ConversationItem) {
-        let open = inner.open_turn.as_mut().expect("checked by callers");
+        let open = &mut inner.open.as_mut().expect("checked by callers").turn;
         let turn_id = open.id.clone();
         open.absorb_item(item.clone());
         let frame = TurnFrame::share(open.clone());
@@ -1285,13 +1299,15 @@ impl WaveRuntime {
         cache_read_tokens: Option<u64>,
     ) {
         let mut inner = self.inner();
-        if inner.drop_deltas_until_opened || inner.open_turn.is_none() {
+        if inner.drop_deltas_until_opened {
             return;
         }
-        inner.open_usage.input_tokens = add_opt(inner.open_usage.input_tokens, input_tokens);
-        inner.open_usage.output_tokens = add_opt(inner.open_usage.output_tokens, output_tokens);
-        inner.open_usage.cache_read_tokens =
-            add_opt(inner.open_usage.cache_read_tokens, cache_read_tokens);
+        let Some(open) = inner.open.as_mut() else {
+            return;
+        };
+        open.usage.input_tokens = add_opt(open.usage.input_tokens, input_tokens);
+        open.usage.output_tokens = add_opt(open.usage.output_tokens, output_tokens);
+        open.usage.cache_read_tokens = add_opt(open.usage.cache_read_tokens, cache_read_tokens);
     }
 
     fn resident_turn_finished(
@@ -1305,13 +1321,17 @@ impl WaveRuntime {
             tracing::debug!("late TurnFinished after a force-finalize; dropped");
             return;
         }
-        let Some(mut turn) = inner.open_turn.take() else {
+        let Some(OpenTurn {
+            mut turn,
+            mut usage,
+            claims,
+            ..
+        }) = inner.open.take()
+        else {
             tracing::warn!("TurnFinished with no open turn; dropped");
             return;
         };
-        let mut usage = std::mem::replace(&mut inner.open_usage, Usage::empty());
         usage.cost_usd = cost_usd;
-        inner.open_text_items = 0;
         inner.journal.append(|_| EventKind::TurnFinished {
             turn_id: turn.id.clone(),
             status,
@@ -1320,7 +1340,6 @@ impl WaveRuntime {
         });
         // Any non-Completed end requeues what the turn claimed: a failed or
         // interrupted turn never answered its messages.
-        let claims = std::mem::take(&mut inner.open_turn_claims);
         if status != Lifecycle::Completed {
             self.requeue_locked(&mut inner, &claims);
         }
@@ -1359,7 +1378,9 @@ impl WaveRuntime {
         // if the turn ends without completing. The boundary-race fallback
         // names a turn that already closed completed — nothing to track.
         if turn_live {
-            inner.open_turn_claims.extend(answers.iter().cloned());
+            if let Some(open) = inner.open.as_mut() {
+                open.claims.extend(answers.iter().cloned());
+            }
         }
         inner
             .journal
@@ -1375,7 +1396,9 @@ impl WaveRuntime {
         let mut inner = self.inner();
         let ids: Vec<MessageId> = ids.into_iter().map(MessageId).collect();
         // Undone claims must not requeue a second time when the turn ends.
-        inner.open_turn_claims.retain(|claim| !ids.contains(claim));
+        if let Some(open) = inner.open.as_mut() {
+            open.claims.retain(|claim| !ids.contains(claim));
+        }
         self.requeue_locked(&mut inner, &ids);
     }
 }
@@ -1405,7 +1428,7 @@ fn claim_answers(inner: &mut Inner, answers: Vec<String>) -> Vec<MessageId> {
 /// clients order by the sequence in the turn id, not array position.
 fn snapshot_locked(inner: &Inner) -> Vec<ChatTurn> {
     let mut turns = inner.thread.clone();
-    turns.extend(inner.open_turn.clone());
+    turns.extend(inner.open.as_ref().map(|open| open.turn.clone()));
     turns
 }
 

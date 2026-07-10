@@ -153,9 +153,9 @@ fn register_run_in(
     // explicit wave (register_session drops the cross-wave parent).
     let inherited = inherited
         || explicit_wave.is_some_and(|wave| {
-            session_id.as_deref().is_some_and(|session_id| {
-                !inherited && !session_belongs_to_wave(session_id, wave.id())
-            })
+            session_id
+                .as_deref()
+                .is_some_and(|session_id| !session_belongs_to_wave(session_id, wave.id()))
         });
     let context = classify_run_context(ambient, session_id.as_deref(), inherited);
     let (wave, parent_session_id) = match context {

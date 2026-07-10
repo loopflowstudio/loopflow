@@ -671,11 +671,9 @@ fn main() -> anyhow::Result<()> {
     result
 }
 
-/// Session label for agent-launching invocations; `None` for utility commands
-/// (`lf pr`, `lf usage`, `lf chat`, `lf sub`, `lf memory`, `lf -l`) and
-/// `lf loop`, which never self-register (placement creates the worker's row;
-/// `lf loop` registers as the wave's agent session; chat/memory are
-/// one-shot POSTs attributed via the env they inherit).
+/// Session label for agent-launching invocations. Utility commands return
+/// `None`; `lf serve` and `lf loop` also return `None` because their own
+/// lifecycle owners register the WaveAgent and LoopRun rows respectively.
 fn run_label(cli: &Cli) -> Option<String> {
     if cli.list {
         return None;

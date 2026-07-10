@@ -5,8 +5,8 @@
 # running in the wave's own worktree).
 #
 # Walks the whole surface against a throwaway repo: boot + discovery (both
-# processes from one command), chat, steer, interrupt, worker dispatch (real
-# `lf q worker run`), attributed worker reports arriving in the thread,
+# processes from one command), chat, steer, interrupt, hand delegation (real
+# `lf loop … --detach`), attributed worker reports arriving in the thread,
 # memory curation, restart with the thread intact, clean teardown.
 #
 # COSTS: every loop pass runs a real three-phase wave-pass (acts 2-6).
@@ -258,10 +258,10 @@ pause
 
 # ---------- act 5: dispatch a worker ----------------------------------------
 
-hr "act 5 · the loop dispatches a worker (lf q worker run)"
+hr "act 5 · the loop delegates a hand (lf loop … --detach)"
 say "asking the loop to delegate — orchestration lives in the prompt, loopflow is the toolset"
 curl -sf -X POST "http://$ADDR/messages" -H 'content-type: application/json' \
-    -d '{"op":"message","text":"Dispatch one worker via lf q worker run to make the next TODO.md improvement. Do not do the work inline. After dispatching, reply with the run id."}' >/dev/null
+    -d "{\"op\":\"message\",\"text\":\"Delegate one hand with lf loop task \\\"make the next TODO.md improvement\\\" --wave $WAVE --detach. Do not do the work inline. After delegating, reply with the run id.\"}" >/dev/null
 poll "run_observed journaled (loop pass + dispatch; model-dependent)" 300 journal_has run_observed || true
 if journal_has run_observed; then
     jq -c 'select(.kind.type == "run_observed") | .kind' "$JOURNAL" | sed 's/^/  /'
@@ -277,11 +277,11 @@ pause
 # ---------- act 6: worker reports + memory -----------------------------------
 
 hr "act 6 · attributed reports and curated memory"
-say "workers finish with 'lf chat <report>' — it lands in the thread with a"
-say "from:\"worker\" byline and wakes the loop; watch for memory_updated when"
+say "hands finish with 'lf radio <report>' — it lands in the thread with the"
+say "hand's channel as its byline and wakes the loop; watch for memory_updated when"
 say "the loop curates what it learned (lf memory add)."
-poll "a from-attributed worker report in the thread (workers take minutes)" 600 sh -c \
-    "curl -sf http://$ADDR/conversation | jq -e '.turns[] | select(.from == \"worker\")'" || true
+poll "a bylined hand report in the thread (hands take minutes)" 600 sh -c \
+    "curl -sf http://$ADDR/conversation | jq -e '.turns[] | select(.from != null)'" || true
 thread | tail -6
 poll "run_completed journaled" 120 journal_has run_completed || true
 if journal_has memory_updated; then

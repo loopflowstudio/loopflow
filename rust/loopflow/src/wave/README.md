@@ -178,7 +178,7 @@ stays SSE on the listener. `lf chat` resolves its target wave from context
 name resolving to its family head), then finds that wave's live endpoint via
 its WaveAgent session row (falling back to `.wave-endpoint`). `--steer` POSTs
 `steer`, which reaches a live steer-capable turn and otherwise queues. Bare `lf
-chat` POSTs an attributed `say`; `--from` overrides its byline. With no wave
+chat` POSTs an unattributed human `message`. With no wave
 context anywhere, `lf chat` and `lf memory` writes exit 0 with one stderr note.
 A resolvable wave whose server is down errors instead (mail to a dead wave
 bounces, it doesn't vanish).
@@ -205,10 +205,10 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 
 | Method + path             | Behavior |
 |---------------------------|----------|
-| `GET /health`             | `{status, loop_state, wave, turns, workers, uptime_seconds}`; `status` is channel liveness; `loop_state` is `idle \| turning \| interrupting \| failed`; `workers` counts observed in-flight worker runs |
+| `GET /health`             | `{status, loop_state, wave, turns, workers, paused, uptime_seconds}`; `status` is channel liveness; `loop_state` is `idle \| turning \| interrupting \| failed`; `workers` counts observed in-flight worker runs |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread; `?limit=N` tails the last N turns (open turn included) |
-| `GET /events`             | SSE, the served mind's thread. No channel scoping — agent broadcast is the bus, not this door. Event names: `state` (loop-state name, on subscribe + every transition), `turn` (a `Turn` JSON; replay then live; ids repeat — each frame replaces the client's previous state for that id), `memory-add` (full added facts since the last externalization, replay then live), `memory` (curation summaries, live-only), and — only with `?inbox=true`, the resident's subscription — `inbox` (`{id, op, text, from}`; pending replay + live ops; bare interrupts ride `id: null`). |
-| `POST /messages {op, text, from?}` | `op` required: `message` (next body), `steer` (inject into the active steer-capable harness, otherwise queue), `interrupt` (stop the active body; non-empty text queues for the retry), or `say` (attributed report/FYI). Returns `{turn, state}`. |
+| `GET /events`             | SSE, the served mind's thread. No channel scoping — agent broadcast is the bus, not this door. Event names: `state` (loop-state name), `playhead` (durable cursor snapshot), `turn` (replay then live; repeated ids replace), `op` (live worker motion), `memory-add` (replay then live), `memory` (live curation summaries), and — only with `?inbox=true` — `inbox` (pending replay + live controls). |
+| `POST /messages {op, text}` | Human thread input. `op` required: `message` (next body), `steer` (inject into the active steer-capable harness, otherwise queue), or `interrupt` (stop the active body; non-empty text queues for the retry). `say` and bylines are rejected; machine speech uses `lf radio`. Returns `{turn, state}`. |
 | `GET /playhead`           | Durable invocation stack, active body, `now`, `next`, local queue, and return target. |
 | `POST /playhead/enqueue {flow}` | Enqueue a flow FIFO at the innermost invocation and return the updated playhead. |
 | `POST /playhead/skip`     | Stop and skip the current body, or advance a failed idle step, without destroying its route. |
@@ -239,7 +239,7 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 order (`ConversationItem` — see `chat/types.rs`). User turns
 carry empty `items`. Turn `id`s are a single monotonic `turn-<n>` sequence
 across all sources. `from` is the speaker byline of an attributed emission
-(`lf chat`); null for the loop's own turns and plain user turns.
+(`lf radio`); null for the loop's own turns and plain user turns.
 
 ## Demo
 

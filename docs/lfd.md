@@ -228,15 +228,15 @@ POST /v0/hooks/github
 
 Set `github.webhook_secret` or `LFD_GITHUB_WEBHOOK_SECRET` before enabling the webhook. `lfd` verifies `X-Hub-Signature-256` and ignores unsigned requests.
 
-Webhooks translate inward through the daemon. The current demo path keeps CI
-and main-push events as attributed chat notifications; queue maintenance runs
+Webhooks translate inward through the daemon. CI and main-push events ride the
+agent bus and fold into the wave's thread attributed; queue maintenance runs
 in-process.
 
-- check_run failure → `lf chat --wave <wave> "CI failed: …"` (the wave's loop decides how to fix)
+- check_run failure → `lf radio --channel <wave> --from github "CI failed: …"` (the wave's loop decides how to fix)
 - PR merged → reconcile stacked queue state for matching waves
-- push to main → `lf chat --wave <wave> "main moved: …"` for each wave in the repo
+- push to main → `lf radio --channel <wave> --from github "main moved: …"` for each wave in the repo
 
-A wave with no live server bounces the notification — logged at debug. No wave resolved → dropped.
+The store accepts the notification even while the wave sleeps. No wave resolved → dropped.
 
 ## Stacked PR queue state
 

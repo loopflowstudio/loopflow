@@ -21,8 +21,8 @@ pub fn run_pass(worktree: &Path, flow: &str, seed: &str, options: &PassOptions) 
     if let Some(max_turns) = options.max_turns {
         cmd.arg("--max-turns").arg(max_turns.to_string());
     }
-    // The explicit verb: bare flow names (`task`, `wave`) collide with
-    // subcommands, `lf flow <name>` never does.
+    // The explicit verb keeps pass execution independent of whether a flow
+    // name collides with a top-level command.
     cmd.arg("flow");
     cmd.arg(flow);
     cmd.arg(seed);

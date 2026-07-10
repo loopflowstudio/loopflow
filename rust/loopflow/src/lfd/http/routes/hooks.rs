@@ -19,7 +19,7 @@
 
 // TODO(M1/M3): preserve these ingress reliability mechanisms under the
 // gatekeeper/argv owner: signature verification, plan-then-exec tests,
-// bounced-chat replay, and CI dedupe only after delivery succeeds.
+// failed-publish replay, and CI dedupe only after delivery succeeds.
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -56,7 +56,7 @@ struct WaveCiTarget {
 /// One `lf` invocation the gatekeeper will spawn — argv after the binary.
 /// Planners return these so tests assert on the exact command line without
 /// spawning anything. `dedupe_key` (CI failures: `<wave_id>:<sha>`) is
-/// recorded in the shared cache only after the exec exits 0 — a bounced chat
+/// recorded in the shared cache only after the exec exits 0 — a failed exec
 /// leaves the key absent so the wave+sha can replay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfExec {
@@ -101,9 +101,8 @@ fn spawn_lf_execs(cache: &Arc<Mutex<HashSet<String>>>, execs: Vec<LfExec>) {
 }
 
 /// Run one exec to completion and settle its dedupe key: exit 0 records the
-/// key (that wave+sha has been heard); a bounce (wave server down, exit ≠ 0)
-/// or spawn failure records nothing, so the next webhook for the same
-/// wave+sha replays instead of being swallowed.
+/// key (the bus accepted the frame); a nonzero exit or spawn failure records
+/// nothing, so the next webhook for the same wave+sha replays.
 async fn settle_exec(lf: &std::path::Path, exec: LfExec, cache: &Arc<Mutex<HashSet<String>>>) {
     let result = tokio::process::Command::new(lf)
         .args(&exec.args)
@@ -122,7 +121,7 @@ async fn settle_exec(lf: &std::path::Path, exec: LfExec, cache: &Arc<Mutex<HashS
             args = ?exec.args,
             dedupe_key = ?exec.dedupe_key,
             code = ?status.code(),
-            "lf exec bounced (no live subscriber); will replay on next delivery"
+            "lf radio exec failed; will replay on next delivery"
         ),
         Err(err) => tracing::warn!(
             args = ?exec.args,
@@ -169,7 +168,7 @@ fn main_moved_text(before: &str, after: &str) -> String {
 /// PR the check ran against. Deduped per wave+commit through the shared
 /// CI-failure cache so a red matrix reports once — but the key is only RECORDED once the spawned
 /// exec exits 0 (see [`settle_exec`]); planning just reads the cache, so a
-/// bounced chat replays. No wave resolved → empty (the caller drops).
+/// failed publish replays. No wave resolved → empty (the caller drops).
 async fn plan_check_run_notifications(
     store: &SharedStore,
     cache: &Arc<Mutex<HashSet<String>>>,

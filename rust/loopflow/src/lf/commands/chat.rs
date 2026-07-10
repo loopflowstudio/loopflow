@@ -330,7 +330,7 @@ mod tests {
     use crate::wave::server;
 
     /// A live wave_server WaveAgent row carrying `endpoint` in its env — the
-    /// shape `lf loop` registers (see crate::wave::registry).
+    /// shape `lf serve` registers (see crate::wave::registry).
     fn live_server_session(wave: &Wave, endpoint: &str) -> Session {
         let now = OffsetDateTime::now_utc();
         Session {
@@ -342,7 +342,7 @@ mod tests {
             skill: "loop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
-            argv: vec!["lf".to_string(), "wave".to_string(), wave.name().clone()],
+            argv: vec!["lf".to_string(), "serve".to_string(), wave.name().clone()],
             env: BTreeMap::from([
                 (WAVE_SERVER_ENDPOINT_ENV.to_string(), endpoint.to_string()),
                 (

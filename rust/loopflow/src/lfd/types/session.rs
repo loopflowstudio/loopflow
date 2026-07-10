@@ -13,8 +13,8 @@ pub const PALETTE_TERMINAL_SOURCE: &str = "palette";
 /// attach/cancel must not manage tmux for it; the process marks itself
 /// terminal via the completion-token path.
 pub const LF_CLI_SOURCE: &str = "lf_cli";
-/// A self-registered `lf loop` server: the process is owned by the wave
-/// server, not launched by lfd. The session row records the running server
+/// A self-registered `lf serve` listener: the process was not launched by
+/// lfd. The session row records the running server
 /// (endpoint + pid in `env`) so Loopflow sees the loop and one-brain
 /// enforcement has a fact to key on.
 pub const WAVE_SERVER_SOURCE: &str = "wave_server";

@@ -11,7 +11,7 @@
 //!   DTO discipline, plus the consumption markers (`TurnOpened.answers`,
 //!   `TurnSteered.answers` — the RESIDENT decides what a turn answers; the
 //!   listener validates against its queue fold and journals), the resident's
-//!   reported loop state, and the vendor thread id. The single writer stays
+//!   reported loop state, and the body's provider session id. The single writer stays
 //!   with the listener: the resident never touches journal files.
 //! - **Listener → resident**: the resident consumes its own wave's `/events`
 //!   subscription with `?inbox=true` — `inbox` SSE frames ([`InboxFrame`])

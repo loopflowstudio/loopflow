@@ -47,7 +47,9 @@ Both forms create the same placed worktree. `--detach` changes attention and
 ownership, not execution: the server launches a headless loop and the caller
 returns immediately.
 
-Waves are independent by default. When one process needs to report into a wave, post into its thread — `lf chat --wave <name> "…"` works from any process, including another wave's loop.
+Waves are independent by default. Humans steer a served mind with `lf chat`;
+agents report on its bus with `lf radio --channel <name> "…"`, even while the
+wave sleeps.
 
 ## Crons
 

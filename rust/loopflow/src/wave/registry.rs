@@ -721,7 +721,7 @@ mod tests {
         }
     }
 
-    /// A wave_server WaveAgent row as a previous `lf loop` would have left it.
+    /// A wave_server WaveAgent row as a previous `lf serve` would have left it.
     fn server_session(wave: &Wave, pid: u32) -> Session {
         Session {
             id: LfdId::new(),

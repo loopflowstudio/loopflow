@@ -396,8 +396,8 @@ pub enum Commands {
         #[arg(last = true)]
         cmd: Vec<String>,
     },
-    /// Run a flow by name — the explicit form; bare flow names that collide
-    /// with subcommands (`task`, `wave`) are only reachable this way
+    /// Run a flow by name — the explicit form for names that collide with a
+    /// built-in command
     Flow {
         /// Flow name
         name: String,

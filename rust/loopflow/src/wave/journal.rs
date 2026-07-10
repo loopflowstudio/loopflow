@@ -1,14 +1,14 @@
 //! The wave's append-only event log — runtime truth for the live agent.
 //!
-//! One JSONL file per CHANNEL at `.lf/journal/waves/<name>/journal.jsonl`
-//! (already covered by the repo's `.lf/journal/` gitignore entry — the log is
-//! per-machine, never committed): the wave channel's under the origin repo,
-//! a work-line channel's inside its own worktree (see
-//! [`crate::wave::channel`]). Every projection is a fold over it: the
-//! thread is the conversation events, the loop state is the last `LoopState`
-//! event, the message queue is `UserMessage`s not yet named in any
-//! `TurnStarted.answers` or `TurnSteered.answers`. Store is truth; the SSE
-//! broadcast bus is liveness.
+//! One JSONL file per served wave at
+//! `.lf/journal/waves/<name>/journal.jsonl` under the origin repo (already
+//! covered by the repo's `.lf/journal/` gitignore entry — the log is
+//! per-machine, never committed). Work-line channels are ephemeral bus topics
+//! and never own journals. Every projection is a fold over the wave's log:
+//! the thread is the conversation events, the loop state is the last
+//! `LoopState` event, and the message queue is `UserMessage`s not yet named in
+//! any `TurnStarted.answers` or `TurnSteered.answers`. The journal is truth;
+//! SSE is liveness.
 //!
 //! These events are internal persistence, NOT wire DTOs — there is no
 //! Swift/Python mirror obligation. The no-defaults discipline still applies:
@@ -21,10 +21,8 @@
 //! shared store — these are confirmed facts, not commands — and the in-flight
 //! view is their fold ([`fold_workers`]). `MemoryUpdated` and `MemoryAdded`
 //! are produced by the server's memory routes (`lf memory update`/`add` — the
-//! server holds MEMORY.md's pen). The
-//! vendor thread id is its first durable act, journaled before the first turn.
-//! `ServerStarted` is appended once per boot, after replay — restarts are
-//! forensically visible in the record.
+//! server holds MEMORY.md's pen). `ServerStarted` is appended once per boot,
+//! after replay — restarts are forensically visible in the record.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
@@ -69,7 +67,7 @@ pub enum MessageOp {
     Steer,
     /// Cancel the current turn; non-empty text becomes the next turn.
     Interrupt,
-    /// An attributed emission (`lf chat`): a worker report, child-wave
+    /// An attributed emission (`lf radio`): a worker report, child-wave
     /// escalation, or CLI FYI. Lands in the thread as an attributed statement
     /// AND queues for the loop exactly like `Message` — same consumption
     /// machinery, `TurnStarted.answers` can name it.
@@ -156,7 +154,7 @@ impl Event {
     pub fn at_rfc3339(&self) -> String {
         self.at
             .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_default()
+            .expect("journal timestamps are representable as RFC 3339")
     }
 }
 
@@ -239,7 +237,7 @@ pub enum EventKind {
     },
     // -- channels --
     /// A work-line channel opened under this wave (dispatch minted the
-    /// worktree and its journal; see placed `lf` runs). Journaled on the
+    /// worktree and its bus address; see placed `lf` runs). Journaled on the
     /// PARENT channel — the fold materializes a thread-visible turn
     /// ([`channel_opened_turn`]) so the wave's thread shows the opening.
     /// `run_id` is the idempotence key: one dispatch, one opening, however

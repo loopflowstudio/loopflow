@@ -6,9 +6,9 @@
 //! pen-shaped: it never touches a journal file. Its two connections to the
 //! listener are the whole protocol (see [`crate::wave::wire`]):
 //!
-//! - **input**: its own wave's `/events?inbox=true` subscription (the same
-//!   SSE machinery `lf sub` uses) — queued messages, steer and interrupt ops,
-//!   the pending queue replayed on connect;
+//! - **input**: its own wave's `/events?inbox=true` thread subscription —
+//!   queued messages, steer and interrupt ops, with the pending queue replayed
+//!   on connect;
 //! - **output**: ordered wire deltas through the token-gated resident door.
 //!
 //! The worktree bootstrap lives HERE now (it moved out of the listener): the

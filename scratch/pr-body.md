@@ -37,9 +37,14 @@ For a fast code-level check:
 
 ```bash
 cargo test -p loopflow wave::bus::tests
-cargo test -p loopflow flowloop::driver::tests
-swift test --package-path swift -Xswiftc -gnone --filter RegistryQueryTests
+cargo test -p loopflow --test wave_exec_policy
+swift test --package-path swift -Xswiftc -gnone --filter WaveChatConnectionTests
 ```
+
+Gate snapshot: Python 51 passed; Rust 1295 passed with 3 configured skips;
+website 59 passed with 3 configured skips; Swift 307 tests plus 5 XCTest cases
+passed; the e2e smoke and macOS `build-for-testing` passed. Formatting, Clippy
+with warnings denied, and Swift multiplatform boundary checks are clean.
 
 ## Intent
 

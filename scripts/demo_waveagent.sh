@@ -33,7 +33,7 @@ echo "tmux is the session cockpit:"
 echo "  tmux ls                 # list live agent + dispatch sessions"
 echo "  tmux attach -r -t <name>   # inspect one; steer through wave chat"
 echo
-echo "(Requires active dispatched sessions; dispatch with 'lf q worker run'.)"
+echo "(Requires active detached hands; delegate with 'lf loop <flow> <seed> --detach'.)"
 
 hr "Done"
 echo "Two files define a wave; its memory rides into every prompt; its sessions are"

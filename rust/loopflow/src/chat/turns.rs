@@ -12,10 +12,9 @@
 //!   commands/edits/messages it ran.
 
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
 
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::wave::playhead::BodyProvenance;
+use crate::wave::playhead::{now_rfc3339, BodyProvenance};
 
 /// Who authored a turn. Mirrors Swift `MessageRole` (user/assistant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,7 +30,7 @@ pub enum ChatRole {
 /// the same shape round-trips through Rust and Swift.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatTurn {
-    /// Stable within a running server: `"turn-1"`, `"turn-2"`, …
+    /// Stable within the wave journal across restarts: `"turn-1"`, `"turn-2"`, …
     pub id: String,
     pub role: ChatRole,
     /// Accumulated assistant prose (or the human message for a `user` turn).
@@ -42,7 +41,7 @@ pub struct ChatTurn {
     pub items: Vec<ConversationItem>,
     /// RFC 3339 timestamp of when the turn opened.
     pub created_at: String,
-    /// Speaker label for attributed emissions (`lf chat` — worker reports,
+    /// Speaker label for attributed emissions (`lf radio` — worker reports,
     /// child-wave escalations). Absent for the loop's own turns and plain
     /// user turns.
     pub from: Option<String>,
@@ -52,12 +51,6 @@ pub struct ChatTurn {
 }
 
 impl ChatTurn {
-    fn now_rfc3339() -> String {
-        OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_default()
-    }
-
     /// A completed `user` turn carrying a human message.
     pub fn user(id: String, text: String) -> Self {
         Self {
@@ -66,7 +59,7 @@ impl ChatTurn {
             text,
             status: Lifecycle::Completed,
             items: Vec::new(),
-            created_at: Self::now_rfc3339(),
+            created_at: now_rfc3339(),
             from: None,
             body: None,
         }

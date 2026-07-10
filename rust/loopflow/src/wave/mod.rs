@@ -1584,7 +1584,7 @@ mod tests {
         let wave_row = make_wave_row("ship");
         store.create_wave(&wave_row).await.expect("seed wave");
 
-        // A live brain, registered as another `lf loop` would be.
+        // A live brain, registered as another `lf serve` would be.
         let first = registry::RegistryConfig {
             store: store.clone(),
             wave: wave_row.clone(),

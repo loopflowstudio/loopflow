@@ -158,7 +158,7 @@ impl BodyProvenance {
 pub fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default()
+        .expect("the current UTC time is representable as RFC 3339")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

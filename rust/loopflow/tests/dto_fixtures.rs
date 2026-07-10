@@ -161,33 +161,6 @@ fn post_message_response_fixture_pins_wave_chat_reply() {
     );
 }
 
-/// A work-line channel's `turn` SSE frame (wave/server.rs
-/// `tagged_turn_event`): the ChatTurn JSON plus exactly one extra top-level
-/// key, `"channel"`. The tag is additive — the turn parses whole with the key
-/// present, and stripping it restores the plain turn frame byte-for-value.
-/// Swift's ContractTests decodes the same fixture through FrameChannelTag +
-/// ChatTurn; a drift in either the tag or the turn shape fails one of the two.
-#[test]
-fn channel_tagged_turn_fixture_pins_the_frame_shape() {
-    let value = load_fixture("channel_tagged_turn.json");
-    assert_eq!(value["channel"], "ship.148e0e02");
-
-    // The tag is additive: the whole frame still parses as a ChatTurn.
-    let turn: ChatTurn = serde_json::from_value(value.clone())
-        .expect("tagged frame parses as a ChatTurn (unknown key ignored)");
-    assert_eq!(turn.id, "turn-7");
-    assert_eq!(turn.from.as_deref(), Some("worker"));
-
-    // The frame is EXACTLY turn + channel: re-serialize the turn, re-insert
-    // the tag, and the fixture comes back byte-for-value.
-    let mut rebuilt = serde_json::to_value(&turn).expect("serialize turn");
-    rebuilt
-        .as_object_mut()
-        .expect("object")
-        .insert("channel".to_string(), value["channel"].clone());
-    assert_eq!(rebuilt, value);
-}
-
 /// The resident wire (`POST /resident/deltas` — wave/wire.rs). CARVE-OUT:
 /// unlike the other fixtures this wire is Rust↔Rust only (the listener and
 /// the resident are the same binary), so only this Rust test pins it — Swift

@@ -99,13 +99,18 @@ Two more, by injury:
 cargo test                                   # to completion — see below
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
-scripts/test.py --all                        # Python, website, Swift, e2e
+uv run python scripts/test.py --all          # Python, Rust, website, Swift, e2e, Mac build
 ```
 
 **Run `cargo test` to completion before trusting a green suite.** A failing lib
 target makes cargo skip every later target, so lib failures mask bin failures.
 
-Last full run: Rust 1298/1298 (3 configured skips), website 59 (3 device-title
-skips), Swift 309 tests across 50 suites plus 5 XCTest cases, Python 51. The
-Loopflow UI suite cannot be greened headlessly (`LoopflowUITests-Runner` hangs);
-treat a `--all` UI failure as unproven, not as a regression.
+Gate run on 2026-07-10: Python 51 passed; Rust 1295 passed with 3 configured
+skips; website 59 passed with 3 device-title skips; Swift 307 tests across 50
+suites plus 5 XCTest cases passed; the e2e smoke passed; and the Loopflow Mac
+scheme completed `xcodebuild build-for-testing`. Formatting, Clippy with
+warnings denied, and Swift multiplatform boundary checks also passed.
+
+The automated gate proves the Mac app and UI-test targets build, but this
+headless run had no rendering environment. The five-step visual walkthrough
+and its two failure-injury variants above remain the reviewer's product check.

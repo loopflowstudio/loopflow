@@ -151,7 +151,7 @@ impl WaveExecutor {
         let mut completed = 0;
         for session in active {
             if session.source == WAVE_SERVER_SOURCE {
-                // A registered `lf loop` server. lfd never launched it, so
+                // A registered `lf serve` listener. lfd never launched it, so
                 // liveness is the recorded pid (same host — the endpoint is
                 // loopback). A dead pid is a server that crashed without
                 // deregistering: close the row so one-brain enforcement

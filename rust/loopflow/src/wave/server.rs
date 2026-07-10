@@ -19,7 +19,7 @@
 //! journal, no worktree binding. Doors are name-addressed.
 //!
 //! Wire contract (snake_case, stable — a Loopflow worker builds against it):
-//! - `GET /health` → `{status, loop_state, wave, turns, workers, uptime_seconds}`;
+//! - `GET /health` → `{status, loop_state, wave, turns, workers, paused, uptime_seconds}`;
 //!   `status` is CHANNEL liveness — always `serving` while this process
 //!   answers; `loop_state` is the resident's state (`idle | turning | interrupting
 //!   | failed`), or null before any resident has attached; a served channel whose resident died reads
@@ -32,7 +32,7 @@
 //! - `GET /events` → SSE, the served mind's thread. It carries the PRIMARY
 //!   channel and nothing else: agent-to-agent traffic is the bus, a table in
 //!   the shared store that no server sits in front of (`crate::wave::bus`).
-//!   Three event names:
+//!   Event names:
 //!   - `state`: data is the loop-state name (`idle | turning | interrupting |
 //!     failed`), sent once on subscribe (before the turn replay) and again on
 //!     every transition — the composer keys its verb off it.
@@ -67,22 +67,17 @@
 //!   - `POST /resident/deltas {deltas: [...]}` → `{accepted}` — ordered turn
 //!     deltas, applied to the journal fold
 //!     ([`WaveRuntime::apply_resident_delta`]).
-//!   - `GET /resident/context` → `{in_flight}` — the pre-turn
+//!   - `GET /resident/context` → `{in_flight, playhead}` — the pre-turn
 //!     snapshot; serving it freshens the store observations (one poll).
-//! - `POST /messages {op, text, from?, channel?}` → `{turn, state}`. `op` is
-//!   required — `"message"` (human speech steers a live steer-capable turn;
-//!   otherwise queued, the next turn answers it), `"steer"`
+//! - `POST /messages {op, text}` → `{turn, state}`. `op` is
+//!   required — `"message"` (queued; the next turn answers it), `"steer"`
 //!   (into the live turn when the harness supports it, else degrades to a
 //!   queued message), `"interrupt"` (cancel the open turn; non-empty text
 //!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
-//!   a no-op success), or `"say"` (an attributed emission — `lf chat`: a
-//!   worker report, child-wave escalation, or CLI FYI; lands in the thread
-//!   with its byline AND queues for the loop like a message). `text` may be
-//!   empty only for `interrupt` (400 otherwise). `from {session_id?, label}`
-//!   is required for `say` and rejected for every other op (400) — human
-//!   turns are unattributed by convention. The door is the THREAD's, and only
-//!   the thread's — a report on a hand's channel is `lf radio`, an INSERT on
-//!   the bus that this server later reads back. `turn` is the appended user `Turn`,
+//!   a no-op success). `text` may be empty only for `interrupt` (400
+//!   otherwise). The thread is human and unattributed: `say` and `from` are
+//!   rejected. Machine speech uses `lf radio`, an INSERT on the bus that this
+//!   server later reads back. `turn` is the appended user `Turn`,
 //!   or null for a bare interrupt (nothing was said); `state` is the
 //!   loop-state name when the request was accepted — ops are applied by the
 //!   loop asynchronously, so watch the stream's `state` events for the
@@ -675,15 +670,15 @@ enum ExecVerdict {
 ///
 /// Permitted:
 /// - Git/GitHub/pm/release/queue commands EXCEPT `auth` — the commit-and-land path.
-/// - `radio`, `chat`, `memory` — a worker reporting up on the agent bus and
-///   curating wave memory (`chat` stays permitted for human/CLI use).
+/// - `radio`, `memory` — a worker reporting up on the agent bus and curating
+///   wave memory.
 /// - the read verbs `ls`/`status`/`runs`/`sub`/`trace`/`usage` — inspection.
 /// - `loop … --detach`, whose only execution path is a server-owned fresh
 ///   worktree.
 ///
 /// Rejected:
 /// - `auth` — credential rotation is never the escape hatch's job.
-/// - `loop <wave>` — wave lifecycle (start / `--force` take-over).
+/// - `serve <wave>` — wave lifecycle (start / `--force` take-over).
 /// - blocking `loop …` — the door process would itself become the long-lived
 ///   owner, bypassing the listener's supervision.
 /// - every direct flow / skill / inline prompt — those would run an arbitrary
@@ -710,14 +705,12 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
             | Commands::Pm { .. },
         ) => ExecVerdict::Allow,
         Some(Commands::Auth { .. }) => ExecVerdict::Deny("auth".to_string()),
-        Some(Commands::Chat { .. })
-        | Some(Commands::Radio { .. })
+        Some(Commands::Radio { .. })
         | Some(Commands::Memory { .. })
         | Some(Commands::Ls { .. })
         | Some(Commands::Status { .. })
         | Some(Commands::Runs { .. })
         | Some(Commands::Sub { .. })
-        | Some(Commands::Wavechat { .. })
         | Some(Commands::Trace { .. })
         | Some(Commands::Usage { .. })
         | Some(Commands::Tokens { .. })
@@ -726,6 +719,10 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         // "detach with nothing to run" case the door used to police is gone.
         Some(Commands::Loop { detach: true, .. }) => ExecVerdict::Allow,
         Some(Commands::Loop { detach: false, .. }) => ExecVerdict::Deny("loop".to_string()),
+        // The exec door is held only by agents. The thread is the human's
+        // surface; machine speech must retain its byline on the bus.
+        Some(Commands::Chat { .. }) => ExecVerdict::Deny("chat".to_string()),
+        Some(Commands::Wavechat { .. }) => ExecVerdict::Deny("wavechat".to_string()),
         // Booting a listener, or a resident body against one, is wave
         // lifecycle: the door process would become the long-lived owner.
         Some(Commands::Serve { .. }) => ExecVerdict::Deny("serve".to_string()),
@@ -1085,13 +1082,13 @@ where
 fn turn_event(turn: &ChatTurn) -> Event {
     Event::default()
         .event("turn")
-        .data(serde_json::to_string(turn).unwrap_or_default())
+        .data(serde_json::to_string(turn).expect("ChatTurn serializes to JSON"))
 }
 
 fn playhead_event(playhead: &PlayheadView) -> Event {
     Event::default()
         .event("playhead")
-        .data(serde_json::to_string(playhead).unwrap_or_default())
+        .data(serde_json::to_string(playhead).expect("PlayheadView serializes to JSON"))
 }
 
 fn state_event(state: &LoopState) -> Event {
@@ -1105,7 +1102,7 @@ fn memory_event(summary: &str) -> Event {
 fn op_event(frame: &OpFrame) -> Event {
     Event::default()
         .event("op")
-        .data(serde_json::to_string(frame).unwrap_or_default())
+        .data(serde_json::to_string(frame).expect("OpFrame serializes to JSON"))
 }
 
 fn memory_add_event(fact: &str) -> Event {
@@ -1115,7 +1112,7 @@ fn memory_add_event(fact: &str) -> Event {
 fn inbox_event(frame: &InboxFrame) -> Event {
     Event::default()
         .event("inbox")
-        .data(serde_json::to_string(frame).unwrap_or_default())
+        .data(serde_json::to_string(frame).expect("InboxFrame serializes to JSON"))
 }
 
 fn pending_inbox_frame(message: &PendingMessage) -> InboxFrame {
@@ -1421,7 +1418,7 @@ mod tests {
     }
 
     /// The escape hatch's real work passes the verb policy: committing and
-    /// landing through git/PR commands, reporting via `chat`/`memory`, inspecting via the
+    /// landing through git/PR commands, reporting via `radio`/`memory`, inspecting via the
     /// read verbs, and delegating a loop into a sandboxed worktree.
     #[test]
     fn wave_exec_policy_permits_the_escape_hatch_essentials() {
@@ -1429,7 +1426,7 @@ mod tests {
             argv(&["commit", "-m", "wip"]),
             argv(&["pr", "land", "--strict"]),
             argv(&["pr", "open"]),
-            argv(&["chat", "worker done"]),
+            argv(&["radio", "worker done"]),
             argv(&["memory", "add", "learned a thing"]),
             argv(&["ls"]),
             argv(&["status"]),
@@ -1465,6 +1462,8 @@ mod tests {
             argv(&["serve", "ship", "--force"]),
             argv(&["__resident", "ship"]),
             argv(&["sync-skills", "--yes"]),
+            argv(&["chat", "pretend to be human"]),
+            argv(&["wavechat", "ship"]),
             argv(&["implement", "ship it"]),
             argv(&[":", "do", "something"]),
         ];

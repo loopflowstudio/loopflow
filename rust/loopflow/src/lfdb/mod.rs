@@ -491,7 +491,7 @@ impl Store {
 
     /// The wave's live brain, if any: a non-terminal `WaveAgent` session —
     /// either lfd-launched (`POST /waves/{id}/run`) or a self-registered
-    /// `lf loop` server. One-brain enforcement (run_wave idempotency, the
+    /// `lf serve` listener. One-brain enforcement (run_wave idempotency, the
     /// loop-ticker skip, wave-server registration conflicts) keys on this
     /// single fact.
     pub async fn live_wave_agent_session(&self, wave_id: &LfdId) -> StoreResult<Option<Session>> {
@@ -508,7 +508,7 @@ impl Store {
 
     /// Record a session in the run registry. The db IS the registry: `lf`
     /// writes its own row here directly — self-registered flow runs, the
-    /// `lf loop` server's WaveAgent row, placed `lf` runs — no
+    /// `lf serve` listener's WaveAgent row, placed `lf` runs — no
     /// daemon in the path. The writer later marks the row terminal via
     /// [`Store::update_control_session`].
     pub async fn register_session(&self, session: &Session) -> StoreResult<()> {

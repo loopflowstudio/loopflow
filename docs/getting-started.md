@@ -158,8 +158,8 @@ lf serve shipper
 
 The wave agent inhabits one loop and delegates self-sufficient work
 (`lf loop build "…" --wave shipper --detach`), then folds each shipped PR into
-memory. CI failures and pushes to main land in the wave's thread as attributed
-`lf chat` notifications.
+memory. CI failures and pushes to main ride the bus with `lf radio`, then land
+in the wave's thread as attributed notifications.
 
 **Loopflow** (macOS) is the native wave experience — monitor progress, browse flows, review PRs. Requires `lfd`.
 

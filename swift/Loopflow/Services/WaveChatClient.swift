@@ -151,13 +151,6 @@ struct PostMessageResponse: Decodable {
     let state: String
 }
 
-/// The optional channel tag beside a `turn` frame's fields: present on
-/// work-line channel frames of a family subscription, absent on the wave's
-/// own (absent = the primary channel).
-struct FrameChannelTag: Decodable {
-    let channel: String?
-}
-
 /// One `op` SSE frame — this wave's operational motion: a worker run starting
 /// or finishing, observed by the wave server's `StoreObserver`. Mirrors Rust
 /// `OpFrame` (`wave/wire.rs`); `kind` reuses the `run_events` ledger vocabulary
@@ -336,10 +329,10 @@ public final class WaveChatConnection {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw WaveChatError.badStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
         }
-        // A fresh stream replays the server's full transcript. Drop the previous
-        // generation first: after a server restart, turn ids and sequences start
-        // over, and stale high-sequence turns would interleave with the replay.
-        // The loop state resets too; the server's first frame is a `state` event.
+        // A fresh stream replays the server's authoritative full transcript.
+        // Drop the previous snapshot first so recovery changes cannot leave a
+        // stale turn beside the replay. The loop state resets too; the server's
+        // first frame is a `state` event.
         turns = []
         loopState = .idle
         playhead = nil
@@ -357,18 +350,14 @@ public final class WaveChatConnection {
         }
     }
 
-    /// One SSE frame off `/events`. Three event names: `state` carries the
+    /// One SSE frame off `/events`. `state` carries the
     /// bare loop-state name (sent on subscribe and on every transition);
     /// `turn` carries a whole turn — re-sent under the same id as it grows,
     /// then a terminal frame at finalization, every frame replacing the
     /// previous state of its id; `memory` carries a MEMORY.md curation
     /// summary (live-only, parsed and exposed, no UI yet). Unknown events
-    /// drop. A turn from a work-line CHANNEL carries an extra `channel` key
-    /// (the wave's own turns ride untagged) — WaveChat renders the PRIMARY
-    /// channel only for now, so tagged frames for other channels are
-    /// skipped, not errors (family UI is later). A turn payload that fails
-    /// to decode is a hole in the transcript: logged always, asserted in
-    /// debug — never silent. Internal for tests.
+    /// drop. A turn payload that fails to decode is a hole in the transcript:
+    /// logged always, asserted in debug — never silent. Internal for tests.
     func handle(event: String, data: String) {
         if event == "state" {
             guard let state = WaveLoopState(rawValue: data) else { return }
@@ -392,10 +381,6 @@ public final class WaveChatConnection {
             return
         }
         guard event.isEmpty || event == "turn", let json = data.data(using: .utf8) else { return }
-        if let tag = try? decoder.decode(FrameChannelTag.self, from: json),
-           let channel = tag.channel, channel != waveName {
-            return
-        }
         do {
             upsert(try decoder.decode(ChatTurn.self, from: json))
         } catch {

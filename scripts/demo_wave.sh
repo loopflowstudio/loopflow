@@ -261,7 +261,7 @@ pause
 hr "act 5 · the loop delegates a hand (lf loop … --detach)"
 say "asking the loop to delegate — orchestration lives in the prompt, loopflow is the toolset"
 curl -sf -X POST "http://$ADDR/messages" -H 'content-type: application/json' \
-    -d "{\"op\":\"message\",\"text\":\"Delegate one hand with lf loop task \\\"make the next TODO.md improvement\\\" --wave $WAVE --detach. Do not do the work inline. After delegating, reply with the run id.\"}" >/dev/null
+    -d "{\"op\":\"message\",\"text\":\"This independent demo task should run in parallel: use lf --wave $WAVE loop task \\\"make the next TODO.md improvement\\\" --detach. After detaching it, reply with the run id.\"}" >/dev/null
 poll "run_observed journaled (loop pass + dispatch; model-dependent)" 300 journal_has run_observed || true
 if journal_has run_observed; then
     jq -c 'select(.kind.type == "run_observed") | .kind' "$JOURNAL" | sed 's/^/  /'

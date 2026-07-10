@@ -230,20 +230,29 @@ fn build_goal_seed(repo: &Path, wave: &str) -> String {
 }
 
 /// The coordinating-session discipline, promoted into the loop's system
-/// prompt: the loop orchestrates, it never grinds inline. Wave-specific rules
-/// only — shared loopflow operating guidance is appended in
+/// prompt. A wave owns coordination, but a single local blocker is still
+/// cheaper and clearer to resolve inline. Wave-specific rules only — shared
+/// loopflow operating guidance is appended in
 /// [`wave_pass_seed`], not duplicated here.
 fn orchestration_discipline(wave: &str) -> String {
     format!(
         "You are the loop of the '{wave}' wave — its long-running orchestrator.\n\
          Discipline:\n\
-         - Read state and filed tasks, then inhabit one loop whose next move \
-         needs this wave's live memory/chat: `lf loop <flow> \"<task>\" \
-         --wave {wave}`. This is one blocking tool call.\n\
-         - Delegate self-sufficient work with the same command plus `--detach`. \
-         Detached hands must report with `lf radio`, publish learnings with \
-         `lf memory add`, and leave done as a PR.\n\
-         - Keep turns centered on selection, sequencing, and authored reports.\n\
+         - Read state and filed tasks when available. If PM fails, report it \
+         once and continue from GOAL, MEMORY, and project KRs; do not turn \
+         infrastructure repair into this wave's work.\n\
+         - Execute the next move inline by default. Resolve the one concrete \
+         blocker between the wave and progress in this process.\n\
+         - Create only project or task loops, and only for strict subsets that \
+         need an independent multi-pass lifecycle, their own PR, or useful \
+         parallel execution. Never delegate the whole wave objective.\n\
+         - Inhabit with `lf --wave {wave} loop <flow> \"<whole handoff>\"`. \
+         Add `--detach` only when the wave has another useful move while that \
+         child runs; if the result gates the next move, keep it foreground. \
+         Never use a one-pass loop. Detached hands report with `lf radio`, \
+         publish durable learnings with `lf memory add`, and leave done as a PR.\n\
+         - Keep turns centered on selection, direct progress, sequencing, and \
+         authored reports.\n\
          - Trust worker summaries; never re-read worker transcripts.\n\
          - A human message is steering: answer it directly and adjust course \
          before returning to the goal."
@@ -1264,6 +1273,7 @@ mod tests {
             server::SubagentDoor::new(),
             None,
             None,
+            server::ShutdownDoor::new(),
         );
         let listener = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)

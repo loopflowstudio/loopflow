@@ -26,6 +26,7 @@ impl LoopRun {
         wave_name: &str,
         flow: &str,
         task: Option<String>,
+        run_id: &LfdId,
         placement: &Placement,
     ) -> OpsResult<Self> {
         let runtime = tokio::runtime::Runtime::new()
@@ -45,8 +46,7 @@ impl LoopRun {
                 .await
                 .map_err(|err| OpsError::Message(format!("failed to read wave registry: {err}")))?
                 .ok_or_else(|| OpsError::Message(format!("wave '{wave_name}' not found")))?;
-            let run_id = LfdId::new();
-            let mut run = create_run_for_placement(&store, &wave, &run_id, placement)
+            let mut run = create_run_for_placement(&store, &wave, run_id, placement)
                 .await
                 .map_err(|err| {
                     OpsError::Message(format!("failed to create loop worktree: {err}"))

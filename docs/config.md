@@ -109,7 +109,7 @@ Flows are YAML files in `.lf/flows/`:
 
 ### Loopflow Guidance
 
-Ambient operating guidance for git, worktrees, PRs, and delegation. Injected by default.
+Ambient operating guidance for inline execution and mechanical git/PR operations. Injected by default; tier skills add scoped delegation.
 
 | | |
 |---|---|

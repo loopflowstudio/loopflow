@@ -28,7 +28,7 @@ lf office-hours                   # bare name works when unambiguous
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
-lf loop task "fix the flaky test" --wave designer   # loop task until the PR merges
+lf --wave designer loop task "fix the flaky test"   # loop task until the PR merges
 ```
 
 ## Skills
@@ -53,6 +53,21 @@ lf implement: add user authentication
 Inside skill files, `{args}` is replaced with whatever comes after the colon.
 
 ## Context Flags
+
+Write global flags before a built-in subcommand. Unambiguous flags also work
+after it:
+
+```bash
+lf --wave designer loop task "fix the flaky test"   # canonical
+lf loop task "fix the flaky test" --wave designer   # accepted and normalized
+lf pm --wave designer show                           # normalized onto `show`
+lf pm task --wave designer create --title "Fix it"  # normalized onto `create`
+lf commit -m "explain the change"                   # -m remains commit-local
+```
+
+Flags may cross nested subcommands to reach a selected command that owns the
+spelling. If more than one level owns it, a flag already valid at its current
+level stays there. Put `--` before literal arguments that look like flags.
 
 ### Files and Directories
 
@@ -124,16 +139,22 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
 ```bash
 lf serve designer                                  # start the named mind
-lf loop task "fix the flaky chord-timeout test" --wave designer
-lf loop task "…" --wave designer --max-passes 4 --wall-clock-secs 3600
-lf loop scan-pass "scan the runtime" --detach # any flow is loopable
+lf stop designer                                   # stop its listener and resident
+lf --wave designer loop task "fix the flaky chord-timeout test"
+lf --wave designer loop task "…" --max-passes 4 --wall-clock-secs 3600
+lf --wave designer loop scan-pass "scan the runtime" --detach
+lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
-With one name, `lf serve <name>` starts that mind and its persistent playhead.
+With one name, `lf serve <name>` starts that mind and its persistent playhead;
+`lf stop <name>` shuts it down without touching detached worker loops.
 With a flow plus free text, it creates a child worktree and loops until the
 flow's skills write `done` to `scratch/loop.yaml` (`task`: when the PR merges).
-Without `--detach` it blocks; with `--detach` the live wave server owns it and
-returns a read-only tmux inspection session. Linear holds filed tasks,
+Loops allow at least two passes; run the flow directly for one-shot work.
+Without `--detach` the caller owns the loop and blocks; with `--detach` the
+already-running wave server owns it and returns a read-only tmux inspection
+session. Detach only when the parent has another useful move while the loop
+runs. Linear holds filed tasks,
 `lf runs` shows active hands, and merged PRs record done.
 
 ## Speaking to Waves
@@ -146,7 +167,7 @@ the shared store, ephemeral, no server in the path.
 lf chat "ship the button audit first"       # post into the current wave's thread
 lf chat -w infra "CI is red on the PR"      # target a wave by name
 lf chat --parent "blocked on schema change" # escalate to the parent wave
-lf wavechat intelligence                    # watch and speak from one terminal pane
+lf chat --follow -w intelligence            # watch and speak from one terminal pane
 lf memory                                   # print the wave's MEMORY.md
 lf memory add "buttons: variants unified"   # publish one replayable fact
 lf memory log                               # print facts added since the last update
@@ -155,16 +176,16 @@ lf memory update < MEMORY.md                # replace it from stdin
 
 | Command | What it does |
 |---------|--------------|
-| `lf chat [TEXT]` | Post a message into a wave's thread; reads stdin when TEXT is omitted. Outside any wave it prints a short drop note and exits 0, so the verb is safe in every prompt |
-| `lf wavechat [WAVE]` | Replay and follow a served mind's thread while typed lines post into it; `/status` reads health and `/quit` leaves |
+| `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays and follows while typed lines post, `/status` reads health, and `/quit` leaves. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
 | `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 
-All three default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
+Both default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
 
 | Flag | Description |
 |------|-------------|
 | `-w, --wave NAME` | Target a wave by name |
 | `--parent` | Target the invoking wave's parent (`lf chat` / `lf memory`) |
+| `--follow` | Replay and follow the selected thread while typed lines post into it (`lf chat`) |
 
 ## The Agent Bus
 
@@ -289,9 +310,9 @@ lf implement -d ux,clarity
 lf gate --no-loopflow
 ```
 
-`LOOPFLOW.md` carries loopflow-specific guidance for git, worktrees, PRs, and
-delegation, and is injected by default. Use `--no-loopflow` for a leaner
-prompt.
+`LOOPFLOW.md` carries loopflow-specific guidance for inline execution and
+mechanical git/PR operations. Tier skills add scoped delegation. Use
+`--no-loopflow` for a leaner prompt.
 
 ### Include clipboard content
 

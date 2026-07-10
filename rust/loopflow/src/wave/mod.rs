@@ -107,6 +107,60 @@ pub fn serve(name: &str, force: bool) -> Result<()> {
     })
 }
 
+/// `lf stop <name>` — ask the named wave's listener to shut down gracefully.
+/// A missing or stale endpoint is already stopped, so this is idempotent.
+pub fn stop(name: &str) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
+    let wave = resolve_wave_name(&main_repo, Some(name))
+        .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
+    let rt = tokio::runtime::Runtime::new()?;
+    let requested = rt.block_on(request_stop(&main_repo, &wave))?;
+    if requested {
+        println!("stopped wave {wave}");
+    } else {
+        println!("wave {wave} is already stopped");
+    }
+    Ok(())
+}
+
+async fn request_stop(repo_root: &Path, wave: &str) -> Result<bool> {
+    let Some(endpoint) = server::live_endpoint(repo_root, wave).await else {
+        return Ok(false);
+    };
+    let response = reqwest::Client::new()
+        .post(format!("http://{endpoint}/stop"))
+        .send()
+        .await
+        .map_err(|err| anyhow!("failed to stop wave '{wave}': {err}"))?;
+    if response.status() != reqwest::StatusCode::ACCEPTED {
+        return Err(anyhow!(
+            "wave '{wave}' refused stop with HTTP {}",
+            response.status()
+        ));
+    }
+
+    // The route requests shutdown; `run_listener` still owns resident and
+    // registry cleanup. Wait until this boot's pointer disappears or a newer
+    // listener replaces it, without probing the server on every iteration.
+    for _ in 0..100 {
+        let recorded = std::fs::read_to_string(server::endpoint_path(repo_root, wave))
+            .ok()
+            .map(|value| value.trim().to_string());
+        if recorded.as_deref() != Some(endpoint.as_str()) {
+            return Ok(true);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    if server::live_endpoint(repo_root, wave).await.is_none() {
+        return Ok(true);
+    }
+    Err(anyhow!(
+        "wave '{wave}' accepted stop but is still serving at http://{endpoint}"
+    ))
+}
+
 /// Open the machine's shared registry and resolve this wave's row, creating
 /// the row when the store has never seen the wave — the db IS the registry,
 /// so a reachable store always yields a registered boot (see
@@ -381,15 +435,24 @@ async fn run_listener(
         }
     );
 
+    let shutdown_door = server::ShutdownDoor::new();
+    let shutdown_request = shutdown_door.clone();
+    let graceful_shutdown = async move {
+        tokio::select! {
+            _ = shutdown => {}
+            _ = shutdown_request.wait() => {}
+        }
+    };
     let app = server::router(
         runtime.clone(),
         door.clone(),
         subagent_door,
         observer,
         Some(supervisor_handle),
+        shutdown_door,
     );
     let result = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown)
+        .with_graceful_shutdown(graceful_shutdown)
         .await;
 
     // Shutdown: stand the keeper down FIRST (so the resident's exit below
@@ -455,6 +518,12 @@ mod tests {
         assert!(Cli::try_parse_from(["lf", "loop", "goals"]).is_err());
     }
 
+    #[tokio::test]
+    async fn stopping_an_absent_wave_is_idempotent() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert!(!request_stop(tmp.path(), "ship").await.expect("stop"));
+    }
+
     fn progress_turn(text: &str) -> ChatTurn {
         ChatTurn {
             id: String::new(),
@@ -492,6 +561,7 @@ mod tests {
             server::SubagentDoor::new(),
             None,
             None,
+            server::ShutdownDoor::new(),
         );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
@@ -1224,6 +1294,7 @@ mod tests {
             server::SubagentDoor::new(),
             None,
             None,
+            server::ShutdownDoor::new(),
         );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
@@ -1267,6 +1338,7 @@ mod tests {
             server::SubagentDoor::new(),
             None,
             None,
+            server::ShutdownDoor::new(),
         );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
@@ -1386,6 +1458,35 @@ mod tests {
         assert!(
             server::read_resident_token(&repo, "ship").is_none(),
             "token removed on shutdown"
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_command_path_gracefully_shuts_down_the_listener() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
+        let repo = tmp.path().to_path_buf();
+        let repo2 = repo.clone();
+        let handle = tokio::spawn(async move {
+            run_listener(
+                repo2,
+                "ship".into(),
+                None,
+                false,
+                false,
+                std::future::pending(),
+            )
+            .await
+        });
+
+        let endpoint = server::endpoint_path(&repo, "ship");
+        wait_for(|| endpoint.exists()).await;
+        assert!(request_stop(&repo, "ship").await.expect("request stop"));
+        handle.await.unwrap().unwrap();
+        assert!(!endpoint.exists(), "stop removes the endpoint");
+        assert!(
+            server::read_resident_token(&repo, "ship").is_none(),
+            "stop removes the resident token"
         );
     }
 

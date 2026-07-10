@@ -15,6 +15,7 @@ struct MessageRow: View {
 
     let turn: ChatTurn
     let timestampLabel: String?
+    let attemptFailure: AttemptFailurePresentation?
 
     var body: some View {
         if turn.role == .assistant {
@@ -64,6 +65,7 @@ struct MessageRow: View {
     @ViewBuilder
     private var assistantBody: some View {
         let segments = parseMessageSegments(turn.text)
+        let visibleItems = turn.items.filter(\.isVisibleInConversation)
         VStack(alignment: .leading, spacing: Spacing.sm) {
             ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                 switch segment {
@@ -74,9 +76,9 @@ struct MessageRow: View {
                 }
             }
 
-            if !turn.items.isEmpty {
+            if !visibleItems.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    ForEach(turn.items) { item in
+                    ForEach(visibleItems) { item in
                         ConversationItemCard(item: item)
                     }
                 }
@@ -98,13 +100,24 @@ struct MessageRow: View {
     }
 
     private var failedBadge: some View {
-        HStack(spacing: Spacing.xs) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(Typography.caption(11))
-                .foregroundStyle(Color.statusError)
-            Text("Turn failed")
-                .font(Typography.caption(11))
-                .foregroundStyle(Color.statusError)
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                Text(attemptFailure?.title ?? "Turn failed")
+            }
+            .font(Typography.caption(11))
+            .foregroundStyle(Color.statusError)
+
+            if let attemptFailure {
+                Text(attemptFailure.reason)
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.text)
+                    .textSelection(.enabled)
+
+                Text("\(attemptFailure.flow) / \(attemptFailure.step)")
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
+            }
         }
     }
 }

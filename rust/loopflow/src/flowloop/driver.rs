@@ -73,13 +73,42 @@ impl LoopOptions {
     }
 }
 
-/// What the loop file said at a pass boundary.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
-pub struct LoopFile {
+/// The loop file's YAML shape: two independent keys, either of which the
+/// agent may omit. Read once at a pass boundary and turned into a
+/// [`LoopVerdict`] — nothing else sees the pair.
+#[derive(Debug, Default, Deserialize)]
+struct LoopFile {
     #[serde(default)]
-    pub done: bool,
+    done: bool,
     #[serde(default)]
-    pub recheck: Option<String>,
+    recheck: Option<String>,
+}
+
+/// What the loop does at a pass boundary. The three cases are exclusive, so
+/// an agent that writes both `done` and `recheck` gets `Done` — decided here,
+/// once, rather than by the order of arms at the call site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LoopVerdict {
+    /// The work is finished; the loop stops.
+    Done,
+    /// Not yet: wait for this shell predicate to exit 0, then run a close-out
+    /// pass. Waiting is free — no pass is burned.
+    Recheck(String),
+    /// The loop file said nothing. Run the next pass.
+    Continue,
+}
+
+impl From<LoopFile> for LoopVerdict {
+    fn from(file: LoopFile) -> Self {
+        match file {
+            LoopFile { done: true, .. } => Self::Done,
+            LoopFile {
+                recheck: Some(predicate),
+                ..
+            } => Self::Recheck(predicate),
+            LoopFile { .. } => Self::Continue,
+        }
+    }
 }
 
 /// `lf loop <flow> "<seed>"`: place a worktree through the wave
@@ -219,12 +248,11 @@ fn drive(
         pass(n, &options.flow, &pass_seed, &pass_options)?;
 
         match take_loop_file(worktree)? {
-            LoopFile { done: true, .. } => return Ok(()),
-            LoopFile {
-                recheck: Some(predicate),
-                ..
-            } => wait_for_recheck(worktree, &predicate, options, started)?,
-            LoopFile { .. } => {}
+            LoopVerdict::Done => return Ok(()),
+            LoopVerdict::Recheck(predicate) => {
+                wait_for_recheck(worktree, &predicate, options, started)?
+            }
+            LoopVerdict::Continue => {}
         }
     }
 
@@ -236,16 +264,18 @@ fn drive(
     Err(OpsError::Message(message))
 }
 
-/// Read and remove the loop file — it speaks for one boundary only.
-fn take_loop_file(worktree: &Path) -> OpsResult<LoopFile> {
+/// Read and remove the loop file — it speaks for one boundary only. An absent
+/// file is the silent verdict: run the next pass.
+fn take_loop_file(worktree: &Path) -> OpsResult<LoopVerdict> {
     let path = worktree.join(LOOP_FILE);
     let raw = match std::fs::read_to_string(&path) {
         Ok(raw) => raw,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(LoopFile::default()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(LoopVerdict::Continue),
         Err(err) => return Err(OpsError::from(err)),
     };
     std::fs::remove_file(&path)?;
-    serde_yaml_ng::from_str(&raw)
+    serde_yaml_ng::from_str::<LoopFile>(&raw)
+        .map(LoopVerdict::from)
         .map_err(|err| OpsError::Parse(format!("unparseable {LOOP_FILE}: {err}")))
 }
 

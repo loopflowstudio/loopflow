@@ -9,15 +9,19 @@ use tokio_util::sync::CancellationToken;
 
 use crate::lfdb::rows::now_unix;
 use crate::lfdb::{ProviderToken, SharedStore};
-use crate::provider_auth::{refresh_provider_token, Provider};
+use crate::provider_auth::{refresh_stored_provider_token, Provider, TOKEN_REFRESH_LEAD_SECONDS};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
-const REFRESH_THRESHOLD: Duration = Duration::from_secs(20 * 60);
+const REFRESH_THRESHOLD: Duration = Duration::from_secs(TOKEN_REFRESH_LEAD_SECONDS as u64);
 const REFRESH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[async_trait]
 trait TokenRefresher: Send + Sync {
-    async fn refresh(&self, provider: Provider) -> Result<ProviderToken, String>;
+    async fn refresh(
+        &self,
+        provider: Provider,
+        current_token: &ProviderToken,
+    ) -> Result<ProviderToken, String>;
 }
 
 #[derive(Debug)]
@@ -25,8 +29,12 @@ struct ProviderAuthTokenRefresher;
 
 #[async_trait]
 impl TokenRefresher for ProviderAuthTokenRefresher {
-    async fn refresh(&self, provider: Provider) -> Result<ProviderToken, String> {
-        refresh_provider_token(provider)
+    async fn refresh(
+        &self,
+        provider: Provider,
+        current_token: &ProviderToken,
+    ) -> Result<ProviderToken, String> {
+        refresh_stored_provider_token(provider, current_token)
             .await
             .map_err(|err| err.to_string())
     }
@@ -118,7 +126,7 @@ async fn schedule_due_refreshes(
         let Some(expires_at) = token.expires_at else {
             continue;
         };
-        if expires_at >= refresh_before {
+        if expires_at > refresh_before {
             continue;
         }
 
@@ -167,7 +175,10 @@ async fn refresh_provider_token_row(
         _ = deps.cancel.cancelled() => {
             return;
         }
-        result = tokio::time::timeout(deps.refresh_timeout, deps.refresher.refresh(provider)) => {
+        result = tokio::time::timeout(
+            deps.refresh_timeout,
+            deps.refresher.refresh(provider, &current_token),
+        ) => {
             match result {
                 Ok(result) => result,
                 Err(_) => {
@@ -183,17 +194,13 @@ async fn refresh_provider_token_row(
     };
 
     match refreshed {
-        Ok(mut refreshed_token) => {
+        Ok(refreshed_token) => {
             if refreshed_token
                 .expires_at
                 .is_some_and(|expires_at| expires_at <= now_unix())
             {
                 log_refresh_failure(provider, "refreshed token is already expired".to_string());
                 return;
-            }
-
-            if refreshed_token.login.is_none() {
-                refreshed_token.login = current_token.login.clone();
             }
 
             if let Err(err) = deps.store.upsert_provider_token(&refreshed_token).await {
@@ -213,10 +220,9 @@ async fn refresh_provider_token_row(
 /// `scratch/eventing.md` §5): there is no machine-wide push, so a failed
 /// refresh surfaces in the logs and on the next `lf auth`/provider-list poll.
 /// Providers that can't self-refresh (Claude, OpenCodeZen) need user
-/// re-authentication; providers with CLI refresh (GitHub, Codex) may recover on
-/// the next scheduled attempt.
+/// re-authentication; automatic providers retry on the next scheduled attempt.
 fn log_refresh_failure(provider: Provider, reason: String) {
-    if provider.supports_cli_refresh() {
+    if provider.supports_automatic_refresh() {
         tracing::warn!(provider = %provider, reason = %reason, "provider token refresh failed");
     } else {
         tracing::warn!(provider = %provider, reason = %reason, "provider token refresh requires re-auth");
@@ -262,7 +268,11 @@ mod tests {
 
     #[async_trait]
     impl TokenRefresher for FakeTokenRefresher {
-        async fn refresh(&self, provider: Provider) -> Result<ProviderToken, String> {
+        async fn refresh(
+            &self,
+            provider: Provider,
+            current_token: &ProviderToken,
+        ) -> Result<ProviderToken, String> {
             let plan = {
                 let mut plans = self.plans.lock().expect("plans mutex poisoned");
                 plans.get_mut(&provider).and_then(VecDeque::pop_front)
@@ -272,8 +282,12 @@ mod tests {
             };
 
             match plan {
-                RefreshPlan::Success { token, delay } => {
+                RefreshPlan::Success { mut token, delay } => {
                     tokio::time::sleep(delay).await;
+                    crate::provider_auth::preserve_provider_token_metadata(
+                        &mut token,
+                        current_token,
+                    );
                     Ok(token)
                 }
                 RefreshPlan::Failure { reason, delay } => {
@@ -297,6 +311,7 @@ mod tests {
             provider: provider.as_str().to_string(),
             access_token: "old-token".to_string(),
             refresh_token: None,
+            oauth_client_id: None,
             expires_at: Some(now_unix() + 60),
             login: login.map(str::to_string),
             updated_at: now_unix(),
@@ -350,6 +365,7 @@ mod tests {
             provider: "github".to_string(),
             access_token: "new-token".to_string(),
             refresh_token: None,
+            oauth_client_id: None,
             expires_at: Some(now_unix() + 3600),
             login: None,
             updated_at: now_unix(),
@@ -376,6 +392,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn linear_refresh_rotates_refresh_token_and_keeps_client_id() {
+        let store = create_store().await;
+        store
+            .upsert_provider_token(&ProviderToken {
+                provider: "linear".to_string(),
+                access_token: "old-access".to_string(),
+                refresh_token: Some("old-refresh".to_string()),
+                oauth_client_id: Some("linear-client".to_string()),
+                expires_at: Some(now_unix() + 60),
+                login: None,
+                updated_at: now_unix(),
+                credential_type: crate::lfdb::CredentialType::OAuth,
+            })
+            .await
+            .expect("insert Linear token");
+        let refreshed = ProviderToken {
+            provider: "linear".to_string(),
+            access_token: "new-access".to_string(),
+            refresh_token: Some("new-refresh".to_string()),
+            oauth_client_id: None,
+            expires_at: Some(now_unix() + 24 * 60 * 60),
+            login: None,
+            updated_at: now_unix(),
+            credential_type: crate::lfdb::CredentialType::OAuth,
+        };
+        let refresher = Arc::new(FakeTokenRefresher::new(HashMap::from([(
+            Provider::Linear,
+            vec![RefreshPlan::Success {
+                token: refreshed,
+                delay: Duration::ZERO,
+            }],
+        )])));
+
+        run_due_refreshes(store.clone(), refresher, Duration::from_secs(5)).await;
+
+        let stored = store
+            .get_provider_token("linear")
+            .await
+            .expect("load Linear token")
+            .expect("Linear token row");
+        assert_eq!(stored.access_token, "new-access");
+        assert_eq!(stored.refresh_token.as_deref(), Some("new-refresh"));
+        assert_eq!(stored.oauth_client_id.as_deref(), Some("linear-client"));
+    }
+
+    #[tokio::test]
     async fn refresh_timeout_leaves_store_unchanged() {
         let store = create_store().await;
         upsert_expiring_token(&store, Provider::GitHub, None).await;
@@ -384,6 +446,7 @@ mod tests {
             provider: "github".to_string(),
             access_token: "never-used".to_string(),
             refresh_token: None,
+            oauth_client_id: None,
             expires_at: Some(now_unix() + 3600),
             login: None,
             updated_at: now_unix(),
@@ -419,6 +482,7 @@ mod tests {
             provider: "claude".to_string(),
             access_token: "claude-new".to_string(),
             refresh_token: None,
+            oauth_client_id: None,
             expires_at: Some(now_unix() + 3600),
             login: None,
             updated_at: now_unix(),
@@ -470,6 +534,7 @@ mod tests {
             provider: "github".to_string(),
             access_token: "github-new".to_string(),
             refresh_token: None,
+            oauth_client_id: None,
             expires_at: Some(now_unix() + 3600),
             login: None,
             updated_at: now_unix(),

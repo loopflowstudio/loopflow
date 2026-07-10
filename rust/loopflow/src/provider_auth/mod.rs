@@ -57,7 +57,7 @@ const LINEAR_OAUTH_CALLBACK_ADDR: &str = "127.0.0.1:19222";
 const LINEAR_CLIENT_ID_ENV: &str = "LINEAR_CLIENT_ID";
 const LINEAR_CLIENT_SECRET_ENV: &str = "LINEAR_CLIENT_SECRET";
 const LINEAR_OAUTH_DEFAULT_SCOPE: &str = "read,write";
-const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
+pub(crate) const TOKEN_REFRESH_LEAD_SECONDS: i64 = 20 * 60;
 
 static USER_CODE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\b([A-Z0-9]{4,}(?:-[A-Z0-9]{4,})+)\b").expect("user code regex"));
@@ -135,11 +135,9 @@ impl Provider {
         }
     }
 
-    /// Whether this provider supports CLI-based token refresh.
-    /// Providers that only re-read files (Claude, OpenCodeZen) can't self-heal
-    /// and require user re-authentication when tokens expire.
-    pub fn supports_cli_refresh(self) -> bool {
-        matches!(self, Self::GitHub | Self::Codex)
+    /// Whether this provider can refresh without user interaction.
+    pub fn supports_automatic_refresh(self) -> bool {
+        matches!(self, Self::GitHub | Self::Codex | Self::Linear)
     }
 }
 
@@ -321,6 +319,11 @@ pub enum TokenRefreshError {
     },
     #[error("{provider} token not found after refresh")]
     MissingToken { provider: Provider },
+    #[error("{provider} OAuth refresh failed: {reason}")]
+    OAuth {
+        provider: Provider,
+        reason: &'static str,
+    },
 }
 
 #[async_trait]
@@ -381,7 +384,7 @@ struct OAuthErrorResponse {
 /// Linear OAuth uses a loopback redirect (`http://localhost:19222/oauth/callback`):
 /// consent is a single click and the code arrives on a short-lived local listener.
 /// Once Linear returns a refresh token, `refresh_pm_oauth_token` renews headlessly
-/// via the client creds.
+/// with the stored PKCE client ID.
 #[derive(Debug, Clone)]
 struct LinearOAuthBroker {
     completed_token: Arc<Mutex<Option<ProviderToken>>>,
@@ -511,6 +514,7 @@ impl LinearOAuthBroker {
             provider: Provider::Linear.as_str().to_string(),
             access_token: payload.access_token,
             refresh_token: payload.refresh_token,
+            oauth_client_id: Some(app.client_id.clone()),
             expires_at,
             login: None,
             updated_at: now_unix(),
@@ -656,6 +660,7 @@ impl AuthBroker for SocketAuthBroker {
             provider: self.provider_name.as_str().to_string(),
             access_token: credential.token,
             refresh_token: None,
+            oauth_client_id: None,
             expires_at: credential.expires_at.as_deref().and_then(parse_expires_at),
             login: credential.login,
             updated_at: now_unix(),
@@ -1340,6 +1345,7 @@ async fn extract_doppler_token() -> Option<ProviderToken> {
         provider: Provider::Doppler.as_str().to_string(),
         access_token: token,
         refresh_token: None,
+        oauth_client_id: None,
         expires_at: None,
         login: None,
         updated_at: crate::lfdb::rows::now_unix(),
@@ -1740,6 +1746,7 @@ fn extract_github_token(home_dir: &Path) -> Option<ProviderToken> {
         provider: "github".to_string(),
         access_token: token.to_string(),
         refresh_token: None,
+        oauth_client_id: None,
         expires_at,
         login,
         updated_at: now_unix(),
@@ -1780,6 +1787,7 @@ fn claude_token_from_credentials_json(content: &str) -> Option<ProviderToken> {
         provider: "claude".to_string(),
         access_token: token.to_string(),
         refresh_token: None,
+        oauth_client_id: None,
         expires_at,
         login: None,
         updated_at: now_unix(),
@@ -1837,6 +1845,7 @@ fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
         provider: "codex".to_string(),
         access_token: token.to_string(),
         refresh_token: None,
+        oauth_client_id: None,
         expires_at,
         login: None,
         updated_at: now_unix(),
@@ -1864,6 +1873,7 @@ fn extract_opencode_zen_token(home_dir: &Path) -> Option<ProviderToken> {
         provider: Provider::OpenCodeZen.as_str().to_string(),
         access_token,
         refresh_token: None,
+        oauth_client_id: None,
         expires_at,
         login,
         updated_at: now_unix(),
@@ -2108,11 +2118,62 @@ fn remove_opencode_zen_auth_entry(home_dir: &Path) -> Result<(), AuthError> {
         .map_err(|err| AuthError::Filesystem(format!("write {}: {err}", auth_path.display())))
 }
 
-pub async fn refresh_provider_token(
-    provider: Provider,
-) -> Result<ProviderToken, TokenRefreshError> {
+async fn refresh_provider_token(provider: Provider) -> Result<ProviderToken, TokenRefreshError> {
     refresh_provider_token_with_runner(provider, &home_dir_or_cwd(), &TokioRefreshCommandRunner)
         .await
+}
+
+pub async fn refresh_stored_provider_token(
+    provider: Provider,
+    current_token: &ProviderToken,
+) -> Result<ProviderToken, TokenRefreshError> {
+    let mut refreshed = match provider {
+        Provider::Linear => {
+            let refresh_token = current_token
+                .refresh_token
+                .as_deref()
+                .filter(|token| !token.trim().is_empty())
+                .ok_or(TokenRefreshError::OAuth {
+                    provider,
+                    reason: "stored credential has no refresh token",
+                })?;
+            refresh_pm_oauth_token(
+                provider,
+                refresh_token,
+                current_token.oauth_client_id.as_deref(),
+            )
+            .await
+            .map_err(|error| TokenRefreshError::OAuth {
+                provider,
+                reason: pm_refresh_failure_reason(&error),
+            })?
+        }
+        _ => refresh_provider_token(provider).await?,
+    };
+    preserve_provider_token_metadata(&mut refreshed, current_token);
+    Ok(refreshed)
+}
+
+pub(crate) fn preserve_provider_token_metadata(
+    refreshed: &mut ProviderToken,
+    current_token: &ProviderToken,
+) {
+    if refreshed.refresh_token.is_none() {
+        refreshed.refresh_token = current_token.refresh_token.clone();
+    }
+    if refreshed.oauth_client_id.is_none() {
+        refreshed.oauth_client_id = current_token.oauth_client_id.clone();
+    }
+    if refreshed.login.is_none() {
+        refreshed.login = current_token.login.clone();
+    }
+}
+
+pub(crate) fn provider_token_refresh_due(token: &ProviderToken, now: i64) -> bool {
+    token.credential_type == CredentialType::OAuth
+        && token
+            .expires_at
+            .is_some_and(|expires_at| expires_at <= now + TOKEN_REFRESH_LEAD_SECONDS)
 }
 
 async fn refresh_provider_token_with_runner(
@@ -2258,9 +2319,39 @@ struct OAuthRefreshResponse {
     expires_in: Option<i64>,
 }
 
+fn pm_refresh_failure_reason(error: &AuthError) -> &'static str {
+    match error {
+        AuthError::CommandUnavailable { .. } => "OAuth client configuration is unavailable",
+        AuthError::OAuthRequest { .. } => {
+            "the token endpoint rejected or could not complete the request"
+        }
+        _ => "the refresh request could not be completed",
+    }
+}
+
+fn encode_pm_refresh_request(
+    provider: Provider,
+    client_id: &str,
+    client_secret: Option<&str>,
+    refresh_token: &str,
+) -> Result<String, AuthError> {
+    let mut params = vec![
+        ("grant_type", "refresh_token"),
+        ("client_id", client_id),
+        ("refresh_token", refresh_token),
+    ];
+    if let Some(client_secret) = client_secret {
+        params.push(("client_secret", client_secret));
+    }
+    serde_urlencoded::to_string(params).map_err(|err| AuthError::OAuthRequest {
+        provider,
+        message: format!("failed to encode refresh request: {err}"),
+    })
+}
+
 /// Exchange a stored refresh token for a fresh access token via the PM provider's
-/// OAuth `grant_type=refresh_token` endpoint. Linear is the supported PM provider;
-/// client credentials are read from the provider's `*_CLIENT_ID`/`*_CLIENT_SECRET` env vars.
+/// OAuth `grant_type=refresh_token` endpoint. Linear PKCE grants reuse their
+/// stored client ID; legacy rows fall back to the configured client credentials.
 ///
 /// The returned token carries `login: None`; callers should preserve the prior login.
 ///
@@ -2271,23 +2362,28 @@ struct OAuthRefreshResponse {
 pub async fn refresh_pm_oauth_token(
     provider: Provider,
     refresh_token: &str,
+    stored_client_id: Option<&str>,
 ) -> Result<ProviderToken, AuthError> {
     let endpoint = pm_oauth_endpoint(provider)
         .ok_or_else(|| AuthError::UnsupportedProvider(provider.to_string()))?;
-    let (client_id, client_secret) =
-        oauth_client_credentials(provider, endpoint.client_id_env, endpoint.client_secret_env)
+    let (client_id, client_secret) = match stored_client_id {
+        Some(client_id) if !client_id.trim().is_empty() => (client_id.trim().to_string(), None),
+        _ => {
+            let (client_id, client_secret) = oauth_client_credentials(
+                provider,
+                endpoint.client_id_env,
+                endpoint.client_secret_env,
+            )
             .await?;
-
-    let body = serde_urlencoded::to_string([
-        ("grant_type", "refresh_token"),
-        ("client_id", client_id.as_str()),
-        ("client_secret", client_secret.as_str()),
-        ("refresh_token", refresh_token),
-    ])
-    .map_err(|err| AuthError::OAuthRequest {
+            (client_id, Some(client_secret))
+        }
+    };
+    let body = encode_pm_refresh_request(
         provider,
-        message: format!("failed to encode refresh request: {err}"),
-    })?;
+        &client_id,
+        client_secret.as_deref(),
+        refresh_token,
+    )?;
 
     let response = reqwest::Client::new()
         .post(endpoint.token_url)
@@ -2334,6 +2430,7 @@ pub async fn refresh_pm_oauth_token(
         provider: provider.as_str().to_string(),
         access_token: payload.access_token,
         refresh_token: payload.refresh_token,
+        oauth_client_id: Some(client_id),
         expires_at,
         login: None,
         updated_at: now_unix(),
@@ -2928,6 +3025,7 @@ mod tests {
             provider: "github".to_string(),
             access_token: "gho_flow123".to_string(),
             refresh_token: None,
+            oauth_client_id: None,
             expires_at: Some(now_unix() + 3600),
             login: Some("jackdanger".to_string()),
             updated_at: now_unix(),
@@ -2991,6 +3089,7 @@ mod tests {
                 provider: "linear".to_string(),
                 access_token: "linear-token".to_string(),
                 refresh_token: Some("linear-refresh".to_string()),
+                oauth_client_id: Some("linear-client".to_string()),
                 expires_at: Some(expires_at),
                 login: Some("jack@loopflow.studio".to_string()),
                 updated_at: now_unix(),
@@ -3023,6 +3122,7 @@ mod tests {
                 provider: "claude".to_string(),
                 access_token: "stale".to_string(),
                 refresh_token: None,
+                oauth_client_id: None,
                 expires_at: Some(now_unix() - 60),
                 login: None,
                 updated_at: now_unix(),
@@ -3212,6 +3312,7 @@ mod tests {
         );
         // Refresh is wired: Linear resolves a PM OAuth endpoint.
         assert!(pm_oauth_endpoint(Provider::Linear).is_some());
+        assert!(Provider::Linear.supports_automatic_refresh());
     }
 
     #[test]
@@ -3335,6 +3436,89 @@ mod tests {
         assert!(pm_oauth_endpoint(Provider::GitHub).is_none());
     }
 
+    #[test]
+    fn pkce_refresh_request_uses_client_id_without_secret() {
+        let body =
+            encode_pm_refresh_request(Provider::Linear, "linear-client", None, "refresh-token")
+                .expect("encode refresh request");
+        let params: HashMap<String, String> =
+            serde_urlencoded::from_str(&body).expect("decode refresh request");
+
+        assert_eq!(
+            params.get("grant_type").map(String::as_str),
+            Some("refresh_token")
+        );
+        assert_eq!(
+            params.get("client_id").map(String::as_str),
+            Some("linear-client")
+        );
+        assert_eq!(
+            params.get("refresh_token").map(String::as_str),
+            Some("refresh-token")
+        );
+        assert!(!params.contains_key("client_secret"));
+    }
+
+    #[test]
+    fn refreshed_token_preserves_or_rotates_grant_metadata() {
+        let current = ProviderToken {
+            provider: "linear".to_string(),
+            access_token: "old-access".to_string(),
+            refresh_token: Some("old-refresh".to_string()),
+            oauth_client_id: Some("linear-client".to_string()),
+            expires_at: Some(now_unix()),
+            login: Some("user@example.com".to_string()),
+            updated_at: now_unix(),
+            credential_type: CredentialType::OAuth,
+        };
+        let mut omitted = ProviderToken {
+            access_token: "new-access".to_string(),
+            refresh_token: None,
+            oauth_client_id: None,
+            login: None,
+            ..current.clone()
+        };
+        preserve_provider_token_metadata(&mut omitted, &current);
+        assert_eq!(omitted.refresh_token.as_deref(), Some("old-refresh"));
+        assert_eq!(omitted.oauth_client_id.as_deref(), Some("linear-client"));
+        assert_eq!(omitted.login.as_deref(), Some("user@example.com"));
+
+        let mut rotated = ProviderToken {
+            refresh_token: Some("new-refresh".to_string()),
+            ..omitted
+        };
+        preserve_provider_token_metadata(&mut rotated, &current);
+        assert_eq!(rotated.refresh_token.as_deref(), Some("new-refresh"));
+    }
+
+    #[test]
+    fn oauth_tokens_refresh_before_expiry_but_api_keys_do_not() {
+        let now = now_unix();
+        let mut token = make_token("linear", CredentialType::OAuth);
+        token.expires_at = Some(now + TOKEN_REFRESH_LEAD_SECONDS);
+        assert!(provider_token_refresh_due(&token, now));
+
+        token.expires_at = Some(now + TOKEN_REFRESH_LEAD_SECONDS + 1);
+        assert!(!provider_token_refresh_due(&token, now));
+
+        token.credential_type = CredentialType::ApiKey;
+        token.expires_at = Some(now - 1);
+        assert!(!provider_token_refresh_due(&token, now));
+    }
+
+    #[tokio::test]
+    async fn linear_refresh_without_refresh_token_is_actionable_and_secret_free() {
+        let token = make_token("linear", CredentialType::OAuth);
+        let error = refresh_stored_provider_token(Provider::Linear, &token)
+            .await
+            .expect_err("missing refresh token should fail");
+
+        assert_eq!(
+            error.to_string(),
+            "linear OAuth refresh failed: stored credential has no refresh token"
+        );
+    }
+
     #[tokio::test]
     async fn socket_broker_extract_token_parses_expiry() {
         let tmp = tempdir().expect("tempdir");
@@ -3407,6 +3591,7 @@ mod tests {
                 provider: "opencodezen".to_string(),
                 access_token: "opencode-key".to_string(),
                 refresh_token: None,
+                oauth_client_id: None,
                 expires_at: None,
                 login: Some("user@example.com".to_string()),
                 updated_at: now_unix(),
@@ -3490,6 +3675,7 @@ mod tests {
             provider: provider.to_string(),
             access_token: "test-token".to_string(),
             refresh_token: None,
+            oauth_client_id: None,
             expires_at: None,
             login: None,
             updated_at: now_unix(),

@@ -14,7 +14,7 @@ use crate::engine::{
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_skill;
-use crate::lf::output::Colors;
+use crate::lf::output::{column_width, Colors};
 use crate::lf::{CronCommand, PmCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
@@ -383,8 +383,8 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     "already linked"
                 };
                 println!(
-                    "{}: Linear project {} ({state})",
-                    result.wave, result.project_id
+                    "{}: Linear Initiative {} ({state})",
+                    result.wave, result.initiative_id
                 );
             }
         }
@@ -407,8 +407,8 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     serde_json::to_string(&serde_json::json!({
                         "wave": result.wave,
                         "provider": result.provider,
+                        "initiative": result.initiative,
                         "project": result.project,
-                        "local_project": result.local_project,
                         "items": result.items,
                     }))?
                 );
@@ -456,20 +456,20 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 println!("no PM-linked waves");
             } else {
                 for wave in result.waves {
-                    let linear_project = wave.project_name.as_deref().unwrap_or("-");
+                    let linear_initiative = wave.initiative_name.as_deref().unwrap_or("-");
                     println!(
-                        "{}: Linear project `{linear_project}` ({}) — {} open / {} total, {} unassigned",
-                        wave.wave, wave.project, wave.open, wave.total, wave.unassigned
+                        "{}: Linear Initiative `{linear_initiative}` ({}) — {} open / {} total",
+                        wave.wave, wave.initiative, wave.open, wave.total
                     );
                     for (project, open) in wave.open_by_project {
                         println!("  {project:<28} {open} open");
                     }
                 }
             }
-            for project in result.stranded_projects {
+            for initiative in result.stranded_waves {
                 println!(
-                    "stranded: Linear project `{}` ({}) — no local wave points here",
-                    project.name, project.id
+                    "stranded: Linear Initiative `{}` ({}) — no local wave points here",
+                    initiative.name, initiative.id
                 );
             }
         }
@@ -483,8 +483,8 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 progress,
             )?;
             println!(
-                "{}: renamed Linear project {} to `{}`",
-                result.wave, result.project, result.title
+                "{}: renamed Linear Initiative {} to `{}`",
+                result.wave, result.initiative, result.title
             );
         }
         PmCommand::Task { cmd } => match cmd {
@@ -498,7 +498,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     &repo_root,
                     &crate::ops::pm::PmUpdateOptions {
                         wave: wave.clone(),
-                        project: project.clone(),
+                        project: Some(project.clone()),
                         id: None,
                         title: Some(title.clone()),
                         notes: notes.clone(),
@@ -507,11 +507,10 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     },
                     progress,
                 )?;
-                let suffix = project
-                    .as_deref()
-                    .map(|project| format!(" project:{project}"))
-                    .unwrap_or_default();
-                println!("{}: created task {}{suffix}", result.wave, result.id);
+                println!(
+                    "{}: created task {} in project:{}",
+                    result.wave, result.id, project
+                );
             }
             PmTaskCommand::Update {
                 id,
@@ -594,7 +593,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
 fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {
     if result.items.is_empty() {
         let suffix = result
-            .local_project
+            .project
             .as_deref()
             .map(|project| format!(" project:{project}"))
             .unwrap_or_default();
@@ -602,37 +601,98 @@ fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {
         return;
     }
 
-    if result.local_project.is_some() {
-        for item in &result.items {
-            println!("{}", crate::ops::pm::format_task_item(item));
-        }
-        return;
-    }
-
-    let mut grouped: std::collections::BTreeMap<String, Vec<_>> = std::collections::BTreeMap::new();
-    let mut unassigned = Vec::new();
-    for item in &result.items {
-        let projects = crate::ops::pm::item_project_labels(item);
-        if projects.is_empty() {
-            unassigned.push(item);
+    let colors = Colors::default();
+    for (index, line) in format_pm_task_table(&result.items).iter().enumerate() {
+        if index == 0 {
+            println!("{}{}{}", colors.bold, line, colors.reset);
         } else {
-            for project in projects {
-                grouped.entry(project).or_default().push(item);
-            }
+            println!("{line}");
         }
     }
+}
 
-    for (project, items) in grouped {
-        println!("project:{project}");
-        for item in items {
-            println!("  {}", crate::ops::pm::format_task_item(item));
-        }
-    }
-    if !unassigned.is_empty() {
-        println!("unassigned:");
-        for item in unassigned {
-            println!("  {}", crate::ops::pm::format_task_item(item));
-        }
+#[derive(Debug)]
+struct PmTaskRow {
+    status: &'static str,
+    title: String,
+    project: String,
+    assignee: String,
+    id: String,
+    completed: bool,
+    rank: u32,
+}
+
+fn format_pm_task_table(items: &[crate::lfd::pm::PmItem]) -> Vec<String> {
+    let mut rows: Vec<_> = items
+        .iter()
+        .map(|item| PmTaskRow {
+            status: if item.completed { "done" } else { "open" },
+            title: item.name.split_whitespace().collect::<Vec<_>>().join(" "),
+            project: item.project.clone().unwrap_or_else(|| "-".to_string()),
+            assignee: item.assignee.clone().unwrap_or_else(|| "-".to_string()),
+            id: item.id.clone(),
+            completed: item.completed,
+            rank: item.rank,
+        })
+        .collect();
+    rows.sort_by_key(|row| (row.completed, row.rank));
+
+    let status_width = column_width("STATUS", rows.iter().map(|row| row.status));
+    let title_width = column_width("TITLE", rows.iter().map(|row| row.title.as_str()));
+    let project_width = column_width("PROJECT", rows.iter().map(|row| row.project.as_str()));
+    let assignee_width = column_width("ASSIGNEE", rows.iter().map(|row| row.assignee.as_str()));
+
+    let mut lines = Vec::with_capacity(rows.len() + 1);
+    lines.push(format!(
+        "{:<status_width$}  {:<title_width$}  {:<project_width$}  {:<assignee_width$}  ID",
+        "STATUS", "TITLE", "PROJECT", "ASSIGNEE"
+    ));
+    lines.extend(rows.into_iter().map(|row| {
+        format!(
+            "{:<status_width$}  {:<title_width$}  {:<project_width$}  {:<assignee_width$}  {}",
+            row.status, row.title, row.project, row.assignee, row.id
+        )
+    }));
+    lines
+}
+
+#[cfg(test)]
+mod pm_output_tests {
+    use super::format_pm_task_table;
+    use crate::lfd::pm::PmItem;
+
+    #[test]
+    fn task_table_is_aligned_complete_and_open_first() {
+        let lines = format_pm_task_table(&[
+            PmItem {
+                id: "done-1".to_string(),
+                name: "Done task".to_string(),
+                description: String::new(),
+                rank: 0,
+                completed: true,
+                project: None,
+                assignee: None,
+            },
+            PmItem {
+                id: "open-1".to_string(),
+                name: "Longer\ntitle".to_string(),
+                description: String::new(),
+                rank: 1,
+                completed: false,
+                project: Some("wave-chat".to_string()),
+                assignee: Some("me".to_string()),
+            },
+        ]);
+
+        assert_eq!(
+            lines,
+            vec![
+                "STATUS  TITLE         PROJECT    ASSIGNEE  ID",
+                "open    Longer title  wave-chat  me        open-1",
+                "done    Done task     -          -         done-1",
+            ]
+        );
+        assert!(lines.iter().all(|line| line.lines().count() == 1));
     }
 }
 
@@ -1180,11 +1240,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
             None => format!("{indent}{}", row.label),
         }
     };
-    let max_name = rows
-        .iter()
-        .map(|r| display_name(r).len())
-        .max()
-        .unwrap_or(0);
+    let max_name = column_width("", rows.iter().map(display_name));
 
     for row in &rows {
         let marker = if row.is_current { "*" } else { " " };

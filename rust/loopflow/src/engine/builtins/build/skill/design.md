@@ -85,7 +85,7 @@ This is the natural session exit point. The user's answer determines what to run
 1. Choose a wave name and create `wave/<name>/`.
 2. Write `wave/<name>/GOAL.md` — the wave's identity and anchor:
    - frontmatter: machine config only (`workers`, `crons`, and, once connected,
-     `pm.linear_project`)
+     `pm.linear_initiative`)
    - body (the loop prompt): Objective, Measures, Cron if any, and Process. Put
      routing judgment in Process, not frontmatter.
    - **No roadmap table, no status indicators, no item lists** — tasks live in
@@ -97,8 +97,9 @@ This is the natural session exit point. The user's answer determines what to run
    Each project belongs to this wave, has no child projects, and carries a
    definition plus proof-shaped `## KRs`.
 5. Connect and seed tasks in Linear:
-   - `lf pm init --wave <name>` creates/links the Linear project and writes
-     `linear_project` into `GOAL.md`.
+   - `lf pm init --wave <name>` creates the Linear Initiative, migrates the
+     seeded project files into native Linear Projects, and writes
+     `linear_initiative` into `GOAL.md`.
    - File the opening items with
      `lf pm task create --project <project> --title "…" --notes "…"` — the urgent
      and next-step work, one task each. Tasks start in Linear, not on disk.

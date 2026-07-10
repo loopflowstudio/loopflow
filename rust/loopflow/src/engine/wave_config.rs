@@ -13,11 +13,17 @@ pub struct WaveCronDef {
     pub schedule: String,
 }
 
-/// The Linear project a wave's tasks live in, from `pm.*` in GOAL.md.
+/// The Linear Initiative representing a wave, from `pm.*` in GOAL.md.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct WavePmConfig {
     #[serde(default)]
     pub provider: Option<String>,
+    #[serde(default)]
+    pub linear_initiative: Option<String>,
+    /// True only while `lf pm init` is seeding Linear Projects.
+    #[serde(default)]
+    pub linear_seed_pending: bool,
+    /// Migration input for repositories created before native Linear hierarchy.
     #[serde(default)]
     pub linear_project: Option<String>,
 }
@@ -225,14 +231,15 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\npm:\n  provider: linear\n  linear_project: \"lin-123\"\n---\nDrive the work.\n",
+            "---\npm:\n  provider: linear\n  linear_initiative: \"lin-123\"\n---\nDrive the work.\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         let pm = config.pm.expect("pm config should exist");
         assert_eq!(pm.provider.as_deref(), Some("linear"));
-        assert_eq!(pm.linear_project.as_deref(), Some("lin-123"));
+        assert_eq!(pm.linear_initiative.as_deref(), Some("lin-123"));
+        assert_eq!(pm.linear_project, None);
     }
 
     /// Crons live in GOAL.md frontmatter — the resident loop's schedule

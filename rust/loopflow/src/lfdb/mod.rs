@@ -710,6 +710,7 @@ pub struct ProviderToken {
     pub provider: String,
     pub access_token: String,
     pub refresh_token: Option<String>,
+    pub oauth_client_id: Option<String>,
     pub expires_at: Option<i64>,
     pub login: Option<String>,
     pub updated_at: i64,
@@ -1922,6 +1923,7 @@ mod tests {
             provider: "github".to_string(),
             access_token: "gho_abc123".to_string(),
             refresh_token: Some("ghr_refresh".to_string()),
+            oauth_client_id: Some("github-client".to_string()),
             expires_at: Some(1700000000),
             login: Some("octocat".to_string()),
             updated_at: 1699000000,
@@ -1941,6 +1943,7 @@ mod tests {
         assert_eq!(loaded.provider, "github");
         assert_eq!(loaded.access_token, "gho_abc123");
         assert_eq!(loaded.refresh_token.as_deref(), Some("ghr_refresh"));
+        assert_eq!(loaded.oauth_client_id.as_deref(), Some("github-client"));
         assert_eq!(loaded.expires_at, Some(1700000000));
         assert_eq!(loaded.login.as_deref(), Some("octocat"));
 
@@ -1970,6 +1973,7 @@ mod tests {
             provider: "claude".to_string(),
             access_token: "sk-ant-key".to_string(),
             refresh_token: None,
+            oauth_client_id: None,
             expires_at: None,
             login: None,
             updated_at: 1699000000,
@@ -2013,6 +2017,7 @@ mod tests {
             provider: "github".to_string(),
             access_token: "gho_secret_access".to_string(),
             refresh_token: Some("ghr_secret_refresh".to_string()),
+            oauth_client_id: Some("github-client".to_string()),
             expires_at: Some(1700000000),
             login: Some("octocat".to_string()),
             updated_at: 1699000000,

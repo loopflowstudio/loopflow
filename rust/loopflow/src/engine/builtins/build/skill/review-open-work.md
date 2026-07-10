@@ -36,7 +36,7 @@ Run the scan headlessly before discussion. Gather:
 - Open PRs authored by the user: `gh pr list --author @me --state open --json number,title,headRefName,url,isDraft,mergeStateStatus,statusCheckRollup,updatedAt`
 - Remote branches authored by the user: `git branch -r --format='%(refname:short) %(committerdate:iso8601)'` filtered by the current git user / branch schema
 - Stale candidates: remote branches with no open PR and no commits in 60 days
-- Wave entries under `wave/`: GOAL/MEMORY/project docs, open task counts by local project, recent commits touching the wave area, associated open PRs
+- Wave entries under `wave/`: GOAL/MEMORY/project cache, open task counts by Linear Project, recent commits touching the wave area, associated open PRs
 - Merge status for each branch: ahead/behind main, CI status when a PR exists, whether a branch is merged or squash-merged
 - Wave attribution for each worktree and branch:
   - Worktrees: use the engine's worktree resolver output and sibling worktree convention. Do not invent another naming scheme.

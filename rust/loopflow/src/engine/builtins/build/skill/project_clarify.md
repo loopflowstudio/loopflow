@@ -9,18 +9,19 @@ Clarify the project artifact: its KR set.
 
 The project seed is in `<lf:message>`. A project is a measured bet inside one
 wave; it owns KRs and closure criteria, not memory, cadence, or child projects.
-Read the seed, the project doc if present, and the wave's GOAL.md and MEMORY.md.
+Read the seed, the cached project doc if present, and the wave's GOAL.md and MEMORY.md.
 
-Wave project docs live at `wave/<wave>/projects/<project>.md`. During an
-isolated project loop, the working doc may be `scratch/<branch>.md`. In
-either case, the project doc carries the definition and a `## KRs` section.
-Concrete tasks live outside the KR set.
+Linear Project content is authoritative. The generated offline cache lives at
+`wave/<wave>/projects/<project>.md`; refresh it with `lf pm sync` after changing
+the Linear Project. During an isolated project loop, draft the clarification in
+`scratch/<branch>.md` until it can be written to Linear. Concrete tasks live
+outside the KR set.
 
 ## Work
 
-- If the doc's KR set is measurable (each KR states an observable condition
+- If the Linear Project's KR set is measurable (each KR states an observable condition
   you could check with a command or a look), leave it alone.
-- Otherwise write it: 2–10 KRs, each one line, each checkable. Shape each
+- Otherwise update its Linear Project content: 2–10 KRs, each one line, each checkable. Shape each
   KR as proof under duration — counted streaks on real work, unattended
   windows ("over one week... zero rescues"), never capability checkboxes
   that pass once on a demo. KRs should read

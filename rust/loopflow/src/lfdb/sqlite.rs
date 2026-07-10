@@ -95,6 +95,7 @@ type TokenRow = (
     String,
     String,
     Option<String>,
+    Option<String>,
     Option<i64>,
     Option<String>,
     i64,
@@ -112,11 +113,22 @@ fn read_token_row(row: &rusqlite::Row) -> rusqlite::Result<TokenRow> {
         row.get(5)?,
         row.get(6)?,
         row.get(7)?,
+        row.get(8)?,
     ))
 }
 
 fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
-    let (provider, access_token, refresh_token, expires_at, login, updated_at, ct, encrypted) = row;
+    let (
+        provider,
+        access_token,
+        refresh_token,
+        oauth_client_id,
+        expires_at,
+        login,
+        updated_at,
+        ct,
+        encrypted,
+    ) = row;
     let access_token =
         token_crypto::decrypt_if_needed(&access_token, encrypted).map_err(|error| {
             StoreError::InvalidData(format!(
@@ -136,6 +148,7 @@ fn decrypt_token_row(row: TokenRow) -> StoreResult<super::ProviderToken> {
         provider,
         access_token,
         refresh_token,
+        oauth_client_id,
         expires_at,
         login,
         updated_at,
@@ -298,7 +311,7 @@ impl SqliteStore {
     pub fn get_provider_token(&self, provider: &str) -> StoreResult<Option<super::ProviderToken>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted
+            "SELECT provider, access_token, refresh_token, oauth_client_id, expires_at, login, updated_at, credential_type, encrypted
              FROM provider_tokens WHERE provider = ?1",
         )?;
         let row = stmt
@@ -325,11 +338,12 @@ impl SqliteStore {
                 ))
             })?;
         conn.execute(
-            "INSERT INTO provider_tokens (provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)
+            "INSERT INTO provider_tokens (provider, access_token, refresh_token, oauth_client_id, expires_at, login, updated_at, credential_type, encrypted)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)
              ON CONFLICT(provider) DO UPDATE SET
                 access_token = excluded.access_token,
                 refresh_token = excluded.refresh_token,
+                oauth_client_id = excluded.oauth_client_id,
                 expires_at = excluded.expires_at,
                 login = excluded.login,
                 updated_at = excluded.updated_at,
@@ -339,6 +353,7 @@ impl SqliteStore {
                 token.provider,
                 encrypted_access,
                 encrypted_refresh,
+                token.oauth_client_id,
                 token.expires_at,
                 token.login,
                 token.updated_at,
@@ -360,7 +375,7 @@ impl SqliteStore {
     pub fn list_provider_tokens(&self) -> StoreResult<Vec<super::ProviderToken>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted
+            "SELECT provider, access_token, refresh_token, oauth_client_id, expires_at, login, updated_at, credential_type, encrypted
              FROM provider_tokens ORDER BY provider",
         )?;
         let rows = stmt.query_map([], read_token_row)?;

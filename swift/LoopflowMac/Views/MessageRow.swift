@@ -17,16 +17,6 @@ struct MessageRow: View {
     let timestampLabel: String?
     let attemptFailure: AttemptFailurePresentation?
 
-    init(
-        turn: ChatTurn,
-        timestampLabel: String?,
-        attemptFailure: AttemptFailurePresentation? = nil
-    ) {
-        self.turn = turn
-        self.timestampLabel = timestampLabel
-        self.attemptFailure = attemptFailure
-    }
-
     var body: some View {
         if turn.role == .assistant {
             content
@@ -109,17 +99,16 @@ struct MessageRow: View {
             .accessibilityHidden(true)
     }
 
-    @ViewBuilder
     private var failedBadge: some View {
-        if let attemptFailure {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                    Text(attemptFailure.title)
-                }
-                .font(Typography.caption(11))
-                .foregroundStyle(Color.statusError)
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                Text(attemptFailure?.title ?? "Turn failed")
+            }
+            .font(Typography.caption(11))
+            .foregroundStyle(Color.statusError)
 
+            if let attemptFailure {
                 Text(attemptFailure.reason)
                     .font(Typography.caption())
                     .foregroundStyle(palette.text)
@@ -129,13 +118,6 @@ struct MessageRow: View {
                     .font(Typography.caption(11))
                     .foregroundStyle(palette.textSecondary)
             }
-        } else {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                Text("Turn failed")
-            }
-            .font(Typography.caption(11))
-            .foregroundStyle(Color.statusError)
         }
     }
 }

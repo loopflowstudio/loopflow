@@ -175,3 +175,27 @@ fn run_git_output_bare(dir: &Path, args: &[&str]) -> String {
     }
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
+
+/// Every `.jsonl` journal file anywhere under `root`, sorted. The channels-as-
+/// wires invariant is a statement about the whole filesystem — "one journal per
+/// served mind, zero per channel" — so proving it means looking everywhere, not
+/// at the paths we expect.
+pub fn journal_files_under(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "jsonl") {
+                found.push(path);
+            }
+        }
+    }
+    found.sort();
+    found
+}

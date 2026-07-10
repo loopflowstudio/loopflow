@@ -1339,7 +1339,10 @@ mod tests {
 
         // Exactly one journal on disk: the served wave's, with exactly one row.
         let wave_journal = journal::journal_path(runtime.repo_root(), "ship");
-        assert_eq!(journal_files_under(tmp.path()), vec![wave_journal.clone()]);
+        assert_eq!(
+            loopflow_test_support::journal_files_under(tmp.path()),
+            vec![wave_journal.clone()]
+        );
         assert_eq!(
             journal::read_events(&wave_journal)
                 .iter()
@@ -1375,27 +1378,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(refused.status(), reqwest::StatusCode::NOT_FOUND);
-    }
-
-    /// Every `.jsonl` journal file anywhere under `root`, sorted.
-    fn journal_files_under(root: &std::path::Path) -> Vec<std::path::PathBuf> {
-        let mut found = Vec::new();
-        let mut stack = vec![root.to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                } else if path.extension().is_some_and(|ext| ext == "jsonl") {
-                    found.push(path);
-                }
-            }
-        }
-        found.sort();
-        found
     }
 
     /// `POST /channels` (the dispatch knock): the wave's thread shows the

@@ -2158,33 +2158,12 @@ mod tests {
         assert!(late.try_recv().is_err(), "no replay: topics have no past");
 
         // Nothing on disk outside the served mind's own journal.
-        let journals = journal_files_under(tmp.path());
+        let journals = loopflow_test_support::journal_files_under(tmp.path());
         assert_eq!(
             journals,
             vec![journal_path(&origin, "ship")],
             "the only journal is the served wave's"
         );
-    }
-
-    /// Every `.jsonl` journal file anywhere under `root`, sorted.
-    fn journal_files_under(root: &Path) -> Vec<PathBuf> {
-        let mut found = Vec::new();
-        let mut stack = vec![root.to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                } else if path.extension().is_some_and(|ext| ext == "jsonl") {
-                    found.push(path);
-                }
-            }
-        }
-        found.sort();
-        found
     }
 
     /// `RunCompleted` commits a thread-visible turn on the primary channel —
@@ -2579,7 +2558,7 @@ mod tests {
 
         // On disk: exactly one journal, the served wave's, with both rows.
         assert_eq!(
-            journal_files_under(tmp.path()),
+            loopflow_test_support::journal_files_under(tmp.path()),
             vec![journal_path(&origin, "ship")]
         );
         let events = crate::wave::journal::read_events(&journal_path(&origin, "ship"));

@@ -120,19 +120,21 @@ public enum WavePlanParser {
         return normalizedText(buffer)
     }
 
-    private static func parseKRs(from lines: [String]) -> [String] {
+    private static func parseKRs(from lines: [String]) -> [WaveKeyResult] {
         var isKRs = false
         var current: [String] = []
-        var items: [String] = []
+        var currentProof: KeyResultProof = .open
+        var items: [WaveKeyResult] = []
 
         func finishCurrent() {
             let text = current
                 .joined(separator: " ")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty {
-                items.append(text)
+                items.append(WaveKeyResult(text: text, proof: currentProof))
             }
             current = []
+            currentProof = .open
         }
 
         for line in lines {
@@ -152,7 +154,14 @@ public enum WavePlanParser {
 
             if trimmed.hasPrefix("- ") {
                 finishCurrent()
-                current = [String(trimmed.dropFirst(2))]
+                var text = String(trimmed.dropFirst(2))
+                if text.hasPrefix("[x] ") || text.hasPrefix("[X] ") {
+                    currentProof = .holds
+                    text = String(text.dropFirst(4))
+                } else if text.hasPrefix("[ ] ") {
+                    text = String(text.dropFirst(4))
+                }
+                current = [text]
             } else if !trimmed.isEmpty {
                 current.append(trimmed)
             }

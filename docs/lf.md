@@ -28,7 +28,7 @@ lf office-hours                   # bare name works when unambiguous
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
-lf task "fix the flaky test" --wave designer   # loop task until the PR merges
+lf loop task "fix the flaky test" --wave designer   # loop task until the PR merges
 ```
 
 ## Skills
@@ -120,39 +120,43 @@ lf ship -w feature-branch
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
-## Running Tasks
+## Running Loops
 
 ```bash
-lf task "fix the flaky chord-timeout test" --wave designer
-lf task "…" --wave designer --max-passes 4 --wall-clock-secs 3600
-lf task "…" --flow scan-pass          # any flow is loopable
+lf serve designer                                  # start the named mind
+lf loop task "fix the flaky chord-timeout test" --wave designer
+lf loop task "…" --wave designer --max-passes 4 --wall-clock-secs 3600
+lf loop scan-pass "scan the runtime" --detach # any flow is loopable
 ```
 
-`lf task` takes free text, creates a task worktree, and loops the flow over
-it until the flow's skills write `done` to `scratch/loop.yaml` (for
-`task`: when the PR merges). The open runs with a task flow are the
-wave's open tasks (`lf runs`); the merged PR is the record of done.
+With one name, `lf serve <name>` starts that mind and its persistent playhead.
+With a flow plus free text, it creates a child worktree and loops until the
+flow's skills write `done` to `scratch/loop.yaml` (`task`: when the PR merges).
+Without `--detach` it blocks; with `--detach` the live wave server owns it and
+returns a read-only tmux inspection session. Linear holds filed tasks,
+`lf runs` shows active hands, and merged PRs record done.
 
 ## Speaking to Waves
+
+Two wires, not one. The **thread** is the human surface: durable, replayed,
+owned by a served mind. The **bus** is how agents call to each other: a table in
+the shared store, ephemeral, no server in the path.
 
 ```bash
 lf chat "ship the button audit first"       # post into the current wave's thread
 lf chat -w infra "CI is red on the PR"      # target a wave by name
 lf chat --parent "blocked on schema change" # escalate to the parent wave
-lf sub                                      # follow the wave's live event stream
-lf sub infra --json                         # raw frames as NDJSON
+lf wavechat intelligence                    # watch and speak from one terminal pane
 lf memory                                   # print the wave's MEMORY.md
 lf memory add "buttons: variants unified"   # publish one replayable fact
 lf memory log                               # print facts added since the last update
 lf memory update < MEMORY.md                # replace it from stdin
-lf wavechat intelligence                    # watch and speak from one terminal pane
 ```
 
 | Command | What it does |
 |---------|--------------|
-| `lf chat [TEXT]` | Post a message into a wave's thread; reads stdin when TEXT is omitted. Outside any wave the publish drops silently (exit 0), so the verb is safe in every prompt |
-| `lf sub [WAVE] [--json]` | Follow a wave's live events (turns, flowloop state, memory) until killed; exits 0 with a note when no wave resolves |
-| `lf wavechat [WAVE]` | Replay and follow a wave's live events while typed lines post to its thread; `/status` reads health and `/quit` leaves |
+| `lf chat [TEXT]` | Post a message into a wave's thread; reads stdin when TEXT is omitted. Outside any wave it prints a short drop note and exits 0, so the verb is safe in every prompt |
+| `lf wavechat [WAVE]` | Replay and follow a served mind's thread while typed lines post into it; `/status` reads health and `/quit` leaves |
 | `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 
 All three default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
@@ -161,6 +165,38 @@ All three default to the invoking context's wave (`LFD_WAVE_ID` env, else the wo
 |------|-------------|
 | `-w, --wave NAME` | Target a wave by name |
 | `--parent` | Target the invoking wave's parent (`lf chat` / `lf memory`) |
+
+## The Agent Bus
+
+```bash
+lf radio "landed PR #91, tests green"        # report on your own channel
+lf radio -c infra.148e "rebase and retry"    # steer a specific hand
+lf radio --parent "blocked on schema change" # escalate to the parent's channel
+lf sub                                       # hear your channel and its hands
+lf sub infra.148e --json                     # one hand's traffic as NDJSON
+```
+
+Channels are a dot tree: `infra` is the wave, `infra.148e` is one of its hands.
+A subscription is a prefix, so `lf sub infra` hears the whole family.
+
+| Command | What it does |
+|---------|--------------|
+| `lf radio [TEXT]` | Broadcast one frame on a channel. An INSERT into the shared store, so it works with no wave running; reads stdin when TEXT is omitted. No channel resolves, or no store on this machine — the broadcast drops with exit 0 |
+| `lf sub [CHANNEL] [--json]` | Tune in to a channel and its descendants until killed. Never opens a socket — the served mind need not exist |
+
+Broadcast, not delivery. `lf sub` tunes in at the head and hears only what is
+said while it listens: nothing is replayed, and a frame published to a channel
+nobody was on is gone. A frame survives one hour, then the sweeper takes it —
+the bus is a wire, and `lf runs` plus the merged PR are the records of record. A
+served mind is the one durable subscriber: it polls from a saved cursor, so it
+catches its hands' reports across a restart, and when a frame aged out before it
+woke, the miss is announced in its thread rather than passed over in silence.
+
+| Flag | Description |
+|------|-------------|
+| `-c, --channel NAME` | Broadcast on any channel (`lf radio`) |
+| `--parent` | Broadcast on the parent wave's channel (`lf radio`) |
+| `--from LABEL` | Byline for machine speech (`--from ci`). Testimony, not proof: the row records it beside the channel the frame arrived on |
 
 ## Reading the Local Ledger
 

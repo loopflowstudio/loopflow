@@ -1,6 +1,6 @@
 //! The wave server's seat in the shared session registry — store-direct.
 //!
-//! `lf wave <name>` is its own process; no daemon launches or supervises it.
+//! `lf serve <name>` is its own process; no daemon launches or supervises it.
 //! The shared local store (the same SQLite db lfd serves from — the db IS
 //! the registry) carries two facts this module owns:
 //!
@@ -8,14 +8,14 @@
 //!   ([`ensure_wave_row`] — a reachable store with no row for the wave gets
 //!   a minimal one, never an unregistered run), then writes itself a
 //!   `WaveAgent` session row (source `wave_server`, endpoint + pid in `env`)
-//!   so Loopflow's agent tree shows the flowloop and one-brain enforcement has a
+//!   so Loopflow's agent tree shows the loop and one-brain enforcement has a
 //!   fact to key on. Before writing, [`register`] probes the wave's live
 //!   WaveAgent rows: a `wave_server` row whose pid is dead is a crashed
 //!   server — closed on the spot; a surviving live brain is a refusal naming
 //!   it, unless `force` takes over (kill the recorded pid / tmux session,
 //!   cancel the row). Graceful shutdown and Ctrl-C mark the row terminal;
 //!   lfd's session reconciliation (pid probe on `wave_server` rows) covers a
-//!   crash, and so does the boot-time probe of the next `lf wave`.
+//!   crash, and so does the boot-time probe of the next `lf serve`.
 //!
 //! - **Observation.** [`StoreObserver`] polls the store — this wave's worker
 //!   sessions and runs — and journals confirmed worker facts:
@@ -67,7 +67,7 @@ async fn tmux_session_exists(session_name: &str) -> anyhow::Result<bool> {
 }
 
 /// How often the observer re-reads the store between turns. Modest by
-/// design: the flowloop also refreshes right before every turn it takes.
+/// design: the loop also refreshes right before every turn it takes.
 pub const POLL_CADENCE: Duration = Duration::from_secs(10);
 
 /// Everything registration needs: the opened store, the wave's row, and this
@@ -76,7 +76,7 @@ pub const POLL_CADENCE: Duration = Duration::from_secs(10);
 pub struct RegistryConfig {
     pub store: SharedStore,
     pub wave: Wave,
-    /// The worktree the server (and its flowloop) runs in.
+    /// The worktree the server (and its loop) runs in.
     pub cwd: String,
     pub pid: u32,
     /// Take over from an existing live wave-agent session.
@@ -223,12 +223,12 @@ pub async fn register(config: &RegistryConfig, endpoint: &str) -> StoreResult<Re
         run_id: None,
         parent_session_id: None,
         session_use: SessionUse::WaveAgent,
-        skill: "flowloop".to_string(),
+        skill: "loop".to_string(),
         agent: "lf".to_string(),
         cwd: config.cwd.clone(),
         argv: vec![
             "lf".to_string(),
-            "wave".to_string(),
+            "serve".to_string(),
             config.wave.name().clone(),
         ],
         env: std::collections::BTreeMap::from([
@@ -463,9 +463,6 @@ impl StoreObserver {
     /// journal new dispatches and fresh finishes. Store errors are logged
     /// and skipped — the next poll retries.
     pub async fn poll_once(&self) {
-        // Sweep dead child channels on the poll cadence: a landed/deleted
-        // work line's channel pins its journal file handle until dropped.
-        self.runtime.sweep_dead_children();
         let poll_started = OffsetDateTime::now_utc();
         let cutoff = *self
             .terminal_cutoff
@@ -724,7 +721,7 @@ mod tests {
         }
     }
 
-    /// A wave_server WaveAgent row as a previous `lf wave` would have left it.
+    /// A wave_server WaveAgent row as a previous `lf serve` would have left it.
     fn server_session(wave: &Wave, pid: u32) -> Session {
         Session {
             id: LfdId::new(),
@@ -732,10 +729,10 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::WaveAgent,
-            skill: "flowloop".to_string(),
+            skill: "loop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
-            argv: vec!["lf".to_string(), "wave".to_string(), wave.name().clone()],
+            argv: vec!["lf".to_string(), "serve".to_string(), wave.name().clone()],
             env: BTreeMap::from([
                 (
                     WAVE_SERVER_ENDPOINT_ENV.to_string(),

@@ -22,9 +22,9 @@ lf debug -c                       # fix it
 
 ```bash
 # author wave/engbot/GOAL.md, then:
-lf wave engbot       # start the wave agent (Ctrl-C to stop)
+lf serve engbot       # start the wave agent (Ctrl-C to stop)
 tmux ls              # live sessions — the wave agent and its workers
-tmux attach -t <name>  # watch one work
+tmux attach -r -t <name>  # inspect one work
 ```
 
 ---
@@ -84,7 +84,7 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 A wave is a named agent with a goal. Everything that defines its durable
 operating context — goal, memory, projects, routing judgment, crons — is
 authored in the repo. Concrete tasks live in Linear. Crons live in `GOAL.md`
-frontmatter and are fired by the wave's resident flowloop. lfd serves wave
+frontmatter and are fired by the wave's resident loop. lfd serves wave
 status and live sessions to clients.
 
 ```markdown

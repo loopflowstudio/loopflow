@@ -1,48 +1,40 @@
-//! `lf chat` — post a message into a wave's thread through its live server.
+//! `lf chat` — the human conversing with a served mind's durable thread.
 //!
-//! The speech surface of the one-door calling convention: flowloops, workers,
-//! humans, and scripts all emit through the same verb. The message POSTs to
-//! the target wave's server as the `say` op — it lands in the thread as an
-//! attributed statement AND wakes the flowloop like any input (queued, coalesced,
-//! answered).
+//! One door, `POST /messages` on the wave's server. `--steer` uses the `steer`
+//! op, reaching a live steer-capable turn and otherwise queueing for the next
+//! one. The default `message` op queues for the loop, unattributed — the same
+//! human act journals the same way on every surface (the Mac composer sends
+//! the identical op).
 //!
-//! # Targeting (by CHANNEL name — dots are the tree)
-//! - default: the invoking context's channel — `LFD_CHANNEL` env first (set
-//!   by dispatch), else `LFD_WAVE_ID`, else the worktree name, which IS the
-//!   channel name under the ownership naming (`<repo>.<wave>` → the wave
-//!   channel; `<repo>.<wave>.<id>` → that work line's channel — speak
-//!   locally). No wave context at all (no env, worktree not wave-shaped)
-//!   means there is no subscriber: the publish drops with exit 0 and one
-//!   stderr note — correct pubsub semantics, which is what makes the speech
-//!   vocabulary safe in every prompt unconditionally.
+//! Agents do not use this verb. Their wire is `lf radio` — a broadcast on the
+//! shared-store bus, with no server in the path ([`super::radio`]). Two words,
+//! two wires: `lf chat` needs a live mind; `lf radio` needs nothing.
+//!
+//! # Targeting
+//! - default: the invoking context's wave — `LFD_CHANNEL` env first (set by
+//!   dispatch), else `LFD_WAVE_ID`, else the worktree name. A dotted name
+//!   resolves to its family head: a hand's channel has no thread to converse
+//!   with. No wave context at all (no env, worktree not wave-shaped) drops the
+//!   message with exit 0 and one stderr note.
 //! - `--parent`: walk `parent_wave_id` in the registry and post to the parent
 //!   wave's live server; its endpoint rides the parent's WaveAgent session
 //!   row, so cross-repo parents resolve through the store, not the
 //!   filesystem. A root wave errors (the human fall-through arrives with
 //!   Decisions).
-//! - `--wave <name>`: explicit target. A dotted name (`goals.148e0e02`)
-//!   addresses that channel through its FAMILY HEAD's server (the wave
-//!   `goals` — the head holds every child channel's pen).
 //!
 //! # Endpoint resolution
-//! Always the family head's: its live WaveAgent session row carries
-//! `LF_WAVE_ENDPOINT`; when the store has no row (unregistered server, no
-//! registry on this machine), the local `wave/<name>/.wave-endpoint`
-//! discovery file is the fallback. A resolvable wave with no live server is
-//! a clear error — a dead wave's mail bounces, it doesn't vanish (child
-//! channels included: the pen is the parent's, so speech to a work line of a
-//! down listener bounces the same way); queuing for offline waves is future
-//! work.
+//! The wave's live WaveAgent session row carries `LF_WAVE_ENDPOINT`; when the
+//! store has no row (unregistered server, no registry on this machine), the
+//! local `wave/<name>/.wave-endpoint` discovery file is the fallback. A
+//! resolvable wave with no live server is a clear error — a dead wave's mail
+//! bounces, it doesn't vanish; queuing for offline waves is future work.
 //!
 //! # Attribution
-//! Sender context comes from env: `LFD_SESSION_ID` (the registry session, when
-//! there is one) plus a label — `LFD_AGENT_ROLE` when set (workers), `wave
-//! <own>` when escalating with `--parent`, else `cli`. `--from <label>`
-//! overrides the label outright: machine speech (the webhook gatekeeper's
-//! `--from ci` / `--from github`) must arrive attributed, never riding the
-//! from-absent human path.
+//! None, ever. The thread is unattributed by convention and the server
+//! rejects a byline on this door. Machine speech — webhook facts, worker
+//! reports, escalations — rides the bus with `lf radio --from`, and the
+//! listener's bus sweep folds it into the thread attributed.
 
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -51,18 +43,18 @@ use anyhow::{anyhow, bail, Result};
 use crate::engine::wave_context::{
     read_endpoint_pointer, resolve_ambient_channel, wave_origin, AmbientWaveRef,
 };
-use crate::lf::commands::util::find_repo_root;
+use crate::lf::commands::util::{find_repo_root, message_text};
 use crate::lf::WaveTargetArgs;
 use crate::lfd::types::Wave;
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::wave::channel::family_head;
-use crate::wave::journal::Attribution;
+use crate::wave::journal::MessageOp;
 
-pub fn run(text_args: &[String], from_label: Option<&str>, target: &WaveTargetArgs) -> Result<()> {
+pub fn run(text_args: &[String], steer: bool, target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let context = CliContext::detect().await;
-        run_with_context(&context, text_args, from_label, target).await
+        run_with_context(&context, text_args, steer, target).await
     })
 }
 
@@ -71,7 +63,7 @@ pub fn run(text_args: &[String], from_label: Option<&str>, target: &WaveTargetAr
 pub(crate) async fn run_with_context(
     context: &CliContext,
     text_args: &[String],
-    from_label: Option<&str>,
+    steer: bool,
     target: &WaveTargetArgs,
 ) -> Result<()> {
     let Some(resolved) = resolve_target(
@@ -88,36 +80,26 @@ pub(crate) async fn run_with_context(
     };
     let text = message_text(text_args, std::io::stdin())?;
     let endpoint = resolved.require_endpoint()?;
-    let mut from = sender_attribution(target.parent, resolved.own_name.as_deref());
-    if let Some(label) = from_label {
-        from.label = label.to_string();
-    }
-    let mut body = serde_json::json!({ "op": "say", "text": text, "from": from });
-    if let Some(channel) = &resolved.channel {
-        body["channel"] = serde_json::Value::String(channel.clone());
-    }
+    // Chat is the human's verb: unattributed, like the Mac composer — the
+    // same human act must journal the same way on every surface. Machine
+    // speech carries a byline and rides the bus (`lf radio`).
+    let op = if steer {
+        MessageOp::Steer
+    } else {
+        MessageOp::Message
+    };
+    let body = serde_json::json!({ "op": op, "text": text });
     post_json(&endpoint, "/messages", &body).await?;
     println!(
-        "posted to channel '{}' as [{}]",
-        resolved.channel.as_deref().unwrap_or(&resolved.name),
-        from.label
+        "sent to '{}' ({})",
+        resolved.name,
+        if steer {
+            "steer live, otherwise queue"
+        } else {
+            "queued for the next turn"
+        }
     );
     Ok(())
-}
-
-/// Message text from the args (joined) or stdin (heredoc-friendly).
-fn message_text(args: &[String], mut stdin: impl Read) -> Result<String> {
-    let joined = args.join(" ").trim().to_string();
-    if !joined.is_empty() {
-        return Ok(joined);
-    }
-    let mut buffer = String::new();
-    stdin.read_to_string(&mut buffer)?;
-    let text = buffer.trim().to_string();
-    if text.is_empty() {
-        bail!("no message text: pass TEXT or pipe it on stdin");
-    }
-    Ok(text)
 }
 
 /// What the process can see: the registry (if this machine has one), the repo
@@ -146,26 +128,20 @@ impl CliContext {
 }
 
 /// A resolved target: the family-head wave's name, its live endpoint (when
-/// one answers via the registry row or the discovery file), the repo root
-/// its wave dir lives under (for serverless reads), the invoking wave's name
-/// (for labels), and — when the target is a work-line channel rather than
-/// the wave itself — the channel name to address the door with.
+/// one answers via the registry row or the discovery file), and the repo
+/// root its wave dir lives under (for serverless reads).
 #[derive(Debug)]
 pub(crate) struct ResolvedWave {
     pub name: String,
     pub endpoint: Option<String>,
     pub repo_root: Option<PathBuf>,
-    pub own_name: Option<String>,
-    /// `Some` only for a child channel (`goals.148e0e02`); `None` targets
-    /// the wave channel itself.
-    pub channel: Option<String>,
 }
 
 impl ResolvedWave {
     pub fn require_endpoint(&self) -> Result<String> {
         self.endpoint.clone().ok_or_else(|| {
             anyhow!(
-                "wave '{name}' has no live server — start one with `lf wave {name}`. \
+                "wave '{name}' has no live server — serve one with `lf serve {name}`. \
                  (Queuing for offline waves is not implemented yet.)",
                 name = self.name
             )
@@ -173,8 +149,8 @@ impl ResolvedWave {
     }
 }
 
-/// Resolve the target channel, its family head wave, and the head's live
-/// endpoint. See the module doc for the targeting and endpoint rules.
+/// Resolve the target wave and its live endpoint. See the module doc for the
+/// targeting and endpoint rules.
 /// `Ok(None)` is the publish-to-no-subscriber case: default targeting with
 /// no wave context anywhere — callers that publish drop the message; callers
 /// that read treat it as an error.
@@ -193,14 +169,12 @@ pub(crate) async fn resolve_target(
     // invoking WAVE is the channel's family head.
     let mut own_row: Option<Wave> = None;
     let mut own_name: Option<String> = None;
-    let mut own_channel: Option<String> = None;
     match resolve_ambient_channel(env_channel, env_wave_id, repo) {
         Some(AmbientWaveRef::Id(id)) => {
             if let (Some(store), Ok(id)) = (store, id.parse()) {
                 own_row = store.get_wave(&id).await?;
             }
             own_name = own_row.as_ref().map(|row| row.name().clone());
-            own_channel = own_name.clone();
         }
         Some(AmbientWaveRef::Name(name)) => {
             let head = family_head(&name).to_string();
@@ -208,68 +182,49 @@ pub(crate) async fn resolve_target(
                 own_row = store.get_wave_by_name(&head).await?;
             }
             own_name = Some(head);
-            own_channel = Some(name);
         }
         None => {}
     }
 
-    let (target_row, target_name, channel): (Option<Wave>, String, Option<String>) =
-        if let Some(name) = &args.wave {
-            let head = family_head(name).to_string();
-            let row = match store {
-                Some(store) => store.get_wave_by_name(&head).await?,
-                None => None,
-            };
-            let channel = (*name != head).then(|| name.clone());
-            (row, head, channel)
-        } else if args.parent {
-            let store = store.ok_or_else(|| {
-                anyhow!(
-                    "--parent needs the run registry to walk the wave tree, \
-                 and this machine has none (~/.lf/lfd.db)"
-                )
-            })?;
-            let own = own_row.ok_or_else(|| {
-                anyhow!(
-                    "cannot resolve the invoking wave for --parent: no LFD_WAVE_ID \
-                 in env and no registered wave matches this worktree"
-                )
-            })?;
-            let parent_id = own.parent_wave_id().ok_or_else(|| {
-                anyhow!(
-                    "wave '{}' has no parent — it is a root wave; the human \
-                 fall-through arrives with Decisions",
-                    own.name()
-                )
-            })?;
-            let parent = store.get_wave(parent_id).await?.ok_or_else(|| {
-                anyhow!(
-                    "wave '{}' names parent {parent_id}, but the registry has no such wave",
-                    own.name()
-                )
-            })?;
-            let name = parent.name().clone();
-            // Escalation targets the parent WAVE's channel, never a work line.
-            (Some(parent), name, None)
-        } else {
-            // Speak locally: the ambient channel, through its family head.
-            let channel = own_channel
-                .clone()
-                .filter(|channel| Some(channel) != own_name.as_ref());
-            match own_row {
-                Some(row) => {
-                    let name = row.name().clone();
-                    (Some(row), name, channel)
-                }
-                None => {
-                    // No wave context anywhere: the publish has no subscriber.
-                    let Some(name) = own_name.clone() else {
-                        return Ok(None);
-                    };
-                    (None, name, channel)
-                }
-            }
+    let (target_row, target_name): (Option<Wave>, String) = if let Some(name) = &args.wave {
+        let head = family_head(name).to_string();
+        let row = match store {
+            Some(store) => store.get_wave_by_name(&head).await?,
+            None => None,
         };
+        (row, head)
+    } else if args.parent {
+        let store = store.ok_or_else(|| {
+            anyhow!(
+                "--parent needs the run registry to walk the wave tree, \
+                 and this machine has none (~/.lf/lfd.db)"
+            )
+        })?;
+        let own = own_row.ok_or_else(|| {
+            anyhow!(
+                "cannot resolve the invoking wave for --parent: no LFD_WAVE_ID \
+                 in env and no registered wave matches this worktree"
+            )
+        })?;
+        let parent = parent_wave(store, &own).await?;
+        let name = parent.name().clone();
+        (Some(parent), name)
+    } else {
+        // Speak locally: the ambient wave.
+        match own_row {
+            Some(row) => {
+                let name = row.name().clone();
+                (Some(row), name)
+            }
+            None => {
+                // No wave context anywhere: the publish has no subscriber.
+                let Some(name) = own_name.clone() else {
+                    return Ok(None);
+                };
+                (None, name)
+            }
+        }
+    };
 
     // Endpoint: the live WaveAgent session row carries it; the local
     // discovery file is the fallback when the store has no row.
@@ -292,28 +247,26 @@ pub(crate) async fn resolve_target(
         name: target_name,
         endpoint,
         repo_root,
-        own_name,
-        channel,
     }))
 }
 
-/// Attribution from env: `LFD_SESSION_ID` when present; label from
-/// `LFD_AGENT_ROLE` (workers), else `wave <own>` when escalating, else "cli".
-pub(crate) fn sender_attribution(escalating: bool, own_wave: Option<&str>) -> Attribution {
-    let session_id = std::env::var(crate::lf::session::SESSION_ID_ENV)
-        .ok()
-        .filter(|value| !value.is_empty());
-    let label = match std::env::var("LFD_AGENT_ROLE")
-        .ok()
-        .filter(|value| !value.is_empty())
-    {
-        Some(role) => role,
-        None => match (escalating, own_wave) {
-            (true, Some(own)) => format!("wave {own}"),
-            _ => "cli".to_string(),
-        },
-    };
-    Attribution { session_id, label }
+/// Walk one step up the wave tree. Both speech verbs escalate this way —
+/// `lf chat --parent` to the parent's thread, `lf radio --parent` to its
+/// channel — and a root wave is the same clear error for both.
+pub(crate) async fn parent_wave(store: &SharedStore, own: &Wave) -> Result<Wave> {
+    let parent_id = own.parent_wave_id().ok_or_else(|| {
+        anyhow!(
+            "wave '{}' has no parent — it is a root wave; the human \
+             fall-through arrives with Decisions",
+            own.name()
+        )
+    })?;
+    store.get_wave(parent_id).await?.ok_or_else(|| {
+        anyhow!(
+            "wave '{}' names parent {parent_id}, but the registry has no such wave",
+            own.name()
+        )
+    })
 }
 
 /// POST a JSON body to the wave server; connection failure and non-2xx are
@@ -331,7 +284,7 @@ pub(crate) async fn post_json(
         .await
         .map_err(|err| {
             anyhow!(
-                "wave server at {endpoint} is not answering ({err}) — is `lf wave` still running?"
+                "wave server at {endpoint} is not answering ({err}) — is `lf serve` still running?"
             )
         })?;
     let status = response.status();
@@ -348,7 +301,7 @@ pub(crate) async fn get_json(endpoint: &str, path: &str) -> Result<serde_json::V
         .await
         .map_err(|err| {
             anyhow!(
-                "wave server at {endpoint} is not answering ({err}) — is `lf wave` still running?"
+                "wave server at {endpoint} is not answering ({err}) — is `lf serve` still running?"
             )
         })?;
     let status = response.status();
@@ -366,47 +319,18 @@ mod tests {
 
     use time::OffsetDateTime;
 
+    use crate::lf::commands::fixtures::{boot_server, make_wave, temp_store};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        Session, SessionStatus, SessionUse, WaveStatus, WAVE_SERVER_ENDPOINT_ENV,
-        WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
+        Session, SessionStatus, SessionUse, WAVE_SERVER_ENDPOINT_ENV, WAVE_SERVER_PID_ENV,
+        WAVE_SERVER_SOURCE,
     };
-    use crate::lfdb::{open_store, StorageConfig};
     use crate::wave::journal::{EventKind, MessageOp};
-    use crate::wave::runtime::{InboxItem, WaveRuntime};
+    use crate::wave::runtime::InboxItem;
     use crate::wave::server;
 
-    async fn temp_store(dir: &Path) -> SharedStore {
-        Arc::new(
-            open_store(&StorageConfig::sqlite(dir.join("lfd.db")))
-                .await
-                .expect("open sqlite store"),
-        )
-    }
-
-    fn make_wave(name: &str, repo: &Path, parent: Option<&LfdId>) -> Wave {
-        Wave {
-            id: LfdId::new(),
-            name: name.to_string(),
-            goal: "ship-roadmap".to_string(),
-            metrics: Vec::new(),
-            repo: repo.display().to_string(),
-            worktree: String::new(),
-            branch: String::new(),
-            status: WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            direction: Vec::new(),
-            area: Vec::new(),
-            paused: false,
-            created_at: Some(OffsetDateTime::now_utc()),
-            workers: 1,
-            parent_wave_id: parent.cloned(),
-        }
-    }
-
     /// A live wave_server WaveAgent row carrying `endpoint` in its env — the
-    /// shape `lf wave` registers (see crate::wave::registry).
+    /// shape `lf serve` registers (see crate::wave::registry).
     fn live_server_session(wave: &Wave, endpoint: &str) -> Session {
         let now = OffsetDateTime::now_utc();
         Session {
@@ -415,10 +339,10 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::WaveAgent,
-            skill: "flowloop".to_string(),
+            skill: "loop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
-            argv: vec!["lf".to_string(), "wave".to_string(), wave.name().clone()],
+            argv: vec!["lf".to_string(), "serve".to_string(), wave.name().clone()],
             env: BTreeMap::from([
                 (WAVE_SERVER_ENDPOINT_ENV.to_string(), endpoint.to_string()),
                 (
@@ -435,45 +359,6 @@ mod tests {
             created_at: now,
             completion_token: None,
         }
-    }
-
-    /// Boot the HTTP surface over a runtime (the wave/mod.rs harness pattern).
-    async fn boot_server(
-        origin: &Path,
-        wave: &str,
-    ) -> (
-        String,
-        Arc<WaveRuntime>,
-        tokio::sync::broadcast::Receiver<InboxItem>,
-    ) {
-        let runtime =
-            WaveRuntime::open(wave.to_string(), origin.to_path_buf()).expect("open runtime");
-        let inbox_rx = runtime.subscribe_inbox();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let app = server::router(
-            runtime.clone(),
-            server::ResidentDoor::new("test-token"),
-            server::SubagentDoor::new(),
-            None,
-            None,
-        );
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
-        });
-        (addr.to_string(), runtime, inbox_rx)
-    }
-
-    #[test]
-    fn message_text_prefers_args_then_stdin_then_errors() {
-        let text = message_text(&["hello".into(), "world".into()], std::io::empty()).unwrap();
-        assert_eq!(text, "hello world");
-
-        let text = message_text(&[], std::io::Cursor::new("from stdin\n")).unwrap();
-        assert_eq!(text, "from stdin");
-
-        let err = message_text(&[], std::io::empty()).unwrap_err();
-        assert!(err.to_string().contains("no message text"));
     }
 
     /// Env-context targeting: LFD_WAVE_ID names the wave; the endpoint comes
@@ -501,7 +386,6 @@ mod tests {
         .expect("wave context");
         assert_eq!(resolved.name, "ship");
         assert_eq!(resolved.endpoint.as_deref(), Some("127.0.0.1:4242"));
-        assert_eq!(resolved.own_name.as_deref(), Some("ship"));
     }
 
     /// Worktree-name fallback: no env, no store — the `<repo>.<wave>` sibling
@@ -556,24 +440,67 @@ mod tests {
         run_with_context(
             &context,
             &["hello".into()],
-            None,
+            false,
             &WaveTargetArgs::default(),
         )
         .await
         .expect("dropped publish exits 0");
     }
 
-    /// `--from` attributes machine speech: the label lands on the journaled
-    /// turn verbatim, overriding the ambient "cli" fallback — webhook execs
-    /// (`lf chat --wave x --from ci "CI failed"`) never ride the from-absent
-    /// human path.
+    /// `--steer` uses the same wire op as the Mac composer and carries no
+    /// attributed byline.
     #[tokio::test]
-    async fn from_flag_overrides_the_attribution_label() {
+    async fn steer_flag_requests_live_steering() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(&origin).unwrap();
-        let (addr, runtime, _inbox) = boot_server(&origin, "ship").await;
+        let (addr, runtime, mut inbox) = boot_server(&origin, "ship").await;
+        let wave = make_wave("ship", &origin, None);
+        store.create_wave(&wave).await.expect("seed wave");
+        store
+            .register_session(&live_server_session(&wave, &addr))
+            .await
+            .expect("seed brain");
+
+        let context = CliContext {
+            store: Some(store),
+            repo: None,
+            env_wave_id: None,
+            env_channel: None,
+        };
+        run_with_context(
+            &context,
+            &["skip".into(), "the".into(), "migration".into()],
+            true,
+            &WaveTargetArgs {
+                wave: Some("ship".into()),
+                parent: false,
+            },
+        )
+        .await
+        .expect("post human message");
+
+        let thread = runtime.thread_snapshot();
+        assert_eq!(thread.len(), 1);
+        assert_eq!(thread[0].text, "skip the migration");
+        assert_eq!(thread[0].from, None);
+        let InboxItem::Message(message) = inbox.try_recv().expect("steer inbox item") else {
+            panic!("expected message inbox item");
+        };
+        assert_eq!(message.op, MessageOp::Steer);
+    }
+
+    /// The same human act journals the same way on every surface: a plain
+    /// CLI message is unattributed and op `message`, exactly what the Mac
+    /// composer sends. Bylines belong to the bus.
+    #[tokio::test]
+    async fn plain_chat_is_unattributed_like_the_mac_composer() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let origin = tmp.path().join("repo");
+        std::fs::create_dir_all(&origin).unwrap();
+        let (addr, runtime, mut inbox) = boot_server(&origin, "ship").await;
         let wave = make_wave("ship", &origin, None);
         store.create_wave(&wave).await.expect("seed wave");
         store
@@ -590,25 +517,29 @@ mod tests {
         run_with_context(
             &context,
             &["CI".into(), "failed".into()],
-            Some("ci"),
+            false,
             &WaveTargetArgs {
                 wave: Some("ship".into()),
                 parent: false,
             },
         )
         .await
-        .expect("post with --from");
+        .expect("post plain message");
 
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "CI failed");
-        assert_eq!(thread[0].from.as_deref(), Some("ci"));
+        assert_eq!(thread[0].from, None, "human turns carry no byline");
+        let InboxItem::Message(message) = inbox.try_recv().expect("inbox item") else {
+            panic!("expected message inbox item");
+        };
+        assert_eq!(message.op, MessageOp::Message);
     }
 
     /// `--parent` walks `parent_wave_id` and posts to the parent's live
-    /// server: the parent runtime receives the attributed queued message.
+    /// server. The thread door refuses bylines; a human turn arrives plain.
     #[tokio::test]
-    async fn parent_targeting_posts_an_attributed_message_to_the_parent_server() {
+    async fn parent_targeting_reaches_the_parent_server_unattributed() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let origin = tmp.path().join("parent-repo");
@@ -641,41 +572,49 @@ mod tests {
         let endpoint = resolved.require_endpoint().expect("live endpoint");
         assert_eq!(endpoint, addr);
 
-        let from = Attribution {
-            session_id: Some("sess-child".into()),
-            label: "wave concerto".into(),
-        };
+        // The thread door takes no bylines: attributed escalation rides the
+        // bus and arrives through the parent's bus sweep, not this wire.
+        let refused = reqwest::Client::new()
+            .post(format!("http://{endpoint}/messages"))
+            .json(&serde_json::json!({
+                "op": "say",
+                "text": "blocked on the schema",
+                "from": "wave concerto",
+            }))
+            .send()
+            .await
+            .expect("post");
+        assert_eq!(refused.status(), reqwest::StatusCode::BAD_REQUEST);
+
+        // A human standing in the child steers the parent: unattributed, like
+        // every human turn.
         post_json(
             &endpoint,
             "/messages",
-            &serde_json::json!({ "op": "say", "text": "blocked on the schema", "from": from }),
+            &serde_json::json!({ "op": "message", "text": "blocked on the schema" }),
         )
         .await
-        .expect("post say");
-
-        // The parent's thread carries the attributed turn…
+        .expect("post message");
         let thread = parent_runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "blocked on the schema");
-        assert_eq!(thread[0].from.as_deref(), Some("wave concerto"));
-        // …its flowloop was woken with the same attributed input…
+        assert_eq!(thread[0].from, None);
         let InboxItem::Message(msg) = parent_inbox.try_recv().expect("inbox item") else {
             panic!("expected message inbox item");
         };
-        assert_eq!(msg.op, MessageOp::Say);
-        assert_eq!(
-            msg.from.as_ref().map(|f| f.label.as_str()),
-            Some("wave concerto")
-        );
-        // …and the journal row records the attribution durably.
+        assert_eq!(msg.op, MessageOp::Message);
+        // The journal row is unattributed too.
         let (_, events) = crate::wave::journal::Journal::open(&crate::wave::journal::journal_path(
             &origin, "goals",
         ))
         .expect("journal");
         assert!(matches!(
             &events[0].kind,
-            EventKind::UserMessage { op: MessageOp::Say, from: Some(from), .. }
-                if from.label == "wave concerto" && from.session_id.as_deref() == Some("sess-child")
+            EventKind::UserMessage {
+                op: MessageOp::Message,
+                from: None,
+                ..
+            }
         ));
     }
 
@@ -704,21 +643,16 @@ mod tests {
         );
     }
 
-    /// Channel addressing: a dotted name resolves its FAMILY HEAD's endpoint
-    /// (the head holds the pen) and rides the wire as the `channel` field —
-    /// the message lands in the work line's own journal, in its worktree.
+    /// A dotted name still resolves to its family head: a hand's channel is a
+    /// bus address, and the bus has no thread to converse with. The mind's
+    /// server answers.
     #[tokio::test]
-    async fn dotted_name_targets_the_channel_through_the_family_head() {
+    async fn a_dotted_name_resolves_to_the_family_head() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(&origin).unwrap();
-        std::fs::create_dir_all(crate::wave::channel::child_worktree_path(
-            &origin,
-            "ship.148e",
-        ))
-        .unwrap();
-        let (addr, runtime, _inbox) = boot_server(&origin, "ship").await;
+        let (addr, _runtime, _inbox) = boot_server(&origin, "ship").await;
         let wave = make_wave("ship", &origin, None);
         store.create_wave(&wave).await.expect("seed wave");
         store
@@ -726,7 +660,6 @@ mod tests {
             .await
             .expect("seed brain");
 
-        // Explicit dotted target: head endpoint, channel on the side.
         let resolved = resolve_target(
             &WaveTargetArgs {
                 wave: Some("ship.148e".into()),
@@ -741,43 +674,7 @@ mod tests {
         .expect("resolve")
         .expect("wave context");
         assert_eq!(resolved.name, "ship", "the family head is the wave");
-        assert_eq!(resolved.channel.as_deref(), Some("ship.148e"));
         assert_eq!(resolved.endpoint.as_deref(), Some(addr.as_str()));
-
-        // Ambient channel (the dispatch env contract): same resolution.
-        let ambient = resolve_target(
-            &WaveTargetArgs::default(),
-            Some(&store),
-            None,
-            Some(wave.id().as_str()),
-            Some("ship.148e"),
-        )
-        .await
-        .expect("resolve")
-        .expect("wave context");
-        assert_eq!(ambient.name, "ship");
-        assert_eq!(ambient.channel.as_deref(), Some("ship.148e"));
-
-        // The whole door: POST with the channel field lands in the child
-        // journal, and a `say` also folds up to the wave thread (the report
-        // reaches the flowloop).
-        let mut body = serde_json::json!({
-            "op": "say",
-            "text": "child-bound",
-            "from": Attribution { session_id: None, label: "worker".into() },
-        });
-        body["channel"] = serde_json::Value::String("ship.148e".into());
-        post_json(&addr, "/messages", &body).await.expect("post");
-        assert_eq!(
-            runtime.thread_snapshot().len(),
-            1,
-            "the report folded up to the wave thread",
-        );
-        let events = crate::wave::journal::read_events(&crate::wave::channel::child_journal_path(
-            &origin,
-            "ship.148e",
-        ));
-        assert_eq!(events.len(), 1, "the work line's journal has the message");
     }
 
     /// No live server anywhere (no registry row, no discovery file): the
@@ -802,7 +699,9 @@ mod tests {
         let err = resolved.require_endpoint().expect_err("no server");
         let message = err.to_string();
         assert!(message.contains("no live server"), "{message}");
-        assert!(message.contains("lf wave ship"), "{message}");
+        // `lf serve` boots a mind; `lf loop` is the batch verb and needs a
+        // flow plus a seed — naming it here would name an unspellable command.
+        assert!(message.contains("lf serve ship"), "{message}");
         assert!(message.contains("not implemented yet"), "{message}");
     }
 }

@@ -10,6 +10,7 @@ mod next;
 pub mod pm;
 mod pr;
 mod progress;
+pub mod project;
 pub mod queue;
 mod rebase;
 mod release;
@@ -43,3 +44,4 @@ pub use release::{
     release_status, release_tag, MergedPr, ReleaseRunResult, ReleaseStatusResult,
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
+pub use util::resolve_wave_name;

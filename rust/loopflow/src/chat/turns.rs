@@ -1,6 +1,6 @@
 //! Turn vocabulary: `ChatTurn`, the wire type Loopflow consumes.
 //!
-//! The wave's flowloop runs each turn as a bounded `wave` child inside
+//! The wave's loop runs each turn as a bounded `wave` child inside
 //! the RESIDENT process (see [`crate::flowloop::wave`]) and reports it as
 //! resident wire deltas ([`crate::wave::wire`]), folded by the listener's
 //! runtime into journaled, broadcast turns.
@@ -12,9 +12,9 @@
 //!   commands/edits/messages it ran.
 
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
 
 use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::wave::playhead::{now_rfc3339, BodyProvenance};
 
 /// Who authored a turn. Mirrors Swift `MessageRole` (user/assistant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,7 +30,7 @@ pub enum ChatRole {
 /// the same shape round-trips through Rust and Swift.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatTurn {
-    /// Stable within a running server: `"turn-1"`, `"turn-2"`, …
+    /// Stable within the wave journal across restarts: `"turn-1"`, `"turn-2"`, …
     pub id: String,
     pub role: ChatRole,
     /// Accumulated assistant prose (or the human message for a `user` turn).
@@ -41,19 +41,16 @@ pub struct ChatTurn {
     pub items: Vec<ConversationItem>,
     /// RFC 3339 timestamp of when the turn opened.
     pub created_at: String,
-    /// Speaker label for attributed emissions (`lf chat` — worker reports,
-    /// child-wave escalations). Absent for the flowloop's own turns and plain
+    /// Speaker label for attributed emissions (`lf radio` — worker reports,
+    /// child-wave escalations). Absent for the loop's own turns and plain
     /// user turns.
     pub from: Option<String>,
+    /// Body that produced an assistant span. Required on the wire and
+    /// explicitly null for human/attributed turns.
+    pub body: Option<BodyProvenance>,
 }
 
 impl ChatTurn {
-    fn now_rfc3339() -> String {
-        OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_default()
-    }
-
     /// A completed `user` turn carrying a human message.
     pub fn user(id: String, text: String) -> Self {
         Self {
@@ -62,8 +59,9 @@ impl ChatTurn {
             text,
             status: Lifecycle::Completed,
             items: Vec::new(),
-            created_at: Self::now_rfc3339(),
+            created_at: now_rfc3339(),
             from: None,
+            body: None,
         }
     }
 
@@ -74,10 +72,25 @@ impl ChatTurn {
     /// turns through this — a second copy is the live-vs-replay split-brain
     /// the journal exists to kill.
     pub fn absorb_item(&mut self, item: ConversationItem) {
-        if let ConversationItem::Message { text, .. } = &item {
-            self.push_text(text);
+        if let ConversationItem::Message { text, phase, .. } = &item {
+            if phase.as_deref() == Some("stream") {
+                self.text.push_str(text);
+            } else {
+                self.push_text(text);
+            }
         } else {
             self.items.push(item);
+        }
+    }
+
+    /// Close the body that produced this turn, if it had one. Every terminal
+    /// path goes through here — the live finalizers, the boot janitor, and the
+    /// journal fold — so a replayed turn's body reads exactly as the live one
+    /// did. Human and attributed turns have no body and close as a no-op.
+    pub fn close_body(&mut self, ended_at: String, reason: Option<String>) {
+        if let Some(body) = self.body.as_mut() {
+            body.ended_at = Some(ended_at);
+            body.termination_reason = reason;
         }
     }
 
@@ -143,5 +156,19 @@ mod tests {
 
         assert_eq!(turn.text, "first\nsecond");
         assert_eq!(turn.items.len(), 1, "prose joins text, tools append");
+    }
+
+    #[test]
+    fn absorb_item_concatenates_stream_fragments_exactly() {
+        let mut turn = ChatTurn::user("turn-4".into(), String::new());
+        for text in ["hello", " ", "world"] {
+            turn.absorb_item(ConversationItem::Message {
+                id: format!("m-{}", turn.text.len()),
+                text: text.into(),
+                phase: Some("stream".into()),
+            });
+        }
+
+        assert_eq!(turn.text, "hello world");
     }
 }

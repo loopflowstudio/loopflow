@@ -8,16 +8,9 @@ cold starts without growing a second brain.
 
 ## KRs
 
-- One steward thread stays coherent through a month of real use: reports
-  folded, decisions traceable, no reset required and no second thread
-  spawned to escape the first.
-- The thread survives every boundary it meets in a week of dogfood — app
-  restart, process reattach, replay, land, branch, machine move — 5/5
-  trials each, with zero learnings lost.
-- Every retained fact cites its source: for a month of memory changes, each
-  one points to the chat event, worker report, or run trace that justified
-  it — unsourced facts are failure events.
-- MEMORY.md stays prompt-sized while facts accumulate for a month, and
-  still answers "decided / constrained / in flight" at a glance.
-- Send, steer, interrupt, and resume hit the right session 100% of a
-  week's uses without exposing runtime plumbing.
+- For one month of real use, every product surface shares one steward thread: every report is folded, every consequential decision is traceable to its originating event, and zero resets or second threads are used to recover coherence.
+- Over one week of dogfood, that thread survives app restarts, process reattachments, replay, land, branch, and machine moves in 5/5 trials per boundary with zero lost messages, decisions, or retained facts.
+- For one month of memory changes, every retained fact links to the chat event, worker report, or run trace that justifies it; any unsourced fact breaks the streak.
+- During one month of accumulating facts, prompt assembly truncates zero wave memories and 10/10 cold-start reviews identify current decisions, constraints, and in-flight work from `MEMORY.md` without reading the raw journal.
+- Across one month of releases, `lf chat` remains the sole CLI owner of the human thread and `lf sub` remains bus-only; CLI help, docs, and surface integrations expose zero overlapping chat commands or thread/bus fusions.
+- Across one week of mixed CLI and Mac use on Codex, Claude, and OpenCode, send, steer, interrupt, and resume target the selected wave's single thread in N/N trials; each steer is visibly reported as mid-turn or queued for the next turn boundary, with zero wrong-wave deliveries and no runtime or session identifiers exposed.

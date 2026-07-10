@@ -554,8 +554,8 @@ async fn pm_init_async(
                 unique_legacy_project_destination(&legacy.project_slugs, &project_ids)
             else {
                 progress.status(&format!(
-                    "leaving legacy task {} without exactly one recognized project label in {legacy_project_id}",
-                    legacy.item.id,
+                    "leaving legacy task {} ({:?}) without exactly one recognized project label in {legacy_project_id}",
+                    legacy.item.id, legacy.item.name,
                 ));
                 unmigrated += 1;
                 continue;

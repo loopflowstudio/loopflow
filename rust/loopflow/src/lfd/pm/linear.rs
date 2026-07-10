@@ -348,7 +348,7 @@ impl LinearClient {
                 CREATE_INITIATIVE_MUTATION,
                 json!({
                     "name": name,
-                    "description": summary,
+                    "description": linear_description(summary),
                 }),
             )
             .await?;
@@ -408,7 +408,7 @@ impl LinearClient {
                 CREATE_PROJECT_MUTATION,
                 json!({
                     "name": name,
-                    "description": linear_project_description(summary),
+                    "description": linear_description(summary),
                     "content": render_project_content(definition, krs),
                     "teamId": team_id,
                 }),
@@ -919,7 +919,7 @@ fn team_key_from_name(name: &str) -> String {
     }
 }
 
-fn linear_project_description(description: &str) -> String {
+fn linear_description(description: &str) -> String {
     let summary = first_meaningful_paragraph(description);
     if summary.is_empty() {
         return String::new();
@@ -1246,14 +1246,14 @@ mod tests {
     }
 
     #[test]
-    fn linear_project_description_skips_headings_and_truncates() {
-        let summary = linear_project_description(
+    fn linear_description_skips_headings_and_truncates() {
+        let summary = linear_description(
             "## Vision\n\nThis is the first paragraph.\n\n## Strategy\n\nSecond paragraph.",
         );
         assert_eq!(summary, "This is the first paragraph.");
 
         let long = "a".repeat(300);
-        assert_eq!(linear_project_description(&long).len(), 255);
-        assert_eq!(linear_project_description(""), "");
+        assert_eq!(linear_description(&long).len(), 255);
+        assert_eq!(linear_description(""), "");
     }
 }

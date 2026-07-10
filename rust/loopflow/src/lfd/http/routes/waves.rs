@@ -695,8 +695,8 @@ fn rename_wave_worktree(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::id::LfdId;
     use crate::lfd::http::routes::test_helpers::{init_git_repo, test_http_state};
+    use crate::lfd::id::LfdId;
     use crate::lfd::types::{Session, SessionStatus, SessionUse, Wave};
     use std::path::Path;
     use tempfile::tempdir;

@@ -1025,8 +1025,10 @@ mod tests {
     }
 
     #[test]
-    fn retired_loop_and_stack_surfaces_do_not_parse() {
-        assert!(Cli::try_parse_from(["lf", "loop", "infrastructure"]).is_err());
+    fn retired_loop_and_stack_surfaces_are_not_first_class_commands() {
+        let loop_cli = Cli::try_parse_from(["lf", "loop", "infrastructure"])
+            .expect("unknown names remain eligible for skill discovery");
+        assert!(matches!(loop_cli.command, Some(Commands::External(_))));
         assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--stack"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
     }

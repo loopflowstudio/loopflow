@@ -85,8 +85,12 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   `--continue` calls have no reason to land on a coherent tree, and a
   mid-rebase write to `scratch/` would have wedged the other driver's next
   checkout. Concurrent editing corrupts a file; concurrent rebasing corrupts
-  history. The store lease in `minds.md` §9 / Next-session item 5 is the fix;
-  it should cover `.git`'s sequencer state, not just the worktree's files.
+  history. Resolution, decided: no store lease — one writer per worktree is
+  dispatch discipline (want a second writer, place a second worktree), and
+  the store contributes visibility (live sessions per cwd in `lf status`),
+  not enforcement. Rebases inherit the same rule: the driver that owns the
+  worktree owns its `.git` sequencer; nobody else should be in the tree at
+  all.
 
 Assumptions taken while implementing §9 (`minds.md`, "the bus is the store"):
 

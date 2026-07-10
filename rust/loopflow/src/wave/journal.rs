@@ -76,15 +76,6 @@ pub enum MessageOp {
     Say,
 }
 
-/// Who spoke, for `Say` emissions. `session_id` is the sender's registry
-/// session when it has one (`LFD_SESSION_ID`); `label` is the human-readable
-/// byline the thread renders ("worker", "wave goals", "cli").
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Attribution {
-    pub session_id: Option<String>,
-    pub label: String,
-}
-
 /// Token usage accrued over one turn. Providers report different subsets, so
 /// every field is explicitly optional.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -142,7 +133,9 @@ pub struct PendingMessage {
     pub id: MessageId,
     pub op: MessageOp,
     pub text: String,
-    pub from: Option<Attribution>,
+    /// The byline a `Say` emission arrived under ("worker", "wave goals",
+    /// "bus"); `None` for the unattributed human thread.
+    pub from: Option<String>,
 }
 
 /// One journal row.
@@ -176,12 +169,12 @@ pub enum EventKind {
         id: MessageId,
         op: MessageOp,
         text: String,
-        /// Attribution for `Say` emissions; `None` for plain user messages.
-        /// Attribution rides the existing `UserMessage` row (an emission is a
-        /// user message with a byline), so the queue fold — `UserMessage`s
-        /// not named in any `answers` — stays untouched: no new event kind,
-        /// no second inbox to desync.
-        from: Option<Attribution>,
+        /// The byline of a `Say` emission; `None` for plain user messages.
+        /// It rides the existing `UserMessage` row (an emission is a user
+        /// message with a byline), so the queue fold — `UserMessage`s not
+        /// named in any `answers` — stays untouched: no new event kind, no
+        /// second inbox to desync.
+        from: Option<String>,
     },
     TurnStarted {
         turn_id: String,
@@ -388,7 +381,7 @@ impl Narrator {
                 };
                 let byline = from
                     .as_ref()
-                    .map(|from| format!("[{}] ", from.label))
+                    .map(|from| format!("[{from}] "))
                     .unwrap_or_default();
                 info(format!(
                     "chat ← {op_tag}{byline}\"{}\" ({id})",
@@ -851,7 +844,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             EventKind::UserMessage { id, op, text, from } => {
                 let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
                 turn.created_at = event.at_rfc3339();
-                turn.from = from.as_ref().map(|from| from.label.clone());
+                turn.from = from.clone();
                 turns.push(turn);
                 let message = PendingMessage {
                     id: id.clone(),
@@ -1147,10 +1140,7 @@ mod tests {
                 id: MessageId("msg-9".into()),
                 op: MessageOp::Say,
                 text: "worker report: PR landed".into(),
-                from: Some(Attribution {
-                    session_id: Some("sess-42".into()),
-                    label: "worker".into(),
-                }),
+                from: Some("worker".into()),
             },
             EventKind::TurnStarted {
                 turn_id: "turn-2".into(),
@@ -1380,10 +1370,7 @@ mod tests {
             id: MessageId("msg-2".into()),
             op: MessageOp::Say,
             text: "run-42 landed: PR #12 merged, one clippy fix on the side".into(),
-            from: Some(Attribution {
-                session_id: Some("sess-42".into()),
-                label: "worker".into(),
-            }),
+            from: Some("worker".into()),
         });
         assert_eq!(
             n.line,
@@ -1678,10 +1665,7 @@ mod tests {
             id: MessageId(format!("msg-{seq}")),
             op: MessageOp::Say,
             text: "landed the parser PR".to_string(),
-            from: Some(Attribution {
-                session_id: Some("sess-7".into()),
-                label: "worker".into(),
-            }),
+            from: Some("worker".into()),
         };
         let events = vec![Event {
             v: FORMAT_VERSION,
@@ -1695,13 +1679,7 @@ mod tests {
         assert_eq!(fold.turns[0].from.as_deref(), Some("worker"));
         assert_eq!(fold.pending_messages.len(), 1, "say queues for the loop");
         assert_eq!(fold.pending_messages[0].op, MessageOp::Say);
-        assert_eq!(
-            fold.pending_messages[0]
-                .from
-                .as_ref()
-                .map(|f| f.label.as_str()),
-            Some("worker")
-        );
+        assert_eq!(fold.pending_messages[0].from.as_deref(), Some("worker"));
 
         // Consumption: a turn answering it drains the queue.
         let consumed = vec![

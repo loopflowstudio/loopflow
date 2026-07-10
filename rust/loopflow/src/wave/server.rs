@@ -131,7 +131,7 @@ use crate::chat::turns::ChatTurn;
 use crate::lfd::executor::helpers::{resolve_lf_binary, spawn_detached_lf, tmux_session_slug};
 use crate::lfd::http::routes::exec::{ExecRequest, ExecResponse};
 use crate::lfd::lf_exec::{exec_lf, validate_lf_argv};
-use crate::wave::journal::{Attribution, MessageOp, PendingMessage};
+use crate::wave::journal::{MessageOp, PendingMessage};
 use crate::wave::playhead::PlayheadView;
 use crate::wave::registry::{process_alive, StoreObserver};
 use crate::wave::runtime::{InboxItem, WaveRuntime};
@@ -323,13 +323,14 @@ struct ConversationQuery {
 }
 
 /// `POST /messages` request body. `op` is required — explicit, never inferred
-/// (no serde default; an op-less body is a 422). `from` is explicitly
-/// Optional: required for `say`, rejected otherwise.
+/// (no serde default; an op-less body is a 422). `from` is accepted only so a
+/// byline can be rejected with a 400 that names the bus, rather than silently
+/// dropped as an unknown field.
 #[derive(Debug, Deserialize)]
 struct PostMessage {
     op: MessageOp,
     text: String,
-    from: Option<Attribution>,
+    from: Option<String>,
 }
 
 /// `POST /channels` request body — the dispatch notification (see module
@@ -907,7 +908,7 @@ async fn messages_handler(
             "text is required for every op but interrupt".to_string(),
         ));
     }
-    let turn = state.runtime.deliver(body.op, body.text, body.from);
+    let turn = state.runtime.deliver(body.op, body.text);
     Ok(Json(PostMessageResponse {
         turn,
         state: state.runtime.loop_state().name().to_string(),

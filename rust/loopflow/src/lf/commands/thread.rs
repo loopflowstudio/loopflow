@@ -420,7 +420,7 @@ mod tests {
             axum::serve(listener, app).await.ok();
         });
 
-        runtime.deliver_user_message("replayed".into(), crate::wave::journal::MessageOp::Message);
+        runtime.deliver(crate::wave::journal::MessageOp::Message, "replayed".into()).expect("user turn");
         runtime
             .append_memory("workers report via lf radio with full useful detail")
             .unwrap();

@@ -922,7 +922,7 @@ mod tests {
     #[tokio::test]
     async fn events_inbox_scope_replays_pending_and_streams_ops() {
         let (base, runtime, _tmp) = boot().await;
-        runtime.deliver_user_message("queued before".into(), MessageOp::Message);
+        runtime.deliver(MessageOp::Message, "queued before".into()).expect("user turn");
 
         let host = base.strip_prefix("http://").unwrap().to_string();
         let mut stream = tokio::net::TcpStream::connect(&host).await.unwrap();

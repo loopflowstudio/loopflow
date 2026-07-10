@@ -36,7 +36,7 @@ use crate::lfd::security::sanitize_fs_component;
 use crate::wave::channel::matches_prefix;
 use crate::wave::journal::{
     channel_opened_turn, fold_thread, fold_workers, journal_path, restore_pending,
-    run_completed_turn, Attribution, EventKind, Journal, MessageId, MessageOp, PendingMessage,
+    run_completed_turn, EventKind, Journal, MessageId, MessageOp, PendingMessage,
     Usage, WorkerOutcome, WorkerRecord,
 };
 use crate::wave::memory::Memory;
@@ -986,41 +986,29 @@ impl WaveRuntime {
         turn
     }
 
-    /// Deliver one resident-directed op, uninterpreted by the caller: the
-    /// door validates SHAPE (op names, text/`from` presence) and hands the op
+    /// Deliver one human op from the thread door, uninterpreted by the caller:
+    /// the door validates SHAPE (op names, text presence) and hands the op
     /// here; what an op *means* lives in this runtime and the loop's
-    /// scheduler. A bare interrupt (empty text) journals nothing and appends
-    /// no turn — `None`; every other delivery journals a `UserMessage`,
-    /// commits the user turn, and queues for the loop.
-    pub fn deliver(
-        &self,
-        op: MessageOp,
-        text: String,
-        from: Option<Attribution>,
-    ) -> Option<ChatTurn> {
+    /// scheduler. The thread is unattributed — bylines arrive on the bus, via
+    /// [`Self::deliver_say`]. A bare interrupt (empty text) journals nothing
+    /// and appends no turn — `None`; every other delivery journals a
+    /// `UserMessage`, commits the user turn, and queues for the loop.
+    pub fn deliver(&self, op: MessageOp, text: String) -> Option<ChatTurn> {
         if op == MessageOp::Interrupt && text.trim().is_empty() {
             self.deliver_interrupt();
             return None;
         }
-        Some(self.deliver_message(text, op, from))
+        Some(self.deliver_message(text, op, None))
     }
 
-    /// Deliver a user message: append its `UserMessage` event (recording the
-    /// op — intent), commit the user turn (id from the event's seq), and hand
-    /// it to the inbox for the loop's scheduler. Returns the stored user turn
-    /// so the HTTP handler can echo it.
-    pub fn deliver_user_message(&self, text: String, op: MessageOp) -> ChatTurn {
-        self.deliver_message(text, op, None)
-    }
-
-    /// Deliver an attributed emission (`lf chat` — a worker report, child-wave
-    /// escalation, or CLI FYI). Same journal row, thread commit, and inbox
-    /// path as any user message; the byline rides along.
-    pub fn deliver_say(&self, text: String, from: Attribution) -> ChatTurn {
+    /// Deliver an attributed emission folded off the bus — a worker report,
+    /// child-wave escalation, or CLI FYI. Same journal row, thread commit, and
+    /// inbox path as any user message; the byline rides along.
+    pub fn deliver_say(&self, text: String, from: String) -> ChatTurn {
         self.deliver_message(text, MessageOp::Say, Some(from))
     }
 
-    fn deliver_message(&self, text: String, op: MessageOp, from: Option<Attribution>) -> ChatTurn {
+    fn deliver_message(&self, text: String, op: MessageOp, from: Option<String>) -> ChatTurn {
         let mut inner = self.inner();
         let event = inner.journal.append(|seq| EventKind::UserMessage {
             id: MessageId(format!("msg-{seq}")),
@@ -1031,7 +1019,7 @@ impl WaveRuntime {
         let id = MessageId(format!("msg-{}", event.seq));
         let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
         turn.created_at = event.at_rfc3339();
-        turn.from = from.as_ref().map(|from| from.label.clone());
+        turn.from = from.clone();
         let turn = self.commit_locked(&mut inner, turn);
         // The pending fold stays live (not boot-only): it is the replay the
         // resident's subscription serves and the validator for its `answers`.
@@ -1528,11 +1516,11 @@ mod tests {
     }
 
     #[test]
-    fn deliver_user_message_appends_user_turn_and_broadcasts() {
+    fn deliver_appends_user_turn_and_broadcasts() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
         let mut rx = rt.subscribe_inbox();
-        let turn = rt.deliver_user_message("how goes it?".into(), MessageOp::Message);
+        let turn = rt.deliver(MessageOp::Message, "how goes it?".into()).expect("user turn");
         assert_eq!(turn.role, ChatRole::User);
         assert_eq!(turn.text, "how goes it?");
         // The op rode the live inbox broadcast, id tied to its journal event.
@@ -1551,10 +1539,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
         let mut rx = rt.subscribe_inbox();
-        let from = Attribution {
-            session_id: Some("sess-9".into()),
-            label: "worker".into(),
-        };
+        let from = "worker".to_string();
         let turn = rt.deliver_say("PR landed; one surprise in the fold".into(), from.clone());
         assert_eq!(turn.role, ChatRole::User);
         assert_eq!(turn.from.as_deref(), Some("worker"));
@@ -1756,8 +1741,8 @@ mod tests {
     fn turn_opened_answers_are_validated_against_the_pending_fold() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let m1 = rt.deliver_user_message("first".into(), MessageOp::Message);
-        let m2 = rt.deliver_user_message("second".into(), MessageOp::Message);
+        let m1 = rt.deliver(MessageOp::Message, "first".into()).expect("user turn");
+        let m2 = rt.deliver(MessageOp::Message, "second".into()).expect("user turn");
         assert_eq!(rt.pending_messages().len(), 2);
 
         // The turn claims both real messages plus a ghost id.
@@ -2074,7 +2059,7 @@ mod tests {
     fn failed_turn_requeues_its_claimed_messages() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let m1 = rt.deliver_user_message("do the thing".into(), MessageOp::Message);
+        let m1 = rt.deliver(MessageOp::Message, "do the thing".into()).expect("user turn");
 
         rt.apply_resident_delta(d_opened(&[&msg_id(&m1)]));
         assert!(rt.pending_messages().is_empty(), "claimed at open");
@@ -2092,7 +2077,7 @@ mod tests {
         // path above still holds m1's requeue, which never re-answered).
         let tmp3 = tempfile::tempdir().expect("tempdir");
         let rt3 = open_runtime(tmp3.path());
-        let m2 = rt3.deliver_user_message("second".into(), MessageOp::Message);
+        let m2 = rt3.deliver(MessageOp::Message, "second".into()).expect("user turn");
         rt3.apply_resident_delta(d_opened(&[&msg_id(&m2)]));
         rt3.apply_resident_delta(d_finished(Lifecycle::Completed));
         assert!(
@@ -2110,7 +2095,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let claimed = {
             let rt = open_runtime(tmp.path());
-            let m = rt.deliver_user_message("answer me".into(), MessageOp::Message);
+            let m = rt.deliver(MessageOp::Message, "answer me".into()).expect("user turn");
             // Turn opens and claims it, then the server crashes (no finish).
             rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
             assert!(rt.pending_messages().is_empty());
@@ -2133,7 +2118,7 @@ mod tests {
     fn resident_requeue_undoes_a_claim_at_most_once() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let m = rt.deliver_user_message("steer".into(), MessageOp::Steer);
+        let m = rt.deliver(MessageOp::Steer, "steer".into()).expect("user turn");
         rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
         // The harness send failed after the claim: the resident undoes it.
         rt.apply_resident_delta(ResidentDelta::MessagesRequeued {
@@ -2165,7 +2150,7 @@ mod tests {
         .unwrap();
         let rt = open_runtime(origin);
         assert!(rt.paused(), "GOAL.md says paused");
-        let m = rt.deliver_user_message("go".into(), MessageOp::Message);
+        let m = rt.deliver(MessageOp::Message, "go".into()).expect("user turn");
 
         rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
         rt.apply_resident_delta(d_text("working"));
@@ -2251,8 +2236,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
 
-        let m1 = rt.deliver_user_message("steer me".into(), MessageOp::Steer);
-        let m2 = rt.deliver_user_message("me too".into(), MessageOp::Steer);
+        let m1 = rt.deliver(MessageOp::Steer, "steer me".into()).expect("user turn");
+        let m2 = rt.deliver(MessageOp::Steer, "me too".into()).expect("user turn");
 
         // No assistant turn anywhere: nothing journaled, both stay pending.
         rt.apply_resident_delta(ResidentDelta::TurnSteered {
@@ -2328,7 +2313,7 @@ mod tests {
 
         let rt = open_runtime(tmp.path());
         // The steer's own user turn is now the thread's last turn.
-        let steer = rt.deliver_user_message("steer me".into(), MessageOp::Steer);
+        let steer = rt.deliver(MessageOp::Steer, "steer me".into()).expect("user turn");
         rt.apply_resident_delta(ResidentDelta::TurnSteered {
             answers: vec![msg_id(&steer)],
         });
@@ -2357,13 +2342,10 @@ mod tests {
         std::fs::create_dir_all(&origin).unwrap();
         let rt = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
 
-        rt.deliver_user_message("to the wave".into(), MessageOp::Message);
+        rt.deliver(MessageOp::Message, "to the wave".into()).expect("user turn");
         rt.deliver_say(
             "to a".into(),
-            Attribution {
-                session_id: None,
-                label: "ship.a".into(),
-            },
+            "ship.a".into(),
         );
 
         let wave = rt.thread_snapshot();
@@ -2427,14 +2409,14 @@ mod tests {
     fn subscription_carries_pending_replay_and_live_inbox() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        rt.deliver_user_message("before".into(), MessageOp::Message);
+        rt.deliver(MessageOp::Message, "before".into()).expect("user turn");
 
         let mut sub = rt.subscribe_with_snapshot();
         assert_eq!(sub.pending.len(), 1);
         assert_eq!(sub.pending[0].text, "before");
         assert!(sub.inbox_rx.try_recv().is_err(), "no frames from before");
 
-        rt.deliver_user_message("after".into(), MessageOp::Message);
+        rt.deliver(MessageOp::Message, "after".into()).expect("user turn");
         rt.deliver_interrupt();
         let InboxItem::Message(live) = sub.inbox_rx.try_recv().expect("live frame") else {
             panic!("expected message");
@@ -2460,7 +2442,7 @@ mod tests {
             let rt = rt.clone();
             handles.push(std::thread::spawn(move || {
                 for i in 0..50 {
-                    rt.deliver_user_message(format!("m-{writer}-{i}"), MessageOp::Message);
+                    rt.deliver(MessageOp::Message, format!("m-{writer}-{i}")).expect("user turn");
                 }
             }));
         }

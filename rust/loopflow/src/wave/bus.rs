@@ -28,7 +28,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::lfdb::{BusMessage, SharedStore};
-use crate::wave::journal::Attribution;
 use crate::wave::runtime::WaveRuntime;
 
 /// How often a subscriber sweeps the bus forward. Fast enough that a steer
@@ -94,13 +93,8 @@ impl BusListener {
         let messages = self.store.read_bus_after(*cursor).await?;
         for message in &messages {
             if self.hears(message) {
-                self.runtime.deliver_say(
-                    message.text.clone(),
-                    Attribution {
-                        session_id: None,
-                        label: message.byline.clone(),
-                    },
-                );
+                self.runtime
+                    .deliver_say(message.text.clone(), message.byline.clone());
             }
             *cursor = message.id;
             self.store
@@ -133,10 +127,7 @@ impl BusListener {
                  sweep window while this mind was asleep. The PRs and `lf runs` hold what \
                  the bus dropped."
             ),
-            Attribution {
-                session_id: None,
-                label: "bus".to_string(),
-            },
+            "bus".to_string(),
         );
         // Consume the missing range as well as announcing it. On an emptied
         // bus there is no surviving row for `poll_once` to advance through;

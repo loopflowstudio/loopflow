@@ -528,11 +528,13 @@ is ours to write; nothing waits on anyone else.
 4. **Composite playhead frames.** Promote branch/loop internals out of the
    `__flow-step` fallback. Separate graph-runtime work; do it when the Mac's
    breadcrumb starts lying about nested flows.
-5. **One writer per worktree — as a store lease.** §9 names the mechanism:
-   one-brain-per-wave is already a pid-probed store row, and a worktree lease
-   is the same row one table over. Four writers hit this worktree in one day.
-   Until the lease exists, check for a live agent before working a wave
-   worktree.
+5. **One writer per worktree — by dispatch, not by lock.** Decided: no store
+   lease (§9's last bullet records the rejection and the reasoning). Wanting
+   a second writer means dispatching into a placed worktree — the invariant
+   is structural, not enforced. The schedulable remainder is visibility:
+   surface live sessions per worktree in `lf status` (the registry already
+   holds every session's cwd), so typing into an occupied tree is a choice
+   made with open eyes rather than a discovery made in `git log`.
 
 ### Punted to the roadmap
 
@@ -868,11 +870,17 @@ What falls out:
   it leak across the verb split — separate transports make the leak
   unspellable). `POST /messages` becomes purely the thread door. Chat and the
   Mac are untouched: the thread stays SSE on the listener.
-- **The same table pattern is the one-writer answer.** One-brain-per-wave is
-  already a pid-probed store row; a worktree lease is the identical mechanism
-  one table over. Four writers hit this branch's worktree in one day on luck
-  and vigilance. The db IS the registry, the db IS the bus, the db IS the
-  lock.
+- **One writer per worktree is dispatch discipline, not a lock.** *(A store
+  lease was sketched here and rejected.)* Worktrees are cheap and placement
+  already exists: a hand gets its own worktree by construction, so wanting a
+  second writer means dispatching one, not sharing a tree. A lease would be
+  enforcement machinery for a situation the verbs already avoid — stale-row
+  reaping, a `--force` everyone learns to reach for, false refusals on
+  read-only visitors. The same argument that killed the prefix write-gate:
+  once the honest path is the cheap path, permission rules are theater. What
+  the store contributes is *visibility*, not enforcement — it already knows
+  every live session's cwd, so `lf status` can say "N live agents in this
+  worktree" and a human about to type into an occupied tree can see it.
 
 #### Done when: publishing needs no server
 

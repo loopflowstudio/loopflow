@@ -334,7 +334,6 @@ mod tests {
         WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
     };
     use crate::lfdb::{open_store, StorageConfig};
-    use crate::wave::journal::Attribution;
     use crate::wave::journal::{EventKind, MessageOp};
     use crate::wave::runtime::{InboxItem, WaveRuntime};
     use crate::wave::server;
@@ -657,7 +656,7 @@ mod tests {
             .json(&serde_json::json!({
                 "op": "say",
                 "text": "blocked on the schema",
-                "from": Attribution { session_id: None, label: "wave concerto".into() },
+                "from": "wave concerto",
             }))
             .send()
             .await

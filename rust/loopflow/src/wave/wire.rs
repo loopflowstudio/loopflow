@@ -37,7 +37,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::wave::journal::{Attribution, MessageOp};
+use crate::wave::journal::MessageOp;
 use crate::wave::playhead::{BodyProvenance, PlayheadView, StepOutcome};
 
 /// Header carrying the resident token on every `/resident/*` request.
@@ -217,7 +217,7 @@ pub enum InboxFrame {
         id: String,
         op: MessageOp,
         text: String,
-        from: Option<Attribution>,
+        from: Option<String>,
     },
     Interrupt,
     Skip,

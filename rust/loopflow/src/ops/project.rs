@@ -52,12 +52,15 @@ pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<S
     })
 }
 
+/// Wake the promoted child through its thread door, not the bus: a fresh
+/// mind's bus cursor attaches at the head, so a row published during boot
+/// could land before the ear exists. The thread door is synchronous with the
+/// live listener — no race. The message is the steward's own voice, so it is
+/// unattributed like every human turn.
 async fn wake_child(repo: &Path, wave: &str) -> OpsResult<()> {
     let status = tokio::process::Command::new(resolve_lf_binary())
         .args([
             "chat",
-            "--from",
-            "project-promote",
             "--wave",
             wave,
             "Promotion complete. Run the first child-wave pass, report what you now own in this thread, then publish the same concise report to the parent with `lf radio --parent`.",

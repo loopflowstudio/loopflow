@@ -107,14 +107,14 @@ crons:
 
 `lfd` verifies each GitHub webhook and translates it inward as an `lf` exec.
 For the current demo path, CI failures and main pushes arrive as attributed
-chat notifications; the architecture direction is durable facts plus explicit
-commands for long-term coordination.
+bus publishes — machine speech with a byline that survives a sleeping wave
+and folds into its thread attributed on the next sweep.
 
 | Event | What lfd runs |
 |-------|---------------|
-| CI fails on a wave's PR | `lf chat --wave <name> --from ci "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
+| CI fails on a wave's PR | `lf radio --channel <name> --from ci "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
 | PR merged | queue state reconciles in-process |
-| Push to main | `lf chat --wave <name> --from github "main moved: …"` — the loop decides whether to rebase or integrate |
+| Push to main | `lf radio --channel <name> --from github "main moved: …"` — the loop decides whether to rebase or integrate |
 
 ## Skills
 

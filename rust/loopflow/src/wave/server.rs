@@ -884,16 +884,21 @@ async fn messages_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostMessage>,
 ) -> Result<Json<PostMessageResponse>, (StatusCode, String)> {
-    if body.from.is_some() && !matches!(body.op, MessageOp::Say) {
+    // The thread door is the human's: unattributed message/steer/interrupt.
+    // `say` is the journal's vocabulary for folded bus reports — nothing
+    // posts it; agents publish with `lf radio` and the listener's bus sweep
+    // records the attributed copy. Rejecting both here is what makes "agents
+    // don't use chat" a wire property instead of doctrine.
+    if matches!(body.op, MessageOp::Say) {
         return Err((
             StatusCode::BAD_REQUEST,
-            "`from` is only valid for the say op".to_string(),
+            "`say` is not a wire op: machine speech rides the bus (`lf radio`)".to_string(),
         ));
     }
-    if matches!(body.op, MessageOp::Say) && body.from.is_none() {
+    if body.from.is_some() {
         return Err((
             StatusCode::BAD_REQUEST,
-            "`from` is required for the say op".to_string(),
+            "the thread is unattributed: bylines belong to the bus (`lf radio --from`)".to_string(),
         ));
     }
     if body.text.trim().is_empty() && !matches!(body.op, MessageOp::Interrupt) {

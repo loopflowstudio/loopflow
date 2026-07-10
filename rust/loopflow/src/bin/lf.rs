@@ -608,12 +608,11 @@ fn main() -> anyhow::Result<()> {
             }
             Some(Commands::Chat {
                 text,
-                from,
                 steer,
                 target,
-            }) => loopflow::lf::commands::chat::run(text, from.as_deref(), *steer, target),
-            Some(Commands::Wavechat { wave, from }) => {
-                loopflow::lf::commands::wavechat::run(wave.as_deref(), from.as_deref())
+            }) => loopflow::lf::commands::chat::run(text, *steer, target),
+            Some(Commands::Wavechat { wave }) => {
+                loopflow::lf::commands::wavechat::run(wave.as_deref())
             }
             Some(Commands::Radio {
                 text,

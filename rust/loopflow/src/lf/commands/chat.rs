@@ -2,8 +2,9 @@
 //!
 //! One door, `POST /messages` on the wave's server. `--steer` uses the `steer`
 //! op, reaching a live steer-capable turn and otherwise queueing for the next
-//! one. The default `say` op lands in the thread with a byline and queues for
-//! the loop.
+//! one. The default `message` op queues for the loop, unattributed — the same
+//! human act journals the same way on every surface (the Mac composer sends
+//! the identical op).
 //!
 //! Agents do not use this verb. Their wire is `lf radio` — a broadcast on the
 //! shared-store bus, with no server in the path ([`super::radio`]). Two words,
@@ -29,9 +30,10 @@
 //! bounces, it doesn't vanish; queuing for offline waves is future work.
 //!
 //! # Attribution
-//! The sender's `LFD_SESSION_ID` and a label leave the client. `--from <label>`
-//! marks machine speech (the webhook gatekeeper's `--from ci` / `--from
-//! github`) so it never rides the from-absent human path.
+//! None, ever. The thread is unattributed by convention and the server
+//! rejects a byline on this door. Machine speech — webhook facts, worker
+//! reports, escalations — rides the bus with `lf radio --from`, and the
+//! listener's bus sweep folds it into the thread attributed.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -47,18 +49,13 @@ use crate::lf::WaveTargetArgs;
 use crate::lfd::types::Wave;
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::wave::channel::family_head;
-use crate::wave::journal::{Attribution, MessageOp};
+use crate::wave::journal::MessageOp;
 
-pub fn run(
-    text_args: &[String],
-    from_label: Option<&str>,
-    steer: bool,
-    target: &WaveTargetArgs,
-) -> Result<()> {
+pub fn run(text_args: &[String], steer: bool, target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let context = CliContext::detect().await;
-        run_with_context(&context, text_args, from_label, steer, target).await
+        run_with_context(&context, text_args, steer, target).await
     })
 }
 
@@ -67,7 +64,6 @@ pub fn run(
 pub(crate) async fn run_with_context(
     context: &CliContext,
     text_args: &[String],
-    from_label: Option<&str>,
     steer: bool,
     target: &WaveTargetArgs,
 ) -> Result<()> {
@@ -85,22 +81,25 @@ pub(crate) async fn run_with_context(
     };
     let text = message_text(text_args, std::io::stdin())?;
     let endpoint = resolved.require_endpoint()?;
-    let (op, from) = if steer {
-        (MessageOp::Steer, None)
+    // Chat is the human's verb: unattributed, like the Mac composer — the
+    // same human act must journal the same way on every surface. Machine
+    // speech carries a byline and rides the bus (`lf radio`).
+    let op = if steer {
+        MessageOp::Steer
     } else {
-        let mut from = sender_attribution(target.parent, resolved.own_name.as_deref());
-        if let Some(label) = from_label {
-            from.label = label.to_string();
-        }
-        (MessageOp::Say, Some(from))
+        MessageOp::Message
     };
-    let body = serde_json::json!({ "op": op, "text": text, "from": from });
+    let body = serde_json::json!({ "op": op, "text": text });
     post_json(&endpoint, "/messages", &body).await?;
-    let name = &resolved.name;
-    match from {
-        Some(from) => println!("posted to '{name}' as [{}]", from.label),
-        None => println!("sent to '{name}' (steer live, otherwise queue)"),
-    }
+    println!(
+        "sent to '{}' ({})",
+        resolved.name,
+        if steer {
+            "steer live, otherwise queue"
+        } else {
+            "queued for the next turn"
+        }
+    );
     Ok(())
 }
 
@@ -145,15 +144,13 @@ impl CliContext {
 }
 
 /// A resolved target: the family-head wave's name, its live endpoint (when
-/// one answers via the registry row or the discovery file), the repo root
-/// its wave dir lives under (for serverless reads), and the invoking wave's
-/// name (for labels).
+/// one answers via the registry row or the discovery file), and the repo
+/// root its wave dir lives under (for serverless reads).
 #[derive(Debug)]
 pub(crate) struct ResolvedWave {
     pub name: String,
     pub endpoint: Option<String>,
     pub repo_root: Option<PathBuf>,
-    pub own_name: Option<String>,
 }
 
 impl ResolvedWave {
@@ -278,27 +275,7 @@ pub(crate) async fn resolve_target(
         name: target_name,
         endpoint,
         repo_root,
-        own_name,
     }))
-}
-
-/// Attribution from env: `LFD_SESSION_ID` when present; label from
-/// `LFD_AGENT_ROLE` (workers), else `wave <own>` when escalating, else "cli".
-pub(crate) fn sender_attribution(escalating: bool, own_wave: Option<&str>) -> Attribution {
-    let session_id = std::env::var(crate::lf::session::SESSION_ID_ENV)
-        .ok()
-        .filter(|value| !value.is_empty());
-    let label = match std::env::var("LFD_AGENT_ROLE")
-        .ok()
-        .filter(|value| !value.is_empty())
-    {
-        Some(role) => role,
-        None => match (escalating, own_wave) {
-            (true, Some(own)) => format!("wave {own}"),
-            _ => "cli".to_string(),
-        },
-    };
-    Attribution { session_id, label }
 }
 
 /// POST a JSON body to the wave server; connection failure and non-2xx are
@@ -357,6 +334,7 @@ mod tests {
         WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
     };
     use crate::lfdb::{open_store, StorageConfig};
+    use crate::wave::journal::Attribution;
     use crate::wave::journal::{EventKind, MessageOp};
     use crate::wave::runtime::{InboxItem, WaveRuntime};
     use crate::wave::server;
@@ -486,7 +464,6 @@ mod tests {
         .expect("wave context");
         assert_eq!(resolved.name, "ship");
         assert_eq!(resolved.endpoint.as_deref(), Some("127.0.0.1:4242"));
-        assert_eq!(resolved.own_name.as_deref(), Some("ship"));
     }
 
     /// Worktree-name fallback: no env, no store — the `<repo>.<wave>` sibling
@@ -541,7 +518,6 @@ mod tests {
         run_with_context(
             &context,
             &["hello".into()],
-            None,
             false,
             &WaveTargetArgs::default(),
         )
@@ -574,7 +550,6 @@ mod tests {
         run_with_context(
             &context,
             &["skip".into(), "the".into(), "migration".into()],
-            None,
             true,
             &WaveTargetArgs {
                 wave: Some("ship".into()),
@@ -594,12 +569,11 @@ mod tests {
         assert_eq!(message.op, MessageOp::Steer);
     }
 
-    /// `--from` attributes machine speech: the label lands on the journaled
-    /// turn verbatim, overriding the ambient "cli" fallback — webhook execs
-    /// (`lf chat --wave x --from ci "CI failed"`) never ride the from-absent
-    /// human path.
+    /// The same human act journals the same way on every surface: a plain
+    /// CLI message is unattributed and op `message`, exactly what the Mac
+    /// composer sends. Bylines belong to the bus.
     #[tokio::test]
-    async fn from_flag_overrides_the_attribution_label() {
+    async fn plain_chat_is_unattributed_like_the_mac_composer() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let origin = tmp.path().join("repo");
@@ -621,7 +595,6 @@ mod tests {
         run_with_context(
             &context,
             &["CI".into(), "failed".into()],
-            Some("ci"),
             false,
             &WaveTargetArgs {
                 wave: Some("ship".into()),
@@ -629,22 +602,22 @@ mod tests {
             },
         )
         .await
-        .expect("post with --from");
+        .expect("post plain message");
 
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "CI failed");
-        assert_eq!(thread[0].from.as_deref(), Some("ci"));
-        let InboxItem::Message(message) = inbox.try_recv().expect("say inbox item") else {
+        assert_eq!(thread[0].from, None, "human turns carry no byline");
+        let InboxItem::Message(message) = inbox.try_recv().expect("inbox item") else {
             panic!("expected message inbox item");
         };
-        assert_eq!(message.op, MessageOp::Say);
+        assert_eq!(message.op, MessageOp::Message);
     }
 
     /// `--parent` walks `parent_wave_id` and posts to the parent's live
-    /// server: the parent runtime receives the attributed queued message.
+    /// server. The thread door refuses bylines; a human turn arrives plain.
     #[tokio::test]
-    async fn parent_targeting_posts_an_attributed_message_to_the_parent_server() {
+    async fn parent_targeting_reaches_the_parent_server_unattributed() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let origin = tmp.path().join("parent-repo");
@@ -677,41 +650,49 @@ mod tests {
         let endpoint = resolved.require_endpoint().expect("live endpoint");
         assert_eq!(endpoint, addr);
 
-        let from = Attribution {
-            session_id: Some("sess-child".into()),
-            label: "wave concerto".into(),
-        };
+        // The thread door takes no bylines: attributed escalation rides the
+        // bus and arrives through the parent's bus sweep, not this wire.
+        let refused = reqwest::Client::new()
+            .post(format!("http://{endpoint}/messages"))
+            .json(&serde_json::json!({
+                "op": "say",
+                "text": "blocked on the schema",
+                "from": Attribution { session_id: None, label: "wave concerto".into() },
+            }))
+            .send()
+            .await
+            .expect("post");
+        assert_eq!(refused.status(), reqwest::StatusCode::BAD_REQUEST);
+
+        // A human standing in the child steers the parent: unattributed, like
+        // every human turn.
         post_json(
             &endpoint,
             "/messages",
-            &serde_json::json!({ "op": "say", "text": "blocked on the schema", "from": from }),
+            &serde_json::json!({ "op": "message", "text": "blocked on the schema" }),
         )
         .await
-        .expect("post say");
-
-        // The parent's thread carries the attributed turn…
+        .expect("post message");
         let thread = parent_runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "blocked on the schema");
-        assert_eq!(thread[0].from.as_deref(), Some("wave concerto"));
-        // …its loop was woken with the same attributed input…
+        assert_eq!(thread[0].from, None);
         let InboxItem::Message(msg) = parent_inbox.try_recv().expect("inbox item") else {
             panic!("expected message inbox item");
         };
-        assert_eq!(msg.op, MessageOp::Say);
-        assert_eq!(
-            msg.from.as_ref().map(|f| f.label.as_str()),
-            Some("wave concerto")
-        );
-        // …and the journal row records the attribution durably.
+        assert_eq!(msg.op, MessageOp::Message);
+        // The journal row is unattributed too.
         let (_, events) = crate::wave::journal::Journal::open(&crate::wave::journal::journal_path(
             &origin, "goals",
         ))
         .expect("journal");
         assert!(matches!(
             &events[0].kind,
-            EventKind::UserMessage { op: MessageOp::Say, from: Some(from), .. }
-                if from.label == "wave concerto" && from.session_id.as_deref() == Some("sess-child")
+            EventKind::UserMessage {
+                op: MessageOp::Message,
+                from: None,
+                ..
+            }
         ));
     }
 
@@ -772,41 +753,6 @@ mod tests {
         .expect("wave context");
         assert_eq!(resolved.name, "ship", "the family head is the wave");
         assert_eq!(resolved.endpoint.as_deref(), Some(addr.as_str()));
-    }
-
-    /// The thread door carries no channel: a `say` lands once on the served
-    /// wave's own thread, bylined with what the client claimed.
-    #[tokio::test]
-    async fn the_thread_door_records_one_attributed_turn() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let origin = tmp.path().join("repo");
-        std::fs::create_dir_all(&origin).unwrap();
-        let (addr, runtime, _inbox) = boot_server(&origin, "ship").await;
-
-        post_json(
-            &addr,
-            "/messages",
-            &serde_json::json!({
-                "op": "say",
-                "text": "CI failed",
-                "from": Attribution { session_id: None, label: "ci".into() },
-            }),
-        )
-        .await
-        .expect("post");
-
-        let thread = runtime.thread_snapshot();
-        assert_eq!(thread.len(), 1);
-        assert_eq!(thread[0].text, "CI failed");
-        assert_eq!(thread[0].from.as_deref(), Some("ci"));
-        assert_eq!(
-            crate::wave::journal::read_events(&crate::wave::journal::journal_path(&origin, "ship"))
-                .iter()
-                .filter(|e| matches!(e.kind, EventKind::UserMessage { .. }))
-                .count(),
-            1,
-            "one copy, in the served wave's journal",
-        );
     }
 
     /// No live server anywhere (no registry row, no discovery file): the

@@ -319,9 +319,6 @@ pub enum Commands {
         /// Message text (reads stdin when omitted — heredoc-friendly)
         #[arg(trailing_var_arg = true)]
         text: Vec<String>,
-        /// Attribution label for machine speech (e.g. --from ci).
-        #[arg(long, conflicts_with = "steer")]
-        from: Option<String>,
         /// Inject into a live steer-capable turn; otherwise queue.
         #[arg(long, conflicts_with = "parent")]
         steer: bool,
@@ -335,9 +332,6 @@ pub enum Commands {
     Wavechat {
         /// Wave name (default: the ambient wave — env, else worktree)
         wave: Option<String>,
-        /// Attribution label for machine speech (e.g. --from ci)
-        #[arg(long)]
-        from: Option<String>,
     },
     /// Broadcast on the agent bus (agents): report up when you finish, fail,
     /// or get stuck. Broadcast, not delivery — whoever is tuned in hears it,
@@ -961,7 +955,6 @@ mod tests {
         let cli = Cli::try_parse_from(["lf", "chat", "shipped", "the", "parser"]).expect("parse");
         let Some(Commands::Chat {
             text,
-            from,
             steer,
             target,
         }) = cli.command
@@ -969,7 +962,6 @@ mod tests {
             panic!("expected chat command");
         };
         assert_eq!(text, vec!["shipped", "the", "parser"]);
-        assert_eq!(from, None);
         assert!(!steer);
         assert_eq!(target.wave, None);
         assert!(!target.parent);
@@ -989,16 +981,18 @@ mod tests {
         assert_eq!(text, vec!["hi"]);
         assert_eq!(target.wave.as_deref(), Some("goals"));
 
-        // Machine speech declares itself: --from rides ahead of the text
-        // (the webhook gatekeeper's planned argv).
-        let cli =
-            Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--from", "ci", "CI failed"])
-                .expect("parse");
-        let Some(Commands::Chat { text, from, .. }) = cli.command else {
-            panic!("expected chat command");
-        };
-        assert_eq!(text, vec!["CI failed"]);
-        assert_eq!(from.as_deref(), Some("ci"));
+        // Machine speech does not ride this verb: bylines belong to the bus
+        // (`lf radio --from`), and chat refuses the flag at parse.
+        assert!(Cli::try_parse_from([
+            "lf",
+            "chat",
+            "--wave",
+            "goals",
+            "--from",
+            "ci",
+            "CI failed"
+        ])
+        .is_err());
 
         let cli =
             Cli::try_parse_from(["lf", "chat", "--steer", "change course"]).expect("parse steer");

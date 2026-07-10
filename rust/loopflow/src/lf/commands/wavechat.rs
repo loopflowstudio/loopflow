@@ -1,15 +1,15 @@
 //! `lf wavechat` — one terminal pane that both monitors and steers a wave.
 //!
-//! The thread surface has two halves: `lf chat` publishes a `say` op through
-//! the wave's door, and [`thread::follow`] reads its `/events` stream. Each is
-//! a one-way verb, and each is right on its own.
+//! The thread surface has two halves: `lf chat` posts an unattributed
+//! `message` through the wave's door, and [`thread::follow`] reads its
+//! `/events` stream. Each is a one-way verb, and each is right on its own.
 //!
 //! A human steering a wave wants both at once, in one pane: the wave's turns,
 //! state transitions, and memory scroll past while a typed line goes into the
 //! thread. That is this command, and it is composition rather than plumbing —
 //! it reuses [`chat::resolve_target`] for targeting and endpoint discovery,
 //! [`thread::follow`] for the stream (which replays on connect and reconnects
-//! across server restarts), and [`chat::post_json`] for the `say` op.
+//! across server restarts), and [`chat::post_json`] for the post.
 //!
 //! Slash commands are the steering verbs that are not speech. Everything else
 //! typed is spoken into the thread.
@@ -18,14 +18,11 @@ use std::io::BufRead;
 
 use anyhow::Result;
 
-use crate::lf::commands::chat::{
-    post_json, resolve_target, sender_attribution, CliContext, ResolvedWave,
-};
+use crate::lf::commands::chat::{post_json, resolve_target, CliContext, ResolvedWave};
 use crate::lf::commands::thread;
 use crate::lf::WaveTargetArgs;
-use crate::wave::journal::Attribution;
 
-pub fn run(wave: Option<&str>, from_label: Option<&str>) -> Result<()> {
+pub fn run(wave: Option<&str>) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let context = CliContext::detect().await;
@@ -47,15 +44,11 @@ pub fn run(wave: Option<&str>, from_label: Option<&str>) -> Result<()> {
             anyhow::bail!("no wave here — name one with `lf wavechat <wave>`");
         };
 
-        let mut from = sender_attribution(false, resolved.own_name.as_deref());
-        if let Some(label) = from_label {
-            from.label = label.to_string();
-        }
-        steer(&resolved, from, target.wave.clone()).await
+        steer(&resolved, target.wave.clone()).await
     })
 }
 
-async fn steer(resolved: &ResolvedWave, from: Attribution, wave_arg: Option<String>) -> Result<()> {
+async fn steer(resolved: &ResolvedWave, wave_arg: Option<String>) -> Result<()> {
     let endpoint = resolved.require_endpoint()?;
     println!(
         "wavechat: {} @ {endpoint}   (/help, Ctrl-D to leave)",
@@ -94,7 +87,7 @@ async fn steer(resolved: &ResolvedWave, from: Attribution, wave_arg: Option<Stri
             }
             continue;
         }
-        say(&endpoint, line, &from).await?;
+        speak(&endpoint, line).await?;
     }
 
     stream.abort();
@@ -146,9 +139,10 @@ async fn print_status(endpoint: &str) -> Result<()> {
     Ok(())
 }
 
-/// Speak into the thread — the same `say` op `lf chat` posts.
-async fn say(endpoint: &str, text: &str, from: &Attribution) -> Result<()> {
-    let body = serde_json::json!({ "op": "say", "text": text, "from": from });
+/// Speak into the thread — the same unattributed `message` op `lf chat`
+/// posts. Humans are unattributed on every surface; bylines are the bus's.
+async fn speak(endpoint: &str, text: &str) -> Result<()> {
+    let body = serde_json::json!({ "op": "message", "text": text });
     post_json(endpoint, "/messages", &body).await?;
     Ok(())
 }

@@ -180,7 +180,6 @@ mod tests {
             name: name.to_string(),
             endpoint,
             repo_root: root.map(Path::to_path_buf),
-            own_name: None,
         }
     }
 

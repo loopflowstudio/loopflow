@@ -599,63 +599,43 @@ mod tests {
         assert_eq!(thread[0].role, ChatRole::User);
     }
 
-    /// The say op: an attributed emission lands in the thread with its byline
-    /// on the wire (`from`), and the attribution rules are enforced — say
-    /// requires `from`, every other op rejects it.
+    /// The thread door is the human's: `say` is not a wire op and bylines are
+    /// refused on every op — attribution enters the thread only through the
+    /// bus fold. "Agents don't use chat" is a wire property, not doctrine,
+    /// and each refusal names the bus.
     #[tokio::test]
-    async fn posted_say_is_attributed_on_the_wire() {
+    async fn the_thread_door_refuses_machine_speech() {
         let (base, runtime, _tmp) = boot().await;
         let client = reqwest::Client::new();
 
-        let body: serde_json::Value = client
-            .post(format!("{base}/messages"))
-            .json(&serde_json::json!({
+        for body in [
+            serde_json::json!({
                 "op": "say",
                 "text": "run-7 landed: PR #12",
                 "from": { "session_id": "sess-7", "label": "worker" },
-            }))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        assert_eq!(body["turn"]["from"], "worker");
-        assert_eq!(body["turn"]["role"], "user");
-
-        // The wire thread carries the byline; the pending queue has the input.
-        let conversation: serde_json::Value = reqwest::get(format!("{base}/conversation"))
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        assert_eq!(conversation["turns"][0]["from"], "worker");
-        // The queue fold treats the emission as consumable input.
-        let (_, events) =
-            journal::Journal::open(&journal::journal_path(runtime.repo_root(), "ship"))
-                .expect("journal");
-        assert_eq!(journal::fold_thread(&events).pending_messages.len(), 1);
-
-        // Say without from, and from on a non-say op, are both refused.
-        let missing_from = client
-            .post(format!("{base}/messages"))
-            .json(&serde_json::json!({ "op": "say", "text": "anon" }))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(missing_from.status(), reqwest::StatusCode::BAD_REQUEST);
-        let stray_from = client
-            .post(format!("{base}/messages"))
-            .json(&serde_json::json!({
+            }),
+            serde_json::json!({ "op": "say", "text": "anon" }),
+            serde_json::json!({
                 "op": "message",
                 "text": "hello",
                 "from": { "session_id": null, "label": "cli" },
-            }))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(stray_from.status(), reqwest::StatusCode::BAD_REQUEST);
+            }),
+        ] {
+            let response = client
+                .post(format!("{base}/messages"))
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+            let text = response.text().await.unwrap();
+            assert!(
+                text.contains("lf radio"),
+                "the refusal names the bus: {text}"
+            );
+        }
+
+        assert!(runtime.thread_snapshot().is_empty(), "nothing journaled");
     }
 
     /// The memory routes: GET serves the origin file; POST update writes it,
@@ -1296,21 +1276,17 @@ mod tests {
         (format!("http://{addr}"), runtime, tmp)
     }
 
-    /// The thread door is the thread's alone: a `say` lands one attributed
-    /// copy in the served wave's journal, and no journal exists anywhere else
-    /// on disk. Reports from hands arrive on the bus, not here.
+    /// The thread door is the thread's alone: a human message lands one
+    /// unattributed copy in the served wave's journal, and no journal exists
+    /// anywhere else on disk. Reports from hands arrive on the bus, not here.
     #[tokio::test]
-    async fn a_say_is_recorded_once_in_the_waves_journal() {
+    async fn a_message_is_recorded_once_in_the_waves_journal() {
         let (base, runtime, tmp) = boot_family().await;
         let client = reqwest::Client::new();
 
         let body: serde_json::Value = client
             .post(format!("{base}/messages"))
-            .json(&serde_json::json!({
-                "op": "say",
-                "text": "landed the parser",
-                "from": { "session_id": null, "label": "ship.148e" },
-            }))
+            .json(&serde_json::json!({ "op": "message", "text": "landed the parser" }))
             .send()
             .await
             .unwrap()
@@ -1321,7 +1297,7 @@ mod tests {
 
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
-        assert_eq!(thread[0].from.as_deref(), Some("ship.148e"));
+        assert_eq!(thread[0].from, None, "human turns carry no byline");
 
         // Exactly one journal on disk: the served wave's, with exactly one row.
         let wave_journal = journal::journal_path(runtime.repo_root(), "ship");
@@ -1335,17 +1311,8 @@ mod tests {
                 .filter(|e| matches!(e.kind, journal::EventKind::UserMessage { .. }))
                 .count(),
             1,
-            "one copy of the report, in the wave's journal",
+            "one copy, in the wave's journal",
         );
-
-        // An unaddressed message rides the same door.
-        client
-            .post(format!("{base}/messages"))
-            .json(&serde_json::json!({ "op": "message", "text": "to the wave" }))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(runtime.thread_snapshot().len(), 2);
     }
 
     /// `POST /channels` (the dispatch knock): the wave's thread shows the

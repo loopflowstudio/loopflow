@@ -226,7 +226,7 @@ pub enum Commands {
         /// Ask the live wave server to own the loop and return immediately
         #[arg(long)]
         detach: bool,
-        /// Maximum passes before escalation
+        /// Maximum passes before escalation (minimum 2; run the flow directly for one pass)
         #[arg(long = "max-passes", default_value_t = 8)]
         max_passes: u32,
         /// Per-pass timeout in seconds

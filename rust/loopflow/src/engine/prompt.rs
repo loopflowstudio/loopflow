@@ -2254,10 +2254,10 @@ mod tests {
         assert!(!prompt.contains("lf chat"));
     }
 
-    /// A bare flow/skill run's assembled prompt carries the one loopflow
-    /// operating document, including the speech vocabulary.
+    /// A bare flow/skill run gets the universal execution floor, not wave or
+    /// project orchestration capabilities.
     #[test]
-    fn assembled_prompt_carries_loopflow_document_once() {
+    fn assembled_prompt_carries_only_universal_loopflow_guidance() {
         let components = PromptComponents {
             operate: true,
             skill: Some(Skill::named("implement")),
@@ -2266,9 +2266,12 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-        assert!(prompt.contains("lf radio --parent"));
+        assert!(prompt.contains("Execute Here First"));
+        assert!(prompt.contains("lf pr land"));
         assert!(prompt.contains("lf memory add"));
-        assert!(prompt.contains("server-owned"));
+        assert!(!prompt.contains("lf pm show"));
+        assert!(!prompt.contains("lf loop <flow>"));
+        assert!(!prompt.contains("tmux attach"));
     }
 
     #[test]

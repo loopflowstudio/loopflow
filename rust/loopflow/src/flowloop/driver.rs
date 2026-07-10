@@ -42,6 +42,7 @@ use crate::wave::wire::{
 };
 
 const LOOP_FILE: &str = "scratch/loop.yaml";
+const MIN_LOOP_PASSES: u32 = 2;
 const DEFAULT_MAX_PASSES: u32 = 8;
 const DEFAULT_PASS_TIMEOUT_SECS: u64 = 60 * 30;
 const DEFAULT_WALL_CLOCK_SECS: u64 = 60 * 60 * 2;
@@ -114,6 +115,7 @@ impl From<LoopFile> for LoopVerdict {
 /// `lf loop <flow> "<seed>"`: place a worktree through the wave
 /// registry, then loop the flow over it until the loop file says done.
 pub fn run_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<()> {
+    validate_loop_options(options)?;
     require_loop_flow(repo, &options.flow)?;
     let wave_name = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
@@ -151,6 +153,7 @@ pub(crate) fn require_loop_flow(repo: &Path, flow: &str) -> OpsResult<()> {
 /// read-only inspection session. The server, not this short-lived CLI, owns
 /// launch and observation.
 pub fn detach_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<String> {
+    validate_loop_options(options)?;
     let wave = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
     let origin = crate::engine::wave_context::wave_origin(repo);
@@ -194,6 +197,17 @@ pub fn detach_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<
     let response: DetachedLoopResponse = serde_json::from_str(&body)
         .map_err(|err| OpsError::Parse(format!("invalid loop response: {err}")))?;
     Ok(response.session)
+}
+
+fn validate_loop_options(options: &LoopOptions) -> OpsResult<()> {
+    if options.max_passes < MIN_LOOP_PASSES {
+        return Err(OpsError::Message(format!(
+            "--max-passes must be at least {MIN_LOOP_PASSES}; use `lf flow {} \
+             \"<seed>\"` for one-shot work",
+            options.flow
+        )));
+    }
+    Ok(())
 }
 
 /// A sandboxed hand presents its own subagent capability; a shell beside the
@@ -348,6 +362,25 @@ mod tests {
     fn write_loop_file(dir: &Path, content: &str) {
         std::fs::create_dir_all(dir.join("scratch")).unwrap();
         std::fs::write(dir.join(LOOP_FILE), content).unwrap();
+    }
+
+    #[test]
+    fn one_pass_is_rejected_before_placement_or_server_lookup() {
+        let tmp = tempfile::tempdir().unwrap();
+        for max_passes in [0, 1] {
+            let options = options(max_passes);
+            let blocking = run_loop(tmp.path(), "seed", &options).expect_err("not a loop");
+            let detached =
+                detach_loop(tmp.path(), "seed", &options).expect_err("not a detached loop");
+
+            for error in [blocking, detached] {
+                let message = error.to_string();
+                assert!(message.contains("--max-passes must be at least 2"));
+                assert!(message.contains("lf flow task \"<seed>\""));
+                assert!(!message.contains("wave"));
+                assert!(!message.contains("server"));
+            }
+        }
     }
 
     #[test]

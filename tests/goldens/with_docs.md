@@ -50,119 +50,42 @@ The sibling naming convention (`<repo>.<name>`) is load-bearing: worktrees
 created elsewhere aren't recognized by `lf wt` (list, switch, up/down, prune)
 or by land.
 
-## Inhabit and Delegate Work
+## Execute Here First
 
-Run work through a loop. Inhabit one loop in the foreground when its next
-move needs the wave's live memory and thread in the room; delegate
-self-sufficient work by detaching the same command:
+The current process and worktree are the default execution surface. Do the
+assigned work here with direct reads, edits, commands, and tests.
 
-```bash
-lf loop <flow> "<task>" --wave <wave>           # inhabit: block until its bit flips
-lf loop <flow> "<task>" --wave <wave> --detach  # delegate: server-owned background loop
-```
+Delegation must make the problem smaller. Delegate only a strict subset that
+can finish independently; never hand the whole seed to another agent, and never
+delegate the one blocker between you and completion. Resolve that blocker
+inline.
 
-Both forms fork a worktree, keep a private transcript, and re-read the wave's
-memory and thread at pass boundaries. Blocking spends this pass inside one long
-tool call, so the wave cannot reply until the inner loop returns. Detach only
-when the seed is the whole handoff.
+`lf loop`, `lf serve`, `lf project`, and `lf pm` are orchestration tools. Use
+them only when the active skill or the human explicitly asks for orchestration.
+Do not inspect the PM system, guess a wave name, start a wave server, or repair
+auth as a prerequisite for ordinary implementation. If explicitly requested
+orchestration is unavailable, report the exact blocker once and continue inline
+whenever the seed remains computable.
 
-A detached loop is headless and non-interactive. Its contract is durable writes:
-PRs record done, `lf radio` reports progress/completion, and `lf memory add`
-records learnings as they happen. Invisible work is failed work. Inspect its
-terminal read-only with `tmux attach -r -t <name>`; never type into it.
+A one-shot operation is a direct skill or flow run. A loop exists to cross at
+least two pass boundaries; never use `lf loop --max-passes 1`.
 
 ## Speak
 
-You already hear the wave: its curated memory and recent thread ride this
-prompt as `<lf:wave-memory>` and `<lf:wave-chat-recent>`, snapshotted at
-launch - there is no live feed to poll mid-run. Answers return on the channel
-they came in: when a human's message reaches you, reply in your own turn
-text. Everything proactive goes through `lf`:
+Answer a human message in your turn text. Use `lf radio` for proactive progress,
+completion, or failure reports only when the prompt establishes an exact wave or
+channel, or when the active skill requires it. Never guess a channel.
 
-- `lf radio "<note>"` - the agent bus: report up when you finish, fail, or get
-  stuck. Broadcast, not delivery - whoever is tuned in hears it, nobody
-  guarantees receipt; it is not a log and not a notebook. Bare, it publishes on
-  your own channel, and a served wave records that report: one attributed copy
-  in its journal, which wakes its loop. One short paragraph; pipe stdin for
-  longer.
-- `lf radio --parent "<report>"` - escalate to the parent wave.
-- `lf radio --channel <name> "<msg>"` - broadcast on another channel. Whoever
-  is tuned in hears it; nothing is delivered to a hand that is mid-pass. Say it
-  on the wave's thread instead when a hand must act on it - hands re-read that
-  thread at every pass boundary.
-- `lf sub [<channel>]` - tune in to the bus: hear what is broadcast on a
-  channel and its descendants while you listen. Bare, your own channel;
-  `<channel>` listens to a hand. Nothing said before you tuned in replays.
-- `lf memory add "<fact>"` - record a durable learning. `lf memory update`
-  rewrites the whole file from stdin.
-- `wave/<name>/MEMORY.md` is server-owned - never edit the file directly.
+`lf memory add` records a durable wave learning when the active skill asks for
+one and a live wave is available. A stopped server must not block the assigned
+work. `wave/<name>/MEMORY.md` is server-owned; never edit it directly.
 
-The byline you write is testimony, not proof: it rides in the record beside the
-channel the message arrived on, so a claim that does not match its channel is
-visible to everyone reading. Speak on your own channel; a channel's name is who
-it is.
-
-`lf chat` is the human's conversation with a served mind - the durable,
-replayed thread. It is not an agent verb; agents use `lf radio`. Use these
-unconditionally. The bus is a table, not a server: `lf radio` and `lf sub` work
-whether or not any wave is running, and a wave asleep when you reported hears
-you when it wakes. Outside any wave they print a short drop note and exit 0 -
-publish-to-no-subscriber is correct pubsub, never a blocker.
-
-## Tasks Live in Linear
-
-Use three planning nouns:
-
-- **Wave**: durable operating context. It owns memory, cadence, budget, chat,
-  and project selection.
-- **Project**: measured bet inside exactly one wave. It owns definition, KRs,
-  and closure criteria.
-- **Task**: concrete work that advances a project — one implementation step,
-  investigation, doc, or shipped change.
-
-Every project belongs to one wave. Projects do not contain projects, and they do
-not own memory or cadence. If a project seems to need subprojects, split it into
-sibling projects, promote the operating context into a wave, or demote the
-pieces into tasks.
-
-Project definitions and KRs live in `wave/<wave>/projects/<project>.md`.
-Concrete tasks live in Linear. There are no local task lists. `lf pm` reads
-and edits the wave's Linear project; tasks attach to local projects with
-`project:<slug>` labels.
-
-Tasks may be filed before they run. Read the backlog when selecting work; a
-task moves from filed, to a running loop, to a merged PR. Do not let filing
-become a substitute for selection.
-
-```bash
-lf pm show                                          # the wave's live PM tasks
-lf pm show --project wave-chat                      # filter by local project
-lf pm task create --project wave-chat --title "..." --notes "..." # file a labeled task
-lf pm task done --id <task-id> --pr <url>           # close a shipped task with its PR link
-lf pm task update --id <task-id> --title "..."      # edit an existing task
-lf pm sync --plan                                   # report PM drift
-```
-
-Close a shipped task with `lf pm task done --id <task-id> --pr <url>` so the
-task carries a pointer back to the work. The PR link posts as a comment; it
-never clobbers the task's description.
-
-Add `--wave <name>` when the wave is ambiguous. Never write `wave/<name>/N-*.md`
-roadmap files, a roadmap table in `GOAL.md`, or task lists in project docs —
-that mirror is gone.
-
-Write project KRs as proof: observable end states that show the bet now holds.
-Do not mix KRs with backlog bullets, implementation receipts, issue ids, or
-status. Individual technical-debt cleanup is a task; a standing debt frontier can
-be a project.
+`lf chat` is the human surface. Agents use `lf radio`.
 
 ## Where To Write
 
-- `wave/<wave>/projects/<project>.md` - project definition and KRs
 - `scratch/<branch>.md` - design doc for the current work
 - `scratch/questions.md` - open questions, blockers, assumptions
-- `lf memory add "<fact>"` - durable wave learnings; `wave/<name>/MEMORY.md` is
-  server-owned, never edited directly (tasks go to Linear, above)
 - Code - the actual work
 
 ## Checkpoint And Proceed
@@ -172,7 +95,7 @@ running local builds and tests. Commit history is the safety net.
 
 ```bash
 # Tree dirty? Snapshot first:
-git add -A && git commit -m "checkpoint: <one-line state>"
+lf commit -m "checkpoint: <one-line state>"
 # Tree clean? HEAD is the rollback point. Go.
 ```
 

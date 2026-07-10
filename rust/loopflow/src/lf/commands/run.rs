@@ -424,10 +424,12 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         "checked cli availability"
     );
 
+    let effective_system =
+        crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config);
     let capture = begin_capture(
         built,
         &built.agent_config.task_prompt,
-        &crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config),
+        &effective_system,
         "headless",
     )?;
 
@@ -435,8 +437,6 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     // in the task prompt). Don't write or pass a context file in that case: codex
     // treats an empty `model_instructions_file` as an error.
     let context_file_start = Instant::now();
-    let effective_system =
-        crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config);
     let context_file = if effective_system.trim().is_empty() {
         None
     } else {

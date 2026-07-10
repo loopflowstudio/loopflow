@@ -419,49 +419,31 @@ fn render_attributed_channel(
     }
     claimed.sort_by_key(|(start, _, _)| *start);
 
+    let assembly_spec = |content: &str| ContextAssetSpec {
+        channel,
+        kind: ContextAssetKind::Assembly,
+        scope: if channel == ContextChannel::System {
+            ContextScope::System
+        } else {
+            ContextScope::Task
+        },
+        label: "prompt assembly".to_string(),
+        source_path: None,
+        included_by: "provider_invocation".to_string(),
+        content: content.to_string(),
+    };
+
     let mut segments = Vec::new();
     let mut cursor = 0;
     for (start, end, spec) in claimed {
         if start > cursor {
-            segments.push((
-                cursor,
-                start,
-                ContextAssetSpec {
-                    channel,
-                    kind: ContextAssetKind::Assembly,
-                    scope: if channel == ContextChannel::System {
-                        ContextScope::System
-                    } else {
-                        ContextScope::Task
-                    },
-                    label: "prompt assembly".to_string(),
-                    source_path: None,
-                    included_by: "provider_invocation".to_string(),
-                    content: text[cursor..start].to_string(),
-                },
-            ));
+            segments.push((cursor, start, assembly_spec(&text[cursor..start])));
         }
         segments.push((start, end, spec));
         cursor = end;
     }
     if cursor < text.len() || segments.is_empty() {
-        segments.push((
-            cursor,
-            text.len(),
-            ContextAssetSpec {
-                channel,
-                kind: ContextAssetKind::Assembly,
-                scope: if channel == ContextChannel::System {
-                    ContextScope::System
-                } else {
-                    ContextScope::Task
-                },
-                label: "prompt assembly".to_string(),
-                source_path: None,
-                included_by: "provider_invocation".to_string(),
-                content: text[cursor..].to_string(),
-            },
-        ));
+        segments.push((cursor, text.len(), assembly_spec(&text[cursor..])));
     }
 
     let total_tokens = token_count(text);

@@ -1232,13 +1232,40 @@ mod tests {
         boot_with(tmp, test_config(heartbeat), script).await
     }
 
+    /// Boot the loop over a script-driven process body, recording the seeds
+    /// each pass was handed.
     async fn boot_with(
         tmp: tempfile::TempDir,
         config: LoopConfig,
         script: &'static str,
     ) -> TestLoop {
-        // The listener half: runtime + HTTP surface with the resident door,
-        // served from a dedicated tokio runtime (see TestLoop::listener).
+        let seeds = Arc::new(Mutex::new(Vec::new()));
+        let spawn_seeds = seeds.clone();
+        let spawn_pass: SpawnPass = Box::new(move |cwd, _step, seed, _max_turns| {
+            spawn_seeds.lock().unwrap().push(seed.to_string());
+            let mut command = tokio::process::Command::new("sh");
+            command
+                .arg("-c")
+                .arg(script)
+                .current_dir(cwd)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            command.spawn()
+        });
+        boot_backend(tmp, config, BodyBackend::Process(spawn_pass), seeds).await
+    }
+
+    /// Both halves of a live loop over whichever body the test wants: the
+    /// listener (runtime + HTTP surface with the resident door, on its own
+    /// tokio runtime — see `TestLoop::listener`) and the resident (attach,
+    /// subscribe, run the loop over the wire).
+    async fn boot_backend(
+        tmp: tempfile::TempDir,
+        config: LoopConfig,
+        backend: BodyBackend,
+        seeds: Arc<Mutex<Vec<String>>>,
+    ) -> TestLoop {
         let runtime =
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
         let door = ResidentDoor::new("test-token");
@@ -1262,8 +1289,6 @@ mod tests {
             axum::serve(tcp, app).await.ok();
         });
 
-        // The resident half: attach, subscribe, run the loop over the
-        // wire with a stub spawner in place of `lf -b wave`.
         let client = ListenerClient::new(addr.to_string(), "test-token".to_string());
         let attach = client.attach(std::process::id()).await.expect("attach");
         assert_eq!(attach.wave, "ship");
@@ -1273,20 +1298,6 @@ mod tests {
             inbox_tx,
         ));
 
-        let seeds = Arc::new(Mutex::new(Vec::new()));
-        let spawn_seeds = seeds.clone();
-        let spawn_pass: SpawnPass = Box::new(move |cwd, _step, seed, _max_turns| {
-            spawn_seeds.lock().unwrap().push(seed.to_string());
-            let mut command = tokio::process::Command::new("sh");
-            command
-                .arg("-c")
-                .arg(script)
-                .current_dir(cwd)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true);
-            command.spawn()
-        });
         let loop_task = tokio::spawn(run_loop_with(
             client,
             inbox_rx,
@@ -1294,7 +1305,7 @@ mod tests {
             tmp.path().to_path_buf(),
             "ship".into(),
             config,
-            BodyBackend::Process(spawn_pass),
+            backend,
         ));
         TestLoop {
             runtime,
@@ -1411,37 +1422,6 @@ mod tests {
             .expect("git init");
         assert!(status.success());
 
-        let runtime =
-            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
-        let door = ResidentDoor::new("test-token");
-        let std_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        std_listener.set_nonblocking(true).unwrap();
-        let addr = std_listener.local_addr().unwrap();
-        let app = server::router(
-            runtime.clone(),
-            door,
-            server::SubagentDoor::new(),
-            None,
-            None,
-        );
-        let listener = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()
-            .expect("listener runtime");
-        listener.spawn(async move {
-            let tcp = tokio::net::TcpListener::from_std(std_listener).expect("adopt listener");
-            axum::serve(tcp, app).await.ok();
-        });
-
-        let client = ListenerClient::new(addr.to_string(), "test-token".to_string());
-        client.attach(std::process::id()).await.expect("attach");
-        let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
-        tokio::spawn(crate::wave::resident::follow_inbox(
-            addr.to_string(),
-            inbox_tx,
-        ));
-
         let inputs = Arc::new(Mutex::new(Vec::new()));
         let harness_inputs = inputs.clone();
         let backend = BodyBackend::Harness {
@@ -1465,15 +1445,14 @@ mod tests {
                 }))
             }),
         };
-        let loop_task = tokio::spawn(run_loop_with(
-            client,
-            inbox_rx,
-            tmp.path().to_path_buf(),
-            tmp.path().to_path_buf(),
-            "ship".into(),
+        let loop_ = boot_backend(
+            tmp,
             test_config(Duration::from_secs(600)),
             backend,
-        ));
+            Arc::new(Mutex::new(Vec::new())),
+        )
+        .await;
+        let runtime = loop_.runtime.clone();
 
         runtime
             .deliver(MessageOp::Message, "begin".into())
@@ -1501,17 +1480,13 @@ mod tests {
             completed.body.and_then(|body| body.session_id),
             Some("vendor-session".to_string())
         );
-        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("journal");
-        assert!(events.iter().any(|event| matches!(
-            &event.kind,
+        assert!(loop_.journal_events().iter().any(|kind| matches!(
+            kind,
             EventKind::TurnSteered { answers, .. }
                 if answers == &[message_id(&steer)]
         )));
         let playhead = runtime.playhead().expect("playhead");
         assert_eq!(playhead.now.expect("next step").step, "wave_pursue");
-
-        loop_task.abort();
-        listener.shutdown_background();
     }
 
     #[test]

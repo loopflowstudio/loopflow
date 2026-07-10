@@ -503,26 +503,34 @@ impl WaveRuntime {
 
     /// Close one body attempt. Completed and skipped bodies advance; failed
     /// and interrupted bodies leave the same logical step selected for retry.
-    pub fn finish_body(
+    fn finish_body(
         &self,
         body_id: &str,
         outcome: StepOutcome,
         reason: &str,
     ) -> anyhow::Result<PlayheadView> {
         let mut inner = self.inner();
+        self.finish_body_locked(&mut inner, body_id, outcome, reason)
+    }
+
+    /// The lock-held half of [`Self::finish_body`], for callers already inside
+    /// the `inner` guard (which cannot re-lock through `finish_body`).
+    fn finish_body_locked(
+        &self,
+        inner: &mut Inner,
+        body_id: &str,
+        outcome: StepOutcome,
+        reason: &str,
+    ) -> anyhow::Result<PlayheadView> {
         let events = inner
             .playhead
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("playhead is not initialized"))?
             .finish_body(body_id, outcome, reason)?;
-        self.journal_playhead_locked(&mut inner, events)
+        self.journal_playhead_locked(inner, events)
     }
 
-    pub fn update_body_session(
-        &self,
-        body_id: &str,
-        session_id: &str,
-    ) -> anyhow::Result<PlayheadView> {
+    fn update_body_session(&self, body_id: &str, session_id: &str) -> anyhow::Result<PlayheadView> {
         let mut inner = self.inner();
         let event = inner
             .playhead
@@ -945,13 +953,7 @@ impl WaveRuntime {
                 Lifecycle::Completed => StepOutcome::Completed,
                 Lifecycle::Pending | Lifecycle::Running | Lifecycle::Failed => StepOutcome::Failed,
             };
-            let events = inner
-                .playhead
-                .as_mut()
-                .expect("an active body belongs to an initialized playhead")
-                .finish_body(&body_id, outcome, reason)
-                .expect("the captured body is the active playhead body");
-            self.journal_playhead_locked(&mut inner, events)
+            self.finish_body_locked(&mut inner, &body_id, outcome, reason)
                 .expect("the active body belongs to an initialized playhead");
         }
         true

@@ -187,44 +187,38 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.sweep_bus(cutoff)).await
     }
 
-    /// The oldest `at` a frame may carry and still be on the bus.
-    fn bus_window_cutoff() -> i64 {
-        time::OffsetDateTime::now_utc().unix_timestamp() - sqlite::BUS_WINDOW_SECS
+    /// Sweep the window, then read. The retention window is enforced by
+    /// whoever looks, not only by whoever publishes next, so a lone report on
+    /// a bus that then went quiet expires on schedule instead of waiting for a
+    /// writer that may never come. Every bus read rides this broom.
+    async fn swept_read<T, F>(&self, read: F) -> StoreResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(sqlite::SqliteStore) -> StoreResult<T> + Send + 'static,
+    {
+        let cutoff = time::OffsetDateTime::now_utc().unix_timestamp() - sqlite::BUS_WINDOW_SECS;
+        run_sqlite(&self.sqlite, move |store| {
+            store.sweep_bus(cutoff)?;
+            read(store)
+        })
+        .await
     }
 
-    /// Every surviving frame after `cursor`. Sweeps first: the retention window
-    /// is enforced by whoever looks, not only by whoever publishes next, so a
-    /// lone report on a bus that then went quiet expires on schedule instead of
-    /// waiting for a writer that may never come.
+    /// Every surviving frame after `cursor`, oldest first.
     pub async fn read_bus_after(&self, cursor: i64) -> StoreResult<Vec<BusMessage>> {
-        let cutoff = Self::bus_window_cutoff();
-        run_sqlite(&self.sqlite, move |store| {
-            store.sweep_bus(cutoff)?;
-            store.read_bus_after(cursor)
-        })
-        .await
+        self.swept_read(move |store| store.read_bus_after(cursor))
+            .await
     }
 
-    /// The high-water mark — where a fresh subscriber tunes in. Sweeps first,
-    /// for the same reason `read_bus_after` does.
+    /// The high-water mark — where a fresh subscriber tunes in.
     pub async fn bus_head(&self) -> StoreResult<i64> {
-        let cutoff = Self::bus_window_cutoff();
-        run_sqlite(&self.sqlite, move |store| {
-            store.sweep_bus(cutoff)?;
-            store.bus_head()
-        })
-        .await
+        self.swept_read(|store| store.bus_head()).await
     }
 
-    /// The oldest readable id, after sweeping. A durable cursor below
-    /// `floor - 1` is a gap: frames this subscriber will never see.
+    /// The oldest readable id. A durable cursor below `floor - 1` is a gap:
+    /// frames this subscriber will never see.
     pub async fn bus_floor(&self) -> StoreResult<Option<i64>> {
-        let cutoff = Self::bus_window_cutoff();
-        run_sqlite(&self.sqlite, move |store| {
-            store.sweep_bus(cutoff)?;
-            store.bus_floor()
-        })
-        .await
+        self.swept_read(|store| store.bus_floor()).await
     }
 
     pub async fn bus_cursor(&self, subscriber: String) -> StoreResult<Option<i64>> {

@@ -175,7 +175,7 @@ async fn plan_check_run_notifications(
     cache: &Arc<Mutex<HashSet<String>>>,
     event: &GitHubCheckRunEvent,
 ) -> Result<Vec<LfExec>, String> {
-    let execs = Vec::new();
+    let mut execs = Vec::new();
     let mut planned: HashSet<String> = HashSet::new();
     for pr in &event.check_run.pull_requests {
         let targets = find_wave_ci_targets(
@@ -220,7 +220,7 @@ async fn complete_merged_task_sessions(
     pr_number: u32,
 ) -> Result<(u32, Vec<LfExec>), String> {
     let mut processed = 0;
-    let mut execs = Vec::new();
+    let execs = Vec::new();
     for mut session in store
         .list_task_sessions(None)
         .await

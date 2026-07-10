@@ -33,7 +33,7 @@ use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
 use crate::lfd::security::sanitize_fs_component;
-use crate::wave::channel::{matches_prefix, scan_child_channels, ChannelFrame, ChildChannel};
+use crate::wave::channel::{matches_prefix, tagged_turn_json, ChannelFrame};
 use crate::wave::journal::{
     channel_opened_turn, fold_thread, fold_workers, journal_path, restore_pending,
     run_completed_turn, Attribution, EventKind, Journal, MessageId, MessageOp, PendingMessage,
@@ -259,14 +259,9 @@ pub struct WaveRuntime {
     /// listener. `/health` serves `loop_state: null` until then (a dormant channel
     /// has no loop to report on).
     resident_expected: AtomicBool,
-    /// The channel family's child channels, materialized on demand. This
-    /// server holds the pen for every one of them (single-writer per journal
-    /// file, all pens in one process); the primary channel stays in `inner`
-    /// so its hot path is untouched.
-    children: Mutex<HashMap<String, Arc<ChildChannel>>>,
-    /// The family bus: child-channel turn frames, tagged with their channel
-    /// name. The primary channel's frames ride the dedicated broadcasts above
-    /// (untagged — absent channel means the wave's own).
+    /// The family bus: ephemeral child-channel frames tagged with their topic.
+    /// The primary channel's durable turns ride the dedicated broadcasts
+    /// above (untagged — absent channel means the wave's own).
     family_tx: broadcast::Sender<ChannelFrame>,
     /// Fans worker-run motion (`op` frames) out to live `/events` subscribers.
     /// Sent under the append lock in [`WaveRuntime::journal_run_observed`] /
@@ -395,7 +390,6 @@ impl WaveRuntime {
             memory,
             inbox_tx,
             resident_expected: AtomicBool::new(false),
-            children: Mutex::new(HashMap::new()),
             family_tx,
             op_tx,
         }))
@@ -766,13 +760,11 @@ impl WaveRuntime {
             .collect()
     }
 
-    // -- Channel family (this server holds every child channel's pen) --
+    // -- Channel family --
     //
-    // The primary (wave) channel lives in `inner`, exactly as before —
-    // loop-attached, hot path untouched. Child channels are pure streams
-    // (no loop, no memory), materialized on demand from their worktree
-    // journals and folded separately; the family view folds upward through
-    // the tagged `family_tx` bus. Consumption markers never cross journals.
+    // The primary channel is the served mind and remains journal-backed.
+    // Child names are live bus topics only: no fold, no replay, no worktree
+    // liveness rule. A subscriber that was absent did not hear the message.
 
     /// Whether `channel` is within this wave's family: the primary channel
     /// or a dot-descendant of the sanitized wave name (see [`channel_role`]).
@@ -786,43 +778,15 @@ impl WaveRuntime {
         channel_role(&self.name, channel) == Some(ChannelRole::Primary)
     }
 
-    /// Materialize (or fetch) a child channel by name. `Ok(None)` when the
-    /// channel's worktree is gone — a landed/deleted work line's channel just
-    /// ends (its journal died with the tree; the flagged persistent archive,
-    /// `~/.lf/journal/<repo>/<worktree>`, is unbuilt). Errors on a name
-    /// outside this wave's family, or journal I/O.
-    pub fn child_channel(&self, name: &str) -> anyhow::Result<Option<Arc<ChildChannel>>> {
-        if channel_role(&self.name, name) != Some(ChannelRole::Child) {
-            anyhow::bail!("channel '{name}' is not a child of wave '{}'", self.name);
-        }
-        let mut children = self.children.lock().expect("children lock poisoned");
-        if let Some(existing) = children.get(name) {
-            if existing.alive() {
-                return Ok(Some(existing.clone()));
-            }
-            // The worktree vanished under an open pen: the channel ended.
-            children.remove(name);
-            return Ok(None);
-        }
-        let Some(channel) = ChildChannel::open(&self.repo_root, name)? else {
-            return Ok(None);
-        };
-        let channel = Arc::new(channel);
-        children.insert(name.to_string(), channel.clone());
-        Ok(Some(channel))
-    }
-
     /// Deliver one op to a named channel of this family. The wave's own name
     /// routes through the primary path ([`WaveRuntime::deliver`], byte
-    /// identical to an unaddressed delivery); a child name journals in that
-    /// channel's worktree journal and broadcasts tagged. `Ok(None)` = nothing
-    /// appended (a bare interrupt).
+    /// identical to an unaddressed delivery); a child name broadcasts one
+    /// tagged frame and writes no topic journal. `Ok(None)` is a bare
+    /// interrupt, which has no content to publish.
     ///
-    /// Fold-upward doctrine: a `say` on a child channel is a worker report —
-    /// the loop must hear it. The child journal keeps its record, AND the
-    /// same speech lands on the primary channel attributed to the work line
-    /// ("[goals.148e] landed PR #42"), queued for the loop like any input;
-    /// consumption is marked parent-side (it entered the parent's pending).
+    /// A `say` on a child channel is a report. The served wave is the durable
+    /// subscriber: it records one attributed copy in its own journal and
+    /// queues that copy for the resident. Plain messages remain live-only.
     pub fn deliver_to_channel(
         &self,
         channel: &str,
@@ -833,25 +797,34 @@ impl WaveRuntime {
         if self.is_primary(channel) {
             return Ok(self.deliver(op, text, from));
         }
-        let Some(child) = self.child_channel(channel)? else {
-            anyhow::bail!(
-                "channel '{channel}' has no live worktree — the work line is gone or was never opened"
-            );
-        };
-        let turn = child.deliver(&self.family_tx, op, text.clone(), from.clone())?;
-        if turn.is_some() && op == MessageOp::Say {
-            // The byline is the CHANNEL — which work line spoke — richer than
-            // the say's own label; the sender's session id rides along.
-            let session_id = from.and_then(|from| from.session_id);
-            self.deliver_say(
-                text,
-                Attribution {
-                    session_id,
-                    label: channel.to_string(),
-                },
-            );
+        if channel_role(&self.name, channel) != Some(ChannelRole::Child) {
+            anyhow::bail!("channel '{channel}' is not in wave '{}''s family", self.name);
         }
-        Ok(turn)
+        if op == MessageOp::Interrupt && text.trim().is_empty() {
+            return Ok(None);
+        }
+        // The byline is the CHANNEL — which work line spoke. It is derived
+        // here, never taken from the caller, so a client cannot claim to be
+        // another speaker; only the sender's session id rides through.
+        let from = Attribution {
+            session_id: from.and_then(|from| from.session_id),
+            label: channel.to_string(),
+        };
+        let mut turn = ChatTurn::user(
+            format!("turn-{}", uuid::Uuid::new_v4().simple()),
+            text.clone(),
+        );
+        turn.created_at = now_rfc3339();
+        turn.from = Some(from.label.clone());
+        let _ = self.family_tx.send(ChannelFrame {
+            channel: channel.to_string(),
+            json: tagged_turn_json(channel, &turn).into(),
+            turn: Arc::new(turn.clone()),
+        });
+        if op == MessageOp::Say {
+            self.deliver_say(text, from);
+        }
+        Ok(Some(turn))
     }
 
     /// Journal a `ChannelOpened` fact on the PRIMARY channel (the dispatch
@@ -871,67 +844,10 @@ impl WaveRuntime {
         Some(self.commit_locked(&mut inner, turn))
     }
 
-    /// Subscribe to the family bus and snapshot every live child channel
-    /// matching `prefix` (channels discovered on disk are materialized —
-    /// this server holds their pens). Bus first, snapshots second: a frame
-    /// can arrive twice across the boundary, never be missed — turn frames
-    /// are upserts by (channel, id), so duplicates are harmless by contract.
-    pub fn subscribe_children(
-        &self,
-        prefix: &str,
-    ) -> (
-        Vec<(String, Vec<ChatTurn>)>,
-        broadcast::Receiver<ChannelFrame>,
-    ) {
-        self.sweep_dead_children();
-        let rx = self.family_tx.subscribe();
-        let mut snapshots = Vec::new();
-        for name in scan_child_channels(&self.repo_root, &self.channel_name) {
-            if !matches_prefix(&name, prefix) {
-                continue;
-            }
-            match self.child_channel(&name) {
-                Ok(Some(channel)) => snapshots.push((name, channel.thread_snapshot())),
-                Ok(None) => {} // vanished between the scan and the open
-                Err(err) => {
-                    tracing::warn!(channel = name, error = %err, "child channel failed to open");
-                }
-            }
-        }
-        (snapshots, rx)
-    }
-
-    /// Subscribe to the family bus and snapshot exactly ONE child channel —
-    /// the strict `?channel=` scope, no descendants (a `?prefix=` subtree
-    /// goes through [`WaveRuntime::subscribe_children`]). Bus first, snapshot
-    /// second, same duplicate-not-missed contract. The snapshot is `None`
-    /// when the channel has no live worktree yet — the subscription still
-    /// carries later frames if the channel opens.
-    pub fn subscribe_child(
-        &self,
-        name: &str,
-    ) -> (Option<Vec<ChatTurn>>, broadcast::Receiver<ChannelFrame>) {
-        self.sweep_dead_children();
-        let rx = self.family_tx.subscribe();
-        let snapshot = match self.child_channel(name) {
-            Ok(Some(channel)) => Some(channel.thread_snapshot()),
-            Ok(None) => None,
-            Err(err) => {
-                tracing::warn!(channel = name, error = %err, "child channel failed to open");
-                None
-            }
-        };
-        (snapshot, rx)
-    }
-
-    /// Drop dead child channels (worktree gone): a lingering entry pins the
-    /// journal's file handle until removed. Runs on every family subscribe
-    /// and on the store observer's poll cadence.
-    pub fn sweep_dead_children(&self) {
-        self.children
-            .lock()
-            .expect("children lock poisoned")
-            .retain(|_, channel| channel.alive());
+    /// Subscribe to child-channel traffic from this instant onward. There is
+    /// intentionally no snapshot: topics have no past.
+    pub fn subscribe_channels(&self) -> broadcast::Receiver<ChannelFrame> {
+        self.family_tx.subscribe()
     }
 
     // -- Memory (the server holds MEMORY.md's pen) --
@@ -2132,44 +2048,29 @@ mod tests {
     }
 
     /// A sanitized-name wave routes a child delivery by the sanitized channel
-    /// and folds it upward with the channel byline — end to end through
-    /// `deliver_to_channel`, the door's path.
+    /// and records it with the channel byline — end to end through
+    /// `deliver_to_channel`, the door's path. No worktree exists: a topic is
+    /// a name, not a place.
     #[test]
-    fn sanitized_wave_delivers_and_folds_child_channels() {
+    fn sanitized_wave_delivers_and_records_child_reports() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path().join("repo");
-        std::fs::create_dir_all(crate::wave::channel::child_worktree_path(
-            &origin,
-            "web-ui.148e",
-        ))
-        .unwrap();
         let rt = WaveRuntime::open("web/ui".into(), origin).expect("open runtime");
         assert_eq!(rt.channel_name(), "web-ui");
         assert!(rt.in_family("web-ui.148e"));
-        rt.deliver_to_channel(
-            "web-ui.148e",
-            MessageOp::Say,
-            "child report".into(),
-            Some(Attribution {
-                session_id: None,
-                label: "worker".into(),
-            }),
-        )
-        .expect("deliver")
-        .expect("appends");
-        // Forwarded to the primary, bylined with the channel.
+        rt.deliver_to_channel("web-ui.148e", MessageOp::Say, "child report".into(), None)
+            .expect("deliver")
+            .expect("appends");
         assert_eq!(rt.thread_snapshot()[0].from.as_deref(), Some("web-ui.148e"));
     }
 
+    /// The byline is server-stamped from the channel: a caller claiming to be
+    /// someone else does not survive to the wave's journal. Only the session
+    /// id rides through.
     #[test]
-    fn child_say_forwards_to_the_primary_inbox_as_attributed_speech() {
+    fn child_say_byline_is_the_channel_not_the_callers_claim() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path().join("repo");
-        std::fs::create_dir_all(crate::wave::channel::child_worktree_path(
-            &origin,
-            "ship.148e",
-        ))
-        .unwrap();
         let rt = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
         let mut inbox = rt.subscribe_inbox();
 
@@ -2179,27 +2080,23 @@ mod tests {
             "landed PR #42".into(),
             Some(Attribution {
                 session_id: Some("sess-9".into()),
-                label: "worker".into(),
+                label: "ship".into(), // a forged byline: claims to be the wave
             }),
         )
         .expect("deliver")
         .expect("say appends");
 
-        // The child journal kept its own row.
-        let child = rt.child_channel("ship.148e").unwrap().expect("child live");
-        assert_eq!(child.thread_snapshot().len(), 1);
-        assert_eq!(child.thread_snapshot()[0].text, "landed PR #42");
-
-        // The primary inbox received the forwarded speech, bylined with the
-        // CHANNEL (which work line spoke), session id carried through.
-        let InboxItem::Message(msg) = inbox.try_recv().expect("forwarded inbox item") else {
+        // The served wave is the durable subscriber: one attributed copy in
+        // its own journal, bylined with the CHANNEL, session id carried.
+        let InboxItem::Message(msg) = inbox.try_recv().expect("recorded inbox item") else {
             panic!("expected a message");
         };
         assert_eq!(msg.op, MessageOp::Say);
         assert_eq!(msg.text, "landed PR #42");
         assert_eq!(
             msg.from.as_ref().map(|f| f.label.as_str()),
-            Some("ship.148e")
+            Some("ship.148e"),
+            "the forged 'ship' byline did not survive"
         );
         assert_eq!(
             msg.from.as_ref().and_then(|f| f.session_id.as_deref()),
@@ -2215,28 +2112,76 @@ mod tests {
         rt.apply_resident_delta(d_finished(Lifecycle::Completed));
         assert!(
             rt.pending_messages().is_empty(),
-            "the boundary turn answered the forwarded report"
+            "the boundary turn answered the recorded report"
         );
     }
 
-    /// A non-say op on a child channel (a plain message) journals in the
-    /// child only — no fold-upward: forwarding is the report doctrine, not
+    /// A non-say op on a child channel is live-only: it broadcasts to whoever
+    /// is tuned in and writes nothing. Recording is the report doctrine, not
     /// every child utterance.
     #[test]
-    fn child_non_say_does_not_forward() {
+    fn child_non_say_broadcasts_without_recording() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path().join("repo");
-        std::fs::create_dir_all(crate::wave::channel::child_worktree_path(&origin, "ship.a"))
-            .unwrap();
         let rt = WaveRuntime::open("ship".into(), origin).expect("open runtime");
-        rt.deliver_to_channel("ship.a", MessageOp::Message, "note to self".into(), None)
+        let mut bus = rt.subscribe_channels();
+        rt.deliver_to_channel("ship.a", MessageOp::Message, "steer left".into(), None)
             .expect("deliver")
             .expect("appends");
+
+        let frame = bus.try_recv().expect("the listener heard it");
+        assert_eq!(frame.channel, "ship.a");
+        assert_eq!(frame.turn.text, "steer left");
         assert!(
             rt.thread_snapshot().is_empty(),
-            "a plain child message never reaches the primary thread"
+            "a plain child message never reaches the wave's thread"
         );
         assert!(rt.pending_messages().is_empty());
+    }
+
+    /// A topic has no past: subscribing after the fact hears nothing, and a
+    /// message published with nobody listening writes no file anywhere.
+    #[test]
+    fn a_message_nobody_heard_is_gone() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let origin = tmp.path().join("repo");
+        let rt = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
+
+        rt.deliver_to_channel("ship.a", MessageOp::Message, "unheard".into(), None)
+            .expect("deliver")
+            .expect("appends");
+
+        let mut late = rt.subscribe_channels();
+        assert!(late.try_recv().is_err(), "no replay: topics have no past");
+
+        // Nothing on disk outside the served mind's own journal.
+        let journals = journal_files_under(tmp.path());
+        assert_eq!(
+            journals,
+            vec![journal_path(&origin, "ship")],
+            "the only journal is the served wave's"
+        );
+    }
+
+    /// Every `.jsonl` journal file anywhere under `root`, sorted.
+    fn journal_files_under(root: &Path) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|ext| ext == "jsonl") {
+                    found.push(path);
+                }
+            }
+        }
+        found.sort();
+        found
     }
 
     /// `RunCompleted` commits a thread-visible turn on the primary channel —
@@ -2601,93 +2546,51 @@ mod tests {
         );
     }
 
-    /// The channel family: parent + two children, threads independent,
-    /// consumption local. Delivering into a child journals in THAT worktree's
-    /// journal, never the parent's; the parent's pending queue (consumption
-    /// machinery) sees only its own messages.
+    /// One journal per served mind, zero per channel. The wave records its own
+    /// message and each child `say` (the report doctrine); a plain child
+    /// message stays on the wire. Nothing is written outside the wave's own
+    /// journal, and the record survives a reopen.
     #[test]
-    fn family_folds_keep_channels_independent_and_consumption_local() {
+    fn only_the_served_mind_journals() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(&origin).unwrap();
-        for channel in ["ship.a", "ship.b"] {
-            std::fs::create_dir_all(crate::wave::channel::child_worktree_path(&origin, channel))
-                .unwrap();
-        }
         let rt = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
 
         rt.deliver_user_message("to the wave".into(), MessageOp::Message);
-        rt.deliver_to_channel(
-            "ship.a",
-            MessageOp::Say,
-            "to a".into(),
-            Some(Attribution {
-                session_id: None,
-                label: "worker".into(),
-            }),
-        )
-        .expect("deliver a")
-        .expect("appended");
+        rt.deliver_to_channel("ship.a", MessageOp::Say, "to a".into(), None)
+            .expect("deliver a")
+            .expect("appended");
         rt.deliver_to_channel("ship.b", MessageOp::Message, "to b".into(), None)
             .expect("deliver b")
             .expect("appended");
 
-        // The parent holds its own turn plus the child `say` folded up (the
-        // report doctrine); the child `message` to ship.b does NOT forward.
         let wave = rt.thread_snapshot();
         assert_eq!(wave.len(), 2);
         assert_eq!(wave[0].text, "to the wave");
+        assert_eq!(wave[1].text, "to a", "the say recorded; the message did not");
+        assert_eq!(wave[1].from.as_deref(), Some("ship.a"));
+
+        // On disk: exactly one journal, the served wave's, with both rows.
         assert_eq!(
-            wave[1].text, "to a",
-            "the say folded up; the message did not"
+            journal_files_under(tmp.path()),
+            vec![journal_path(&origin, "ship")]
         );
-        let a = rt.child_channel("ship.a").unwrap().expect("a live");
-        let b = rt.child_channel("ship.b").unwrap().expect("b live");
-        assert_eq!(a.thread_snapshot().len(), 1);
-        assert_eq!(a.thread_snapshot()[0].text, "to a");
-        assert_eq!(a.thread_snapshot()[0].from.as_deref(), Some("worker"));
-        assert_eq!(b.thread_snapshot().len(), 1);
-        assert_eq!(b.thread_snapshot()[0].text, "to b");
+        let events = crate::wave::journal::read_events(&journal_path(&origin, "ship"));
+        let messages = events
+            .iter()
+            .filter(|e| matches!(e.kind, EventKind::UserMessage { .. }))
+            .count();
+        assert_eq!(messages, 2, "the wave's message and the child's report");
 
-        // On disk: three separate journals, each with one UserMessage.
-        for (root, channel) in [
-            (origin.clone(), "ship".to_string()),
-            (
-                crate::wave::channel::child_worktree_path(&origin, "ship.a"),
-                "ship.a".to_string(),
-            ),
-            (
-                crate::wave::channel::child_worktree_path(&origin, "ship.b"),
-                "ship.b".to_string(),
-            ),
-        ] {
-            let events = crate::wave::journal::read_events(&journal_path(&root, &channel));
-            let messages = events
-                .iter()
-                .filter(|e| matches!(e.kind, EventKind::UserMessage { .. }))
-                .count();
-            // The parent carries its own message plus the child say's forward;
-            // each child carries exactly its own.
-            let expected = if channel == "ship" { 2 } else { 1 };
-            assert_eq!(messages, expected, "message count in {channel}'s journal");
-        }
-
-        // Consumption: the parent's queue holds its own message AND the
-        // forwarded report (so the loop answers it) — but NOT the plain
-        // `message` to ship.b, which never folds up.
+        // Consumption: the queue holds the wave's message AND the report —
+        // but not the plain `message` to ship.b, which was never recorded.
         let rt2 = WaveRuntime::open("ship".into(), origin.clone()).expect("reopen");
         let pending = rt2.pending_messages();
-        assert_eq!(
-            pending.len(),
-            2,
-            "the wave message and the forwarded report"
-        );
         let texts: Vec<_> = pending.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(texts.len(), 2, "the wave message and the report");
         assert!(texts.contains(&"to the wave") && texts.contains(&"to a"));
-        assert!(
-            !texts.contains(&"to b"),
-            "the child message never folded up"
-        );
+        assert!(!texts.contains(&"to b"), "the child message was live-only");
 
         // Family membership is enforced; a foreign name is refused.
         assert!(rt2
@@ -2695,36 +2598,23 @@ mod tests {
             .is_err());
     }
 
-    /// A vanished worktree ends its channel: deliveries refuse, folds skip
-    /// it, nothing panics — and the family's other channels are untouched.
+    /// A channel needs no worktree and no prior existence: it is a name on the
+    /// bus. Speech to a work line whose tree has landed still publishes — there
+    /// is simply nobody listening.
     #[test]
-    fn vanished_worktree_ends_the_channel_without_panic() {
+    fn a_channel_needs_no_worktree() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(&origin).unwrap();
-        let doomed = crate::wave::channel::child_worktree_path(&origin, "ship.gone");
-        std::fs::create_dir_all(&doomed).unwrap();
         let rt = WaveRuntime::open("ship".into(), origin).expect("open runtime");
 
-        rt.deliver_to_channel("ship.gone", MessageOp::Message, "hi".into(), None)
-            .expect("deliver while alive")
+        // Never opened, no directory anywhere: publishing succeeds regardless.
+        rt.deliver_to_channel("ship.never", MessageOp::Message, "hi".into(), None)
+            .expect("publish to a name")
             .expect("appended");
-
-        // The work line lands/deletes: the tree (journal with it) is gone.
-        std::fs::remove_dir_all(&doomed).unwrap();
-        assert!(
-            rt.deliver_to_channel("ship.gone", MessageOp::Message, "again".into(), None)
-                .is_err(),
-            "speech to an ended channel refuses"
-        );
-        assert!(
-            rt.child_channel("ship.gone").unwrap().is_none(),
-            "the ended channel is no longer materialized"
-        );
-        let (snapshots, _rx) = rt.subscribe_children("ship");
-        assert!(snapshots.is_empty(), "family fold skips the ended channel");
-        // A never-opened channel behaves the same (no dir, no resurrection).
-        assert!(rt.child_channel("ship.never").unwrap().is_none());
+        rt.deliver_to_channel("ship.gone", MessageOp::Message, "again".into(), None)
+            .expect("publish to a landed work line")
+            .expect("appended");
     }
 
     /// `ChannelOpened` (the dispatch notification): the thread shows the

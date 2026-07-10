@@ -29,9 +29,12 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   ephemeral pubsub wires and journaling became a property of served minds only
   (`scratch/minds.md` §8, with done-whens). Child journals delete rather than
   move; attribution becomes server-stamped; the prefix write-gate sketch is
-  dropped in favor of open publish with honest bylines. Until §8's done-whens
-  hold, chat still carries client-supplied `from` and work lines still write
-  worktree journals nobody reads.
+  dropped in favor of open publish with honest bylines. The verb splits with
+  the wires: `lf radio` is the agent bus (broadcast, ephemeral), `lf chat`
+  narrows to the human client for a served mind's thread, and `lf serve` stays
+  lifecycle — chat boots nothing. Until §8's done-whens hold, chat still
+  carries client-supplied `from`, still doubles as the agent verb, and work
+  lines still write worktree journals nobody reads.
 - Two agents wrote this worktree at once. HEAD advanced under a running skill
   while unrelated files were being edited, and the two writers left a
   self-contradicting test behind — one updated the frame it waited for, the

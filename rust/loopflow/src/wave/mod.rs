@@ -1282,16 +1282,12 @@ mod tests {
         );
     }
 
-    /// Boot the HTTP surface over a family: origin repo nested in the
-    /// tempdir so child worktrees (siblings of the origin) stay inside it.
-    async fn boot_family(children: &[&str]) -> (String, Arc<WaveRuntime>, tempfile::TempDir) {
+    /// Boot the HTTP surface over a wave. Child channels need no setup: they
+    /// are names on the bus, not places on disk.
+    async fn boot_family() -> (String, Arc<WaveRuntime>, tempfile::TempDir) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(origin.join("wave/ship")).expect("wave dir");
-        for child in children {
-            std::fs::create_dir_all(crate::wave::channel::child_worktree_path(&origin, child))
-                .expect("child worktree");
-        }
         let runtime = WaveRuntime::open("ship".into(), origin).expect("open runtime");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1308,13 +1304,14 @@ mod tests {
         (format!("http://{addr}"), runtime, tmp)
     }
 
-    /// Name-addressed chat: a message POSTed with a channel lands in THAT
-    /// channel's journal (in its worktree), never the wave's; the wave
-    /// channel stays byte-identical for unaddressed posts. Foreign and
-    /// vanished channels 404.
+    /// Name-addressed chat: a `say` on a child channel is a report — the
+    /// served wave records ONE attributed copy in its own journal and nowhere
+    /// else. The byline is stamped from the channel, so a forged `from` in the
+    /// body never survives. Only foreign names 404; a work line with no
+    /// worktree is just a name.
     #[tokio::test]
-    async fn posted_message_with_channel_lands_in_that_journal() {
-        let (base, runtime, _tmp) = boot_family(&["ship.148e"]).await;
+    async fn a_child_say_is_recorded_once_in_the_waves_journal() {
+        let (base, runtime, tmp) = boot_family().await;
         let client = reqwest::Client::new();
 
         let body: serde_json::Value = client
@@ -1322,7 +1319,7 @@ mod tests {
             .json(&serde_json::json!({
                 "op": "say",
                 "text": "landed the parser",
-                "from": { "session_id": null, "label": "worker" },
+                "from": { "session_id": null, "label": "ship" },
                 "channel": "ship.148e",
             }))
             .send()
@@ -1333,24 +1330,23 @@ mod tests {
             .unwrap();
         assert_eq!(body["turn"]["text"], "landed the parser");
 
-        // The child journal (in its worktree) has the row; the wave's doesn't.
-        let child_journal =
-            crate::wave::channel::child_journal_path(runtime.repo_root(), "ship.148e");
-        let events = journal::read_events(&child_journal);
-        assert_eq!(events.len(), 1);
-        // The report also folds UP: a child `say` forwards to the wave as
-        // attributed speech so the loop hears its workers (the report
-        // doctrine). The child journal keeps its own copy above.
-        let forwarded = runtime.thread_snapshot();
-        assert_eq!(forwarded.len(), 1, "the report reached the wave thread");
-        assert_eq!(forwarded[0].text, "landed the parser");
+        // The report reached the wave's thread, bylined with the channel —
+        // the forged "ship" byline did not survive.
+        let thread = runtime.thread_snapshot();
+        assert_eq!(thread.len(), 1, "the report reached the wave thread");
+        assert_eq!(thread[0].text, "landed the parser");
+        assert_eq!(thread[0].from.as_deref(), Some("ship.148e"));
+
+        // Exactly one journal on disk: the served wave's, with exactly one row.
+        let wave_journal = journal::journal_path(runtime.repo_root(), "ship");
+        assert_eq!(journal_files_under(tmp.path()), vec![wave_journal.clone()]);
         assert_eq!(
-            journal::read_events(&journal::journal_path(runtime.repo_root(), "ship"))
+            journal::read_events(&wave_journal)
                 .iter()
                 .filter(|e| matches!(e.kind, journal::EventKind::UserMessage { .. }))
                 .count(),
             1,
-            "the forwarded report is journaled on the wave channel",
+            "one copy of the report, in the wave's journal",
         );
 
         // Addressing the wave channel by name = the unaddressed path.
@@ -1362,27 +1358,51 @@ mod tests {
             .unwrap();
         assert_eq!(runtime.thread_snapshot().len(), 2);
 
-        // Outside the family, or a work line with no worktree: 404.
-        for channel in ["concerto", "ship.ghost"] {
-            let refused = client
-                .post(format!("{base}/messages"))
-                .json(&serde_json::json!({ "op": "message", "text": "?", "channel": channel }))
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(
-                refused.status(),
-                reqwest::StatusCode::NOT_FOUND,
-                "channel '{channel}' bounces"
-            );
+        // A work line with no worktree is a name like any other: it publishes.
+        let ghost = client
+            .post(format!("{base}/messages"))
+            .json(&serde_json::json!({ "op": "message", "text": "?", "channel": "ship.ghost" }))
+            .send()
+            .await
+            .unwrap();
+        assert!(ghost.status().is_success(), "a topic needs no worktree");
+
+        // Outside the family: 404.
+        let refused = client
+            .post(format!("{base}/messages"))
+            .json(&serde_json::json!({ "op": "message", "text": "?", "channel": "concerto" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), reqwest::StatusCode::NOT_FOUND);
+    }
+
+    /// Every `.jsonl` journal file anywhere under `root`, sorted.
+    fn journal_files_under(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut found = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|ext| ext == "jsonl") {
+                    found.push(path);
+                }
+            }
         }
+        found.sort();
+        found
     }
 
     /// `POST /channels` (the dispatch knock): the wave's thread shows the
     /// opening, idempotent on run id; foreign names 404.
     #[tokio::test]
     async fn channels_door_journals_the_opening_once() {
-        let (base, runtime, _tmp) = boot_family(&[]).await;
+        let (base, runtime, _tmp) = boot_family().await;
         let client = reqwest::Client::new();
 
         let body: serde_json::Value = client
@@ -1418,21 +1438,16 @@ mod tests {
         assert_eq!(foreign.status(), reqwest::StatusCode::NOT_FOUND);
     }
 
-    /// The family subscription: the default `/events` replays the primary
-    /// (untagged) plus every child (tagged with its channel) and streams
-    /// live frames from all of them; `?channel=` narrows to one; a foreign
-    /// name 404s.
+    /// The family subscription is live-only: `/events` streams the primary
+    /// (untagged) plus every child (tagged with its channel) from the instant
+    /// of connection. Topics have no past, so a frame published before connect
+    /// never arrives; `?channel=` narrows to one; a foreign name 404s.
     #[tokio::test]
     async fn events_family_subscription_carries_channel_tagged_frames() {
-        let (base, runtime, _tmp) = boot_family(&["ship.a", "ship.b"]).await;
-        narrate(&runtime, "wave turn");
+        let (base, runtime, _tmp) = boot_family().await;
+        // Published before connect: nobody was listening, so it is gone.
         runtime
-            .deliver_to_channel(
-                "ship.a",
-                journal::MessageOp::Message,
-                "a replay".into(),
-                None,
-            )
+            .deliver_to_channel("ship.a", journal::MessageOp::Message, "a lost".into(), None)
             .unwrap();
 
         let host = base.strip_prefix("http://").unwrap().to_string();
@@ -1441,8 +1456,14 @@ mod tests {
             .write_all(b"GET /events HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n")
             .await
             .unwrap();
+        // Let the subscription establish before publishing live frames.
+        tokio::time::sleep(Duration::from_millis(200)).await;
 
-        // Live frames after connect, from both children.
+        // Live frames after connect, from the wave and both children.
+        narrate(&runtime, "wave turn");
+        runtime
+            .deliver_to_channel("ship.a", journal::MessageOp::Message, "a live".into(), None)
+            .unwrap();
         runtime
             .deliver_to_channel("ship.b", journal::MessageOp::Message, "b live".into(), None)
             .unwrap();
@@ -1456,7 +1477,7 @@ mod tests {
                 Ok(Ok(n)) => {
                     acc.push_str(&String::from_utf8_lossy(&buf[..n]));
                     if acc.contains("wave turn")
-                        && acc.contains("a replay")
+                        && acc.contains("a live")
                         && acc.contains("b live")
                     {
                         break;
@@ -1465,8 +1486,12 @@ mod tests {
                 Ok(Err(_)) => break,
             }
         }
-        assert!(acc.contains("a replay"), "child replay arrives: {acc}");
+        assert!(acc.contains("a live"), "child live frame arrives: {acc}");
         assert!(acc.contains("b live"), "child live frame arrives");
+        assert!(
+            !acc.contains("a lost"),
+            "a frame published before connect is gone: {acc}"
+        );
         assert!(
             acc.contains(r#""channel":"ship.a""#) && acc.contains(r#""channel":"ship.b""#),
             "child frames carry their channel tag"
@@ -1488,6 +1513,11 @@ mod tests {
         )
         .await
         .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        runtime
+            .deliver_to_channel("ship.a", journal::MessageOp::Message, "a solo".into(), None)
+            .unwrap();
+        narrate(&runtime, "wave turn two");
         let mut acc_one = String::new();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         loop {
@@ -1496,14 +1526,14 @@ mod tests {
                 Ok(Ok(0)) | Err(_) => break,
                 Ok(Ok(n)) => {
                     acc_one.push_str(&String::from_utf8_lossy(&buf[..n]));
-                    if acc_one.contains("a replay") {
+                    if acc_one.contains("a solo") {
                         break;
                     }
                 }
                 Ok(Err(_)) => break,
             }
         }
-        assert!(acc_one.contains("a replay"));
+        assert!(acc_one.contains("a solo"));
         assert!(!acc_one.contains("wave turn"), "no primary frames");
         assert!(
             !acc_one.contains("event: state"),

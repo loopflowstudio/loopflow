@@ -140,7 +140,6 @@ use crate::chat::turns::ChatTurn;
 use crate::lfd::executor::helpers::{resolve_lf_binary, spawn_detached_lf, tmux_session_slug};
 use crate::lfd::http::routes::exec::{ExecRequest, ExecResponse};
 use crate::lfd::lf_exec::{exec_lf, validate_lf_argv};
-use crate::wave::channel::tagged_turn_json;
 use crate::wave::journal::{Attribution, MessageOp, PendingMessage};
 use crate::wave::playhead::PlayheadView;
 use crate::wave::registry::{process_alive, StoreObserver};
@@ -1066,31 +1065,16 @@ async fn events_handler(
         ));
     }
 
-    // Child channels: live bus first, snapshots second (see method doc). A
-    // `?channel=` scope replays STRICTLY the one named channel (no
-    // descendants), matching how it streams (strict equality); a `?prefix=`
-    // scope replays the whole subtree. The primary scope carries no child
-    // snapshots — its own thread rides the primary subscription below.
-    let (child_snapshots, family_rx) = match &scope {
-        Scope::Channel(channel) if state.runtime.is_primary(channel) => (Vec::new(), None),
-        Scope::Channel(channel) => {
-            let (snapshot, rx) = state.runtime.subscribe_child(channel);
-            let snapshots = snapshot
-                .map(|turns| vec![(channel.clone(), turns)])
-                .unwrap_or_default();
-            (snapshots, Some(rx))
-        }
-        Scope::Prefix(prefix) => {
-            let (snapshots, rx) = state.runtime.subscribe_children(prefix);
-            (snapshots, Some(rx))
-        }
+    // Child channels are topics: live bus only, no replay — a subscriber
+    // hears what is said while it listens, and a message nobody heard is
+    // gone. A `?channel=` scope streams STRICTLY the one named channel (no
+    // descendants); a `?prefix=` scope streams the whole subtree. The primary
+    // scope carries no child frames — its own thread rides the primary
+    // subscription below.
+    let family_rx = match &scope {
+        Scope::Channel(channel) if state.runtime.is_primary(channel) => None,
+        Scope::Channel(_) | Scope::Prefix(_) => Some(state.runtime.subscribe_channels()),
     };
-    let child_replay = stream::iter(child_snapshots.into_iter().flat_map(|(channel, turns)| {
-        turns
-            .into_iter()
-            .map(move |turn| Ok(tagged_turn_event(&channel, &turn)))
-            .collect::<Vec<_>>()
-    }));
     let live_children = family_rx.map(|rx| {
         let scope = scope.clone();
         BroadcastStream::new(rx).filter_map(move |res| {
@@ -1164,9 +1148,8 @@ async fn events_handler(
         }
         streams.push(Box::pin(replay.chain(live)));
     }
-    match live_children {
-        Some(live) => streams.push(Box::pin(child_replay.chain(live))),
-        None => streams.push(Box::pin(child_replay)),
+    if let Some(live) = live_children {
+        streams.push(Box::pin(live));
     }
     let merged: BoxedEventStream = match streams.len() {
         1 => streams.pop().expect("one stream"),
@@ -1235,16 +1218,6 @@ fn playhead_event(playhead: &PlayheadView) -> Event {
     Event::default()
         .event("playhead")
         .data(serde_json::to_string(playhead).unwrap_or_default())
-}
-
-/// A child channel's turn frame for the REPLAY path: the `Turn` JSON plus one
-/// extra key, `"channel"` (the live path reuses the frame's pre-serialized
-/// `json`). Additive — the primary channel's frames stay untagged, so a
-/// family of one is byte-identical to the pre-family wire.
-fn tagged_turn_event(channel: &str, turn: &ChatTurn) -> Event {
-    Event::default()
-        .event("turn")
-        .data(tagged_turn_json(channel, turn))
 }
 
 fn state_event(state: &LoopState) -> Event {

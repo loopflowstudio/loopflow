@@ -767,19 +767,15 @@ mod tests {
     }
 
     /// Channel addressing: a dotted name resolves its FAMILY HEAD's endpoint
-    /// (the head holds the pen) and rides the wire as the `channel` field —
-    /// the message lands in the work line's own journal, in its worktree.
+    /// (the head serves the mind) and rides the wire as the `channel` field —
+    /// a `say` is recorded once in the served wave's own journal, bylined with
+    /// the channel. No worktree, no per-channel journal.
     #[tokio::test]
     async fn dotted_name_targets_the_channel_through_the_family_head() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(&origin).unwrap();
-        std::fs::create_dir_all(crate::wave::channel::child_worktree_path(
-            &origin,
-            "ship.148e",
-        ))
-        .unwrap();
         let (addr, runtime, _inbox) = boot_server(&origin, "ship").await;
         let wave = make_wave("ship", &origin, None);
         store.create_wave(&wave).await.expect("seed wave");
@@ -820,9 +816,9 @@ mod tests {
         assert_eq!(ambient.name, "ship");
         assert_eq!(ambient.channel.as_deref(), Some("ship.148e"));
 
-        // The whole door: POST with the channel field lands in the child
-        // journal, and a `say` also folds up to the wave thread (the report
-        // reaches the loop).
+        // The whole door: POST with the channel field records the report once
+        // on the wave thread, bylined with the channel — the report reaches
+        // the loop, and there is no per-channel journal.
         let mut body = serde_json::json!({
             "op": "say",
             "text": "child-bound",
@@ -830,16 +826,18 @@ mod tests {
         });
         body["channel"] = serde_json::Value::String("ship.148e".into());
         post_json(&addr, "/messages", &body).await.expect("post");
+        let thread = runtime.thread_snapshot();
+        assert_eq!(thread.len(), 1, "the report reached the wave thread");
+        assert_eq!(thread[0].text, "child-bound");
+        assert_eq!(thread[0].from.as_deref(), Some("ship.148e"));
         assert_eq!(
-            runtime.thread_snapshot().len(),
+            crate::wave::journal::read_events(&crate::wave::journal::journal_path(&origin, "ship"))
+                .iter()
+                .filter(|e| matches!(e.kind, EventKind::UserMessage { .. }))
+                .count(),
             1,
-            "the report folded up to the wave thread",
+            "one copy, in the served wave's journal",
         );
-        let events = crate::wave::journal::read_events(&crate::wave::channel::child_journal_path(
-            &origin,
-            "ship.148e",
-        ));
-        assert_eq!(events.len(), 1, "the work line's journal has the message");
     }
 
     /// No live server anywhere (no registry row, no discovery file): the

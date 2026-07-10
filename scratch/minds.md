@@ -106,15 +106,17 @@ traces to that fusion. Split them.
 - **Family head** — routing. Which server holds the pen, which journal file.
   Keep it; it is a fact about single-writer discipline, not about meaning.
 
-**Writes go down. Reads go up.** Publish is permitted iff
-`matches_prefix(target, writer_channel)` — your channel and its subtree — with
-`writer_channel` derived server-side from the token. A hand narrates to
-`<self>` and authors reports to `<self>/report`; the parent *subscribes* to
-reports and not narration. A child wave likewise. No upward write exists
-anywhere. The prefix rule is total, with zero exceptions — `lf chat --parent`
-becomes sugar for `--channel <self>/report`, and `driver.rs:206` stops being a
-crossing: the child was always talking in its own room, and the parent was
-always the one who chose to listen.
+**Writes go down. Reads go up.** *(Superseded by §8 — kept for the reasoning,
+not the rule.)* The original sketch: publish permitted iff
+`matches_prefix(target, writer_channel)`, with `writer_channel` derived
+server-side from the token — no upward write anywhere, `lf chat --parent`
+becomes sugar for `--channel <self>/report`. §8 keeps the *shape* (a hand
+speaks in its own room; the parent chooses to listen) but drops the gate:
+publish is open, and the security boundary is attribution — the server stamps
+who spoke from the token, so a byline cannot be forged. Routing rules turned
+out to be permission theater once bylines were honest; the default posture
+(narrate on `<self>`, report up by publishing where the parent listens)
+survives as convention taught in the loop skills, not as an enforced rule.
 
 **Wake is subscription.** The loop wakes on reports, heartbeat, and cron.
 It does not subscribe to its own narration — so a wave inhabiting a task cannot
@@ -685,6 +687,22 @@ byline is exactly how radio speech works ("this is goals.148e reporting").
 product. Two words, two wires. The old `chat` was one verb fused across both,
 and that fusion is where every steering confusion in this design traced back
 to.
+
+Chat and serve stay separate commands, deliberately — the same cut as
+serve/loop. `lf serve` is lifecycle: boot the mind, own the process, outlive
+any one conversation. `lf chat` is attachment: the human client to an
+already-served mind — it streams the thread, sends what you type into it, and
+boots nothing (no live server → the `lf serve <wave>` error). Quitting a
+conversation must never kill a mind. postgres and psql, not one verb wearing
+two hats.
+
+The three verbs, complete:
+
+| Verb | Who uses it | What it is |
+| --- | --- | --- |
+| `lf serve <wave>` | human (or promotion) | boot a mind; own its process |
+| `lf chat` | humans only | converse with a served mind's thread |
+| `lf radio` | agents only | broadcast on the bus; ephemeral |
 
 The model, in full:
 

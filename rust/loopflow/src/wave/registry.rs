@@ -463,9 +463,6 @@ impl StoreObserver {
     /// journal new dispatches and fresh finishes. Store errors are logged
     /// and skipped — the next poll retries.
     pub async fn poll_once(&self) {
-        // Sweep dead child channels on the poll cadence: a landed/deleted
-        // work line's channel pins its journal file handle until dropped.
-        self.runtime.sweep_dead_children();
         let poll_started = OffsetDateTime::now_utc();
         let cutoff = *self
             .terminal_cutoff

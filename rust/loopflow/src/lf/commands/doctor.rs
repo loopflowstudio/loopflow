@@ -119,18 +119,13 @@ fn check_capture(
         .filter(|process| !launch_processes.contains(process))
         .collect();
 
-    let root = crate::trace::trace_root();
     let mut failures = Vec::new();
     let mut prompt_only = 0;
     for launch in &launches {
-        if !Path::new(&launch.artifact_dir).starts_with(&root)
-            || !Path::new(&launch.conversation_path).starts_with(&root)
+        if crate::trace::resolve_artifact(&launch.artifact_dir).is_err()
+            || crate::trace::resolve_artifact(&launch.conversation_path).is_err()
         {
-            failures.push(format!(
-                "{} has a path outside {}",
-                launch.id,
-                root.display()
-            ));
+            failures.push(format!("{} has an unsafe artifact path", launch.id));
         }
         if launch.capture_status == "prompt_only" {
             prompt_only += 1;
@@ -151,7 +146,9 @@ fn check_capture(
             ));
         }
         if launch.capture_status == "complete" {
-            match crate::trace::read_conversation(Path::new(&launch.conversation_path)) {
+            match crate::trace::resolve_artifact(&launch.conversation_path)
+                .and_then(|path| crate::trace::read_conversation(&path))
+            {
                 Ok(records) => {
                     if records
                         .windows(2)
@@ -182,11 +179,14 @@ fn check_capture(
         .iter()
         .filter(|turn| turn.context_coverage == "assembled")
     {
-        if !Path::new(&turn.task_prompt_path).is_file()
+        if !crate::trace::resolve_artifact(&turn.task_prompt_path)
+            .is_ok_and(|path| path.is_file())
             || turn
                 .system_prompt_path
                 .as_deref()
-                .is_some_and(|path| !Path::new(path).is_file())
+                .is_some_and(|path| {
+                    !crate::trace::resolve_artifact(path).is_ok_and(|path| path.is_file())
+                })
         {
             failures.push(format!("{} is missing a prompt artifact", turn.id));
         }

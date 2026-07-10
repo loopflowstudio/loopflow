@@ -21,6 +21,46 @@ use crate::lfdb::{StoreError, StoreResult};
 pub const TRACE_SCHEMA_VERSION: u32 = 1;
 pub const TOKENIZER: &str = "cl100k_base";
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(transparent)]
+pub struct AgentLaunchId(String);
+
+impl AgentLaunchId {
+    pub fn new() -> Self {
+        Self(LfdId::new().to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for AgentLaunchId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(transparent)]
+pub struct AgentTurnId(String);
+
+impl AgentTurnId {
+    pub fn new() -> Self {
+        Self(LfdId::new().to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for AgentTurnId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TraceCaptureContext {
     pub run_id: LfdId,
@@ -82,19 +122,17 @@ impl ContextCoverage {
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum ContextAssetKind {
-    Loopflow,
-    Surface,
-    StructuredReply,
-    ProviderWrapper,
+    OperatingInstructions,
+    SurfaceInstructions,
+    ProviderInstructions,
     RepoInstructions,
-    Skill,
+    SkillInstructions,
     Direction,
-    WaveGoal,
-    Project,
-    WaveMemory,
-    WaveChat,
-    ParentSummary,
-    Docs,
+    Goal,
+    Memory,
+    Chat,
+    Summary,
+    Document,
     Scratch,
     Diff,
     Clipboard,
@@ -105,19 +143,17 @@ pub enum ContextAssetKind {
 impl ContextAssetKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Loopflow => "loopflow",
-            Self::Surface => "surface",
-            Self::StructuredReply => "structured_reply",
-            Self::ProviderWrapper => "provider_wrapper",
+            Self::OperatingInstructions => "operating_instructions",
+            Self::SurfaceInstructions => "surface_instructions",
+            Self::ProviderInstructions => "provider_instructions",
             Self::RepoInstructions => "repo_instructions",
-            Self::Skill => "skill",
+            Self::SkillInstructions => "skill_instructions",
             Self::Direction => "direction",
-            Self::WaveGoal => "wave_goal",
-            Self::Project => "project",
-            Self::WaveMemory => "wave_memory",
-            Self::WaveChat => "wave_chat",
-            Self::ParentSummary => "parent_summary",
-            Self::Docs => "docs",
+            Self::Goal => "goal",
+            Self::Memory => "memory",
+            Self::Chat => "chat",
+            Self::Summary => "summary",
+            Self::Document => "document",
             Self::Scratch => "scratch",
             Self::Diff => "diff",
             Self::Clipboard => "clipboard",
@@ -128,19 +164,17 @@ impl ContextAssetKind {
 
     pub fn parse(value: &str) -> StoreResult<Self> {
         match value {
-            "loopflow" => Ok(Self::Loopflow),
-            "surface" => Ok(Self::Surface),
-            "structured_reply" => Ok(Self::StructuredReply),
-            "provider_wrapper" => Ok(Self::ProviderWrapper),
+            "operating_instructions" => Ok(Self::OperatingInstructions),
+            "surface_instructions" => Ok(Self::SurfaceInstructions),
+            "provider_instructions" => Ok(Self::ProviderInstructions),
             "repo_instructions" => Ok(Self::RepoInstructions),
-            "skill" => Ok(Self::Skill),
+            "skill_instructions" => Ok(Self::SkillInstructions),
             "direction" => Ok(Self::Direction),
-            "wave_goal" => Ok(Self::WaveGoal),
-            "project" => Ok(Self::Project),
-            "wave_memory" => Ok(Self::WaveMemory),
-            "wave_chat" => Ok(Self::WaveChat),
-            "parent_summary" => Ok(Self::ParentSummary),
-            "docs" => Ok(Self::Docs),
+            "goal" => Ok(Self::Goal),
+            "memory" => Ok(Self::Memory),
+            "chat" => Ok(Self::Chat),
+            "summary" => Ok(Self::Summary),
+            "document" => Ok(Self::Document),
             "scratch" => Ok(Self::Scratch),
             "diff" => Ok(Self::Diff),
             "clipboard" => Ok(Self::Clipboard),
@@ -157,7 +191,8 @@ impl ContextAssetKind {
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum ContextScope {
-    System,
+    Global,
+    Provider,
     Repo,
     Wave,
     Project,
@@ -169,7 +204,8 @@ pub enum ContextScope {
 impl ContextScope {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::System => "system",
+            Self::Global => "global",
+            Self::Provider => "provider",
             Self::Repo => "repo",
             Self::Wave => "wave",
             Self::Project => "project",
@@ -181,7 +217,8 @@ impl ContextScope {
 
     pub fn parse(value: &str) -> StoreResult<Self> {
         match value {
-            "system" => Ok(Self::System),
+            "global" => Ok(Self::Global),
+            "provider" => Ok(Self::Provider),
             "repo" => Ok(Self::Repo),
             "wave" => Ok(Self::Wave),
             "project" => Ok(Self::Project),
@@ -254,7 +291,8 @@ impl ContextDecisionKind {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContextDecision {
     pub position: u32,
-    pub kind: String,
+    pub kind: ContextAssetKind,
+    pub scope: ContextScope,
     pub label: String,
     pub source_path: Option<String>,
     pub decision: ContextDecisionKind,
@@ -291,6 +329,16 @@ pub struct ContextAssetSpec {
     pub content: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptSection {
+    pub kind: ContextAssetKind,
+    pub scope: ContextScope,
+    pub label: String,
+    pub source_path: Option<String>,
+    pub included_by: String,
+    pub text: String,
+}
+
 impl PreparedTurnContext {
     /// Capture the exact final provider strings. More specific attributed
     /// sections can replace these assembly assets without changing storage.
@@ -300,7 +348,7 @@ impl PreparedTurnContext {
             let channel = prompt_channel(
                 system,
                 ContextChannel::System,
-                ContextScope::System,
+                ContextScope::Global,
                 "system prompt",
                 position,
             );
@@ -361,7 +409,8 @@ impl PreparedTurnContext {
         {
             decisions.push(ContextDecision {
                 position: first_decision_position + offset as u32,
-                kind: asset.kind.as_str().to_string(),
+                kind: asset.kind,
+                scope: asset.scope,
                 label: asset.label.clone(),
                 source_path: asset.source_path.clone(),
                 decision: ContextDecisionKind::Included,
@@ -423,7 +472,7 @@ fn render_attributed_channel(
         channel,
         kind: ContextAssetKind::Assembly,
         scope: if channel == ContextChannel::System {
-            ContextScope::System
+            ContextScope::Global
         } else {
             ContextScope::Task
         },
@@ -534,7 +583,7 @@ pub struct RecordedConversationEvent {
     pub seq: u64,
     #[serde(with = "time::serde::rfc3339")]
     pub ts: OffsetDateTime,
-    pub turn_id: Option<String>,
+    pub turn_id: Option<AgentTurnId>,
     pub payload: RecordedConversationPayload,
 }
 
@@ -603,9 +652,6 @@ pub struct AgentLaunchRow {
     pub provider_events_path: Option<String>,
     pub provider_session_id: Option<String>,
     pub provider_session_path: Option<String>,
-    pub context_gather_ms: i64,
-    pub context_render_ms: i64,
-    pub context_persist_ms: i64,
     pub conversation_event_count: i64,
     pub conversation_bytes: i64,
 }
@@ -633,6 +679,9 @@ pub struct AgentTurnRow {
     pub cache_read_tokens: Option<i64>,
     pub cache_write_tokens: Option<i64>,
     pub cost_usd: Option<f64>,
+    pub context_gather_ms: i64,
+    pub context_render_ms: i64,
+    pub context_persist_ms: i64,
     pub first_event_seq: Option<i64>,
     pub last_event_seq: Option<i64>,
 }
@@ -667,14 +716,14 @@ pub struct CaptureStart {
 
 impl CaptureHandle {
     pub fn artifact_dir(&self) -> PathBuf {
-        PathBuf::from(
-            &self
-                .0
-                .lock()
-                .expect("trace capture mutex poisoned")
-                .launch
-                .artifact_dir,
-        )
+        let relative = self
+            .0
+            .lock()
+            .expect("trace capture mutex poisoned")
+            .launch
+            .artifact_dir
+            .clone();
+        resolve_artifact(&relative).expect("capture stores a validated relative artifact path")
     }
 
     pub fn begin(
@@ -758,14 +807,23 @@ impl TraceCapture {
     ) -> StoreResult<Self> {
         validate_input_op(&start.input_op)?;
         let persist_start = Instant::now();
-        let launch_id = LfdId::new().to_string();
-        let turn_id = LfdId::new().to_string();
-        let artifact_dir = trace_root()
+        let launch_id = AgentLaunchId::new();
+        let turn_id = AgentTurnId::new();
+        let root = trace_root();
+        create_private_dir(&root)?;
+        let process_dir = root
             .join(context.run_id.as_str())
-            .join(context.process_id.as_str())
-            .join(&launch_id);
-        create_private_dir(&artifact_dir)?;
-        let turns_dir = artifact_dir.join("turns");
+            .join(context.process_id.as_str());
+        create_private_dir(&process_dir)?;
+        let artifact_dir = process_dir.join(launch_id.as_str());
+        let staging_dir = process_dir.join(format!(".{}.staging", launch_id.as_str()));
+        if staging_dir.exists() || artifact_dir.exists() {
+            return Err(StoreError::InvalidData(format!(
+                "trace artifact already exists for launch {launch_id}"
+            )));
+        }
+        create_private_dir(&staging_dir)?;
+        let turns_dir = staging_dir.join("turns");
         create_private_dir(&turns_dir)?;
 
         let system_path = prepared
@@ -778,21 +836,49 @@ impl TraceCapture {
             .transpose()?;
         let task_path = turns_dir.join("0001-task.md");
         write_private(&task_path, prepared.task.text.as_bytes())?;
-        let conversation_path = artifact_dir.join("conversation.jsonl");
+        let conversation_path = staging_dir.join("conversation.jsonl");
+        let initial_event = RecordedConversationEvent {
+            schema_version: TRACE_SCHEMA_VERSION,
+            seq: 0,
+            ts: OffsetDateTime::now_utc(),
+            turn_id: Some(turn_id.clone()),
+            payload: RecordedConversationPayload::UserInput {
+                op: start.input_op.clone(),
+                text: prepared.task.text.clone(),
+            },
+        };
         write_private(&conversation_path, b"")?;
+        let initial_bytes = append_json_line(&conversation_path, &initial_event)?;
         let provider_path = start
             .raw_provider
-            .then(|| artifact_dir.join("provider.jsonl"));
+            .then(|| staging_dir.join("provider.jsonl"));
         if let Some(path) = &provider_path {
             write_private(path, b"")?;
         }
+
+        fs::rename(&staging_dir, &artifact_dir).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "publish {} as {}: {error}",
+                staging_dir.display(),
+                artifact_dir.display()
+            ))
+        })?;
+        let published_system_path = system_path
+            .as_ref()
+            .map(|path| artifact_dir.join(path.strip_prefix(&staging_dir).expect("staged path")));
+        let published_task_path =
+            artifact_dir.join(task_path.strip_prefix(&staging_dir).expect("staged path"));
+        let published_conversation_path = artifact_dir.join("conversation.jsonl");
+        let published_provider_path = provider_path
+            .as_ref()
+            .map(|path| artifact_dir.join(path.strip_prefix(&staging_dir).expect("staged path")));
 
         let started_at = OffsetDateTime::now_utc().unix_timestamp();
         let system_tokens = prepared.system.as_ref().map_or(0, |channel| channel.tokens) as i64;
         let task_tokens = prepared.task.tokens as i64;
         let persist_ms = persist_start.elapsed().as_millis() as i64;
         let launch = AgentLaunchRow {
-            id: launch_id,
+            id: launch_id.to_string(),
             run_id: context.run_id.to_string(),
             process_id: context.process_id.to_string(),
             started_at,
@@ -808,21 +894,19 @@ impl TraceCapture {
             capture_status: "capturing".to_string(),
             incomplete_reason: None,
             outcome: "running".to_string(),
-            artifact_dir: artifact_dir.display().to_string(),
-            conversation_path: conversation_path.display().to_string(),
-            provider_events_path: provider_path
+            artifact_dir: artifact_relative(&root, &artifact_dir)?,
+            conversation_path: artifact_relative(&root, &published_conversation_path)?,
+            provider_events_path: published_provider_path
                 .as_ref()
-                .map(|path| path.display().to_string()),
+                .map(|path| artifact_relative(&root, path))
+                .transpose()?,
             provider_session_id: None,
             provider_session_path: None,
-            context_gather_ms: start.gather_ms as i64,
-            context_render_ms: start.render_ms as i64,
-            context_persist_ms: persist_ms,
-            conversation_event_count: 0,
-            conversation_bytes: 0,
+            conversation_event_count: 1,
+            conversation_bytes: initial_bytes as i64,
         };
         let turn = AgentTurnRow {
-            id: turn_id.clone(),
+            id: turn_id.to_string(),
             launch_id: launch.id.clone(),
             ordinal: 1,
             provider_turn_id: None,
@@ -832,8 +916,11 @@ impl TraceCapture {
             input_op: start.input_op.clone(),
             context_coverage: prepared.coverage.as_str().to_string(),
             tokenizer: prepared.tokenizer.to_string(),
-            system_prompt_path: system_path.map(|path| path.display().to_string()),
-            task_prompt_path: task_path.display().to_string(),
+            system_prompt_path: published_system_path
+                .as_ref()
+                .map(|path| artifact_relative(&root, path))
+                .transpose()?,
+            task_prompt_path: artifact_relative(&root, &published_task_path)?,
             system_tokens,
             task_tokens,
             supplied_context_tokens: system_tokens + task_tokens,
@@ -843,14 +930,17 @@ impl TraceCapture {
             cache_read_tokens: None,
             cache_write_tokens: None,
             cost_usd: None,
+            context_gather_ms: start.gather_ms as i64,
+            context_render_ms: start.render_ms as i64,
+            context_persist_ms: persist_ms,
             first_event_seq: Some(0),
-            last_event_seq: None,
+            last_event_seq: Some(0),
         };
         let assets = prepared
             .assets()
             .cloned()
             .map(|asset| ContextAssetRow {
-                turn_id: turn_id.clone(),
+                turn_id: turn_id.to_string(),
                 asset,
             })
             .collect::<Vec<_>>();
@@ -858,27 +948,27 @@ impl TraceCapture {
             .decisions
             .into_iter()
             .map(|decision| ContextDecisionRow {
-                turn_id: turn_id.clone(),
+                turn_id: turn_id.to_string(),
                 decision,
             })
             .collect::<Vec<_>>();
-        crate::journal::open_ledger()?.insert_trace_capture(&launch, &turn, &assets, &decisions)?;
+        if let Err(error) = crate::journal::open_ledger()?
+            .insert_trace_capture(&launch, &turn, &assets, &decisions)
+        {
+            let _ = fs::remove_dir_all(&artifact_dir);
+            return Err(error);
+        }
 
-        let mut capture = Self {
+        Ok(Self {
             launch,
             turn,
-            conversation_path,
-            provider_path,
-            event_seq: 0,
+            conversation_path: published_conversation_path,
+            provider_path: published_provider_path,
+            event_seq: 1,
             provider_seq: 0,
             usage: TurnUsage::default(),
             failed: None,
-        };
-        capture.append_payload(RecordedConversationPayload::UserInput {
-            op: start.input_op,
-            text: prepared.task.text,
-        })?;
-        Ok(capture)
+        })
     }
 
     fn append_payload(&mut self, payload: RecordedConversationPayload) -> StoreResult<()> {
@@ -886,7 +976,7 @@ impl TraceCapture {
             schema_version: TRACE_SCHEMA_VERSION,
             seq: self.event_seq,
             ts: OffsetDateTime::now_utc(),
-            turn_id: Some(self.turn.id.clone()),
+            turn_id: Some(AgentTurnId(self.turn.id.clone())),
             payload,
         };
         let bytes = append_json_line(&self.conversation_path, &event)?;
@@ -1025,6 +1115,39 @@ pub fn trace_root() -> PathBuf {
         .join(".lf/traces")
 }
 
+fn artifact_relative(root: &Path, path: &Path) -> StoreResult<String> {
+    let relative = path.strip_prefix(root).map_err(|_| {
+        StoreError::InvalidData(format!(
+            "trace artifact {} is outside {}",
+            path.display(),
+            root.display()
+        ))
+    })?;
+    validate_artifact_path(relative)?;
+    Ok(relative.display().to_string())
+}
+
+pub fn resolve_artifact(relative: &str) -> StoreResult<PathBuf> {
+    let relative = Path::new(relative);
+    validate_artifact_path(relative)?;
+    Ok(trace_root().join(relative))
+}
+
+fn validate_artifact_path(path: &Path) -> StoreResult<()> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            !matches!(component, std::path::Component::Normal(_))
+        })
+    {
+        return Err(StoreError::InvalidData(format!(
+            "unsafe trace artifact path: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
 fn create_private_dir(path: &Path) -> StoreResult<()> {
     fs::create_dir_all(path)
         .map_err(|error| StoreError::InvalidData(format!("create {}: {error}", path.display())))?;
@@ -1045,6 +1168,8 @@ fn write_private(path: &Path, bytes: &[u8]) -> StoreResult<()> {
         .map_err(|error| StoreError::InvalidData(format!("open {}: {error}", path.display())))?;
     file.write_all(bytes)
         .map_err(|error| StoreError::InvalidData(format!("write {}: {error}", path.display())))?;
+    file.sync_all()
+        .map_err(|error| StoreError::InvalidData(format!("sync {}: {error}", path.display())))?;
     #[cfg(unix)]
     file.set_permissions(fs::Permissions::from_mode(0o600))
         .map_err(|error| {
@@ -1065,6 +1190,8 @@ fn append_json_line<T: Serialize>(path: &Path, value: &T) -> StoreResult<usize> 
         .map_err(|error| StoreError::InvalidData(format!("open {}: {error}", path.display())))?;
     file.write_all(&bytes)
         .map_err(|error| StoreError::InvalidData(format!("append {}: {error}", path.display())))?;
+    file.sync_data()
+        .map_err(|error| StoreError::InvalidData(format!("sync {}: {error}", path.display())))?;
     Ok(bytes.len())
 }
 
@@ -1142,8 +1269,8 @@ mod tests {
             "task",
             vec![ContextAssetSpec {
                 channel: ContextChannel::System,
-                kind: ContextAssetKind::Loopflow,
-                scope: ContextScope::System,
+                kind: ContextAssetKind::OperatingInstructions,
+                scope: ContextScope::Global,
                 label: "guide".to_string(),
                 source_path: None,
                 included_by: "test".to_string(),
@@ -1155,7 +1282,10 @@ mod tests {
         assert_eq!(prepared.decisions[0].asset_position, Some(1));
         let system = prepared.system.unwrap();
         assert_eq!(system.assets.len(), 3);
-        assert_eq!(system.assets[1].kind, ContextAssetKind::Loopflow);
+        assert_eq!(
+            system.assets[1].kind,
+            ContextAssetKind::OperatingInstructions
+        );
         assert_eq!(
             system.assets.iter().map(|asset| asset.bytes).sum::<u64>(),
             system.text.len() as u64
@@ -1206,11 +1336,12 @@ mod tests {
         let launches = store.agent_launches_matching(run_id.as_str()).unwrap();
         assert_eq!(launches.len(), 1);
         assert_eq!(launches[0].capture_status, "complete");
-        assert!(std::path::Path::new(&launches[0].conversation_path).is_file());
+        let conversation = super::resolve_artifact(&launches[0].conversation_path).unwrap();
+        assert!(conversation.is_file());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&launches[0].conversation_path)
+            let mode = std::fs::metadata(conversation)
                 .unwrap()
                 .permissions()
                 .mode()

@@ -101,10 +101,11 @@ fn join_turns(launches: &[AgentLaunchRow], turns: &[AgentTurnRow]) -> Vec<Contex
                 capture_status: launch.capture_status.clone(),
                 supplied_context_tokens: turn.supplied_context_tokens,
                 provider_input_tokens: turn.provider_input_tokens,
-                context_gather_ms: launch.context_gather_ms,
-                context_render_ms: launch.context_render_ms,
-                context_persist_ms: launch.context_persist_ms,
-                artifact_available: std::path::Path::new(&turn.task_prompt_path).is_file(),
+                context_gather_ms: turn.context_gather_ms,
+                context_render_ms: turn.context_render_ms,
+                context_persist_ms: turn.context_persist_ms,
+                artifact_available: crate::trace::resolve_artifact(&turn.task_prompt_path)
+                    .is_ok_and(|path| path.is_file()),
             })
         })
         .collect()

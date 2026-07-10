@@ -1657,10 +1657,9 @@ impl SqliteStore {
                 id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
                 skill, provider, model, surface, capture_status, incomplete_reason, outcome,
                 artifact_dir, conversation_path, provider_events_path, provider_session_id,
-                provider_session_path, context_gather_ms, context_render_ms, context_persist_ms,
-                conversation_event_count, conversation_bytes
+                provider_session_path, conversation_event_count, conversation_bytes
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
             params![
                 launch.id,
                 launch.run_id,
@@ -1683,9 +1682,6 @@ impl SqliteStore {
                 launch.provider_events_path,
                 launch.provider_session_id,
                 launch.provider_session_path,
-                launch.context_gather_ms,
-                launch.context_render_ms,
-                launch.context_persist_ms,
                 launch.conversation_event_count,
                 launch.conversation_bytes,
             ],
@@ -1720,13 +1716,14 @@ impl SqliteStore {
             let decision = &row.decision;
             tx.execute(
                 "INSERT INTO context_decisions (
-                    turn_id, position, kind, label, source_path, decision, reason,
+                    turn_id, position, kind, scope, label, source_path, decision, reason,
                     original_bytes, original_tokens, asset_position
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     row.turn_id,
                     i64::from(decision.position),
-                    decision.kind,
+                    decision.kind.as_str(),
+                    decision.scope.as_str(),
                     decision.label,
                     decision.source_path,
                     decision.decision.as_str(),
@@ -1807,8 +1804,7 @@ impl SqliteStore {
             "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
                     skill, provider, model, surface, capture_status, incomplete_reason, outcome,
                     artifact_dir, conversation_path, provider_events_path, provider_session_id,
-                    provider_session_path, context_gather_ms, context_render_ms, context_persist_ms,
-                    conversation_event_count, conversation_bytes
+                    provider_session_path, conversation_event_count, conversation_bytes
              FROM agent_launches WHERE run_id LIKE ?1 ORDER BY started_at, id",
             params![prefix],
         )
@@ -1819,8 +1815,7 @@ impl SqliteStore {
             "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
                     skill, provider, model, surface, capture_status, incomplete_reason, outcome,
                     artifact_dir, conversation_path, provider_events_path, provider_session_id,
-                    provider_session_path, context_gather_ms, context_render_ms, context_persist_ms,
-                    conversation_event_count, conversation_bytes
+                    provider_session_path, conversation_event_count, conversation_bytes
              FROM agent_launches WHERE started_at >= ?1 ORDER BY started_at, id",
             params![since],
         )
@@ -1856,11 +1851,8 @@ impl SqliteStore {
                 provider_events_path: row.get(18)?,
                 provider_session_id: row.get(19)?,
                 provider_session_path: row.get(20)?,
-                context_gather_ms: row.get(21)?,
-                context_render_ms: row.get(22)?,
-                context_persist_ms: row.get(23)?,
-                conversation_event_count: row.get(24)?,
-                conversation_bytes: row.get(25)?,
+                conversation_event_count: row.get(21)?,
+                conversation_bytes: row.get(22)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -1880,7 +1872,8 @@ impl SqliteStore {
                     input_op, context_coverage, tokenizer, system_prompt_path, task_prompt_path,
                     system_tokens, task_tokens, supplied_context_tokens, provider_input_tokens,
                     provider_output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
-                    cost_usd, first_event_seq, last_event_seq
+                    cost_usd, context_gather_ms, context_render_ms, context_persist_ms,
+                    first_event_seq, last_event_seq
              FROM agent_turns ORDER BY started_at, ordinal",
         )?;
         let rows = stmt.query_map([], map_agent_turn)?;
@@ -1980,7 +1973,7 @@ impl SqliteStore {
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT turn_id, position, kind, label, source_path, decision, reason,
+            "SELECT turn_id, position, kind, scope, label, source_path, decision, reason,
                     original_bytes, original_tokens, asset_position
              FROM context_decisions ORDER BY turn_id, position",
         )?;
@@ -1990,12 +1983,13 @@ impl SqliteStore {
                 row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, String>(5)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
                 row.get::<_, String>(6)?,
-                row.get::<_, Option<i64>>(7)?,
+                row.get::<_, String>(7)?,
                 row.get::<_, Option<i64>>(8)?,
                 row.get::<_, Option<i64>>(9)?,
+                row.get::<_, Option<i64>>(10)?,
             ))
         })?;
         let wanted: std::collections::HashSet<&str> = turn_ids.iter().map(String::as_str).collect();
@@ -2005,6 +1999,7 @@ impl SqliteStore {
                 turn_id,
                 position,
                 kind,
+                scope,
                 label,
                 source_path,
                 decision,
@@ -2020,7 +2015,8 @@ impl SqliteStore {
                 turn_id,
                 decision: ContextDecision {
                     position: position as u32,
-                    kind,
+                    kind: ContextAssetKind::parse(&kind)?,
+                    scope: ContextScope::parse(&scope)?,
                     label,
                     source_path,
                     decision: ContextDecisionKind::parse(&decision)?,
@@ -2041,10 +2037,11 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             id, launch_id, ordinal, provider_turn_id, started_at, ended_at, status, input_op,
             context_coverage, tokenizer, system_prompt_path, task_prompt_path, system_tokens,
             task_tokens, supplied_context_tokens, provider_input_tokens, provider_output_tokens,
-            reasoning_tokens, cache_read_tokens, cache_write_tokens, cost_usd, first_event_seq,
+            reasoning_tokens, cache_read_tokens, cache_write_tokens, cost_usd,
+            context_gather_ms, context_render_ms, context_persist_ms, first_event_seq,
             last_event_seq
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
         params![
             turn.id,
             turn.launch_id,
@@ -2067,6 +2064,9 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             turn.cache_read_tokens,
             turn.cache_write_tokens,
             turn.cost_usd,
+            turn.context_gather_ms,
+            turn.context_render_ms,
+            turn.context_persist_ms,
             turn.first_event_seq,
             turn.last_event_seq,
         ],
@@ -2097,7 +2097,10 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
         cache_read_tokens: row.get(18)?,
         cache_write_tokens: row.get(19)?,
         cost_usd: row.get(20)?,
-        first_event_seq: row.get(21)?,
-        last_event_seq: row.get(22)?,
+        context_gather_ms: row.get(21)?,
+        context_render_ms: row.get(22)?,
+        context_persist_ms: row.get(23)?,
+        first_event_seq: row.get(24)?,
+        last_event_seq: row.get(25)?,
     })
 }

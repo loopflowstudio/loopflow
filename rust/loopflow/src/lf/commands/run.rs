@@ -571,8 +571,8 @@ fn attributed_context(
     if components.operate {
         push(
             &crate::engine::prompt::loopflow_section(),
-            Kind::Loopflow,
-            Scope::System,
+            Kind::OperatingInstructions,
+            Scope::Global,
             "Loopflow operating guide".to_string(),
             None,
             "operate",
@@ -580,8 +580,8 @@ fn attributed_context(
     }
     push(
         components.surface.instructions(),
-        Kind::Surface,
-        Scope::System,
+        Kind::SurfaceInstructions,
+        Scope::Global,
         format!("{:?} surface", components.surface),
         None,
         "surface",
@@ -599,7 +599,7 @@ fn attributed_context(
     if let Some(wave) = &components.wave {
         push(
             &format!("<lf:wave name=\"{wave}\">"),
-            Kind::WaveGoal,
+            Kind::Goal,
             Scope::Wave,
             wave.clone(),
             Some(format!("wave/{wave}/GOAL.md")),
@@ -609,7 +609,7 @@ fn attributed_context(
     if let Some(memory) = &components.wave_memory {
         push(
             &memory.content,
-            Kind::WaveMemory,
+            Kind::Memory,
             Scope::Wave,
             "wave memory".to_string(),
             Some(memory.path.clone()),
@@ -619,7 +619,7 @@ fn attributed_context(
     if let Some(chat) = &components.wave_chat {
         push(
             chat,
-            Kind::WaveChat,
+            Kind::Chat,
             Scope::Wave,
             "recent wave chat".to_string(),
             None,
@@ -632,7 +632,7 @@ fn attributed_context(
         } else if document.path.ends_with("AGENTS.md") || document.path.ends_with("CLAUDE.md") {
             Kind::RepoInstructions
         } else {
-            Kind::Docs
+            Kind::Document
         };
         push(
             &document.content,
@@ -666,7 +666,7 @@ fn attributed_context(
     for summary in &components.summaries {
         push(
             &summary.content,
-            Kind::ParentSummary,
+            Kind::Summary,
             Scope::Task,
             summary.path.clone(),
             Some(summary.path.clone()),
@@ -687,7 +687,7 @@ fn attributed_context(
         if let Some(content) = &skill.content {
             push(
                 content,
-                Kind::Skill,
+                Kind::SkillInstructions,
                 Scope::Step,
                 skill.name.clone(),
                 None,
@@ -696,7 +696,7 @@ fn attributed_context(
         } else {
             push(
                 &skill.name,
-                Kind::Skill,
+                Kind::SkillInstructions,
                 Scope::Step,
                 skill.name.clone(),
                 None,
@@ -719,7 +719,8 @@ fn attributed_context(
     if components.diff_tier == DiffTier::StatOnly {
         decisions.push(ContextDecision {
             position: 0,
-            kind: "diff".to_string(),
+            kind: Kind::Diff,
+            scope: Scope::Repo,
             label: "branch diff".to_string(),
             source_path: None,
             decision: ContextDecisionKind::StatOnly,

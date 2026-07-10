@@ -185,7 +185,10 @@ pub fn trace(
         if let Some(reason) = &launch.incomplete_reason {
             println!("    incomplete  {reason}");
         }
-        println!("    events      {}", launch.conversation_path);
+        println!(
+            "    events      {}",
+            crate::trace::resolve_artifact(&launch.conversation_path)?.display()
+        );
         for turn in turns.iter().filter(|turn| turn.launch_id == launch.id) {
             println!(
                 "    turn {}  {} tokens  provider input {}  {}",
@@ -197,9 +200,15 @@ pub fn trace(
                 turn.status,
             );
             if let Some(system) = &turn.system_prompt_path {
-                println!("      system  {system}");
+                println!(
+                    "      system  {}",
+                    crate::trace::resolve_artifact(system)?.display()
+                );
             }
-            println!("      task    {}", turn.task_prompt_path);
+            println!(
+                "      task    {}",
+                crate::trace::resolve_artifact(&turn.task_prompt_path)?.display()
+            );
         }
     }
 
@@ -238,8 +247,8 @@ fn trace_events(
     }
 
     for launch in selected {
-        let path = std::path::Path::new(&launch.conversation_path);
-        let file = std::fs::File::open(path).map_err(|error| {
+        let path = crate::trace::resolve_artifact(&launch.conversation_path)?;
+        let file = std::fs::File::open(&path).map_err(|error| {
             anyhow!(
                 "normalized conversation missing at {}: {error}",
                 path.display()

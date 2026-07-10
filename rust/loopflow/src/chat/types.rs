@@ -24,6 +24,19 @@ pub enum Lifecycle {
     Interrupted,
 }
 
+impl Lifecycle {
+    /// The console/wire name, identical to the serde representation.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
+        }
+    }
+}
+
 // -- Typed items --
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

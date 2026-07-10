@@ -1,14 +1,19 @@
 pub mod auth;
 pub mod chat;
 pub mod doctor;
+#[cfg(test)]
+pub(crate) mod fixtures;
 pub mod flow;
 pub mod list;
 pub mod memory;
 pub mod ops;
+pub mod playhead;
+pub mod radio;
 pub mod run;
 pub mod runs;
 pub mod ssh;
 pub mod sub;
+pub mod thread;
 pub mod tokens;
 pub mod usage;
 pub mod util;

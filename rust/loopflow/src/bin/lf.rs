@@ -7,7 +7,7 @@ use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
-use loopflow::lf::{Cli, Commands};
+use loopflow::lf::{Cli, Commands, ProjectCommand};
 
 /// What `reorder_args` needs to know about the CLI, derived from the clap
 /// definition so it can never drift from it (the old hand-maintained lists
@@ -313,7 +313,7 @@ fn run_target_in_repo(
 }
 
 fn placement_requested(cli: &Cli) -> bool {
-    cli.dispatch || cli.stack.is_some() || cli.fork
+    cli.stack.is_some() || cli.fork
 }
 
 fn inner_placement_invocation(command: &[String]) -> anyhow::Result<(Cli, Vec<String>)> {
@@ -332,7 +332,7 @@ fn strip_placement_args(command: &[String]) -> Vec<String> {
     let mut args = command.iter().peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--dispatch" | "--fork" => {}
+            "--fork" => {}
             "--stack" => {
                 let _ = args.next();
             }
@@ -360,40 +360,15 @@ fn run_placed_target(
     } else {
         loopflow::lfd::executor::Placement::Fresh
     };
-    let target_branch = if cli.dispatch {
-        loopflow::engine::git::current_branch(repo_root)?
-    } else {
-        None
-    };
-
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store: loopflow::lfdb::SharedStore = std::sync::Arc::new(runtime.block_on(async {
-        loopflow::lfdb::open_existing_store().await.ok_or_else(|| {
-            anyhow::anyhow!(
-                "no run registry on this machine — nothing has created ~/.lf/lfd.db yet"
-            )
-        })
-    })?);
-
-    let mut run = runtime.block_on(async {
-        let wave = store
-            .get_wave_by_name(&wave_name)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("wave '{wave_name}' not found in the registry"))?;
-        let run_id = loopflow::lfd::id::LfdId::new();
-        let mut run = loopflow::lfd::executor::create_run_for_placement(
-            &store,
-            &wave,
-            &run_id,
-            &placement,
-            target_branch.as_deref(),
-        )
-        .await?;
-        run.flow = name.trim_end_matches(':').to_string();
-        run.task = message.map(str::to_string);
-        store.update_run(&run).await?;
-        anyhow::Ok(run)
-    })?;
+    // The same registry-backed run lifecycle `lf loop` uses; only the
+    // placement and what happens inside the worktree differ.
+    let placed = loopflow::flowloop::run::LoopRun::start(
+        &wave_name,
+        name.trim_end_matches(':'),
+        message.map(str::to_string),
+        &placement,
+    )?;
+    let run = &placed.run;
 
     eprintln!("placed {name} in {}", run.worktree);
     let _cwd = CurrentDirGuard::set(&run.worktree)?;
@@ -409,19 +384,7 @@ fn run_placed_target(
         &inner_cli,
         &inner_command,
     );
-    let succeeded = result.is_ok();
-    let error = result.as_ref().err().map(ToString::to_string);
-    runtime.block_on(async {
-        run.status = if succeeded {
-            loopflow::lfd::types::RunStatus::Completed
-        } else {
-            loopflow::lfd::types::RunStatus::Failed
-        };
-        run.ended_at = Some(time::OffsetDateTime::now_utc());
-        run.error = error;
-        store.update_run(&run).await
-    })?;
-    result
+    placed.finish(result)
 }
 
 fn resolve_placement_wave(repo_root: &Path, cli: &Cli) -> anyhow::Result<String> {
@@ -483,7 +446,7 @@ fn main() -> anyhow::Result<()> {
     // survive as an orphan. The `termination` feature extends the handler
     // to SIGTERM and SIGHUP: `tmux kill-session` delivers SIGHUP, which
     // otherwise bypasses every cleanup (observed live: it orphaned the wave
-    // flowloop's codex app-server pair and left a stale .wave-endpoint).
+    // loop's codex app-server pair and left a stale .wave-endpoint).
     ctrlc::set_handler(|| {
         loopflow::engine::agent::run_interrupt_cleanups();
         loopflow::engine::agent::kill_child_if_running();
@@ -569,18 +532,16 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Cron { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
             }
-            Some(Commands::Wave {
+            Some(Commands::Serve { name, force }) => {
+                in_repo_runtime(&args, |_| loopflow::wave::serve(name, *force))
+            }
+            Some(Commands::Resident { name }) => {
+                in_repo_runtime(&args, |_| loopflow::wave::resident::run(name))
+            }
+            Some(Commands::Loop {
                 name,
-                force,
-                no_flowloop,
-                flowloop_only,
-            }) => in_repo_runtime(&args, |_| {
-                loopflow::wave::run(name, *force, *no_flowloop, *flowloop_only)
-            }),
-            Some(Commands::Task {
                 seed,
-                flow,
-                wave,
+                detach,
                 max_passes,
                 pass_timeout_secs,
                 wall_clock_secs,
@@ -588,14 +549,47 @@ fn main() -> anyhow::Result<()> {
                 max_turns,
             }) => in_repo_runtime(&args, |repo| {
                 let mut options =
-                    loopflow::flowloop::driver::LoopOptions::new(flow.clone(), wave.clone());
+                    loopflow::flowloop::driver::LoopOptions::new(name.clone(), cli.wave.clone());
                 options.max_passes = *max_passes;
                 options.pass_timeout = std::time::Duration::from_secs(*pass_timeout_secs);
                 options.wall_clock = std::time::Duration::from_secs(*wall_clock_secs);
                 options.poll = std::time::Duration::from_secs(*poll_secs);
                 options.max_turns = max_turns.or(cli.max_turns);
-                loopflow::flowloop::driver::run_flowloop(repo, seed, &options)
-                    .map_err(anyhow::Error::from)
+                if *detach {
+                    let session = loopflow::flowloop::driver::detach_loop(repo, seed, &options)
+                        .map_err(anyhow::Error::from)?;
+                    println!("detached {name} loop in tmux session {session}");
+                    println!("inspect: tmux attach -r -t {session}");
+                    Ok(())
+                } else {
+                    loopflow::flowloop::driver::run_loop(repo, seed, &options)
+                        .map_err(anyhow::Error::from)
+                }
+            }),
+            Some(Commands::Enqueue { flow }) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::playhead::enqueue(repo, cli.wave.as_deref(), flow)
+            }),
+            Some(Commands::Skip) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::playhead::skip(repo, cli.wave.as_deref())
+            }),
+            Some(Commands::FlowStep { flow, index, seed }) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::flow::run_step(flow, *index, seed, &cli, repo)
+            }),
+            Some(Commands::Project {
+                cmd: ProjectCommand::Promote { slug, wave },
+            }) => in_repo_runtime(&args, |repo| {
+                let parent = wave
+                    .clone()
+                    .or_else(|| loopflow::ops::resolve_wave_name(repo, None))
+                    .ok_or_else(|| anyhow::anyhow!("cannot determine parent wave"))?;
+                let message = format!(
+                    "Promote project '{slug}' from parent wave '{parent}'. Complete the authored migration, PM move, parent link, and residency checks."
+                );
+                run_target("project-promote", Some(&message), &cli, &args)?;
+                let session = loopflow::ops::project::complete_promotion(repo, &parent, slug)
+                    .map_err(anyhow::Error::from)?;
+                println!("promoted {slug} from {parent}; residency: {session}");
+                Ok(())
             }),
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)
@@ -612,14 +606,27 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Trace { run_id, json }) => {
                 loopflow::lf::commands::runs::trace(run_id, *json)
             }
-            Some(Commands::Chat { text, from, target }) => {
-                loopflow::lf::commands::chat::run(text, from.as_deref(), target)
+            Some(Commands::Chat {
+                text,
+                steer,
+                target,
+            }) => loopflow::lf::commands::chat::run(text, *steer, target),
+            Some(Commands::Wavechat { wave }) => {
+                loopflow::lf::commands::wavechat::run(wave.as_deref())
             }
-            Some(Commands::Wavechat { wave, from }) => {
-                loopflow::lf::commands::wavechat::run(wave.as_deref(), from.as_deref())
-            }
-            Some(Commands::Sub { wave, json }) => {
-                loopflow::lf::commands::sub::run(wave.as_deref(), *json)
+            Some(Commands::Radio {
+                text,
+                channel,
+                parent,
+                from,
+            }) => loopflow::lf::commands::radio::run(
+                text,
+                channel.as_deref(),
+                *parent,
+                from.as_deref(),
+            ),
+            Some(Commands::Sub { channel, json }) => {
+                loopflow::lf::commands::sub::run(channel.as_deref(), *json)
             }
             Some(Commands::Memory { cmd, target }) => {
                 loopflow::lf::commands::memory::run(cmd.as_ref(), target)
@@ -664,11 +671,9 @@ fn main() -> anyhow::Result<()> {
     result
 }
 
-/// Session label for agent-launching invocations; `None` for utility commands
-/// (`lf pr`, `lf usage`, `lf chat`, `lf sub`, `lf memory`, `lf -l`) and
-/// `lf wave`, which never self-register (placement creates the worker's row;
-/// `lf wave` registers as the wave's agent session; chat/memory are
-/// one-shot POSTs attributed via the env they inherit).
+/// Session label for agent-launching invocations. Utility commands return
+/// `None`; `lf serve` and `lf loop` also return `None` because their own
+/// lifecycle owners register the WaveAgent and LoopRun rows respectively.
 fn run_label(cli: &Cli) -> Option<String> {
     if cli.list {
         return None;
@@ -694,8 +699,12 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Pm { .. })
         | Some(Commands::SyncSkills { .. })
         | Some(Commands::Cron { .. })
-        | Some(Commands::Wave { .. })
-        | Some(Commands::Task { .. })
+        | Some(Commands::Serve { .. })
+        | Some(Commands::Resident { .. })
+        | Some(Commands::Loop { .. })
+        | Some(Commands::Enqueue { .. })
+        | Some(Commands::Skip)
+        | Some(Commands::FlowStep { .. })
         | Some(Commands::Usage { .. })
         | Some(Commands::Tokens { .. })
         | Some(Commands::Doctor { .. })
@@ -704,10 +713,12 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Runs { .. })
         | Some(Commands::Trace { .. })
         | Some(Commands::Chat { .. })
+        | Some(Commands::Radio { .. })
         | Some(Commands::Sub { .. })
         | Some(Commands::Wavechat { .. })
         | Some(Commands::Memory { .. })
         | Some(Commands::Ssh { .. }) => None,
+        Some(Commands::Project { .. }) => Some("project-promote".to_string()),
     }
 }
 
@@ -724,8 +735,8 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "wave", "task", "flow",
-            "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace", "help",
+            ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "loop", "project",
+            "flow", "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace", "help",
         ] {
             assert!(tables.commands.contains(command), "command {command}");
         }
@@ -766,7 +777,6 @@ mod tests {
             "--diff",
             "--no-diff",
             "--no-loopflow",
-            "--dispatch",
             "--fork",
             "-h",
             "--help",
@@ -810,17 +820,17 @@ mod tests {
             "lf".to_string(),
             "implement".to_string(),
             "ship it".to_string(),
-            "--dispatch".to_string(),
+            "--fork".to_string(),
         ];
         let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "--dispatch", "implement", "ship it"]);
+        assert_eq!(result, vec!["lf", "--fork", "implement", "ship it"]);
     }
 
     #[test]
-    fn placed_inner_invocation_strips_dispatch() {
+    fn placed_inner_invocation_strips_fork() {
         let command: Vec<String> = [
             "lf",
-            "--dispatch",
+            "--fork",
             "-b",
             "--wave",
             "goals",
@@ -842,6 +852,82 @@ mod tests {
         assert!(inner_cli.batch);
         assert_eq!(inner_cli.wave.as_deref(), Some("goals"));
         assert!(matches!(inner_cli.command, Some(Commands::External(_))));
+    }
+
+    /// Batch and steerable are different entrypoints, not one verb reading its
+    /// environment. `lf loop` always names a flow and always carries a seed.
+    #[test]
+    fn loop_parses_blocking_and_detached_batch_forms() {
+        let blocking = Cli::try_parse_from(["lf", "loop", "task", "ship it"]).unwrap();
+        assert!(matches!(
+            blocking.command,
+            Some(Commands::Loop {
+                detach: false,
+                name,
+                seed,
+                ..
+            }) if name == "task" && seed == "ship it"
+        ));
+
+        let detached =
+            Cli::try_parse_from(["lf", "loop", "project", "hold the KR frontier", "--detach"])
+                .unwrap();
+        assert!(matches!(
+            detached.command,
+            Some(Commands::Loop { detach: true, name, .. }) if name == "project"
+        ));
+
+        // A seedless loop has nothing to run: it is a parse error, not a wave.
+        assert!(Cli::try_parse_from(["lf", "loop", "goals"]).is_err());
+    }
+
+    /// Serving a mind is its own command. Nothing about the ambient
+    /// environment can turn one of these into the other.
+    #[test]
+    fn serve_and_resident_are_distinct_entrypoints() {
+        let served = Cli::try_parse_from(["lf", "serve", "goals"]).unwrap();
+        assert!(matches!(
+            served.command,
+            Some(Commands::Serve { name, force: false }) if name == "goals"
+        ));
+
+        let forced = Cli::try_parse_from(["lf", "serve", "goals", "--force"]).unwrap();
+        assert!(matches!(
+            forced.command,
+            Some(Commands::Serve { force: true, .. })
+        ));
+
+        // The listener's own body — hidden, but spellable, because the
+        // listener spawns it by name rather than by leaking env.
+        let body = Cli::try_parse_from(["lf", "__resident", "goals"]).unwrap();
+        assert!(matches!(
+            body.command,
+            Some(Commands::Resident { name }) if name == "goals"
+        ));
+    }
+
+    /// `wave` became `serve`. The parser can't reject it outright — the
+    /// `external_subcommand` catch-all claims any unmatched verb — so the
+    /// property that actually holds is that it no longer names a built-in
+    /// command. The exec door denies `External` on top of that.
+    #[test]
+    fn old_wave_surface_is_no_longer_a_builtin_command() {
+        let cli = Cli::try_parse_from(["lf", "wave", "goals"]).expect("falls through to external");
+        assert!(
+            matches!(cli.command, Some(Commands::External(parts)) if parts[0] == "wave"),
+            "`wave` survives only as an external verb, not a wave command"
+        );
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "serve", "goals"])
+                .expect("the replacement")
+                .command,
+            Some(Commands::Serve { .. })
+        ));
+    }
+
+    #[test]
+    fn removed_dispatch_flag_is_rejected() {
+        assert!(Cli::try_parse_from(["lf", "--dispatch", "implement", "ship it"]).is_err());
     }
 
     #[test]

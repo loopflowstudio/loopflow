@@ -824,7 +824,7 @@ fn run_in_wave_context_assembles_chat_and_memory_sections() {
     fs::create_dir_all(repo.join("wave/goals")).unwrap();
     fs::write(
         repo.join("wave/goals/MEMORY.md"),
-        "- workers report via lf chat",
+        "- workers report via lf radio",
     )
     .unwrap();
     make_commit(repo, "initial");
@@ -849,7 +849,7 @@ fn run_in_wave_context_assembles_chat_and_memory_sections() {
     assert!(prompt.contains("<lf:wave-chat-recent>"));
     assert!(prompt.contains("user: how goes the build?"));
     assert!(prompt.contains("<lf:wave-memory>"));
-    assert!(prompt.contains("workers report via lf chat"));
+    assert!(prompt.contains("workers report via lf radio"));
 }
 
 #[test]
@@ -886,7 +886,7 @@ fn worktree_reads_the_origin_repos_wave_memory() {
     .unwrap();
     make_commit(&origin, "initial");
 
-    // A sibling worktree, as `lf wave` bootstraps: <repo>.goals.
+    // A sibling worktree, as `lf loop` bootstraps: <repo>.goals.
     let worktree = temp.path().join("repo.goals");
     std::process::Command::new("git")
         .args([

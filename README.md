@@ -38,54 +38,60 @@ change crosses component or product boundaries.
 Run the wave in your terminal:
 
 ```bash
-lf wave designer             # the wave's server: one persistent flowloop, until Ctrl-C
-lf chat "ship the button audit first"     # post into its thread (any process can)
+lf serve designer             # the wave's server: one persistent loop, until Ctrl-C
+lf chat --steer "ship the button audit first" # steer the live body, else queue
 lf memory add "buttons: variants unified" # curate what it knows
 ```
 
 Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
-`tmux attach -t <name>` to jump into one.
+`tmux attach -r -t <name>` to inspect one without writing into its session.
 
-`lf wave <name>` starts a long-lived server at the repo's main checkout (the
-wave's journal and endpoint live at the origin); the resident flowloop — one
-persistent codex thread — enters the wave's worktree to work. Progress and
-chat are a single conversation: human messages steer a live turn by default,
-attributed messages (workers, scripts) queue for the next one, and interrupt
-finalizes a partial turn. Truth is an append-only journal, so a restart keeps
-the whole thread. `lf chat` and `lf memory` are the message doors for flowloops,
-workers, humans, and scripts; worker reports arrive attributed in the thread.
-Outside any wave a publish drops silently (exit 0) — the verbs are safe in
-every prompt. See `rust/loopflow/src/wave/README.md` for the wire contract,
-and `scripts/demo_wave.sh` for the guided demo.
+`lf serve <name>` starts a long-lived server at the repo's main checkout (the
+wave's journal and endpoint live at the origin); its playhead enters the wave's
+worktree and gives each flow step a live harness session. Progress and chat are
+a single conversation: `lf chat --steer` reaches the body now playing (and
+queues when it cannot). Truth is an append-only journal, so a restart keeps the
+whole thread. Humans use `lf chat`; agents broadcast with `lf radio`; `lf
+memory` curates retained facts. A served wave folds family reports into its
+thread with attribution. Outside any wave a publish prints a short drop note
+and exits 0, so the verbs are safe in every prompt. See
+`rust/loopflow/src/wave/README.md` for the wire contract, and
+`scripts/demo_wave.sh` for the guided demo.
 
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 
 ```bash
-lf wave s3           # the s3 (control) charter
+lf serve s3           # the s3 (control) charter
 ```
 
-The wave agent coordinates; it rarely writes code itself. When it picks a substantial task it dispatches a **worker** — a scoped agent that runs a flow, opens a PR, and reports back:
+The wave agent inhabits one context-sensitive loop and delegates
+self-sufficient work. Both forms run in scoped worktrees and report back:
 
 ```bash
-lf build "unify button variants" --wave designer --dispatch
+lf loop build "unify button variants" --wave designer           # inhabit
+lf loop build "audit the settings panes" --wave designer --detach # delegate
 ```
 
 Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its intent in view. Their PRs are how results flow back to the wave.
 
-Run a task as a bounded task flowloop:
+Run a task as a bounded task loop:
 
 ```bash
-lf task "fix the flaky chord-timeout test" --wave designer
+lf loop task "fix the flaky chord-timeout test" --wave designer
 ```
 
-`lf task` takes free text, creates a task worktree, and loops `task`
-over it until the PR merges. The open runs with a task flow ARE the wave's
-open tasks (`lf runs`); the merged PR is the record of done — no tracker
-required.
+`lf loop` takes a flow and free text, creates a worktree, and repeats the flow
+until its bit flips (`task`: when the PR merges). Linear holds filed work,
+`lf runs` holds active hands, and merged PRs record done.
+
+Two commands, two kinds of run. `lf serve designer` boots a mind: a listener, a
+thread, a playhead — something you can chat with while it works. `lf loop task
+"fix it"` runs a bounded child loop in batch: no chat surface, reports at its
+boundaries. Serving is for waves; looping is for the work a wave hands off.
 
 ### Crons
 
-Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. They live in `GOAL.md` frontmatter; the wave's resident flowloop fires each due schedule as a system pass. `workers: 0` is valid for a cron-only wave.
+Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. They live in `GOAL.md` frontmatter; the wave's resident loop fires each due schedule as a system pass. `workers: 0` is valid for a cron-only wave.
 
 ```markdown
 <!-- wave/governance/GOAL.md -->
@@ -101,14 +107,14 @@ crons:
 
 `lfd` verifies each GitHub webhook and translates it inward as an `lf` exec.
 For the current demo path, CI failures and main pushes arrive as attributed
-chat notifications; the architecture direction is durable facts plus explicit
-commands for long-term coordination.
+bus publishes — machine speech with a byline that survives a sleeping wave
+and folds into its thread attributed on the next sweep.
 
 | Event | What lfd runs |
 |-------|---------------|
-| CI fails on a wave's PR | `lf chat --wave <name> "CI failed: …"` — the flowloop decides how to fix (usually a `ci-fix` worker) |
+| CI fails on a wave's PR | `lf radio --channel <name> --from ci "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
 | PR merged | queue state reconciles in-process |
-| Push to main | `lf chat --wave <name> "main moved: …"` — the flowloop decides whether to rebase or integrate |
+| Push to main | `lf radio --channel <name> --from github "main moved: …"` — the loop decides whether to rebase or integrate |
 
 ## Skills
 
@@ -303,7 +309,7 @@ If no `router:` is specified, a generic routing agent picks a path based on scra
 Once you're chaining skills into flows, you're ready to ride a wave. Write its `wave/<name>/GOAL.md`, then run the agent:
 
 ```bash
-lf wave engbot             # start the wave agent
+lf serve engbot             # start the wave agent
 ```
 
 Directions compose extra nuance into any skill or flow the wave dispatches.
@@ -341,13 +347,13 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf --bin lf
 ```
 Install the Rust binaries directly with cargo.
 
-## Dispatch and Observe
+## Inhabit, Delegate, Observe
 
 ```bash
-lf wave engbot       # start the wave agent (Ctrl-C to stop)
-lf implement "Add the endpoint" --wave engbot --dispatch
+lf serve engbot       # start the wave agent (Ctrl-C to stop)
+lf loop implement "Add the endpoint" --wave engbot --detach
 tmux ls              # list live sessions — the wave agent and its workers
-tmux attach -t <name>  # attach to one
+tmux attach -r -t <name>  # inspect without direct control
 ```
 
 Read `wave/engbot/GOAL.md` and `wave/engbot/MEMORY.md` for a wave's state, or

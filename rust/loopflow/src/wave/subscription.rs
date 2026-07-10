@@ -59,9 +59,8 @@ impl SseFrameParser {
 }
 
 /// Follow one `/events` connection until it ends, handing every frame to
-/// `on_frame`. `query` scopes the subscription (`""` = the whole family,
-/// `"?channel=<name>"` = one channel, `"?inbox=true"` = the resident's
-/// scope). Connection failure and non-2xx are errors.
+/// `on_frame`. `query` is `""` for the mind's thread, or `"?inbox=true"` for
+/// the resident's scope. Connection failure and non-2xx are errors.
 pub async fn stream_events(
     endpoint: &str,
     query: &str,

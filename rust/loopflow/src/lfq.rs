@@ -21,7 +21,7 @@ use crate::lfdb::{open_existing_store, SharedStore};
 use crate::wave::wire::{SUBAGENT_TOKEN_ENV, SUBAGENT_TOKEN_HEADER};
 
 /// The endpoint from `LF_WAVE_ENDPOINT`, trimmed; `None` when unset or empty.
-fn env_endpoint() -> Option<String> {
+pub(crate) fn env_endpoint() -> Option<String> {
     std::env::var(WAVE_SERVER_ENDPOINT_ENV)
         .ok()
         .map(|value| value.trim().to_string())
@@ -29,7 +29,7 @@ fn env_endpoint() -> Option<String> {
 }
 
 /// The per-subagent token from `LF_SUBAGENT_TOKEN`, trimmed.
-fn subagent_token() -> Option<String> {
+pub(crate) fn subagent_token() -> Option<String> {
     std::env::var(SUBAGENT_TOKEN_ENV)
         .ok()
         .map(|value| value.trim().to_string())

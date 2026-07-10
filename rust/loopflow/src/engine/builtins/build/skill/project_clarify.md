@@ -12,7 +12,7 @@ wave; it owns KRs and closure criteria, not memory, cadence, or child projects.
 Read the seed, the project doc if present, and the wave's GOAL.md and MEMORY.md.
 
 Wave project docs live at `wave/<wave>/projects/<project>.md`. During an
-isolated project flowloop, the working doc may be `scratch/<branch>.md`. In
+isolated project loop, the working doc may be `scratch/<branch>.md`. In
 either case, the project doc carries the definition and a `## KRs` section.
 Concrete tasks live outside the KR set.
 

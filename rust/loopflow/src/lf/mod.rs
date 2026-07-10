@@ -5,7 +5,7 @@ pub mod discovery;
 pub mod output;
 pub mod session;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Default)]
 #[command(name = "lf")]
 #[command(about = "Run skills and flows with coding agents")]
 #[command(version)]
@@ -98,16 +98,12 @@ pub struct Cli {
     #[arg(long = "no-loopflow")]
     pub no_loopflow: bool,
 
-    /// Run this invocation in a separate worktree targeting the current branch
-    #[arg(long, conflicts_with_all = ["stack", "fork"])]
-    pub dispatch: bool,
-
     /// Run this invocation in a worktree stacked on a parent run
-    #[arg(long, value_name = "RUN_ID", conflicts_with_all = ["dispatch", "fork"])]
+    #[arg(long, value_name = "RUN_ID", conflicts_with = "fork")]
     pub stack: Option<String>,
 
     /// Run this invocation in a separate worktree forked from the review base
-    #[arg(long, conflicts_with_all = ["dispatch", "stack"])]
+    #[arg(long, conflicts_with = "stack")]
     pub fork: bool,
 }
 
@@ -203,35 +199,33 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: CronCommand,
     },
-    /// Start a wave: a long-lived listener (journal, doors, live events over
-    /// a loopback HTTP port; discovery via `wave/<name>/.wave-endpoint`)
-    /// that spawns and supervises the wave's flowloop as a resident child
-    /// process.
-    #[command(name = "wave")]
-    Wave {
-        /// Wave name (matches wave/<name>/)
+    /// Serve a mind: boot its listener, thread, and residency. Steerable.
+    ///
+    /// By convention this is the wave loop's entrypoint — a served mind is one
+    /// you can chat with while it runs. `lf loop` is the batch counterpart.
+    Serve {
+        /// Wave name
         name: String,
-        /// Take over even if lfd reports another live wave-agent session
+        /// Take over even if another live wave session is registered
         #[arg(long)]
         force: bool,
-        /// Serve dormant: listener only, no resident (health reads flowloop: null)
-        #[arg(long, conflicts_with = "flowloop_only")]
-        no_flowloop: bool,
-        /// Run only the resident flowloop against an existing listener
-        #[arg(long, conflicts_with = "no_flowloop")]
-        flowloop_only: bool,
     },
-    /// Run a task as a bounded flowloop: loop task until the PR merges
-    Task {
-        /// What to do — free text; the flow's skills clarify it into a design
-        /// doc and drive one small PR to merged
+    /// Internal: the resident body a listener spawns for its own wave. Never
+    /// booted by hand — `lf serve` owns the listener half.
+    #[command(name = "__resident", hide = true)]
+    Resident {
+        /// Wave name
+        name: String,
+    },
+    /// Run a bounded child loop for a flow, to its bit. Batch: no chat surface.
+    Loop {
+        /// Flow name
+        name: String,
+        /// The loop's whole handoff — computable on its own
         seed: String,
-        /// Loop a different flow (any flow is loopable)
-        #[arg(long = "flow", default_value = "task")]
-        flow: String,
-        /// Wave name (default: inferred from the current worktree/branch)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
+        /// Ask the live wave server to own the loop and return immediately
+        #[arg(long)]
+        detach: bool,
         /// Maximum passes before escalation
         #[arg(long = "max-passes", default_value_t = 8)]
         max_passes: u32,
@@ -247,6 +241,22 @@ pub enum Commands {
         /// Maximum agent turns per pass
         #[arg(long = "max-turns")]
         max_turns: Option<u32>,
+    },
+    /// Enqueue a flow in the current wave's innermost invocation
+    Enqueue { flow: String },
+    /// Skip the current logical step without destroying its route
+    Skip,
+    /// Internal resident primitive: execute one expanded top-level flow step.
+    #[command(name = "__flow-step", hide = true)]
+    FlowStep {
+        flow: String,
+        index: usize,
+        seed: String,
+    },
+    /// Project lifecycle operations
+    Project {
+        #[command(subcommand)]
+        cmd: ProjectCommand,
     },
     /// Measure this codebase: lines and tokens per directory (tracked files only)
     Tokens {
@@ -279,7 +289,7 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show one wave's runs, attention, and (when live) flowloop state, from the
+    /// Show one wave's runs, attention, and (when live) loop state, from the
     /// registry. Defaults to the ambient wave (`LFD_WAVE_ID`).
     Status {
         /// Wave name (default: the ambient wave)
@@ -302,36 +312,56 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Post a message into a wave's thread (worker reports, child-wave
-    /// escalations, proactive FYIs). Reads stdin when TEXT is omitted.
+    /// Converse with a served mind's thread (humans); --steer reaches the
+    /// live body. The human surface: journaled, durable, replayed. Agents use
+    /// `lf radio` for agent-to-agent comms, not this.
     Chat {
         /// Message text (reads stdin when omitted — heredoc-friendly)
         #[arg(trailing_var_arg = true)]
         text: Vec<String>,
-        /// Attribution label for machine speech (e.g. --from ci). Overrides
-        /// the ambient label; absent = the ambient sender (env, else "cli").
-        #[arg(long)]
-        from: Option<String>,
+        /// Inject into a live steer-capable turn; otherwise queue.
+        #[arg(long, conflicts_with = "parent")]
+        steer: bool,
         #[command(flatten)]
         target: WaveTargetArgs,
     },
-    /// Steer and monitor a wave from one terminal pane: its live events scroll
-    /// past while a typed line is spoken into the thread. `lf chat` publishes;
-    /// `lf sub` reads; this does both.
+    /// Steer and monitor a served mind from one terminal pane: its thread
+    /// scrolls past while a typed line is spoken into it. `lf chat` publishes
+    /// into the thread; this publishes and follows. The agent bus is the other
+    /// wire — see `lf radio` and `lf sub`.
     Wavechat {
         /// Wave name (default: the ambient wave — env, else worktree)
         wave: Option<String>,
-        /// Attribution label for machine speech (e.g. --from ci)
+    },
+    /// Broadcast on the agent bus (agents): report up when you finish, fail,
+    /// or get stuck. Broadcast, not delivery — whoever is tuned in hears it,
+    /// nobody guarantees receipt. Not a log, not the human surface. Publishing
+    /// is a write to the shared store, so no wave need be running. Bare, it
+    /// publishes on your own channel, which a served wave records as one
+    /// attributed report. Tune in with `lf sub`.
+    Radio {
+        /// Message text (reads stdin when omitted — heredoc-friendly)
+        #[arg(trailing_var_arg = true)]
+        text: Vec<String>,
+        /// Broadcast on another channel (a hand's `goals.<run>`) instead of
+        /// your own.
+        #[arg(short = 'c', long = "channel", conflicts_with = "parent")]
+        channel: Option<String>,
+        /// Broadcast to the parent wave's channel (escalation up the tree).
+        #[arg(long)]
+        parent: bool,
+        /// Byline for machine speech (e.g. --from ci). Testimony, not proof:
+        /// the row records it beside the channel it arrived on.
         #[arg(long)]
         from: Option<String>,
     },
-    /// Follow a wave's live event stream (turns, flowloop state, memory) until
-    /// killed. Defaults to the invoking context's wave; exits 0 with a note
-    /// when no wave resolves.
+    /// Tune in to the agent bus: hear what is broadcast on a channel and its
+    /// descendants while you listen. Defaults to the invoking context's
+    /// channel; exits 0 with a note when none resolves.
     Sub {
-        /// Wave name (default: the ambient wave — env, else worktree)
-        wave: Option<String>,
-        /// Emit raw frames as NDJSON instead of human lines
+        /// Channel prefix (default: the ambient channel — env, else worktree)
+        channel: Option<String>,
+        /// Emit heard frames as NDJSON instead of human lines
         #[arg(long)]
         json: bool,
     },
@@ -366,8 +396,8 @@ pub enum Commands {
         #[arg(last = true)]
         cmd: Vec<String>,
     },
-    /// Run a flow by name — the explicit form; bare flow names that collide
-    /// with subcommands (`task`, `wave`) are only reachable this way
+    /// Run a flow by name — the explicit form for names that collide with a
+    /// built-in command
     Flow {
         /// Flow name
         name: String,
@@ -426,6 +456,18 @@ pub enum MemoryCommand {
         fact: String,
         #[command(flatten)]
         target: WaveTargetArgs,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProjectCommand {
+    /// Promote a project into a resident child wave through the authored flow
+    Promote {
+        /// Project slug under wave/<parent>/projects/
+        slug: String,
+        /// Parent wave (default: ambient wave)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
     },
 }
 
@@ -532,6 +574,9 @@ pub enum PmCommand {
         /// Local project slug from wave/<wave>/projects/
         #[arg(short = 'p', long = "project")]
         project: Option<String>,
+        /// Emit the task snapshot as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Create, edit, or close a Linear task
     Update {
@@ -830,13 +875,19 @@ mod tests {
     fn pm_show_accepts_wave_flag() {
         let cli = Cli::try_parse_from(["lf", "pm", "show", "--wave", "goals"]).expect("parse");
         let Some(Commands::Pm {
-            cmd: PmCommand::Show { wave, project },
+            cmd:
+                PmCommand::Show {
+                    wave,
+                    project,
+                    json,
+                },
         }) = cli.command
         else {
             panic!("expected pm show command");
         };
         assert_eq!(wave.as_deref(), Some("goals"));
         assert_eq!(project, None);
+        assert!(!json);
     }
 
     #[test]
@@ -902,11 +953,16 @@ mod tests {
     #[test]
     fn chat_parses_text_and_targeting() {
         let cli = Cli::try_parse_from(["lf", "chat", "shipped", "the", "parser"]).expect("parse");
-        let Some(Commands::Chat { text, from, target }) = cli.command else {
+        let Some(Commands::Chat {
+            text,
+            steer,
+            target,
+        }) = cli.command
+        else {
             panic!("expected chat command");
         };
         assert_eq!(text, vec!["shipped", "the", "parser"]);
-        assert_eq!(from, None);
+        assert!(!steer);
         assert_eq!(target.wave, None);
         assert!(!target.parent);
 
@@ -925,19 +981,75 @@ mod tests {
         assert_eq!(text, vec!["hi"]);
         assert_eq!(target.wave.as_deref(), Some("goals"));
 
-        // Machine speech declares itself: --from rides ahead of the text
-        // (the webhook gatekeeper's planned argv).
+        // Machine speech does not ride this verb: bylines belong to the bus
+        // (`lf radio --from`), and chat refuses the flag at parse.
+        assert!(Cli::try_parse_from([
+            "lf",
+            "chat",
+            "--wave",
+            "goals",
+            "--from",
+            "ci",
+            "CI failed"
+        ])
+        .is_err());
+
         let cli =
-            Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--from", "ci", "CI failed"])
-                .expect("parse");
-        let Some(Commands::Chat { text, from, .. }) = cli.command else {
+            Cli::try_parse_from(["lf", "chat", "--steer", "change course"]).expect("parse steer");
+        let Some(Commands::Chat { text, steer, .. }) = cli.command else {
             panic!("expected chat command");
         };
-        assert_eq!(text, vec!["CI failed"]);
-        assert_eq!(from.as_deref(), Some("ci"));
+        assert_eq!(text, vec!["change course"]);
+        assert!(steer);
+
+        assert!(
+            Cli::try_parse_from(["lf", "chat", "--steer", "--from", "ci", "change course"])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from(["lf", "chat", "--steer", "--parent", "x"]).is_err());
 
         // --wave and --parent are mutually exclusive.
         assert!(Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--parent", "x"]).is_err());
+    }
+
+    #[test]
+    fn radio_parses_channel_parent_and_byline() {
+        // `-c`/`--channel` addresses a hand's channel; text trails.
+        let cli =
+            Cli::try_parse_from(["lf", "radio", "-c", "goals.148e", "landed PR"]).expect("parse");
+        let Some(Commands::Radio {
+            text,
+            channel,
+            parent,
+            from,
+        }) = cli.command
+        else {
+            panic!("expected radio command");
+        };
+        assert_eq!(text, vec!["landed PR"]);
+        assert_eq!(channel.as_deref(), Some("goals.148e"));
+        assert!(!parent);
+        assert_eq!(from, None);
+
+        // Escalation up the tree.
+        let cli =
+            Cli::try_parse_from(["lf", "radio", "--parent", "blocked"]).expect("parse parent");
+        let Some(Commands::Radio { parent, .. }) = cli.command else {
+            panic!("expected radio command");
+        };
+        assert!(parent);
+
+        // A channel and the parent are mutually exclusive — a report goes to
+        // one place.
+        assert!(Cli::try_parse_from(["lf", "radio", "-c", "goals.148e", "--parent", "x"]).is_err());
+    }
+
+    /// Steer is a thread op, and the thread is not the bus. The shared
+    /// dispatch once let `--steer` leak across the verb split; separate
+    /// transports make it unspellable.
+    #[test]
+    fn radio_has_no_steer_flag() {
+        assert!(Cli::try_parse_from(["lf", "radio", "--steer", "gate it"]).is_err());
     }
 
     #[test]

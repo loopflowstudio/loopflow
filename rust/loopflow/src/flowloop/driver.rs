@@ -1,9 +1,9 @@
-//! The generic flowloop driver: loop a named flow in a placed worktree until
+//! The generic loop driver: loop a named flow in a placed worktree until
 //! the loop file says done, under caps.
 //!
 //! The driver knows nothing about what the flow does or when it is done —
 //! that judgment lives in the flow's skills. The termination bit is ONE
-//! GENERIC CONTRACT, identical for every flowloop, and the driver teaches it
+//! GENERIC CONTRACT, identical for every loop, and the driver teaches it
 //! itself: every pass's seed carries a standing instruction
 //! ([`loop_instruction`]) explaining how to mark for termination, so ANY
 //! flow is loopable without its skills knowing loop mechanics. Purpose-built
@@ -23,8 +23,8 @@
 //! `done` ends the loop. `recheck` is an agent-authored predicate the driver
 //! polls mechanically (free — no pass burned) until it exits 0, then runs
 //! one more pass so the flow can do its close-out and write `done`. No file
-//! → the next pass starts immediately. Caps (max passes, wall clock)
-//! escalate via `lf chat --parent` and error out.
+//! → the next pass starts immediately. Caps (max passes, wall clock) report
+//! failure on the hand's bus channel and error out.
 
 use std::path::Path;
 use std::process::Command;
@@ -34,8 +34,12 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 
 use crate::flowloop::pass::{run_pass, PassOptions};
-use crate::flowloop::run::FlowloopRun;
+use crate::flowloop::run::LoopRun;
+use crate::lfd::executor::Placement;
 use crate::ops::{OpsError, OpsResult};
+use crate::wave::wire::{
+    DetachedLoopRequest, DetachedLoopResponse, RESIDENT_TOKEN_HEADER, SUBAGENT_TOKEN_HEADER,
+};
 
 const LOOP_FILE: &str = "scratch/loop.yaml";
 const DEFAULT_MAX_PASSES: u32 = 8;
@@ -69,39 +73,145 @@ impl LoopOptions {
     }
 }
 
-/// What the loop file said at a pass boundary.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
-pub struct LoopFile {
+/// The loop file's YAML shape: two independent keys, either of which the
+/// agent may omit. Read once at a pass boundary and turned into a
+/// [`LoopVerdict`] — nothing else sees the pair.
+#[derive(Debug, Default, Deserialize)]
+struct LoopFile {
     #[serde(default)]
-    pub done: bool,
+    done: bool,
     #[serde(default)]
-    pub recheck: Option<String>,
+    recheck: Option<String>,
 }
 
-/// `lf task "<seed>"` and friends: place a worktree through the wave
+/// What the loop does at a pass boundary. The three cases are exclusive, so
+/// an agent that writes both `done` and `recheck` gets `Done` — decided here,
+/// once, rather than by the order of arms at the call site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LoopVerdict {
+    /// The work is finished; the loop stops.
+    Done,
+    /// Not yet: wait for this shell predicate to exit 0, then run a close-out
+    /// pass. Waiting is free — no pass is burned.
+    Recheck(String),
+    /// The loop file said nothing. Run the next pass.
+    Continue,
+}
+
+impl From<LoopFile> for LoopVerdict {
+    fn from(file: LoopFile) -> Self {
+        match file {
+            LoopFile { done: true, .. } => Self::Done,
+            LoopFile {
+                recheck: Some(predicate),
+                ..
+            } => Self::Recheck(predicate),
+            LoopFile { .. } => Self::Continue,
+        }
+    }
+}
+
+/// `lf loop <flow> "<seed>"`: place a worktree through the wave
 /// registry, then loop the flow over it until the loop file says done.
-pub fn run_flowloop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<()> {
+pub fn run_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<()> {
+    require_loop_flow(repo, &options.flow)?;
     let wave_name = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
-    let run = FlowloopRun::start(&wave_name, &options.flow, seed.to_string())?;
+    let mut run = LoopRun::start(
+        &wave_name,
+        &options.flow,
+        Some(seed.to_string()),
+        &Placement::Fresh,
+    )?;
     let worktree = run.worktree();
-    eprintln!(
-        "flowloop {} running in {}",
-        options.flow,
-        worktree.display()
+    eprintln!("loop {} running in {}", options.flow, worktree.display());
+    let result = drive(
+        &worktree,
+        seed,
+        options,
+        |pass, flow, seed, pass_options| {
+            run.start_pass(pass)?;
+            run_pass(&worktree, flow, seed, pass_options)
+        },
     );
-    let result = drive(&worktree, seed, options, |flow, seed, pass_options| {
-        run_pass(&worktree, flow, seed, pass_options)
-    });
     run.finish(result)
+}
+
+/// Resolve the loop target before creating a worktree. A skill is not a
+/// one-step flow by implication: loop callers name a flow explicitly. Two
+/// doors share this gate: the CLI's blocking loop and the wave server's
+/// detached-loop launch.
+pub(crate) fn require_loop_flow(repo: &Path, flow: &str) -> OpsResult<()> {
+    crate::engine::load_flow(flow, repo)
+        .map(|_| ())
+        .map_err(|err| OpsError::Message(format!("cannot loop flow '{flow}': {err}")))
+}
+
+/// Ask the live wave server to own the same loop invocation and return its
+/// read-only inspection session. The server, not this short-lived CLI, owns
+/// launch and observation.
+pub fn detach_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<String> {
+    let wave = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
+        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
+    let origin = crate::engine::wave_context::wave_origin(repo);
+    let endpoint = crate::lfq::env_endpoint()
+        .or_else(|| crate::engine::wave_context::read_endpoint_pointer(&origin, &wave))
+        .ok_or_else(|| {
+            OpsError::Message(format!(
+                "wave '{wave}' has no live server; start it with `lf serve {wave}`"
+            ))
+        })?;
+    let (header, token) = detached_loop_credential(&origin, &wave).ok_or_else(|| {
+        OpsError::Message(format!(
+            "wave '{wave}' has no loop-launch credential; restart its live server"
+        ))
+    })?;
+    let request = DetachedLoopRequest {
+        flow: options.flow.clone(),
+        seed: seed.to_string(),
+        max_passes: options.max_passes,
+        pass_timeout_secs: options.pass_timeout.as_secs(),
+        wall_clock_secs: options.wall_clock.as_secs(),
+        poll_secs: options.poll.as_secs(),
+        max_turns: options.max_turns,
+    };
+    let url = format!("http://{endpoint}/loops");
+    let response = reqwest::blocking::Client::new()
+        .post(&url)
+        .header(header, token)
+        .json(&request)
+        .send()
+        .map_err(|err| OpsError::Message(format!("POST {url} failed: {err}")))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|err| OpsError::Message(format!("reading {url} response failed: {err}")))?;
+    if !status.is_success() {
+        return Err(OpsError::Message(format!(
+            "wave loop door refused ({status}): {body}"
+        )));
+    }
+    let response: DetachedLoopResponse = serde_json::from_str(&body)
+        .map_err(|err| OpsError::Parse(format!("invalid loop response: {err}")))?;
+    Ok(response.session)
+}
+
+/// A sandboxed hand presents its own subagent capability; a shell beside the
+/// wave falls back to the resident token file.
+fn detached_loop_credential(origin: &Path, wave: &str) -> Option<(&'static str, String)> {
+    if let Some(token) = crate::lfq::subagent_token() {
+        return Some((SUBAGENT_TOKEN_HEADER, token));
+    }
+    crate::wave::server::read_resident_token(origin, wave)
+        .map(|token| (RESIDENT_TOKEN_HEADER, token))
 }
 
 /// The standing instruction appended to every pass's seed: the generic
 /// how-to-terminate contract. The WHEN belongs to the flow's skills.
 fn loop_instruction(pass: u32, max_passes: u32) -> String {
     format!(
-        "<lf:flowloop>\n\
-         This flow is running inside a flowloop — pass {pass} of at most \
+        "<lf:loop>\n\
+         This flow is running inside a loop — pass {pass} of at most \
          {max_passes}. The loop repeats until you mark it terminated. To \
          terminate, write `scratch/loop.yaml` before this pass ends:\n\n\
          - `done: true` — the loop stops at this boundary. Flip it only when \
@@ -112,8 +222,8 @@ fn loop_instruction(pass: u32, max_passes: u32) -> String {
          runs one more pass when it exits 0.\n\n\
          The file is consumed at every boundary — write it fresh each pass \
          or the loop simply continues. Exhausting the pass budget without \
-         `done` escalates to the parent as a failure.\n\
-         </lf:flowloop>"
+         `done` reports a failure to the wave.\n\
+         </lf:loop>"
     )
 }
 
@@ -122,7 +232,7 @@ fn drive(
     worktree: &Path,
     seed: &str,
     options: &LoopOptions,
-    mut pass: impl FnMut(&str, &str, &PassOptions) -> OpsResult<()>,
+    mut pass: impl FnMut(u32, &str, &str, &PassOptions) -> OpsResult<()>,
 ) -> OpsResult<()> {
     let started = Instant::now();
     let pass_options = PassOptions {
@@ -131,40 +241,41 @@ fn drive(
     };
     for n in 1..=options.max_passes {
         check_wall_clock(started, options.wall_clock).inspect_err(|err| {
-            escalate_parent(&err.to_string());
+            report_failure(worktree, &err.to_string());
         })?;
         eprintln!("{} pass {n}/{}", options.flow, options.max_passes);
         let pass_seed = format!("{seed}\n\n{}", loop_instruction(n, options.max_passes));
-        pass(&options.flow, &pass_seed, &pass_options)?;
+        pass(n, &options.flow, &pass_seed, &pass_options)?;
 
         match take_loop_file(worktree)? {
-            LoopFile { done: true, .. } => return Ok(()),
-            LoopFile {
-                recheck: Some(predicate),
-                ..
-            } => wait_for_recheck(worktree, &predicate, options, started)?,
-            LoopFile { .. } => {}
+            LoopVerdict::Done => return Ok(()),
+            LoopVerdict::Recheck(predicate) => {
+                wait_for_recheck(worktree, &predicate, options, started)?
+            }
+            LoopVerdict::Continue => {}
         }
     }
 
     let message = format!(
-        "flowloop {} exhausted {} pass(es) without done",
+        "loop {} exhausted {} pass(es) without done",
         options.flow, options.max_passes
     );
-    escalate_parent(&message);
+    report_failure(worktree, &message);
     Err(OpsError::Message(message))
 }
 
-/// Read and remove the loop file — it speaks for one boundary only.
-fn take_loop_file(worktree: &Path) -> OpsResult<LoopFile> {
+/// Read and remove the loop file — it speaks for one boundary only. An absent
+/// file is the silent verdict: run the next pass.
+fn take_loop_file(worktree: &Path) -> OpsResult<LoopVerdict> {
     let path = worktree.join(LOOP_FILE);
     let raw = match std::fs::read_to_string(&path) {
         Ok(raw) => raw,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(LoopFile::default()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(LoopVerdict::Continue),
         Err(err) => return Err(OpsError::from(err)),
     };
     std::fs::remove_file(&path)?;
-    serde_yaml_ng::from_str(&raw)
+    serde_yaml_ng::from_str::<LoopFile>(&raw)
+        .map(LoopVerdict::from)
         .map_err(|err| OpsError::Parse(format!("unparseable {LOOP_FILE}: {err}")))
 }
 
@@ -179,7 +290,7 @@ fn wait_for_recheck(
     eprintln!("waiting: {predicate}");
     loop {
         check_wall_clock(started, options.wall_clock).inspect_err(|err| {
-            escalate_parent(&err.to_string());
+            report_failure(worktree, &err.to_string());
         })?;
         let fired = Command::new("sh")
             .args(["-c", predicate])
@@ -196,14 +307,14 @@ fn wait_for_recheck(
 fn check_wall_clock(started: Instant, wall_clock: Duration) -> OpsResult<()> {
     if started.elapsed() >= wall_clock {
         return Err(OpsError::Message(format!(
-            "flowloop exceeded wall-clock cap of {}s",
+            "loop exceeded wall-clock cap of {}s",
             wall_clock.as_secs()
         )));
     }
     Ok(())
 }
 
-fn escalate_parent(message: &str) {
+fn report_failure(worktree: &Path, message: &str) {
     // In tests current_exe is the test binary; execing it as `lf` is noise.
     if cfg!(test) {
         return;
@@ -212,7 +323,10 @@ fn escalate_parent(message: &str) {
         .map(Command::new)
         .unwrap_or_else(|_| Command::new("lf"));
     let mut cmd = exe;
-    let _ = cmd.arg("chat").arg("--parent").arg(message).status();
+    // Resolve the hand's own channel from its placed worktree. The served
+    // wave subscribes to that family and folds the report into its thread;
+    // `--parent` would instead mean a promoted wave's parent_wave_id.
+    let _ = cmd.arg("radio").arg(message).current_dir(worktree).status();
 }
 
 #[cfg(test)]
@@ -240,7 +354,7 @@ mod tests {
     fn done_stops_the_loop_at_the_boundary() {
         let tmp = tempfile::tempdir().unwrap();
         let mut passes = 0;
-        drive(tmp.path(), "seed", &options(8), |_, _, _| {
+        drive(tmp.path(), "seed", &options(8), |_, _, _, _| {
             passes += 1;
             write_loop_file(tmp.path(), "done: true\n");
             Ok(())
@@ -254,7 +368,7 @@ mod tests {
     fn missing_file_keeps_passing_until_the_cap_escalates() {
         let tmp = tempfile::tempdir().unwrap();
         let mut passes = 0;
-        let err = drive(tmp.path(), "seed", &options(3), |_, _, _| {
+        let err = drive(tmp.path(), "seed", &options(3), |_, _, _, _| {
             passes += 1;
             Ok(())
         })
@@ -269,7 +383,7 @@ mod tests {
         let flag = tmp.path().join("merged");
         std::fs::write(&flag, "").unwrap();
         let mut passes = 0;
-        drive(tmp.path(), "seed", &options(8), |_, _, _| {
+        drive(tmp.path(), "seed", &options(8), |_, _, _, _| {
             passes += 1;
             if passes == 1 {
                 // Submitted; wait for the (already-set) external bit.
@@ -292,7 +406,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let mut opts = options(8);
         opts.wall_clock = Duration::from_millis(50);
-        let err = drive(tmp.path(), "seed", &opts, |_, _, _| {
+        let err = drive(tmp.path(), "seed", &opts, |_, _, _, _| {
             write_loop_file(tmp.path(), "recheck: false\n");
             Ok(())
         })
@@ -303,11 +417,25 @@ mod tests {
     #[test]
     fn garbage_loop_file_is_an_error_not_a_silent_continue() {
         let tmp = tempfile::tempdir().unwrap();
-        let err = drive(tmp.path(), "seed", &options(8), |_, _, _| {
+        let err = drive(tmp.path(), "seed", &options(8), |_, _, _, _| {
             write_loop_file(tmp.path(), ": not yaml [");
             Ok(())
         })
         .expect_err("unparseable file errors");
         assert!(err.to_string().contains("unparseable"));
+    }
+
+    /// The flow resolves before any worktree exists: a bogus target is a
+    /// clean error from `run_loop` itself, not a half-placed run.
+    #[test]
+    fn loop_target_must_resolve_to_a_flow() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = run_loop(
+            tmp.path(),
+            "seed",
+            &LoopOptions::new("definitely-not-a-flow".into(), None),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("cannot loop flow"));
     }
 }

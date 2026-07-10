@@ -153,10 +153,13 @@ Ready to automate? Waves run your workflows continuously.
 Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter sets machine config such as `workers:`, `crons:`, and `pm:`), then run the agent:
 
 ```bash
-lf wave shipper
+lf serve shipper
 ```
 
-The wave agent coordinates; it dispatches a **worker** per task (`lf build "…" --wave shipper --dispatch`) and folds each shipped PR into memory. Today CI failures and pushes to main land in the wave's thread as attributed `lf chat` notifications, so the demo path stays live while webhook coordination moves toward durable facts plus explicit commands.
+The wave agent inhabits one loop and delegates self-sufficient work
+(`lf loop build "…" --wave shipper --detach`), then folds each shipped PR into
+memory. CI failures and pushes to main ride the bus with `lf radio`, then land
+in the wave's thread as attributed notifications.
 
 **Loopflow** (macOS) is the native wave experience — monitor progress, browse flows, review PRs. Requires `lfd`.
 
@@ -164,10 +167,10 @@ Sessions are plain tmux:
 
 ```bash
 tmux ls               # live agent sessions
-tmux attach -t <name> # attach to one; agent output lives here
+tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Stop a wave with Ctrl-C in its `lf wave` session.
+Stop a wave with Ctrl-C in its `lf serve` session.
 
 ### Browse flows
 
@@ -177,7 +180,7 @@ Stop a wave with Ctrl-C in its `lf wave` session.
 
 `lfd` serves the same resolved catalog at `/v0/catalog?repo=/path/to/repo`, including builtin definitions and any `.lf/flows/*.yaml` or `.lf/skills/*.md` overrides in the repo.
 
-You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
+You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf serve <name>` runs them and Loopflow picks them up.
 
 [Wave Authoring Guide →](wave-authoring.md) · [Waves Reference →](waves.md)
 

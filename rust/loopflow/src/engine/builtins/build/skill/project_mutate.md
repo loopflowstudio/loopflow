@@ -21,7 +21,7 @@ running tasks with `lf runs`, and merged PRs with `gh`.
   runner with a recheck on the state you are waiting for (e.g. a
   `gh pr view` on a task's PR).
 - Blocked on missing authority, credentials, or strategy → escalate with
-  `lf radio --parent` and record the blocker.
+  `lf radio pub --parent` and record the blocker.
 
 The project's real-world condition: **every KR's observable condition is
 true.** You both drive the KRs there and decide that checking each one means

@@ -1,11 +1,11 @@
 //! GitHub webhook ingress — the gatekeeper's ears, translating inward.
 //!
 //! Webhooks no longer feed the trigger/activation machinery. A webhook fact
-//! is machine speech, so it rides the bus (`lf radio --from github`) and
+//! is machine speech, so it rides the bus (`lf radio pub --from github`) and
 //! survives a sleeping wave; machine-owned queue state reconciles in-process
 //! so daemon behavior does not depend on CLI grammar.
 //!
-//! - **check_run failure** → `lf radio --channel <wave> --from github
+//! - **check_run failure** → `lf radio pub --channel <wave> --from github
 //!   "CI failed: …"` — the wave's loop decides whether and how to dispatch.
 //! - **PR merged** → reconcile queue state for each wave holding that PR.
 //! - **push to main** → the same, `"main moved: …"`, for every wave in the
@@ -72,6 +72,7 @@ impl LfExec {
         Self {
             args: vec![
                 "radio".to_string(),
+                "pub".to_string(),
                 "--channel".to_string(),
                 wave.to_string(),
                 "--from".to_string(),
@@ -121,7 +122,7 @@ async fn settle_exec(lf: &std::path::Path, exec: LfExec, cache: &Arc<Mutex<HashS
             args = ?exec.args,
             dedupe_key = ?exec.dedupe_key,
             code = ?status.code(),
-            "lf radio exec failed; will replay on next delivery"
+            "lf radio pub exec failed; will replay on next delivery"
         ),
         Err(err) => tracing::warn!(
             args = ?exec.args,
@@ -766,6 +767,7 @@ mod tests {
             vec![
                 vec![
                     "radio".to_string(),
+                    "pub".to_string(),
                     "--channel".to_string(),
                     "ship".to_string(),
                     "--from".to_string(),
@@ -774,6 +776,7 @@ mod tests {
                 ],
                 vec![
                     "radio".to_string(),
+                    "pub".to_string(),
                     "--channel".to_string(),
                     "systems".to_string(),
                     "--from".to_string(),

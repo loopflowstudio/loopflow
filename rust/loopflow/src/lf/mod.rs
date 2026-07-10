@@ -318,8 +318,8 @@ pub enum Commands {
         json: bool,
     },
     /// Converse with a served mind's thread (humans); --follow replays it and
-    /// --steer reaches the live body. Agents use `lf radio` for agent-to-agent
-    /// comms, not this.
+    /// --steer reaches the live body. Agents use `lf radio pub` for
+    /// agent-to-agent comms, not this.
     Chat {
         /// Message text (reads stdin when omitted unless --follow)
         #[arg(trailing_var_arg = true)]
@@ -333,37 +333,24 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
-    /// Broadcast on the agent bus (agents): report up when you finish, fail,
-    /// or get stuck. Broadcast, not delivery — whoever is tuned in hears it,
-    /// nobody guarantees receipt. Not a log, not the human surface. Publishing
-    /// is a write to the shared store, so no wave need be running. Bare, it
-    /// publishes on your own channel, which a served wave records as one
-    /// attributed report. Tune in with `lf sub`.
+    /// Publish to or subscribe to the ephemeral agent bus.
+    #[command(subcommand_required = true, arg_required_else_help = true)]
     Radio {
-        /// Message text (reads stdin when omitted — heredoc-friendly)
-        #[arg(trailing_var_arg = true)]
-        text: Vec<String>,
-        /// Broadcast on another channel (a hand's `goals.<run>`) instead of
-        /// your own.
-        #[arg(short = 'c', long = "channel", conflicts_with = "parent")]
-        channel: Option<String>,
-        /// Broadcast to the parent wave's channel (escalation up the tree).
-        #[arg(long)]
-        parent: bool,
-        /// Byline for machine speech (e.g. --from ci). Testimony, not proof:
-        /// the row records it beside the channel it arrived on.
-        #[arg(long)]
-        from: Option<String>,
+        #[command(subcommand)]
+        command: RadioCommand,
     },
-    /// Tune in to the agent bus: hear what is broadcast on a channel and its
-    /// descendants while you listen. Defaults to the invoking context's
-    /// channel; exits 0 with a note when none resolves.
-    Sub {
-        /// Channel prefix (default: the ambient channel — env, else worktree)
-        channel: Option<String>,
-        /// Emit heard frames as NDJSON instead of human lines
-        #[arg(long)]
-        json: bool,
+    // Reserve the retired spelling so the external-subcommand fallback cannot
+    // reinterpret the retired top-level spelling as a skill. This variant can
+    // never parse.
+    #[command(
+        name = "sub",
+        hide = true,
+        about = "Removed; use `lf radio sub`",
+        arg_required_else_help = true
+    )]
+    RetiredSub {
+        #[arg(required = true, value_parser = reject_retired_sub)]
+        removed: String,
     },
     /// Read or curate a wave's MEMORY.md (server-owned; bare `lf memory` = show)
     Memory {
@@ -416,6 +403,39 @@ pub enum Commands {
     /// External: skill/flow name (when no subcommand matches)
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RadioCommand {
+    /// Broadcast on the agent bus. Reads stdin when TEXT is omitted.
+    Pub {
+        /// Message text (reads stdin when omitted — heredoc-friendly)
+        #[arg(trailing_var_arg = true)]
+        text: Vec<String>,
+        /// Broadcast on another channel (a hand's `goals.<run>`) instead of
+        /// your own.
+        #[arg(short = 'c', long = "channel", conflicts_with = "parent")]
+        channel: Option<String>,
+        /// Broadcast to the parent wave's channel (escalation up the tree).
+        #[arg(long)]
+        parent: bool,
+        /// Byline for machine speech (e.g. --from ci). Testimony, not proof:
+        /// the row records it beside the channel it arrived on.
+        #[arg(long)]
+        from: Option<String>,
+    },
+    /// Hear broadcasts on a channel and its descendants while listening.
+    Sub {
+        /// Channel prefix (default: the ambient channel — env, else worktree)
+        channel: Option<String>,
+        /// Emit heard frames as NDJSON instead of human lines
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+fn reject_retired_sub(_: &str) -> Result<String, String> {
+    Err("the top-level subscription command was removed; use `lf radio sub`".to_string())
 }
 
 /// Wave targeting shared by `lf chat` and `lf memory`: default is the
@@ -985,7 +1005,7 @@ mod tests {
         assert_eq!(target.wave.as_deref(), Some("goals"));
 
         // Machine speech does not ride this verb: bylines belong to the bus
-        // (`lf radio --from`), and chat refuses the flag at parse.
+        // (`lf radio pub --from`), and chat refuses the flag at parse.
         assert!(Cli::try_parse_from([
             "lf",
             "chat",
@@ -1035,18 +1055,21 @@ mod tests {
     }
 
     #[test]
-    fn radio_parses_channel_parent_and_byline() {
+    fn radio_pub_parses_channel_parent_and_byline() {
         // `-c`/`--channel` addresses a hand's channel; text trails.
-        let cli =
-            Cli::try_parse_from(["lf", "radio", "-c", "goals.148e", "landed PR"]).expect("parse");
+        let cli = Cli::try_parse_from(["lf", "radio", "pub", "-c", "goals.148e", "landed PR"])
+            .expect("parse");
         let Some(Commands::Radio {
-            text,
-            channel,
-            parent,
-            from,
+            command:
+                RadioCommand::Pub {
+                    text,
+                    channel,
+                    parent,
+                    from,
+                },
         }) = cli.command
         else {
-            panic!("expected radio command");
+            panic!("expected radio pub command");
         };
         assert_eq!(text, vec!["landed PR"]);
         assert_eq!(channel.as_deref(), Some("goals.148e"));
@@ -1054,16 +1077,47 @@ mod tests {
         assert_eq!(from, None);
 
         // Escalation up the tree.
-        let cli =
-            Cli::try_parse_from(["lf", "radio", "--parent", "blocked"]).expect("parse parent");
-        let Some(Commands::Radio { parent, .. }) = cli.command else {
-            panic!("expected radio command");
+        let cli = Cli::try_parse_from(["lf", "radio", "pub", "--parent", "blocked"])
+            .expect("parse parent");
+        let Some(Commands::Radio {
+            command: RadioCommand::Pub { parent, .. },
+        }) = cli.command
+        else {
+            panic!("expected radio pub command");
         };
         assert!(parent);
 
         // A channel and the parent are mutually exclusive — a report goes to
         // one place.
-        assert!(Cli::try_parse_from(["lf", "radio", "-c", "goals.148e", "--parent", "x"]).is_err());
+        assert!(
+            Cli::try_parse_from(["lf", "radio", "pub", "-c", "goals.148e", "--parent", "x"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn radio_sub_parses_channel_and_json() {
+        let cli = Cli::try_parse_from(["lf", "radio", "sub", "goals", "--json"]).expect("parse");
+        let Some(Commands::Radio {
+            command: RadioCommand::Sub { channel, json },
+        }) = cli.command
+        else {
+            panic!("expected radio sub command");
+        };
+        assert_eq!(channel.as_deref(), Some("goals"));
+        assert!(json);
+    }
+
+    #[test]
+    fn radio_requires_an_explicit_operation_and_rejects_old_forms() {
+        let error = Cli::try_parse_from(["lf", "radio"]).expect_err("bare radio shows help");
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        );
+        assert!(Cli::try_parse_from(["lf", "radio", "worker done"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "sub"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "sub", "goals"]).is_err());
     }
 
     /// Steer is a thread op, and the thread is not the bus. The shared
@@ -1071,7 +1125,7 @@ mod tests {
     /// transports make it unspellable.
     #[test]
     fn radio_has_no_steer_flag() {
-        assert!(Cli::try_parse_from(["lf", "radio", "--steer", "gate it"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "radio", "pub", "--steer", "gate it"]).is_err());
     }
 
     #[test]

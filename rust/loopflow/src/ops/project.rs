@@ -63,7 +63,7 @@ async fn wake_child(repo: &Path, wave: &str) -> OpsResult<()> {
             "chat",
             "--wave",
             wave,
-            "Promotion complete. Run the first child-wave pass, report what you now own in this thread, then publish the same concise report to the parent with `lf radio --parent`.",
+            "Promotion complete. Run the first child-wave pass, report what you now own in this thread, then publish the same concise report to the parent with `lf radio pub --parent`.",
         ])
         .current_dir(repo)
         .status()

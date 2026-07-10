@@ -232,9 +232,9 @@ Webhooks translate inward through the daemon. CI and main-push events ride the
 agent bus and fold into the wave's thread attributed; queue maintenance runs
 in-process.
 
-- check_run failure → `lf radio --channel <wave> --from github "CI failed: …"` (the wave's loop decides how to fix)
+- check_run failure → `lf radio pub --channel <wave> --from github "CI failed: …"` (the wave's loop decides how to fix)
 - PR merged → reconcile stacked queue state for matching waves
-- push to main → `lf radio --channel <wave> --from github "main moved: …"` for each wave in the repo
+- push to main → `lf radio pub --channel <wave> --from github "main moved: …"` for each wave in the repo
 
 The store accepts the notification even while the wave sleeps. No wave resolved → dropped.
 

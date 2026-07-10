@@ -39,12 +39,12 @@ lf pm task update --id <task-id> --title "..."
   child runs. If the result gates the next move, keep the loop foreground.
   Detaching requires an already-served exact wave; do not start a server merely
   to make it available.
-- Require detached hands to report with `lf radio`, record live learnings with
+- Require detached hands to report with `lf radio pub`, record live learnings with
   `lf memory add`, and leave done as a PR. No writes means failed work.
-- Watch a hand with `lf sub <channel>`. You already hear its reports: they land
+- Watch a hand with `lf radio sub <channel>`. You already hear its reports: they land
   in this thread, attributed, even the ones broadcast while you were asleep. To
   change what a hand does, say it here — hands re-read this thread at every pass
-  boundary; a `lf radio --channel` broadcast only reaches whoever is tuned in
+  boundary; a `lf radio pub --channel` broadcast only reaches whoever is tuned in
   right now.
 - Answer human steering before returning to the goal.
 

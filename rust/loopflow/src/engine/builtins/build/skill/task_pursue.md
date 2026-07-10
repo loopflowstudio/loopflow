@@ -30,7 +30,7 @@ selection. Follow the repo style guide.
   `lf pm task done --id <task-id> --pr <url>`.
 - File a concrete follow-up with `lf pm task create` when new work belongs later
   under a known project. Filing does not authorize launching it in this task.
-- At a detached pass boundary, report concrete progress with `lf radio` and
+- At a detached pass boundary, report concrete progress with `lf radio pub` and
   publish durable learnings with `lf memory add`; the vendor conversation is
   private.
 

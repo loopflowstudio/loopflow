@@ -207,10 +207,10 @@ mod tests {
             "the ORIGIN file is the one replaced"
         );
 
-        let summary = write_memory(&target, "add", "workers report via lf radio", None)
+        let summary = write_memory(&target, "add", "workers report via lf radio pub", None)
             .await
             .expect("add");
-        assert_eq!(summary, "workers report via lf radio");
+        assert_eq!(summary, "workers report via lf radio pub");
         assert_eq!(
             std::fs::read_to_string(origin.join("wave/ship/MEMORY.md")).expect("origin file"),
             "# Ship\n\nfold is truth\n",
@@ -229,7 +229,7 @@ mod tests {
                     summary: "# Ship".to_string()
                 },
                 EventKind::MemoryAdded {
-                    fact: "workers report via lf radio".to_string()
+                    fact: "workers report via lf radio pub".to_string()
                 },
             ]
         );

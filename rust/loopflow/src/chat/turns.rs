@@ -41,7 +41,7 @@ pub struct ChatTurn {
     pub items: Vec<ConversationItem>,
     /// RFC 3339 timestamp of when the turn opened.
     pub created_at: String,
-    /// Speaker label for attributed emissions (`lf radio` — worker reports,
+    /// Speaker label for attributed emissions (`lf radio pub` — worker reports,
     /// child-wave escalations). Absent for the loop's own turns and plain
     /// user turns.
     pub from: Option<String>,

@@ -1631,7 +1631,7 @@ mod tests {
     fn subscription_replays_full_memory_facts_in_order() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let long_fact = "workers report via lf radio with the full useful detail";
+        let long_fact = "workers report via lf radio pub with the full useful detail";
 
         rt.append_memory(long_fact).expect("append");
         rt.append_memory("second fact").expect("append");

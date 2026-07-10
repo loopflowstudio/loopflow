@@ -277,7 +277,7 @@ pause
 # ---------- act 6: worker reports + memory -----------------------------------
 
 hr "act 6 · attributed reports and curated memory"
-say "hands finish with 'lf radio <report>' — it lands in the thread with the"
+say "hands finish with 'lf radio pub <report>' — it lands in the thread with the"
 say "hand's channel as its byline and wakes the loop; watch for memory_updated when"
 say "the loop curates what it learned (lf memory add)."
 poll "a bylined hand report in the thread (hands take minutes)" 600 sh -c \

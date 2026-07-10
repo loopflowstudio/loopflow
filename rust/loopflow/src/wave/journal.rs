@@ -67,7 +67,7 @@ pub enum MessageOp {
     Steer,
     /// Cancel the current turn; non-empty text becomes the next turn.
     Interrupt,
-    /// An attributed emission (`lf radio`): a worker report, child-wave
+    /// An attributed emission (`lf radio pub`): a worker report, child-wave
     /// escalation, or CLI FYI. Lands in the thread as an attributed statement
     /// AND queues for the loop exactly like `Message` — same consumption
     /// machinery, `TurnStarted.answers` can name it.

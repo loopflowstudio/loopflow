@@ -6,9 +6,9 @@
 //! human act journals the same way on every surface (the Mac composer sends
 //! the identical op).
 //!
-//! Agents do not use this verb. Their wire is `lf radio` — a broadcast on the
+//! Agents do not use this verb. Their wire is `lf radio pub` — a broadcast on the
 //! shared-store bus, with no server in the path ([`super::radio`]). Two words,
-//! two wires: `lf chat` needs a live mind; `lf radio` needs nothing.
+//! two wires: `lf chat` needs a live mind; `lf radio pub` needs nothing.
 //!
 //! # Targeting
 //! - default: the invoking context's wave — `LFD_CHANNEL` env first (set by
@@ -32,7 +32,7 @@
 //! # Attribution
 //! None, ever. The thread is unattributed by convention and the server
 //! rejects a byline on this door. Machine speech — webhook facts, worker
-//! reports, escalations — rides the bus with `lf radio --from`, and the
+//! reports, escalations — rides the bus with `lf radio pub --from`, and the
 //! listener's bus sweep folds it into the thread attributed.
 //!
 //! # Following
@@ -209,7 +209,7 @@ async fn handle_command(command: &str, endpoint: &str) -> Result<bool> {
 
 /// Post one unattributed human act, shared by one-shot and followed chat.
 async fn post_message(endpoint: &str, text: &str, steer: bool) -> Result<()> {
-    // Machine speech carries a byline and rides the bus (`lf radio`).
+    // Machine speech carries a byline and rides the bus (`lf radio pub`).
     let op = if steer {
         MessageOp::Steer
     } else {
@@ -369,7 +369,7 @@ pub(crate) async fn resolve_target(
 }
 
 /// Walk one step up the wave tree. Both speech verbs escalate this way —
-/// `lf chat --parent` to the parent's thread, `lf radio --parent` to its
+/// `lf chat --parent` to the parent's thread, `lf radio pub --parent` to its
 /// channel — and a root wave is the same clear error for both.
 pub(crate) async fn parent_wave(store: &SharedStore, own: &Wave) -> Result<Wave> {
     let parent_id = own.parent_wave_id().ok_or_else(|| {

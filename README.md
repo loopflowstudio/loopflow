@@ -52,7 +52,7 @@ wave's journal and endpoint live at the origin); its playhead enters the wave's
 worktree and gives each flow step a live harness session. Progress and chat are
 a single conversation: `lf chat --steer` reaches the body now playing (and
 queues when it cannot). Truth is an append-only journal, so a restart keeps the
-whole thread. Humans use `lf chat`; agents broadcast with `lf radio`; `lf
+whole thread. Humans use `lf chat`; agents broadcast with `lf radio pub`; `lf
 memory` curates retained facts. A served wave folds family reports into its
 thread with attribution. Outside any wave a publish prints a short drop note
 and exits 0, so the verbs are safe in every prompt. See
@@ -118,9 +118,9 @@ and folds into its thread attributed on the next sweep.
 
 | Event | What lfd runs |
 |-------|---------------|
-| CI fails on a wave's PR | `lf radio --channel <name> --from ci "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
+| CI fails on a wave's PR | `lf radio pub --channel <name> --from ci "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
 | PR merged | queue state reconciles in-process |
-| Push to main | `lf radio --channel <name> --from github "main moved: …"` — the loop decides whether to rebase or integrate |
+| Push to main | `lf radio pub --channel <name> --from github "main moved: …"` — the loop decides whether to rebase or integrate |
 
 ## Skills
 

@@ -255,7 +255,7 @@ fn snapshot_attention(item: AttentionItem) -> AttentionSnapshot {
 
 /// The invoking context's wave: `LFD_WAVE_ID` env, else `None` (the caller
 /// errors). Kept minimal — `lf status` with no arg is a convenience, not the
-/// resolution surface `lf chat`/`lf sub` own.
+/// resolution surface `lf chat`/`lf radio sub` own.
 fn ambient_wave() -> Option<String> {
     std::env::var(crate::lf::session::WAVE_ID_ENV)
         .ok()

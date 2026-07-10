@@ -1365,7 +1365,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    // The agent bus (`bus_messages`): `lf radio` publishes, every subscriber
+    // The agent bus (`bus_messages`): `lf radio pub` publishes, every subscriber
     // polls forward from an id cursor. No process is in the path.
 
     /// Publish one frame and sweep whatever aged out of the window. The sweep

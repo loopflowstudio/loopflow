@@ -53,7 +53,7 @@ permission to create a loop.
   (`lf -b flow <flow>`, killed on timeout) — the loopable unit.
 - `driver.rs` — the loop: place → pass → read the loop file → done / recheck
   / continue, under caps (max passes, wall clock; exhaustion escalates via
-  `lf radio` on the hand's channel).
+  `lf radio pub` on the hand's channel).
 - `run.rs` — `LoopRun`: the registry-backed run lifecycle (worktree,
   store row, status). The row is what makes a running loop visible as an
   open task.

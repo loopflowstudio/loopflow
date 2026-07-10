@@ -41,7 +41,8 @@ use crate::wave::journal::{
 };
 use crate::wave::memory::Memory;
 use crate::wave::playhead::{
-    BodyProvenance, Playhead, PlayheadEvent, PlayheadView, QueuedInvocation, StepOutcome,
+    now_rfc3339, BodyProvenance, Playhead, PlayheadEvent, PlayheadView, QueuedInvocation,
+    StepOutcome,
 };
 use crate::wave::state::{can_transition, LoopState};
 use crate::wave::wire::{OpFrame, ResidentDelta, ResidentStateTo};
@@ -570,23 +571,12 @@ impl WaveRuntime {
         let step = playhead
             .current()
             .ok_or_else(|| anyhow::anyhow!("playhead has no current step"))?;
-        let body_id = uuid::Uuid::new_v4().to_string();
-        let body = BodyProvenance {
-            body_id: body_id.clone(),
-            invocation_id: step.invocation_id,
-            step_index: step.index,
-            flow: step.flow,
-            step: step.step,
-            iteration: step.iteration,
-            session_id: None,
-            harness: None,
-            model: None,
-            host: gethostname::gethostname().to_string_lossy().to_string(),
-            worktree: self.repo_root.to_string_lossy().to_string(),
-            started_at: now_rfc3339(),
-            ended_at: Some(now_rfc3339()),
-            termination_reason: Some(reason.to_string()),
-        };
+        // A skipped step's body is instantaneous: it starts and ends at the
+        // same moment, having never run.
+        let mut body = BodyProvenance::for_step(&step, &self.repo_root);
+        let body_id = body.body_id.clone();
+        body.ended_at = Some(body.started_at.clone());
+        body.termination_reason = Some(reason.to_string());
         let mut events = vec![playhead.start_body(body)?];
         events.extend(playhead.finish_body(&body_id, StepOutcome::Skipped, reason)?);
         self.journal_playhead_locked(&mut inner, events)
@@ -1440,12 +1430,6 @@ fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
 }
 
 /// Current time as an RFC3339 string for `op` frame timestamps.
-fn now_rfc3339() -> String {
-    time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

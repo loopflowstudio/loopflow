@@ -254,24 +254,10 @@ fn body_provenance(step: &StepRef, cwd: &Path) -> BodyProvenance {
     let configured = crate::engine::load_config_or_default(Some(cwd));
     let agent = configured.agent.as_deref().unwrap_or("codex");
     let (harness, model) = crate::engine::parse_agent(agent);
-    BodyProvenance {
-        body_id: uuid::Uuid::new_v4().to_string(),
-        invocation_id: step.invocation_id.clone(),
-        step_index: step.index,
-        flow: step.flow.clone(),
-        step: step.step.clone(),
-        iteration: step.iteration,
-        session_id: None,
-        harness: Some(harness),
-        model,
-        host: gethostname::gethostname().to_string_lossy().to_string(),
-        worktree: cwd.to_string_lossy().to_string(),
-        started_at: time::OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_default(),
-        ended_at: None,
-        termination_reason: None,
-    }
+    let mut body = BodyProvenance::for_step(step, cwd);
+    body.harness = Some(harness);
+    body.model = model;
+    body
 }
 
 // -- The scheduler --

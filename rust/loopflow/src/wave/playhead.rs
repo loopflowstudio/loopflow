@@ -128,6 +128,39 @@ pub struct BodyProvenance {
     pub termination_reason: Option<String>,
 }
 
+impl BodyProvenance {
+    /// A fresh attempt at `step`, starting now, on this host and worktree.
+    /// The caller fills in whatever it knows about the body itself: a real
+    /// pass sets `harness`/`model`, a synthetic one closes `ended_at` and
+    /// `termination_reason` on the spot.
+    pub fn for_step(step: &StepRef, worktree: &Path) -> Self {
+        Self {
+            body_id: Uuid::new_v4().to_string(),
+            invocation_id: step.invocation_id.clone(),
+            step_index: step.index,
+            flow: step.flow.clone(),
+            step: step.step.clone(),
+            iteration: step.iteration,
+            session_id: None,
+            harness: None,
+            model: None,
+            host: gethostname::gethostname().to_string_lossy().to_string(),
+            worktree: worktree.to_string_lossy().to_string(),
+            started_at: now_rfc3339(),
+            ended_at: None,
+            termination_reason: None,
+        }
+    }
+}
+
+/// The current instant as RFC 3339 — the format every timestamp on the wire
+/// and in the journal uses.
+pub fn now_rfc3339() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Playhead {
     pub stack: Vec<InvocationState>,

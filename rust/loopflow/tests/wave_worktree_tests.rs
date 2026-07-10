@@ -3,9 +3,7 @@ use std::process::Command;
 
 use loopflow::engine::git::{branch_rename, current_branch, worktree_move};
 use loopflow::engine::naming::{git_user, sanitize_for_branch};
-use loopflow::engine::worktrees::{
-    branch_exists, create_wave_worktree, worktree_path,
-};
+use loopflow::engine::worktrees::{branch_exists, create_wave_worktree, worktree_path};
 use loopflow::lfd::executor::ensure_wave_worktree;
 use loopflow_test_support::TestRepo;
 

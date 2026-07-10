@@ -17,12 +17,17 @@ use crate::lfdb::rows::{
     serialize_pr,
 };
 use crate::lfdb::token_crypto;
-use crate::lfdb::{ForkRun, ForkRunStatus, RunEventRow, StoreError, StoreResult};
+use crate::lfdb::{BusMessage, ForkRun, ForkRunStatus, RunEventRow, StoreError, StoreResult};
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
 }
+
+/// How long a bus frame survives. The bus is a wire, not a log: long enough
+/// that a mind asleep between passes still catches its hands' reports, short
+/// enough that the table never becomes a record anyone is tempted to read.
+pub const BUS_WINDOW_SECS: i64 = 60 * 60;
 
 fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {
     let mut scan = conn.prepare(
@@ -1329,6 +1334,94 @@ impl SqliteStore {
                 message.content,
                 message.created_at.unix_timestamp(),
             ],
+        )?;
+        Ok(())
+    }
+
+    // The agent bus (`bus_messages`): `lf radio` publishes, every subscriber
+    // polls forward from an id cursor. No process is in the path.
+
+    /// Publish one frame and sweep whatever aged out of the window. The sweep
+    /// rides the publish so the bus stays bounded with zero daemons: a bus
+    /// nobody writes to needs no cleaning.
+    pub fn publish_bus(
+        &self,
+        channel: &str,
+        byline: &str,
+        text: &str,
+        at: i64,
+    ) -> StoreResult<i64> {
+        self.sweep_bus(at - BUS_WINDOW_SECS)?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO bus_messages (channel, byline, text, at) VALUES (?1, ?2, ?3, ?4)",
+            params![channel, byline, text, at],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// Drop every frame published before `cutoff` (unix seconds).
+    pub fn sweep_bus(&self, cutoff: i64) -> StoreResult<usize> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute("DELETE FROM bus_messages WHERE at < ?1", params![cutoff])?)
+    }
+
+    /// Every surviving frame published after `cursor`, oldest first.
+    pub fn read_bus_after(&self, cursor: i64) -> StoreResult<Vec<BusMessage>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, channel, byline, text, at FROM bus_messages
+             WHERE id > ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map(params![cursor], |row| {
+            Ok(BusMessage {
+                id: row.get(0)?,
+                channel: row.get(1)?,
+                byline: row.get(2)?,
+                text: row.get(3)?,
+                at: row.get(4)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
+    /// The newest published id; `0` on an empty bus. Tuning in means starting
+    /// here — a subscriber hears what is said while it listens.
+    pub fn bus_head(&self) -> StoreResult<i64> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let head = conn.query_row("SELECT COALESCE(MAX(id), 0) FROM bus_messages", [], |row| {
+            row.get(0)
+        })?;
+        Ok(head)
+    }
+
+    /// The oldest surviving id. A durable cursor below `floor - 1` means the
+    /// sweeper reached frames this subscriber never read.
+    pub fn bus_floor(&self) -> StoreResult<Option<i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let floor = conn.query_row("SELECT MIN(id) FROM bus_messages", [], |row| row.get(0))?;
+        Ok(floor)
+    }
+
+    pub fn bus_cursor(&self, subscriber: &str) -> StoreResult<Option<i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let cursor = conn
+            .query_row(
+                "SELECT cursor FROM bus_cursors WHERE subscriber = ?1",
+                params![subscriber],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(cursor)
+    }
+
+    pub fn set_bus_cursor(&self, subscriber: &str, cursor: i64) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO bus_cursors (subscriber, cursor) VALUES (?1, ?2)
+             ON CONFLICT(subscriber) DO UPDATE SET cursor = excluded.cursor",
+            params![subscriber, cursor],
         )?;
         Ok(())
     }

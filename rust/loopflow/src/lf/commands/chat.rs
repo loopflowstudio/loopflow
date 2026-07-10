@@ -1,45 +1,37 @@
-//! The transport under two verbs: `lf chat` (the human conversing with a
-//! served mind's durable thread) and `lf radio` (the agent bus — broadcast,
-//! ephemeral). Two words, two wires, one door: both POST `/messages` on the
-//! family head's server, the way psql and any other client share postgres's
-//! wire. `--steer` uses the `steer` op, reaching a live steer-capable turn and
-//! otherwise queueing for the next one. The default `say` op lands in the
-//! served mind's thread with a byline and queues for its loop.
+//! `lf chat` — the human conversing with a served mind's durable thread.
 //!
-//! # Targeting (by CHANNEL name — dots are the tree)
-//! - default: the invoking context's channel — `LFD_CHANNEL` env first (set
-//!   by dispatch), else `LFD_WAVE_ID`, else the worktree name, which IS the
-//!   channel name (`<repo>.<wave>` → the wave channel; `<repo>.<wave>.<id>` →
-//!   that work line's channel — speak locally). No wave context at all (no
-//!   env, worktree not wave-shaped) means there is no subscriber: the publish
-//!   drops with exit 0 and one stderr note — correct pubsub semantics, which
-//!   is what makes the speech vocabulary safe in every prompt unconditionally.
+//! One door, `POST /messages` on the wave's server. `--steer` uses the `steer`
+//! op, reaching a live steer-capable turn and otherwise queueing for the next
+//! one. The default `say` op lands in the thread with a byline and queues for
+//! the loop.
+//!
+//! Agents do not use this verb. Their wire is `lf radio` — a broadcast on the
+//! shared-store bus, with no server in the path ([`super::radio`]). Two words,
+//! two wires: `lf chat` needs a live mind; `lf radio` needs nothing.
+//!
+//! # Targeting
+//! - default: the invoking context's wave — `LFD_CHANNEL` env first (set by
+//!   dispatch), else `LFD_WAVE_ID`, else the worktree name. A dotted name
+//!   resolves to its family head: a hand's channel has no thread to converse
+//!   with. No wave context at all (no env, worktree not wave-shaped) drops the
+//!   message with exit 0 and one stderr note.
 //! - `--parent`: walk `parent_wave_id` in the registry and post to the parent
 //!   wave's live server; its endpoint rides the parent's WaveAgent session
 //!   row, so cross-repo parents resolve through the store, not the
 //!   filesystem. A root wave errors (the human fall-through arrives with
 //!   Decisions).
-//! - a dotted name (`goals.148e0e02`) addresses that channel through its
-//!   FAMILY HEAD's server. A child channel is a name on the bus, not a place:
-//!   it needs no worktree and keeps no journal of its own.
 //!
 //! # Endpoint resolution
-//! Always the family head's: its live WaveAgent session row carries
-//! `LF_WAVE_ENDPOINT`; when the store has no row (unregistered server, no
-//! registry on this machine), the local `wave/<name>/.wave-endpoint`
-//! discovery file is the fallback. A resolvable wave with no live server is
-//! a clear error — a dead wave's mail bounces, it doesn't vanish (child
-//! channels included: the head serves the mind, so speech to a work line of a
-//! down listener bounces the same way); queuing for offline waves is future
-//! work.
+//! The wave's live WaveAgent session row carries `LF_WAVE_ENDPOINT`; when the
+//! store has no row (unregistered server, no registry on this machine), the
+//! local `wave/<name>/.wave-endpoint` discovery file is the fallback. A
+//! resolvable wave with no live server is a clear error — a dead wave's mail
+//! bounces, it doesn't vanish; queuing for offline waves is future work.
 //!
 //! # Attribution
-//! Only the sender's `LFD_SESSION_ID` and a suggested label leave the client.
-//! On a CHILD channel the server stamps the byline from the channel name
-//! itself, so a `from` in the body cannot claim to be another speaker; the
-//! label survives only on the wave's own channel, where `--from <label>` marks
-//! machine speech (the webhook gatekeeper's `--from ci` / `--from github`) so
-//! it never rides the from-absent human path.
+//! The sender's `LFD_SESSION_ID` and a label leave the client. `--from <label>`
+//! marks machine speech (the webhook gatekeeper's `--from ci` / `--from
+//! github`) so it never rides the from-absent human path.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -102,15 +94,12 @@ pub(crate) async fn run_with_context(
         }
         (MessageOp::Say, Some(from))
     };
-    let mut body = serde_json::json!({ "op": op, "text": text, "from": from });
-    if let Some(channel) = &resolved.channel {
-        body["channel"] = serde_json::Value::String(channel.clone());
-    }
+    let body = serde_json::json!({ "op": op, "text": text, "from": from });
     post_json(&endpoint, "/messages", &body).await?;
-    let channel = resolved.channel.as_deref().unwrap_or(&resolved.name);
+    let name = &resolved.name;
     match from {
-        Some(from) => println!("posted to channel '{channel}' as [{}]", from.label),
-        None => println!("sent to channel '{channel}' (steer live, otherwise queue)"),
+        Some(from) => println!("posted to '{name}' as [{}]", from.label),
+        None => println!("sent to '{name}' (steer live, otherwise queue)"),
     }
     Ok(())
 }
@@ -157,18 +146,14 @@ impl CliContext {
 
 /// A resolved target: the family-head wave's name, its live endpoint (when
 /// one answers via the registry row or the discovery file), the repo root
-/// its wave dir lives under (for serverless reads), the invoking wave's name
-/// (for labels), and — when the target is a work-line channel rather than
-/// the wave itself — the channel name to address the door with.
+/// its wave dir lives under (for serverless reads), and the invoking wave's
+/// name (for labels).
 #[derive(Debug)]
 pub(crate) struct ResolvedWave {
     pub name: String,
     pub endpoint: Option<String>,
     pub repo_root: Option<PathBuf>,
     pub own_name: Option<String>,
-    /// `Some` only for a child channel (`goals.148e0e02`); `None` targets
-    /// the wave channel itself.
-    pub channel: Option<String>,
 }
 
 impl ResolvedWave {
@@ -183,8 +168,8 @@ impl ResolvedWave {
     }
 }
 
-/// Resolve the target channel, its family head wave, and the head's live
-/// endpoint. See the module doc for the targeting and endpoint rules.
+/// Resolve the target wave and its live endpoint. See the module doc for the
+/// targeting and endpoint rules.
 /// `Ok(None)` is the publish-to-no-subscriber case: default targeting with
 /// no wave context anywhere — callers that publish drop the message; callers
 /// that read treat it as an error.
@@ -203,14 +188,12 @@ pub(crate) async fn resolve_target(
     // invoking WAVE is the channel's family head.
     let mut own_row: Option<Wave> = None;
     let mut own_name: Option<String> = None;
-    let mut own_channel: Option<String> = None;
     match resolve_ambient_channel(env_channel, env_wave_id, repo) {
         Some(AmbientWaveRef::Id(id)) => {
             if let (Some(store), Ok(id)) = (store, id.parse()) {
                 own_row = store.get_wave(&id).await?;
             }
             own_name = own_row.as_ref().map(|row| row.name().clone());
-            own_channel = own_name.clone();
         }
         Some(AmbientWaveRef::Name(name)) => {
             let head = family_head(&name).to_string();
@@ -218,68 +201,61 @@ pub(crate) async fn resolve_target(
                 own_row = store.get_wave_by_name(&head).await?;
             }
             own_name = Some(head);
-            own_channel = Some(name);
         }
         None => {}
     }
 
-    let (target_row, target_name, channel): (Option<Wave>, String, Option<String>) =
-        if let Some(name) = &args.wave {
-            let head = family_head(name).to_string();
-            let row = match store {
-                Some(store) => store.get_wave_by_name(&head).await?,
-                None => None,
-            };
-            let channel = (*name != head).then(|| name.clone());
-            (row, head, channel)
-        } else if args.parent {
-            let store = store.ok_or_else(|| {
-                anyhow!(
-                    "--parent needs the run registry to walk the wave tree, \
-                 and this machine has none (~/.lf/lfd.db)"
-                )
-            })?;
-            let own = own_row.ok_or_else(|| {
-                anyhow!(
-                    "cannot resolve the invoking wave for --parent: no LFD_WAVE_ID \
-                 in env and no registered wave matches this worktree"
-                )
-            })?;
-            let parent_id = own.parent_wave_id().ok_or_else(|| {
-                anyhow!(
-                    "wave '{}' has no parent — it is a root wave; the human \
-                 fall-through arrives with Decisions",
-                    own.name()
-                )
-            })?;
-            let parent = store.get_wave(parent_id).await?.ok_or_else(|| {
-                anyhow!(
-                    "wave '{}' names parent {parent_id}, but the registry has no such wave",
-                    own.name()
-                )
-            })?;
-            let name = parent.name().clone();
-            // Escalation targets the parent WAVE's channel, never a work line.
-            (Some(parent), name, None)
-        } else {
-            // Speak locally: the ambient channel, through its family head.
-            let channel = own_channel
-                .clone()
-                .filter(|channel| Some(channel) != own_name.as_ref());
-            match own_row {
-                Some(row) => {
-                    let name = row.name().clone();
-                    (Some(row), name, channel)
-                }
-                None => {
-                    // No wave context anywhere: the publish has no subscriber.
-                    let Some(name) = own_name.clone() else {
-                        return Ok(None);
-                    };
-                    (None, name, channel)
-                }
-            }
+    let (target_row, target_name): (Option<Wave>, String) = if let Some(name) = &args.wave {
+        let head = family_head(name).to_string();
+        let row = match store {
+            Some(store) => store.get_wave_by_name(&head).await?,
+            None => None,
         };
+        (row, head)
+    } else if args.parent {
+        let store = store.ok_or_else(|| {
+            anyhow!(
+                "--parent needs the run registry to walk the wave tree, \
+                 and this machine has none (~/.lf/lfd.db)"
+            )
+        })?;
+        let own = own_row.ok_or_else(|| {
+            anyhow!(
+                "cannot resolve the invoking wave for --parent: no LFD_WAVE_ID \
+                 in env and no registered wave matches this worktree"
+            )
+        })?;
+        let parent_id = own.parent_wave_id().ok_or_else(|| {
+            anyhow!(
+                "wave '{}' has no parent — it is a root wave; the human \
+                 fall-through arrives with Decisions",
+                own.name()
+            )
+        })?;
+        let parent = store.get_wave(parent_id).await?.ok_or_else(|| {
+            anyhow!(
+                "wave '{}' names parent {parent_id}, but the registry has no such wave",
+                own.name()
+            )
+        })?;
+        let name = parent.name().clone();
+        (Some(parent), name)
+    } else {
+        // Speak locally: the ambient wave.
+        match own_row {
+            Some(row) => {
+                let name = row.name().clone();
+                (Some(row), name)
+            }
+            None => {
+                // No wave context anywhere: the publish has no subscriber.
+                let Some(name) = own_name.clone() else {
+                    return Ok(None);
+                };
+                (None, name)
+            }
+        }
+    };
 
     // Endpoint: the live WaveAgent session row carries it; the local
     // discovery file is the fallback when the store has no row.
@@ -303,7 +279,6 @@ pub(crate) async fn resolve_target(
         endpoint,
         repo_root,
         own_name,
-        channel,
     }))
 }
 
@@ -765,17 +740,16 @@ mod tests {
         );
     }
 
-    /// Channel addressing: a dotted name resolves its FAMILY HEAD's endpoint
-    /// (the head serves the mind) and rides the wire as the `channel` field —
-    /// a `say` is recorded once in the served wave's own journal, bylined with
-    /// the channel. No worktree, no per-channel journal.
+    /// A dotted name still resolves to its family head: a hand's channel is a
+    /// bus address, and the bus has no thread to converse with. The mind's
+    /// server answers.
     #[tokio::test]
-    async fn dotted_name_targets_the_channel_through_the_family_head() {
+    async fn a_dotted_name_resolves_to_the_family_head() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(&origin).unwrap();
-        let (addr, runtime, _inbox) = boot_server(&origin, "ship").await;
+        let (addr, _runtime, _inbox) = boot_server(&origin, "ship").await;
         let wave = make_wave("ship", &origin, None);
         store.create_wave(&wave).await.expect("seed wave");
         store
@@ -783,7 +757,6 @@ mod tests {
             .await
             .expect("seed brain");
 
-        // Explicit dotted target: head endpoint, channel on the side.
         let resolved = resolve_target(
             &WaveTargetArgs {
                 wave: Some("ship.148e".into()),
@@ -798,37 +771,34 @@ mod tests {
         .expect("resolve")
         .expect("wave context");
         assert_eq!(resolved.name, "ship", "the family head is the wave");
-        assert_eq!(resolved.channel.as_deref(), Some("ship.148e"));
         assert_eq!(resolved.endpoint.as_deref(), Some(addr.as_str()));
+    }
 
-        // Ambient channel (the dispatch env contract): same resolution.
-        let ambient = resolve_target(
-            &WaveTargetArgs::default(),
-            Some(&store),
-            None,
-            Some(wave.id().as_str()),
-            Some("ship.148e"),
+    /// The thread door carries no channel: a `say` lands once on the served
+    /// wave's own thread, bylined with what the client claimed.
+    #[tokio::test]
+    async fn the_thread_door_records_one_attributed_turn() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let origin = tmp.path().join("repo");
+        std::fs::create_dir_all(&origin).unwrap();
+        let (addr, runtime, _inbox) = boot_server(&origin, "ship").await;
+
+        post_json(
+            &addr,
+            "/messages",
+            &serde_json::json!({
+                "op": "say",
+                "text": "CI failed",
+                "from": Attribution { session_id: None, label: "ci".into() },
+            }),
         )
         .await
-        .expect("resolve")
-        .expect("wave context");
-        assert_eq!(ambient.name, "ship");
-        assert_eq!(ambient.channel.as_deref(), Some("ship.148e"));
+        .expect("post");
 
-        // The whole door: POST with the channel field records the report once
-        // on the wave thread, bylined with the channel — the report reaches
-        // the loop, and there is no per-channel journal.
-        let mut body = serde_json::json!({
-            "op": "say",
-            "text": "child-bound",
-            "from": Attribution { session_id: None, label: "worker".into() },
-        });
-        body["channel"] = serde_json::Value::String("ship.148e".into());
-        post_json(&addr, "/messages", &body).await.expect("post");
         let thread = runtime.thread_snapshot();
-        assert_eq!(thread.len(), 1, "the report reached the wave thread");
-        assert_eq!(thread[0].text, "child-bound");
-        assert_eq!(thread[0].from.as_deref(), Some("ship.148e"));
+        assert_eq!(thread.len(), 1);
+        assert_eq!(thread[0].text, "CI failed");
+        assert_eq!(thread[0].from.as_deref(), Some("ci"));
         assert_eq!(
             crate::wave::journal::read_events(&crate::wave::journal::journal_path(&origin, "ship"))
                 .iter()
@@ -836,59 +806,6 @@ mod tests {
                 .count(),
             1,
             "one copy, in the served wave's journal",
-        );
-    }
-
-    /// The whole `lf radio --channel ship.148e --from ship` path: radio shares
-    /// this transport, and the server stamps the byline from the CHANNEL. A
-    /// hand cannot post as its wave, however it labels itself.
-    #[tokio::test]
-    async fn a_forged_byline_does_not_survive_the_channel_stamp() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let store = temp_store(tmp.path()).await;
-        let origin = tmp.path().join("repo");
-        std::fs::create_dir_all(&origin).unwrap();
-        let (addr, runtime, mut inbox) = boot_server(&origin, "ship").await;
-        let wave = make_wave("ship", &origin, None);
-        store.create_wave(&wave).await.expect("seed wave");
-        store
-            .register_session(&live_server_session(&wave, &addr))
-            .await
-            .expect("seed brain");
-
-        let context = CliContext {
-            store: Some(store),
-            repo: None,
-            env_wave_id: None,
-            env_channel: None,
-        };
-        // `--from ship` claims the wave's own byline; the channel is a hand's.
-        run_with_context(
-            &context,
-            &["landed".into()],
-            Some("ship"),
-            false,
-            &WaveTargetArgs {
-                wave: Some("ship.148e".into()),
-                parent: false,
-            },
-        )
-        .await
-        .expect("radio publishes on the hand's channel");
-
-        let thread = runtime.thread_snapshot();
-        assert_eq!(thread.len(), 1);
-        assert_eq!(
-            thread[0].from.as_deref(),
-            Some("ship.148e"),
-            "the forged 'ship' byline did not survive the server stamp"
-        );
-        let InboxItem::Message(msg) = inbox.try_recv().expect("the report woke the loop") else {
-            panic!("expected a message");
-        };
-        assert_eq!(
-            msg.from.as_ref().map(|f| f.label.as_str()),
-            Some("ship.148e")
         );
     }
 

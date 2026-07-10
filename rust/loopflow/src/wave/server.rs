@@ -29,25 +29,18 @@
 //!   `running`), if one is in progress, after the finalized thread. Optional
 //!   `?limit=N` tails the last N turns (open turn included) — `wave_context`
 //!   passes 12; absent means the whole thread. Primary channel only.
-//! - `GET /events` → SSE, the family's one unified stream. Scope by query:
-//!   `?channel=<name>` (exactly one channel), `?prefix=<name>` (that subtree),
-//!   default = the whole family. A name outside this wave's family is a 404.
+//! - `GET /events` → SSE, the served mind's thread. It carries the PRIMARY
+//!   channel and nothing else: agent-to-agent traffic is the bus, a table in
+//!   the shared store that no server sits in front of (`crate::wave::bus`).
 //!   Three event names:
 //!   - `state`: data is the loop-state name (`idle | turning | interrupting |
 //!     failed`), sent once on subscribe (before the turn replay) and again on
-//!     every transition — the composer keys its verb off it. Primary channel
-//!     only — child channels have no loop, so a child-only subscription
-//!     carries no `state` frames.
-//!   - `turn`: data is a `Turn` JSON; the PRIMARY thread replays on connect
-//!     (including the open turn), then streams live. CHILD channels are
-//!     live-only — a topic has no past, so nothing replays for them. A turn
-//!     from a child carries one extra key, `"channel": "<name>"`; the primary
-//!     channel's turns ride untagged (absent `channel` = the wave's own
-//!     channel), so a family of one is byte-identical to the pre-family wire.
-//!     Turn ids repeat — and repeat across channels: an in-progress turn is
-//!     re-sent whole as it grows and finalization sends the terminal turn
+//!     every transition — the composer keys its verb off it.
+//!   - `turn`: data is a `Turn` JSON; the thread replays on connect (including
+//!     the open turn), then streams live. Turn ids repeat: an in-progress turn
+//!     is re-sent whole as it grows and finalization sends the terminal turn
 //!     under the same id — each frame replaces the client's previous state
-//!     for that (channel, id) pair (upsert, never append-if-seen).
+//!     for that id (upsert, never append-if-seen).
 //!   - `memory`: data is the `MemoryUpdated` summary string, fired on every
 //!     curation. Live-only, no replay — MEMORY.md itself is the durable
 //!     state. Primary channel only (memory is wave identity; work lines have
@@ -87,13 +80,9 @@
 //!   with its byline AND queues for the loop like a message). `text` may be
 //!   empty only for `interrupt` (400 otherwise). `from {session_id?, label}`
 //!   is required for `say` and rejected for every other op (400) — human
-//!   turns are unattributed by convention. `channel` is explicitly Optional:
-//!   null targets the wave channel (unchanged); a child name broadcasts one
-//!   tagged frame on the bus (404 only outside the family — a topic needs no
-//!   worktree). A child `say` is a report: the served wave records ONE copy in
-//!   its own journal, bylined with the channel, and queues it for the loop.
-//!   On a child channel there is no resident: steer degrades to a plain
-//!   message, a bare interrupt is a no-op. `turn` is the appended user `Turn`,
+//!   turns are unattributed by convention. The door is the THREAD's, and only
+//!   the thread's — a report on a hand's channel is `lf radio`, an INSERT on
+//!   the bus that this server later reads back. `turn` is the appended user `Turn`,
 //!   or null for a bare interrupt (nothing was said); `state` is the
 //!   loop-state name when the request was accepted — ops are applied by the
 //!   loop asynchronously, so watch the stream's `state` events for the
@@ -335,17 +324,12 @@ struct ConversationQuery {
 
 /// `POST /messages` request body. `op` is required — explicit, never inferred
 /// (no serde default; an op-less body is a 422). `from` is explicitly
-/// Optional: required for `say`, rejected otherwise — and on a child channel
-/// only its `session_id` is honored, since the byline is stamped from the
-/// channel name (a client cannot speak as another). `channel` is explicitly
-/// Optional: null = the wave channel; a child name is a bus topic that needs
-/// no worktree and keeps no journal (404 only outside the family).
+/// Optional: required for `say`, rejected otherwise.
 #[derive(Debug, Deserialize)]
 struct PostMessage {
     op: MessageOp,
     text: String,
     from: Option<Attribution>,
-    channel: Option<String>,
 }
 
 /// `POST /channels` request body — the dispatch notification (see module
@@ -363,15 +347,11 @@ struct PostChannelResponse {
     turn: Option<ChatTurn>,
 }
 
-/// `GET /events` scope query. `channel`/`prefix` are explicitly Optional;
-/// setting both is a 400; absent = the whole family. `inbox` is explicitly
-/// Optional: `true` adds the resident's `inbox` frames (pending replay +
-/// live ops) to a primary-scope subscription; absent/false leaves the wire
-/// byte-identical to the pre-resident stream.
+/// `GET /events` query. `inbox` is explicitly Optional: `true` adds the
+/// resident's `inbox` frames (pending replay + live ops) to the subscription;
+/// absent/false leaves the wire byte-identical to the pre-resident stream.
 #[derive(Debug, Deserialize)]
 struct EventsQuery {
-    channel: Option<String>,
-    prefix: Option<String>,
     inbox: Option<bool>,
 }
 
@@ -922,22 +902,7 @@ async fn messages_handler(
             "text is required for every op but interrupt".to_string(),
         ));
     }
-    let channel = body
-        .channel
-        .unwrap_or_else(|| state.runtime.name().to_string());
-    if !state.runtime.in_family(&channel) {
-        return Err((
-            StatusCode::NOT_FOUND,
-            format!(
-                "channel '{channel}' is not in wave '{}''s family",
-                state.runtime.name()
-            ),
-        ));
-    }
-    let turn = state
-        .runtime
-        .deliver_to_channel(&channel, body.op, body.text, body.from)
-        .map_err(|err| (StatusCode::NOT_FOUND, err.to_string()))?;
+    let turn = state.runtime.deliver(body.op, body.text, body.from);
     Ok(Json(PostMessageResponse {
         turn,
         state: state.runtime.loop_state().name().to_string(),
@@ -1019,155 +984,76 @@ fn first_line(content: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The unified `/events` SSE, scoped to one channel, a subtree, or (default)
-/// the whole family.
+/// The served mind's thread as SSE: the loop state, the thread on connect
+/// (open turn included, status `running`), then live frames — `state` on every
+/// transition, `turn` ids repeating by design (every frame replaces the
+/// client's state for that id, so an in-progress turn updates in place and its
+/// terminal frame lands under the same id), `memory` on every curation
+/// (live-only; the file is the durable state), and `memory-add` for replayable
+/// facts. Snapshot and subscription are atomic in the runtime (broadcasts
+/// share the append lock), so no live frame is ever older than the replayed
+/// snapshot.
 ///
-/// The primary channel's replay-then-live shape is unchanged: the loop state,
-/// the thread on connect (open turn included, status `running`), then live
-/// frames — `state` on every transition, `turn` ids repeating by design
-/// (every frame replaces the client's state for that (channel, id), so an
-/// in-progress turn updates in place and its terminal frame lands under the
-/// same id), `memory` on every curation (live-only; the file is the durable
-/// state), and `memory-add` for replayable facts. Snapshot and subscription
-/// are atomic in the runtime (broadcasts share the append lock), so no primary
-/// live frame is ever older than the replayed snapshot.
-///
-/// Child channels replay their folded threads (turn frames tagged with
-/// `channel`) and stream live off the family bus, subscribed BEFORE the
-/// snapshots — a frame can repeat across the boundary, never go missing.
-/// A subscription that names a child channel with no journal yet just waits:
-/// the channel may open later.
+/// There is no channel scoping. Agent-to-agent broadcast is the bus — a table,
+/// polled from a cursor, with no server in the path (`crate::wave::bus`).
 async fn events_handler(
     State(state): State<ServerState>,
     Query(query): Query<EventsQuery>,
-) -> Result<axum::response::Response, (StatusCode, String)> {
-    let wave = state.runtime.name().to_string();
+) -> axum::response::Response {
     let include_inbox = query.inbox == Some(true);
-    let (scope, primary) = match (query.channel, query.prefix) {
-        (Some(_), Some(_)) => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "pass channel or prefix, not both".to_string(),
-            ));
-        }
-        (Some(channel), None) => {
-            let primary = state.runtime.is_primary(&channel);
-            (Scope::Channel(channel), primary)
-        }
-        (None, Some(prefix)) => {
-            let primary = state.runtime.is_primary(&prefix);
-            (Scope::Prefix(prefix), primary)
-        }
-        (None, None) => (
-            Scope::Prefix(state.runtime.channel_name().to_string()),
-            true,
-        ),
+    let sub = state.runtime.subscribe_with_snapshot();
+    // The resident's subscription replays the pending queue after the
+    // thread — its boot inbox. Consumption is validated at the resident
+    // door, so a stale replay can never double-consume.
+    let inbox_replay: Vec<Result<Event, Infallible>> = if include_inbox {
+        sub.pending
+            .iter()
+            .map(|message| Ok(inbox_event(&pending_inbox_frame(message))))
+            .collect()
+    } else {
+        Vec::new()
     };
-    let name = scope.name();
-    if !state.runtime.in_family(name) {
-        return Err((
-            StatusCode::NOT_FOUND,
-            format!("'{name}' is not in wave '{wave}''s family"),
-        ));
-    }
-
-    // Child channels are topics: live bus only, no replay — a subscriber
-    // hears what is said while it listens, and a message nobody heard is
-    // gone. A `?channel=` scope streams STRICTLY the one named channel (no
-    // descendants); a `?prefix=` scope streams the whole subtree. The primary
-    // scope carries no child frames — its own thread rides the primary
-    // subscription below.
-    let family_rx = match &scope {
-        Scope::Channel(channel) if state.runtime.is_primary(channel) => None,
-        Scope::Channel(_) | Scope::Prefix(_) => Some(state.runtime.subscribe_channels()),
-    };
-    let live_children = family_rx.map(|rx| {
-        let scope = scope.clone();
-        BroadcastStream::new(rx).filter_map(move |res| {
-            let out = match res {
-                // The frame carries its tagged JSON, serialized once at the
-                // send site — every subscriber reuses it.
-                Ok(frame) if scope.matches(&frame.channel) => {
-                    Some(Ok(Event::default().event("turn").data(frame.json.as_ref())))
-                }
-                // Out of scope, or lagged (the journal has it; a client
-                // that fell behind resyncs on reconnect).
-                _ => None,
-            };
-            async move { out }
-        })
+    let replay = stream::iter(
+        std::iter::once(Ok(state_event(&sub.state)))
+            .chain(sub.playhead.into_iter().map(|p| Ok(playhead_event(&p))))
+            .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t))))
+            .chain(
+                sub.memory_adds
+                    .into_iter()
+                    .map(|fact| Ok(memory_add_event(&fact))),
+            )
+            .chain(inbox_replay),
+    );
+    // The frame's wire JSON was serialized once at the send site. Lagged:
+    // the client fell behind; it resyncs from /conversation.
+    let live_turns = live_stream(sub.turn_rx, |frame| {
+        Event::default().event("turn").data(frame.json.as_str())
     });
-
-    let mut streams: Vec<BoxedEventStream> = Vec::new();
-    if primary {
-        let sub = state.runtime.subscribe_with_snapshot();
-        // The resident's subscription replays the pending queue after the
-        // thread — its boot inbox. Consumption is validated at the resident
-        // door, so a stale replay can never double-consume.
-        let inbox_replay: Vec<Result<Event, Infallible>> = if include_inbox {
-            sub.pending
-                .iter()
-                .map(|message| Ok(inbox_event(&pending_inbox_frame(message))))
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let replay = stream::iter(
-            std::iter::once(Ok(state_event(&sub.state)))
-                .chain(sub.playhead.into_iter().map(|p| Ok(playhead_event(&p))))
-                .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t))))
-                .chain(
-                    sub.memory_adds
-                        .into_iter()
-                        .map(|fact| Ok(memory_add_event(&fact))),
-                )
-                .chain(inbox_replay),
-        );
-        // The frame's wire JSON was serialized once at the send site. Lagged:
-        // the client fell behind; it resyncs from /conversation.
-        let live_turns = live_stream(sub.turn_rx, |frame| {
-            Event::default().event("turn").data(frame.json.as_str())
-        });
-        // Worker-run motion (`op` frames). Live-only — no replay; a client
-        // that lags re-reads history from `lf runs`.
-        let live_ops = live_stream(sub.op_rx, |frame| op_event(&frame));
-        // Lagged: fine — the next transition carries the current state.
-        let live_states = live_stream(sub.state_rx, |s| state_event(&s));
-        let live_playhead = live_stream(sub.playhead_rx, |p| playhead_event(&p));
-        // Lagged: reconnect gets a fresh add snapshot.
-        let live_memory_adds = live_stream(sub.memory_add_rx, |fact| memory_add_event(&fact));
-        // Lagged: fine — MEMORY.md itself is the durable state.
-        let live_memory = live_stream(sub.memory_rx, |summary| memory_event(&summary));
-        let mut live: BoxedEventStream = Box::pin(stream::select(
-            stream::select(live_turns, live_ops),
-            stream::select(
-                stream::select(live_states, live_playhead),
-                stream::select(live_memory, live_memory_adds),
-            ),
-        ));
-        if include_inbox {
-            // Lagged: the pending fold is the durable queue; a resident that
-            // falls behind resubscribes.
-            let live_inbox =
-                live_stream(sub.inbox_rx, |item| inbox_event(&inbox_item_frame(&item)));
-            live = Box::pin(stream::select(live, live_inbox));
-        }
-        streams.push(Box::pin(replay.chain(live)));
+    // Worker-run motion (`op` frames). Live-only — no replay; a client
+    // that lags re-reads history from `lf runs`.
+    let live_ops = live_stream(sub.op_rx, |frame| op_event(&frame));
+    // Lagged: fine — the next transition carries the current state.
+    let live_states = live_stream(sub.state_rx, |s| state_event(&s));
+    let live_playhead = live_stream(sub.playhead_rx, |p| playhead_event(&p));
+    // Lagged: reconnect gets a fresh add snapshot.
+    let live_memory_adds = live_stream(sub.memory_add_rx, |fact| memory_add_event(&fact));
+    // Lagged: fine — MEMORY.md itself is the durable state.
+    let live_memory = live_stream(sub.memory_rx, |summary| memory_event(&summary));
+    let mut live: BoxedEventStream = Box::pin(stream::select(
+        stream::select(live_turns, live_ops),
+        stream::select(
+            stream::select(live_states, live_playhead),
+            stream::select(live_memory, live_memory_adds),
+        ),
+    ));
+    if include_inbox {
+        // Lagged: the pending fold is the durable queue; a resident that
+        // falls behind resubscribes.
+        let live_inbox = live_stream(sub.inbox_rx, |item| inbox_event(&inbox_item_frame(&item)));
+        live = Box::pin(stream::select(live, live_inbox));
     }
-    if let Some(live) = live_children {
-        streams.push(Box::pin(live));
-    }
-    let merged: BoxedEventStream = match streams.len() {
-        1 => streams.pop().expect("one stream"),
-        _ => {
-            let children = streams.pop().expect("child stream");
-            let primary = streams.pop().expect("primary stream");
-            Box::pin(stream::select(primary, children))
-        }
-    };
-    Ok(axum::response::IntoResponse::into_response(
-        Sse::new(merged).keep_alive(KeepAlive::default()),
-    ))
+    let merged: BoxedEventStream = Box::pin(replay.chain(live));
+    axum::response::IntoResponse::into_response(Sse::new(merged).keep_alive(KeepAlive::default()))
 }
 
 type BoxedEventStream =
@@ -1188,30 +1074,6 @@ where
         let out = res.ok().map(|value| Ok(to_event(value)));
         async move { out }
     })
-}
-
-/// The scope one `/events` subscription covers.
-#[derive(Debug, Clone)]
-enum Scope {
-    /// Exactly one channel.
-    Channel(String),
-    /// A subtree: the named channel and every dot-descendant.
-    Prefix(String),
-}
-
-impl Scope {
-    fn name(&self) -> &str {
-        match self {
-            Self::Channel(name) | Self::Prefix(name) => name,
-        }
-    }
-
-    fn matches(&self, channel: &str) -> bool {
-        match self {
-            Self::Channel(name) => channel == name,
-            Self::Prefix(prefix) => crate::wave::channel::matches_prefix(channel, prefix),
-        }
-    }
 }
 
 fn turn_event(turn: &ChatTurn) -> Event {

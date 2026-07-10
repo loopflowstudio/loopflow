@@ -620,18 +620,14 @@ fn main() -> anyhow::Result<()> {
                 channel,
                 parent,
                 from,
-                steer,
-            }) => {
-                // Radio and chat share one transport (postgres and psql over
-                // one wire): a channel is a dotted wave name to the door.
-                let target = loopflow::lf::WaveTargetArgs {
-                    wave: channel.clone(),
-                    parent: *parent,
-                };
-                loopflow::lf::commands::chat::run(text, from.as_deref(), *steer, &target)
-            }
-            Some(Commands::Sub { wave, json }) => {
-                loopflow::lf::commands::sub::run(wave.as_deref(), *json)
+            }) => loopflow::lf::commands::radio::run(
+                text,
+                channel.as_deref(),
+                *parent,
+                from.as_deref(),
+            ),
+            Some(Commands::Sub { channel, json }) => {
+                loopflow::lf::commands::sub::run(channel.as_deref(), *json)
             }
             Some(Commands::Memory { cmd, target }) => {
                 loopflow::lf::commands::memory::run(cmd.as_ref(), target)

@@ -181,7 +181,6 @@ mod tests {
             endpoint,
             repo_root: root.map(Path::to_path_buf),
             own_name: None,
-            channel: None,
         }
     }
 

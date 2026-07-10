@@ -87,6 +87,21 @@ pub struct RunEventRow {
     pub model: Option<String>,
 }
 
+/// One frame on the agent bus (`bus_messages`). `byline` is testimony — what
+/// the publishing client said it was — and `channel` is evidence: where the
+/// row actually arrived. Nothing derives identity server-side, so a forged
+/// byline shows up as a mismatch between the two rather than being prevented.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BusMessage {
+    /// Monotonic id; a subscriber's cursor is an id it has already read.
+    pub id: i64,
+    pub channel: String,
+    pub byline: String,
+    pub text: String,
+    /// Unix seconds. The sweeper's window is measured against this.
+    pub at: i64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("sqlite error: {0}")]
@@ -147,6 +162,52 @@ impl Store {
 
     pub fn admin(&self) -> &dyn StoreAdmin {
         self
+    }
+
+    // The agent bus: publish is an INSERT, subscribe is a forward poll from an
+    // id cursor. No server is in the path — see `migrations/059_bus.sql`.
+
+    /// Publish one frame, stamped now. Returns its id.
+    pub async fn publish_bus(
+        &self,
+        channel: String,
+        byline: String,
+        text: String,
+    ) -> StoreResult<i64> {
+        let at = time::OffsetDateTime::now_utc().unix_timestamp();
+        run_sqlite(&self.sqlite, move |store| {
+            store.publish_bus(&channel, &byline, &text, at)
+        })
+        .await
+    }
+
+    /// Drop every frame published before `cutoff` (unix seconds). Publishing
+    /// sweeps on its own; this is the same broom, aimed by hand.
+    pub async fn sweep_bus(&self, cutoff: i64) -> StoreResult<usize> {
+        run_sqlite(&self.sqlite, move |store| store.sweep_bus(cutoff)).await
+    }
+
+    pub async fn read_bus_after(&self, cursor: i64) -> StoreResult<Vec<BusMessage>> {
+        run_sqlite(&self.sqlite, move |store| store.read_bus_after(cursor)).await
+    }
+
+    pub async fn bus_head(&self) -> StoreResult<i64> {
+        run_sqlite(&self.sqlite, move |store| store.bus_head()).await
+    }
+
+    pub async fn bus_floor(&self) -> StoreResult<Option<i64>> {
+        run_sqlite(&self.sqlite, move |store| store.bus_floor()).await
+    }
+
+    pub async fn bus_cursor(&self, subscriber: String) -> StoreResult<Option<i64>> {
+        run_sqlite(&self.sqlite, move |store| store.bus_cursor(&subscriber)).await
+    }
+
+    pub async fn set_bus_cursor(&self, subscriber: String, cursor: i64) -> StoreResult<()> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.set_bus_cursor(&subscriber, cursor)
+        })
+        .await
     }
 
     pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {

@@ -340,34 +340,33 @@ pub enum Commands {
     },
     /// Broadcast on the agent bus (agents): report up when you finish, fail,
     /// or get stuck. Broadcast, not delivery — whoever is tuned in hears it,
-    /// nobody guarantees receipt. Not a log, not the human surface. Bare, it
-    /// publishes on your own channel, which the wave records as one attributed
-    /// report. Tune in with `lf sub`.
+    /// nobody guarantees receipt. Not a log, not the human surface. Publishing
+    /// is a write to the shared store, so no wave need be running. Bare, it
+    /// publishes on your own channel, which a served wave records as one
+    /// attributed report. Tune in with `lf sub`.
     Radio {
         /// Message text (reads stdin when omitted — heredoc-friendly)
         #[arg(trailing_var_arg = true)]
         text: Vec<String>,
         /// Broadcast on another channel (a hand's `goals.<run>`) instead of
-        /// your own. Live listeners hear it; a mid-pass hand does not.
+        /// your own.
         #[arg(short = 'c', long = "channel", conflicts_with = "parent")]
         channel: Option<String>,
         /// Broadcast to the parent wave's channel (escalation up the tree).
         #[arg(long)]
         parent: bool,
-        /// Attribution label for machine speech (e.g. --from ci).
-        #[arg(long, conflicts_with = "steer")]
-        from: Option<String>,
-        /// Reach a live steer-capable turn on the channel; otherwise queue.
+        /// Byline for machine speech (e.g. --from ci). Testimony, not proof:
+        /// the row records it beside the channel it arrived on.
         #[arg(long)]
-        steer: bool,
+        from: Option<String>,
     },
-    /// Follow a wave's live event stream (turns, loop state, memory) until
-    /// killed. Defaults to the invoking context's wave; exits 0 with a note
-    /// when no wave resolves.
+    /// Tune in to the agent bus: hear what is broadcast on a channel and its
+    /// descendants while you listen. Defaults to the invoking context's
+    /// channel; exits 0 with a note when none resolves.
     Sub {
-        /// Wave name (default: the ambient wave — env, else worktree)
-        wave: Option<String>,
-        /// Emit raw frames as NDJSON instead of human lines
+        /// Channel prefix (default: the ambient channel — env, else worktree)
+        channel: Option<String>,
+        /// Emit heard frames as NDJSON instead of human lines
         #[arg(long)]
         json: bool,
     },
@@ -1019,7 +1018,7 @@ mod tests {
     }
 
     #[test]
-    fn radio_parses_channel_parent_and_steer() {
+    fn radio_parses_channel_parent_and_byline() {
         // `-c`/`--channel` addresses a hand's channel; text trails.
         let cli =
             Cli::try_parse_from(["lf", "radio", "-c", "goals.148e", "landed PR"]).expect("parse");
@@ -1028,7 +1027,6 @@ mod tests {
             channel,
             parent,
             from,
-            steer,
         }) = cli.command
         else {
             panic!("expected radio command");
@@ -1037,23 +1035,6 @@ mod tests {
         assert_eq!(channel.as_deref(), Some("goals.148e"));
         assert!(!parent);
         assert_eq!(from, None);
-        assert!(!steer);
-
-        // Steering a hand's live turn.
-        let cli = Cli::try_parse_from([
-            "lf",
-            "radio",
-            "--channel",
-            "goals.148e",
-            "--steer",
-            "gate it",
-        ])
-        .expect("parse steer");
-        let Some(Commands::Radio { steer, channel, .. }) = cli.command else {
-            panic!("expected radio command");
-        };
-        assert!(steer);
-        assert_eq!(channel.as_deref(), Some("goals.148e"));
 
         // Escalation up the tree.
         let cli =
@@ -1066,6 +1047,14 @@ mod tests {
         // A channel and the parent are mutually exclusive — a report goes to
         // one place.
         assert!(Cli::try_parse_from(["lf", "radio", "-c", "goals.148e", "--parent", "x"]).is_err());
+    }
+
+    /// Steer is a thread op, and the thread is not the bus. The shared
+    /// dispatch once let `--steer` leak across the verb split; separate
+    /// transports make it unspellable.
+    #[test]
+    fn radio_has_no_steer_flag() {
+        assert!(Cli::try_parse_from(["lf", "radio", "--steer", "gate it"]).is_err());
     }
 
     #[test]

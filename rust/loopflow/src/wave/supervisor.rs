@@ -630,7 +630,8 @@ mod tests {
         })
         .await;
         let before = spawns.load(Ordering::SeqCst);
-        rt.deliver(MessageOp::Message, "are you alive?".into()).expect("user turn");
+        rt.deliver(MessageOp::Message, "are you alive?".into())
+            .expect("user turn");
         wait_for("immediate respawn", || {
             spawns.load(Ordering::SeqCst) > before
         })

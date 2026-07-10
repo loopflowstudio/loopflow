@@ -181,8 +181,11 @@ impl Store {
         .await
     }
 
-    /// Drop every frame published before `cutoff` (unix seconds). Publishing
-    /// sweeps on its own; this is the same broom, aimed by hand.
+    /// Drop every frame published before `cutoff` (unix seconds). Production
+    /// never sweeps by hand — publishing and every read carry the broom (see
+    /// [`Self::swept_read`]); this aims it at a chosen cutoff so a test can
+    /// age the bus out without waiting the window.
+    #[cfg(test)]
     pub async fn sweep_bus(&self, cutoff: i64) -> StoreResult<usize> {
         run_sqlite(&self.sqlite, move |store| store.sweep_bus(cutoff)).await
     }

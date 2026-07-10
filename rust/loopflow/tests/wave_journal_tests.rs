@@ -94,7 +94,8 @@ async fn restart_replays_thread_and_turn_ids_continue() {
     // First life: a user message and a real finalized turn.
     let before = {
         let rt = open_wave(tmp.path());
-        rt.deliver(MessageOp::Message, "please build the feature".into()).expect("user turn");
+        rt.deliver(MessageOp::Message, "please build the feature".into())
+            .expect("user turn");
         run_resident_turn(rt.clone(), resident_turn_deltas());
         let before = rt.thread_snapshot();
         assert_eq!(before.len(), 2);
@@ -112,7 +113,9 @@ async fn restart_replays_thread_and_turn_ids_continue() {
 
     // And new turn ids continue the journal's seq domain monotonically.
     let max_before = before.iter().map(|t| turn_seq(&t.id)).max().unwrap();
-    let next = rt.deliver(MessageOp::Message, "still there?".into()).expect("user turn");
+    let next = rt
+        .deliver(MessageOp::Message, "still there?".into())
+        .expect("user turn");
     assert!(
         turn_seq(&next.id) > max_before,
         "new turn id {} continues past {max_before}",
@@ -221,7 +224,8 @@ async fn corrupt_trailing_line_is_tolerated_on_reboot() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let before = {
         let rt = open_wave(tmp.path());
-        rt.deliver(MessageOp::Message, "kept message".into()).expect("user turn");
+        rt.deliver(MessageOp::Message, "kept message".into())
+            .expect("user turn");
         rt.thread_snapshot()
     };
 
@@ -238,7 +242,8 @@ async fn corrupt_trailing_line_is_tolerated_on_reboot() {
         "thread intact past the torn tail"
     );
     // The journal still appends cleanly after truncation.
-    rt.deliver(MessageOp::Message, "after the crash".into()).expect("user turn");
+    rt.deliver(MessageOp::Message, "after the crash".into())
+        .expect("user turn");
     assert_eq!(rt.thread_snapshot().len(), 2);
 }
 

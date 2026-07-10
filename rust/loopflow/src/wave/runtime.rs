@@ -36,8 +36,8 @@ use crate::lfd::security::sanitize_fs_component;
 use crate::wave::channel::matches_prefix;
 use crate::wave::journal::{
     channel_opened_turn, fold_thread, fold_workers, journal_path, restore_pending,
-    run_completed_turn, EventKind, Journal, MessageId, MessageOp, PendingMessage,
-    Usage, WorkerOutcome, WorkerRecord,
+    run_completed_turn, EventKind, Journal, MessageId, MessageOp, PendingMessage, Usage,
+    WorkerOutcome, WorkerRecord,
 };
 use crate::wave::memory::Memory;
 use crate::wave::playhead::{
@@ -732,7 +732,10 @@ impl WaveRuntime {
     }
 
     /// Subscribe to this wave's live `op` stream (worker-run motion). Live-only
-    /// — the past is a `lf runs` query, so nothing replays.
+    /// — the past is a `lf runs` query, so nothing replays. The SSE route takes
+    /// its receiver from `subscribe_with_snapshot`, so this bare accessor
+    /// exists for tests that want the op stream without the snapshot.
+    #[cfg(test)]
     pub fn subscribe_ops(&self) -> broadcast::Receiver<OpFrame> {
         self.op_tx.subscribe()
     }
@@ -1520,7 +1523,9 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
         let mut rx = rt.subscribe_inbox();
-        let turn = rt.deliver(MessageOp::Message, "how goes it?".into()).expect("user turn");
+        let turn = rt
+            .deliver(MessageOp::Message, "how goes it?".into())
+            .expect("user turn");
         assert_eq!(turn.role, ChatRole::User);
         assert_eq!(turn.text, "how goes it?");
         // The op rode the live inbox broadcast, id tied to its journal event.
@@ -1741,8 +1746,12 @@ mod tests {
     fn turn_opened_answers_are_validated_against_the_pending_fold() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let m1 = rt.deliver(MessageOp::Message, "first".into()).expect("user turn");
-        let m2 = rt.deliver(MessageOp::Message, "second".into()).expect("user turn");
+        let m1 = rt
+            .deliver(MessageOp::Message, "first".into())
+            .expect("user turn");
+        let m2 = rt
+            .deliver(MessageOp::Message, "second".into())
+            .expect("user turn");
         assert_eq!(rt.pending_messages().len(), 2);
 
         // The turn claims both real messages plus a ghost id.
@@ -2059,7 +2068,9 @@ mod tests {
     fn failed_turn_requeues_its_claimed_messages() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let m1 = rt.deliver(MessageOp::Message, "do the thing".into()).expect("user turn");
+        let m1 = rt
+            .deliver(MessageOp::Message, "do the thing".into())
+            .expect("user turn");
 
         rt.apply_resident_delta(d_opened(&[&msg_id(&m1)]));
         assert!(rt.pending_messages().is_empty(), "claimed at open");
@@ -2077,7 +2088,9 @@ mod tests {
         // path above still holds m1's requeue, which never re-answered).
         let tmp3 = tempfile::tempdir().expect("tempdir");
         let rt3 = open_runtime(tmp3.path());
-        let m2 = rt3.deliver(MessageOp::Message, "second".into()).expect("user turn");
+        let m2 = rt3
+            .deliver(MessageOp::Message, "second".into())
+            .expect("user turn");
         rt3.apply_resident_delta(d_opened(&[&msg_id(&m2)]));
         rt3.apply_resident_delta(d_finished(Lifecycle::Completed));
         assert!(
@@ -2095,7 +2108,9 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let claimed = {
             let rt = open_runtime(tmp.path());
-            let m = rt.deliver(MessageOp::Message, "answer me".into()).expect("user turn");
+            let m = rt
+                .deliver(MessageOp::Message, "answer me".into())
+                .expect("user turn");
             // Turn opens and claims it, then the server crashes (no finish).
             rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
             assert!(rt.pending_messages().is_empty());
@@ -2118,7 +2133,9 @@ mod tests {
     fn resident_requeue_undoes_a_claim_at_most_once() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let m = rt.deliver(MessageOp::Steer, "steer".into()).expect("user turn");
+        let m = rt
+            .deliver(MessageOp::Steer, "steer".into())
+            .expect("user turn");
         rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
         // The harness send failed after the claim: the resident undoes it.
         rt.apply_resident_delta(ResidentDelta::MessagesRequeued {
@@ -2150,7 +2167,9 @@ mod tests {
         .unwrap();
         let rt = open_runtime(origin);
         assert!(rt.paused(), "GOAL.md says paused");
-        let m = rt.deliver(MessageOp::Message, "go".into()).expect("user turn");
+        let m = rt
+            .deliver(MessageOp::Message, "go".into())
+            .expect("user turn");
 
         rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
         rt.apply_resident_delta(d_text("working"));
@@ -2236,8 +2255,12 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
 
-        let m1 = rt.deliver(MessageOp::Steer, "steer me".into()).expect("user turn");
-        let m2 = rt.deliver(MessageOp::Steer, "me too".into()).expect("user turn");
+        let m1 = rt
+            .deliver(MessageOp::Steer, "steer me".into())
+            .expect("user turn");
+        let m2 = rt
+            .deliver(MessageOp::Steer, "me too".into())
+            .expect("user turn");
 
         // No assistant turn anywhere: nothing journaled, both stay pending.
         rt.apply_resident_delta(ResidentDelta::TurnSteered {
@@ -2313,7 +2336,9 @@ mod tests {
 
         let rt = open_runtime(tmp.path());
         // The steer's own user turn is now the thread's last turn.
-        let steer = rt.deliver(MessageOp::Steer, "steer me".into()).expect("user turn");
+        let steer = rt
+            .deliver(MessageOp::Steer, "steer me".into())
+            .expect("user turn");
         rt.apply_resident_delta(ResidentDelta::TurnSteered {
             answers: vec![msg_id(&steer)],
         });
@@ -2342,11 +2367,9 @@ mod tests {
         std::fs::create_dir_all(&origin).unwrap();
         let rt = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
 
-        rt.deliver(MessageOp::Message, "to the wave".into()).expect("user turn");
-        rt.deliver_say(
-            "to a".into(),
-            "ship.a".into(),
-        );
+        rt.deliver(MessageOp::Message, "to the wave".into())
+            .expect("user turn");
+        rt.deliver_say("to a".into(), "ship.a".into());
 
         let wave = rt.thread_snapshot();
         assert_eq!(wave.len(), 2);
@@ -2409,14 +2432,16 @@ mod tests {
     fn subscription_carries_pending_replay_and_live_inbox() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        rt.deliver(MessageOp::Message, "before".into()).expect("user turn");
+        rt.deliver(MessageOp::Message, "before".into())
+            .expect("user turn");
 
         let mut sub = rt.subscribe_with_snapshot();
         assert_eq!(sub.pending.len(), 1);
         assert_eq!(sub.pending[0].text, "before");
         assert!(sub.inbox_rx.try_recv().is_err(), "no frames from before");
 
-        rt.deliver(MessageOp::Message, "after".into()).expect("user turn");
+        rt.deliver(MessageOp::Message, "after".into())
+            .expect("user turn");
         rt.deliver_interrupt();
         let InboxItem::Message(live) = sub.inbox_rx.try_recv().expect("live frame") else {
             panic!("expected message");
@@ -2442,7 +2467,8 @@ mod tests {
             let rt = rt.clone();
             handles.push(std::thread::spawn(move || {
                 for i in 0..50 {
-                    rt.deliver(MessageOp::Message, format!("m-{writer}-{i}")).expect("user turn");
+                    rt.deliver(MessageOp::Message, format!("m-{writer}-{i}"))
+                        .expect("user turn");
                 }
             }));
         }

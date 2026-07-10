@@ -201,7 +201,7 @@ impl Renderer {
             lines.push(format!(
                 "turn {} {} · {items} item{plural}",
                 turn.id,
-                lifecycle_name(turn.status)
+                turn.status.name()
             ));
         }
         lines
@@ -217,10 +217,10 @@ fn item_line(item: &ConversationItem) -> Option<String> {
         } => Some(format!(
             "  $ {} → {}",
             ellipsize(&command.join(" "), 70),
-            lifecycle_name(*status)
+            status.name()
         )),
         ConversationItem::Tool { name, status, .. } => {
-            Some(format!("  tool {name} → {}", lifecycle_name(*status)))
+            Some(format!("  tool {name} → {}", status.name()))
         }
         ConversationItem::File {
             changes, status, ..
@@ -229,20 +229,10 @@ fn item_line(item: &ConversationItem) -> Option<String> {
                 [only] => only.path.clone(),
                 many => format!("{} files", many.len()),
             };
-            Some(format!("  edit {what} → {}", lifecycle_name(*status)))
+            Some(format!("  edit {what} → {}", status.name()))
         }
         // Prose fragments already rode in as turn text; thoughts are debug.
         ConversationItem::Message { .. } | ConversationItem::Thought { .. } => None,
-    }
-}
-
-fn lifecycle_name(status: Lifecycle) -> &'static str {
-    match status {
-        Lifecycle::Pending => "pending",
-        Lifecycle::Running => "running",
-        Lifecycle::Completed => "completed",
-        Lifecycle::Failed => "failed",
-        Lifecycle::Interrupted => "interrupted",
     }
 }
 
@@ -420,7 +410,9 @@ mod tests {
             axum::serve(listener, app).await.ok();
         });
 
-        runtime.deliver(crate::wave::journal::MessageOp::Message, "replayed".into()).expect("user turn");
+        runtime
+            .deliver(crate::wave::journal::MessageOp::Message, "replayed".into())
+            .expect("user turn");
         runtime
             .append_memory("workers report via lf radio with full useful detail")
             .unwrap();

@@ -1475,9 +1475,13 @@ mod tests {
             backend,
         ));
 
-        runtime.deliver(MessageOp::Message, "begin".into()).expect("user turn");
+        runtime
+            .deliver(MessageOp::Message, "begin".into())
+            .expect("user turn");
         wait_for("initial live input", || inputs.lock().unwrap().len() == 1).await;
-        let steer = runtime.deliver(MessageOp::Steer, "finish".into()).expect("user turn");
+        let steer = runtime
+            .deliver(MessageOp::Steer, "finish".into())
+            .expect("user turn");
         wait_for("completed streamed turn", || {
             runtime.thread_snapshot().iter().any(|turn| {
                 turn.role == ChatRole::Assistant
@@ -1547,7 +1551,8 @@ mod tests {
         let loop_ = boot(Duration::from_secs(600), "echo hi!").await;
         let user_turn = loop_
             .runtime
-            .deliver(MessageOp::Message, "hello wave".into()).expect("user turn");
+            .deliver(MessageOp::Message, "hello wave".into())
+            .expect("user turn");
         wait_for("pass spawned", || loop_.pass_count() == 1).await;
         assert_eq!(wake_of(&loop_.seed(0)), "hello wave");
 
@@ -1598,7 +1603,8 @@ mod tests {
         let loop_ = boot(Duration::from_secs(600), "sleep 0.4; echo done").await;
         loop_
             .runtime
-            .deliver(MessageOp::Message, "first".into()).expect("user turn");
+            .deliver(MessageOp::Message, "first".into())
+            .expect("user turn");
         wait_for("pass 1 spawned", || loop_.pass_count() == 1).await;
 
         // Two messages land mid-pass: queued, never rejected. Give the SSE
@@ -1606,10 +1612,12 @@ mod tests {
         // select then guarantees they're queued before the boundary drains).
         let m2 = loop_
             .runtime
-            .deliver(MessageOp::Message, "second".into()).expect("user turn");
+            .deliver(MessageOp::Message, "second".into())
+            .expect("user turn");
         let m3 = loop_
             .runtime
-            .deliver(MessageOp::Message, "third".into()).expect("user turn");
+            .deliver(MessageOp::Message, "third".into())
+            .expect("user turn");
 
         // One boundary pass drains the whole queue.
         wait_for("boundary pass spawned", || loop_.pass_count() == 2).await;
@@ -1806,7 +1814,8 @@ mod tests {
         let loop_ = boot_with(tmp, config, "sleep 30").await;
         loop_
             .runtime
-            .deliver(MessageOp::Message, "go".into()).expect("user turn");
+            .deliver(MessageOp::Message, "go".into())
+            .expect("user turn");
         wait_for("pass spawned", || loop_.pass_count() == 1).await;
 
         wait_for("turn failed", || {
@@ -1840,7 +1849,8 @@ mod tests {
         ));
         loop_
             .runtime
-            .deliver(MessageOp::Message, "go".into()).expect("user turn");
+            .deliver(MessageOp::Message, "go".into())
+            .expect("user turn");
         wait_for("pass spawned", || loop_.pass_count() == 1).await;
         wait_for("long pass completed", || {
             loop_.runtime.thread_snapshot().iter().any(|turn| {
@@ -1867,7 +1877,8 @@ mod tests {
         let loop_ = boot(Duration::from_secs(600), "sleep 30").await;
         loop_
             .runtime
-            .deliver(MessageOp::Message, "start".into()).expect("user turn");
+            .deliver(MessageOp::Message, "start".into())
+            .expect("user turn");
         wait_for("pass spawned", || loop_.pass_count() == 1).await;
         wait_for("turning", || loop_.runtime.loop_state().name() == "turning").await;
 

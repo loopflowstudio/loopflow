@@ -35,7 +35,6 @@
 //! reports, escalations — rides the bus with `lf radio --from`, and the
 //! listener's bus sweep folds it into the thread attributed.
 
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -44,7 +43,7 @@ use anyhow::{anyhow, bail, Result};
 use crate::engine::wave_context::{
     read_endpoint_pointer, resolve_ambient_channel, wave_origin, AmbientWaveRef,
 };
-use crate::lf::commands::util::find_repo_root;
+use crate::lf::commands::util::{find_repo_root, message_text};
 use crate::lf::WaveTargetArgs;
 use crate::lfd::types::Wave;
 use crate::lfdb::{open_existing_store, SharedStore};
@@ -101,21 +100,6 @@ pub(crate) async fn run_with_context(
         }
     );
     Ok(())
-}
-
-/// Message text from the args (joined) or stdin (heredoc-friendly).
-fn message_text(args: &[String], mut stdin: impl Read) -> Result<String> {
-    let joined = args.join(" ").trim().to_string();
-    if !joined.is_empty() {
-        return Ok(joined);
-    }
-    let mut buffer = String::new();
-    stdin.read_to_string(&mut buffer)?;
-    let text = buffer.trim().to_string();
-    if text.is_empty() {
-        bail!("no message text: pass TEXT or pipe it on stdin");
-    }
-    Ok(text)
 }
 
 /// What the process can see: the registry (if this machine has one), the repo
@@ -222,19 +206,7 @@ pub(crate) async fn resolve_target(
                  in env and no registered wave matches this worktree"
             )
         })?;
-        let parent_id = own.parent_wave_id().ok_or_else(|| {
-            anyhow!(
-                "wave '{}' has no parent — it is a root wave; the human \
-                 fall-through arrives with Decisions",
-                own.name()
-            )
-        })?;
-        let parent = store.get_wave(parent_id).await?.ok_or_else(|| {
-            anyhow!(
-                "wave '{}' names parent {parent_id}, but the registry has no such wave",
-                own.name()
-            )
-        })?;
+        let parent = parent_wave(store, &own).await?;
         let name = parent.name().clone();
         (Some(parent), name)
     } else {
@@ -276,6 +248,25 @@ pub(crate) async fn resolve_target(
         endpoint,
         repo_root,
     }))
+}
+
+/// Walk one step up the wave tree. Both speech verbs escalate this way —
+/// `lf chat --parent` to the parent's thread, `lf radio --parent` to its
+/// channel — and a root wave is the same clear error for both.
+pub(crate) async fn parent_wave(store: &SharedStore, own: &Wave) -> Result<Wave> {
+    let parent_id = own.parent_wave_id().ok_or_else(|| {
+        anyhow!(
+            "wave '{}' has no parent — it is a root wave; the human \
+             fall-through arrives with Decisions",
+            own.name()
+        )
+    })?;
+    store.get_wave(parent_id).await?.ok_or_else(|| {
+        anyhow!(
+            "wave '{}' names parent {parent_id}, but the registry has no such wave",
+            own.name()
+        )
+    })
 }
 
 /// POST a JSON body to the wave server; connection failure and non-2xx are
@@ -424,18 +415,6 @@ mod tests {
             axum::serve(listener, app).await.ok();
         });
         (addr.to_string(), runtime, inbox_rx)
-    }
-
-    #[test]
-    fn message_text_prefers_args_then_stdin_then_errors() {
-        let text = message_text(&["hello".into(), "world".into()], std::io::empty()).unwrap();
-        assert_eq!(text, "hello world");
-
-        let text = message_text(&[], std::io::Cursor::new("from stdin\n")).unwrap();
-        assert_eq!(text, "from stdin");
-
-        let err = message_text(&[], std::io::empty()).unwrap_err();
-        assert!(err.to_string().contains("no message text"));
     }
 
     /// Env-context targeting: LFD_WAVE_ID names the wave; the endpoint comes

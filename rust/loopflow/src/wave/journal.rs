@@ -405,7 +405,7 @@ impl Narrator {
                     } => info(format!(
                         "  $ {} → {}",
                         ellipsize(&command.join(" "), 70),
-                        lifecycle_name(*status)
+                        status.name()
                     )),
                     ConversationItem::Message { text, .. } => {
                         if turn.text_shown {
@@ -425,10 +425,10 @@ impl Narrator {
                             [only] => only.path.clone(),
                             many => format!("{} files", many.len()),
                         };
-                        info(format!("  edit {what} → {}", lifecycle_name(*status)))
+                        info(format!("  edit {what} → {}", status.name()))
                     }
                     ConversationItem::Tool { name, status, .. } => {
-                        info(format!("  tool {name} → {}", lifecycle_name(*status)))
+                        info(format!("  tool {name} → {}", status.name()))
                     }
                 }
             }
@@ -450,7 +450,7 @@ impl Narrator {
                 let plural = if items == 1 { "" } else { "s" };
                 info(format!(
                     "turn {turn_id} {} · {items} item{plural}{}",
-                    lifecycle_name(*status),
+                    status.name(),
                     usage_segment(usage)
                 ))
             }
@@ -560,16 +560,6 @@ fn fmt_tokens(n: u64) -> String {
         format!("{k:.1}k")
     } else {
         format!("{k:.0}k")
-    }
-}
-
-fn lifecycle_name(status: Lifecycle) -> &'static str {
-    match status {
-        Lifecycle::Pending => "pending",
-        Lifecycle::Running => "running",
-        Lifecycle::Completed => "completed",
-        Lifecycle::Failed => "failed",
-        Lifecycle::Interrupted => "interrupted",
     }
 }
 
@@ -690,8 +680,10 @@ impl Journal {
         ))
     }
 
-    /// The seq the next appended event will get. Callers that embed ids in
-    /// the event body (e.g. `"turn-<seq>"`) build them from this.
+    /// The seq the next appended event will get. `append` reads the field
+    /// directly; this accessor lets a test assert the id space survives a
+    /// reopen.
+    #[cfg(test)]
     pub fn next_seq(&self) -> u64 {
         self.next_seq
     }

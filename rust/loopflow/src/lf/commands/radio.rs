@@ -23,12 +23,11 @@
 //! `--from` overrides it. A forged byline is not prevented — it is visible, as
 //! a mismatch between the byline and the channel the row arrived on.
 
-use std::io::Read;
-
 use anyhow::{anyhow, Result};
 
 use crate::engine::wave_context::{resolve_ambient_channel, AmbientWaveRef};
-use crate::lf::commands::chat::CliContext;
+use crate::lf::commands::chat::{parent_wave, CliContext};
+use crate::lf::commands::util::message_text;
 use crate::lfd::types::Wave;
 use crate::lfdb::SharedStore;
 use crate::wave::channel::family_head;
@@ -147,35 +146,8 @@ async fn target_channel(
              LFD_WAVE_ID in env and no registered wave matches this worktree"
             )
         })?;
-    let parent_id = own.parent_wave_id().ok_or_else(|| {
-        anyhow!(
-            "wave '{}' has no parent — it is a root wave; the human \
-             fall-through arrives with Decisions",
-            own.name()
-        )
-    })?;
-    let parent = store.get_wave(parent_id).await?.ok_or_else(|| {
-        anyhow!(
-            "wave '{}' names parent {parent_id}, but the registry has no such wave",
-            own.name()
-        )
-    })?;
+    let parent = parent_wave(store, own).await?;
     Ok(Some(wave_channel_name(parent.name())))
-}
-
-/// Message text from the args (joined) or stdin (heredoc-friendly).
-fn message_text(args: &[String], mut stdin: impl Read) -> Result<String> {
-    let joined = args.join(" ").trim().to_string();
-    if !joined.is_empty() {
-        return Ok(joined);
-    }
-    let mut buffer = String::new();
-    stdin.read_to_string(&mut buffer)?;
-    let text = buffer.trim().to_string();
-    if text.is_empty() {
-        anyhow::bail!("no message text: pass TEXT or pipe it on stdin");
-    }
-    Ok(text)
 }
 
 #[cfg(test)]
@@ -352,14 +324,5 @@ mod tests {
             err.to_string().contains("wave 'goals' has no parent"),
             "{err}"
         );
-    }
-
-    #[test]
-    fn message_text_prefers_args_then_stdin_then_errors() {
-        let text = message_text(&["hello".into(), "world".into()], std::io::empty()).unwrap();
-        assert_eq!(text, "hello world");
-        let text = message_text(&[], std::io::Cursor::new("from stdin\n")).unwrap();
-        assert_eq!(text, "from stdin");
-        assert!(message_text(&[], std::io::empty()).is_err());
     }
 }

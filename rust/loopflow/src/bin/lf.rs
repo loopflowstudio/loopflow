@@ -876,12 +876,10 @@ fn main() -> anyhow::Result<()> {
             }
             Some(Commands::Chat {
                 text,
+                follow,
                 steer,
                 target,
-            }) => loopflow::lf::commands::chat::run(text, *steer, target),
-            Some(Commands::Wavechat { wave }) => {
-                loopflow::lf::commands::wavechat::run(wave.as_deref())
-            }
+            }) => loopflow::lf::commands::chat::run(text, *follow, *steer, target),
             Some(Commands::Radio {
                 text,
                 channel,
@@ -984,7 +982,6 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Chat { .. })
         | Some(Commands::Radio { .. })
         | Some(Commands::Sub { .. })
-        | Some(Commands::Wavechat { .. })
         | Some(Commands::Memory { .. })
         | Some(Commands::Ssh { .. }) => None,
         Some(Commands::Project { .. }) => Some("project-promote".to_string()),

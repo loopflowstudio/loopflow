@@ -317,26 +317,21 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Converse with a served mind's thread (humans); --steer reaches the
-    /// live body. The human surface: journaled, durable, replayed. Agents use
-    /// `lf radio` for agent-to-agent comms, not this.
+    /// Converse with a served mind's thread (humans); --follow replays it and
+    /// --steer reaches the live body. Agents use `lf radio` for agent-to-agent
+    /// comms, not this.
     Chat {
-        /// Message text (reads stdin when omitted — heredoc-friendly)
+        /// Message text (reads stdin when omitted unless --follow)
         #[arg(trailing_var_arg = true)]
         text: Vec<String>,
+        /// Replay and follow the thread while typed lines post into it.
+        #[arg(long, conflicts_with = "text")]
+        follow: bool,
         /// Inject into a live steer-capable turn; otherwise queue.
         #[arg(long, conflicts_with = "parent")]
         steer: bool,
         #[command(flatten)]
         target: WaveTargetArgs,
-    },
-    /// Steer and monitor a served mind from one terminal pane: its thread
-    /// scrolls past while a typed line is spoken into it. `lf chat` publishes
-    /// into the thread; this publishes and follows. The agent bus is the other
-    /// wire — see `lf radio` and `lf sub`.
-    Wavechat {
-        /// Wave name (default: the ambient wave — env, else worktree)
-        wave: Option<String>,
     },
     /// Broadcast on the agent bus (agents): report up when you finish, fail,
     /// or get stuck. Broadcast, not delivery — whoever is tuned in hears it,
@@ -835,6 +830,7 @@ pub enum WtCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
 
     #[test]
     fn pm_init_accepts_positional_wave() {
@@ -960,6 +956,7 @@ mod tests {
         let cli = Cli::try_parse_from(["lf", "chat", "shipped", "the", "parser"]).expect("parse");
         let Some(Commands::Chat {
             text,
+            follow,
             steer,
             target,
         }) = cli.command
@@ -967,6 +964,7 @@ mod tests {
             panic!("expected chat command");
         };
         assert_eq!(text, vec!["shipped", "the", "parser"]);
+        assert!(!follow);
         assert!(!steer);
         assert_eq!(target.wave, None);
         assert!(!target.parent);
@@ -1015,6 +1013,25 @@ mod tests {
 
         // --wave and --parent are mutually exclusive.
         assert!(Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--parent", "x"]).is_err());
+
+        let cli = Cli::try_parse_from(["lf", "chat", "--follow", "--wave", "goals"])
+            .expect("parse follow");
+        let Some(Commands::Chat {
+            text,
+            follow,
+            steer,
+            target,
+        }) = cli.command
+        else {
+            panic!("expected chat command");
+        };
+        assert!(text.is_empty());
+        assert!(follow);
+        assert!(!steer);
+        assert_eq!(target.wave.as_deref(), Some("goals"));
+
+        assert!(Cli::try_parse_from(["lf", "chat", "--follow", "hello"]).is_err());
+        assert!(Cli::command().find_subcommand("wavechat").is_none());
     }
 
     #[test]

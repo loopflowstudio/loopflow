@@ -118,6 +118,13 @@ public enum ConversationItem: Codable, Sendable, Hashable, Identifiable {
         }
     }
 
+    public var isVisibleInConversation: Bool {
+        if case let .thought(_, text) = self {
+            return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return true
+    }
+
     private enum CodingKeys: String, CodingKey {
         case type, id, command, cwd, status, output
         case exitCode = "exit_code"

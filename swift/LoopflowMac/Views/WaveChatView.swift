@@ -21,6 +21,10 @@ struct WaveChatView: View {
     @State private var enqueueFlow = ""
     @State private var sendError: String?
     @State private var launch: LaunchState = .idle
+    @State private var isStopping = false
+    @State private var confirmStop = false
+    @State private var isFollowingLatest = true
+    @State private var isNearTranscriptBottom = true
     @FocusState private var composerFocused: Bool
 
     enum LaunchState: Equatable {
@@ -53,11 +57,25 @@ struct WaveChatView: View {
             connection?.stop()
             sendError = nil
             launch = .idle
+            isStopping = false
+            confirmStop = false
+            isFollowingLatest = true
+            isNearTranscriptBottom = true
             let conn = WaveChatConnection(repoPath: repoPath, waveName: waveName)
             connection = conn
             conn.start()
         }
         .onDisappear { connection?.stop() }
+        .confirmationDialog(
+            "Stop \(waveName)?",
+            isPresented: $confirmStop,
+            titleVisibility: .visible
+        ) {
+            Button("Stop wave", role: .destructive) { stopWave() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Stops the wave listener and its resident. Detached worker loops keep running.")
+        }
     }
 
     // MARK: - Transcript
@@ -65,6 +83,11 @@ struct WaveChatView: View {
     @ViewBuilder
     private var transcript: some View {
         let turns = connection?.turns ?? []
+        let failures = attemptFailurePresentations(
+            turns: turns,
+            playhead: connection?.playhead,
+            loopState: connection?.loopState ?? .idle
+        )
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.lg) {
@@ -72,7 +95,11 @@ struct WaveChatView: View {
                         if let body = turn.body, turn.role == .assistant {
                             bodyBoundary(body, status: turn.status)
                         }
-                        MessageRow(turn: turn, timestampLabel: timestampLabel(for: turn))
+                        MessageRow(
+                            turn: turn,
+                            timestampLabel: timestampLabel(for: turn),
+                            attemptFailure: failures[turn.id]
+                        )
                             .id(turn.id)
                     }
                     Color.clear
@@ -91,10 +118,29 @@ struct WaveChatView: View {
                 }
             }
             .onChange(of: turns.count) { _, _ in
-                scrollToBottom(proxy)
+                if isFollowingLatest {
+                    scrollToBottom(proxy)
+                }
             }
             .onChange(of: turns.last?.text) { _, _ in
-                scrollToBottom(proxy)
+                if isFollowingLatest {
+                    scrollToBottom(proxy)
+                }
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.visibleRect.maxY >= geometry.contentSize.height - Spacing.xl
+            } action: { _, isNearBottom in
+                isNearTranscriptBottom = isNearBottom
+            }
+            .onScrollPhaseChange { _, phase in
+                switch phase {
+                case .tracking, .interacting, .decelerating:
+                    isFollowingLatest = false
+                case .idle:
+                    isFollowingLatest = isNearTranscriptBottom
+                case .animating:
+                    break
+                }
             }
         }
     }
@@ -122,6 +168,22 @@ struct WaveChatView: View {
                     .controlSize(.small)
                     .disabled(playhead?.now == nil)
                     .accessibilityIdentifier("wave-chat-skip")
+                Button {
+                    confirmStop = true
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        if isStopping {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(isStopping ? "Stopping…" : "Stop")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .foregroundStyle(Color.statusError)
+                .disabled(isStopping)
+                .accessibilityIdentifier("wave-chat-stop")
             }
 
             HStack(spacing: Spacing.lg) {
@@ -234,6 +296,24 @@ struct WaveChatView: View {
             } catch {
                 sendError = "Skip failed: \(error.localizedDescription)"
             }
+        }
+    }
+
+    private func stopWave() {
+        guard !isStopping else { return }
+        isStopping = true
+        sendError = nil
+        let repoPath = repoPath
+        let waveName = waveName
+        Task {
+            do {
+                try await Task.detached {
+                    try LocalWaveAgentLauncher.stopWave(repoPath: repoPath, waveName: waveName)
+                }.value
+            } catch {
+                sendError = "Stop failed: \(error.localizedDescription)"
+            }
+            isStopping = false
         }
     }
 

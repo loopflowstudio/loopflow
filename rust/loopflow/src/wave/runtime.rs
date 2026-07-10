@@ -1256,6 +1256,9 @@ impl WaveRuntime {
     }
 
     fn resident_turn_item(&self, item: ConversationItem) {
+        if matches!(&item, ConversationItem::Thought { text, .. } if text.trim().is_empty()) {
+            return;
+        }
         let mut inner = self.inner();
         if inner.drop_deltas_until_opened {
             return;
@@ -1485,6 +1488,15 @@ mod tests {
                 status: Lifecycle::Completed,
                 input: None,
                 output: Some("cargo test".into()),
+            },
+        }
+    }
+
+    fn d_thought(id: &str, text: &str) -> ResidentDelta {
+        ResidentDelta::TurnItem {
+            item: ConversationItem::Thought {
+                id: id.into(),
+                text: text.into(),
             },
         }
     }
@@ -1852,6 +1864,40 @@ mod tests {
             LoopState::Idle
         );
         assert!(states.try_recv().is_err(), "no extra state frames");
+    }
+
+    #[test]
+    fn empty_thoughts_never_enter_the_thread_or_journal() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let mut frames = rt.subscribe_with_snapshot().turn_rx;
+
+        rt.apply_resident_delta(d_opened(&[]));
+        let opened = frames.try_recv().expect("opened frame");
+        assert!(opened.turn.items.is_empty());
+
+        rt.apply_resident_delta(d_thought("empty", "  \n\t"));
+        assert!(frames.try_recv().is_err(), "empty thought emits no frame");
+        assert!(rt.thread_snapshot()[0].items.is_empty());
+
+        rt.apply_resident_delta(d_thought("real", "checking the retry"));
+        let grown = frames.try_recv().expect("real thought frame");
+        assert_eq!(grown.turn.items.len(), 1);
+        assert!(matches!(
+            &grown.turn.items[0],
+            ConversationItem::Thought { id, text }
+                if id == "real" && text == "checking the retry"
+        ));
+
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
+        let thought_items: Vec<&ConversationItem> = events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                EventKind::TurnItem { item, .. } => Some(item),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(thought_items.len(), 1, "only the real thought is journaled");
     }
 
     /// The listener-side janitor: force-finalize closes the journal and

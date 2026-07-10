@@ -1,6 +1,7 @@
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -448,3 +449,68 @@ def test_release_dmg_build_has_timeouts_and_unbuffered_logs():
     assert "notarytool" in script
     assert "Timed out after" in script
     assert "flush=True" in script
+    assert "Skipping notarization" not in script
+    assert "signing ad-hoc" not in script
+    assert "refusing to build a user DMG" in script
+
+
+def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    test_script = (ROOT / "scripts/test.py").read_text()
+    screenshot_script = (ROOT / "scripts/generate_screenshots.py").read_text()
+    docs = "\n".join(
+        [
+            (ROOT / "TESTING.md").read_text(),
+            (ROOT / "swift/README.md").read_text(),
+        ]
+    )
+
+    for text in (ci, test_script, screenshot_script, docs):
+        assert "CODE_SIGNING_ALLOWED=NO" not in text
+        assert "CODE_SIGNING_REQUIRED=NO" not in text
+
+    assert "CODE_SIGN_IDENTITY=-" in ci
+    assert '"CODE_SIGN_IDENTITY=-"' in test_script
+    assert '"CODE_SIGN_IDENTITY=-"' in screenshot_script
+    assert "-disableAutomaticPackageResolution" in ci
+    assert "-disableAutomaticPackageResolution" in docs
+
+
+def test_changed_aware_runner_includes_ci_static_checks():
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/test.py"),
+            "--list",
+            "--rust",
+            "--swift",
+            "--base",
+            "HEAD",
+        ],
+        cwd=ROOT,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    assert "cargo fmt --all -- --check" in result.stdout
+    assert "cargo clippy --all-targets -- -D warnings" in result.stdout
+    assert "cargo nextest run --all" in result.stdout or "cargo test --all" in result.stdout
+    assert "uv run python scripts/check_swift_multiplatform_boundaries.py" in result.stdout
+
+    full = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/test.py"),
+            "--list",
+            "--all",
+            "--base",
+            "HEAD",
+        ],
+        cwd=ROOT,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    assert "$ uv run pytest python/tests/" in full.stdout
+    assert "python/tests/test_release_automation.py" not in full.stdout.split("Plan:", 1)[1]

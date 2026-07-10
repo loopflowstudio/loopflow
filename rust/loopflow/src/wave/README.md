@@ -41,6 +41,11 @@ child, a promoted subwave — then booted the wrong half by accident. Serving is
 now `lf serve`, batch looping is `lf loop`, and the body is `lf __resident`.
 Environment configures a process; it no longer decides what the process is.
 
+`lf stop <name>` posts to the listener's lifecycle door. The listener stands
+down its supervisor, terminates the resident, deregisters its session, and
+removes this boot's discovery files. Detached worker loops are separate tmux
+sessions and keep running.
+
 - **One Loop, one thread.** Chat and progress share the same context. A
   message while idle reaches the next body. A steer while a compatible
   harness is active is injected with `send_input`; unsupported harnesses
@@ -254,6 +259,7 @@ curl -X POST 127.0.0.1:52306/messages -H 'content-type: application/json' \
      -d '{"op":"message","text":"status?"}'
 curl 127.0.0.1:52306/conversation
 curl -N 127.0.0.1:52306/events
+lf stop demo
 ```
 
 The full guided walk — chat, steer, interrupt, worker dispatch, attributed

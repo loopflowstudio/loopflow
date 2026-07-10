@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 // SAFETY: operations delegate to Keychain APIs which are thread-safe and this
@@ -10,6 +11,12 @@ public final class ConnectionSecretStore: @unchecked Sendable {
 
     public init() {}
 
+    private func nonInteractiveAuthenticationContext() -> LAContext {
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        return context
+    }
+
     public func token(for connection: ServerConnection) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -17,6 +24,7 @@ public final class ConnectionSecretStore: @unchecked Sendable {
             kSecAttrAccount as String: connection.connectionKey,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationContext as String: nonInteractiveAuthenticationContext(),
         ]
 
         var result: AnyObject?
@@ -37,6 +45,7 @@ public final class ConnectionSecretStore: @unchecked Sendable {
             kSecAttrAccount as String: connection.connectionKey,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+            kSecUseAuthenticationContext as String: nonInteractiveAuthenticationContext(),
         ]
 
         SecItemDelete(query as CFDictionary)
@@ -50,6 +59,7 @@ public final class ConnectionSecretStore: @unchecked Sendable {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
             kSecAttrAccount as String: connection.connectionKey,
+            kSecUseAuthenticationContext as String: nonInteractiveAuthenticationContext(),
         ]
 
         let status = SecItemDelete(query as CFDictionary)

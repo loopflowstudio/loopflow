@@ -11,12 +11,18 @@ struct TelemetryDashboardView: View {
     @Environment(\.palette) private var palette
 
     private static let windowDays = 30
+    /// The codebase moves on a slower clock than a day's runs: a year shows the
+    /// shape of the thing (a rewrite, a vendored tree), where a month shows noise.
+    private static let codebaseDays = 365
 
     @State private var spend: [TraceSpan] = []
     @State private var doctor: DoctorReport?
     @State private var codebase: CodeNode?
     @State private var growth: [CodeSnapshot] = []
     @State private var selectedRepo: String?
+    /// Repo-relative path of the subtree the flame is zoomed into. Empty is the
+    /// whole repo.
+    @State private var focusPath: String = ""
     @State private var errorMessage: String?
     @State private var codebaseError: String?
     @State private var isLoading = true
@@ -52,7 +58,7 @@ struct TelemetryDashboardView: View {
                     }
 
                     chartCard(
-                        "Codebase over time · \(Self.windowDays) days",
+                        "Codebase over time · 12 months",
                         subtitle: "What a model pays to read this repo, by file extension"
                     ) {
                         CodebaseGrowthChart(snapshots: growth, failure: codebaseError)
@@ -61,10 +67,17 @@ struct TelemetryDashboardView: View {
 
                     chartCard(
                         codebaseTitle,
-                        subtitle: "Files on disk. Width is tokens; a lockfile is cheap in lines and ruinous here."
+                        subtitle: "Files on disk. Width is tokens. Click a directory to zoom in."
                     ) {
-                        CodeFlame(root: codebase, failure: codebaseError)
-                            .frame(minHeight: 200)
+                        VStack(alignment: .leading, spacing: Spacing.md) {
+                            breadcrumb
+                            CodeFlame(
+                                root: focusedNode,
+                                failure: codebaseError,
+                                onSelect: { node in focusPath = node.path }
+                            )
+                            .frame(minHeight: 120)
+                        }
                     }
 
                     chartCard(
@@ -81,6 +94,7 @@ struct TelemetryDashboardView: View {
         .background(palette.background)
         .task { await refresh() }
         .onChange(of: selectedRepo) { _, _ in
+            focusPath = ""
             Task { await loadCodebase() }
         }
     }
@@ -128,8 +142,54 @@ struct TelemetryDashboardView: View {
     }
 
     private var codebaseTitle: String {
-        guard let codebase else { return "Codebase flame" }
-        return "Codebase flame · \(codebase.lines.formatted()) lines · \(compactTokens(codebase.tokens)) tokens"
+        guard let node = focusedNode else { return "Codebase flame" }
+        return "Codebase flame · \(node.lines.formatted()) lines · \(compactTokens(node.tokens)) tokens"
+    }
+
+    /// The subtree the flame is showing. A focus path that no longer exists (the
+    /// repo changed under us) falls back to the whole repo rather than nothing.
+    private var focusedNode: CodeNode? {
+        guard let codebase else { return nil }
+        guard !focusPath.isEmpty else { return codebase }
+        return Self.find(focusPath, in: codebase) ?? codebase
+    }
+
+    private static func find(_ path: String, in node: CodeNode) -> CodeNode? {
+        if node.path == path { return node }
+        // Only descend where the path can still live.
+        guard node.path.isEmpty || path.hasPrefix(node.path + "/") else { return nil }
+        for child in node.children {
+            if let hit = find(path, in: child) { return hit }
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private var breadcrumb: some View {
+        HStack(spacing: Spacing.xs) {
+            crumb(label: codebase?.name ?? "repo", path: "")
+            ForEach(crumbs, id: \.path) { crumb in
+                Text("/").foregroundStyle(palette.textSecondary)
+                self.crumb(label: crumb.name, path: crumb.path)
+            }
+            Spacer()
+        }
+        .font(Typography.code(11))
+    }
+
+    private var crumbs: [(name: String, path: String)] {
+        guard !focusPath.isEmpty else { return [] }
+        var prefix = ""
+        return focusPath.split(separator: "/").map { component in
+            prefix = prefix.isEmpty ? String(component) : "\(prefix)/\(component)"
+            return (String(component), prefix)
+        }
+    }
+
+    private func crumb(label: String, path: String) -> some View {
+        Button(label) { focusPath = path }
+            .buttonStyle(.plain)
+            .foregroundStyle(path == focusPath ? palette.text : palette.textSecondary)
     }
 
     private func shortRepoName(_ repo: String) -> String {
@@ -225,7 +285,7 @@ struct TelemetryDashboardView: View {
         do {
             codebase = try await RegistryQueryLocal.shared.codebase(repoPath: selectedRepo)
             growth = try await RegistryQueryLocal.shared.codebaseHistory(
-                repoPath: selectedRepo, days: Self.windowDays
+                repoPath: selectedRepo, days: Self.codebaseDays
             )
             codebaseError = nil
         } catch {
@@ -390,11 +450,12 @@ private struct CodebaseGrowthChart: View {
 private struct CodeFlame: View {
     let root: CodeNode?
     var failure: String?
+    var onSelect: (CodeNode) -> Void = { _ in }
 
     var body: some View {
         if let root, root.tokens > 0 {
             GeometryReader { geometry in
-                IcicleNode(node: root, width: geometry.size.width, depth: 0)
+                IcicleNode(node: root, width: geometry.size.width, depth: 0, onSelect: onSelect)
             }
             .frame(height: flameHeight(root))
         } else {
@@ -428,6 +489,7 @@ private struct IcicleNode: View {
     let node: CodeNode
     let width: CGFloat
     let depth: Int
+    let onSelect: (CodeNode) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: barGap) {
@@ -435,8 +497,13 @@ private struct IcicleNode: View {
             if depth < maxFlameDepth, node.tokens > 0 {
                 HStack(alignment: .top, spacing: barGap) {
                     ForEach(visibleChildren, id: \.node.id) { child in
-                        IcicleNode(node: child.node, width: child.width, depth: depth + 1)
-                            .frame(width: child.width, alignment: .leading)
+                        IcicleNode(
+                            node: child.node,
+                            width: child.width,
+                            depth: depth + 1,
+                            onSelect: onSelect
+                        )
+                        .frame(width: child.width, alignment: .leading)
                     }
                 }
                 .frame(width: width, alignment: .leading)
@@ -444,6 +511,10 @@ private struct IcicleNode: View {
         }
         .frame(width: width, alignment: .leading)
     }
+
+    /// A leaf is a file: there is nothing to zoom into, so it does not pretend
+    /// to be clickable.
+    private var isZoomable: Bool { !node.children.isEmpty }
 
     private var bar: some View {
         ZStack(alignment: .leading) {
@@ -459,6 +530,9 @@ private struct IcicleNode: View {
             }
         }
         .frame(width: width, height: barHeight)
+        .contentShape(Rectangle())
+        .onTapGesture { if isZoomable { onSelect(node) } }
+        .pointerStyle(isZoomable ? .link : .default)
         .help("\(node.path.isEmpty ? node.name : node.path): \(node.tokens.formatted()) tokens · \(node.lines.formatted()) lines")
     }
 

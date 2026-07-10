@@ -13,7 +13,7 @@
 //! so `target/`, `.build/`, and `node_modules/` never enter the total. A file
 //! that is not valid UTF-8 is a binary and is skipped rather than estimated.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -157,8 +157,27 @@ fn commit_blobs(root: &Path, commit: &str) -> Result<Vec<(String, String)>> {
 }
 
 /// Measure a blob, memoized by its sha. Blob content is immutable, so the cache
-/// never goes stale and a month of history tokenizes each file version once.
-fn blob_weight(root: &Path, store: &SqliteStore, sha: &str) -> Option<(usize, usize)> {
+/// never goes stale and a year of history tokenizes each file version once.
+///
+/// Two layers: a process-local map, because the same blob appears in every
+/// snapshot it survived (a year of daily commits asks about the same unchanged
+/// file ninety times), and the sqlite table, because the answer outlives the
+/// process.
+fn blob_weight(
+    root: &Path,
+    store: &SqliteStore,
+    memo: &mut HashMap<String, Option<(usize, usize)>>,
+    sha: &str,
+) -> Option<(usize, usize)> {
+    if let Some(cached) = memo.get(sha) {
+        return *cached;
+    }
+    let weight = measure_blob(root, store, sha);
+    memo.insert(sha.to_string(), weight);
+    weight
+}
+
+fn measure_blob(root: &Path, store: &SqliteStore, sha: &str) -> Option<(usize, usize)> {
     if let Ok(Some((lines, _bytes, tokens))) = store.blob_tokens(sha) {
         return Some((lines.max(0) as usize, tokens.max(0) as usize));
     }
@@ -191,6 +210,7 @@ struct RawSnapshot {
 
 fn history(root: &Path, days: u32) -> Result<Vec<CodeSnapshot>> {
     let store = open_ledger()?;
+    let mut memo: HashMap<String, Option<(usize, usize)>> = HashMap::new();
 
     // Measure every day first, then decide which extensions get their own
     // series. Deciding per snapshot would make a series flicker in and out as a
@@ -203,7 +223,7 @@ fn history(root: &Path, days: u32) -> Result<Vec<CodeSnapshot>> {
         let (mut total_lines, mut total_tokens) = (0usize, 0usize);
 
         for (sha, path) in commit_blobs(root, &commit)? {
-            let Some((lines, tokens)) = blob_weight(root, &store, &sha) else {
+            let Some((lines, tokens)) = blob_weight(root, &store, &mut memo, &sha) else {
                 continue;
             };
             total_lines += lines;

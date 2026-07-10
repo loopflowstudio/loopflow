@@ -60,11 +60,14 @@ after it:
 ```bash
 lf --wave designer loop task "fix the flaky test"   # canonical
 lf loop task "fix the flaky test" --wave designer   # accepted and normalized
+lf pm --wave designer show                           # normalized onto `show`
+lf pm task --wave designer create --title "Fix it"  # normalized onto `create`
 lf commit -m "explain the change"                   # -m remains commit-local
 ```
 
-When a spelling exists at both levels, the subcommand meaning wins. Put `--`
-before literal arguments that happen to look like global flags.
+Flags may cross nested subcommands to reach a selected command that owns the
+spelling. If more than one level owns it, a flag already valid at its current
+level stays there. Put `--` before literal arguments that look like flags.
 
 ### Files and Directories
 

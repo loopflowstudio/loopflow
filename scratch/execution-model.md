@@ -60,6 +60,12 @@ designer` to the canonical form before parsing. A subcommand-local spelling
 wins on collision (`lf commit -m "message"`; loop-local `--max-turns`), and
 `--` ends normalization so later flag-shaped text stays literal.
 
+The same path-aware normalization applies below the top-level command. `lf pm
+--wave designer show` becomes `lf pm show --wave designer`, and `lf pm task
+--wave designer create …` moves the flag onto `create`. A flag already valid at
+its current command level stays there, so `lf memory --wave designer add …`
+continues to target `memory` rather than being silently reassigned to `add`.
+
 ## Delegation depth
 
 The tier controls `lf loop`, not all child processes.

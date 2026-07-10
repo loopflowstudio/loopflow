@@ -45,6 +45,21 @@ impl FlagTables {
     fn takes_value(&self, arg: &str) -> bool {
         self.value.contains(flag_name(arg))
     }
+
+    fn extend(&mut self, other: &Self) {
+        self.value.extend(other.value.iter().cloned());
+        self.boolean.extend(other.boolean.iter().cloned());
+    }
+}
+
+#[derive(Clone, Default)]
+struct CommandArgTables {
+    /// Flags owned directly by this command.
+    direct: FlagTables,
+    /// Flags owned here or by any descendant, used only to find the command path.
+    recursive: FlagTables,
+    /// Direct subcommands, indexed by canonical name and aliases.
+    subcommands: HashMap<String, CommandArgTables>,
 }
 
 /// What `reorder_args` needs to know about the CLI, derived from the clap
@@ -52,21 +67,33 @@ impl FlagTables {
 /// were missing the uppercase short aliases `-D`/`-C`/`-M`/`-I`/`-B`/`-W`,
 /// misrouting e.g. `lf debug -M codex`).
 struct ArgTables {
-    /// Top-level subcommand names and aliases.
-    commands: HashSet<String>,
+    /// Top-level subcommands, indexed by canonical name and aliases.
+    commands: HashMap<String, CommandArgTables>,
     /// Top-level flags accepted on either side of an unambiguous command.
     top_level: FlagTables,
-    /// Every local flag under each top-level command. The recursive union is
-    /// deliberately conservative: a local meaning always wins over hoisting.
-    command_flags: HashMap<String, FlagTables>,
 }
 
-fn collect_command_flags(command: &clap::Command, flags: &mut FlagTables) {
+fn command_arg_tables(command: &clap::Command) -> CommandArgTables {
+    let mut direct = FlagTables::default();
     for arg in command.get_arguments() {
-        flags.insert(arg);
+        direct.insert(arg);
     }
+
+    let mut recursive = direct.clone();
+    let mut subcommands = HashMap::new();
     for subcommand in command.get_subcommands() {
-        collect_command_flags(subcommand, flags);
+        let child = command_arg_tables(subcommand);
+        recursive.extend(&child.recursive);
+        let names = std::iter::once(subcommand.get_name()).chain(subcommand.get_all_aliases());
+        for name in names {
+            subcommands.insert(name.to_string(), child.clone());
+        }
+    }
+
+    CommandArgTables {
+        direct,
+        recursive,
+        subcommands,
     }
 }
 
@@ -77,16 +104,12 @@ fn arg_tables() -> &'static ArgTables {
         // Materialize the built-ins (help subcommand, -h/--help, -V/--version).
         cli.build();
 
-        let mut commands = HashSet::new();
-        let mut command_flags = HashMap::new();
+        let mut commands = HashMap::new();
         for sub in cli.get_subcommands() {
-            let mut flags = FlagTables::default();
-            collect_command_flags(sub, &mut flags);
-
+            let table = command_arg_tables(sub);
             let names = std::iter::once(sub.get_name()).chain(sub.get_all_aliases());
             for name in names {
-                commands.insert(name.to_string());
-                command_flags.insert(name.to_string(), flags.clone());
+                commands.insert(name.to_string(), table.clone());
             }
         }
 
@@ -98,7 +121,6 @@ fn arg_tables() -> &'static ArgTables {
         ArgTables {
             commands,
             top_level,
-            command_flags,
         }
     })
 }
@@ -145,37 +167,126 @@ fn first_target_index(args: &[String]) -> Option<usize> {
     None
 }
 
-fn reorder_command_args(program: String, rest: &[String], command_index: usize) -> Vec<String> {
-    let command = &rest[command_index];
-    let local = arg_tables()
-        .command_flags
-        .get(command)
-        .expect("known commands have local flag tables");
-    let mut hoisted = Vec::new();
-    let mut command_args = vec![command.clone()];
+#[derive(Clone, Copy)]
+struct SelectedCommand<'a> {
+    index: usize,
+    args: &'a CommandArgTables,
+}
+
+fn selected_command_path<'a>(
+    rest: &[String],
+    command_index: usize,
+    command: &'a CommandArgTables,
+) -> Vec<SelectedCommand<'a>> {
+    let mut path = vec![SelectedCommand {
+        index: command_index,
+        args: command,
+    }];
     let mut index = command_index + 1;
 
     while index < rest.len() {
         let arg = &rest[index];
         if arg == "--" {
-            command_args.extend_from_slice(&rest[index..]);
             break;
         }
 
-        if local.contains(arg) {
-            push_flag(rest, &mut command_args, &mut index, local.takes_value(arg));
+        let current = path.last().expect("command path is never empty").args;
+        if arg.starts_with('-') {
+            let recognized = current.recursive.contains(arg) || is_known_flag(arg);
+            let takes_value = current.recursive.takes_value(arg) || is_value_flag(arg);
+            if recognized && takes_value && !has_inline_value(arg) && index + 1 < rest.len() {
+                index += 1;
+            }
+            index += 1;
+            continue;
+        }
+
+        let Some(child) = current.subcommands.get(arg) else {
+            break;
+        };
+        path.push(SelectedCommand { index, args: child });
+        index += 1;
+    }
+
+    path
+}
+
+fn deepest_command_before(path: &[SelectedCommand<'_>], index: usize) -> usize {
+    path.iter()
+        .rposition(|command| command.index < index)
+        .expect("the top-level command precedes its arguments")
+}
+
+fn local_flag_owner(path: &[SelectedCommand<'_>], arg: &str, current: usize) -> Option<usize> {
+    if path[current].args.direct.contains(arg) {
+        return Some(current);
+    }
+    path.iter()
+        .rposition(|command| command.args.direct.contains(arg))
+}
+
+fn reorder_command_args(
+    program: String,
+    rest: &[String],
+    command_index: usize,
+    command: &CommandArgTables,
+) -> Vec<String> {
+    let path = selected_command_path(rest, command_index, command);
+    let mut moved_globals = Vec::new();
+    let mut moved_locals: HashMap<usize, Vec<String>> = HashMap::new();
+    let mut retained = vec![true; rest.len()];
+    let mut index = command_index + 1;
+
+    while index < rest.len() {
+        let arg = &rest[index];
+        if arg == "--" {
+            break;
+        }
+
+        let current = deepest_command_before(&path, index);
+        let local_owner = local_flag_owner(&path, arg, current);
+        let destination = if let Some(owner) = local_owner {
+            (owner != current).then_some(Some(owner))
         } else if is_known_flag(arg) {
-            push_flag(rest, &mut hoisted, &mut index, is_value_flag(arg));
+            Some(None)
         } else {
-            command_args.push(arg.clone());
+            None
+        };
+
+        let Some(destination) = destination else {
+            index += 1;
+            continue;
+        };
+
+        let takes_value = destination.map_or_else(
+            || is_value_flag(arg),
+            |owner| path[owner].args.direct.takes_value(arg),
+        );
+        let mut moved = Vec::new();
+        push_flag(rest, &mut moved, &mut index, takes_value);
+        let moved_start = index + 1 - moved.len();
+        retained[moved_start..=index].fill(false);
+        if let Some(owner) = destination {
+            moved_locals.entry(owner).or_default().extend(moved);
+        } else {
+            moved_globals.extend(moved);
         }
         index += 1;
     }
 
     let mut result = vec![program];
     result.extend_from_slice(&rest[..command_index]);
-    result.extend(hoisted);
-    result.extend(command_args);
+    result.extend(moved_globals);
+    for (index, arg) in rest.iter().enumerate().skip(command_index) {
+        if retained[index] {
+            result.push(arg.clone());
+        }
+        if let Some(owner) = path.iter().position(|command| command.index == index) {
+            if let Some(flags) = moved_locals.remove(&owner) {
+                result.extend(flags);
+            }
+        }
+    }
     result
 }
 
@@ -192,8 +303,8 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
     let Some(target_index) = first_target_index(rest) else {
         return args;
     };
-    if arg_tables().commands.contains(rest[target_index].as_str()) {
-        return reorder_command_args(program, rest, target_index);
+    if let Some(command) = arg_tables().commands.get(rest[target_index].as_str()) {
+        return reorder_command_args(program, rest, target_index, command);
     }
 
     // Find where the skill name is and collect flags that come after it
@@ -873,7 +984,7 @@ mod tests {
     };
 
     use clap::Parser;
-    use loopflow::lf::{Cli, Commands};
+    use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand};
 
     /// The derived tables cover everything the old hand lists carried, plus
     /// the uppercase short aliases those lists had drifted away from.
@@ -884,7 +995,7 @@ mod tests {
             ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "loop", "project",
             "flow", "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace", "help",
         ] {
-            assert!(tables.commands.contains(command), "command {command}");
+            assert!(tables.commands.contains_key(command), "command {command}");
         }
         for flag in [
             "-d",
@@ -1297,6 +1408,83 @@ mod tests {
         assert_eq!(
             reorder_args(args),
             vec!["lf", "skill", "debug", "--", "--wave", "literal"]
+        );
+    }
+
+    #[test]
+    fn reorder_args_moves_flags_to_nested_owners() {
+        let args: Vec<String> = ["lf", "pm", "--wave", "systems", "show"]
+            .map(String::from)
+            .to_vec();
+        let reordered = reorder_args(args);
+        assert_eq!(reordered, vec!["lf", "pm", "show", "--wave", "systems"]);
+        assert!(matches!(
+            Cli::try_parse_from(reordered).unwrap().command,
+            Some(Commands::Pm {
+                cmd: PmCommand::Show { .. }
+            })
+        ));
+
+        let args: Vec<String> = [
+            "lf", "pm", "task", "--wave", "systems", "create", "--title", "file it",
+        ]
+        .map(String::from)
+        .to_vec();
+        let reordered = reorder_args(args);
+        assert_eq!(
+            reordered,
+            vec!["lf", "pm", "task", "create", "--wave", "systems", "--title", "file it"]
+        );
+        assert!(matches!(
+            Cli::try_parse_from(reordered).unwrap().command,
+            Some(Commands::Pm {
+                cmd: PmCommand::Task {
+                    cmd: PmTaskCommand::Create { .. }
+                }
+            })
+        ));
+
+        let args: Vec<String> = ["lf", "pr", "-m", "codex", "open"]
+            .map(String::from)
+            .to_vec();
+        let reordered = reorder_args(args);
+        assert_eq!(reordered, vec!["lf", "pr", "open", "-m", "codex"]);
+        assert!(matches!(
+            Cli::try_parse_from(reordered).unwrap().command,
+            Some(Commands::Pr {
+                cmd: Some(PrCommand::Open { .. })
+            })
+        ));
+
+        let args: Vec<String> = ["lf", "pr", "--strict", "submit"]
+            .map(String::from)
+            .to_vec();
+        let reordered = reorder_args(args);
+        assert_eq!(reordered, vec!["lf", "pr", "submit", "--strict"]);
+        assert!(matches!(
+            Cli::try_parse_from(reordered).unwrap().command,
+            Some(Commands::Pr {
+                cmd: Some(PrCommand::Submit { strict: true, .. })
+            })
+        ));
+
+        let args: Vec<String> = ["lf", "wt", "--force", "rm", "old-tree"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            reorder_args(args),
+            vec!["lf", "wt", "rm", "--force", "old-tree"]
+        );
+    }
+
+    #[test]
+    fn reorder_args_keeps_valid_parent_flags_on_the_parent() {
+        let args: Vec<String> = ["lf", "memory", "--wave", "systems", "add", "fact"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            reorder_args(args),
+            vec!["lf", "memory", "--wave", "systems", "add", "fact"]
         );
     }
 

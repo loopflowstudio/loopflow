@@ -376,6 +376,9 @@ lf auth linear     # connect Linear with OAuth
 lf auth disconnect github
 ```
 
+Linear refreshes OAuth automatically before expiry. Connections created before
+this release may need one `lf auth linear` reconnect to record their PKCE client ID.
+
 Tasks live in Linear. Pin a wave to its Linear project in `wave/<name>/GOAL.md` frontmatter — `lf pm init` writes this for you:
 
 ```yaml

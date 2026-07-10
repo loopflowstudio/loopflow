@@ -15,11 +15,13 @@ use crate::lfd::pm::linear::LinearClient;
 use crate::lfd::pm::{
     PmError, PmItem, PmItemCreate, PmItemUpdate, PmLabel, PmProject, PmProviderKind, PmResult,
 };
-use crate::lfdb::open_store;
+use crate::lfdb::{open_store, ProviderToken, Store};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::resolve_wave_name;
-use crate::provider_auth::{refresh_pm_oauth_token, Provider};
+use crate::provider_auth::{
+    provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
+};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -296,9 +298,8 @@ async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     })
 }
 
-/// Linear authenticates via OAuth: the access token lives in the lfdb credential
-/// store (keyed by provider), and an expired token is refreshed in place when it
-/// carries a refresh token and the OAuth client creds resolve.
+/// Linear authenticates via OAuth: the access token and refresh grant live in
+/// lfdb, and PM access refreshes the grant before the access token expires.
 async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
     // A forwarded token wins over the local store: `lf ssh` resolves the PM
     // credential on the caller's machine (where lfdb lives) and hands it to the
@@ -308,13 +309,29 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
         return Ok(token);
     }
 
-    let auth_provider = match provider {
-        PmProviderKind::Linear => Provider::Linear,
-    };
-
     let store = open_store(&storage_config_from_env()?)
         .await
         .map_err(|err| OpsError::Message(format!("failed to open lfd credential store: {err}")))?;
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    resolve_pm_token_from_store(provider, &store, now, |provider, token| async move {
+        refresh_stored_provider_token(provider, &token).await
+    })
+    .await
+}
+
+async fn resolve_pm_token_from_store<F, Fut>(
+    provider: PmProviderKind,
+    store: &Store,
+    now: i64,
+    refresh: F,
+) -> OpsResult<String>
+where
+    F: FnOnce(Provider, ProviderToken) -> Fut,
+    Fut: Future<Output = Result<ProviderToken, TokenRefreshError>>,
+{
+    let auth_provider = match provider {
+        PmProviderKind::Linear => Provider::Linear,
+    };
     let token = store
         .get_provider_token(provider.as_str())
         .await
@@ -325,28 +342,13 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
             ))
         })?;
 
-    let expired = token
-        .expires_at
-        .is_some_and(|expires_at| expires_at <= time::OffsetDateTime::now_utc().unix_timestamp());
-    if !expired {
+    let expired = token.expires_at.is_some_and(|expires_at| expires_at <= now);
+    if !provider_token_refresh_due(&token, now) {
         return Ok(token.access_token);
     }
 
-    // The stored token is expired but may be refreshable: if it carries a refresh
-    // token and the OAuth client creds resolve, refresh in place rather than
-    // forcing the user to re-authenticate.
-    let refresh_token = token
-        .refresh_token
-        .as_deref()
-        .filter(|value| !value.trim().is_empty());
-    if let Some(refresh_token) = refresh_token {
-        if let Ok(mut refreshed) = refresh_pm_oauth_token(auth_provider, refresh_token).await {
-            if refreshed.refresh_token.is_none() {
-                refreshed.refresh_token = token.refresh_token.clone();
-            }
-            if refreshed.login.is_none() {
-                refreshed.login = token.login.clone();
-            }
+    match refresh(auth_provider, token.clone()).await {
+        Ok(refreshed) => {
             let access_token = refreshed.access_token.clone();
             store
                 .upsert_provider_token(&refreshed)
@@ -356,13 +358,21 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
                         "failed to persist refreshed {provider} token: {err}"
                     ))
                 })?;
-            return Ok(access_token);
+            Ok(access_token)
         }
+        Err(error) if !expired => {
+            tracing::warn!(
+                provider = %provider,
+                error = %error,
+                "proactive PM token refresh failed; using the current token"
+            );
+            Ok(token.access_token)
+        }
+        Err(error) => Err(OpsError::Message(format!(
+            "Stored {provider} token expired and automatic refresh failed: {error}. \
+             Run `lf auth {provider}` once to reconnect."
+        ))),
     }
-
-    Err(OpsError::Message(format!(
-        "Stored {provider} token has expired. Run `lf auth {provider}` again."
-    )))
 }
 
 /// Env var carrying a PM access token forwarded by `lf ssh`.
@@ -1405,6 +1415,103 @@ mod tests {
     // Env vars are process-global; serialize the forwarded-token tests so a
     // concurrent test never observes a half-set environment.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[tokio::test]
+    async fn pm_refreshes_due_linear_token_before_using_it() {
+        let db_path =
+            std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::lfd::id::LfdId::new()));
+        let store = std::sync::Arc::new(
+            open_store(&crate::lfdb::StorageConfig::sqlite(db_path))
+                .await
+                .expect("open token store"),
+        );
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        store
+            .upsert_provider_token(&ProviderToken {
+                provider: "linear".to_string(),
+                access_token: "old-access".to_string(),
+                refresh_token: Some("old-refresh".to_string()),
+                oauth_client_id: Some("linear-client".to_string()),
+                expires_at: Some(now + 60),
+                login: None,
+                updated_at: now,
+                credential_type: crate::lfdb::CredentialType::OAuth,
+            })
+            .await
+            .expect("store current token");
+
+        let access_token = resolve_pm_token_from_store(
+            PmProviderKind::Linear,
+            &store,
+            now,
+            |provider, current| async move {
+                assert_eq!(provider, Provider::Linear);
+                assert_eq!(current.refresh_token.as_deref(), Some("old-refresh"));
+                Ok(ProviderToken {
+                    provider: "linear".to_string(),
+                    access_token: "new-access".to_string(),
+                    refresh_token: Some("new-refresh".to_string()),
+                    oauth_client_id: Some("linear-client".to_string()),
+                    expires_at: Some(now + 24 * 60 * 60),
+                    login: None,
+                    updated_at: now,
+                    credential_type: crate::lfdb::CredentialType::OAuth,
+                })
+            },
+        )
+        .await
+        .expect("resolve refreshed token");
+
+        assert_eq!(access_token, "new-access");
+        let stored = store
+            .get_provider_token("linear")
+            .await
+            .expect("load refreshed token")
+            .expect("refreshed token row");
+        assert_eq!(stored.refresh_token.as_deref(), Some("new-refresh"));
+        assert_eq!(stored.oauth_client_id.as_deref(), Some("linear-client"));
+    }
+
+    #[tokio::test]
+    async fn proactive_refresh_failure_uses_still_valid_token() {
+        let db_path =
+            std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::lfd::id::LfdId::new()));
+        let store = std::sync::Arc::new(
+            open_store(&crate::lfdb::StorageConfig::sqlite(db_path))
+                .await
+                .expect("open token store"),
+        );
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        store
+            .upsert_provider_token(&ProviderToken {
+                provider: "linear".to_string(),
+                access_token: "still-valid".to_string(),
+                refresh_token: Some("refresh-token".to_string()),
+                oauth_client_id: Some("linear-client".to_string()),
+                expires_at: Some(now + 60),
+                login: None,
+                updated_at: now,
+                credential_type: crate::lfdb::CredentialType::OAuth,
+            })
+            .await
+            .expect("store current token");
+
+        let access_token = resolve_pm_token_from_store(
+            PmProviderKind::Linear,
+            &store,
+            now,
+            |provider, _| async move {
+                Err(TokenRefreshError::OAuth {
+                    provider,
+                    reason: "the token endpoint rejected or could not complete the request",
+                })
+            },
+        )
+        .await
+        .expect("valid token remains usable");
+
+        assert_eq!(access_token, "still-valid");
+    }
 
     #[test]
     fn resolve_pm_token_prefers_forwarded_env() {

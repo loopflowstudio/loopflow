@@ -155,6 +155,7 @@ pub async fn configure_credential_handler(
         provider: provider.as_str().to_string(),
         access_token: body.api_key,
         refresh_token: None,
+        oauth_client_id: None,
         expires_at: None,
         login: None,
         updated_at: crate::lfdb::rows::now_unix(),

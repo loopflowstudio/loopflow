@@ -113,6 +113,7 @@ async fn configure(raw_provider: &str) -> Result<()> {
             provider: provider.as_str().to_string(),
             access_token: api_key,
             refresh_token: None,
+            oauth_client_id: None,
             expires_at: None,
             login: None,
             updated_at: OffsetDateTime::now_utc().unix_timestamp(),

@@ -41,7 +41,7 @@ use time::OffsetDateTime;
 
 use crate::engine::wave_context::{resolve_ambient_wave, AmbientWaveRef};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{Session, SessionStatus, SessionUse, LF_CLI_SOURCE};
+use crate::lfd::types::{Session, SessionStatus, SessionUse, Wave, LF_CLI_SOURCE};
 use crate::lfdb::{open_existing_store, SharedStore};
 
 pub const WAVE_ID_ENV: &str = "LFD_WAVE_ID";
@@ -101,9 +101,35 @@ pub fn classify_run_context(
 /// early error) records a failure, and Ctrl+C reports via the interrupt-hook
 /// machinery. Returns `None` — with zero noise — outside wave contexts and
 /// when the machine has no registry store (or the write fails).
-pub fn register_run(skill: &str, agent: &str, argv: &[String]) -> Option<RunSession> {
+pub fn register_run(
+    skill: &str,
+    agent: &str,
+    argv: &[String],
+    explicit_wave: Option<&Wave>,
+) -> Option<RunSession> {
     let repo_root = crate::lf::commands::util::find_repo_root().ok();
-    register_run_in(repo_root.as_deref(), skill, agent, argv)
+    register_run_in(repo_root.as_deref(), skill, agent, argv, explicit_wave)
+}
+
+/// Resolve a top-level `--wave` to the domain row that owns attribution.
+/// Explicit context is an identity claim, so an absent registry or unknown
+/// name is a user-facing error rather than an empty prompt plus ambient
+/// attribution to some other wave.
+pub fn resolve_explicit_wave(name: &str) -> anyhow::Result<Wave> {
+    let name = crate::ops::util::normalize_wave_name(name)
+        .ok_or_else(|| anyhow::anyhow!("--wave requires a non-empty wave name"))?;
+    let lookup_name = name.clone();
+    let lookup = block_on(async move {
+        let store = open_existing_store()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("no wave registry on this machine"))?;
+        store
+            .get_wave_by_name(&lookup_name)
+            .await
+            .map_err(|err| anyhow::anyhow!("failed to read wave registry: {err}"))
+    })
+    .ok_or_else(|| anyhow::anyhow!("failed to resolve explicit wave '{name}'"))??;
+    lookup.ok_or_else(|| anyhow::anyhow!("wave '{name}' not found"))
 }
 
 /// The body of [`register_run`], a function of the repo the run executes in
@@ -114,12 +140,24 @@ fn register_run_in(
     skill: &str,
     agent: &str,
     argv: &[String],
+    explicit_wave: Option<&Wave>,
 ) -> Option<RunSession> {
-    let context = classify_run_context(
-        resolve_ambient_wave(env_var(WAVE_ID_ENV).as_deref(), repo_root),
-        env_var(SESSION_ID_ENV).as_deref(),
-        env_var(SESSION_INHERITED_ENV).is_some(),
-    );
+    let ambient = explicit_wave
+        .map(|wave| AmbientWaveRef::Id(wave.id().to_string()))
+        .or_else(|| resolve_ambient_wave(env_var(WAVE_ID_ENV).as_deref(), repo_root));
+    let session_id = env_var(SESSION_ID_ENV);
+    let inherited = env_var(SESSION_INHERITED_ENV).is_some();
+    // An executor-owned row may describe the ambient wave the process was
+    // launched from. Explicit --wave still wins: only adopt that row when it
+    // belongs to the selected wave; otherwise register a new root in the
+    // explicit wave (register_session drops the cross-wave parent).
+    let inherited = inherited
+        || explicit_wave.is_some_and(|wave| {
+            session_id.as_deref().is_some_and(|session_id| {
+                !inherited && !session_belongs_to_wave(session_id, wave.id())
+            })
+        });
+    let context = classify_run_context(ambient, session_id.as_deref(), inherited);
     let (wave, parent_session_id) = match context {
         RunContext::Outside => return None,
         RunContext::OwnSession => {
@@ -151,6 +189,20 @@ fn register_run_in(
     let interrupted = Arc::clone(&session.inner);
     crate::engine::agent::register_interrupt_cleanup(move || interrupted.complete(130));
     Some(session)
+}
+
+fn session_belongs_to_wave(session_id: &str, wave_id: &LfdId) -> bool {
+    let Ok(session_id) = session_id.parse::<LfdId>() else {
+        return false;
+    };
+    let wave_id = wave_id.clone();
+    block_on(async move {
+        let store = open_existing_store().await?;
+        let session = store.get_control_session(&session_id).await.ok()??;
+        Some(session.wave_id == wave_id)
+    })
+    .flatten()
+    .unwrap_or(false)
 }
 
 /// Adopt the session row a dispatcher created for this process — placement
@@ -274,7 +326,12 @@ async fn register_session(
     // A parent the store never heard of: keep the registration, drop the
     // attribution (the row's FK would reject it otherwise).
     if let Some(parent) = &parent_session_id {
-        if store.get_control_session(parent).await.ok()?.is_none() {
+        let parent_matches_wave = store
+            .get_control_session(parent)
+            .await
+            .ok()?
+            .is_some_and(|session| session.wave_id == wave_id);
+        if !parent_matches_wave {
             parent_session_id = None;
         }
     }
@@ -341,8 +398,7 @@ fn env_var(key: &str) -> Option<String> {
 /// the rest.
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    crate::journal::test_env_lock()
 }
 
 fn current_tmux_session_name() -> Option<String> {
@@ -370,7 +426,10 @@ mod tests {
 
     use crate::engine::wave_context::AmbientWaveRef;
 
-    use super::{block_on_new_runtime, classify_run_context, register_run_in, RunContext};
+    use super::{
+        block_on_new_runtime, classify_run_context, register_run_in, resolve_explicit_wave,
+        RunContext,
+    };
 
     fn env_wave(id: &str) -> Option<AmbientWaveRef> {
         Some(AmbientWaveRef::Id(id.to_string()))
@@ -435,9 +494,13 @@ mod tests {
     }
 
     fn make_wave(repo: &str) -> Wave {
+        make_named_wave(repo, "registry-wave")
+    }
+
+    fn make_named_wave(repo: &str, name: &str) -> Wave {
         Wave {
             id: LfdId::new(),
-            name: "registry-wave".to_string(),
+            name: name.to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo: repo.to_string(),
@@ -458,6 +521,11 @@ mod tests {
     /// Create a registry db at `path` with one wave; point `LFD_DB_PATH` at it.
     fn seed_registry(path: &Path) -> Wave {
         let wave = make_wave("/tmp/repo");
+        seed_wave(path, &wave);
+        wave
+    }
+
+    fn seed_wave(path: &Path, wave: &Wave) {
         let seeded = wave.clone();
         let path_buf = path.to_path_buf();
         block_on_new_runtime(async move {
@@ -467,7 +535,6 @@ mod tests {
             store.create_wave(&seeded).await.expect("seed wave");
         });
         std::env::set_var("LFD_DB_PATH", path);
-        wave
     }
 
     /// Seed a live session row (a dispatcher the run would chain off).
@@ -598,8 +665,10 @@ mod tests {
         // before any store is touched, so this holds even with a registry on
         // the machine.
         let tmp = tempfile::tempdir().expect("tempdir");
-        assert!(register_run_in(Some(tmp.path()), "design", "lf", &["lf".to_string()]).is_none());
-        assert!(register_run_in(None, "design", "lf", &["lf".to_string()]).is_none());
+        assert!(
+            register_run_in(Some(tmp.path()), "design", "lf", &["lf".to_string()], None).is_none()
+        );
+        assert!(register_run_in(None, "design", "lf", &["lf".to_string()], None).is_none());
         assert!(std::env::var(super::SESSION_INHERITED_ENV).is_err());
     }
 
@@ -618,7 +687,7 @@ mod tests {
 
         let argv = vec!["lf".to_string(), "design".to_string()];
         let registration =
-            register_run_in(Some(&worktree), "design", "lf", &argv).expect("registered");
+            register_run_in(Some(&worktree), "design", "lf", &argv, None).expect("registered");
 
         let stored = load_session(&db, registration.session_id());
         assert_eq!(stored.status, SessionStatus::Running);
@@ -640,13 +709,55 @@ mod tests {
     }
 
     #[test]
+    fn explicit_wave_overrides_different_ambient_attribution() {
+        let _guard = super::test_env_lock();
+        clear_session_env();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db = tmp.path().join("lfd.db");
+        let ambient = make_named_wave("/tmp/repo", "ambient");
+        seed_wave(&db, &ambient);
+        let explicit = make_named_wave("/tmp/repo", "context");
+        seed_wave(&db, &explicit);
+        let parent = seed_parent_session(&db, &ambient);
+        std::env::set_var(super::WAVE_ID_ENV, ambient.id().to_string());
+        std::env::set_var(super::SESSION_ID_ENV, parent.to_string());
+        // The ambient executor says this row belongs to the current process,
+        // not an ancestor. Explicit context must still refuse to adopt it.
+        std::env::remove_var(super::SESSION_INHERITED_ENV);
+
+        let registration =
+            register_run_in(None, "design", "lf", &["lf".to_string()], Some(&explicit))
+                .expect("registered against explicit wave");
+        let stored = load_session(&db, registration.session_id());
+
+        assert_eq!(stored.wave_id, *explicit.id());
+        assert_eq!(stored.parent_session_id, None, "cross-wave parent dropped");
+        registration.complete(0);
+        clear_session_env();
+    }
+
+    #[test]
+    fn unknown_explicit_wave_is_an_error() {
+        let _guard = super::test_env_lock();
+        clear_session_env();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db = tmp.path().join("lfd.db");
+        seed_registry(&db);
+
+        let error = resolve_explicit_wave("missing-wave").expect_err("unknown wave rejected");
+
+        assert!(error.to_string().contains("wave 'missing-wave' not found"));
+        clear_session_env();
+    }
+
+    #[test]
     fn executor_launched_run_marks_children_without_registering() {
         let _guard = super::test_env_lock();
         clear_session_env();
         std::env::set_var(super::WAVE_ID_ENV, "wave-1");
         std::env::set_var(super::SESSION_ID_ENV, "sess-1");
 
-        let registration = register_run_in(None, "design", "lf", &["lf".to_string()]);
+        let registration = register_run_in(None, "design", "lf", &["lf".to_string()], None);
 
         assert!(registration.is_none());
         // Children now read LFD_SESSION_ID as their parent's session.
@@ -675,7 +786,7 @@ mod tests {
         std::env::set_var(super::SESSION_INHERITED_ENV, "1");
 
         let argv = vec!["lf".to_string(), "design".to_string()];
-        let registration = register_run_in(None, "design", "lf", &argv).expect("registered");
+        let registration = register_run_in(None, "design", "lf", &argv, None).expect("registered");
 
         let stored = load_session(&db, registration.session_id());
         assert_eq!(stored.status, SessionStatus::Running);
@@ -714,7 +825,8 @@ mod tests {
         let wave = seed_registry(&db);
         std::env::set_var(super::WAVE_ID_ENV, wave.id().to_string());
 
-        let failed = register_run_in(None, "debug", "lf", &["lf".to_string()]).expect("registered");
+        let failed =
+            register_run_in(None, "debug", "lf", &["lf".to_string()], None).expect("registered");
         failed.complete(3);
         assert_eq!(
             load_session(&db, failed.session_id()).status,
@@ -726,7 +838,7 @@ mod tests {
         std::env::remove_var(super::SESSION_ID_ENV);
         std::env::remove_var(super::SESSION_INHERITED_ENV);
         let dropped =
-            register_run_in(None, "debug", "lf", &["lf".to_string()]).expect("registered");
+            register_run_in(None, "debug", "lf", &["lf".to_string()], None).expect("registered");
         let id = dropped.session_id().to_string();
         drop(dropped);
         assert_eq!(load_session(&db, &id).status, SessionStatus::Failed);
@@ -742,7 +854,7 @@ mod tests {
         std::env::set_var("LFD_DB_PATH", &db);
         std::env::set_var(super::WAVE_ID_ENV, LfdId::new().to_string());
 
-        assert!(register_run_in(None, "design", "lf", &["lf".to_string()]).is_none());
+        assert!(register_run_in(None, "design", "lf", &["lf".to_string()], None).is_none());
         assert!(!db.exists(), "a missing registry must not be conjured");
         clear_session_env();
     }
@@ -762,7 +874,7 @@ mod tests {
         // LFD_SESSION_INHERITED absent: this process owns the row.
 
         let adoption =
-            register_run_in(None, "implement", "lf", &["lf".to_string()]).expect("adopted");
+            register_run_in(None, "implement", "lf", &["lf".to_string()], None).expect("adopted");
         assert_eq!(adoption.session_id(), own.id.as_str());
         // No second row: adoption never registers.
         assert_eq!(count_sessions(&db, &wave), 1);
@@ -804,7 +916,7 @@ mod tests {
         std::env::set_var(super::SESSION_ID_ENV, failed_row.id.to_string());
         std::env::remove_var(super::SESSION_INHERITED_ENV);
         let failed =
-            register_run_in(None, "implement", "lf", &["lf".to_string()]).expect("adopted");
+            register_run_in(None, "implement", "lf", &["lf".to_string()], None).expect("adopted");
         failed.complete(3);
         assert_eq!(
             load_session(&db, failed_row.id.as_str()).status,
@@ -817,7 +929,7 @@ mod tests {
         std::env::set_var(super::SESSION_ID_ENV, dropped_row.id.to_string());
         std::env::remove_var(super::SESSION_INHERITED_ENV);
         let dropped =
-            register_run_in(None, "implement", "lf", &["lf".to_string()]).expect("adopted");
+            register_run_in(None, "implement", "lf", &["lf".to_string()], None).expect("adopted");
         drop(dropped);
         assert_eq!(
             load_session(&db, dropped_row.id.as_str()).status,
@@ -837,14 +949,14 @@ mod tests {
 
         // Registry exists but the row does not: silent no-op, no row conjured.
         std::env::set_var(super::SESSION_ID_ENV, LfdId::new().to_string());
-        assert!(register_run_in(None, "implement", "lf", &["lf".to_string()]).is_none());
+        assert!(register_run_in(None, "implement", "lf", &["lf".to_string()], None).is_none());
         assert_eq!(count_sessions(&db, &wave), 0);
 
         // No registry at all: silent no-op, db not conjured.
         let missing = tmp.path().join("never-created.db");
         std::env::set_var("LFD_DB_PATH", &missing);
         std::env::remove_var(super::SESSION_INHERITED_ENV);
-        assert!(register_run_in(None, "implement", "lf", &["lf".to_string()]).is_none());
+        assert!(register_run_in(None, "implement", "lf", &["lf".to_string()], None).is_none());
         assert!(!missing.exists(), "a missing registry must not be conjured");
         clear_session_env();
     }
@@ -864,7 +976,7 @@ mod tests {
         assert!(canceled.cancel());
         store_session(&db, &canceled);
         std::env::set_var(super::SESSION_ID_ENV, canceled.id.to_string());
-        assert!(register_run_in(None, "implement", "lf", &["lf".to_string()]).is_none());
+        assert!(register_run_in(None, "implement", "lf", &["lf".to_string()], None).is_none());
         assert_eq!(
             load_session(&db, canceled.id.as_str()).status,
             SessionStatus::Canceled
@@ -876,7 +988,7 @@ mod tests {
         std::env::set_var(super::SESSION_ID_ENV, raced.id.to_string());
         std::env::remove_var(super::SESSION_INHERITED_ENV);
         let adoption =
-            register_run_in(None, "implement", "lf", &["lf".to_string()]).expect("adopted");
+            register_run_in(None, "implement", "lf", &["lf".to_string()], None).expect("adopted");
         let mut closed = raced.clone();
         assert!(closed.cancel());
         store_session(&db, &closed);
@@ -898,7 +1010,7 @@ mod tests {
         // A wave id the store never heard of: stale env, silent no-op.
         std::env::set_var(super::WAVE_ID_ENV, LfdId::new().to_string());
 
-        assert!(register_run_in(None, "design", "lf", &["lf".to_string()]).is_none());
+        assert!(register_run_in(None, "design", "lf", &["lf".to_string()], None).is_none());
         clear_session_env();
     }
 }

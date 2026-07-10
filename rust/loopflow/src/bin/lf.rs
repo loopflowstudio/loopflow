@@ -162,13 +162,7 @@ fn with_runtime<T>(
         LfNode::Run,
         LfEventType::Started,
         LfEventFields {
-            wave_name: loopflow::engine::worktrees::main_repo_root(repo_root)
-                .ok()
-                .and_then(|main_repo| {
-                    loopflow::engine::worktrees::wave_name_from_worktree_and_main(
-                        repo_root, &main_repo,
-                    )
-                }),
+            wave_name: loopflow::engine::wave_context::resolve_run_wave_name(repo_root),
             worktree: Some(repo_root.display().to_string()),
             command: Some(command.to_vec()),
             ..LfEventFields::default()
@@ -362,10 +356,12 @@ fn run_placed_target(
     };
     // The same registry-backed run lifecycle `lf loop` uses; only the
     // placement and what happens inside the worktree differ.
+    let run_id = loopflow::lfd::id::LfdId::new();
     let placed = loopflow::flowloop::run::LoopRun::start(
         &wave_name,
         name.trim_end_matches(':'),
         message.map(str::to_string),
+        &run_id,
         &placement,
     )?;
     let run = &placed.run;
@@ -468,7 +464,24 @@ fn main() -> anyhow::Result<()> {
     let raw_args: Vec<String> = std::env::args().collect();
     let args = reorder_args(raw_args.clone());
 
-    let cli = Cli::parse_from(args.clone());
+    let mut cli = Cli::parse_from(args.clone());
+    let explicit_wave = cli
+        .wave
+        .as_deref()
+        .map(loopflow::lf::session::resolve_explicit_wave)
+        .transpose()?;
+    if let Some(wave) = &explicit_wave {
+        cli.wave = Some(wave.name().to_string());
+    }
+    // One resolved wave identity drives prompt context, registry attribution,
+    // journaling, and every child process. An explicit wave is also the
+    // default bus channel for this invocation.
+    let _explicit_wave_env = explicit_wave
+        .as_ref()
+        .map(|wave| EnvGuard::set(loopflow::lf::session::WAVE_ID_ENV, wave.id().to_string()));
+    let _explicit_channel_env = explicit_wave
+        .as_ref()
+        .map(|wave| EnvGuard::set(loopflow::lf::session::CHANNEL_ENV, wave.name().to_string()));
     debug!(?cli, "parsed CLI arguments");
 
     // Inside a wave context, agent-launching runs register themselves as lfd
@@ -479,6 +492,7 @@ fn main() -> anyhow::Result<()> {
             &skill,
             cli.model.as_deref().unwrap_or("lf"),
             &raw_args,
+            explicit_wave.as_ref(),
         ),
         None => {
             loopflow::lf::session::mark_child_sessions_inherited();
@@ -547,7 +561,12 @@ fn main() -> anyhow::Result<()> {
                 wall_clock_secs,
                 poll_secs,
                 max_turns,
-            }) => in_repo_runtime(&args, |repo| {
+            }) => {
+                // A placed loop owns a fresh trace just like --fork/--stack.
+                // Do not start the generic invocation runtime first: it may
+                // have inherited its caller's trace, and two loops from one
+                // pass must never compete for the same registry Run id.
+                let repo = loopflow::lf::commands::util::find_repo_root()?;
                 let mut options =
                     loopflow::flowloop::driver::LoopOptions::new(name.clone(), cli.wave.clone());
                 options.max_passes = *max_passes;
@@ -556,16 +575,16 @@ fn main() -> anyhow::Result<()> {
                 options.poll = std::time::Duration::from_secs(*poll_secs);
                 options.max_turns = max_turns.or(cli.max_turns);
                 if *detach {
-                    let session = loopflow::flowloop::driver::detach_loop(repo, seed, &options)
+                    let session = loopflow::flowloop::driver::detach_loop(&repo, seed, &options)
                         .map_err(anyhow::Error::from)?;
                     println!("detached {name} loop in tmux session {session}");
                     println!("inspect: tmux attach -r -t {session}");
                     Ok(())
                 } else {
-                    loopflow::flowloop::driver::run_loop(repo, seed, &options)
+                    loopflow::flowloop::driver::run_loop(&repo, seed, &options)
                         .map_err(anyhow::Error::from)
                 }
-            }),
+            }
             Some(Commands::Enqueue { flow }) => in_repo_runtime(&args, |repo| {
                 loopflow::lf::commands::playhead::enqueue(repo, cli.wave.as_deref(), flow)
             }),

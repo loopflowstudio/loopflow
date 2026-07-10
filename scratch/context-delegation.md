@@ -5,6 +5,9 @@
 - Every assembled prompt receives the same `LOOPFLOW.md`. That document tells a
   one-off implementation run to inspect Linear, resolve a wave, find a server,
   and start child loops even when its seed already names one concrete job.
+- Generic skill orientation repeats the problem: `implement`, `gate`, `qa`,
+  `research`, and dozens of peers say to infer whether a `wave/<name>/`
+  directory "matches this work" and then read that wave's live tasks.
 - A served wave receives a second instruction saying the orchestrator "never
   grinds inline." A single blocked next move is therefore pushed into another
   worktree and transcript instead of being resolved in the room that found it.
@@ -12,8 +15,14 @@
   while `task_pursue` does not explicitly close that capability. The result is
   recursive whole-task delegation rather than strict-subset delegation.
 - `lf loop --max-passes 1` is accepted. It creates loop state and a worktree but
-  removes the only reason to use the primitive: another pass after the first
-  boundary.
+  removes the only reason to use the primitive: room for another pass after the
+  first boundary.
+- Detached launch currently returns a tmux session and then dies: the server
+  emits `lf loop ... --wave W`, but `--wave` is a top-level option and must
+  precede `loop`. Most public examples teach the same invalid order.
+- Explicit wave context and evidence attribution resolve independently, and a
+  placed loop's registry run id differs from the trace id its passes emit.
+  Status, prompt logs, and `lf trace` therefore do not identify the same work.
 
 ## Design
 
@@ -67,9 +76,17 @@ The CLI rejects `max_passes < 2` before resolving a wave, checking a server, or
 creating a worktree. Its error points to `lf flow <name> "<seed>"` for one-shot
 execution.
 
+Detached launch emits parser-valid top-level wave scope and enforces the same
+two-pass minimum at its HTTP door. Explicit wave scope must also drive evidence
+attribution, and each placed loop's registry run id must be the `LF_RUN_ID` its
+passes and operational descendants inherit.
+
 ## Acceptance
 
-- A bare assembled `implement` prompt contains no `lf pm` or `lf loop` command.
+- A bare assembled `implement` prompt contains no PM lookup or child-loop launch
+  recipe.
+- Generic execution skills consult wave/PM state only when the prompt or seed
+  names an exact wave, task, project, or concrete coordination question.
 - A wave pass says to resolve one local blocker inline and grants only
   project/task loop delegation.
 - A project pursue prompt grants task loops but forbids project/wave children.
@@ -77,4 +94,8 @@ execution.
   children and scoped PM use, and forbids every `lf loop` child.
 - `lf loop task "work" --max-passes 1` fails before placement with the direct
   flow correction.
+- A detached loop's generated argv parses, and the loop door rejects one-pass
+  requests before creating a tmux session.
+- Explicit `--wave` overrides ambient attribution, and foreground/detached loop
+  passes emit under the registry run id shown by `lf status`.
 - Existing multi-pass foreground and detached loops remain unchanged.

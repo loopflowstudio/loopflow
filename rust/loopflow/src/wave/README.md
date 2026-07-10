@@ -55,10 +55,11 @@ Environment configures a process; it no longer decides what the process is.
   the loop dispatches with judgment. Mid-pass due dates fire at the
   boundary; occurrences older than 24h are missed, not replayed. The
   daemon's cron poller and `wave_crons` table died in the collapse.
-- **The loop inhabits or delegates.** Each pass's seed is the rendered
-  `GOAL.md` plus the coordinating-session discipline. It inhabits one
-  context-sensitive hand with `lf loop <flow> "task" --wave <wave>` and
-  delegates self-sufficient work with `--detach`; both use placed worktrees.
+- **The loop executes inline first.** Each pass's seed is the rendered
+  `GOAL.md` plus the coordinating-session discipline. A sole blocker stays in
+  the wave process. A strict subset that needs a repeated lifecycle may run as
+  `lf --wave <wave> loop <flow> "task"`; add `--detach` only when the wave has
+  another useful move while that child runs. Both loop forms use placed worktrees.
   The LISTENER polls the shared store
   and journals `RunObserved`/`RunCompleted` observations — every ~10s and
   once per `GET /resident/context` (the resident calls it before each pass).

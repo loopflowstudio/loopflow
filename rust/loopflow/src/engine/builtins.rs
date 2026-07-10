@@ -258,6 +258,16 @@ mod tests {
     }
 
     #[test]
+    fn generic_execution_skills_never_infer_a_wave_or_require_pm() {
+        for name in ["implement", "gate", "qa", "research", "rebase"] {
+            let skill = get_builtin_skill(name).expect("generic skill");
+            assert!(skill.contains("seed names the exact wave"), "{name}");
+            assert!(!skill.contains("matches this work"), "{name}");
+            assert!(!skill.contains("lf pm show"), "{name}");
+        }
+    }
+
+    #[test]
     fn vsm_system_goals_are_registered() {
         let key = resolve_builtin_goal("s3").expect("s3 goal");
         let goal = get_builtin_goal(key).expect("registered goal");

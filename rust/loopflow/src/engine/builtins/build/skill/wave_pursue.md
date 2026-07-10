@@ -27,7 +27,7 @@ lf pm task update --id <task-id> --title "..."
 - Select from filed tasks and open KRs; filing work does not require launching it.
 - Execute the next move inline by default. If one concrete blocker stands
   between the wave and progress, resolve it in this process instead of creating
-  another worktree, transcript, task, or loop.
+  another worktree, vendor session, task, or loop.
 - Create a project or task loop only when the child is a strict subset of the
   wave objective and needs an independent multi-pass lifecycle, its own PR, or
   useful parallel execution. Never delegate the whole wave objective.

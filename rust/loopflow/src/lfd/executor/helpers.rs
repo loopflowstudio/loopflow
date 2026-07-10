@@ -402,17 +402,38 @@ pub(crate) async fn launch_session_in_tmux(session: &Session, tail: &str) -> Res
 /// launcher's env, and a registered launcher would leak its session identity
 /// into the child's login shell.
 pub(crate) async fn spawn_detached_lf(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
+    spawn_detached_lf_with_env(session, cwd, argv, &[]).await
+}
+
+/// Launch a detached `lf` with explicit inherited identity. Environment
+/// pairs are applied to the `lf` process itself, so its nested operational
+/// children inherit them normally.
+pub(crate) async fn spawn_detached_lf_with_env(
+    session: &str,
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+) -> Result<()> {
+    let shell_command = detached_lf_shell_command(argv, env);
+    spawn_tmux_session(session, &cwd.display().to_string(), &shell_command).await
+}
+
+pub(crate) fn detached_lf_shell_command(argv: &[String], env: &[(&str, &str)]) -> String {
     let command = argv
         .iter()
         .map(|arg| shell_escape(arg))
         .collect::<Vec<_>>()
         .join(" ");
-    spawn_tmux_session(
-        session,
-        &cwd.display().to_string(),
-        &format!("unset LFD_SESSION_INHERITED; exec {command}"),
-    )
-    .await
+    let env = env
+        .iter()
+        .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if env.is_empty() {
+        format!("unset LFD_SESSION_INHERITED; exec {command}")
+    } else {
+        format!("unset LFD_SESSION_INHERITED; exec env {env} {command}")
+    }
 }
 
 /// Start a detached tmux session running `shell_command`, with mouse mode on

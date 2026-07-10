@@ -38,7 +38,7 @@ lf pm task create --project <project> --title "..." --notes "..."
   remaining project as one task. A stopped server is a reason to work inline,
   not to boot orchestration infrastructure.
 - A detached task must report, publish live learnings, and leave a PR; otherwise
-  its private transcript makes it invisible.
+  its private vendor session leaves no durable evidence.
 - Discovered debt becomes a task under an existing KR unless it
   reveals a broader standing quality frontier. Do not turn individual cleanup
   into a project-shaped KR.

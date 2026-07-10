@@ -36,13 +36,15 @@ use serde::Deserialize;
 use crate::flowloop::pass::{run_pass, PassOptions};
 use crate::flowloop::run::LoopRun;
 use crate::lfd::executor::Placement;
+use crate::lfd::id::LfdId;
 use crate::ops::{OpsError, OpsResult};
 use crate::wave::wire::{
     DetachedLoopRequest, DetachedLoopResponse, RESIDENT_TOKEN_HEADER, SUBAGENT_TOKEN_HEADER,
 };
 
 const LOOP_FILE: &str = "scratch/loop.yaml";
-const MIN_LOOP_PASSES: u32 = 2;
+pub(crate) const LF_LOOP_RUN_ID_ENV: &str = "LF_LOOP_RUN_ID";
+pub(crate) const MIN_LOOP_PASSES: u32 = 2;
 const DEFAULT_MAX_PASSES: u32 = 8;
 const DEFAULT_PASS_TIMEOUT_SECS: u64 = 60 * 30;
 const DEFAULT_WALL_CLOCK_SECS: u64 = 60 * 60 * 2;
@@ -119,10 +121,20 @@ pub fn run_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<()>
     require_loop_flow(repo, &options.flow)?;
     let wave_name = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
+    let trace_id = loop_trace_id()?;
+    // A detached handoff is one-use. Remove the marker before any pass runs,
+    // otherwise a nested `lf loop` would steal its parent's registry id.
+    let _handoff_env = EnvGuard::remove(LF_LOOP_RUN_ID_ENV);
+    let _trace_env = EnvGuard::set(crate::journal::LF_RUN_ID_ENV, trace_id.as_str());
+    // A placed loop is a new trace root. The first pass mints its own process
+    // id; its nested operational children then inherit that id as their
+    // parent while replacing LF_PROCESS_ID for themselves.
+    let _process_env = EnvGuard::remove(crate::journal::LF_PROCESS_ID_ENV);
     let mut run = LoopRun::start(
         &wave_name,
         &options.flow,
         Some(seed.to_string()),
+        &trace_id,
         &Placement::Fresh,
     )?;
     let worktree = run.worktree();
@@ -133,7 +145,7 @@ pub fn run_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<()>
         options,
         |pass, flow, seed, pass_options| {
             run.start_pass(pass)?;
-            run_pass(&worktree, flow, seed, pass_options)
+            run_pass(&worktree, flow, seed, &run.run.id, pass_options)
         },
     );
     run.finish(result)
@@ -156,6 +168,7 @@ pub fn detach_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<
     validate_loop_options(options)?;
     let wave = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
+    let trace_id = LfdId::new();
     let origin = crate::engine::wave_context::wave_origin(repo);
     let endpoint = crate::lfq::env_endpoint()
         .or_else(|| crate::engine::wave_context::read_endpoint_pointer(&origin, &wave))
@@ -170,6 +183,7 @@ pub fn detach_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<
         ))
     })?;
     let request = DetachedLoopRequest {
+        run_id: trace_id,
         flow: options.flow.clone(),
         seed: seed.to_string(),
         max_passes: options.max_passes,
@@ -197,6 +211,43 @@ pub fn detach_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<
     let response: DetachedLoopResponse = serde_json::from_str(&body)
         .map_err(|err| OpsError::Parse(format!("invalid loop response: {err}")))?;
     Ok(response.session)
+}
+
+fn loop_trace_id() -> OpsResult<LfdId> {
+    match std::env::var(LF_LOOP_RUN_ID_ENV).ok() {
+        Some(value) => value.parse().map_err(|err| {
+            OpsError::Message(format!("invalid {LF_LOOP_RUN_ID_ENV} handoff: {err}"))
+        }),
+        None => Ok(LfdId::new()),
+    }
+}
+
+struct EnvGuard {
+    key: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let previous = std::env::var_os(key);
+        std::env::set_var(key, value);
+        Self { key, previous }
+    }
+
+    fn remove(key: &'static str) -> Self {
+        let previous = std::env::var_os(key);
+        std::env::remove_var(key);
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var(self.key, value),
+            None => std::env::remove_var(self.key),
+        }
+    }
 }
 
 fn validate_loop_options(options: &LoopOptions) -> OpsResult<()> {
@@ -381,6 +432,30 @@ mod tests {
                 assert!(!message.contains("server"));
             }
         }
+    }
+
+    #[test]
+    fn sibling_loops_under_one_parent_trace_get_distinct_run_ids() {
+        let _lock = crate::journal::test_env_lock();
+        let parent = LfdId::new();
+        let _parent = EnvGuard::set(crate::journal::LF_RUN_ID_ENV, parent.as_str());
+        let _handoff = EnvGuard::remove(LF_LOOP_RUN_ID_ENV);
+
+        let first = loop_trace_id().expect("first loop id");
+        let second = loop_trace_id().expect("second loop id");
+
+        assert_ne!(first, second);
+        assert_ne!(first, parent);
+        assert_ne!(second, parent);
+    }
+
+    #[test]
+    fn detached_child_accepts_the_id_minted_by_its_launcher() {
+        let _lock = crate::journal::test_env_lock();
+        let handed_off = LfdId::new();
+        let _handoff = EnvGuard::set(LF_LOOP_RUN_ID_ENV, handed_off.as_str());
+
+        assert_eq!(loop_trace_id().expect("handoff id"), handed_off);
     }
 
     #[test]

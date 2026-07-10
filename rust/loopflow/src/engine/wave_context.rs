@@ -109,6 +109,21 @@ pub fn resolve_ambient_channel_name(repo_root: &Path) -> Option<String> {
     }
 }
 
+/// The wave a run is attributed to. A dispatcher or explicit `--wave` owns
+/// attribution through `LFD_WAVE_ID`; a bare run may use a recognized sibling
+/// wave worktree. Branch-name inference is intentionally excluded: the main
+/// checkout's ordinary branch is not a wave identity.
+pub fn resolve_run_wave_name(repo_root: &Path) -> Option<String> {
+    if let Some(id) = std::env::var(crate::lf::session::WAVE_ID_ENV)
+        .ok()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+    {
+        return wave_name_for_id(&id);
+    }
+    crate::engine::worktrees::wave_name_from_worktree(repo_root)
+}
+
 /// What the ambient-wave paths ask git about a repo root.
 #[derive(Debug, Clone)]
 struct RepoGitInfo {

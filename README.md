@@ -1,6 +1,6 @@
 # Loopflow
 
-Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it works Linear tasks, delegates the implementation to workers, remembers what it learns, and shows you every live session.
+Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it works Linear tasks inline, spins off independent loops when parallelism earns them, remembers what it learns, and shows you every live session.
 
 Start a wave by hand and steer it interactively. As it earns trust, let it loop — picking work, dispatching flows, and reacting to changes on its own.
 
@@ -64,20 +64,24 @@ The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one
 lf serve s3           # the s3 (control) charter
 ```
 
-The wave agent inhabits one context-sensitive loop and delegates
-self-sufficient work. Both forms run in scoped worktrees and report back:
+The wave agent executes the next move inline by default. Give a strict subset
+its own repeated lifecycle only when the work earns a separate worktree and PR:
 
 ```bash
-lf loop build "unify button variants" --wave designer           # inhabit
-lf loop build "audit the settings panes" --wave designer --detach # delegate
+lf --wave designer loop build "unify button variants"            # caller waits
+lf --wave designer loop build "audit settings panes" --detach    # server owns it
 ```
+
+Use `--detach` only when `designer` is already served and the parent has another
+useful move while the child runs. If this result is needed next, keep it
+foreground. If it is the sole local blocker, do it inline.
 
 Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its intent in view. Their PRs are how results flow back to the wave.
 
 Run a task as a bounded task loop:
 
 ```bash
-lf loop task "fix the flaky chord-timeout test" --wave designer
+lf --wave designer loop task "fix the flaky chord-timeout test"
 ```
 
 `lf loop` takes a flow and free text, creates a worktree, and repeats the flow
@@ -347,11 +351,11 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf --bin lf
 ```
 Install the Rust binaries directly with cargo.
 
-## Inhabit, Delegate, Observe
+## Execute, Loop, Observe
 
 ```bash
 lf serve engbot       # start the wave agent (Ctrl-C to stop)
-lf loop implement "Add the endpoint" --wave engbot --detach
+lf --wave engbot loop implement "Add the endpoint" --detach
 tmux ls              # list live sessions — the wave agent and its workers
 tmux attach -r -t <name>  # inspect without direct control
 ```

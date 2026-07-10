@@ -156,8 +156,9 @@ Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter
 lf serve shipper
 ```
 
-The wave agent inhabits one loop and delegates self-sufficient work
-(`lf loop build "…" --wave shipper --detach`), then folds each shipped PR into
+The wave agent resolves the next local blocker inline. It detaches an already
+justified child loop only when another useful move can run in parallel
+(`lf --wave shipper loop build "…" --detach`), then folds each shipped PR into
 memory. CI failures and pushes to main ride the bus with `lf radio`, then land
 in the wave's thread as attributed notifications.
 

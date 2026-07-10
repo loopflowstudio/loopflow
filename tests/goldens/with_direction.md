@@ -17,13 +17,6 @@ lf pr submit                     # prep + mark ready + assign to you; you click 
 lf pr land                       # hands-off: submit, then arm auto-merge
 lf rebase --plan              # show reset/rebase strategy
 lf rebase                     # apply the planned update
-lf wt create my-feature       # sibling worktree, root branch from main (default)
-lf wt create thing --child parent # stack a child under parent
-lf wt switch my-feature       # cd to a worktree (wave name, leaf, or branch)
-lf wt up                      # cd to the parent worktree in the stack
-lf wt down                    # cd to a child worktree in the stack
-lf wt list                    # the worktree stack as a tree
-lf wt prune                   # clean up merged worktrees
 ```
 
 ### `pr` vs `submit` vs `land`
@@ -46,9 +39,10 @@ lands it:
   — landing never moves your worktree; a merged worker's tree is pruned when its
   branch is deleted.
 
-The sibling naming convention (`<repo>.<name>`) is load-bearing: worktrees
-created elsewhere aren't recognized by `lf wt` (list, switch, up/down, prune)
-or by land.
+Stay in the worktree Loopflow placed for this run. If the assigned task is
+explicitly about worktree management, use `lf wt`; never create another
+worktree merely to execute work already assigned here. The sibling naming
+convention (`<repo>.<name>`) is load-bearing, so never use raw `git worktree`.
 
 ## Execute Here First
 
@@ -67,8 +61,8 @@ auth as a prerequisite for ordinary implementation. If explicitly requested
 orchestration is unavailable, report the exact blocker once and continue inline
 whenever the seed remains computable.
 
-A one-shot operation is a direct skill or flow run. A loop exists to cross at
-least two pass boundaries; never use `lf loop --max-passes 1`.
+A one-shot operation is a direct skill or flow run. A loop must leave room for
+at least two passes; never use `lf loop --max-passes 1`.
 
 ## Speak
 

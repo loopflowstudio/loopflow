@@ -28,7 +28,7 @@ lf office-hours                   # bare name works when unambiguous
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
-lf loop task "fix the flaky test" --wave designer   # loop task until the PR merges
+lf --wave designer loop task "fix the flaky test"   # loop task until the PR merges
 ```
 
 ## Skills
@@ -124,16 +124,20 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
 ```bash
 lf serve designer                                  # start the named mind
-lf loop task "fix the flaky chord-timeout test" --wave designer
-lf loop task "…" --wave designer --max-passes 4 --wall-clock-secs 3600
-lf loop scan-pass "scan the runtime" --detach # any flow is loopable
+lf --wave designer loop task "fix the flaky chord-timeout test"
+lf --wave designer loop task "…" --max-passes 4 --wall-clock-secs 3600
+lf --wave designer loop scan-pass "scan the runtime" --detach
+lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
 With one name, `lf serve <name>` starts that mind and its persistent playhead.
 With a flow plus free text, it creates a child worktree and loops until the
 flow's skills write `done` to `scratch/loop.yaml` (`task`: when the PR merges).
-Without `--detach` it blocks; with `--detach` the live wave server owns it and
-returns a read-only tmux inspection session. Linear holds filed tasks,
+Loops allow at least two passes; run the flow directly for one-shot work.
+Without `--detach` the caller owns the loop and blocks; with `--detach` the
+already-running wave server owns it and returns a read-only tmux inspection
+session. Detach only when the parent has another useful move while the loop
+runs. Linear holds filed tasks,
 `lf runs` shows active hands, and merged PRs record done.
 
 ## Speaking to Waves
@@ -289,9 +293,9 @@ lf implement -d ux,clarity
 lf gate --no-loopflow
 ```
 
-`LOOPFLOW.md` carries loopflow-specific guidance for git, worktrees, PRs, and
-delegation, and is injected by default. Use `--no-loopflow` for a leaner
-prompt.
+`LOOPFLOW.md` carries loopflow-specific guidance for inline execution and
+mechanical git/PR operations. Tier skills add scoped delegation. Use
+`--no-loopflow` for a leaner prompt.
 
 ### Include clipboard content
 

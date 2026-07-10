@@ -31,6 +31,7 @@ selection. Follow the repo style guide.
 - File a concrete follow-up with `lf pm task create` when new work belongs later
   under a known project. Filing does not authorize launching it in this task.
 - At a detached pass boundary, report concrete progress with `lf radio` and
-  publish durable learnings with `lf memory add`; the transcript is private.
+  publish durable learnings with `lf memory add`; the vendor conversation is
+  private.
 
 Stay scoped to the task. Put unresolved ambiguity in `scratch/questions.md`.

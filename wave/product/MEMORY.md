@@ -5,6 +5,100 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Minds (settled 2026-07-10, the `minds` branch)
+
+The execution model, in the four verbs it produced. `scratch/minds.md` is the
+long form and dies at land; this is what survives.
+
+- **Waves are the only minds.** A mind is a *read set*, not a process: it
+  re-reads the live thread and memory. Task and project loops are hands —
+  private transcript, public posts, no memory of their own. The only way to make
+  another mind is `lf project promote`, which grants residency (a process, an
+  endpoint, a cadence, a budget) and costs the parent its ambient overhearing.
+- **The verbs, and why they are four:**
+  | `lf serve <wave>` | boot a mind: listener, thread, playhead. Steerable. |
+  | `lf loop <flow> <seed>` | run a bounded child loop to its bit. Batch. `--detach` is the concurrency switch; `--dispatch` is deleted. |
+  | `lf chat` | humans only: converse with a served mind's thread. HTTP/SSE on the listener. |
+  | `lf radio` | agents only: broadcast on the bus. An INSERT; no server in the path. |
+  `lf __resident` is hidden. **Environment configures a process; it must never
+  decide what the process is** — the earlier `lf loop <name>` chose between
+  booting a listener and being a resident by reading `WAVE_SERVER_ENDPOINT` from
+  the environment, and tmux hands a promoting pass's env straight to its child,
+  so a promoted wave's resident attached to its *parent's* listener with the
+  parent's token. Split the verb by what it does.
+- **Inhabiting is a call, not a mode.** The wave LLM runs `lf loop project "…"`
+  and blocks; nothing about the wave changes. Blocking is one long tool call —
+  the thread's tool-boundary ear is traded for the inner loop's pass-boundary
+  ear. A live child loop is presence and extends the pass lease.
+- **Delegate all but one.** Keep the project whose next move needs the wave's
+  memory and chat in the room — the one you could not write a self-sufficient
+  seed for. Not the most important one: inhabited work advances at wake cadence,
+  delegated work advances continuously, so keeping the priority starves it.
+- **A session is not a conversation.** One thread per wave, journal-backed,
+  durable, assembled from many disposable bodies. The human attaches to the
+  running pass itself; the persona rotates with the flow's skills and that is
+  honest. Rendering each active session as its own chat is exactly how this
+  design gets undone in the UI after being right in the runtime.
+- **The playhead.** The mind is always mid-flow: a cursor through the wave
+  flow's default cycle, wrapping at the end. Enqueue attaches to the *innermost*
+  active invocation frame and drains FIFO before returning to the caller — so
+  the queue is per-frame, not one flat list. Skip interrupts the body, journals
+  a boundary, advances one step; it never restarts the flow. The journal is the
+  queue's source of truth, keyed by invocation id + step path (names alone can't
+  reconstruct the stack when a flow appears twice).
+- **The db IS the bus** (the same move that made the db the registry).
+  `bus_messages` + `bus_cursors`; publish is an INSERT, subscribe is a forward
+  poll from a rowid cursor, the sweeper rides every read and write with a 1 h
+  wall-clock window. No broker, so publishing works with zero loopflow processes
+  running and two detached hands hear each other with no served wave. The bus is
+  **not a log** — that temptation is the failure mode to guard.
+- **Byline is testimony; channel is evidence.** With no server in the publish
+  path, client-submitted attribution is the only kind possible: a forged byline
+  is visible as a mismatch against the arrival channel, not prevented. Per-hand
+  tokens stopped being needed. A mind skips rows bylined with its own channel,
+  or steering a hand wakes the steerer with its own steer.
+- **Bus delivery is at-least-once, and no doc may promise more.** The listener
+  journals a report then commits its cursor; a crash in that seam replays one
+  row. Deliberate — a duplicated report is cheaper than a silent lost one. A
+  clean restart replays nothing.
+- **Nothing crosses a boundary unless someone wrote it down on purpose.** Memory
+  is lexical scope (a child reads the parent's live memory, writes only its own);
+  chat is a mailbox that stops at the wave. Raw records stay home; authored
+  statements travel. That is what lets log-as-truth survive nesting.
+- **A hand's ear is the wave's thread**, at pass granularity — every pass is a
+  fresh process that re-reads the wave's live memory and chat at birth. Verified:
+  no `env_clear` in the pass-spawn path, and `LoopRun` worktrees are wave-named.
+  The tmux door is now read-only; it existed only because the mind on the other
+  side went deaf at birth.
+- **Backlogs are allowed.** Agents file tasks without running them; `loop/README`'s
+  "no backlog" is resolved in Linear's favor. What it bought — "the open runs ARE
+  the wave's open tasks" — is gone: a task now has three states (filed, running,
+  merged), and nothing else prevents a tracker filling with intent nobody does.
+
+### Minds: what did not land
+
+- **A detached loop's driver holds no subscription.** `lf radio -c <hand>`
+  reaches live `lf sub` listeners and nobody else; steering a hand means speaking
+  on the wave's thread. On a store bus the fast path is a poll cursor in the
+  driver's pass boundary — cheap to build, or to skip deliberately. Open fork.
+- **Mid-turn steer is Codex-only.** Claude and OpenCode queue to the next body.
+  Vendor-gated; the product question lives in `projects/wave-chat.md`.
+- **`lf chat` and `lf wavechat` overlap.** `wavechat` (picked up in the rebase) is
+  `chat` + `sub` fused — the exact fusion this design splits. One should go.
+- **Composite flow nodes** (`and`/`or`/`xor`/`loop`) still run through the
+  internal headless `__flow-step` fallback rather than first-class playhead
+  frames. Do it when the Mac's breadcrumb starts lying about nested flows.
+- **Project-loop caps** still inherit the generic 8-pass / 2-hour task defaults.
+  Needs one real project loop's dogfood data, not a guessed weeks-scale timeout.
+- **Foreground/background label** on Active sessions: the run ledger doesn't
+  persist the owner, so the Mac shows pass/worktree/liveness and declines to guess.
+- **PM label removal on promotion:** the provider abstraction has no remove-label
+  op, so promotion records residual `project:<slug>` labels instead of clearing
+  them. Provider-level API work.
+- **Residency reads wave definitions from the main checkout.** Promotion authored
+  in a worker worktree stops with an explicit land-before-residency error rather
+  than launching a child against files the listener cannot see.
+
 ## Model (design invariants)
 
 - Frame, don't render: no native chat UI, and the CLI stays the source of truth — Concerto composes around it.
@@ -38,6 +132,10 @@ they mean the Mac surface.
 - **lfd demotes to proxy + pubsub** — proxies `lf` over HTTP so remote looks like
   local, and streams new runs. It is NOT how things execute, NOT a parallel impl.
   Concerto's bundled lfd earns its keep solely as the pubsub pipe feeding the ledger.
+- **Superseded on the agent side:** `lf sub` no longer opens a socket — it polls
+  the store bus by channel prefix. Its SSE follower moved verbatim to
+  `lf/commands/thread.rs` and backs `lf wavechat`. HTTP/SSE remains the *thread's*
+  transport (`lf chat`, the Mac); the bus never had a server in its path.
 - **Why:** one implementation at the daemon layer, matching "keep one
   implementation"; kills the two-code-path / three-mirror drift the DTO rule fights.
 - **This branch is Swift catching up.** Scope boundary: redo Swift to match; do

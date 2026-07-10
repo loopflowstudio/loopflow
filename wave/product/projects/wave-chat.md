@@ -44,3 +44,17 @@ pricing before assuming the vendors will close the gap for us.
 `op:"say"`; only the Mac composer emits `op=steer`. Whatever the answer above,
 the CLI and the Mac must reach the same session with the same verb, or the KR
 is measuring one surface and claiming both.
+
+**Two CLI surfaces claim the thread.** `lf wavechat` is a one-pane TUI that both
+follows a wave's events and posts into its thread — `lf chat` + `lf sub` fused,
+the same fusion the verb split exists to undo. Both are in the tree because
+deleting a verb that just landed on main is not a rebase's call. One should go,
+and the split (`serve` boots, `chat` attaches, `sub` reads the bus) is the shape
+this project defends.
+
+**Does a hand deserve a private steer channel?** A detached loop's driver holds
+no subscription, so a broadcast on a hand's channel reaches live `lf sub`
+listeners and nobody else. The wave's thread is the ear a hand reliably has, at
+pass granularity. On a store bus the fast path is a poll cursor the driver could
+hold — cheap either way, which makes this a question about whether a hand should
+be addressable at all, not a bug on the way past.

@@ -54,6 +54,12 @@ lf --wave <wave> loop <flow> "<whole handoff>"
 lf --wave <wave> loop <flow> "<whole handoff>" --detach
 ```
 
+The CLI also accepts a global flag after a built-in command when that command
+does not define the same spelling. It normalizes `lf loop task "…" --wave
+designer` to the canonical form before parsing. A subcommand-local spelling
+wins on collision (`lf commit -m "message"`; loop-local `--max-turns`), and
+`--` ends normalization so later flag-shaped text stays literal.
+
 ## Delegation depth
 
 The tier controls `lf loop`, not all child processes.

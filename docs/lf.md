@@ -54,6 +54,18 @@ Inside skill files, `{args}` is replaced with whatever comes after the colon.
 
 ## Context Flags
 
+Write global flags before a built-in subcommand. Unambiguous flags also work
+after it:
+
+```bash
+lf --wave designer loop task "fix the flaky test"   # canonical
+lf loop task "fix the flaky test" --wave designer   # accepted and normalized
+lf commit -m "explain the change"                   # -m remains commit-local
+```
+
+When a spelling exists at both levels, the subcommand meaning wins. Put `--`
+before literal arguments that happen to look like global flags.
+
 ### Files and Directories
 
 | Flag | Description |

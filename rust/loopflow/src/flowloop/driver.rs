@@ -251,11 +251,22 @@ impl Drop for EnvGuard {
 }
 
 fn validate_loop_options(options: &LoopOptions) -> OpsResult<()> {
-    if options.max_passes < MIN_LOOP_PASSES {
+    validate_loop_passes(&options.flow, options.max_passes)
+}
+
+/// Reject a one-shot loop before callers resolve placement or contact a
+/// server. The CLI calls this immediately after parsing so an explicit but
+/// unavailable wave cannot hide the direct-flow correction.
+///
+/// # Errors
+///
+/// Returns an error when `max_passes` cannot produce a repeated lifecycle.
+pub fn validate_loop_passes(flow: &str, max_passes: u32) -> OpsResult<()> {
+    if max_passes < MIN_LOOP_PASSES {
         return Err(OpsError::Message(format!(
             "--max-passes must be at least {MIN_LOOP_PASSES}; use `lf flow {} \
              \"<seed>\"` for one-shot work",
-            options.flow
+            flow
         )));
     }
     Ok(())

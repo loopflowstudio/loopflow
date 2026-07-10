@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::OnceLock;
 
 use clap::{CommandFactory, Parser};
@@ -7,7 +7,7 @@ use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
-use loopflow::lf::{Cli, Commands, ProjectCommand};
+use loopflow::lf::{Cli, Commands, ProjectCommand, TaskCommand};
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -493,9 +493,6 @@ fn run_target(
     command: &[String],
 ) -> anyhow::Result<()> {
     let repo_root = loopflow::lf::commands::util::find_repo_root()?;
-    if placement_requested(cli) {
-        return run_placed_target(&repo_root, name, message, cli, command);
-    }
     run_target_in_repo(&repo_root, name, message, cli, command)
 }
 
@@ -528,133 +525,6 @@ fn run_target_in_repo(
     }
 }
 
-fn placement_requested(cli: &Cli) -> bool {
-    cli.stack.is_some() || cli.fork
-}
-
-fn validate_loop_command(cli: &Cli) -> anyhow::Result<()> {
-    if let Some(Commands::Loop {
-        name, max_passes, ..
-    }) = &cli.command
-    {
-        loopflow::flowloop::driver::validate_loop_passes(name, *max_passes)?;
-    }
-    Ok(())
-}
-
-fn inner_placement_invocation(command: &[String]) -> anyhow::Result<(Cli, Vec<String>)> {
-    let inner_command = strip_placement_args(command);
-    let mut inner_cli = Cli::try_parse_from(inner_command.clone())?;
-    if placement_requested(&inner_cli) {
-        return Err(anyhow::anyhow!(
-            "placement flags leaked into placed invocation"
-        ));
-    }
-    // A placed invocation already owns an isolated worktree. Give its worker
-    // direct authority there instead of depending on an out-of-process exec
-    // proxy for commits and delegation.
-    inner_cli.yolo = true;
-    Ok((inner_cli, inner_command))
-}
-
-fn strip_placement_args(command: &[String]) -> Vec<String> {
-    let mut stripped = Vec::with_capacity(command.len());
-    let mut args = command.iter().peekable();
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--fork" => {}
-            "--stack" => {
-                let _ = args.next();
-            }
-            value if value.starts_with("--stack=") => {}
-            _ => stripped.push(arg.clone()),
-        }
-    }
-    stripped
-}
-
-fn run_placed_target(
-    repo_root: &Path,
-    name: &str,
-    message: Option<&str>,
-    cli: &Cli,
-    command: &[String],
-) -> anyhow::Result<()> {
-    let wave_name = resolve_placement_wave(repo_root, cli)?;
-    let placement = if let Some(parent) = cli.stack.as_deref() {
-        loopflow::lfd::executor::Placement::Stack {
-            parent_run_id: parent
-                .parse()
-                .map_err(|_| anyhow::anyhow!("invalid --stack run id: '{parent}'"))?,
-        }
-    } else {
-        loopflow::lfd::executor::Placement::Fresh
-    };
-    // The same registry-backed run lifecycle `lf loop` uses; only the
-    // placement and what happens inside the worktree differ.
-    let run_id = loopflow::lfd::id::LfdId::new();
-    let placed = loopflow::flowloop::run::LoopRun::start(
-        &wave_name,
-        name.trim_end_matches(':'),
-        message.map(str::to_string),
-        &run_id,
-        &placement,
-    )?;
-    let run = &placed.run;
-
-    eprintln!("placed {name} in {}", run.worktree);
-    let _cwd = CurrentDirGuard::set(&run.worktree)?;
-    let _wave_env = EnvGuard::set("LFD_WAVE_ID", run.wave_id.to_string());
-    let _run_env = EnvGuard::set("LFD_RUN_ID", run.id.to_string());
-    let _lf_run_env = EnvGuard::set("LF_RUN_ID", run.id.to_string());
-    // Placement starts a trace and a work line: neither identity may leak from
-    // the caller even though the target executes synchronously in this process.
-    let _channel_env = EnvGuard::set(
-        loopflow::lf::session::CHANNEL_ENV,
-        loopflow::engine::wave_context::placed_channel_name(&wave_name, &run.id),
-    );
-    let _process_env = EnvGuard::remove(loopflow::journal::LF_PROCESS_ID_ENV);
-
-    let (inner_cli, inner_command) = inner_placement_invocation(command)?;
-    let result = run_target_in_repo(
-        Path::new(&run.worktree),
-        name,
-        message,
-        &inner_cli,
-        &inner_command,
-    );
-    placed.finish(result)
-}
-
-fn resolve_placement_wave(repo_root: &Path, cli: &Cli) -> anyhow::Result<String> {
-    if let Some(wave) = cli.wave.as_ref().filter(|value| !value.trim().is_empty()) {
-        return Ok(wave.clone());
-    }
-    let main_repo = loopflow::engine::worktrees::main_repo_root(repo_root)?;
-    loopflow::engine::worktrees::wave_name_from_worktree_and_main(repo_root, &main_repo)
-        .ok_or_else(|| anyhow::anyhow!("placement requires --wave or an ambient wave worktree"))
-}
-
-struct CurrentDirGuard {
-    previous: PathBuf,
-}
-
-impl CurrentDirGuard {
-    fn set(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let previous = std::env::current_dir()?;
-        std::env::set_current_dir(path)?;
-        Ok(Self { previous })
-    }
-}
-
-impl Drop for CurrentDirGuard {
-    fn drop(&mut self) {
-        if let Err(err) = std::env::set_current_dir(&self.previous) {
-            eprintln!("failed to restore cwd {}: {err}", self.previous.display());
-        }
-    }
-}
-
 struct EnvGuard {
     key: &'static str,
     previous: Option<std::ffi::OsString>,
@@ -666,12 +536,6 @@ impl EnvGuard {
         std::env::set_var(key, value.into());
         Self { key, previous }
     }
-
-    fn remove(key: &'static str) -> Self {
-        let previous = std::env::var_os(key);
-        std::env::remove_var(key);
-        Self { key, previous }
-    }
 }
 
 impl Drop for EnvGuard {
@@ -680,6 +544,115 @@ impl Drop for EnvGuard {
             std::env::set_var(self.key, value);
         } else {
             std::env::remove_var(self.key);
+        }
+    }
+}
+
+fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
+    let value = value.trim();
+    let (number, multiplier) = if let Some(number) = value.strip_suffix('s') {
+        (number, 1)
+    } else if let Some(number) = value.strip_suffix('m') {
+        (number, 60)
+    } else if let Some(number) = value.strip_suffix('h') {
+        (number, 60 * 60)
+    } else {
+        (value, 1)
+    };
+    let amount: u64 = number
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid duration {value:?}; use seconds, 10s, 5m, or 1h"))?;
+    Ok(std::time::Duration::from_secs(
+        amount.saturating_mul(multiplier),
+    ))
+}
+
+fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyhow::Result<()> {
+    if json {
+        let snapshot = loopflow::ops::task::task_snapshot(session)?;
+        println!("{}", serde_json::to_string_pretty(&snapshot)?);
+    } else {
+        println!(
+            "{}  {}  {}\n  session: {}\n  worktree: {}\n  branch: {}\n  reason: {}",
+            session.issue.identifier,
+            session.status.as_str(),
+            session.provider,
+            session.id,
+            session.worktree.display(),
+            session.branch,
+            session.status_reason,
+        );
+    }
+    Ok(())
+}
+
+fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
+    match command {
+        TaskCommand::Run { issue, json } => {
+            let session = loopflow::ops::task::task_run(repo, issue)?;
+            print_task_session(&session, *json)
+        }
+        TaskCommand::Start {
+            title,
+            project_id,
+            json,
+        } => {
+            let session = loopflow::ops::task::task_start(repo, title.clone(), project_id)?;
+            print_task_session(&session, *json)
+        }
+        TaskCommand::Status { issue, json } => {
+            let session = loopflow::ops::task::task_status(issue)?;
+            print_task_session(&session, *json)
+        }
+        TaskCommand::Send { issue, message } => {
+            let result = loopflow::ops::task::task_send(issue, message.clone())?;
+            println!(
+                "{} → {} ({})",
+                result.command_id, result.issue_id, result.delivery
+            );
+            Ok(())
+        }
+        TaskCommand::Interrupt { issue, message } => {
+            let result = loopflow::ops::task::task_interrupt(issue, message.clone())?;
+            println!(
+                "{} → {} ({})",
+                result.command_id, result.issue_id, result.delivery
+            );
+            Ok(())
+        }
+        TaskCommand::Wait {
+            issue,
+            until,
+            timeout,
+            json,
+        } => {
+            let until = if until == "submitted" {
+                loopflow::ops::task::TaskWaitUntil::Submitted
+            } else {
+                loopflow::ops::task::TaskWaitUntil::Terminal
+            };
+            let timeout = timeout.as_deref().map(parse_duration).transpose()?;
+            let session = loopflow::ops::task::task_wait(issue, until, timeout)?;
+            print_task_session(&session, *json)
+        }
+        TaskCommand::Resume { issue, message } => {
+            let result = loopflow::ops::task::task_resume(issue, message.clone())?;
+            println!(
+                "{} → {} ({})",
+                result.command_id, result.issue_id, result.delivery
+            );
+            Ok(())
+        }
+        TaskCommand::Attach { issue } => {
+            loopflow::ops::task::task_attach(issue).map_err(Into::into)
+        }
+        TaskCommand::Abandon { issue, reason } => {
+            let result = loopflow::ops::task::task_abandon(issue, reason.clone())?;
+            println!(
+                "{} → {} ({})",
+                result.command_id, result.issue_id, result.delivery
+            );
+            Ok(())
         }
     }
 }
@@ -714,9 +687,6 @@ fn main() -> anyhow::Result<()> {
     let args = reorder_args(raw_args.clone());
 
     let mut cli = Cli::parse_from(args.clone());
-    // A one-shot invocation is not a loop. Reject it before explicit wave
-    // resolution, placement, registry access, or detached-server discovery.
-    validate_loop_command(&cli)?;
     let explicit_wave = cli
         .wave
         .as_deref()
@@ -805,39 +775,6 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Resident { name }) => {
                 in_repo_runtime(&args, |_| loopflow::wave::resident::run(name))
             }
-            Some(Commands::Loop {
-                name,
-                seed,
-                detach,
-                max_passes,
-                pass_timeout_secs,
-                wall_clock_secs,
-                poll_secs,
-                max_turns,
-            }) => {
-                // A placed loop owns a fresh trace just like --fork/--stack.
-                // Do not start the generic invocation runtime first: it may
-                // have inherited its caller's trace, and two loops from one
-                // pass must never compete for the same registry Run id.
-                let repo = loopflow::lf::commands::util::find_repo_root()?;
-                let mut options =
-                    loopflow::flowloop::driver::LoopOptions::new(name.clone(), cli.wave.clone());
-                options.max_passes = *max_passes;
-                options.pass_timeout = std::time::Duration::from_secs(*pass_timeout_secs);
-                options.wall_clock = std::time::Duration::from_secs(*wall_clock_secs);
-                options.poll = std::time::Duration::from_secs(*poll_secs);
-                options.max_turns = max_turns.or(cli.max_turns);
-                if *detach {
-                    let session = loopflow::flowloop::driver::detach_loop(&repo, seed, &options)
-                        .map_err(anyhow::Error::from)?;
-                    println!("detached {name} loop in tmux session {session}");
-                    println!("inspect: tmux attach -r -t {session}");
-                    Ok(())
-                } else {
-                    loopflow::flowloop::driver::run_loop(&repo, seed, &options)
-                        .map_err(anyhow::Error::from)
-                }
-            }
             Some(Commands::Enqueue { flow }) => in_repo_runtime(&args, |repo| {
                 loopflow::lf::commands::playhead::enqueue(repo, cli.wave.as_deref(), flow)
             }),
@@ -863,6 +800,47 @@ fn main() -> anyhow::Result<()> {
                 println!("promoted {slug} from {parent}; residency: {session}");
                 Ok(())
             }),
+            Some(Commands::Project {
+                cmd: ProjectCommand::Run { project_id, json },
+            }) => in_repo_runtime(&args, |repo| {
+                let result = loopflow::ops::task::project_run(repo, project_id)?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                } else {
+                    println!(
+                        "{} → wave/{} ({})",
+                        result.project, result.wave, result.delivery
+                    );
+                }
+                Ok(())
+            }),
+            Some(Commands::Project {
+                cmd: ProjectCommand::Start { title, wave, json },
+            }) => in_repo_runtime(&args, |repo| {
+                let result = loopflow::ops::task::project_start(repo, title, wave.as_deref())?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                } else {
+                    println!(
+                        "{} → wave/{} ({})",
+                        result.project, result.wave, result.delivery
+                    );
+                }
+                Ok(())
+            }),
+            Some(Commands::Task { cmd }) => {
+                in_repo_runtime(&args, |repo| run_task_command(repo, cmd))
+            }
+            Some(Commands::TaskRunner {
+                session_id,
+                generation,
+            }) => {
+                let session_id = session_id.parse()?;
+                tokio::runtime::Runtime::new()?.block_on(loopflow::task::runner::run_task_session(
+                    session_id,
+                    *generation,
+                ))
+            }
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)
             }
@@ -963,13 +941,10 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Session label for agent-launching invocations. Utility commands return
-/// `None`; `lf serve` and `lf loop` also return `None` because their own
-/// lifecycle owners register the WaveAgent and LoopRun rows respectively.
+/// `None`; `lf serve` also returns `None` because its lifecycle owner registers
+/// the WaveAgent row.
 fn run_label(cli: &Cli) -> Option<String> {
     if cli.list {
-        return None;
-    }
-    if placement_requested(cli) {
         return None;
     }
     match &cli.command {
@@ -993,7 +968,6 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Serve { .. })
         | Some(Commands::Stop { .. })
         | Some(Commands::Resident { .. })
-        | Some(Commands::Loop { .. })
         | Some(Commands::Enqueue { .. })
         | Some(Commands::Skip)
         | Some(Commands::FlowStep { .. })
@@ -1009,17 +983,24 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Radio { .. })
         | Some(Commands::RetiredSub { .. })
         | Some(Commands::Memory { .. })
-        | Some(Commands::Ssh { .. }) => None,
-        Some(Commands::Project { .. }) => Some("project-promote".to_string()),
+        | Some(Commands::Ssh { .. })
+        | Some(Commands::Task { .. })
+        | Some(Commands::TaskRunner { .. })
+        | Some(Commands::Project {
+            cmd: ProjectCommand::Run { .. },
+        })
+        | Some(Commands::Project {
+            cmd: ProjectCommand::Start { .. },
+        }) => None,
+        Some(Commands::Project {
+            cmd: ProjectCommand::Promote { .. },
+        }) => Some("project-promote".to_string()),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        arg_tables, inner_placement_invocation, placement_requested, reorder_args,
-        validate_loop_command,
-    };
+    use super::{arg_tables, reorder_args};
 
     use clap::Parser;
     use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand};
@@ -1030,7 +1011,7 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "loop", "project",
+            ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "task", "project",
             "flow", "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace", "help",
         ] {
             assert!(tables.commands.contains_key(command), "command {command}");
@@ -1047,7 +1028,6 @@ mod tests {
             "-w",
             "-W",
             "--wave",
-            "--stack",
         ] {
             assert!(tables.top_level.value.contains(flag), "value flag {flag}");
         }
@@ -1072,7 +1052,6 @@ mod tests {
             "--diff",
             "--no-diff",
             "--no-loopflow",
-            "--fork",
             "-h",
             "--help",
             "-V",
@@ -1107,92 +1086,6 @@ mod tests {
         let args = vec!["lf".to_string(), "debug".to_string(), "-c".to_string()];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-c", "debug"]);
-    }
-
-    #[test]
-    fn reorder_args_placement_flags_after_skill() {
-        let args = vec![
-            "lf".to_string(),
-            "implement".to_string(),
-            "ship it".to_string(),
-            "--fork".to_string(),
-        ];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "--fork", "implement", "ship it"]);
-    }
-
-    #[test]
-    fn placed_inner_invocation_strips_fork() {
-        let command: Vec<String> = [
-            "lf",
-            "--fork",
-            "-b",
-            "--wave",
-            "goals",
-            "implement",
-            "ship it",
-        ]
-        .map(String::from)
-        .to_vec();
-        let cli = Cli::parse_from(command.clone());
-        assert!(placement_requested(&cli));
-
-        let (inner_cli, inner_command) = inner_placement_invocation(&command).unwrap();
-
-        assert!(!placement_requested(&inner_cli));
-        assert!(inner_cli.yolo);
-        assert_eq!(
-            inner_command,
-            vec!["lf", "-b", "--wave", "goals", "implement", "ship it"]
-        );
-        assert!(inner_cli.batch);
-        assert_eq!(inner_cli.wave.as_deref(), Some("goals"));
-        assert!(matches!(inner_cli.command, Some(Commands::External(_))));
-    }
-
-    /// Batch and steerable are different entrypoints, not one verb reading its
-    /// environment. `lf loop` always names a flow and always carries a seed.
-    #[test]
-    fn loop_parses_blocking_and_detached_batch_forms() {
-        let blocking = Cli::try_parse_from(["lf", "loop", "task", "ship it"]).unwrap();
-        assert!(matches!(
-            blocking.command,
-            Some(Commands::Loop {
-                detach: false,
-                name,
-                seed,
-                ..
-            }) if name == "task" && seed == "ship it"
-        ));
-
-        let detached =
-            Cli::try_parse_from(["lf", "loop", "project", "hold the KR frontier", "--detach"])
-                .unwrap();
-        assert!(matches!(
-            detached.command,
-            Some(Commands::Loop { detach: true, name, .. }) if name == "project"
-        ));
-
-        // A seedless loop has nothing to run: it is a parse error, not a wave.
-        assert!(Cli::try_parse_from(["lf", "loop", "goals"]).is_err());
-    }
-
-    #[test]
-    fn one_pass_loop_is_rejected_before_explicit_wave_resolution() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "--wave",
-            "not-registered",
-            "loop",
-            "task",
-            "ship it",
-            "--max-passes",
-            "1",
-        ])
-        .expect("loop syntax parses");
-
-        let error = validate_loop_command(&cli).expect_err("one pass is a direct flow");
-        assert!(error.to_string().contains("lf flow task \"<seed>\""));
     }
 
     /// Serving a mind is its own command. Nothing about the ambient
@@ -1248,25 +1141,6 @@ mod tests {
     #[test]
     fn removed_dispatch_flag_is_rejected() {
         assert!(Cli::try_parse_from(["lf", "--dispatch", "implement", "ship it"]).is_err());
-    }
-
-    #[test]
-    fn placed_inner_invocation_strips_stack_value_forms() {
-        let spaced: Vec<String> = ["lf", "--stack", "01JSTACK", "implement"]
-            .map(String::from)
-            .to_vec();
-        let (inner_cli, inner_command) = inner_placement_invocation(&spaced).unwrap();
-        assert!(!placement_requested(&inner_cli));
-        assert!(inner_cli.yolo);
-        assert_eq!(inner_command, vec!["lf", "implement"]);
-
-        let equals: Vec<String> = ["lf", "--stack=01JSTACK", "implement"]
-            .map(String::from)
-            .to_vec();
-        let (inner_cli, inner_command) = inner_placement_invocation(&equals).unwrap();
-        assert!(!placement_requested(&inner_cli));
-        assert!(inner_cli.yolo);
-        assert_eq!(inner_command, vec!["lf", "implement"]);
     }
 
     #[test]
@@ -1364,42 +1238,6 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_hoists_unambiguous_globals_after_loop() {
-        let args: Vec<String> = [
-            "lf", "loop", "task", "ship it", "-M", "codex", "--wave", "goals", "--detach",
-        ]
-        .map(String::from)
-        .to_vec();
-        let reordered = reorder_args(args);
-        assert_eq!(
-            reordered,
-            vec!["lf", "-M", "codex", "--wave", "goals", "loop", "task", "ship it", "--detach"]
-        );
-        let cli = Cli::try_parse_from(reordered).unwrap();
-        assert_eq!(cli.model.as_deref(), Some("codex"));
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Loop { detach: true, .. })
-        ));
-    }
-
-    #[test]
-    fn reorder_args_accepts_equals_globals_after_command() {
-        let args: Vec<String> = ["lf", "loop", "task", "ship it", "--wave=goals"]
-            .map(String::from)
-            .to_vec();
-        let reordered = reorder_args(args);
-        assert_eq!(
-            reordered,
-            vec!["lf", "--wave=goals", "loop", "task", "ship it"]
-        );
-        assert_eq!(
-            Cli::try_parse_from(reordered).unwrap().wave.as_deref(),
-            Some("goals")
-        );
-    }
-
-    #[test]
     fn reorder_args_preserves_local_collision_after_leading_global() {
         let args: Vec<String> = ["lf", "--wave", "goals", "commit", "-m", "ship it"]
             .map(String::from)
@@ -1408,43 +1246,6 @@ mod tests {
             reorder_args(args),
             vec!["lf", "--wave", "goals", "commit", "-m", "ship it"]
         );
-    }
-
-    #[test]
-    fn reorder_args_keeps_loop_max_turns_local() {
-        let args: Vec<String> = [
-            "lf",
-            "loop",
-            "task",
-            "ship it",
-            "--max-turns",
-            "4",
-            "--wave",
-            "goals",
-        ]
-        .map(String::from)
-        .to_vec();
-        let reordered = reorder_args(args);
-        assert_eq!(
-            reordered,
-            vec![
-                "lf",
-                "--wave",
-                "goals",
-                "loop",
-                "task",
-                "ship it",
-                "--max-turns",
-                "4"
-            ]
-        );
-        assert!(matches!(
-            Cli::try_parse_from(reordered).unwrap().command,
-            Some(Commands::Loop {
-                max_turns: Some(4),
-                ..
-            })
-        ));
     }
 
     #[test]

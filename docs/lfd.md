@@ -7,8 +7,8 @@ title: lfd Daemon Reference
 
 `lfd` runs the loopflow daemon: the HTTP read surface, session registry,
 GitHub webhook ingress translated to `lf` execs, provider token refresh, and
-worktree cleanup. It launches no agent work; each wave's resident loop and
-its server-owned `lf loop … --detach` hands own agent execution.
+worktree cleanup. It launches no agent work; each Wave resident and each
+registry-backed Task Session own their provider execution.
 
 ## Run Native lfd
 
@@ -229,31 +229,11 @@ POST /v0/hooks/github
 Set `github.webhook_secret` or `LFD_GITHUB_WEBHOOK_SECRET` before enabling the webhook. `lfd` verifies `X-Hub-Signature-256` and ignores unsigned requests.
 
 Webhooks translate inward through the daemon. CI and main-push events ride the
-agent bus and fold into the wave's thread attributed; queue maintenance runs
-in-process.
+agent bus and fold into the wave's thread attributed. Merged PRs complete their
+owning durable Task Sessions.
 
 - check_run failure → `lf radio pub --channel <wave> --from github "CI failed: …"` (the wave's loop decides how to fix)
-- PR merged → reconcile stacked queue state for matching waves
+- PR merged → mark the owning Task Session merged and notify its Wave
 - push to main → `lf radio pub --channel <wave> --from github "main moved: …"` for each wave in the repo
 
 The store accepts the notification even while the wave sleeps. No wave resolved → dropped.
-
-## Stacked PR queue state
-
-```bash
-curl -s "$LFD_ADDR/v0/runs?wave_id=<wave_id>&order=stack" | jq '.data[] | {id, stack_position, queue_role, queue_block_reason, next_action}'
-```
-
-`/v0/runs` includes:
-
-- `queue_role`: `ready | draft | blocked | merged | superseded`
-- `queue_block_reason` / `queue_blocked_at`
-- `next_action`: `open_pr | resolve_conflict | combine_prs | await_merge`
-
-`/v0/waves/{id}` reports:
-
-- `open_pr_count`
-- `stack_count`
-- `has_stale_pr_state`
-
-`LFD_GITHUB_TOKEN` enables live PR refresh during reconciliation and poll cycles.

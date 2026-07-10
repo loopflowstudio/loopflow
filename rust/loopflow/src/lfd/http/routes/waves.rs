@@ -16,15 +16,13 @@ use crate::engine::wave_config::update_wave_agent_config;
 use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, ensure_wave_worktree, worktree_path};
 use crate::lfd::http::dto::{
-    session_connection_info_dto, session_dto, CombineResponse, CombineResponseResult,
-    DeletedResourceResponse, LandWaveResponse, ListResponse, StopWaveResponse, WaveAgentTreeDto,
-    WaveAgentTreeSessionDto, WaveDto,
+    session_connection_info_dto, session_dto, DeletedResourceResponse, LandWaveResponse,
+    ListResponse, StopWaveResponse, WaveAgentTreeDto, WaveAgentTreeSessionDto, WaveDto,
 };
 use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, ApiMessage, ApiResult};
-use crate::lfd::id::LfdId;
-use crate::lfd::types::{Run, RunStatus, Wave, WaveStatus, LIVE_SESSION_STATUSES};
+use crate::lfd::types::{Run, RunStatus, WaveStatus, LIVE_SESSION_STATUSES};
 
 // TODO(M1): convert the mutating wave routes in this file to exec lf argv or
 // remove them. lfd is the local face, not a hand: no direct git, worktree, tmux,
@@ -538,37 +536,6 @@ pub async fn land_wave_handler(
     Ok(Json(LandWaveResponse { merged: true }))
 }
 
-pub async fn combine_wave_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-) -> ApiResult<CombineResponse> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let (wave, work_dir) = wave_and_work_dir(&state, &wave_id).await?;
-    let wave_name = wave.name().clone();
-
-    let result = run_blocking_result(
-        move || {
-            crate::ops::combine_prs(
-                std::path::Path::new(&work_dir),
-                &crate::ops::CombineOptions {
-                    wave_name: Some(wave_name),
-                },
-                &crate::ops::NullProgress,
-            )
-        },
-        StatusCode::BAD_REQUEST,
-    )
-    .await?;
-
-    Ok(Json(CombineResponse {
-        ok: true,
-        result: CombineResponseResult {
-            new_pr_url: result.new_pr_url,
-            closed_prs: result.closed_prs,
-        },
-    }))
-}
-
 #[derive(Debug, Deserialize)]
 pub struct WaveDiffQuery {
     path: String,
@@ -619,33 +586,6 @@ fn wave_name_exists_error(name: &str) -> ApiError {
         StatusCode::CONFLICT,
         ApiMessage::Safe(format!("wave '{name}' already exists in this repo")),
     )
-}
-
-async fn wave_and_work_dir(state: &HttpState, wave_id: &LfdId) -> Result<(Wave, String), ApiError> {
-    let wave = state
-        .store
-        .get_wave(wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-
-    let latest_run = state
-        .store
-        .get_latest_run(wave_id)
-        .await
-        .map_err(map_store_error)?;
-
-    let latest_worktree = latest_run
-        .map(|run| run.worktree)
-        .filter(|value| !value.is_empty());
-    let work_dir = resolve_wave_work_dir_for_api(
-        wave.repo().to_string(),
-        wave.name().clone(),
-        latest_worktree,
-    )
-    .await?;
-
-    Ok((wave, work_dir))
 }
 
 async fn resolve_wave_work_dir_for_api(
@@ -755,6 +695,7 @@ fn rename_wave_worktree(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfd::id::LfdId;
     use crate::lfd::http::routes::test_helpers::{init_git_repo, test_http_state};
     use crate::lfd::types::{Session, SessionStatus, SessionUse, Wave};
     use std::path::Path;

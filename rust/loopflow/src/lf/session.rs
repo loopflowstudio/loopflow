@@ -236,7 +236,7 @@ fn adopt_own_session() -> Option<RunSession> {
 
 /// Flip `LFD_SESSION_ID`'s meaning for everything this process spawns: the
 /// row belongs to an ancestor, not to the spawned process. Called by every
-/// `lf` command — including non-registering ones like `lf pr`/`lf loop`,
+/// `lf` command — including non-registering ones like `lf pr`/`lf serve`,
 /// which may themselves be the executor-launched session owner.
 pub fn mark_child_sessions_inherited() {
     if env_var(SESSION_ID_ENV).is_some() {

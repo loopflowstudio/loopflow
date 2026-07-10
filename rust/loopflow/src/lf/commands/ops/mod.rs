@@ -708,6 +708,7 @@ mod pm_output_tests {
         let lines = format_pm_task_table(&[
             PmItem {
                 id: "done-1".to_string(),
+                identifier: "INF-1".to_string(),
                 name: "Done task".to_string(),
                 description: String::new(),
                 rank: 0,
@@ -717,6 +718,7 @@ mod pm_output_tests {
             },
             PmItem {
                 id: "open-1".to_string(),
+                identifier: "INF-2".to_string(),
                 name: "Longer\ntitle".to_string(),
                 description: String::new(),
                 rank: 1,
@@ -899,12 +901,7 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
 
 pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
-        WtCommand::Create {
-            name,
-            child,
-            sibling: _,
-            plan,
-        } => wt_create(name, child.as_deref(), *plan),
+        WtCommand::Create { name, plan } => wt_create(name, *plan),
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::Up => wt_up(),
         WtCommand::Down { name } => wt_down(name.as_deref()),
@@ -918,37 +915,15 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     }
 }
 
-fn wt_create(name: &str, child: Option<&str>, dry_run: bool) -> Result<()> {
+fn wt_create(name: &str, dry_run: bool) -> Result<()> {
     let started = Instant::now();
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let segment = WorktreeSegment::parse(name)?;
-    let current = current_branch(&repo_root)?;
-    // Sibling (the default) roots from the default branch. A child stacks under
-    // its parent — opt-in only via --child, so ad-hoc worktrees never nest off
-    // the current feature branch by accident.
-    let request = if let Some(parent) = child {
-        let parent = if parent == "__current__" {
-            current
-                .as_deref()
-                .ok_or_else(|| anyhow!("not on a branch"))?
-                .to_string()
-        } else {
-            parent.to_string()
-        };
-        PlacementRequest::Stack { parent, segment }
-    } else {
-        PlacementRequest::Main { segment }
-    };
+    let request = PlacementRequest::Main { segment };
 
     let default_branch = get_default_branch(&main_repo)?;
-    let sync_default_base = match &request {
-        PlacementRequest::Main { .. } => true,
-        PlacementRequest::Stack { .. } => false,
-    };
-    if sync_default_base {
-        let _ = sync_main(&main_repo, &default_branch);
-    }
+    let _ = sync_main(&main_repo, &default_branch);
 
     let placement = plan_placement(&main_repo, request)?;
 
@@ -1006,7 +981,6 @@ fn print_placement_plan(plan: &crate::engine::worktrees::PlacementPlan) {
 fn placement_strategy_name(strategy: &PlacementStrategy) -> &'static str {
     match strategy {
         PlacementStrategy::CreateRoot => "create_root",
-        PlacementStrategy::CreateStackChild => "create_stack_child",
         PlacementStrategy::CheckoutExisting => "checkout_existing",
         PlacementStrategy::UseExistingWorktree => "use_existing_worktree",
     }

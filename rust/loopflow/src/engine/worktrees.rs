@@ -39,21 +39,14 @@ impl WorktreeSegment {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlacementRequest {
-    /// Root branch off the default branch. The no-flag default for
-    /// `lf wt create` — ad-hoc worktrees never stack unless asked.
+    /// Root branch off the default branch.
     Main { segment: WorktreeSegment },
-    /// Child branch stacked under an explicit parent (`--child`).
-    Stack {
-        parent: String,
-        segment: WorktreeSegment,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlacementStrategy {
     CreateRoot,
-    CreateStackChild,
     CheckoutExisting,
     UseExistingWorktree,
 }
@@ -73,7 +66,7 @@ pub enum PlacementError {
     #[error("worktree segment cannot be empty")]
     EmptySegment,
     #[error(
-        "\"{0}\" is not a worktree segment. Dots are reserved for stack ancestry. Use a hyphen, or create ancestry with --child."
+        "\"{0}\" is not a worktree segment. Dots are reserved for identity ancestry. Use a hyphen."
     )]
     DotsReserved(String),
 }
@@ -702,30 +695,6 @@ pub fn plan_placement(repo: &Path, request: PlacementRequest) -> Result<Placemen
         PlacementRequest::Main { segment } => {
             (WaveId::wave(&user, segment), default_branch.clone(), None)
         }
-        PlacementRequest::Stack { parent, segment } => {
-            let parent_id =
-                WaveId::parse(&parent, &user).ok_or_else(|| GitError::CommandFailed {
-                    command: "wt create --child".to_string(),
-                    stderr: format!("cannot parse parent branch: {parent}"),
-                })?;
-            let parent_branch = parent_id.branch();
-            let base_ref = if branch_exists(repo, &parent_branch)? {
-                parent_branch.clone()
-            } else {
-                let remote_parent = format!("origin/{parent_branch}");
-                if rev_parse(repo, &remote_parent).is_ok() {
-                    remote_parent
-                } else {
-                    parent_branch.clone()
-                }
-            };
-            // A human-created child is a persistent subwave — unstamped.
-            (
-                parent_id.child(segment, None),
-                base_ref,
-                Some(parent_branch),
-            )
-        }
     };
 
     let branch = id.branch();
@@ -743,8 +712,6 @@ pub fn plan_placement(repo: &Path, request: PlacementRequest) -> Result<Placemen
     } else if branch_exists(repo, &branch)? || rev_parse(repo, &format!("origin/{branch}")).is_ok()
     {
         PlacementStrategy::CheckoutExisting
-    } else if parent_branch.is_some() {
-        PlacementStrategy::CreateStackChild
     } else {
         PlacementStrategy::CreateRoot
     };
@@ -793,7 +760,7 @@ pub fn create_from_placement_plan(
                 base_commit: None,
             })
         }
-        PlacementStrategy::CreateRoot | PlacementStrategy::CreateStackChild => {
+        PlacementStrategy::CreateRoot => {
             if plan.worktree_path.exists() {
                 return Err(GitError::CommandFailed {
                     command: "git worktree add".to_string(),
@@ -961,33 +928,6 @@ mod tests {
     fn worktree_segment_rejects_dots() {
         let err = WorktreeSegment::parse("api.v2").unwrap_err();
         assert_eq!(err, PlacementError::DotsReserved("api.v2".to_string()));
-    }
-
-    #[test]
-    fn stack_placement_creates_child_branch() {
-        let repo = init_repo();
-        let segment = WorktreeSegment::parse("child").unwrap();
-        let plan = plan_placement(
-            repo.path(),
-            PlacementRequest::Stack {
-                parent: "a.b".to_string(),
-                segment,
-            },
-        )
-        .expect("plan placement");
-
-        // Child of `a.b` under author `tester`: dir flat, branch author-scoped.
-        assert_eq!(plan.branch, "tester/a.b.child");
-        assert_eq!(plan.base_ref, "tester/a.b");
-        assert_eq!(plan.parent_branch.as_deref(), Some("tester/a.b"));
-        assert_eq!(plan.stack_depth, 3);
-        assert_eq!(plan.strategy, PlacementStrategy::CreateStackChild);
-        let file_name = plan
-            .worktree_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("worktree path file name");
-        assert!(file_name.ends_with(".a.b.child"), "{file_name}");
     }
 
     #[test]

@@ -16,6 +16,9 @@ use crate::lfd::types::{
     LivePullRequestState, QueueBlock, Repo, RepoEdge, RepoId, Run, RunStackStatus, Session,
     SessionStatus, Summary, Wave,
 };
+use crate::task::{
+    TaskCommand, TaskCommandId, TaskEvent, TaskEventKind, TaskSession, TaskSessionId,
+};
 
 pub mod catalog;
 pub mod migrations;
@@ -255,6 +258,114 @@ impl Store {
     pub async fn set_bus_cursor(&self, subscriber: String, cursor: i64) -> StoreResult<()> {
         run_sqlite(&self.sqlite, move |store| {
             store.set_bus_cursor(&subscriber, cursor)
+        })
+        .await
+    }
+
+    pub async fn create_task_session(&self, session: &TaskSession) -> StoreResult<()> {
+        let session = session.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.insert_task_session(&session)
+        })
+        .await
+    }
+
+    pub async fn reserve_task_session(
+        &self,
+        session: &TaskSession,
+        max_active: u32,
+    ) -> StoreResult<bool> {
+        let session = session.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_task_session(&session, max_active)
+        })
+        .await
+    }
+
+    pub async fn update_task_session(&self, session: &TaskSession) -> StoreResult<()> {
+        let session = session.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.update_task_session(&session)
+        })
+        .await
+    }
+
+    pub async fn get_task_session(
+        &self,
+        session_id: &TaskSessionId,
+    ) -> StoreResult<Option<TaskSession>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_session(&session_id)).await
+    }
+
+    pub async fn get_task_session_by_issue(&self, issue: &str) -> StoreResult<Option<TaskSession>> {
+        let issue = issue.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.task_session_by_issue(&issue)
+        })
+        .await
+    }
+
+    pub async fn list_task_sessions(
+        &self,
+        wave_id: Option<&LfdId>,
+    ) -> StoreResult<Vec<TaskSession>> {
+        let wave_id = wave_id.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_task_sessions(wave_id.as_ref())
+        })
+        .await
+    }
+
+    pub async fn create_task_command(&self, command: &TaskCommand) -> StoreResult<()> {
+        let command = command.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.insert_task_command(&command)
+        })
+        .await
+    }
+
+    pub async fn claim_task_commands(
+        &self,
+        session_id: &TaskSessionId,
+        generation: u32,
+    ) -> StoreResult<Vec<TaskCommand>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_task_commands(&session_id, generation)
+        })
+        .await
+    }
+
+    pub async fn acknowledge_task_command(&self, command_id: &TaskCommandId) -> StoreResult<()> {
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.acknowledge_task_command(&command_id)
+        })
+        .await
+    }
+
+    pub async fn append_task_event(
+        &self,
+        session_id: &TaskSessionId,
+        kind: &TaskEventKind,
+    ) -> StoreResult<TaskEvent> {
+        let session_id = session_id.clone();
+        let kind = kind.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.append_task_event(&session_id, &kind)
+        })
+        .await
+    }
+
+    pub async fn task_events_after(
+        &self,
+        session_id: &TaskSessionId,
+        cursor: i64,
+    ) -> StoreResult<Vec<TaskEvent>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.task_events_after(&session_id, cursor)
         })
         .await
     }
@@ -1392,7 +1503,13 @@ mod tests {
         QueueBlockReason, Repo, RepoEdge, RepoId, Run, RunStackStatus, RunStatus, Summary, Wave,
         WaveStatus, DEFAULT_WAVE_FLOW,
     };
+    use crate::task::{
+        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, TaskCommand,
+        TaskCommandKind, TaskCommandSource, TaskEventKind, TaskSession, TaskSessionId,
+        TaskSessionStatus,
+    };
     use std::env;
+    use std::path::PathBuf;
     use time::OffsetDateTime;
 
     fn make_wave(repo: &str) -> Wave {
@@ -1446,6 +1563,109 @@ mod tests {
             repair_of: None,
             pr: None,
         }
+    }
+
+    fn make_task_session(wave: &Wave) -> TaskSession {
+        let now = OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp())
+            .expect("current unix time");
+        TaskSession {
+            id: TaskSessionId::new(),
+            issue: LinearIssueRef {
+                id: LinearIssueId::new("issue-uuid").unwrap(),
+                identifier: "INF-123".to_string(),
+                title: "Add hello world".to_string(),
+                description: "Ship one command".to_string(),
+            },
+            project: LinearProjectRef {
+                id: LinearProjectId::new("project-uuid").unwrap(),
+                slug: "developer-efficiency".to_string(),
+                name: "Developer Efficiency".to_string(),
+            },
+            wave_id: wave.id().clone(),
+            wave: wave.name().to_string(),
+            status: TaskSessionStatus::Created,
+            status_reason: "task session reserved".to_string(),
+            status_at: now,
+            worktree: PathBuf::from("/repo.inf-123"),
+            branch: "jack/inf-123".to_string(),
+            base_commit: "deadbeef".to_string(),
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            process: None,
+            pull_request: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[tokio::test]
+    async fn task_session_commands_reclaim_by_generation_and_events_are_durable() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let session = make_task_session(&wave);
+        store.create_task_session(&session).await.unwrap();
+
+        let loaded = store
+            .get_task_session_by_issue("INF-123")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded, session);
+
+        let command = TaskCommand::new(
+            session.id.clone(),
+            TaskCommandSource::Human,
+            TaskCommandKind::Message {
+                text: "rename the flag".to_string(),
+            },
+        );
+        store.create_task_command(&command).await.unwrap();
+        let first_claim = store.claim_task_commands(&session.id, 1).await.unwrap();
+        assert_eq!(first_claim.len(), 1);
+        assert_eq!(first_claim[0].id, command.id);
+        assert_eq!(first_claim[0].kind, command.kind);
+        assert_eq!(first_claim[0].claimed_by_generation, Some(1));
+        assert_eq!(
+            store.claim_task_commands(&session.id, 2).await.unwrap()[0].claimed_by_generation,
+            Some(2)
+        );
+        store.acknowledge_task_command(&command.id).await.unwrap();
+        assert!(store
+            .claim_task_commands(&session.id, 3)
+            .await
+            .unwrap()
+            .is_empty());
+
+        let event = store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::Progress {
+                    summary: "tests pass".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store.task_events_after(&session.id, 0).await.unwrap(),
+            vec![event]
+        );
+
+        let mut second = make_task_session(&wave);
+        second.issue.id = LinearIssueId::new("issue-two").unwrap();
+        second.issue.identifier = "INF-124".to_string();
+        second.worktree = PathBuf::from("/repo.inf-124");
+        second.branch = "jack/inf-124".to_string();
+        assert!(!store.reserve_task_session(&second, 1).await.unwrap());
+        assert!(store
+            .get_task_session_by_issue("INF-124")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     async fn run_store_basic_suite(store: &super::Store) {

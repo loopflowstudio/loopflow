@@ -2,12 +2,11 @@
 //!
 //! Webhooks no longer feed the trigger/activation machinery. A webhook fact
 //! is machine speech, so it rides the bus (`lf radio pub --from github`) and
-//! survives a sleeping wave; machine-owned queue state reconciles in-process
-//! so daemon behavior does not depend on CLI grammar.
+//! survives a sleeping wave. Durable Task Sessions own delivery state.
 //!
 //! - **check_run failure** → `lf radio pub --channel <wave> --from github
 //!   "CI failed: …"` — the wave's loop decides whether and how to dispatch.
-//! - **PR merged** → reconcile queue state for each wave holding that PR.
+//! - **PR merged** → complete the Task Session that owns that PR.
 //! - **push to main** → the same, `"main moved: …"`, for every wave in the
 //!   repo — the loop decides to rebase/integrate with judgment.
 //!
@@ -44,6 +43,7 @@ use crate::lfd::http::{api_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{Run, Wave, CI_FIX_FLOW};
 use crate::lfdb::SharedStore;
+use crate::task::{TaskEventKind, TaskSessionStatus};
 
 #[derive(Debug, Clone)]
 struct WaveCiTarget {
@@ -213,32 +213,70 @@ async fn plan_check_run_notifications(
     Ok(execs)
 }
 
-/// PR merged → reconcile each wave holding that PR in its stack.
-async fn reconcile_pr_merged_queues(
+/// PR merged → complete each durable Task Session that owns that PR.
+async fn complete_merged_task_sessions(
     store: &SharedStore,
-    github: &crate::lfd::config::GitHubConfig,
     repo_full_name: &str,
     pr_number: u32,
-) -> Result<u32, String> {
-    let wave_ids = find_waves_for_pr(store, repo_full_name, pr_number).await?;
+) -> Result<(u32, Vec<LfExec>), String> {
     let mut processed = 0;
-    for wave_id in wave_ids {
+    let mut execs = Vec::new();
+    for mut session in store
+        .list_task_sessions(None)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        let Some(pull_request) = session
+            .pull_request
+            .clone()
+            .filter(|pull_request| pull_request.number == pr_number)
+        else {
+            continue;
+        };
         let Some(wave) = store
-            .get_wave(&wave_id)
+            .get_wave(&session.wave_id)
             .await
             .map_err(|err| err.to_string())?
         else {
             continue;
         };
-        let outcomes = crate::ops::queue::reconcile_wave_queues(store, github, Some(wave.name()))
-            .await
-            .map_err(|err| err.to_string())?;
-        for outcome in outcomes {
-            outcome.result?;
-            processed += 1;
+        if !wave_in_github_repo(&wave, repo_full_name)
+            || matches!(
+                session.status,
+                TaskSessionStatus::Merged | TaskSessionStatus::Abandoned
+            )
+        {
+            continue;
         }
+        session.set_status(
+            TaskSessionStatus::Merged,
+            format!("pull request #{pr_number} merged"),
+        );
+        store
+            .update_task_session(&session)
+            .await
+            .map_err(|error| error.to_string())?;
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::Completed {
+                    pull_request,
+                    summary: session.status_reason.clone(),
+                },
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        execs.push(LfExec::radio(
+            wave.name(),
+            format!(
+                "Task {} → merged: {}",
+                session.issue.identifier, session.status_reason
+            ),
+            "github",
+        ));
+        processed += 1;
     }
-    Ok(processed)
+    Ok((processed, execs))
 }
 
 /// A deleted branch → remove the local worktree that was on it. GitHub deletes
@@ -438,9 +476,8 @@ pub async fn github_webhook_handler(
                     serde_json::json!({ "ok": true, "processed": 0, "skipped": true }),
                 ));
             }
-            let processed = reconcile_pr_merged_queues(
+            let (processed, execs) = complete_merged_task_sessions(
                 &state.store,
-                &state.github,
                 &event.repository.full_name,
                 event.pull_request.number,
             )
@@ -451,6 +488,7 @@ pub async fn github_webhook_handler(
                     ApiMessage::Untrusted(err),
                 )
             })?;
+            spawn_lf_execs(&state.ci_failure_cache, execs);
             Ok(Json(
                 serde_json::json!({ "ok": true, "processed": processed }),
             ))
@@ -508,33 +546,6 @@ async fn find_wave_ci_targets(
         .await
         .map_err(|err| err.to_string())?;
     collect_wave_ci_targets(store, waves, Some(repo_full_name), Some(branch), pr_number).await
-}
-
-async fn find_waves_for_pr(
-    store: &SharedStore,
-    repo_full_name: &str,
-    pr_number: u32,
-) -> Result<Vec<LfdId>, String> {
-    let waves = store
-        .list_waves(None)
-        .await
-        .map_err(|err| err.to_string())?;
-    let mut matches = Vec::new();
-    for wave in waves {
-        if !wave_in_github_repo(&wave, repo_full_name) {
-            continue;
-        }
-        let has_pr = store
-            .list_stack_runs(wave.id())
-            .await
-            .map_err(|err| err.to_string())?
-            .into_iter()
-            .any(|run| run.pr.and_then(|pr| pr.number) == Some(pr_number));
-        if has_pr {
-            matches.push(wave.id().clone());
-        }
-    }
-    Ok(matches)
 }
 
 async fn collect_wave_ci_targets(
@@ -611,6 +622,10 @@ mod tests {
     use crate::lfd::github::{CheckRun, CheckRunPR, CheckRunRef, GitHubRepository};
     use crate::lfd::types::{PullRequest, RunStackStatus, RunStatus, WaveStatus};
     use crate::lfdb::{open_store, StorageConfig};
+    use crate::task::{
+        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PullRequestRef,
+        TaskSession, TaskSessionId,
+    };
     use std::sync::Arc;
     use tempfile::tempdir;
     use time::OffsetDateTime;
@@ -703,6 +718,42 @@ mod tests {
                 title: Some("test".to_string()),
                 branch: Some(branch.to_string()),
             }),
+        }
+    }
+
+    fn task_with_open_pr(wave: &Wave, pr_number: u32) -> TaskSession {
+        let now = OffsetDateTime::now_utc();
+        TaskSession {
+            id: TaskSessionId::new(),
+            issue: LinearIssueRef {
+                id: LinearIssueId::new("issue-uuid").expect("issue id"),
+                identifier: "INF-123".to_string(),
+                title: "Ship task sessions".to_string(),
+                description: String::new(),
+            },
+            project: LinearProjectRef {
+                id: LinearProjectId::new("project-uuid").expect("project id"),
+                slug: "delivery".to_string(),
+                name: "Delivery".to_string(),
+            },
+            wave_id: wave.id().clone(),
+            wave: wave.name().to_string(),
+            status: TaskSessionStatus::Submitted,
+            status_reason: format!("pull request #{pr_number} is open for review"),
+            status_at: now,
+            worktree: std::path::PathBuf::from("/tmp/task-inf-123"),
+            branch: "jack/inf-123".to_string(),
+            base_commit: "deadbeef".to_string(),
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: Some("thread-1".to_string()),
+            process: None,
+            pull_request: Some(PullRequestRef {
+                number: pr_number,
+                url: format!("https://example.test/pr/{pr_number}"),
+            }),
+            created_at: now,
+            updated_at: now,
         }
     }
 
@@ -901,29 +952,35 @@ mod tests {
         assert!(deduped.is_empty(), "delivered wave+sha never reports twice");
     }
 
-    /// PR merged resolves to the waves that need in-process queue reconcile.
     #[tokio::test]
-    async fn pr_merged_finds_owning_wave() {
+    async fn merged_pr_completes_its_task_session_once() {
         let tmp = tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
         let wave = make_wave("ship", &repo);
         store.create_wave(&wave).await.expect("wave");
-        store
-            .create_run(&run_with_open_pr(&wave, "build", "feature", 7))
-            .await
-            .expect("run");
+        let task = task_with_open_pr(&wave, 7);
+        store.create_task_session(&task).await.expect("task");
 
-        let waves = find_waves_for_pr(&store, "loopflowstudio/loopflow", 7)
+        let (processed, execs) =
+            complete_merged_task_sessions(&store, "loopflowstudio/loopflow", 7)
+                .await
+                .expect("complete task");
+        assert_eq!(processed, 1);
+        assert_eq!(execs.len(), 1);
+        let merged = store
+            .get_task_session(&task.id)
             .await
-            .expect("find");
-        assert_eq!(waves, vec![wave.id().clone()]);
+            .expect("read task")
+            .expect("task remains");
+        assert_eq!(merged.status, TaskSessionStatus::Merged);
 
-        // A PR nobody holds reconciles nothing.
-        let none = find_waves_for_pr(&store, "loopflowstudio/loopflow", 99)
-            .await
-            .expect("find none");
-        assert!(none.is_empty());
+        let (processed_again, execs_again) =
+            complete_merged_task_sessions(&store, "loopflowstudio/loopflow", 7)
+                .await
+                .expect("idempotent completion");
+        assert_eq!(processed_again, 0);
+        assert!(execs_again.is_empty());
     }
 
     /// Every planned argv must resolve to a real `lf` subcommand. Bare

@@ -53,15 +53,15 @@ can finish independently; never hand the whole seed to another agent, and never
 delegate the one blocker between you and completion. Resolve that blocker
 inline.
 
-`lf loop`, `lf serve`, `lf project`, and `lf pm` are orchestration tools. Use
+`lf task`, `lf serve`, `lf project`, and `lf pm` are orchestration tools. Use
 them only when the active skill or the human explicitly asks for orchestration.
 Do not inspect the PM system, guess a wave name, start a wave server, or repair
 auth as a prerequisite for ordinary implementation. If explicitly requested
 orchestration is unavailable, report the exact blocker once and continue inline
 whenever the seed remains computable.
 
-A one-shot operation is a direct skill or flow run. A loop must leave room for
-at least two passes; never use `lf loop --max-passes 1`.
+A one-shot operation is a direct skill or flow run. Durable delegated work
+starts from an existing Linear task with `lf task run <issue-id>`.
 
 ## Speak
 

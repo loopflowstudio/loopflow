@@ -25,28 +25,17 @@ lf pm task update --id <task-id> --title "..."
 ## Work
 
 - Select from filed tasks and open KRs; filing work does not require launching it.
-- Execute the next move inline by default. If one concrete blocker stands
-  between the wave and progress, resolve it in this process instead of creating
-  another worktree, vendor session, task, or loop.
-- Create a project or task loop only when the child is a strict subset of the
-  wave objective and needs an independent multi-pass lifecycle, its own PR, or
-  useful parallel execution. Never delegate the whole wave objective.
-- Inhabit such work with `lf --wave <exact-wave> loop <project-or-task-flow>
-  "<whole handoff>"`. A seed that cannot finish without delegating the parent
-  objective again is not a handoff.
-- `--detach` changes ownership of an already-justified loop; it is not a reason
-  to create one. Add it only when the wave has another useful move while the
-  child runs. If the result gates the next move, keep the loop foreground.
-  Detaching requires an already-served exact wave; do not start a server merely
-  to make it available.
-- Require detached hands to report with `lf radio pub`, record live learnings with
-  `lf memory add`, and leave done as a PR. No writes means failed work.
-- Watch a hand with `lf radio sub <channel>`. You already hear its reports: they land
-  in this thread, attributed, even the ones broadcast while you were asleep. To
-  change what a hand does, say it here — hands re-read this thread at every pass
-  boundary; a `lf radio pub --channel` broadcast only reaches whoever is tuned in
-  right now.
+- Keep coordination and small read-only decisions in the Wave. Every concrete
+  file-writing change begins as a Linear task under exactly one Project.
+- Start the task with `lf task run <issue-id>`. The resulting Task Session owns
+  one immutable worktree, provider transcript, and pull request to main.
+- Supervise active work with `lf task status`, `lf task send`, `lf task
+  interrupt`, `lf task wait`, and `lf task resume`. A second task may run in
+  parallel when capacity permits; never create a second session for one issue.
+- Use `lf project run <linear-project-id>` to queue a Project directive for its
+  owning Wave. Projects never own worktrees or child minds.
+- Trust linked Task events and summaries. Drill into the Task Session only when
+  the report is insufficient; do not copy raw child tool chatter into the Wave.
 - Answer human steering before returning to the goal.
 
-Keep the turn focused: select, execute, or delegate a strict subset; record what
-changed.
+Keep the turn focused: select, create, supervise, or respond to results.

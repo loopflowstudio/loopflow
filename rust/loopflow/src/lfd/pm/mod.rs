@@ -73,6 +73,7 @@ pub struct PmWave {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmItem {
     pub id: String,
+    pub identifier: String,
     pub name: String,
     pub description: String,
     pub rank: u32,

@@ -78,8 +78,8 @@ side-effectful workflows around git, PRs, PM providers, and release artifacts.
 
 `lfd` is the gatekeeper: it serves read routes and the event push, verifies
 GitHub webhooks and translates them inward as `lf` execs, refreshes provider
-tokens, and tidies the registry at boot. It dispatches no work; waves and
-ordinary blocking and server-owned detached `lf loop` runs own agent execution.
+tokens, and tidies the registry at boot. It dispatches no work; Wave residents
+and durable Task Session processes own agent execution.
 
 Important paths:
 

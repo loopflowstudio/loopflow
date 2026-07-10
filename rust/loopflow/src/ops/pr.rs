@@ -243,6 +243,44 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
     Ok(None)
 }
 
+pub fn current_or_merged_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
+    if !gh_available() {
+        return Ok(None);
+    }
+    let branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let output = Command::new("gh")
+        .arg("pr")
+        .arg("list")
+        .arg("--head")
+        .arg(&branch)
+        .arg("--state")
+        .arg("all")
+        .arg("--json")
+        .arg("url,state,isDraft,number")
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("gh pr list --head {branch} --state all"),
+            stderr: stderr_from_output(&output),
+        });
+    }
+    let list: Vec<GhPr> = serde_json::from_slice(&output.stdout).map_err(|error| {
+        OpsError::Message(format!("failed to parse gh pr list output: {error}"))
+    })?;
+    Ok(list.into_iter().next().map(|pr| PrInfo {
+        url: pr.url,
+        number: pr.number,
+        state: if pr.is_draft {
+            "draft".to_string()
+        } else {
+            pr.state.to_ascii_lowercase()
+        },
+        branch,
+    }))
+}
+
 fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;

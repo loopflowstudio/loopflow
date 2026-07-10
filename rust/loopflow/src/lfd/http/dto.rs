@@ -306,18 +306,6 @@ pub struct LandWaveResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct CombineResponse {
-    pub ok: bool,
-    pub result: CombineResponseResult,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CombineResponseResult {
-    pub new_pr_url: Option<String>,
-    pub closed_prs: Vec<u64>,
-}
-
-#[derive(Debug, Serialize)]
 pub struct DeletedResourceResponse {
     pub id: String,
     pub object: String,

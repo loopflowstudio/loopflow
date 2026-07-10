@@ -59,7 +59,6 @@ use tokio::time::Instant;
 use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
-use crate::flowloop::pass::lf_command;
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::wave::journal::{ellipsize, MessageId, MessageOp, PendingMessage};
 use crate::wave::playhead::{BodyProvenance, StepKind, StepOutcome, StepRef};
@@ -252,20 +251,25 @@ fn orchestration_discipline(wave: &str) -> String {
          infrastructure repair into this wave's work.\n\
          - Execute the next move inline by default. Resolve the one concrete \
          blocker between the wave and progress in this process.\n\
-         - Create only project or task loops, and only for strict subsets that \
-         need an independent multi-pass lifecycle, their own PR, or useful \
-         parallel execution. Never delegate the whole wave objective.\n\
-         - Inhabit with `lf --wave {wave} loop <flow> \"<whole handoff>\"`. \
-         Add `--detach` only when the wave has another useful move while that \
-         child runs; if the result gates the next move, keep it foreground. \
-         Never use a one-pass loop. Detached hands report with `lf radio pub`, \
-         publish durable learnings with `lf memory add`, and leave done as a PR.\n\
+         - Create or select a Linear Project and Linear task before delegating \
+         file-writing work. Start it with `lf task run <issue-id>`. Never \
+         delegate anonymous work or the whole wave objective.\n\
+         - Supervise durable Task Sessions with `lf task status`, `send`, \
+         `interrupt`, `wait`, and `resume`. Each task owns one immutable \
+         worktree and one PR to main; keep the Wave home free of shipping edits.\n\
          - Keep turns centered on selection, direct progress, sequencing, and \
          authored reports.\n\
          - Trust worker summaries; never re-read worker transcripts.\n\
          - A human message is steering: answer it directly and adjust course \
          before returning to the goal."
     )
+}
+
+fn lf_command() -> std::process::Command {
+    if let Ok(path) = std::env::current_exe() {
+        return std::process::Command::new(path);
+    }
+    std::process::Command::new("lf")
 }
 
 fn body_provenance(step: &StepRef, cwd: &Path) -> BodyProvenance {
@@ -1015,10 +1019,9 @@ impl WaveLoop {
         }
     }
 
-    /// What a fired pass-timeout means right now. A foreground `lf loop` is
-    /// one long tool call inside this pass; its registry row is presence, so
-    /// live delegated work renews the lease instead of hanging up on it at
-    /// the ordinary pass boundary.
+    /// What a fired pass-timeout means right now. A durable Task Session can
+    /// outlive this pass; its registry row is presence, so live delegated work
+    /// renews the lease instead of hanging up on it at the ordinary boundary.
     async fn timeout_action(&mut self) -> TimeoutAction {
         let workers = self.fetch_in_flight().await;
         if self.end.is_some() {

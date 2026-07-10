@@ -482,7 +482,7 @@ mod tests {
     use crate::wave::server::ResidentDoor;
     use crate::wave::wire::{ResidentDelta, RESIDENT_TOKEN_HEADER};
 
-    /// Serving a mind and looping a flow are different entrypoints, and the
+    /// Serving a mind and running a Task Session are different entrypoints, and the
     /// listener spawns its resident body by name. Nothing here reads the
     /// environment: an `lf` process inheriting `WAVE_SERVER_ENDPOINT` and
     /// `RESIDENT_TOKEN` — a tmux child, a promoted subwave — becomes whichever
@@ -499,9 +499,14 @@ mod tests {
             Some(Commands::Resident { name }) if name == "goals"
         ));
 
-        // The batch verb cannot name a wave, so the spawner could not have
-        // reached the resident half through `lf loop` even by accident.
-        assert!(Cli::try_parse_from(["lf", "loop", "goals"]).is_err());
+        // The retired loop verb is no longer a built-in; unmatched names fall
+        // through to the external skill surface.
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "loop", "goals"])
+                .expect("external fallback")
+                .command,
+            Some(Commands::External(parts)) if parts[0] == "loop"
+        ));
     }
 
     #[tokio::test]

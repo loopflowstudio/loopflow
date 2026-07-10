@@ -38,12 +38,12 @@ An earlier design ran both halves from one `lf loop <name>` command, choosing
 which half to be by checking whether the endpoint and token were present in the
 environment. Any process that inherited a parent wave's environment — a tmux
 child, a promoted subwave — then booted the wrong half by accident. Serving is
-now `lf serve`, batch looping is `lf loop`, and the body is `lf __resident`.
+now `lf serve`, and the body is `lf __resident`.
 Environment configures a process; it no longer decides what the process is.
 
 `lf stop <name>` posts to the listener's lifecycle door. The listener stands
 down its supervisor, terminates the resident, deregisters its session, and
-removes this boot's discovery files. Detached worker loops are separate tmux
+removes this boot's discovery files. Durable Task Sessions are separate tmux
 sessions and keep running.
 
 - **One Loop, one thread.** Chat and progress share the same context. A
@@ -60,14 +60,12 @@ sessions and keep running.
   the loop dispatches with judgment. Mid-pass due dates fire at the
   boundary; occurrences older than 24h are missed, not replayed. The
   daemon's cron poller and `wave_crons` table died in the collapse.
-- **The loop executes inline first.** Each pass's seed is the rendered
-  `GOAL.md` plus the coordinating-session discipline. A sole blocker stays in
-  the wave process. A strict subset that needs a repeated lifecycle may run as
-  `lf --wave <wave> loop <flow> "task"`; add `--detach` only when the wave has
-  another useful move while that child runs. Both loop forms use placed worktrees.
-  The LISTENER polls the shared store
-  and journals `RunObserved`/`RunCompleted` observations — every ~10s and
-  once per `GET /resident/context` (the resident calls it before each pass).
+- **The Wave coordinates; Task Sessions ship.** Each pass's seed is the rendered
+  `GOAL.md` plus the coordinating-session discipline. The Wave creates or
+  selects a Linear task, starts it with `lf task run <issue-id>`, and remains
+  available while that Task Session works in its immutable sibling worktree.
+  Structured Task commands and events carry steering and results; raw terminal
+  bytes and child tool chatter do not become the orchestration protocol.
 - **Interrupts stop the active harness.** The resident sends an `Interrupting`
   state delta, stops the body, and closes the turn
   (`TurnFinished{interrupted}`); non-empty interrupt text queues for the

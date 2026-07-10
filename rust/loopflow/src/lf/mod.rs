@@ -97,14 +97,6 @@ pub struct Cli {
     /// Exclude loopflow operating guidance
     #[arg(long = "no-loopflow")]
     pub no_loopflow: bool,
-
-    /// Run this invocation in a worktree stacked on a parent run
-    #[arg(long, value_name = "RUN_ID", conflicts_with = "fork")]
-    pub stack: Option<String>,
-
-    /// Run this invocation in a separate worktree forked from the review base
-    #[arg(long, conflicts_with = "stack")]
-    pub fork: bool,
 }
 
 impl Cli {
@@ -202,7 +194,7 @@ pub enum Commands {
     /// Serve a mind: boot its listener, thread, and residency. Steerable.
     ///
     /// By convention this is the wave loop's entrypoint — a served mind is one
-    /// you can chat with while it runs. `lf loop` is the batch counterpart.
+    /// you can chat with while it runs.
     Serve {
         /// Wave name
         name: String,
@@ -222,31 +214,6 @@ pub enum Commands {
         /// Wave name
         name: String,
     },
-    /// Run a bounded child loop for a flow, to its bit. Batch: no chat surface.
-    Loop {
-        /// Flow name
-        name: String,
-        /// The loop's whole handoff — computable on its own
-        seed: String,
-        /// Ask the live wave server to own the loop and return immediately
-        #[arg(long)]
-        detach: bool,
-        /// Maximum passes before escalation (minimum 2; run the flow directly for one pass)
-        #[arg(long = "max-passes", default_value_t = 8)]
-        max_passes: u32,
-        /// Per-pass timeout in seconds
-        #[arg(long = "pass-timeout-secs", default_value_t = 1800)]
-        pass_timeout_secs: u64,
-        /// Overall timeout in seconds
-        #[arg(long = "wall-clock-secs", default_value_t = 7200)]
-        wall_clock_secs: u64,
-        /// Poll interval for the loop file's recheck predicate
-        #[arg(long = "poll-secs", default_value_t = 60)]
-        poll_secs: u64,
-        /// Maximum agent turns per pass
-        #[arg(long = "max-turns")]
-        max_turns: Option<u32>,
-    },
     /// Enqueue a flow in the current wave's innermost invocation
     Enqueue { flow: String },
     /// Skip the current logical step without destroying its route
@@ -262,6 +229,18 @@ pub enum Commands {
     Project {
         #[command(subcommand)]
         cmd: ProjectCommand,
+    },
+    /// Linear-backed Task Session lifecycle
+    Task {
+        #[command(subcommand)]
+        cmd: TaskCommand,
+    },
+    /// Internal: run one durable Task Session process generation
+    #[command(name = "__task", hide = true)]
+    TaskRunner {
+        session_id: String,
+        #[arg(long)]
+        generation: u32,
     },
     /// Measure this codebase: lines and tokens per directory (tracked files only)
     Tokens {
@@ -505,6 +484,21 @@ pub enum MemoryCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
+    /// Create a Linear Project first, then queue it for its owning Wave
+    Start {
+        title: String,
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Queue an existing Linear Project for its owning Wave to pursue
+    Run {
+        /// Linear Project UUID
+        project_id: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Promote a project into a resident child wave through the authored flow
     Promote {
         /// Linear Project slug under the parent wave
@@ -512,6 +506,61 @@ pub enum ProjectCommand {
         /// Parent wave (default: ambient wave)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TaskCommand {
+    /// Start or return the one Task Session for an existing Linear task
+    Run {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a Linear task first, then start its Task Session
+    Start {
+        title: String,
+        #[arg(short = 'p', long = "project")]
+        project_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show durable state and reconcile process liveness
+    Status {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Send an audited instruction to the Task Session
+    Send { issue: String, message: String },
+    /// Interrupt the active provider turn and optionally replace its next instruction
+    Interrupt {
+        issue: String,
+        #[arg(long = "message")]
+        message: Option<String>,
+    },
+    /// Wait without polling an LM
+    Wait {
+        issue: String,
+        #[arg(long, default_value = "terminal", value_parser = ["submitted", "terminal"])]
+        until: String,
+        #[arg(long)]
+        timeout: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resume the same Task Session, worktree, and provider history
+    Resume {
+        issue: String,
+        message: Option<String>,
+    },
+    /// Attach read-write to the Task Session control terminal
+    Attach { issue: String },
+    /// Explicitly end a Task Session without merging
+    Abandon {
+        issue: String,
+        #[arg(long)]
+        reason: String,
     },
 }
 
@@ -841,12 +890,6 @@ pub enum WtCommand {
     Create {
         /// Worktree name (creates ../NAME)
         name: String,
-        /// Stack as a child under a parent branch (defaults to the current branch)
-        #[arg(short = 'c', long = "child", value_name = "PARENT", num_args = 0..=1, default_missing_value = "__current__")]
-        child: Option<String>,
-        /// Root an independent sibling branch from the default branch (the default)
-        #[arg(short = 's', long = "sibling", conflicts_with = "child")]
-        sibling: bool,
         /// Print the placement plan without creating a worktree
         #[arg(long)]
         plan: bool,
@@ -921,6 +964,71 @@ mod tests {
         assert_eq!(wave.as_deref(), Some("pm"));
         assert_eq!(wave_flag, None);
         assert!(!all);
+    }
+
+    #[test]
+    fn task_run_accepts_linear_identifier_and_json() {
+        let cli = Cli::try_parse_from(["lf", "task", "run", "INF-123", "--json"])
+            .expect("parse task run");
+        let Some(Commands::Task {
+            cmd: TaskCommand::Run { issue, json },
+        }) = cli.command
+        else {
+            panic!("expected task run command");
+        };
+        assert_eq!(issue, "INF-123");
+        assert!(json);
+    }
+
+    #[test]
+    fn task_interrupt_requires_explicit_message_flag() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "interrupt",
+            "INF-123",
+            "--message",
+            "take the smaller approach",
+        ])
+        .expect("parse task interrupt");
+        let Some(Commands::Task {
+            cmd: TaskCommand::Interrupt { issue, message },
+        }) = cli.command
+        else {
+            panic!("expected task interrupt command");
+        };
+        assert_eq!(issue, "INF-123");
+        assert_eq!(message.as_deref(), Some("take the smaller approach"));
+    }
+
+    #[test]
+    fn project_start_accepts_title_wave_and_json() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "project",
+            "start",
+            "Release stability",
+            "--wave",
+            "infrastructure",
+            "--json",
+        ])
+        .expect("parse project start");
+        let Some(Commands::Project {
+            cmd: ProjectCommand::Start { title, wave, json },
+        }) = cli.command
+        else {
+            panic!("expected project start command");
+        };
+        assert_eq!(title, "Release stability");
+        assert_eq!(wave.as_deref(), Some("infrastructure"));
+        assert!(json);
+    }
+
+    #[test]
+    fn retired_loop_and_stack_surfaces_do_not_parse() {
+        assert!(Cli::try_parse_from(["lf", "loop", "infrastructure"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--stack"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
     }
 
     #[test]

@@ -243,11 +243,6 @@ public struct WaveService: @unchecked Sendable {
         throw unsupported("Run reads must use RegistryQuery (`lf status --json` or `lf runs --json`).")
     }
 
-    public func combinePRs(_ id: String) async throws -> CombinePRsResult {
-        _ = id
-        throw unsupported("PR combine is not available through the retired lfd HTTP API.")
-    }
-
     public func streamOutput(waveId: String) -> AsyncThrowingStream<String, Error> {
         _ = waveId
         return AsyncThrowingStream { continuation in
@@ -575,15 +570,5 @@ public enum WaveServiceError: LocalizedError {
         case .trustMismatch:
             return "Certificate fingerprint changed"
         }
-    }
-}
-
-public struct CombinePRsResult: Sendable {
-    public let newPRUrl: String?
-    public let closedPRs: [Int]
-
-    public init(newPRUrl: String?, closedPRs: [Int]) {
-        self.newPRUrl = newPRUrl
-        self.closedPRs = closedPRs
     }
 }

@@ -119,8 +119,8 @@ async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> O
     Ok(())
 }
 
-/// Promotion grants residency, so it boots a listener — `lf serve`, never
-/// `lf loop`. The child is spawned through tmux, which inherits the promoting
+/// Promotion grants residency, so it boots a listener with `lf serve`. The
+/// child is spawned through tmux, which inherits the promoting
 /// pass's environment (`WAVE_SERVER_ENDPOINT`, `RESIDENT_TOKEN`). Naming the
 /// listener explicitly is what keeps that inheritance from deciding which half
 /// of the wave the child becomes.
@@ -155,7 +155,7 @@ mod tests {
     use clap::Parser;
 
     /// Promotion grants residency: the spawned child must be the steerable
-    /// half. `lf loop` would need a seed and would never publish an endpoint.
+    /// half. A one-shot task runner would never publish an endpoint.
     #[test]
     fn promotion_spawns_a_listener_not_a_batch_loop() {
         let argv = residency_argv(Path::new("/opt/lf"), "release-stability");

@@ -148,9 +148,9 @@ lf pr land    # submit to merge queue
 
 Ready to automate? Waves run your workflows continuously.
 
-`lf` skills are manual building blocks. A wave is a named agent that runs them
-for you — reading Linear tasks, resolving the next blocker inline, spinning off
-independent work when parallelism earns it, and looping.
+`lf` skills are manual building blocks. A Wave is a named agent that reads its
+Linear Projects and tasks, starts durable Task Sessions, and supervises their
+results.
 
 Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter sets machine config such as `workers:`, `crons:`, and `pm:`), then run the agent:
 
@@ -158,11 +158,10 @@ Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter
 lf serve shipper
 ```
 
-The wave agent resolves the next local blocker inline. It detaches an already
-justified child loop only when another useful move can run in parallel
-(`lf --wave shipper loop build "…" --detach`), then folds each shipped PR into
-memory. CI failures and pushes to main ride the bus with `lf radio pub`, then land
-in the wave's thread as attributed notifications.
+The Wave creates or selects a Linear task, starts it with `lf task run
+<issue-id>`, and stays steerable while the Task Session works in its immutable
+worktree. CI failures and review feedback return to the same session; linked
+events land in the Wave thread.
 
 **Loopflow** (macOS) is the native wave experience — monitor progress, browse flows, review PRs. Requires `lfd`.
 

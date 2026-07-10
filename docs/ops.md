@@ -199,29 +199,22 @@ Worktree helper commands.
 Create or select a worktree from a placement plan.
 
 ```bash
-lf wt create my-feature              # sibling: root branch from main (the default)
-lf wt create thing --child parent    # child: create parent.thing
-lf wt create thing --child           # child of the current branch
+lf wt create my-feature              # independent branch from main
 lf wt create my-feature --plan       # print the plan without creating anything
 ```
 
-Two relative-to-here verbs. **Sibling** (the default) roots an independent
-branch from main. **Child** stacks under its parent. Ad-hoc worktrees never
-nest unless you ask with `--child`.
+Manual worktrees are diagnostic escape hatches rooted from `main`. Roadmap work
+starts with `lf task run`, which owns task placement.
 
 | Flag | Description |
 |------|-------------|
-| `-c, --child [PARENT]` | Stack under `PARENT`, or under the current branch when omitted |
-| `-s, --sibling` | Root an independent branch from the default branch (already the default) |
 | `--plan` | Print the placement plan without mutating git |
 
-Dots are reserved for stack ancestry. Use `api-v2` as a worktree segment, not
-`api.v2`; create ancestry with `--child`.
+Dots are reserved for identity ancestry. Use `api-v2` as a worktree segment,
+not `api.v2`.
 
-Worktree branches use the fixed identity shape `<user>/<chain>`. A sibling
-`bugs` creates `<user>/bugs` in `../loopflow.bugs`; a child `fix-auth` under
-`<user>/bugs` creates `<user>/bugs.fix-auth` in
-`../loopflow.bugs.fix-auth`.
+Worktree branches use the fixed identity shape `<user>/<name>`. `bugs` creates
+`<user>/bugs` in `../loopflow.bugs`.
 
 ### lf wt switch
 

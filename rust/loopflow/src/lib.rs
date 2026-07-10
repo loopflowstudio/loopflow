@@ -9,4 +9,5 @@ pub mod lfdb;
 pub mod ops;
 pub mod provider_auth;
 pub mod trace;
+pub mod task;
 pub mod wave;

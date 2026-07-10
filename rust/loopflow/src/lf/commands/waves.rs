@@ -39,6 +39,8 @@ pub struct WaveSnapshot {
     pub workers: u32,
     /// Active (pending/running/waiting) runs right now.
     pub active_runs: u32,
+    /// Non-terminal Task Sessions owned by this Wave.
+    pub active_tasks: u32,
     /// Whether a wave server answered `/health` at the discovery endpoint.
     pub live: bool,
     /// Loopback endpoint of the live server, `null` when stopped.
@@ -59,7 +61,24 @@ pub struct WaveStatusSnapshot {
     /// serving dormant.
     pub loop_state: Option<String>,
     pub runs: Vec<RunSnapshot>,
+    pub tasks: Vec<TaskSnapshot>,
     pub attention: Vec<AttentionSnapshot>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TaskSnapshot {
+    pub issue_id: String,
+    pub session_id: String,
+    pub project: String,
+    pub status: String,
+    pub reason: String,
+    pub status_at: String,
+    pub worktree: String,
+    pub branch: String,
+    pub provider: String,
+    pub process_alive: bool,
+    pub pr_url: Option<String>,
+    pub latest_event: Option<crate::task::TaskEvent>,
 }
 
 /// One run's snapshot for `lf status`. Wire type; no serde defaults.
@@ -147,6 +166,14 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         for run in stored_runs {
             runs.push(snapshot_run(&store, run).await?);
         }
+        let stored_tasks = store
+            .list_task_sessions(Some(wave.id()))
+            .await
+            .map_err(|err| anyhow!("failed to read Task Sessions: {err}"))?;
+        let mut tasks = Vec::with_capacity(stored_tasks.len());
+        for task in stored_tasks {
+            tasks.push(snapshot_task(&store, task).await?);
+        }
         let wave_id = wave.id().clone();
         let attention = store
             .list_attention_items(None, None)
@@ -160,6 +187,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             wave: snapshot,
             loop_state,
             runs,
+            tasks,
             attention,
         };
         if json {
@@ -184,6 +212,13 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
         .count_active_runs(wave.id())
         .await
         .map_err(|err| anyhow!("failed to count active runs: {err}"))?;
+    let active_tasks = store
+        .list_task_sessions(Some(wave.id()))
+        .await
+        .map_err(|err| anyhow!("failed to count active Task Sessions: {err}"))?
+        .into_iter()
+        .filter(|session| !session.status.is_terminal())
+        .count() as u32;
     Ok(WaveSnapshot {
         id: wave.id().to_string(),
         name: wave.name().clone(),
@@ -194,10 +229,47 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
         iteration: wave.iteration(),
         workers: wave.workers(),
         active_runs,
+        active_tasks,
         live: endpoint.is_some(),
         endpoint,
         created_at: wave.created_at().and_then(format_time),
         parent_wave_id: wave.parent_wave_id().map(ToString::to_string),
+    })
+}
+
+async fn snapshot_task(
+    store: &SharedStore,
+    task: crate::task::TaskSession,
+) -> Result<TaskSnapshot> {
+    let process_alive = if task.status.is_process_active() {
+        match task.process.as_ref() {
+            Some(process) => crate::lfd::executor::helpers::tmux_session_exists(&process.tmux_name)
+                .await
+                .unwrap_or(false),
+            None => false,
+        }
+    } else {
+        false
+    };
+    let latest_event = store
+        .task_events_after(&task.id, 0)
+        .await
+        .map_err(|err| anyhow!("failed to read Task Session events: {err}"))?
+        .into_iter()
+        .last();
+    Ok(TaskSnapshot {
+        issue_id: task.issue.identifier,
+        session_id: task.id.to_string(),
+        project: task.project.slug,
+        status: task.status.as_str().to_string(),
+        reason: task.status_reason,
+        status_at: format_time(task.status_at).unwrap_or_default(),
+        worktree: task.worktree.display().to_string(),
+        branch: task.branch,
+        provider: task.provider,
+        process_alive,
+        pr_url: task.pull_request.map(|pull_request| pull_request.url),
+        latest_event,
     })
 }
 
@@ -371,6 +443,20 @@ fn print_status(status: &WaveStatusSnapshot) {
             );
         }
     }
+    if status.tasks.is_empty() {
+        println!("  tasks     none");
+    } else {
+        println!("  tasks");
+        for task in &status.tasks {
+            println!(
+                "    {issue:<12}  {status:<10}  {project:<20}  {reason}",
+                issue = task.issue_id,
+                status = task.status,
+                project = truncate(&task.project, 20),
+                reason = task.reason,
+            );
+        }
+    }
     if !status.attention.is_empty() {
         println!("  attention");
         for item in &status.attention {
@@ -407,6 +493,7 @@ mod tests {
             iteration: 3,
             workers: 2,
             active_runs: 1,
+            active_tasks: 2,
             live: true,
             endpoint: Some("127.0.0.1:5678".into()),
             created_at: Some("2026-07-06T00:00:00Z".into()),
@@ -437,6 +524,7 @@ mod tests {
                 iteration: 0,
                 workers: 1,
                 active_runs: 0,
+                active_tasks: 0,
                 live: false,
                 endpoint: None,
                 created_at: None,
@@ -458,6 +546,7 @@ mod tests {
                 pr_state: None,
                 pr_title: None,
             }],
+            tasks: Vec::new(),
             attention: vec![AttentionSnapshot {
                 id: "att-1".into(),
                 kind: "interactive".into(),

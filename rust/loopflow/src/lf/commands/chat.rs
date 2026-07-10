@@ -55,7 +55,7 @@ use crate::lf::WaveTargetArgs;
 use crate::lfd::types::Wave;
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::wave::channel::family_head;
-use crate::wave::journal::MessageOp;
+use crate::wave::journal::{EventKind, Journal, MessageId, MessageOp};
 
 pub fn run(text_args: &[String], follow: bool, steer: bool, target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
@@ -218,6 +218,42 @@ async fn post_message(endpoint: &str, text: &str, steer: bool) -> Result<()> {
     let body = serde_json::json!({ "op": op, "text": text });
     post_json(endpoint, "/messages", &body).await?;
     Ok(())
+}
+
+/// Queue a structured lifecycle/control note in a named Wave's durable
+/// conversation. A live Wave receives it through its door; a stopped Wave's
+/// journal receives it directly for replay on the next serve.
+pub(crate) async fn post_to_named_wave(wave: &str, text: &str) -> Result<bool> {
+    let context = CliContext::detect().await;
+    let target = WaveTargetArgs {
+        wave: Some(wave.to_string()),
+        parent: false,
+    };
+    let resolved = resolve_target(
+        &target,
+        context.store.as_ref(),
+        context.repo.as_deref(),
+        context.env_wave_id.as_deref(),
+        context.env_channel.as_deref(),
+    )
+    .await?
+    .ok_or_else(|| anyhow!("wave {wave:?} cannot be resolved"))?;
+    if let Some(endpoint) = resolved.endpoint {
+        post_message(&endpoint, text, false).await?;
+        return Ok(true);
+    }
+    let repo_root = resolved
+        .repo_root
+        .ok_or_else(|| anyhow!("wave {wave:?} has no registered repository"))?;
+    let path = crate::wave::journal::journal_path(&repo_root, &resolved.name);
+    let (mut journal, _) = Journal::open(&path)?;
+    journal.append(|seq| EventKind::UserMessage {
+        id: MessageId(format!("msg-{seq}")),
+        op: MessageOp::Message,
+        text: text.to_string(),
+        from: None,
+    });
+    Ok(false)
 }
 
 /// What the process can see: the registry (if this machine has one), the repo
@@ -828,8 +864,7 @@ mod tests {
         let err = resolved.require_endpoint().expect_err("no server");
         let message = err.to_string();
         assert!(message.contains("no live server"), "{message}");
-        // `lf serve` boots a mind; `lf loop` is the batch verb and needs a
-        // flow plus a seed — naming it here would name an unspellable command.
+        // `lf serve` is the only public Wave lifecycle entrypoint.
         assert!(message.contains("lf serve ship"), "{message}");
         assert!(message.contains("not implemented yet"), "{message}");
     }

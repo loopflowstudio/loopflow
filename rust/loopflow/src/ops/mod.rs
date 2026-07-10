@@ -1,6 +1,5 @@
 mod abandon;
 mod branches;
-mod combine;
 mod commit;
 pub mod cron;
 mod error;
@@ -13,6 +12,7 @@ pub mod project;
 pub mod queue;
 mod rebase;
 mod release;
+pub mod task;
 pub mod trace;
 pub(crate) mod util;
 
@@ -21,7 +21,6 @@ pub use branches::{
     list_branch_candidates, prune_branches, BranchCandidate, BranchFilterOptions,
     BranchListOptions, BranchPruneOptions,
 };
-pub use combine::{combine_prs, CombineOptions, CombineResult};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub use cron::{
     add_cron, default_launch_agents_dir, list_crons, parse_schedule, remove_cron, resolve_lf_path,
@@ -30,7 +29,7 @@ pub use cron::{
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
 pub use land::{land, mark_ready, submit, LandOptions};
-pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
+pub use pr::{create_or_update_pr, current_or_merged_pr, current_pr, PrInfo, PrOptions, PrResult};
 pub use progress::{NullProgress, Progress};
 pub(crate) use rebase::merged_parent_fork_point;
 pub use rebase::{

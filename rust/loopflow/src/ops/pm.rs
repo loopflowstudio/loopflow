@@ -179,10 +179,95 @@ pub struct PmProjectArchiveResult {
     pub slug: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmResolvedTask {
+    pub wave: String,
+    pub initiative_id: String,
+    pub project: PmProject,
+    pub item: PmItem,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmResolvedProject {
+    pub wave: String,
+    pub initiative_id: String,
+    pub project: PmProject,
+}
+
+pub fn pm_create_project(
+    repo: &Path,
+    wave: Option<&str>,
+    title: &str,
+) -> OpsResult<PmResolvedProject> {
+    block_on_pm(pm_create_project_async(repo, wave, title))
+}
+
+async fn pm_create_project_async(
+    repo: &Path,
+    wave: Option<&str>,
+    title: &str,
+) -> OpsResult<PmResolvedProject> {
+    let wave = resolve_wave(repo, wave)?;
+    let ctx = resolve_context(repo, &wave).await?;
+    let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
+    if let Some(project) = projects
+        .into_iter()
+        .find(|project| project.name.eq_ignore_ascii_case(title))
+    {
+        return Ok(PmResolvedProject {
+            wave,
+            initiative_id: ctx.initiative,
+            project,
+        });
+    }
+    let seed = LocalProject {
+        slug: crate::lfd::pm::project_slug(title),
+        name: title.to_string(),
+        summary: title.to_string(),
+        definition: title.to_string(),
+        krs: Vec::new(),
+    };
+    let id = match ctx
+        .client
+        .create_project(&ctx.initiative, &seed.name, &seed.definition, &seed.krs)
+        .await
+    {
+        Ok(id) => id,
+        Err(create_error) => checked_projects(&ctx.client, &ctx.initiative, &wave)
+            .await?
+            .into_iter()
+            .find(|project| project.name.eq_ignore_ascii_case(title))
+            .map(|project| project.id)
+            .ok_or_else(|| pm_to_ops(create_error))?,
+    };
+    Ok(PmResolvedProject {
+        wave,
+        initiative_id: ctx.initiative.clone(),
+        project: PmProject {
+            id,
+            slug: seed.slug,
+            name: seed.name,
+            summary: seed.summary,
+            definition: seed.definition,
+            krs: seed.krs,
+            initiative_ids: vec![ctx.initiative],
+        },
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct PmSnapshot {
     projects: Vec<PmProject>,
     items: Vec<PmItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LocalProject {
+    slug: String,
+    name: String,
+    summary: String,
+    definition: String,
+    krs: Vec<PmKr>,
 }
 
 // ── Client + Linear project resolution ──────────────────────────────
@@ -849,6 +934,94 @@ pub fn pm_update(
     block_on_pm(pm_update_async(repo, options, progress))
 }
 
+pub fn pm_create_task_idempotent(
+    repo: &Path,
+    wave: &str,
+    project_slug: &str,
+    title: &str,
+    marker: &str,
+    progress: &impl Progress,
+) -> OpsResult<PmUpdateResult> {
+    block_on_pm(pm_create_task_idempotent_async(
+        repo,
+        wave,
+        project_slug,
+        title,
+        marker,
+        progress,
+    ))
+}
+
+async fn pm_create_task_idempotent_async(
+    repo: &Path,
+    wave: &str,
+    project_slug: &str,
+    title: &str,
+    marker: &str,
+    progress: &impl Progress,
+) -> OpsResult<PmUpdateResult> {
+    let ctx = resolve_context(repo, wave).await?;
+    let projects = checked_projects(&ctx.client, &ctx.initiative, wave).await?;
+    let project = find_project(&projects, wave, project_slug)?;
+    let find_existing = |items: Vec<PmItem>| {
+        items
+            .into_iter()
+            .find(|item| item.description.contains(marker))
+    };
+    if let Some(existing) = find_existing(
+        ctx.client
+            .list_items(&project.id)
+            .await
+            .map_err(pm_to_ops)?,
+    ) {
+        return Ok(PmUpdateResult {
+            wave: wave.to_string(),
+            id: existing.id,
+            created: false,
+            completed: existing.completed,
+            linked_pr: None,
+        });
+    }
+
+    progress.status(&format!(
+        "creating idempotent {} task in Linear Project {} for wave/{wave}",
+        ctx.provider, project.id
+    ));
+    let item = PmItemCreate {
+        name: title.to_string(),
+        description: marker.to_string(),
+    };
+    match ctx.client.create_item(&project.id, &item).await {
+        Ok(id) => Ok(PmUpdateResult {
+            wave: wave.to_string(),
+            id,
+            created: true,
+            completed: false,
+            linked_pr: None,
+        }),
+        Err(create_error) => {
+            // The request may have reached Linear before the transport failed.
+            // Resolve the durable marker before reporting failure so a retry
+            // cannot create a second issue.
+            let items = ctx
+                .client
+                .list_items(&project.id)
+                .await
+                .map_err(pm_to_ops)?;
+            if let Some(existing) = find_existing(items) {
+                return Ok(PmUpdateResult {
+                    wave: wave.to_string(),
+                    id: existing.id,
+                    created: false,
+                    completed: existing.completed,
+                    linked_pr: None,
+                });
+            }
+            Err(pm_to_ops(create_error))
+        }
+    }
+}
+
 async fn pm_update_async(
     repo: &Path,
     options: &PmUpdateOptions,
@@ -1033,6 +1206,72 @@ pub fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
         .into_iter()
         .filter(|wave| wave_has_pm_initiative(repo, wave))
         .collect())
+}
+
+pub fn pm_resolve_task(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
+    block_on_pm(pm_resolve_task_async(repo, issue))
+}
+
+async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
+    let mut matches = Vec::new();
+    for wave in list_pm_waves(repo)? {
+        let ctx = resolve_context(repo, &wave).await?;
+        for project in checked_projects(&ctx.client, &ctx.initiative, &wave).await? {
+            let items = ctx
+                .client
+                .list_items(&project.id)
+                .await
+                .map_err(pm_to_ops)?;
+            for item in items {
+                if item.id == issue || item.identifier.eq_ignore_ascii_case(issue) {
+                    matches.push(PmResolvedTask {
+                        wave: wave.clone(),
+                        initiative_id: ctx.initiative.clone(),
+                        project: project.clone(),
+                        item,
+                    });
+                }
+            }
+        }
+    }
+    match matches.len() {
+        0 => Err(OpsError::Message(format!(
+            "Linear task {issue:?} does not belong to a known Loopflow Project and Wave"
+        ))),
+        1 => Ok(matches.pop().expect("one task match")),
+        count => Err(OpsError::Message(format!(
+            "Linear task {issue:?} belongs to {count} known Loopflow Waves; repair PM ownership before running it"
+        ))),
+    }
+}
+
+pub fn pm_resolve_project(repo: &Path, project_id: &str) -> OpsResult<PmResolvedProject> {
+    block_on_pm(pm_resolve_project_async(repo, project_id))
+}
+
+async fn pm_resolve_project_async(repo: &Path, project_id: &str) -> OpsResult<PmResolvedProject> {
+    let mut matches = Vec::new();
+    for wave in list_pm_waves(repo)? {
+        let ctx = resolve_context(repo, &wave).await?;
+        for project in checked_projects(&ctx.client, &ctx.initiative, &wave).await? {
+            if project.id == project_id {
+                matches.push(PmResolvedProject {
+                    wave: wave.clone(),
+                    initiative_id: ctx.initiative.clone(),
+                    project,
+                });
+            }
+        }
+    }
+    match matches.len() {
+        0 => Err(OpsError::Message(format!(
+            "Linear Project {project_id:?} does not belong to a known Loopflow Wave"
+        ))),
+        1 => Ok(matches.pop().expect("one project match")),
+        count => Err(OpsError::Message(format!(
+            "Linear Project {project_id:?} belongs to {count} known Loopflow Waves; each Project must belong to exactly one Wave"
+        ))),
+    }
 }
 
 // ── sync / doctor ──────────────────────────────────────────────────

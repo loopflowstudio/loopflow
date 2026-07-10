@@ -47,7 +47,6 @@ impl QueueRole {
 pub enum QueueNextAction {
     OpenPr,
     ResolveConflict,
-    CombinePrs,
     AwaitMerge,
 }
 
@@ -56,7 +55,6 @@ impl QueueNextAction {
         match self {
             Self::OpenPr => "open_pr",
             Self::ResolveConflict => "resolve_conflict",
-            Self::CombinePrs => "combine_prs",
             Self::AwaitMerge => "await_merge",
         }
     }
@@ -436,7 +434,7 @@ where
 fn queue_next_action(role: QueueRole, block: Option<&QueueBlock>, has_pr: bool) -> QueueNextAction {
     match role {
         QueueRole::Ready | QueueRole::Merged => QueueNextAction::AwaitMerge,
-        QueueRole::Superseded => QueueNextAction::CombinePrs,
+        QueueRole::Superseded => QueueNextAction::AwaitMerge,
         QueueRole::Draft => {
             if has_pr {
                 QueueNextAction::AwaitMerge

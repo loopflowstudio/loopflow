@@ -58,8 +58,8 @@ Write global flags before a built-in subcommand. Unambiguous flags also work
 after it:
 
 ```bash
-lf --wave designer loop task "fix the flaky test"   # canonical
-lf loop task "fix the flaky test" --wave designer   # accepted and normalized
+lf task run DES-123 --json                           # durable Task Session
+lf task status DES-123 --json                        # same identity and worktree
 lf pm --wave designer show                           # normalized onto `show`
 lf pm task --wave designer create --title "Fix it"  # normalized onto `create`
 lf commit -m "explain the change"                   # -m remains commit-local
@@ -135,27 +135,24 @@ lf ship -w feature-branch
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
-## Running Loops
+## Running Waves and Tasks
 
 ```bash
 lf serve designer                                  # start the named mind
 lf stop designer                                   # stop its listener and resident
-lf --wave designer loop task "fix the flaky chord-timeout test"
-lf --wave designer loop task "…" --max-passes 4 --wall-clock-secs 3600
-lf --wave designer loop scan-pass "scan the runtime" --detach
+lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
+lf task run DES-123
+lf task send DES-123 "rename the flag"
+lf task interrupt DES-123 --message "take the smaller approach"
+lf task wait DES-123
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
-With one name, `lf serve <name>` starts that mind and its persistent playhead;
-`lf stop <name>` shuts it down without touching detached worker loops.
-With a flow plus free text, it creates a child worktree and loops until the
-flow's skills write `done` to `scratch/loop.yaml` (`task`: when the PR merges).
-Loops allow at least two passes; run the flow directly for one-shot work.
-Without `--detach` the caller owns the loop and blocks; with `--detach` the
-already-running wave server owns it and returns a read-only tmux inspection
-session. Detach only when the parent has another useful move while the loop
-runs. Linear holds filed tasks,
-`lf runs` shows active hands, and merged PRs record done.
+`lf serve <name>` starts the durable Wave mind and persistent playhead. A Task
+Session starts only after its Linear task exists, owns one immutable worktree
+and provider transcript, and remains resumable through review and merge.
+`lf task attach` exposes a writable prompt that records structured commands;
+terminal bytes never drive the provider directly.
 
 ## Speaking to Waves
 

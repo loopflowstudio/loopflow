@@ -741,12 +741,6 @@ public final class RepoState {
         return item
     }
 
-    public func combinePRs(_ waveId: String) async throws -> CombinePRsResult {
-        let result = try await waveService.combinePRs(waveId)
-        loadRuns(for: waveId)
-        return result
-    }
-
     private func handleWaveStatusChange(wave: WaveViewModel, from oldStatus: WaveStatus?, to newStatus: WaveStatus) {
         // Note: loadWaveContent is driven by the snapshot loop / selection — not duplicated here.
         switch newStatus {

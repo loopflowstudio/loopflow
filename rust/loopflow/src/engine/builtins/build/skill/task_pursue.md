@@ -17,8 +17,8 @@ selection. Follow the repo style guide.
 
 - Own execution in this process and worktree. Operational Loopflow children such
   as `lf commit`, `lf pr land`, `lf rebase`, and direct skill or flow calls are
-  part of that execution and remain available. Never invoke `lf loop` from a
-  task. Do not boot a server or delegate the task seed. If scoped PM reads fail,
+  part of that execution and remain available. Do not boot a server, create a
+  second Task Session, or delegate the task seed. If scoped PM reads fail,
   note the failure and continue from the seed rather than repairing auth.
 - Delegate only bounded, independent checks through the execution tools already
   available to this process, and keep responsibility for integrating the result.
@@ -30,8 +30,7 @@ selection. Follow the repo style guide.
   `lf pm task done --id <task-id> --pr <url>`.
 - File a concrete follow-up with `lf pm task create` when new work belongs later
   under a known project. Filing does not authorize launching it in this task.
-- At a detached pass boundary, report concrete progress with `lf radio pub` and
-  publish durable learnings with `lf memory add`; the vendor conversation is
-  private.
+- Report consequential progress through the Task Session; its linked events
+  keep the owning Wave informed without copying raw tool chatter.
 
 Stay scoped to the task. Put unresolved ambiguity in `scratch/questions.md`.

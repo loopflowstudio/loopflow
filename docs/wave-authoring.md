@@ -225,18 +225,19 @@ Run the wave agent and it works one move at a time:
 
 1. **Read** — its `GOAL.md`, `MEMORY.md`, Linear tasks, and any work already in flight.
 2. **Decide** — pick the next useful move against the task list and metrics.
-3. **Execute** — resolve the sole blocker inline. Create a worker only when a
-   strict subset needs its own repeated lifecycle or can run usefully in parallel:
+3. **Execute** — create or select the concrete Linear task, then start its Task
+   Session:
 
    ```bash
-   lf --wave infra loop build "wrap SQLite migrations in a transaction" --detach
+   lf task run INF-123
    ```
 
-4. **Watch** — the PR is how the worker reports back. The agent reads its diff, checks, and comments.
+4. **Watch** — use Task status and linked events; steer or interrupt the same
+   session when review changes course.
 5. **Remember** — the agent folds what shipped into `MEMORY.md` and updates Linear tasks.
 
-The wave agent coordinates and executes. Work becomes a worker session only
-when a separate lifecycle or real parallelism earns the extra worktree.
+The Wave coordinates. Concrete changes ship through Task Sessions; Projects
+never own worktrees or provider processes.
 
 ### Fold, Don't Drop
 

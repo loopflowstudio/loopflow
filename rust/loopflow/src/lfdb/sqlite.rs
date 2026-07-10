@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
@@ -23,6 +23,11 @@ use crate::lfdb::{
 use crate::trace::{
     AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
     ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
+};
+use crate::task::{
+    LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PullRequestRef, TaskCommand,
+    TaskCommandId, TaskCommandKind, TaskCommandSource, TaskEvent, TaskEventKind, TaskProcess,
+    TaskSession, TaskSessionId,
 };
 
 #[derive(Debug, Clone)]
@@ -1512,6 +1517,252 @@ impl SqliteStore {
         Ok(())
     }
 
+    // Durable task sessions: Linear identity, immutable placement, commands,
+    // and lifecycle events share one sqlite transaction boundary.
+
+    pub fn insert_task_session(&self, session: &TaskSession) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let parameters = task_session_params(session);
+        conn.execute(
+            "INSERT INTO task_sessions (
+                id, issue_id, issue_identifier, issue_title, issue_description,
+                project_id, project_slug, project_name, wave_id, wave_name,
+                status, status_reason, status_at, worktree, branch, base_commit,
+                agent, provider, provider_session_id, process_generation, process_pid,
+                process_tmux_name, process_started_at, pr_number, pr_url,
+                created_at, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
+             )",
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )?;
+        Ok(())
+    }
+
+    pub fn reserve_task_session(
+        &self,
+        session: &TaskSession,
+        max_active: u32,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let active: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM task_sessions
+             WHERE wave_id = ?1 AND status IN ('created', 'starting', 'running')",
+            params![session.wave_id],
+            |row| row.get(0),
+        )?;
+        if active >= i64::from(max_active) {
+            return Ok(false);
+        }
+        let parameters = task_session_params(session);
+        transaction.execute(
+            "INSERT INTO task_sessions (
+                id, issue_id, issue_identifier, issue_title, issue_description,
+                project_id, project_slug, project_name, wave_id, wave_name,
+                status, status_reason, status_at, worktree, branch, base_commit,
+                agent, provider, provider_session_id, process_generation, process_pid,
+                process_tmux_name, process_started_at, pr_number, pr_url,
+                created_at, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
+             )",
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )?;
+        transaction.commit()?;
+        Ok(true)
+    }
+
+    pub fn update_task_session(&self, session: &TaskSession) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let parameters = task_session_params(session);
+        let changed = conn.execute(
+            "UPDATE task_sessions SET
+                issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
+                project_id=?6, project_slug=?7, project_name=?8, wave_id=?9,
+                wave_name=?10, status=?11, status_reason=?12, status_at=?13,
+                worktree=?14, branch=?15, base_commit=?16, agent=?17, provider=?18,
+                provider_session_id=?19, process_generation=?20, process_pid=?21,
+                process_tmux_name=?22, process_started_at=?23, pr_number=?24,
+                pr_url=?25, created_at=?26, updated_at=?27
+             WHERE id=?1",
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn task_session(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            TASK_SESSION_SELECT,
+            params![session_id.as_str()],
+            map_task_session_row,
+        )
+        .optional()
+        .map_err(StoreError::from)
+    }
+
+    pub fn task_session_by_issue(&self, issue: &str) -> StoreResult<Option<TaskSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let query = format!(
+            "{TASK_SESSION_COLUMNS} WHERE issue_id = ?1 OR issue_identifier = ?1 ORDER BY created_at"
+        );
+        let mut statement = conn.prepare(&query)?;
+        let rows = statement.query_map(params![issue], map_task_session_row)?;
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(row?);
+        }
+        match sessions.len() {
+            0 => Ok(None),
+            1 => Ok(sessions.pop()),
+            count => Err(StoreError::InvalidData(format!(
+                "issue {issue:?} resolves to {count} task sessions"
+            ))),
+        }
+    }
+
+    pub fn list_task_sessions(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<TaskSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (query, parameter): (String, Option<&dyn ToSql>) = match wave_id {
+            Some(wave_id) => (
+                format!("{TASK_SESSION_COLUMNS} WHERE wave_id = ?1 ORDER BY updated_at DESC"),
+                Some(wave_id as &dyn ToSql),
+            ),
+            None => (
+                format!("{TASK_SESSION_COLUMNS} ORDER BY updated_at DESC"),
+                None,
+            ),
+        };
+        let mut statement = conn.prepare(&query)?;
+        let mut sessions = Vec::new();
+        if let Some(parameter) = parameter {
+            let rows = statement.query_map([parameter], map_task_session_row)?;
+            for row in rows {
+                sessions.push(row?);
+            }
+        } else {
+            let rows = statement.query_map([], map_task_session_row)?;
+            for row in rows {
+                sessions.push(row?);
+            }
+        }
+        Ok(sessions)
+    }
+
+    pub fn insert_task_command(&self, command: &TaskCommand) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO task_commands (
+                id, session_id, source_json, kind_json, created_at,
+                claimed_by_generation, acknowledged_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                command.id.as_str(),
+                command.session_id.as_str(),
+                serde_json::to_string(&command.source)?,
+                serde_json::to_string(&command.kind)?,
+                command.created_at.unix_timestamp(),
+                command.claimed_by_generation.map(i64::from),
+                command.acknowledged_at.map(|at| at.unix_timestamp()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn claim_task_commands(
+        &self,
+        session_id: &TaskSessionId,
+        generation: u32,
+    ) -> StoreResult<Vec<TaskCommand>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        transaction.execute(
+            "UPDATE task_commands
+             SET claimed_by_generation = ?1
+             WHERE session_id = ?2 AND acknowledged_at IS NULL
+               AND (claimed_by_generation IS NULL OR claimed_by_generation <> ?1)",
+            params![i64::from(generation), session_id.as_str()],
+        )?;
+        let mut statement = transaction.prepare(
+            "SELECT id, session_id, source_json, kind_json, created_at,
+                    claimed_by_generation, acknowledged_at
+             FROM task_commands
+             WHERE session_id = ?1 AND claimed_by_generation = ?2
+               AND acknowledged_at IS NULL
+             ORDER BY created_at, id",
+        )?;
+        let rows = statement.query_map(
+            params![session_id.as_str(), i64::from(generation)],
+            map_task_command_row,
+        )?;
+        let mut commands = Vec::new();
+        for row in rows {
+            commands.push(row?);
+        }
+        drop(statement);
+        transaction.commit()?;
+        Ok(commands)
+    }
+
+    pub fn acknowledge_task_command(&self, command_id: &TaskCommandId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE task_commands SET acknowledged_at = ?1 WHERE id = ?2",
+            params![now_unix(), command_id.as_str()],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn append_task_event(
+        &self,
+        session_id: &TaskSessionId,
+        kind: &TaskEventKind,
+    ) -> StoreResult<TaskEvent> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let created_at = now_unix();
+        conn.execute(
+            "INSERT INTO task_events (session_id, kind_json, created_at) VALUES (?1, ?2, ?3)",
+            params![
+                session_id.as_str(),
+                serde_json::to_string(kind)?,
+                created_at
+            ],
+        )?;
+        Ok(TaskEvent {
+            id: conn.last_insert_rowid(),
+            session_id: session_id.clone(),
+            kind: kind.clone(),
+            created_at: crate::lfdb::rows::unix_to_datetime(created_at),
+        })
+    }
+
+    pub fn task_events_after(
+        &self,
+        session_id: &TaskSessionId,
+        cursor: i64,
+    ) -> StoreResult<Vec<TaskEvent>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT id, session_id, kind_json, created_at
+             FROM task_events WHERE session_id = ?1 AND id > ?2 ORDER BY id",
+        )?;
+        let rows = statement.query_map(params![session_id.as_str(), cursor], map_task_event_row)?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
+    }
+
     // Run ledger (`run_events`): the machine-grain, append-only record of
     // every run written directly by `lf`. Read by `lf runs` / `lf trace`.
 
@@ -2162,5 +2413,179 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
         context_persist_ms: row.get(23)?,
         first_event_seq: row.get(24)?,
         last_event_seq: row.get(25)?,
+    })
+}
+
+const TASK_SESSION_COLUMNS: &str = "SELECT
+    id, issue_id, issue_identifier, issue_title, issue_description,
+    project_id, project_slug, project_name, wave_id, wave_name,
+    status, status_reason, status_at, worktree, branch, base_commit,
+    agent, provider, provider_session_id, process_generation, process_pid,
+    process_tmux_name, process_started_at, pr_number, pr_url,
+    created_at, updated_at
+    FROM task_sessions";
+const TASK_SESSION_SELECT: &str = "SELECT
+    id, issue_id, issue_identifier, issue_title, issue_description,
+    project_id, project_slug, project_name, wave_id, wave_name,
+    status, status_reason, status_at, worktree, branch, base_commit,
+    agent, provider, provider_session_id, process_generation, process_pid,
+    process_tmux_name, process_started_at, pr_number, pr_url,
+    created_at, updated_at
+    FROM task_sessions WHERE id = ?1";
+
+fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
+    vec![
+        Box::new(session.id.as_str().to_string()),
+        Box::new(session.issue.id.as_str().to_string()),
+        Box::new(session.issue.identifier.clone()),
+        Box::new(session.issue.title.clone()),
+        Box::new(session.issue.description.clone()),
+        Box::new(session.project.id.as_str().to_string()),
+        Box::new(session.project.slug.clone()),
+        Box::new(session.project.name.clone()),
+        Box::new(session.wave_id.clone()),
+        Box::new(session.wave.clone()),
+        Box::new(session.status.as_str().to_string()),
+        Box::new(session.status_reason.clone()),
+        Box::new(session.status_at.unix_timestamp()),
+        Box::new(session.worktree.display().to_string()),
+        Box::new(session.branch.clone()),
+        Box::new(session.base_commit.clone()),
+        Box::new(session.agent.clone()),
+        Box::new(session.provider.clone()),
+        Box::new(session.provider_session_id.clone()),
+        Box::new(
+            session
+                .process
+                .as_ref()
+                .map(|process| i64::from(process.generation)),
+        ),
+        Box::new(
+            session
+                .process
+                .as_ref()
+                .and_then(|process| process.pid.map(i64::from)),
+        ),
+        Box::new(
+            session
+                .process
+                .as_ref()
+                .map(|process| process.tmux_name.clone()),
+        ),
+        Box::new(
+            session
+                .process
+                .as_ref()
+                .map(|process| process.started_at.unix_timestamp()),
+        ),
+        Box::new(
+            session
+                .pull_request
+                .as_ref()
+                .map(|pull_request| i64::from(pull_request.number)),
+        ),
+        Box::new(
+            session
+                .pull_request
+                .as_ref()
+                .map(|pull_request| pull_request.url.clone()),
+        ),
+        Box::new(session.created_at.unix_timestamp()),
+        Box::new(session.updated_at.unix_timestamp()),
+    ]
+}
+
+fn invalid_column(
+    index: usize,
+    error: impl std::error::Error + Send + Sync + 'static,
+) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(index, rusqlite::types::Type::Text, Box::new(error))
+}
+
+fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession> {
+    let status_text: String = row.get(10)?;
+    let status = status_text
+        .parse()
+        .map_err(|error| invalid_column(10, error))?;
+    let process_generation: Option<i64> = row.get(19)?;
+    let process_started_at: Option<i64> = row.get(22)?;
+    let process = match (process_generation, process_started_at) {
+        (Some(generation), Some(started_at)) => Some(TaskProcess {
+            generation: generation as u32,
+            pid: row.get::<_, Option<i64>>(20)?.map(|pid| pid as u32),
+            tmux_name: row.get::<_, Option<String>>(21)?.unwrap_or_default(),
+            started_at: crate::lfdb::rows::unix_to_datetime(started_at),
+        }),
+        _ => None,
+    };
+    let pr_number: Option<i64> = row.get(23)?;
+    let pr_url: Option<String> = row.get(24)?;
+    let pull_request = match (pr_number, pr_url) {
+        (Some(number), Some(url)) => Some(PullRequestRef {
+            number: number as u32,
+            url,
+        }),
+        _ => None,
+    };
+    Ok(TaskSession {
+        id: TaskSessionId::from_raw(row.get::<_, String>(0)?),
+        issue: LinearIssueRef {
+            id: LinearIssueId::from_raw(row.get::<_, String>(1)?),
+            identifier: row.get(2)?,
+            title: row.get(3)?,
+            description: row.get(4)?,
+        },
+        project: LinearProjectRef {
+            id: LinearProjectId::from_raw(row.get::<_, String>(5)?),
+            slug: row.get(6)?,
+            name: row.get(7)?,
+        },
+        wave_id: LfdId::from_raw(row.get::<_, String>(8)?),
+        wave: row.get(9)?,
+        status,
+        status_reason: row.get(11)?,
+        status_at: crate::lfdb::rows::unix_to_datetime(row.get(12)?),
+        worktree: PathBuf::from(row.get::<_, String>(13)?),
+        branch: row.get(14)?,
+        base_commit: row.get(15)?,
+        agent: row.get(16)?,
+        provider: row.get(17)?,
+        provider_session_id: row.get(18)?,
+        process,
+        pull_request,
+        created_at: crate::lfdb::rows::unix_to_datetime(row.get(25)?),
+        updated_at: crate::lfdb::rows::unix_to_datetime(row.get(26)?),
+    })
+}
+
+fn map_task_command_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskCommand> {
+    let source_json: String = row.get(2)?;
+    let kind_json: String = row.get(3)?;
+    let source: TaskCommandSource =
+        serde_json::from_str(&source_json).map_err(|error| invalid_column(2, error))?;
+    let kind: TaskCommandKind =
+        serde_json::from_str(&kind_json).map_err(|error| invalid_column(3, error))?;
+    Ok(TaskCommand {
+        id: TaskCommandId::from_raw(row.get::<_, String>(0)?),
+        session_id: TaskSessionId::from_raw(row.get::<_, String>(1)?),
+        source,
+        kind,
+        created_at: crate::lfdb::rows::unix_to_datetime(row.get(4)?),
+        claimed_by_generation: row.get::<_, Option<i64>>(5)?.map(|value| value as u32),
+        acknowledged_at: row
+            .get::<_, Option<i64>>(6)?
+            .map(crate::lfdb::rows::unix_to_datetime),
+    })
+}
+
+fn map_task_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
+    let kind_json: String = row.get(2)?;
+    let kind: TaskEventKind =
+        serde_json::from_str(&kind_json).map_err(|error| invalid_column(2, error))?;
+    Ok(TaskEvent {
+        id: row.get(0)?,
+        session_id: TaskSessionId::from_raw(row.get::<_, String>(1)?),
+        kind,
+        created_at: crate::lfdb::rows::unix_to_datetime(row.get(3)?),
     })
 }

@@ -89,10 +89,6 @@
 //!   PARENT channel's thread shows "work line <name> opened" (journaled as
 //!   `ChannelOpened`, idempotent on `run_id` — a repeated knock returns
 //!   `{turn: null}`). 404 outside the family.
-//! - `POST /loops {flow, seed, caps…}` → `{session}` — capability-gated
-//!   detached loop launch. The listener starts a headless `lf loop` in a
-//!   named tmux session; callers may inspect it with `tmux attach -r`, never
-//!   write through its stdin. The blocking form never crosses this door.
 //! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
 //!   origin repo. Wave-level only: memory is wave identity, channels don't
 //!   have it.
@@ -125,9 +121,6 @@ use tokio::sync::{broadcast, watch};
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
-use crate::lfd::executor::helpers::{
-    resolve_lf_binary, spawn_detached_lf_with_env, tmux_session_slug,
-};
 use crate::wave::journal::{MessageOp, PendingMessage};
 use crate::wave::playhead::PlayheadView;
 use crate::wave::registry::{process_alive, StoreObserver};
@@ -135,9 +128,8 @@ use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::state::LoopState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
-    AttachRequest, AttachResponse, ContextResponse, DetachedLoopRequest, DetachedLoopResponse,
-    InFlightWorker, InboxFrame, OpFrame, PostDeltasRequest, PostDeltasResponse,
-    RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
+    AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, OpFrame,
+    PostDeltasRequest, PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
 };
 
 /// Basename of the discovery pointer under `wave/<name>/`.
@@ -375,63 +367,6 @@ struct ServerState {
     started_at: OffsetDateTime,
 }
 
-/// Start the blocking `lf loop` the request names, detached in its own tmux
-/// session. Tmux keeps the child inspectable without granting stdin
-/// (`tmux attach -r`); the loop's own run row is its durable supervision view.
-async fn launch_detached_loop(
-    repo_root: &Path,
-    wave: &str,
-    request: &DetachedLoopRequest,
-) -> Result<String, String> {
-    let session = detached_loop_session_name(wave);
-    let argv = detached_loop_argv(&resolve_lf_binary(), request, wave);
-    spawn_detached_lf_with_env(
-        &session,
-        repo_root,
-        &argv,
-        &[
-            (crate::journal::LF_RUN_ID_ENV, request.run_id.as_str()),
-            (
-                crate::flowloop::driver::LF_LOOP_RUN_ID_ENV,
-                request.run_id.as_str(),
-            ),
-        ],
-    )
-    .await
-    .map_err(|err| format!("failed to launch detached loop: {err}"))?;
-    tracing::info!(session, wave, flow = request.flow, "detached loop launched");
-    Ok(session)
-}
-
-fn detached_loop_session_name(wave: &str) -> String {
-    let run = uuid::Uuid::new_v4().simple().to_string();
-    format!("lf-loop-{}-{}", tmux_session_slug(wave), &run[..8])
-}
-
-fn detached_loop_argv(executable: &Path, request: &DetachedLoopRequest, wave: &str) -> Vec<String> {
-    let mut argv = vec![
-        executable.display().to_string(),
-        "--wave".to_string(),
-        wave.to_string(),
-        "loop".to_string(),
-        request.flow.clone(),
-        request.seed.clone(),
-        "--max-passes".to_string(),
-        request.max_passes.to_string(),
-        "--pass-timeout-secs".to_string(),
-        request.pass_timeout_secs.to_string(),
-        "--wall-clock-secs".to_string(),
-        request.wall_clock_secs.to_string(),
-        "--poll-secs".to_string(),
-        request.poll_secs.to_string(),
-    ];
-    if let Some(max_turns) = request.max_turns {
-        argv.push("--max-turns".to_string());
-        argv.push(max_turns.to_string());
-    }
-    argv
-}
-
 /// Build the router over a running [`WaveRuntime`]. `observer` is the store
 /// poller when this server is registered — `GET /resident/context` freshens
 /// it before serving. `supervisor` lets the attach door stand the respawn
@@ -466,7 +401,6 @@ pub fn router(
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
         .route("/channels", post(channels_handler))
-        .route("/loops", post(loops_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
         .route("/memory/log", get(memory_log_handler))
         .route("/resident/attach", post(resident_attach_handler))
@@ -555,7 +489,7 @@ async fn resident_attach_handler(
     // refuses the attach naming it — a second resident would split-brain the
     // wire. A dead/absent seat is free (takeover after a crash rides the same
     // door; the supervisor's own seat probe frees a dead pid on its cadence).
-    // `--force` is `lf loop`'s boot flag, not the door's business.
+    // `--force` is `lf serve`'s boot flag, not the door's business.
     if let Some(seated) = state.resident.seat_pid() {
         if seated != body.pid && process_alive(seated).await {
             return Err((
@@ -632,44 +566,6 @@ async fn resident_context_handler(
         in_flight,
         playhead,
     }))
-}
-
-/// `POST /loops` — launch one generic loop in a fresh worktree and return
-/// immediately. The resident credential authorizes this worktree-forcing
-/// primitive for trusted local callers.
-async fn loops_handler(
-    State(state): State<ServerState>,
-    headers: HeaderMap,
-    Json(request): Json<DetachedLoopRequest>,
-) -> Result<Json<DetachedLoopResponse>, (StatusCode, String)> {
-    state.resident.authorize(&headers)?;
-    if request.flow.trim().is_empty() || request.seed.trim().is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "flow and seed are required".to_string(),
-        ));
-    }
-    if request.max_passes < crate::flowloop::driver::MIN_LOOP_PASSES {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "max_passes must be at least {}; use a direct flow for one-shot work",
-                crate::flowloop::driver::MIN_LOOP_PASSES
-            ),
-        ));
-    }
-    if request.pass_timeout_secs == 0 || request.wall_clock_secs == 0 || request.poll_secs == 0 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "loop caps and poll interval must be positive".to_string(),
-        ));
-    }
-    crate::flowloop::driver::require_loop_flow(state.runtime.repo_root(), &request.flow)
-        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
-    let session = launch_detached_loop(state.runtime.repo_root(), state.runtime.name(), &request)
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
-    Ok(Json(DetachedLoopResponse { session }))
 }
 
 async fn conversation_handler(
@@ -1052,7 +948,6 @@ pub fn remove_resident_token(repo_root: &Path, wave: &str, own_token: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
 
     #[test]
     fn write_and_remove_endpoint_roundtrips() {
@@ -1129,28 +1024,6 @@ mod tests {
         server.abort();
     }
 
-    async fn boot_authenticated() -> (String, tempfile::TempDir) {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let dir = tmp.path().join("wave/ship");
-        std::fs::create_dir_all(&dir).expect("wave dir");
-        std::fs::write(dir.join("MEMORY.md"), "Goal: exercise loop launch.\n").expect("memory");
-        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
-
-        let app = router(
-            runtime,
-            ResidentDoor::new("resident"),
-            None,
-            None,
-            ShutdownDoor::new(),
-        );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
-        });
-        (format!("http://{addr}"), tmp)
-    }
-
     /// A worker dispatched while a client is subscribed to `/events` surfaces
     /// as a live `op` frame carrying the ledger-vocabulary `kind`. This is the
     /// wave's operational channel riding the same stream as `state`/`turn`.
@@ -1208,127 +1081,6 @@ mod tests {
         assert_eq!(frame.kind, "run.started");
         assert_eq!(frame.run_id, "run-42");
         assert_eq!(frame.flow.as_deref(), Some("implement"));
-    }
-
-    #[test]
-    fn detached_loop_argv_forces_the_server_owned_blocking_form() {
-        let request = DetachedLoopRequest {
-            run_id: crate::lfd::id::LfdId::new(),
-            flow: "task".into(),
-            seed: "fix 'quoted' behavior".into(),
-            max_passes: 8,
-            pass_timeout_secs: 1800,
-            wall_clock_secs: 7200,
-            poll_secs: 60,
-            max_turns: Some(20),
-        };
-        let argv = detached_loop_argv(Path::new("/opt/lf"), &request, "platform");
-        assert_eq!(
-            &argv[..6],
-            [
-                "/opt/lf",
-                "--wave",
-                "platform",
-                "loop",
-                "task",
-                "fix 'quoted' behavior"
-            ]
-        );
-        let parsed = crate::lf::Cli::try_parse_from(&argv).expect("server argv parses");
-        assert_eq!(parsed.wave.as_deref(), Some("platform"));
-        assert!(matches!(
-            parsed.command,
-            Some(crate::lf::Commands::Loop {
-                name,
-                seed,
-                detach: false,
-                ..
-            }) if name == "task" && seed == "fix 'quoted' behavior"
-        ));
-        assert!(!argv.iter().any(|arg| arg == "--detach"));
-
-        let shell = crate::lfd::executor::helpers::detached_lf_shell_command(
-            &argv,
-            &[
-                (crate::journal::LF_RUN_ID_ENV, request.run_id.as_str()),
-                (
-                    crate::flowloop::driver::LF_LOOP_RUN_ID_ENV,
-                    request.run_id.as_str(),
-                ),
-            ],
-        );
-        for key in [
-            crate::journal::LF_RUN_ID_ENV,
-            crate::flowloop::driver::LF_LOOP_RUN_ID_ENV,
-        ] {
-            let assignment = format!(
-                "{}={}",
-                crate::lfd::executor::helpers::shell_escape(key),
-                crate::lfd::executor::helpers::shell_escape(request.run_id.as_str())
-            );
-            assert!(shell.contains(&assignment));
-        }
-    }
-
-    #[tokio::test]
-    async fn loop_door_requires_capability_before_validating_or_launching() {
-        let (base, _tmp) = boot_authenticated().await;
-        let request = DetachedLoopRequest {
-            run_id: crate::lfd::id::LfdId::new(),
-            flow: String::new(),
-            seed: "ship it".into(),
-            max_passes: 8,
-            pass_timeout_secs: 1800,
-            wall_clock_secs: 7200,
-            poll_secs: 60,
-            max_turns: None,
-        };
-        let client = reqwest::Client::new();
-        let unauthorized = client
-            .post(format!("{base}/loops"))
-            .json(&request)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(unauthorized.status(), reqwest::StatusCode::UNAUTHORIZED);
-
-        let invalid = client
-            .post(format!("{base}/loops"))
-            .header(RESIDENT_TOKEN_HEADER, "resident")
-            .json(&request)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(invalid.status(), reqwest::StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn loop_door_rejects_one_pass_before_launching() {
-        let (base, _tmp) = boot_authenticated().await;
-        let request = DetachedLoopRequest {
-            run_id: crate::lfd::id::LfdId::new(),
-            flow: "task".into(),
-            seed: "ship it".into(),
-            max_passes: 1,
-            pass_timeout_secs: 1800,
-            wall_clock_secs: 7200,
-            poll_secs: 60,
-            max_turns: None,
-        };
-        let response = reqwest::Client::new()
-            .post(format!("{base}/loops"))
-            .header(RESIDENT_TOKEN_HEADER, "resident")
-            .json(&request)
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
-        assert!(response
-            .text()
-            .await
-            .unwrap()
-            .contains("max_passes must be at least 2"));
     }
 
     /// A pointer to a dead address is stale: the probe says no live server.

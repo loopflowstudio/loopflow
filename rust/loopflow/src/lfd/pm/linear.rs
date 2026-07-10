@@ -120,6 +120,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
     issues(first: $first, after: $after) {
       nodes {
         id
+        identifier
         title
         description
         prioritySortOrder
@@ -685,6 +686,8 @@ struct IdNode {
 struct IssueNode {
     id: String,
     #[serde(default)]
+    identifier: String,
+    #[serde(default)]
     title: String,
     #[serde(default)]
     description: Option<String>,
@@ -705,8 +708,14 @@ impl IssueNode {
             .as_ref()
             .is_some_and(|state| state.r#type.eq_ignore_ascii_case(COMPLETED_STATE_TYPE));
 
+        let identifier = if self.identifier.is_empty() {
+            self.id.clone()
+        } else {
+            self.identifier
+        };
         PmItem {
             id: self.id,
+            identifier,
             name: self.title,
             description: self.description.unwrap_or_default(),
             rank,

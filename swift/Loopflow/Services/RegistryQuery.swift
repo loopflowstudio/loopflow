@@ -60,6 +60,7 @@ public struct RegistryQuery: Sendable {
         let snapshot = try Self.decode(WaveStatusSnapshot.self, from: stdout)
         let repo = snapshot.wave.repo
         let runs = snapshot.runs.map { $0.toRun(waveId: waveId, repo: repo) }
+            + snapshot.tasks.map { $0.toRun(waveId: waveId, repo: repo) }
         let attention = snapshot.attention.map { $0.toItem(waveId: waveId) }
         return (runs, attention, snapshot.loopState)
     }
@@ -205,6 +206,7 @@ struct WaveSnapshot: Decodable {
     let iteration: Int
     let workers: Int
     let activeRuns: Int
+    let activeTasks: Int
     let live: Bool
     let endpoint: String?
     let createdAt: String?
@@ -213,6 +215,7 @@ struct WaveSnapshot: Decodable {
     enum CodingKeys: String, CodingKey {
         case id, name, status, paused, goal, repo, iteration, workers, live, endpoint
         case activeRuns = "active_runs"
+        case activeTasks = "active_tasks"
         case createdAt = "created_at"
         case parentWaveId = "parent_wave_id"
     }
@@ -240,11 +243,67 @@ struct WaveStatusSnapshot: Decodable {
     let wave: WaveSnapshot
     let loopState: String?
     let runs: [RunSnapshot]
+    let tasks: [TaskSnapshot]
     let attention: [AttentionSnapshot]
 
     enum CodingKeys: String, CodingKey {
-        case wave, runs, attention
+        case wave, runs, tasks, attention
         case loopState = "loop_state"
+    }
+}
+
+/// One durable Task Session under `lf status`.
+struct TaskSnapshot: Decodable {
+    let issueId: String
+    let sessionId: String
+    let project: String
+    let status: String
+    let reason: String
+    let statusAt: String
+    let worktree: String
+    let branch: String
+    let provider: String
+    let processAlive: Bool
+    let prURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case project, status, reason, worktree, branch, provider
+        case issueId = "issue_id"
+        case sessionId = "session_id"
+        case statusAt = "status_at"
+        case processAlive = "process_alive"
+        case prURL = "pr_url"
+    }
+
+    func toRun(waveId: String, repo: String) -> Run {
+        let runStatus: RunStatus = switch status {
+        case "created", "starting": .pending
+        case "running": .running
+        case "waiting", "submitted", "blocked": .waiting
+        case "merged", "abandoned": .completed
+        case "failed": .failed
+        default: .unspecified
+        }
+        let pr = prURL.flatMap(URL.init(string:)).map {
+            PullRequest(url: $0, number: nil, state: nil, title: nil, branch: branch)
+        }
+        return Run(
+            id: sessionId,
+            waveId: waveId,
+            flow: "task",
+            task: issueId,
+            repo: repo,
+            status: runStatus,
+            stepIndex: 0,
+            worktree: worktree,
+            branch: branch,
+            error: status == "failed" ? reason : nil,
+            pr: pr,
+            startedAt: RegistrySnapshotDate.parse(statusAt),
+            endedAt: ["merged", "abandoned"].contains(status)
+                ? RegistrySnapshotDate.parse(statusAt) : nil,
+            createdAt: RegistrySnapshotDate.parse(statusAt)
+        )
     }
 }
 

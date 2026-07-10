@@ -886,7 +886,7 @@ fn worktree_reads_the_origin_repos_wave_memory() {
     .unwrap();
     make_commit(&origin, "initial");
 
-    // A sibling worktree, as `lf loop` bootstraps: <repo>.goals.
+    // A sibling worktree, as `lf serve` bootstraps: <repo>.goals.
     let worktree = temp.path().join("repo.goals");
     std::process::Command::new("git")
         .args([

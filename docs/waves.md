@@ -15,39 +15,39 @@ You author wave files under `wave/<name>/`:
 | **`GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
 | **`MEMORY.md`** | What the wave remembers between loops — written by the wave agent |
 
-Projects and tasks live in Linear and sync into the local SQLite registry. Run
-`lf pm sync`, then run the agent: it reads its projects,
-tasks, and memory; pick the next move; execute it inline or place a justified
-child loop; watch the PR; and fold what changed back into memory.
+Tasks live in Linear. Run the agent and it reads its Projects, tasks, and
+memory; creates or selects the next task; starts one durable Task Session; and
+folds the linked result back into memory.
 
 ```bash
 lf serve shipper            # start the wave agent
 tmux ls                    # the wave agent and every worker it launches
-tmux attach -r -t <name>   # inspect one without direct control
+lf task attach INF-123     # audited writable task control prompt
 ```
 
-The wave agent resolves the sole blocker inline. It creates a child loop only
-for a strict subset that needs its own repeated lifecycle or useful parallelism:
+Every concrete file-writing change begins with a Linear task:
 
 ```bash
-lf --wave shipper loop build "add retry to token refresh"
-lf --wave shipper loop build "audit retry callers" --detach
+lf task start "add retry to token refresh" --project <linear-project-id>
+lf task run INF-123
+lf task send INF-123 "also audit retry callers"
 ```
 
-A worker runs the flow in its own worktree, opens a PR, and reports back. It inherits the wave's `GOAL.md` and `MEMORY.md`, so it builds with the wave's intent in view.
+A Task Session runs in one immutable worktree, opens one PR to `main`, and
+reports linked events to its Wave. It inherits the Wave's `GOAL.md` and
+`MEMORY.md` plus its Project definition and KRs.
 
-Each loop gets a fresh sibling worktree — `<repo>.<wave>.<run-id>` — off the
-default branch, with its own branch and PR:
+Each Task Session gets a sibling worktree off `main`, with its own branch and
+PR:
 
 ```bash
-lf --wave shipper loop task "…"           # foreground: caller-owned
-lf --wave shipper loop task "…" --detach  # background: server-owned
+lf task status INF-123
+lf task interrupt INF-123 --message "take the smaller approach"
+lf task wait INF-123
 ```
 
-Both forms create the same placed worktree. `--detach` changes attention and
-ownership, not execution: the server launches a headless loop and the caller
-returns immediately. It requires an already-running server and is useful only
-when the parent has another move; otherwise keep the loop foreground.
+The Wave stays directly steerable while several independent tasks run. Review
+feedback and CI repair resume the same Task Session and provider history.
 
 Waves are independent by default. Humans steer a served mind with `lf chat`;
 agents report on its bus with `lf radio pub --channel <name> "…"`, even while the

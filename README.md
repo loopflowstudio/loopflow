@@ -66,34 +66,32 @@ lf serve s3           # the s3 (control) charter
 lf stop s3            # stop only this wave
 ```
 
-The wave agent executes the next move inline by default. Give a strict subset
-its own repeated lifecycle only when the work earns a separate worktree and PR:
+The wave agent coordinates concrete work through Linear-backed Task Sessions:
 
 ```bash
-lf --wave designer loop build "unify button variants"            # caller waits
-lf --wave designer loop build "audit settings panes" --detach    # server owns it
+lf task start "unify button variants" --project <linear-project-id>
+lf task send INF-123 "also audit the settings panes"
+lf task wait INF-123
 ```
 
-Use `--detach` only when `designer` is already served and the parent has another
-useful move while the child runs. If this result is needed next, keep it
-foreground. If it is the sole local blocker, do it inline.
+The Linear task exists before its worktree. One durable Task Session retains
+that immutable sibling worktree and provider history through review, CI repair,
+and merge. Every Task PR targets `main`.
 
-Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its intent in view. Their PRs are how results flow back to the wave.
+Workers inherit the Wave objective, curated memory, Project definition, and KRs.
+Structured commands and events keep the Wave informed without copying raw tool
+chatter into its thread.
 
-Run a task as a bounded task loop:
+Run an existing Linear task or queue a Project for its owning Wave:
 
 ```bash
-lf --wave designer loop task "fix the flaky chord-timeout test"
+lf task run INF-123
+lf project run <linear-project-id>
 ```
 
-`lf loop` takes a flow and free text, creates a worktree, and repeats the flow
-until its bit flips (`task`: when the PR merges). Linear holds filed work,
-`lf runs` holds active hands, and merged PRs record done.
-
-Two commands, two kinds of run. `lf serve designer` boots a mind: a listener, a
-thread, a playhead — something you can chat with while it works. `lf loop task
-"fix it"` runs a bounded child loop in batch: no chat surface, reports at its
-boundaries. Serving is for waves; looping is for the work a wave hands off.
+`lf serve designer` boots the durable Wave mind. `lf task run` starts a durable
+child session. The Wave stays directly steerable while several independent
+tasks run.
 
 Inspect exactly what an agent received and what Loopflow observed:
 
@@ -370,13 +368,13 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf --bin lf
 ```
 Install the Rust binaries directly with cargo.
 
-## Execute, Loop, Observe
+## Execute and observe
 
 ```bash
 lf serve engbot       # start the wave agent (Ctrl-C to stop)
-lf --wave engbot loop implement "Add the endpoint" --detach
+lf task run ENG-123   # start the Linear task in its own worktree
 tmux ls              # list live sessions — the wave agent and its workers
-tmux attach -r -t <name>  # inspect without direct control
+lf task attach ENG-123    # writable audited control prompt
 ```
 
 Read `wave/engbot/GOAL.md` and `wave/engbot/MEMORY.md` for a wave's state, or

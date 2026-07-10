@@ -26,6 +26,15 @@ from typing import Literal
 
 import yaml
 
+XCODE_LOCAL_SIGNING = [
+    "CODE_SIGNING_ALLOWED=YES",
+    "CODE_SIGNING_REQUIRED=YES",
+    "CODE_SIGN_STYLE=Manual",
+    "CODE_SIGN_IDENTITY=-",
+    "DEVELOPMENT_TEAM=",
+]
+XCODE_DERIVED_DATA = ".build/xcode-derived-data"
+
 
 @dataclass
 class Screenshot:
@@ -305,7 +314,11 @@ def find_loopflow_executable(
             "Release",
             "-destination",
             "platform=macOS",
+            "-derivedDataPath",
+            XCODE_DERIVED_DATA,
+            "-disableAutomaticPackageResolution",
             "build",
+            *XCODE_LOCAL_SIGNING,
         ]
         build_log = log_dir / "xcodebuild.log" if log_dir else None
         build_configs = [("Release", build_args), ("Debug", build_args.copy())]
@@ -451,8 +464,12 @@ def capture_ui_test_screenshot(
         "LoopflowMac",
         "-destination",
         "platform=macOS",
+        "-derivedDataPath",
+        XCODE_DERIVED_DATA,
+        "-disableAutomaticPackageResolution",
         "test",
         "-only-testing:LoopflowUITests/ScreenshotPipelineTests/testCapture",
+        *XCODE_LOCAL_SIGNING,
     ]
 
     print(f"Capturing {shot.name} (UI test)...")

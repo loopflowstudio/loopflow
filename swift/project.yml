@@ -5,6 +5,7 @@ options:
     macOS: "15.0"
     iOS: "18.0"
   xcodeVersion: "15.0"
+  postGenCommand: "mkdir -p LoopflowSwift.xcodeproj/project.xcworkspace/xcshareddata/swiftpm && cp Package.resolved LoopflowSwift.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 
 settings:
   base:
@@ -69,8 +70,9 @@ targets:
           - "$(inherited)"
           - "@executable_path/../Frameworks"
           - "@loader_path/../Frameworks"
-        CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: 2V3M244HF2
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
         # GhosttyKit is disabled in Xcode project - use SPM build for full terminal support
         # To enable locally, build Ghostty and add GHOSTTY_ENABLED to compilation conditions
 
@@ -108,6 +110,9 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSPrincipalClass: LoopflowTestsPrincipal
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/Loopflow.app/Contents/MacOS/Loopflow
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
 
   LoopflowUITests:
     type: bundle.ui-testing
@@ -120,3 +125,6 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: LoopflowMac
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""

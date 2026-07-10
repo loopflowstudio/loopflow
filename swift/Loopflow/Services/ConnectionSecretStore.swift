@@ -17,6 +17,7 @@ public final class ConnectionSecretStore: @unchecked Sendable {
             kSecAttrAccount as String: connection.connectionKey,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
         ]
 
         var result: AnyObject?
@@ -37,6 +38,7 @@ public final class ConnectionSecretStore: @unchecked Sendable {
             kSecAttrAccount as String: connection.connectionKey,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
         ]
 
         SecItemDelete(query as CFDictionary)
@@ -50,6 +52,7 @@ public final class ConnectionSecretStore: @unchecked Sendable {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
             kSecAttrAccount as String: connection.connectionKey,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
         ]
 
         let status = SecItemDelete(query as CFDictionary)

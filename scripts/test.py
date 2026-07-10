@@ -25,6 +25,14 @@ from pathlib import Path
 from typing import Callable, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+XCODE_LOCAL_SIGNING = [
+    "CODE_SIGNING_ALLOWED=YES",
+    "CODE_SIGNING_REQUIRED=YES",
+    "CODE_SIGN_STYLE=Manual",
+    "CODE_SIGN_IDENTITY=-",
+    "DEVELOPMENT_TEAM=",
+]
+XCODE_DERIVED_DATA = ".build/xcode-derived-data"
 
 
 # --- Changed files -------------------------------------------------------
@@ -165,7 +173,7 @@ def _loopflow_commands(_changed: list[str]) -> list[Command]:
         Command(
             [
                 "xcodebuild",
-                "build-for-testing",
+                "clean",
                 "-project",
                 "LoopflowSwift.xcodeproj",
                 "-scheme",
@@ -173,9 +181,27 @@ def _loopflow_commands(_changed: list[str]) -> list[Command]:
                 "-destination",
                 "platform=macOS",
                 "-derivedDataPath",
-                "DerivedData",
-                "CODE_SIGNING_ALLOWED=NO",
-                "CODE_SIGNING_REQUIRED=NO",
+                XCODE_DERIVED_DATA,
+                "-disableAutomaticPackageResolution",
+                *XCODE_LOCAL_SIGNING,
+            ],
+            swift_dir,
+            "xcodebuild-clean",
+        ),
+        Command(
+            [
+                "xcodebuild",
+                "test",
+                "-project",
+                "LoopflowSwift.xcodeproj",
+                "-scheme",
+                "LoopflowMac",
+                "-destination",
+                "platform=macOS",
+                "-derivedDataPath",
+                XCODE_DERIVED_DATA,
+                "-disableAutomaticPackageResolution",
+                *XCODE_LOCAL_SIGNING,
             ],
             swift_dir,
             "xcodebuild",

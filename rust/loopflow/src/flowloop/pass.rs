@@ -11,7 +11,7 @@ pub struct PassOptions {
     pub max_turns: Option<u32>,
 }
 
-/// One bounded, headless pass of ANY flow in a worktree — the flowloop
+/// One bounded, headless pass of ANY flow in a worktree — the loop
 /// primitive. The tiers bind their `<tier>-pass` flows here, but a skill
 /// loop or a scan flow loops the same way: `lf -b <flow>`, killed on
 /// timeout.
@@ -21,8 +21,8 @@ pub fn run_pass(worktree: &Path, flow: &str, seed: &str, options: &PassOptions) 
     if let Some(max_turns) = options.max_turns {
         cmd.arg("--max-turns").arg(max_turns.to_string());
     }
-    // The explicit verb: bare flow names (`task`, `wave`) collide with
-    // subcommands, `lf flow <name>` never does.
+    // The explicit verb keeps pass execution independent of whether a flow
+    // name collides with a top-level command.
     cmd.arg("flow");
     cmd.arg(flow);
     cmd.arg(seed);
@@ -54,7 +54,7 @@ pub(crate) fn run_with_timeout(
             let _ = child.kill();
             let _ = child.wait();
             return Err(OpsError::Message(format!(
-                "flowloop pass timed out after {}s",
+                "loop pass timed out after {}s",
                 timeout.as_secs()
             )));
         }

@@ -28,16 +28,51 @@ use std::process::{Command, Stdio};
 pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     let items = expand_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items, repo)?;
+    execute(&flow.name, &items, None, message, cli, repo)
+}
+
+/// Run exactly one expanded top-level step. The resident owns the cursor and
+/// invokes this hidden primitive once per body, so a session boundary maps to
+/// a product step instead of an entire flow.
+pub fn run_step(flow: &str, index: usize, message: &str, cli: &Cli, repo: &Path) -> Result<()> {
+    let definition = crate::engine::load_flow(flow, repo)?;
+    let items = expand_flow(&definition, repo)?;
+    let item = items
+        .get(index)
+        .cloned()
+        .ok_or_else(|| anyhow!("flow '{flow}' has no step at index {index}"))?;
+    execute(
+        &definition.name,
+        std::slice::from_ref(&item),
+        Some(index as u32),
+        Some(message),
+        cli,
+        repo,
+    )
+}
+
+/// Execute expanded steps on a fresh runtime, bracketed by flow journal events.
+/// `index` names the single step when the caller is running one body's worth.
+fn execute(
+    flow_name: &str,
+    items: &[ConcreteStep],
+    index: Option<u32>,
+    message: Option<&str>,
+    cli: &Cli,
+    repo: &Path,
+) -> Result<()> {
+    let fields = |extra: LfEventFields| LfEventFields {
+        flow: Some(flow_name.to_string()),
+        index,
+        ..extra
+    };
     journal::emit(
         repo,
         LfNode::Flow,
         LfEventType::Started,
-        LfEventFields {
-            flow: Some(flow.name.clone()),
-            ..LfEventFields::default()
-        },
+        fields(LfEventFields::default()),
     );
-    let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", &flow.name);
+    let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", flow_name);
     let executor = CliFlowExecutor {
         cli,
         message,
@@ -48,25 +83,25 @@ pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result
         .build()
         .context("failed to build flow runtime")?;
     let result = runtime
-        .block_on(FlowEngine::new(executor).run(&items, 0))
+        .block_on(FlowEngine::new(executor).run(items, 0))
         .map(|outcome| match outcome {
             FlowOutcome::Completed | FlowOutcome::Waiting => (),
         });
     match &result {
-        Ok(_) => journal::emit(
+        Ok(()) => journal::emit(
             repo,
             LfNode::Flow,
             LfEventType::Completed,
-            LfEventFields::default(),
+            fields(LfEventFields::default()),
         ),
         Err(err) => journal::emit(
             repo,
             LfNode::Flow,
             LfEventType::Errored,
-            LfEventFields {
+            fields(LfEventFields {
                 error: Some(err.to_string()),
                 ..LfEventFields::default()
-            },
+            }),
         ),
     }
     result
@@ -406,7 +441,7 @@ fn run_skill_with_journal(
 }
 
 /// Commit any uncommitted changes left by the previous skill.
-fn commit_skill_work(repo: &Path, skill_name: &str) -> Result<()> {
+pub(crate) fn commit_skill_work(repo: &Path, skill_name: &str) -> Result<()> {
     let options = CommitOptions {
         add: true,
         message: Some(format!("lf commit: {skill_name}")),

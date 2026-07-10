@@ -705,7 +705,7 @@ public final class RepoState {
     }
 
     private func statusSnapshot(for waveId: String) async throws
-        -> (runs: [Run], attention: [AttentionItem], flowloop: String?) {
+        -> (runs: [Run], attention: [AttentionItem], loopState: String?) {
         guard let registryQuery,
               let wave = waveStore.wave(for: waveId)
         else {

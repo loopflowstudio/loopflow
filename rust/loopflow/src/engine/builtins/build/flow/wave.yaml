@@ -1,4 +1,4 @@
-# One bounded pass of the wave flowloop.
+# One bounded pass of the wave loop.
 - wave_clarify
 - wave_pursue
 - wave_mutate

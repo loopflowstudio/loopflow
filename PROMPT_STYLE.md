@@ -106,13 +106,13 @@ implementation receipts, issue ids, or status into the KR line.
 
 Loopflow's architecture is legible from the top down: the key data structures
 and APIs explain the system, the implementation follows that map, and obsolete
-pre-flowloop concepts do not linger as alternate design.
+pre-loop concepts do not linger as alternate design.
 
 ## KRs
 
 - Top-down architecture documentation is complete, published, and centered on the key data structures and public APIs.
 - Every data structure and API in the architecture is ratified as minimally simple for its purpose.
-- The codebase, prompts, docs, and UI contain no stale pre-flowloop technical design language.
+- The codebase, prompts, docs, and UI contain no stale pre-loop technical design language.
 ```
 
 ### A wave's GOAL.md: five marks of a goal that loops well

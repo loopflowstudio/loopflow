@@ -49,27 +49,26 @@ The sibling naming convention (`<repo>.<name>`) is load-bearing: worktrees
 created elsewhere aren't recognized by `lf wt` (list, switch, up/down, prune)
 or by land.
 
-## Delegate Work
+## Inhabit and Delegate Work
 
-Dispatch an `lf` flow or skill for real implementation work. A dispatched child
-inherits loopflow context: operating guidance, scratch notes, explicit docs,
-wave context, and skill instructions. Inline edits in the coordinating session do not, and they
-bloat the transcript with work that belongs in a child.
-
-Inside a Wave loop, dispatch with:
+Run work through a loop. Inhabit one loop in the foreground when its next
+move needs the wave's live memory and thread in the room; delegate
+self-sufficient work by detaching the same command:
 
 ```bash
-lf <flow> "<task>" --wave <wave> --dispatch
+lf loop <flow> "<task>" --wave <wave>           # inhabit: block until its bit flips
+lf loop <flow> "<task>" --wave <wave> --detach  # delegate: server-owned background loop
 ```
 
-This spawns the child as its own attachable tmux session — not an inline
-shell-out — so it's independently monitorable and steerable. List live
-sessions with `tmux ls` and drop into one with `tmux attach -t <name>` to
-answer an interactive skill.
+Both forms fork a worktree, keep a private transcript, and re-read the wave's
+memory and thread at pass boundaries. Blocking spends this pass inside one long
+tool call, so the wave cannot reply until the inner loop returns. Detach only
+when the seed is the whole handoff.
 
-Inline edits are only for trivial fixes smaller than the cost of dispatching.
-When you do one, say why. Keep the coordinating session about decisions,
-sequencing, and reading results back.
+A detached loop is headless and non-interactive. Its contract is durable writes:
+PRs record done, `lf radio` reports progress/completion, and `lf memory add`
+records learnings as they happen. Invisible work is failed work. Inspect its
+terminal read-only with `tmux attach -r -t <name>`; never type into it.
 
 ## Speak
 
@@ -79,20 +78,35 @@ launch - there is no live feed to poll mid-run. Answers return on the channel
 they came in: when a human's message reaches you, reply in your own turn
 text. Everything proactive goes through `lf`:
 
-- `lf chat "<note>"` - report outcomes, FYIs, and blockers to the wave's
-  thread; the post wakes the wave's flowloop like any message. One short
-  paragraph: what landed, links, anything surprising. Pipe stdin for longer.
-- `lf chat --parent "<report>"` - escalate to the parent wave.
-- `lf sub` - listen to your wave: follow its live events (turns, flowloop state,
-  memory) until killed. Workers may run it in a background terminal to
-  receive steering mid-task. Outside a wave it exits silently.
+- `lf radio "<note>"` - the agent bus: report up when you finish, fail, or get
+  stuck. Broadcast, not delivery - whoever is tuned in hears it, nobody
+  guarantees receipt; it is not a log and not a notebook. Bare, it publishes on
+  your own channel, and a served wave records that report: one attributed copy
+  in its journal, which wakes its loop. One short paragraph; pipe stdin for
+  longer.
+- `lf radio --parent "<report>"` - escalate to the parent wave.
+- `lf radio --channel <name> "<msg>"` - broadcast on another channel. Whoever
+  is tuned in hears it; nothing is delivered to a hand that is mid-pass. Say it
+  on the wave's thread instead when a hand must act on it - hands re-read that
+  thread at every pass boundary.
+- `lf sub [<channel>]` - tune in to the bus: hear what is broadcast on a
+  channel and its descendants while you listen. Bare, your own channel;
+  `<channel>` listens to a hand. Nothing said before you tuned in replays.
 - `lf memory add "<fact>"` - record a durable learning. `lf memory update`
   rewrites the whole file from stdin.
 - `wave/<name>/MEMORY.md` is server-owned - never edit the file directly.
 
-Use these unconditionally. Outside any wave they drop silently (exit 0) -
-publish-to-no-subscriber is correct pubsub, never a blocker. A wave whose
-server is down errors instead; note it and move on.
+The byline you write is testimony, not proof: it rides in the record beside the
+channel the message arrived on, so a claim that does not match its channel is
+visible to everyone reading. Speak on your own channel; a channel's name is who
+it is.
+
+`lf chat` is the human's conversation with a served mind - the durable,
+replayed thread. It is not an agent verb; agents use `lf radio`. Use these
+unconditionally. The bus is a table, not a server: `lf radio` and `lf sub` work
+whether or not any wave is running, and a wave asleep when you reported hears
+you when it wakes. Outside any wave they print a short drop note and exit 0 -
+publish-to-no-subscriber is correct pubsub, never a blocker.
 
 ## Tasks Live in Linear
 
@@ -114,6 +128,10 @@ Project definitions and KRs live in `wave/<wave>/projects/<project>.md`.
 Concrete tasks live in Linear. There are no local task lists. `lf pm` reads
 and edits the wave's Linear project; tasks attach to local projects with
 `project:<slug>` labels.
+
+Tasks may be filed before they run. Read the backlog when selecting work; a
+task moves from filed, to a running loop, to a merged PR. Do not let filing
+become a substitute for selection.
 
 ```bash
 lf pm show                                          # the wave's live PM tasks

@@ -1,23 +1,25 @@
 //! GitHub webhook ingress — the gatekeeper's ears, translating inward.
 //!
-//! Webhooks no longer feed the trigger/activation machinery. Human-facing
-//! notifications still use attributed `lf chat`; machine-owned queue state
-//! reconciles in-process so daemon behavior does not depend on CLI grammar.
+//! Webhooks no longer feed the trigger/activation machinery. A webhook fact
+//! is machine speech, so it rides the bus (`lf radio --from github`) and
+//! survives a sleeping wave; machine-owned queue state reconciles in-process
+//! so daemon behavior does not depend on CLI grammar.
 //!
-//! - **check_run failure** → `lf chat --wave <wave> "CI failed: …"` — the
-//!   wave's flowloop decides whether and how to dispatch a fix.
+//! - **check_run failure** → `lf radio --channel <wave> --from github
+//!   "CI failed: …"` — the wave's loop decides whether and how to dispatch.
 //! - **PR merged** → reconcile queue state for each wave holding that PR.
-//! - **push to main** → `lf chat --wave <wave> "main moved: …"` for every
-//!   wave in the repo — the flowloop decides to rebase/integrate with judgment.
+//! - **push to main** → the same, `"main moved: …"`, for every wave in the
+//!   repo — the loop decides to rebase/integrate with judgment.
 //!
-//! Execs are spawned detached; a wave whose server is down bounces the chat
-//! with exit ≠ 0 — logged at warn and, for CI failures, the dedupe key is NOT
-//! recorded, so the next delivery of that wave+sha replays instead of
-//! vanishing. No wave resolved → log-and-drop.
+//! Execs are spawned detached. Publishing is a store INSERT, so the only
+//! bounce left is a machine with no registry db (exit 0, dropped with a
+//! note); the CI dedupe key is recorded only after the exec exits 0, so a
+//! spawn failure replays on the next delivery. No wave resolved →
+//! log-and-drop.
 
 // TODO(M1/M3): preserve these ingress reliability mechanisms under the
 // gatekeeper/argv owner: signature verification, plan-then-exec tests,
-// bounced-chat replay, and CI dedupe only after delivery succeeds.
+// failed-publish replay, and CI dedupe only after delivery succeeds.
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -54,7 +56,7 @@ struct WaveCiTarget {
 /// One `lf` invocation the gatekeeper will spawn — argv after the binary.
 /// Planners return these so tests assert on the exact command line without
 /// spawning anything. `dedupe_key` (CI failures: `<wave_id>:<sha>`) is
-/// recorded in the shared cache only after the exec exits 0 — a bounced chat
+/// recorded in the shared cache only after the exec exits 0 — a failed exec
 /// leaves the key absent so the wave+sha can replay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfExec {
@@ -63,11 +65,14 @@ pub struct LfExec {
 }
 
 impl LfExec {
-    fn chat(wave: &str, text: String, from: &str) -> Self {
+    /// A webhook fact is machine speech: it rides the bus with a byline, so
+    /// it survives a sleeping wave and folds into the thread attributed when
+    /// the listener next sweeps (`wave::bus`). Chat is the human's verb.
+    fn radio(wave: &str, text: String, from: &str) -> Self {
         Self {
             args: vec![
-                "chat".to_string(),
-                "--wave".to_string(),
+                "radio".to_string(),
+                "--channel".to_string(),
                 wave.to_string(),
                 "--from".to_string(),
                 from.to_string(),
@@ -96,9 +101,8 @@ fn spawn_lf_execs(cache: &Arc<Mutex<HashSet<String>>>, execs: Vec<LfExec>) {
 }
 
 /// Run one exec to completion and settle its dedupe key: exit 0 records the
-/// key (that wave+sha has been heard); a bounce (wave server down, exit ≠ 0)
-/// or spawn failure records nothing, so the next webhook for the same
-/// wave+sha replays instead of being swallowed.
+/// key (the bus accepted the frame); a nonzero exit or spawn failure records
+/// nothing, so the next webhook for the same wave+sha replays.
 async fn settle_exec(lf: &std::path::Path, exec: LfExec, cache: &Arc<Mutex<HashSet<String>>>) {
     let result = tokio::process::Command::new(lf)
         .args(&exec.args)
@@ -117,7 +121,7 @@ async fn settle_exec(lf: &std::path::Path, exec: LfExec, cache: &Arc<Mutex<HashS
             args = ?exec.args,
             dedupe_key = ?exec.dedupe_key,
             code = ?status.code(),
-            "lf exec bounced (no live subscriber); will replay on next delivery"
+            "lf radio exec failed; will replay on next delivery"
         ),
         Err(err) => tracing::warn!(
             args = ?exec.args,
@@ -148,7 +152,7 @@ async fn plan_push_notifications(
     Ok(waves
         .iter()
         .filter(|wave| wave_in_github_repo(wave, repo_full_name))
-        .map(|wave| LfExec::chat(wave.name(), text.clone(), "github"))
+        .map(|wave| LfExec::radio(wave.name(), text.clone(), "github"))
         .collect())
 }
 
@@ -164,7 +168,7 @@ fn main_moved_text(before: &str, after: &str) -> String {
 /// PR the check ran against. Deduped per wave+commit through the shared
 /// CI-failure cache so a red matrix reports once — but the key is only RECORDED once the spawned
 /// exec exits 0 (see [`settle_exec`]); planning just reads the cache, so a
-/// bounced chat replays. No wave resolved → empty (the caller drops).
+/// failed publish replays. No wave resolved → empty (the caller drops).
 async fn plan_check_run_notifications(
     store: &SharedStore,
     cache: &Arc<Mutex<HashSet<String>>>,
@@ -193,7 +197,7 @@ async fn plan_check_run_notifications(
                 continue;
             };
             execs.push(
-                LfExec::chat(
+                LfExec::radio(
                     wave.name(),
                     format!(
                         "CI failed: {} on PR #{} — {}",
@@ -727,7 +731,7 @@ mod tests {
 
     /// Push to main notifies every wave in the repo — and only those.
     #[tokio::test]
-    async fn push_to_main_plans_chat_for_each_wave_in_repo() {
+    async fn push_to_main_plans_radio_for_each_wave_in_repo() {
         let tmp = tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
@@ -761,16 +765,16 @@ mod tests {
             argvs,
             vec![
                 vec![
-                    "chat".to_string(),
-                    "--wave".to_string(),
+                    "radio".to_string(),
+                    "--channel".to_string(),
                     "ship".to_string(),
                     "--from".to_string(),
                     "github".to_string(),
                     "main moved: abc..def".to_string(),
                 ],
                 vec![
-                    "chat".to_string(),
-                    "--wave".to_string(),
+                    "radio".to_string(),
+                    "--channel".to_string(),
                     "systems".to_string(),
                     "--from".to_string(),
                     "github".to_string(),
@@ -825,7 +829,7 @@ mod tests {
         let expected_key = format!("{}:abc123", wave.id());
         assert_eq!(
             execs,
-            vec![LfExec::chat(
+            vec![LfExec::radio(
                 "ship",
                 "CI failed: test-check on PR #1 — https://example.test/logs".to_string(),
                 "ci",
@@ -927,7 +931,7 @@ mod tests {
     fn planned_execs_resolve_to_known_lf_commands() {
         use clap::Parser;
 
-        let exec = LfExec::chat("ship", "main moved".to_string(), "github");
+        let exec = LfExec::radio("ship", "main moved".to_string(), "github");
         let argv = std::iter::once("lf".to_string()).chain(exec.args.iter().cloned());
         let cli = crate::lf::Cli::try_parse_from(argv)
             .unwrap_or_else(|err| panic!("{:?} must parse: {err}", exec.args));

@@ -184,7 +184,7 @@ fn adopt_own_session() -> Option<RunSession> {
 
 /// Flip `LFD_SESSION_ID`'s meaning for everything this process spawns: the
 /// row belongs to an ancestor, not to the spawned process. Called by every
-/// `lf` command — including non-registering ones like `lf pr`/`lf wave`,
+/// `lf` command — including non-registering ones like `lf pr`/`lf loop`,
 /// which may themselves be the executor-launched session owner.
 pub fn mark_child_sessions_inherited() {
     if env_var(SESSION_ID_ENV).is_some() {
@@ -479,7 +479,7 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: crate::lfd::types::SessionUse::WaveAgent,
-            skill: "flowloop".to_string(),
+            skill: "loop".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo".to_string(),
             argv: Vec::new(),

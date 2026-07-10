@@ -87,6 +87,21 @@ pub struct RunEventRow {
     pub model: Option<String>,
 }
 
+/// One frame on the agent bus (`bus_messages`). `byline` is testimony — what
+/// the publishing client said it was — and `channel` is evidence: where the
+/// row actually arrived. Nothing derives identity server-side, so a forged
+/// byline shows up as a mismatch between the two rather than being prevented.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BusMessage {
+    /// Monotonic id; a subscriber's cursor is an id it has already read.
+    pub id: i64,
+    pub channel: String,
+    pub byline: String,
+    pub text: String,
+    /// Unix seconds. The sweeper's window is measured against this.
+    pub at: i64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("sqlite error: {0}")]
@@ -147,6 +162,77 @@ impl Store {
 
     pub fn admin(&self) -> &dyn StoreAdmin {
         self
+    }
+
+    // The agent bus: publish is an INSERT, subscribe is a forward poll from an
+    // id cursor. No server is in the path — see `migrations/059_bus.sql`.
+
+    /// Publish one frame, stamped now. Returns its id.
+    pub async fn publish_bus(
+        &self,
+        channel: String,
+        byline: String,
+        text: String,
+    ) -> StoreResult<i64> {
+        let at = time::OffsetDateTime::now_utc().unix_timestamp();
+        run_sqlite(&self.sqlite, move |store| {
+            store.publish_bus(&channel, &byline, &text, at)
+        })
+        .await
+    }
+
+    /// Drop every frame published before `cutoff` (unix seconds). Production
+    /// never sweeps by hand — publishing and every read carry the broom (see
+    /// [`Self::swept_read`]); this aims it at a chosen cutoff so a test can
+    /// age the bus out without waiting the window.
+    #[cfg(test)]
+    pub async fn sweep_bus(&self, cutoff: i64) -> StoreResult<usize> {
+        run_sqlite(&self.sqlite, move |store| store.sweep_bus(cutoff)).await
+    }
+
+    /// Sweep the window, then read. The retention window is enforced by
+    /// whoever looks, not only by whoever publishes next, so a lone report on
+    /// a bus that then went quiet expires on schedule instead of waiting for a
+    /// writer that may never come. Every bus read rides this broom.
+    async fn swept_read<T, F>(&self, read: F) -> StoreResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(sqlite::SqliteStore) -> StoreResult<T> + Send + 'static,
+    {
+        let cutoff = time::OffsetDateTime::now_utc().unix_timestamp() - sqlite::BUS_WINDOW_SECS;
+        run_sqlite(&self.sqlite, move |store| {
+            store.sweep_bus(cutoff)?;
+            read(store)
+        })
+        .await
+    }
+
+    /// Every surviving frame after `cursor`, oldest first.
+    pub async fn read_bus_after(&self, cursor: i64) -> StoreResult<Vec<BusMessage>> {
+        self.swept_read(move |store| store.read_bus_after(cursor))
+            .await
+    }
+
+    /// The high-water mark — where a fresh subscriber tunes in.
+    pub async fn bus_head(&self) -> StoreResult<i64> {
+        self.swept_read(|store| store.bus_head()).await
+    }
+
+    /// The oldest readable id. A durable cursor below `floor - 1` is a gap:
+    /// frames this subscriber will never see.
+    pub async fn bus_floor(&self) -> StoreResult<Option<i64>> {
+        self.swept_read(|store| store.bus_floor()).await
+    }
+
+    pub async fn bus_cursor(&self, subscriber: String) -> StoreResult<Option<i64>> {
+        run_sqlite(&self.sqlite, move |store| store.bus_cursor(&subscriber)).await
+    }
+
+    pub async fn set_bus_cursor(&self, subscriber: String, cursor: i64) -> StoreResult<()> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.set_bus_cursor(&subscriber, cursor)
+        })
+        .await
     }
 
     pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
@@ -405,7 +491,7 @@ impl Store {
 
     /// The wave's live brain, if any: a non-terminal `WaveAgent` session —
     /// either lfd-launched (`POST /waves/{id}/run`) or a self-registered
-    /// `lf wave` server. One-brain enforcement (run_wave idempotency, the
+    /// `lf serve` listener. One-brain enforcement (run_wave idempotency, the
     /// loop-ticker skip, wave-server registration conflicts) keys on this
     /// single fact.
     pub async fn live_wave_agent_session(&self, wave_id: &LfdId) -> StoreResult<Option<Session>> {
@@ -422,7 +508,7 @@ impl Store {
 
     /// Record a session in the run registry. The db IS the registry: `lf`
     /// writes its own row here directly — self-registered flow runs, the
-    /// `lf wave` server's WaveAgent row, placed `lf` runs — no
+    /// `lf serve` listener's WaveAgent row, placed `lf` runs — no
     /// daemon in the path. The writer later marks the row terminal via
     /// [`Store::update_control_session`].
     pub async fn register_session(&self, session: &Session) -> StoreResult<()> {

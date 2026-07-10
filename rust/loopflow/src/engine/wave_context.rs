@@ -15,7 +15,7 @@
 //!
 //! Read path — reads only, the wave server stays the single writer:
 //! 1. live server: `GET /conversation` at the `wave/<name>/.wave-endpoint`
-//!    discovery pointer (the same file `lf wave` publishes);
+//!    discovery pointer (the same file `lf serve` publishes);
 //! 2. no live server: a read-only fold over the wave's journal
 //!    ([`crate::wave::journal::read_events`] — never truncates, never
 //!    creates);
@@ -24,7 +24,7 @@
 //! Wave state (journal, endpoint pointer, MEMORY.md) lives under the ORIGIN
 //! repo — a worktree resolves its main repo first.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -220,65 +220,81 @@ pub fn gather_wave_chat(repo_root: &Path, wave: &str) -> Option<String> {
 /// `lf memory log` command still prints oldest to newest.
 pub fn gather_wave_memory(repo_root: &Path, wave: &str) -> Option<String> {
     let origin = wave_origin(repo_root);
-    let base = crate::wave::memory::Memory::for_wave(&origin, wave).read();
-    let adds = live_memory_adds(&origin, wave).or_else(|| journal_memory_adds(&origin, wave));
-    render_wave_memory(adds.unwrap_or_default(), &base)
+    let chain = memory_wave_chain(wave).unwrap_or_else(|| vec![wave.to_string()]);
+    gather_memory_chain(&origin, &chain)
 }
 
-/// Turn/char budget for the parent-wave section of a work line's overlay —
-/// the parent rides compactly beside the work line's own thread; the two
-/// budgets together stay within [`WAVE_CHAT_MAX_CHARS`].
-const PARENT_CHAT_TURNS: usize = 6;
-const PARENT_CHAT_MAX_CHARS: usize = 1_500;
-/// What the work line's own section may spend when the parent section rides
-/// along (`WAVE_CHAT_MAX_CHARS - PARENT_CHAT_MAX_CHARS`).
-const CHILD_CHAT_MAX_CHARS: usize = WAVE_CHAT_MAX_CHARS - PARENT_CHAT_MAX_CHARS;
+/// Resolve lexical memory scope through the registry. Chat intentionally does
+/// not call this: a child wave inherits facts, never its parent's mailbox.
+fn memory_wave_chain(wave: &str) -> Option<Vec<String>> {
+    let wave = wave.to_string();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().ok()?;
+        rt.block_on(async {
+            let store = crate::lfdb::open_existing_store().await?;
+            memory_wave_chain_from_store(&store, &wave).await
+        })
+    })
+    .join()
+    .ok()
+    .flatten()
+}
 
-/// The `<lf:wave-chat-recent>` body for an ambient CHANNEL: the wave channel
-/// reads exactly as [`gather_wave_chat`]; a work-line channel reads down the
-/// tree — its own thread (folded from the journal in THIS worktree, where
-/// the channel lives) plus, compactly, the parent wave channel's recent
-/// turns — under the same total cap as a wave-home overlay.
-pub fn gather_channel_chat(repo_root: &Path, channel: &str) -> Option<String> {
-    // Family membership and the head split are ONE predicate, shared with the
-    // server's scoping (`crate::wave::channel::family_head`): a channel with
-    // no dot (the wave's own channel) reads as a plain wave chat; a work-line
-    // channel reads down the tree from its family head.
-    let wave = crate::wave::channel::family_head(channel);
-    if wave == channel {
-        return gather_wave_chat(repo_root, channel);
-    }
-    // The work line's own thread: its journal travels with the branch —
-    // journal fold only, read-only (the family head's server holds the pen;
-    // a vanished/never-opened journal is just an empty section).
-    let own = {
-        let events = read_events(&journal_path(repo_root, channel));
-        let fold = fold_thread(&events);
-        let mut turns = fold.turns;
-        turns.extend(fold.open);
-        render_wave_chat_budget(&turns, WAVE_CHAT_RECENT_TURNS, CHILD_CHAT_MAX_CHARS)
-    };
-    let parent = {
-        let origin = wave_origin(repo_root);
-        live_turns(&origin, wave)
-            .or_else(|| journal_turns(&origin, wave))
-            .and_then(|turns| {
-                render_wave_chat_budget(&turns, PARENT_CHAT_TURNS, PARENT_CHAT_MAX_CHARS)
-            })
-    };
-    match (own, parent) {
-        (None, None) => None,
-        (own, parent) => {
-            let mut sections = Vec::new();
-            if let Some(own) = own {
-                sections.push(format!("## this work line ({channel})\n{own}"));
-            }
-            if let Some(parent) = parent {
-                sections.push(format!("## wave {wave}\n{parent}"));
-            }
-            Some(sections.join("\n\n"))
+async fn memory_wave_chain_from_store(
+    store: &crate::lfdb::Store,
+    wave: &str,
+) -> Option<Vec<String>> {
+    let mut current = store.get_wave_by_name(wave).await.ok().flatten()?;
+    let mut seen = HashSet::new();
+    let mut chain = Vec::new();
+    loop {
+        if !seen.insert(current.id().clone()) {
+            tracing::warn!(
+                wave,
+                "cycle in parent_wave_id; using the acyclic memory prefix"
+            );
+            break;
         }
+        chain.push(current.name().to_string());
+        let Some(parent) = current.parent_wave_id() else {
+            break;
+        };
+        current = match store.get_wave(parent).await.ok().flatten() {
+            Some(parent) => parent,
+            None => {
+                tracing::warn!(wave, parent = %parent, "missing parent wave in memory scope");
+                break;
+            }
+        };
     }
+    chain.reverse();
+    Some(chain)
+}
+
+/// Render each wave's memory oldest-ancestor first. A lone wave reads as its
+/// own memory, unheadered; an inherited chain labels who owns what.
+fn gather_memory_chain(origin: &Path, chain: &[String]) -> Option<String> {
+    let leaf = chain.last()?;
+    let scoped = chain
+        .iter()
+        .filter_map(|wave| {
+            let base = crate::wave::memory::Memory::for_wave(origin, wave).read();
+            let adds = live_memory_adds(origin, wave)
+                .or_else(|| journal_memory_adds(origin, wave))
+                .unwrap_or_default();
+            let memory = render_wave_memory(adds, &base)?;
+            if chain.len() == 1 {
+                return Some(memory);
+            }
+            let ownership = if wave == leaf {
+                "owned by"
+            } else {
+                "inherited from"
+            };
+            Some(format!("## Memory {ownership} {wave}\n\n{memory}"))
+        })
+        .collect::<Vec<_>>();
+    (!scoped.is_empty()).then(|| scoped.join("\n\n"))
 }
 
 /// The `wave/<name>/.wave-endpoint` discovery pointer's contents, trimmed.
@@ -536,50 +552,23 @@ mod tests {
         );
     }
 
-    /// A run inside a work-line worktree reads down the tree: its own
-    /// channel's thread plus, compactly, the parent wave channel's — both
-    /// sections labeled; a run at the wave home reads the wave channel alone,
-    /// exactly as before.
+    /// A hand lives inside its wave's mind: a run in a work-line worktree reads
+    /// the WAVE's thread — the journal lives at the origin, and the worktree
+    /// carries none of its own — byte-identical to a run at the wave home.
     #[test]
-    fn channel_chat_in_a_work_line_carries_child_and_parent_sections() {
+    fn a_work_line_worktree_reads_the_waves_thread() {
         let repo = loopflow_test_support::TestRepo::new();
         let worktree = repo.create_wave_worktree("goals.148e");
-
-        // Parent wave channel: journal at the origin.
         seed_journal(repo.path(), "goals", "wave-level question?");
-        // The work line's own channel: journal in ITS worktree.
-        let (mut child, _) =
-            Journal::open(&journal_path(&worktree, "goals.148e")).expect("child journal");
-        child.append(|seq| EventKind::UserMessage {
-            id: MessageId(format!("msg-{seq}")),
-            op: MessageOp::Say,
-            text: "child-level report".to_string(),
-            from: None,
-        });
-        drop(child);
 
-        let overlay =
-            gather_channel_chat(&worktree, "goals.148e").expect("work-line overlay renders");
-        assert!(overlay.contains("## this work line (goals.148e)"));
-        assert!(overlay.contains("child-level report"));
-        assert!(overlay.contains("## wave goals"));
-        assert!(overlay.contains("wave-level question?"));
-        let child_pos = overlay.find("child-level report").unwrap();
-        let parent_pos = overlay.find("wave-level question?").unwrap();
-        assert!(child_pos < parent_pos, "own channel first, parent after");
-
-        // A wave-channel gather stays the plain single-section render.
-        let wave_only = gather_channel_chat(repo.path(), "goals").expect("wave chat");
-        assert!(
-            !wave_only.contains("## "),
-            "no section headers at the wave home"
+        let from_work_line =
+            gather_wave_chat(&worktree, "goals").expect("work line reads its wave");
+        assert!(from_work_line.contains("wave-level question?"));
+        assert_eq!(
+            from_work_line,
+            gather_wave_chat(repo.path(), "goals").expect("wave chat"),
+            "the wave home reads exactly the same thread"
         );
-
-        // A work line with no thread yet still inherits the parent section.
-        let bare = repo.create_wave_worktree("goals.bare0");
-        let overlay = gather_channel_chat(&bare, "goals.bare0").expect("parent-only overlay");
-        assert!(!overlay.contains("## this work line"));
-        assert!(overlay.contains("## wave goals"));
     }
 
     #[test]
@@ -606,6 +595,7 @@ mod tests {
             items: Vec::new(),
             created_at: "1970-01-01T00:00:00Z".to_string(),
             from: None,
+            body: None,
         }
     }
 
@@ -686,6 +676,7 @@ mod tests {
         journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers: vec![MessageId("msg-1".to_string())],
+            body: None,
         });
         journal.append(|_| EventKind::TurnItem {
             turn_id: "turn-2".to_string(),
@@ -699,6 +690,7 @@ mod tests {
             turn_id: "turn-2".to_string(),
             status: Lifecycle::Completed,
             usage: Usage::empty(),
+            termination_reason: None,
         });
     }
 
@@ -749,6 +741,54 @@ mod tests {
 
         let memory = gather_wave_memory(tmp.path(), "goals").expect("memory");
         assert_eq!(memory, "- newest\n- oldest\n\n# Goals\n\ncompiled");
+    }
+
+    #[tokio::test]
+    async fn child_memory_walks_parent_scope_while_chat_stays_local() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(
+            tmp.path().join("lfd.db"),
+        ))
+        .await
+        .unwrap();
+        let parent = crate::lfd::types::Wave::new(
+            crate::lfd::id::LfdId::new(),
+            "platform".into(),
+            tmp.path().display().to_string(),
+        );
+        let child = crate::lfd::types::Wave::new(
+            crate::lfd::id::LfdId::new(),
+            "release".into(),
+            tmp.path().display().to_string(),
+        )
+        .with_parent(parent.id().clone());
+        store.create_wave(&parent).await.unwrap();
+        store.create_wave(&child).await.unwrap();
+        std::fs::create_dir_all(tmp.path().join("wave/platform")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("wave/release")).unwrap();
+        std::fs::write(
+            tmp.path().join("wave/platform/MEMORY.md"),
+            "Parent constraint.",
+        )
+        .unwrap();
+        std::fs::write(tmp.path().join("wave/release/MEMORY.md"), "Child decision.").unwrap();
+
+        let chain = memory_wave_chain_from_store(&store, "release")
+            .await
+            .expect("scope resolves");
+        assert_eq!(chain, ["platform", "release"]);
+        let memory = gather_memory_chain(tmp.path(), &chain).expect("memory renders");
+        assert!(memory.contains("## Memory inherited from platform\n\nParent constraint."));
+        assert!(memory.contains("## Memory owned by release\n\nChild decision."));
+        assert!(
+            memory.find("Parent constraint.").unwrap() < memory.find("Child decision.").unwrap()
+        );
+
+        seed_journal(tmp.path(), "platform", "parent-only chat");
+        seed_journal(tmp.path(), "release", "child-only chat");
+        let chat = gather_wave_chat(tmp.path(), "release").expect("child chat");
+        assert!(chat.contains("child-only chat"));
+        assert!(!chat.contains("parent-only chat"));
     }
 
     /// Canned one-shot HTTP server: the "existing test-server pattern"

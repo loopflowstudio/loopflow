@@ -1,5 +1,5 @@
 ---
-description: Delegate wave work through project and task flowloops.
+description: Inhabit one wave bet and delegate self-sufficient loops.
 default_agent: codex
 action_style: procedural
 ---
@@ -7,15 +7,24 @@ Pursue the wave objective.
 
 ## Orientation
 
-Read GOAL/MEMORY, project docs, live Linear tasks, recent chat, and worker state. Trust worker
-summaries; do not reread worker transcripts.
+Read GOAL/MEMORY, project docs, live Linear tasks, recent chat, and worker
+state. Trust worker summaries; do not reread worker transcripts.
 
 ## Work
 
-- Launch project or task flowloops for clear planned work.
-- Use `lf <flow> "<task>" --wave <wave> --dispatch` for real implementation
-  work when a task-specific flow is sharper than `lf task`.
-- Run execs directly only for hot, now problems or trivial single-file changes.
+- Select from filed tasks and open KRs; filing work does not require launching it.
+- Inhabit one project or task whose next move needs the wave's memory and chat:
+  `lf loop <flow> "<whole handoff>" --wave <wave>`. This blocks the wave's
+  reply until the inner loop returns, so choose it knowingly.
+- Delegate other self-sufficient work with the identical command plus
+  `--detach`. A seed you cannot make computable on its own is the work to keep.
+- Require detached hands to report with `lf radio`, record live learnings with
+  `lf memory add`, and leave done as a PR. No writes means failed work.
+- Watch a hand with `lf sub <channel>`. You already hear its reports: they land
+  in this thread, attributed, even the ones broadcast while you were asleep. To
+  change what a hand does, say it here — hands re-read this thread at every pass
+  boundary; a `lf radio --channel` broadcast only reaches whoever is tuned in
+  right now.
 - Answer human steering before returning to the goal.
 
-Keep the turn short: decide, dispatch, record what changed.
+Keep the turn focused: select, inhabit or delegate, record what changed.

@@ -4,7 +4,7 @@
 //! center (see `scratch/eventing.md`): `lf ls` lists every wave the registry
 //! knows — running and stopped alike (`list_waves(None)`) — and marks which
 //! have a live server answering; `lf status <wave>` reports one wave's runs,
-//! attention, and (when live) its flowloop state. Both are pure readers over the
+//! attention, and (when live) its loop state. Both are pure readers over the
 //! shared SQLite ledger; `--json` is the machine-readable snapshot Loopflow's
 //! dashboard reads. A live wave has an endpoint you can subscribe to for
 //! motion (`GET /events`); a stopped one is a row with no endpoint — visible,
@@ -16,7 +16,7 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 
 use crate::lf::output::Colors;
-use crate::lfd::types::{AttentionItem, AttentionStatus, Run, RunStatus, Wave};
+use crate::lfd::types::{AttentionItem, AttentionStatus, LivePrState, Run, RunStatus, Wave};
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::wave::journal::short_id;
 use crate::wave::server::live_endpoint;
@@ -50,14 +50,14 @@ pub struct WaveSnapshot {
 }
 
 /// `lf status <wave>` snapshot: the wave plus its runs, attention, and — when
-/// a server is live — its flowloop state. Wire type; no serde defaults.
+/// a server is live — its loop state. Wire type; no serde defaults.
 #[derive(Debug, Serialize)]
 pub struct WaveStatusSnapshot {
     pub wave: WaveSnapshot,
-    /// Resident flowloop state name from the live server's `/health`
+    /// Resident loop state name from the live server's `/health`
     /// (`idle | turning | interrupting | failed`), `null` when stopped or
     /// serving dormant.
-    pub flowloop: Option<String>,
+    pub loop_state: Option<String>,
     pub runs: Vec<RunSnapshot>,
     pub attention: Vec<AttentionSnapshot>,
 }
@@ -68,6 +68,8 @@ pub struct RunSnapshot {
     pub id: String,
     pub flow: String,
     pub task: Option<String>,
+    /// Current execution step; generic loops publish their pass here.
+    pub step_index: u32,
     pub status: String,
     pub branch: String,
     pub worktree: String,
@@ -75,6 +77,8 @@ pub struct RunSnapshot {
     pub ended_at: Option<String>,
     pub error: Option<String>,
     pub pr_url: Option<String>,
+    pub pr_state: Option<String>,
+    pub pr_title: Option<String>,
 }
 
 /// One attention item's snapshot for `lf status`. Wire type; no serde defaults.
@@ -114,7 +118,7 @@ pub fn ls(json: bool) -> Result<()> {
     })
 }
 
-/// `lf status <wave>` — one wave's runs, attention, and live flowloop state.
+/// `lf status <wave>` — one wave's runs, attention, and live loop state.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let name = wave
         .map(str::to_string)
@@ -131,17 +135,18 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
             .ok_or_else(|| anyhow!("wave '{name}' is not in the registry"))?;
         let snapshot = snapshot_wave(&store, &wave).await?;
-        let flowloop = match &snapshot.endpoint {
-            Some(endpoint) => flowloop_state(endpoint).await,
+        let loop_state = match &snapshot.endpoint {
+            Some(endpoint) => loop_state(endpoint).await,
             None => None,
         };
-        let runs = store
+        let stored_runs = store
             .list_runs(Some(wave.id()), Some(20))
             .await
-            .map_err(|err| anyhow!("failed to read runs: {err}"))?
-            .into_iter()
-            .map(snapshot_run)
-            .collect::<Vec<_>>();
+            .map_err(|err| anyhow!("failed to read runs: {err}"))?;
+        let mut runs = Vec::with_capacity(stored_runs.len());
+        for run in stored_runs {
+            runs.push(snapshot_run(&store, run).await?);
+        }
         let wave_id = wave.id().clone();
         let attention = store
             .list_attention_items(None, None)
@@ -153,7 +158,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .collect::<Vec<_>>();
         let status = WaveStatusSnapshot {
             wave: snapshot,
-            flowloop,
+            loop_state,
             runs,
             attention,
         };
@@ -196,18 +201,43 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
     })
 }
 
-fn snapshot_run(run: Run) -> RunSnapshot {
-    RunSnapshot {
+async fn snapshot_run(store: &SharedStore, run: Run) -> Result<RunSnapshot> {
+    let (pr_url, pr_state, pr_title) = match run.pr {
+        Some(pr) => {
+            let live_state = match pr.number {
+                Some(number) => store
+                    .get_live_pr_state(&run.repo, number)
+                    .await
+                    .map_err(|err| anyhow!("failed to read PR state: {err}"))?
+                    .map(|state| snapshot_pr_state(state.state, state.is_draft).to_string()),
+                None => None,
+            };
+            (Some(pr.url), live_state.or(pr.state), pr.title)
+        }
+        None => (None, None, None),
+    };
+    Ok(RunSnapshot {
         id: run.id.to_string(),
         flow: run.flow,
         task: run.task,
+        step_index: run.step_index,
         status: run_status_str(run.status).to_string(),
         branch: run.branch,
         worktree: run.worktree,
         started_at: run.started_at.and_then(format_time),
         ended_at: run.ended_at.and_then(format_time),
         error: run.error,
-        pr_url: run.pr.map(|pr| pr.url),
+        pr_url,
+        pr_state,
+        pr_title,
+    })
+}
+
+fn snapshot_pr_state(state: LivePrState, is_draft: bool) -> &'static str {
+    if state == LivePrState::Open && is_draft {
+        "draft"
+    } else {
+        state.as_str()
     }
 }
 
@@ -232,8 +262,8 @@ fn ambient_wave() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Ask a live server for its resident flowloop state (`/health` `flowloop` field).
-async fn flowloop_state(endpoint: &str) -> Option<String> {
+/// Ask a live server for its resident loop state (`/health` `loop` field).
+async fn loop_state(endpoint: &str) -> Option<String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
@@ -246,7 +276,7 @@ async fn flowloop_state(endpoint: &str) -> Option<String> {
         .json()
         .await
         .ok()?;
-    body.get("flowloop")
+    body.get("loop_state")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
 }
@@ -311,15 +341,15 @@ fn print_status(status: &WaveStatusSnapshot) {
     let colors = Colors::default();
     let wave = &status.wave;
     println!(
-        "{bold}{name}{reset}  {status}{flowloop}",
+        "{bold}{name}{reset}  {status}{loop_state}",
         bold = colors.bold,
         reset = colors.reset,
         name = wave.name,
         status = wave.status,
-        flowloop = status
-            .flowloop
+        loop_state = status
+            .loop_state
             .as_deref()
-            .map(|m| format!("  flowloop:{m}"))
+            .map(|m| format!("  loop:{m}"))
             .unwrap_or_default(),
     );
     println!("  goal      {}", wave.goal);
@@ -412,11 +442,12 @@ mod tests {
                 created_at: None,
                 parent_wave_id: None,
             },
-            flowloop: None,
+            loop_state: None,
             runs: vec![RunSnapshot {
                 id: "run-1".into(),
                 flow: "implement".into(),
                 task: Some("wire it".into()),
+                step_index: 2,
                 status: "running".into(),
                 branch: "b".into(),
                 worktree: "/wt".into(),
@@ -424,6 +455,8 @@ mod tests {
                 ended_at: None,
                 error: None,
                 pr_url: None,
+                pr_state: None,
+                pr_title: None,
             }],
             attention: vec![AttentionSnapshot {
                 id: "att-1".into(),
@@ -437,8 +470,18 @@ mod tests {
         };
         let value: serde_json::Value = serde_json::to_value(&status).expect("serialize");
         assert_eq!(value["wave"]["name"], "goals");
-        assert_eq!(value["flowloop"], serde_json::Value::Null);
+        assert_eq!(value["loop_state"], serde_json::Value::Null);
         assert_eq!(value["runs"][0]["flow"], "implement");
+        assert_eq!(value["runs"][0]["step_index"], 2);
+        assert_eq!(value["runs"][0]["pr_state"], serde_json::Value::Null);
+        assert_eq!(value["runs"][0]["pr_title"], serde_json::Value::Null);
         assert_eq!(value["attention"][0]["kind"], "interactive");
+    }
+
+    #[test]
+    fn draft_live_pr_state_stays_distinct_from_open() {
+        assert_eq!(snapshot_pr_state(LivePrState::Open, true), "draft");
+        assert_eq!(snapshot_pr_state(LivePrState::Open, false), "open");
+        assert_eq!(snapshot_pr_state(LivePrState::Closed, true), "closed");
     }
 }

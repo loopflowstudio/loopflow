@@ -1,4 +1,5 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -6,6 +7,22 @@ use crate::engine::{check_cli_available, codex_permission_args, workspace_add_di
 
 pub fn find_repo_root() -> Result<PathBuf> {
     crate::engine::repo::find_repo_root()
+}
+
+/// Message text from the args (joined) or stdin (heredoc-friendly). The
+/// speech verbs — `lf chat`, `lf radio` — take their text the same way.
+pub(crate) fn message_text(args: &[String], mut stdin: impl Read) -> Result<String> {
+    let joined = args.join(" ").trim().to_string();
+    if !joined.is_empty() {
+        return Ok(joined);
+    }
+    let mut buffer = String::new();
+    stdin.read_to_string(&mut buffer)?;
+    let text = buffer.trim().to_string();
+    if text.is_empty() {
+        bail!("no message text: pass TEXT or pipe it on stdin");
+    }
+    Ok(text)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,6 +257,18 @@ mod tests {
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn message_text_prefers_args_then_stdin_then_errors() {
+        let text = message_text(&["hello".into(), "world".into()], std::io::empty()).unwrap();
+        assert_eq!(text, "hello world");
+
+        let text = message_text(&[], std::io::Cursor::new("from stdin\n")).unwrap();
+        assert_eq!(text, "from stdin");
+
+        let err = message_text(&[], std::io::empty()).unwrap_err();
+        assert!(err.to_string().contains("no message text"));
     }
 
     #[test]

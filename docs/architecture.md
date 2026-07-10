@@ -50,7 +50,7 @@ Git/PR/PM ops             Clients
 | Skill | `.lf/skills/` and built-ins | `engine` |
 | Flow | `.lf/flows/` and built-ins | `engine` |
 | Direction | `.lf/directions/` | `engine` prompt assembly |
-| Wave goal | `wave/<name>/GOAL.md` | `lf wave` server + resident flowloop |
+| Wave goal | `wave/<name>/GOAL.md` | `lf serve` server + resident loop |
 | Wave memory | `wave/<name>/MEMORY.md` | wave agent |
 | Task | Linear | `lf pm` and wave flows |
 | Session | lfdb | `lf` runs and placement flags |
@@ -79,7 +79,7 @@ side-effectful workflows around git, PRs, PM providers, and release artifacts.
 `lfd` is the gatekeeper: it serves read routes and the event push, verifies
 GitHub webhooks and translates them inward as `lf` execs, refreshes provider
 tokens, and tidies the registry at boot. It dispatches no work; waves and
-ordinary `lf --dispatch` / `--stack` / `--fork` runs own agent execution.
+ordinary blocking and server-owned detached `lf loop` runs own agent execution.
 
 Important paths:
 

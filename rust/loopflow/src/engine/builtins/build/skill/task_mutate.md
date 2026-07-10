@@ -4,7 +4,7 @@ default_agent: codex
 action_style: procedural
 ---
 Mutate the task lifecycle honestly. The loop's termination mechanics are in
-the `<lf:flowloop>` instruction; this is the judgment about WHEN.
+the `<lf:loop>` instruction; this is the judgment about WHEN.
 
 ## Orientation
 

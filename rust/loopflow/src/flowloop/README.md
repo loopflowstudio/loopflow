@@ -48,7 +48,7 @@ read-only inspection. Both execute headlessly and fork a worktree.
   (`lf -b flow <flow>`, killed on timeout) — the loopable unit.
 - `driver.rs` — the loop: place → pass → read the loop file → done / recheck
   / continue, under caps (max passes, wall clock; exhaustion escalates via
-  `lf chat --parent`).
+  `lf radio` on the hand's channel).
 - `run.rs` — `LoopRun`: the registry-backed run lifecycle (worktree,
   store row, status). The row is what makes a running loop visible as an
   open task.
@@ -63,5 +63,6 @@ in the project's own doc, bit = all KRs checked). Tier behavior lives in the
 skill texts — defining a new kind of loop is writing a flow + skills,
 zero Rust.
 
-Phase runs are plumbing — never surfaced in the product. Chat is the one
-interface to a loop; only execs surface as attachable sessions.
+Phase runs are plumbing — never surfaced in the product. A served wave's
+thread is the one conversation surface; bounded loops are hands, with only
+their read-only tmux sessions exposed for inspection.

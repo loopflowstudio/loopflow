@@ -50,13 +50,13 @@ Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
 wave's journal and endpoint live at the origin); its playhead enters the wave's
 worktree and gives each flow step a live harness session. Progress and chat are
 a single conversation: `lf chat --steer` reaches the body now playing (and
-queues when it cannot), while attributed messages from workers and scripts
-queue for the next one. Truth is an append-only journal, so a restart keeps the
-whole thread. `lf chat` and `lf memory` are the message doors for loops,
-workers, humans, and scripts; worker reports arrive attributed in the thread.
-Outside any wave a publish drops silently (exit 0) — the verbs are safe in
-every prompt. See `rust/loopflow/src/wave/README.md` for the wire contract,
-and `scripts/demo_wave.sh` for the guided demo.
+queues when it cannot). Truth is an append-only journal, so a restart keeps the
+whole thread. Humans use `lf chat`; agents broadcast with `lf radio`; `lf
+memory` curates retained facts. A served wave folds family reports into its
+thread with attribution. Outside any wave a publish prints a short drop note
+and exits 0, so the verbs are safe in every prompt. See
+`rust/loopflow/src/wave/README.md` for the wire contract, and
+`scripts/demo_wave.sh` for the guided demo.
 
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 

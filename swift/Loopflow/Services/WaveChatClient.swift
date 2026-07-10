@@ -1,6 +1,6 @@
 import Foundation
 
-// Live client for a wave's chat server. A running `lf loop <name>` publishes its
+// Live client for a wave's chat server. A running `lf serve <name>` publishes its
 // loopback address to `wave/<name>/.wave-endpoint`; this client discovers it,
 // consumes the unified `GET /events` SSE stream (turn + state + memory frames,
 // thread replay on connect), and posts messages back. When the pointer file is

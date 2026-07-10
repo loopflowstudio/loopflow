@@ -155,7 +155,7 @@ lf memory update < MEMORY.md                # replace it from stdin
 
 | Command | What it does |
 |---------|--------------|
-| `lf chat [TEXT]` | Post a message into a wave's thread; reads stdin when TEXT is omitted. Outside any wave the publish drops silently (exit 0), so the verb is safe in every prompt |
+| `lf chat [TEXT]` | Post a message into a wave's thread; reads stdin when TEXT is omitted. Outside any wave it prints a short drop note and exits 0, so the verb is safe in every prompt |
 | `lf wavechat [WAVE]` | Replay and follow a served mind's thread while typed lines post into it; `/status` reads health and `/quit` leaves |
 | `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 

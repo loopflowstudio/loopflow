@@ -61,10 +61,7 @@ impl BusListener {
     pub async fn attach(&self) -> anyhow::Result<()> {
         let stored = self.store.bus_cursor(self.subscriber.clone()).await?;
         let cursor = match stored {
-            Some(cursor) => {
-                self.report_gap(cursor).await?;
-                cursor
-            }
+            Some(cursor) => self.report_gap(cursor).await?,
             None => self.store.bus_head().await?,
         };
         *self.cursor.lock().await = cursor;
@@ -122,12 +119,12 @@ impl BusListener {
     /// A durable cursor below the oldest surviving frame means the sweeper
     /// reached reports this mind never read. Say so in the thread — a silent
     /// miss is the failure mode of treating a wire like a log.
-    async fn report_gap(&self, cursor: i64) -> anyhow::Result<()> {
+    async fn report_gap(&self, cursor: i64) -> anyhow::Result<i64> {
         let Some(floor) = self.store.bus_floor().await? else {
-            return Ok(());
+            return Ok(cursor);
         };
         if floor <= cursor + 1 {
-            return Ok(());
+            return Ok(cursor);
         }
         let missed = floor - cursor - 1;
         self.runtime.deliver_say(
@@ -141,7 +138,11 @@ impl BusListener {
                 label: "bus".to_string(),
             },
         );
-        Ok(())
+        // Consume the missing range as well as announcing it. On an emptied
+        // bus there is no surviving row for `poll_once` to advance through;
+        // leaving the old cursor behind would repeat the same warning on
+        // every restart until somebody happened to publish again.
+        Ok(floor - 1)
     }
 }
 
@@ -289,7 +290,7 @@ mod tests {
         let store = temp_store(tmp.path()).await;
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(&origin).unwrap();
-        let runtime = WaveRuntime::open("ship".into(), origin).expect("runtime");
+        let runtime = WaveRuntime::open("ship".into(), origin.clone()).expect("runtime");
 
         store
             .set_bus_cursor("ship".into(), 0)
@@ -318,6 +319,16 @@ mod tests {
             "the miss is visible on an emptied bus: {}",
             thread[0].text
         );
+
+        // The gap itself advances the durable cursor. A restart before any
+        // new publish must not announce the same missing frame again.
+        assert_eq!(store.bus_cursor("ship".into()).await.unwrap(), Some(1));
+        drop(runtime);
+        let runtime = WaveRuntime::open("ship".into(), origin).expect("runtime");
+        let listener = BusListener::new(runtime.clone(), store);
+        listener.attach().await.expect("reattach");
+        listener.poll_once().await.expect("poll");
+        assert_eq!(runtime.thread_snapshot().len(), 1, "gap announced once");
     }
 
     /// Backdate every frame on the bus by `seconds`, writing the store's file

@@ -1,4 +1,4 @@
-//! `lf loop <name>` — one mind implemented as a listener and resident pair.
+//! `lf serve <name>` — one mind implemented as a listener and resident pair.
 //!
 //! The listener (this module's `serve`) is the channel made durable — pure
 //! hear / check / fold / tell, vendor-free:
@@ -18,7 +18,7 @@
 //! deltas back through the resident door. The wire between them is [`wire`].
 //!
 //! ```text
-//!   lf loop <name>                      internal resident invocation
+//!   lf serve <name>                     lf __resident <name>
 //!   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
 //!   │ LISTENER (origin repo)│──────────▶│ RESIDENT (<repo>.<wave>) │
 //!   │ pens · folds · doors  │           │ pass scheduler           │
@@ -27,9 +27,9 @@
 //!              └────────── /events?inbox=true ───────┘
 //! ```
 //!
-//! `lf loop <name>` boots the listener and spawns the resident as the same
-//! command carrying private endpoint/token environment. The split is runtime
-//! plumbing, not a second product surface.
+//! `lf serve <name>` boots the listener, which spawns `lf __resident <name>`
+//! carrying private endpoint/token environment. The split is runtime plumbing,
+//! not a second product surface.
 //!
 //! Truth is the per-wave append-only [`journal`] (JSONL under `.lf/journal/
 //! waves/<name>/` in the ORIGIN repo — the listener serves from the origin
@@ -143,7 +143,7 @@ async fn resolve_registry(
     }
 }
 
-/// The production resident spawner: `lf loop <wave>`, run by this
+/// The production resident spawner: `lf __resident <wave>`, run by this
 /// same executable, endpoint + token + wave-session context in env. The
 /// resident's stdout/stderr inherit — one `lf serve` terminal shows both
 /// halves, today's UX.

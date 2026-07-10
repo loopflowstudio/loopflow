@@ -23,8 +23,8 @@
 //! `done` ends the loop. `recheck` is an agent-authored predicate the driver
 //! polls mechanically (free — no pass burned) until it exits 0, then runs
 //! one more pass so the flow can do its close-out and write `done`. No file
-//! → the next pass starts immediately. Caps (max passes, wall clock)
-//! escalate via `lf chat --parent` and error out.
+//! → the next pass starts immediately. Caps (max passes, wall clock) report
+//! failure on the hand's bus channel and error out.
 
 use std::path::Path;
 use std::process::Command;
@@ -191,7 +191,7 @@ fn loop_instruction(pass: u32, max_passes: u32) -> String {
          runs one more pass when it exits 0.\n\n\
          The file is consumed at every boundary — write it fresh each pass \
          or the loop simply continues. Exhausting the pass budget without \
-         `done` escalates to the parent as a failure.\n\
+         `done` reports a failure to the wave.\n\
          </lf:loop>"
     )
 }
@@ -210,7 +210,7 @@ fn drive(
     };
     for n in 1..=options.max_passes {
         check_wall_clock(started, options.wall_clock).inspect_err(|err| {
-            escalate_parent(&err.to_string());
+            report_failure(worktree, &err.to_string());
         })?;
         eprintln!("{} pass {n}/{}", options.flow, options.max_passes);
         let pass_seed = format!("{seed}\n\n{}", loop_instruction(n, options.max_passes));
@@ -230,7 +230,7 @@ fn drive(
         "loop {} exhausted {} pass(es) without done",
         options.flow, options.max_passes
     );
-    escalate_parent(&message);
+    report_failure(worktree, &message);
     Err(OpsError::Message(message))
 }
 
@@ -258,7 +258,7 @@ fn wait_for_recheck(
     eprintln!("waiting: {predicate}");
     loop {
         check_wall_clock(started, options.wall_clock).inspect_err(|err| {
-            escalate_parent(&err.to_string());
+            report_failure(worktree, &err.to_string());
         })?;
         let fired = Command::new("sh")
             .args(["-c", predicate])
@@ -282,7 +282,7 @@ fn check_wall_clock(started: Instant, wall_clock: Duration) -> OpsResult<()> {
     Ok(())
 }
 
-fn escalate_parent(message: &str) {
+fn report_failure(worktree: &Path, message: &str) {
     // In tests current_exe is the test binary; execing it as `lf` is noise.
     if cfg!(test) {
         return;
@@ -291,7 +291,10 @@ fn escalate_parent(message: &str) {
         .map(Command::new)
         .unwrap_or_else(|_| Command::new("lf"));
     let mut cmd = exe;
-    let _ = cmd.arg("chat").arg("--parent").arg(message).status();
+    // Resolve the hand's own channel from its placed worktree. The served
+    // wave subscribes to that family and folds the report into its thread;
+    // `--parent` would instead mean a promoted wave's parent_wave_id.
+    let _ = cmd.arg("radio").arg(message).current_dir(worktree).status();
 }
 
 #[cfg(test)]

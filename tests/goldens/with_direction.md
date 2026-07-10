@@ -106,7 +106,7 @@ it is.
 replayed thread. It is not an agent verb; agents use `lf radio`. Use these
 unconditionally. The bus is a table, not a server: `lf radio` and `lf sub` work
 whether or not any wave is running, and a wave asleep when you reported hears
-you when it wakes. Outside any wave they drop silently (exit 0) -
+you when it wakes. Outside any wave they print a short drop note and exit 0 -
 publish-to-no-subscriber is correct pubsub, never a blocker.
 
 ## Tasks Live in Linear

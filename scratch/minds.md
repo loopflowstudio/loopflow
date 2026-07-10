@@ -438,7 +438,7 @@ covered by its chat-command tests and the live-body done-when test.
 | §9 The db IS the bus: `bus_messages` + `bus_cursors`, publish is an INSERT, sweep rides the publish (1h window) | `lfdb/migrations/059_bus.sql`, `lfdb/sqlite.rs`, `lfdb/mod.rs` |
 | §9 `lf radio` is its own command with no server in the path; `--steer` is a parse error | `lf/commands/radio.rs`, `lf/mod.rs`, `bin/lf.rs` |
 | §9 `lf sub` polls the bus by prefix; the SSE thread-follower moved out to back `lf wavechat` | `lf/commands/sub.rs`, `lf/commands/thread.rs` |
-| §9 The listener demotes to a subscriber: durable cursor, exactly-once fold, visible cursor jump past the window | `wave/bus.rs`, `wave/mod.rs` |
+| §9 The listener demotes to a subscriber: durable cursor, at-least-once fold, visible cursor jump past the window | `wave/bus.rs`, `wave/mod.rs` |
 | §9 Broker deleted: `family_tx`, `ChannelFrame`, `tagged_turn_json`, `deliver_to_channel`, `subscribe_channels`, `?channel=`/`?prefix=`, `/messages`'s `channel` | `wave/runtime.rs`, `wave/server.rs`, `wave/channel.rs`, `lf/commands/chat.rs` |
 | §9 Doctrine: LOOPFLOW.md's radio block loses the "wave must be running" caveat; byline reads as testimony | `engine/builtins/LOOPFLOW.md`, `wave/README.md` |
 

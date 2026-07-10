@@ -2,7 +2,7 @@
 //! scheduled by events, publishing through the wire.
 //!
 //! This runs inside the resident process (the internal half of
-//! `lf loop <name>`,
+//! `lf serve <name>`,
 //! see [`crate::wave::resident`]) — never in the listener. A turn is one
 //! `wave` flow (`wave_clarify → wave_pursue → wave_mutate`) run as a
 //! bounded headless child in the wave home; continuity is GOAL.md + memory +
@@ -241,7 +241,7 @@ fn orchestration_discipline(wave: &str) -> String {
          needs this wave's live memory/chat: `lf loop <flow> \"<task>\" \
          --wave {wave}`. This is one blocking tool call.\n\
          - Delegate self-sufficient work with the same command plus `--detach`. \
-         Detached hands must report with `lf chat`, publish learnings with \
+         Detached hands must report with `lf radio`, publish learnings with \
          `lf memory add`, and leave done as a PR.\n\
          - Keep turns centered on selection, sequencing, and authored reports.\n\
          - Trust worker summaries; never re-read worker transcripts.\n\

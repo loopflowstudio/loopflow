@@ -58,7 +58,7 @@ pub const LISTENER_INTERRUPT_DEADLINE: Duration = Duration::from_secs(20);
 /// How often an attached (not spawned) resident's pid is probed.
 pub const ATTACH_PROBE: Duration = Duration::from_secs(10);
 
-/// Spawn one resident process. Production spawns `lf loop <name>` with the
+/// Spawn one resident process. Production spawns `lf __resident <name>` with the
 /// resident endpoint/token in its environment
 /// (the current executable); tests spawn whatever stands in for a resident.
 /// A closure, not a trait: the supervisor needs exactly one behavior.

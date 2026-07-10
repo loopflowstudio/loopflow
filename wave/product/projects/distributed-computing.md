@@ -10,7 +10,7 @@ the user has to reconcile.
   identity, repo context, and audit trail intact throughout — the remote
   runs are indistinguishable in the record except for their host.
 - Reattach, interrupt, report, and recover succeed across local and remote
-  workers N/N trials over that week.
+  workers in 5/5 trials for each operation over that week.
 - Trust, credential, spend, and ownership boundaries are explicit and hold
   unattended — no remote run exceeds its authority or budget in the window.
 - One vocabulary survives the distribution: a month of mixed local/remote

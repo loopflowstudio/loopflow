@@ -4,7 +4,6 @@ crons:
   schedule: 0 0 8 * * * *
 pm:
   provider: linear
-  linear_project: 9ee88f2a-ef37-46c7-b201-d197db3ccae0
   linear_initiative: 33e774b0-ec3b-4bd6-a4f8-07676f9e897b
 ---
 

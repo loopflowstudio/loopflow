@@ -39,9 +39,6 @@ pub(crate) enum Query {
     DeleteChatMemoryBlock,
     ResetStaleActiveWaves,
     ListChildWaves,
-    RecordRunTokenUsage,
-    AggregateTokenUsageByWaveProvider,
-    AggregateTokenUsageByRepoProvider,
     ListRunsActiveOrEndedSince,
 }
 
@@ -78,9 +75,6 @@ impl Query {
         Self::DeleteChatMemoryBlock,
         Self::ResetStaleActiveWaves,
         Self::ListChildWaves,
-        Self::RecordRunTokenUsage,
-        Self::AggregateTokenUsageByWaveProvider,
-        Self::AggregateTokenUsageByRepoProvider,
         Self::ListRunsActiveOrEndedSince,
     ];
 }
@@ -220,23 +214,6 @@ const QUERY_DEFS: [QueryDef; QUERY_COUNT] = [
     // ListChildWaves — a chord's contents are its children, ordered by creation.
     QueryDef {
         template: "SELECT id, name, direction, area, paused, created_at, workers,\n                    goal, metrics, parent_wave_id,\n                    repo, worktree, branch, status, iteration, cycle_start_iteration\n             FROM waves\n             WHERE parent_wave_id = {p1}\n             ORDER BY created_at ASC",
-        sqlite_override: None,
-    },
-    // RecordRunTokenUsage — one row per run, replaced if re-recorded.
-    QueryDef {
-        template: "INSERT INTO run_token_usage (\n                run_id, wave, provider, model, input_tokens, output_tokens, cache_read_tokens, recorded_at, repo\n            ) VALUES ({p1}, {p2}, {p3}, {p4}, {p5}, {p6}, {p7}, {p8}, {p9})\n            ON CONFLICT(run_id) DO UPDATE SET\n                wave = excluded.wave,\n                provider = excluded.provider,\n                model = excluded.model,\n                input_tokens = excluded.input_tokens,\n                output_tokens = excluded.output_tokens,\n                cache_read_tokens = excluded.cache_read_tokens,\n                recorded_at = excluded.recorded_at,\n                repo = excluded.repo",
-        sqlite_override: None,
-    },
-    // AggregateTokenUsageByWaveProvider — totals grouped by wave and provider.
-    QueryDef {
-        template: "SELECT wave, provider,\n                    CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT),\n                    CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT),\n                    CAST(COALESCE(SUM(cache_read_tokens), 0) AS BIGINT)\n             FROM run_token_usage\n             GROUP BY wave, provider\n             ORDER BY wave, provider",
-        sqlite_override: None,
-    },
-    // AggregateTokenUsageByRepoProvider — totals grouped by repo and provider.
-    // repo is nullable (rows recorded before migration 043 have NULL); NULLs
-    // group together. CAST mirrors the wave/provider aggregate above.
-    QueryDef {
-        template: "SELECT repo, provider,\n                    CAST(COALESCE(SUM(input_tokens), 0) AS BIGINT),\n                    CAST(COALESCE(SUM(output_tokens), 0) AS BIGINT),\n                    CAST(COALESCE(SUM(cache_read_tokens), 0) AS BIGINT)\n             FROM run_token_usage\n             GROUP BY repo, provider\n             ORDER BY repo, provider",
         sqlite_override: None,
     },
     // ListRunsActiveOrEndedSince — the push bridge's working set: every

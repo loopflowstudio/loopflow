@@ -597,15 +597,26 @@ fn main() -> anyhow::Result<()> {
                 loopflow::flowloop::driver::run_flowloop(repo, seed, &options)
                     .map_err(anyhow::Error::from)
             }),
-            Some(Commands::Usage) => loopflow::lf::commands::usage::run(),
+            Some(Commands::Tokens { json, days }) => {
+                loopflow::lf::commands::tokens::run(*json, *days)
+            }
+            Some(Commands::Usage { json, days }) => {
+                loopflow::lf::commands::usage::run(*json, *days)
+            }
+            Some(Commands::Doctor { json }) => loopflow::lf::commands::doctor::run(*json),
             Some(Commands::Ls { json }) => loopflow::lf::commands::waves::ls(*json),
             Some(Commands::Status { wave, json }) => {
                 loopflow::lf::commands::waves::status(wave.as_deref(), *json)
             }
             Some(Commands::Runs { json }) => loopflow::lf::commands::runs::list(*json),
-            Some(Commands::Trace { run_id }) => loopflow::lf::commands::runs::trace(run_id),
+            Some(Commands::Trace { run_id, json }) => {
+                loopflow::lf::commands::runs::trace(run_id, *json)
+            }
             Some(Commands::Chat { text, from, target }) => {
                 loopflow::lf::commands::chat::run(text, from.as_deref(), target)
+            }
+            Some(Commands::Wavechat { wave, from }) => {
+                loopflow::lf::commands::wavechat::run(wave.as_deref(), from.as_deref())
             }
             Some(Commands::Sub { wave, json }) => {
                 loopflow::lf::commands::sub::run(wave.as_deref(), *json)
@@ -685,13 +696,16 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Cron { .. })
         | Some(Commands::Wave { .. })
         | Some(Commands::Task { .. })
-        | Some(Commands::Usage)
+        | Some(Commands::Usage { .. })
+        | Some(Commands::Tokens { .. })
+        | Some(Commands::Doctor { .. })
         | Some(Commands::Ls { .. })
         | Some(Commands::Status { .. })
         | Some(Commands::Runs { .. })
         | Some(Commands::Trace { .. })
         | Some(Commands::Chat { .. })
         | Some(Commands::Sub { .. })
+        | Some(Commands::Wavechat { .. })
         | Some(Commands::Memory { .. })
         | Some(Commands::Ssh { .. }) => None,
     }

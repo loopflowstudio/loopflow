@@ -621,8 +621,11 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         | Some(Commands::Status { .. })
         | Some(Commands::Runs { .. })
         | Some(Commands::Sub { .. })
+        | Some(Commands::Wavechat { .. })
         | Some(Commands::Trace { .. })
-        | Some(Commands::Usage) => ExecVerdict::Allow,
+        | Some(Commands::Usage { .. })
+        | Some(Commands::Tokens { .. })
+        | Some(Commands::Doctor { .. }) => ExecVerdict::Allow,
         // A flow/skill run or an inline prompt: allowed only when it will land
         // in a sandboxed worktree (`--dispatch`), never run in the outwave.
         Some(Commands::External(parts)) => {

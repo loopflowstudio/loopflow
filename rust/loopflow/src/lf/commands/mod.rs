@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod chat;
+pub mod doctor;
 pub mod flow;
 pub mod list;
 pub mod memory;
@@ -8,6 +9,8 @@ pub mod run;
 pub mod runs;
 pub mod ssh;
 pub mod sub;
+pub mod tokens;
 pub mod usage;
 pub mod util;
+pub mod wavechat;
 pub mod waves;

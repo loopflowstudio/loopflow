@@ -12,7 +12,7 @@ cargo test --all                       # Rust tests
 uv run pytest python/tests/            # Python tests
 cd website && uv run python dev.py test # Website tests
 swift test --package-path swift        # Swift package tests
-cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO  # Loopflow UI
+cd swift && xcodegen generate && xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO  # Loopflow UI compile
 tests/e2e/test_smoke.sh               # E2E smoke
 uv run pytest tests/regression/ -v     # nightly/weekly release gate
 ```
@@ -83,12 +83,14 @@ swift test --package-path swift --filter SomeTestClass  # Filtered
 
 ## Loopflow UI Tests
 
-UI tests for the macOS app. Requires Xcode and xcodegen.
+Compile the macOS app and its test targets. Requires Xcode and xcodegen. Swift
+package tests already exercise the shared suites; CI uses `build-for-testing`
+here because launching the hosted app test runner can exit before bootstrapping.
 
 ```bash
 cd swift
 xcodegen generate
-xcodebuild test -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```
 
 ## What CI Runs
@@ -102,7 +104,7 @@ See `.github/workflows/ci.yml`. Six parallel jobs:
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` |
 | `swift-test` | macos-15 | `swift test --package-path swift` |
-| `loopflow-ui-test` | macos-15 | xcodegen + xcodebuild |
+| `loopflow-ui-test` | macos-15 | xcodegen + xcodebuild build-for-testing |
 
 All six must pass for PRs to merge.
 
@@ -129,6 +131,12 @@ Prompt parity and golden prompt tests live in Rust.
 cargo test -p loopflow golden_prompt
 uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after prompt changes
 ```
+
+Migration coverage includes a drifted-database fixture, not only a fresh
+schema chain. `the_migration_starts_the_ledger_empty` seeds the pre-057
+`run_events` shape and proves the identity cutover truncates ambiguous history,
+then recreates `process_id` as `NOT NULL`. A separate storage regression proves
+the rebuilt table rejects vocabulary drift.
 
 ## E2E Tests
 

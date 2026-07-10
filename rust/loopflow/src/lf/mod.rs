@@ -248,8 +248,30 @@ pub enum Commands {
         #[arg(long = "max-turns")]
         max_turns: Option<u32>,
     },
-    /// Show token usage by repo and provider (from a running lfd)
-    Usage,
+    /// Measure this codebase: lines and tokens per directory (tracked files only)
+    Tokens {
+        /// Emit as JSON
+        #[arg(long)]
+        json: bool,
+        /// Walk git history instead: the codebase's size on each day it changed
+        #[arg(long, value_name = "DAYS")]
+        days: Option<u32>,
+    },
+    /// Show token usage and cost by repo and provider (from the local ledger)
+    Usage {
+        /// Emit per-boundary spend (skill, provider:model, repo) as JSON
+        #[arg(long)]
+        json: bool,
+        /// Window for --json, in days
+        #[arg(long, default_value_t = 30)]
+        days: u32,
+    },
+    /// Audit the local run ledger: continuity, vocabulary, attribution, identity, lineage, coverage
+    Doctor {
+        /// Emit the audit as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// List every wave in the registry (running and stopped), marking which
     /// have a live server. Local-only query over the shared ledger.
     Ls {
@@ -276,6 +298,9 @@ pub enum Commands {
     Trace {
         /// Run id from `lf runs` (a unique prefix is enough)
         run_id: String,
+        /// Emit the process tree as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Post a message into a wave's thread (worker reports, child-wave
     /// escalations, proactive FYIs). Reads stdin when TEXT is omitted.
@@ -289,6 +314,16 @@ pub enum Commands {
         from: Option<String>,
         #[command(flatten)]
         target: WaveTargetArgs,
+    },
+    /// Steer and monitor a wave from one terminal pane: its live events scroll
+    /// past while a typed line is spoken into the thread. `lf chat` publishes;
+    /// `lf sub` reads; this does both.
+    Wavechat {
+        /// Wave name (default: the ambient wave — env, else worktree)
+        wave: Option<String>,
+        /// Attribution label for machine speech (e.g. --from ci)
+        #[arg(long)]
+        from: Option<String>,
     },
     /// Follow a wave's live event stream (turns, flowloop state, memory) until
     /// killed. Defaults to the invoking context's wave; exits 0 with a note

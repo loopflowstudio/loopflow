@@ -165,13 +165,15 @@ def _loopflow_commands(_changed: list[str]) -> list[Command]:
         Command(
             [
                 "xcodebuild",
-                "test",
+                "build-for-testing",
                 "-project",
                 "LoopflowSwift.xcodeproj",
                 "-scheme",
                 "LoopflowMac",
                 "-destination",
                 "platform=macOS",
+                "-derivedDataPath",
+                "DerivedData",
                 "CODE_SIGNING_ALLOWED=NO",
                 "CODE_SIGNING_REQUIRED=NO",
             ],

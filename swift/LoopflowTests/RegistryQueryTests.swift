@@ -101,16 +101,56 @@ struct RegistryQueryTests {
     @Test("lf runs decodes the ledger window")
     func runsDecode() async throws {
         let json = """
-        [{"id":"abc","repo":"loopflow","wave":"goals","label":"gate","status":"ok","started":100,"ended":110,"input_tokens":1000,"output_tokens":200}]
+        [{"id":"span-1","run_id":"abc","process_id":"span-1","parent_process_id":null,"repo":"/src/loopflow","wave":"goals","label":"gate","status":"ok","started":100,"ended":110,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":800,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus"}]
         """
         let query = RegistryQuery { _, _ in json }
 
         let runs = try await query.recentRuns()
         #expect(runs.count == 1)
-        #expect(runs[0].id == "abc")
+        #expect(runs[0].id == "span-1")
+        #expect(runs[0].runId == "abc")
         #expect(runs[0].wave == "goals")
         #expect(runs[0].status == "ok")
         #expect(runs[0].ended == 110)
+        #expect(runs[0].cacheReadTokens == 800)
+        #expect(runs[0].model == "opus")
+    }
+
+    @Test("lf usage --json preserves lineage and unspent spans")
+    func spendDecodes() async throws {
+        let json = """
+        [{"run_id":"abc","process_id":"child","parent_process_id":"parent","seq":7,"node":"run","name":"lf pm show","repo":null,"wave":null,"flow":null,"skill":null,"started_at":100,"ended_at":null,"status":"open","input_tokens":null,"output_tokens":null,"cache_read_tokens":null,"cost_usd":null,"duration_secs":null,"provider":null,"model":null}]
+        """
+        let query = RegistryQuery { args, _ in
+            #expect(args == ["usage", "--json", "--days", "30"])
+            return json
+        }
+
+        let spans = try await query.spend()
+        #expect(spans[0].processId == "child")
+        #expect(spans[0].id == "child-7")
+        #expect(spans[0].parentProcessId == "parent")
+        #expect(spans[0].status == "open")
+        #expect(spans[0].endedAt == nil)
+        // A span that spent nothing carries nulls, not zeros.
+        #expect(spans[0].totalTokens == 0)
+        #expect(spans[0].agent == "unattributed")
+    }
+
+    @Test("lf doctor decodes every check")
+    func doctorDecodes() async throws {
+        let json = """
+        {"rows":2,"checks":[{"name":"lineage","status":"ok","detail":"every parent process resolves"}]}
+        """
+        let query = RegistryQuery { args, _ in
+            #expect(args == ["doctor", "--json"])
+            return json
+        }
+
+        let report = try await query.doctor()
+        #expect(report.rows == 2)
+        #expect(report.checks[0].name == "lineage")
+        #expect(report.checks[0].status == "ok")
     }
 
     @Test("run status accepts lf runs folded ok token")

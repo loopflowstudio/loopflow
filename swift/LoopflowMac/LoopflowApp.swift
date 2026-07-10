@@ -90,6 +90,14 @@ struct LoopflowApp: App {
         }
         .defaultSize(width: 1080, height: 760)
 
+        Window("Telemetry", id: "telemetry") {
+            TelemetryDashboardView()
+                .tint(.loopflowBurgundy)
+                .preferredColorScheme(theme.preferredScheme)
+                .environment(\.palette, theme.palette)
+        }
+        .defaultSize(width: 1180, height: 860)
+
         Window("Terminal Test", id: "terminal-test") {
             TerminalTestWindow()
                 .preferredColorScheme(theme.preferredScheme)
@@ -134,6 +142,11 @@ struct LoopflowApp: App {
                     openWindow(id: "portfolio")
                 }
                 .keyboardShortcut("0", modifiers: .command)
+
+                Button("Telemetry") {
+                    openWindow(id: "telemetry")
+                }
+                .keyboardShortcut("1", modifiers: .command)
 
                 if !portfolioService.repos.isEmpty {
                     Menu("Move to Repo") {

@@ -9,7 +9,6 @@ pub mod repos;
 pub mod runs;
 pub mod session_controls;
 pub mod system;
-pub mod usage;
 pub mod waves;
 pub mod worktrees;
 

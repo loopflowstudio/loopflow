@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use loopflow::chat::turns::{ChatRole, ChatTurn};
 use loopflow::chat::types::{ConversationItem, Lifecycle};
-use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, UsageReportDto, WaveDto};
+use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, WaveDto};
 use loopflow::wave::state::FlowloopState;
 use loopflow::wave::wire::{
     AttachRequest, AttachResponse, ContextResponse, PostDeltasRequest, ResidentDelta,
@@ -127,47 +127,6 @@ fn create_session_request_fixture_pins_required_fields() {
     assert_eq!(request.flow, "ship");
     assert_eq!(request.worktree, "/tmp/repo.Desktop");
     assert_eq!(request.agent, "codex");
-}
-
-#[test]
-fn usage_report_fixture_pins_repo_provider_shape() {
-    let value = load_fixture("usage_report.json");
-    assert_eq!(value["object"], "usage_report");
-    let report: UsageReportDto =
-        serde_json::from_value(value).expect("usage report fixture should parse");
-
-    assert_eq!(report.by_repo_provider.len(), 3);
-    let loopflow_claude = report
-        .by_repo_provider
-        .iter()
-        .find(|row| row.repo.as_deref() == Some("/Users/jack/src/loopflow"))
-        .expect("loopflow/claude row");
-    assert_eq!(loopflow_claude.provider, "claude");
-    assert_eq!(loopflow_claude.input_tokens, 400);
-    assert_eq!(loopflow_claude.cache_read_tokens, 15);
-
-    // repo is explicitly Optional: a null repo round-trips as None.
-    let unattributed = report
-        .by_repo_provider
-        .iter()
-        .find(|row| row.repo.is_none())
-        .expect("null-repo row");
-    assert_eq!(unattributed.provider, "claude");
-
-    assert_eq!(report.by_wave_provider.len(), 1);
-    assert_eq!(
-        report.by_wave_provider[0].wave_id,
-        "lfdwave_01HNX7XYZ0AZ1B2C3D4E5F6G7H"
-    );
-    assert_eq!(report.by_provider.len(), 2);
-
-    // Round-trip: serializing back preserves the explicit null repo.
-    let roundtrip = serde_json::to_value(&report).expect("serialize usage report");
-    assert!(roundtrip["by_repo_provider"]
-        .as_array()
-        .expect("array")
-        .iter()
-        .any(|row| row["repo"].is_null()));
 }
 
 /// `POST /messages` response — `{turn, state}` (wave/server.rs

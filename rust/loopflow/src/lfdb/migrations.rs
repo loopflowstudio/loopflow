@@ -226,6 +226,22 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "054_step_to_skill",
         sql: include_str!("migrations/054_step_to_skill.sql"),
     },
+    Migration {
+        version: "055_run_events_step_index_repair",
+        sql: include_str!("migrations/055_run_events_step_index_repair.sql"),
+    },
+    Migration {
+        version: "056_run_events_provider",
+        sql: include_str!("migrations/056_run_events_provider.sql"),
+    },
+    Migration {
+        version: "057_run_events_identity",
+        sql: include_str!("migrations/057_run_events_identity.sql"),
+    },
+    Migration {
+        version: "058_blob_tokens",
+        sql: include_str!("migrations/058_blob_tokens.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the
@@ -237,6 +253,7 @@ const RENAME_CONVERGENCE_MIGRATIONS: &[&str] = &[
     "049_runs_rename",
     "050_drop_trigger_organs",
     "053_drop_wave_primary_flow",
+    "055_run_events_step_index_repair",
 ];
 
 /// Per-migration failures that mean "the db is already in the target state":
@@ -525,6 +542,87 @@ mod drift_tests {
             )
             .unwrap();
         assert!(!agents_exists, "agents should be dropped by migration 050");
+    }
+
+    #[test]
+    fn step_index_repair_converges_a_prerelease_054_ledger() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        // A pre-release 054 renamed step_index alongside step -> skill, so this
+        // ledger carries skill_index and every run_events reader fails on it.
+        conn.execute_batch(
+            "CREATE TABLE run_events (run_id TEXT NOT NULL, seq BIGINT NOT NULL, skill TEXT, skill_index BIGINT);
+             INSERT INTO run_events (run_id, seq, skill, skill_index) VALUES ('r1', 1, 'ci-fix', 7);
+             CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);",
+        )
+        .unwrap();
+        for m in migrations() {
+            if m.version != "055_run_events_step_index_repair" {
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, 0)",
+                    rusqlite::params![m.version],
+                )
+                .unwrap();
+            }
+        }
+        apply_sqlite(&conn).unwrap();
+
+        // The rename preserves the recorded run history — a repair that drops
+        // the ledger is worse than the breakage it fixes.
+        let (index, skill): (i64, String) = conn
+            .query_row(
+                "SELECT step_index, skill FROM run_events WHERE run_id='r1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(index, 7);
+        assert_eq!(skill, "ci-fix");
+    }
+
+    #[test]
+    fn the_migration_starts_the_ledger_empty() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE run_events (
+                 run_id TEXT NOT NULL,
+                 seq BIGINT NOT NULL,
+                 ts BIGINT NOT NULL,
+                 node TEXT NOT NULL,
+                 event TEXT NOT NULL,
+                 provider TEXT
+             );
+             INSERT INTO run_events (run_id, seq, ts, node, event)
+             VALUES ('legacy', 0, 1, 'step', 'started');
+             CREATE TABLE schema_migrations (
+                 version TEXT PRIMARY KEY,
+                 applied_at INTEGER NOT NULL
+             );",
+        )
+        .unwrap();
+        for migration in migrations() {
+            if migration.version != "057_run_events_identity" {
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, 0)",
+                    rusqlite::params![migration.version],
+                )
+                .unwrap();
+            }
+        }
+
+        apply_sqlite(&conn).unwrap();
+
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM run_events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
+        let process_not_null: i64 = conn
+            .query_row(
+                "SELECT \"notnull\" FROM pragma_table_info('run_events') WHERE name='process_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(process_not_null, 1);
     }
 
     #[test]

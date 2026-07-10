@@ -15,9 +15,10 @@
 import Foundation
 
 /// One `lf` query failed — the subprocess errored, or its JSON didn't decode.
-public struct RegistryQueryError: Error, Sendable {
+public struct RegistryQueryError: LocalizedError, Sendable {
     public let message: String
     public init(_ message: String) { self.message = message }
+    public var errorDescription: String? { message }
 }
 
 /// Runs an `lf` argv (already including the subcommand, e.g. `["ls","--json"]`)
@@ -68,6 +69,36 @@ public struct RegistryQuery: Sendable {
     public func recentRuns() async throws -> [RunLedgerEntry] {
         let stdout = try await run(["runs", "--json"], nil)
         return try Self.decode([RunLedgerEntry].self, from: stdout)
+    }
+
+    /// Per-boundary spend over a window: what each skill, and each terminal run,
+    /// actually spent. `lf usage --json` applies the cumulative-diff rule, so
+    /// these rows are additive and sum to the totals `lf usage` prints.
+    public func spend(days: Int = 30) async throws -> [TraceSpan] {
+        let stdout = try await run(["usage", "--json", "--days", String(days)], nil)
+        return try Self.decode([TraceSpan].self, from: stdout)
+    }
+
+    /// The codebase on disk, as a tree of directories weighted by tokens.
+    /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf tokens` measures the
+    /// repo it is invoked in.
+    public func codebase(repoPath: String) async throws -> CodeNode {
+        let stdout = try await run(["tokens", "--json"], repoPath)
+        return try Self.decode(CodeNode.self, from: stdout)
+    }
+
+    /// How big the codebase was on each day it changed. Mirrors Rust
+    /// `CodeSnapshot`. Blob counts are cached by sha, so only the first walk of
+    /// a window pays to tokenize.
+    public func codebaseHistory(repoPath: String, days: Int = 30) async throws -> [CodeSnapshot] {
+        let stdout = try await run(["tokens", "--json", "--days", String(days)], repoPath)
+        return try Self.decode([CodeSnapshot].self, from: stdout)
+    }
+
+    /// The ledger's self-audit, including continuity and lineage tripwires.
+    public func doctor() async throws -> DoctorReport {
+        let stdout = try await run(["doctor", "--json"], nil)
+        return try Self.decode(DoctorReport.self, from: stdout)
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, from stdout: String) throws -> T {
@@ -216,6 +247,9 @@ struct AttentionSnapshot: Decodable {
 /// seconds, `wave` a name (not an id).
 public struct RunLedgerEntry: Decodable, Sendable, Identifiable {
     public let id: String
+    public let runId: String
+    public let processId: String
+    public let parentProcessId: String?
     public let repo: String?
     public let wave: String?
     public let label: String
@@ -224,12 +258,89 @@ public struct RunLedgerEntry: Decodable, Sendable, Identifiable {
     public let ended: Int?
     public let inputTokens: Int
     public let outputTokens: Int
+    public let cacheReadTokens: Int
+    public let costUsd: Double?
+    public let durationSecs: Double?
+    public let provider: String?
+    public let model: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, repo, wave, label, status, started, ended
+        case id, repo, wave, label, status, started, ended, provider, model
+        case runId = "run_id"
+        case processId = "process_id"
+        case parentProcessId = "parent_process_id"
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
+        case cacheReadTokens = "cache_read_tokens"
+        case costUsd = "cost_usd"
+        case durationSecs = "duration_secs"
     }
+}
+
+/// One process in `lf trace --json`. Mirrors Rust `SpanDto` exactly.
+public struct TraceSpan: Decodable, Sendable, Identifiable {
+    /// A process contributes several boundaries. Their event sequence is the
+    /// stable discriminator even when one skill completes twice in one second.
+    public var id: String { "\(processId)-\(seq)" }
+
+    public let runId: String
+    public let processId: String
+    public let parentProcessId: String?
+    public let seq: Int
+    public let node: String
+    public let name: String?
+    public let repo: String?
+    public let wave: String?
+    public let flow: String?
+    public let skill: String?
+    public let startedAt: Int
+    public let endedAt: Int?
+    public let status: String
+    public let inputTokens: Int?
+    public let outputTokens: Int?
+    public let cacheReadTokens: Int?
+    public let costUsd: Double?
+    public let durationSecs: Double?
+    public let provider: String?
+    public let model: String?
+
+    /// `provider:model` — the harness and the model it drove.
+    public var agent: String {
+        switch (provider, model) {
+        case let (provider?, model?): return "\(provider):\(model)"
+        case let (provider?, nil): return provider
+        default: return "unattributed"
+        }
+    }
+
+    public var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
+
+    enum CodingKeys: String, CodingKey {
+        case seq, node, name, status, provider, model, repo, wave, flow, skill
+        case runId = "run_id"
+        case processId = "process_id"
+        case parentProcessId = "parent_process_id"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case cacheReadTokens = "cache_read_tokens"
+        case costUsd = "cost_usd"
+        case durationSecs = "duration_secs"
+    }
+}
+
+public struct DoctorReport: Decodable, Sendable {
+    public let rows: Int
+    public let checks: [DoctorCheck]
+}
+
+public struct DoctorCheck: Decodable, Sendable, Identifiable {
+    public var id: String { name }
+
+    public let name: String
+    public let status: String
+    public let detail: String
 }
 
 private enum RegistrySnapshotDate {
@@ -241,4 +352,38 @@ private enum RegistrySnapshotDate {
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
     }
+}
+
+/// A directory or file in the codebase, weighted by the tokens a model pays to
+/// read it. Mirrors Rust `CodeNode` exactly.
+public struct CodeNode: Decodable, Sendable, Identifiable {
+    public var id: String { path.isEmpty ? name : path }
+
+    public let path: String
+    public let name: String
+    public let lines: Int
+    public let tokens: Int
+    public let children: [CodeNode]
+}
+
+/// The codebase's size on one day. Mirrors Rust `CodeSnapshot` exactly.
+public struct CodeSnapshot: Decodable, Sendable, Identifiable {
+    public var id: String { commit }
+
+    public let date: String
+    public let commit: String
+    public let lines: Int
+    public let tokens: Int
+    public let slices: [CodeSlice]
+}
+
+/// One file extension's weight in a snapshot. Mirrors Rust `CodeSlice`.
+/// `ext` carries no dot; a file with no extension is `(none)` and the long tail
+/// is folded into `other`.
+public struct CodeSlice: Decodable, Sendable, Identifiable {
+    public var id: String { ext }
+
+    public let ext: String
+    public let lines: Int
+    public let tokens: Int
 }

@@ -8,12 +8,17 @@ deployments only: no remote telemetry server, ever (a bound, not a gap).
 ## KRs
 
 - A month of runs is 100% reconstructable — prompt, context, flow/skill
-  shape, spawned work, cost, time, result — verified by random spot-audits
-  that succeed N/N.
-- `run_token_usage` is fed continuously from the day it's wired: zero
-  gap-days in a month (0 rows against 152 runs today; the schema and
-  upsert path already exist), and cost + per-skill dimensions get homes.
-- Any run from the last month can be replayed against its recorded context
-  for debugging and for evals.
+  shape, spawned work, cost, time, result — verified by 20/20 random
+  spot-audits against the long-lived ledger.
+- The trace readers survive the ledger they actually read: a month in which
+  every `lf runs`, `lf trace`, and `lf usage` invocation on a real, migrated
+  ledger succeeds, and none fails on a schema the migrations never produce.
+- Token and cost evidence has one home and no unexplained silence: for a
+  month, every agent-bearing run lands in the ledger carrying provider,
+  tokens, and cost; `lf doctor` reports no gap-day and no silence longer
+  than a working day; and no run's spend is attributed to a nested `lf`
+  sharing its `run_id`.
+- Any run from the last month replays against its recorded context, for
+  debugging and for evals: 10/10 sampled runs replay unattended.
 - The stats surface answers the standing questions — what runs hot, what
-  it costs, how it trends — in one query, on real history.
+  it costs, how it trends — in one query, on a month of real history.

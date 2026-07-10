@@ -13,13 +13,11 @@ use crate::lfd::types::{
 use crate::lfdb::catalog::{list_runs_query, list_waves_query, sql, Query, SqlDialect};
 use crate::lfdb::rows::{
     map_chat_memory_block_row, map_chat_message_row, map_fork_run_row, map_live_pr_state_row,
-    map_repo_edge_row, map_repo_provider_usage_row, map_repo_row, map_run_row, map_summary_row,
-    map_wave_provider_usage_row, map_wave_row, now_unix, serialize_pr,
+    map_repo_edge_row, map_repo_row, map_run_row, map_summary_row, map_wave_row, now_unix,
+    serialize_pr,
 };
 use crate::lfdb::token_crypto;
-use crate::lfdb::{
-    ForkRun, ForkRunStatus, RunEventRow, RunTokenUsage, StoreError, StoreResult, TokenUsageReport,
-};
+use crate::lfdb::{ForkRun, ForkRunStatus, RunEventRow, StoreError, StoreResult};
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
@@ -146,6 +144,7 @@ impl SqliteStore {
         )?;
 
         super::migrations::apply_sqlite(&conn)?;
+        validate_run_events_schema(&conn)?;
         migrate_plaintext_provider_tokens(&mut conn)?;
 
         Ok(Self {
@@ -252,6 +251,17 @@ impl SqliteStore {
                 .map(crate::lfdb::rows::unix_to_datetime),
         })
     }
+}
+
+fn validate_run_events_schema(conn: &Connection) -> StoreResult<()> {
+    conn.prepare(
+        "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree,
+                wave, node, event, command, flow, skill, step_index, error,
+                input_tokens, output_tokens, cache_read_tokens, cost_usd,
+                duration_secs, provider, model, context
+         FROM run_events LIMIT 0",
+    )?;
+    Ok(())
 }
 
 impl SqliteStore {
@@ -1323,61 +1333,51 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn record_run_usage(&self, usage: &RunTokenUsage) -> StoreResult<()> {
+    // Run ledger (`run_events`): the machine-grain, append-only record of
+    // every run written directly by `lf`. Read by `lf runs` / `lf trace`.
+
+    /// Cached line/token counts for a git blob. Content-addressed, so a hit is
+    /// always correct and a miss only costs one tokenization.
+    pub fn blob_tokens(&self, sha: &str) -> StoreResult<Option<(i64, i64, i64)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row = conn
+            .query_row(
+                "SELECT lines, bytes, tokens FROM blob_tokens WHERE sha = ?1",
+                params![sha],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    pub fn put_blob_tokens(
+        &self,
+        sha: &str,
+        lines: i64,
+        bytes: i64,
+        tokens: i64,
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            Self::sql(Query::RecordRunTokenUsage),
-            params![
-                usage.run_id,
-                usage.wave,
-                usage.provider,
-                usage.model,
-                usage.input_tokens as i64,
-                usage.output_tokens as i64,
-                usage.cache_read_tokens as i64,
-                usage.recorded_at,
-                usage.repo,
-            ],
+            "INSERT INTO blob_tokens (sha, lines, bytes, tokens) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(sha) DO NOTHING",
+            params![sha, lines, bytes, tokens],
         )?;
         Ok(())
     }
-
-    pub fn aggregate_token_usage(&self) -> StoreResult<TokenUsageReport> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-
-        let mut repo_stmt = conn.prepare(Self::sql(Query::AggregateTokenUsageByRepoProvider))?;
-        let repo_rows = repo_stmt.query_map([], |row| Ok(map_repo_provider_usage_row(row)))?;
-        let mut by_repo_provider = Vec::new();
-        for row in repo_rows {
-            by_repo_provider.push(row??);
-        }
-
-        let mut wave_stmt = conn.prepare(Self::sql(Query::AggregateTokenUsageByWaveProvider))?;
-        let wave_rows = wave_stmt.query_map([], |row| Ok(map_wave_provider_usage_row(row)))?;
-        let mut by_wave_provider = Vec::new();
-        for row in wave_rows {
-            by_wave_provider.push(row??);
-        }
-
-        Ok(TokenUsageReport::from_grouped(
-            by_repo_provider,
-            by_wave_provider,
-        ))
-    }
-
-    // Run ledger (`run_events`): the machine-grain, append-only record of
-    // every run written directly by `lf`. Read by `lf runs` / `lf trace`.
 
     pub fn insert_run_event(&self, row: &RunEventRow) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO run_events (
-                run_id, seq, ts, repo, worktree, wave, node, event, command,
+                run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
                 flow, skill, step_index, error, input_tokens, output_tokens,
-                cache_read_tokens, cost_usd, duration_secs
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                cache_read_tokens, cost_usd, duration_secs, provider, model
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 row.run_id,
+                row.process_id,
+                row.parent_process_id,
                 row.seq,
                 row.ts,
                 row.repo,
@@ -1395,6 +1395,8 @@ impl SqliteStore {
                 row.cache_read_tokens,
                 row.cost_usd,
                 row.duration_secs,
+                row.provider,
+                row.model,
             ],
         )?;
         Ok(())
@@ -1402,9 +1404,9 @@ impl SqliteStore {
 
     pub fn list_run_events_since(&self, since_unix: i64) -> StoreResult<Vec<RunEventRow>> {
         self.query_run_events(
-            "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
+            "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
                     flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs
+                    cache_read_tokens, cost_usd, duration_secs, provider, model
              FROM run_events WHERE ts >= ?1 ORDER BY ts, run_id, seq",
             params![since_unix],
         )
@@ -1414,9 +1416,9 @@ impl SqliteStore {
     pub fn run_events_matching(&self, run_id: &str) -> StoreResult<Vec<RunEventRow>> {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
         self.query_run_events(
-            "SELECT run_id, seq, ts, repo, worktree, wave, node, event, command,
+            "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
                     flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs
+                    cache_read_tokens, cost_usd, duration_secs, provider, model
              FROM run_events WHERE run_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
         )
@@ -1432,23 +1434,27 @@ impl SqliteStore {
         let rows = stmt.query_map(params, |row| {
             Ok(RunEventRow {
                 run_id: row.get(0)?,
-                seq: row.get(1)?,
-                ts: row.get(2)?,
-                repo: row.get(3)?,
-                worktree: row.get(4)?,
-                wave: row.get(5)?,
-                node: row.get(6)?,
-                event: row.get(7)?,
-                command: row.get(8)?,
-                flow: row.get(9)?,
-                skill: row.get(10)?,
-                step_index: row.get(11)?,
-                error: row.get(12)?,
-                input_tokens: row.get(13)?,
-                output_tokens: row.get(14)?,
-                cache_read_tokens: row.get(15)?,
-                cost_usd: row.get(16)?,
-                duration_secs: row.get(17)?,
+                process_id: row.get(1)?,
+                parent_process_id: row.get(2)?,
+                seq: row.get(3)?,
+                ts: row.get(4)?,
+                repo: row.get(5)?,
+                worktree: row.get(6)?,
+                wave: row.get(7)?,
+                node: row.get(8)?,
+                event: row.get(9)?,
+                command: row.get(10)?,
+                flow: row.get(11)?,
+                skill: row.get(12)?,
+                step_index: row.get(13)?,
+                error: row.get(14)?,
+                input_tokens: row.get(15)?,
+                output_tokens: row.get(16)?,
+                cache_read_tokens: row.get(17)?,
+                cost_usd: row.get(18)?,
+                duration_secs: row.get(19)?,
+                provider: row.get(20)?,
+                model: row.get(21)?,
             })
         })?;
         let mut events = Vec::new();

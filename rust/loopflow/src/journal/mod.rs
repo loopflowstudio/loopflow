@@ -5,10 +5,11 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::id::LfdId;
@@ -18,8 +19,9 @@ use crate::lfdb::RunEventRow;
 const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
 pub const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
+pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 
-/// Serializes tests that mutate process-global env (LF_HOME, LF_RUN_ID).
+/// Serializes tests that mutate process-global env (LF_HOME and run identity).
 /// Every test in the crate that touches these vars must hold this lock —
 /// the ledger path is resolved from env at write time.
 #[cfg(test)]
@@ -38,6 +40,10 @@ thread_local! {
 #[derive(Debug, Clone)]
 struct RunContext {
     run_id: LfdId,
+    process_id: LfdId,
+    parent_process_id: Option<LfdId>,
+    /// Serialized argv captured at run start so terminal rows name their work.
+    command: Option<String>,
     /// File-journal directory. Written in any git repo (main, wave worktree,
     /// or plain worktree); None only when the journal can't be git-excluded.
     /// The daemon's poller tails wave worktrees; the SQLite ledger records
@@ -51,15 +57,17 @@ struct RunContext {
     minted_run_id: bool,
 }
 
-/// Token/cost totals accumulated from the agent stream on this thread,
-/// attached to ledger rows as the run progresses.
-#[derive(Debug, Clone, Copy, Default)]
+/// Token/cost totals accumulated from the agent stream on this thread, plus the
+/// agent that spent them. Attached to ledger rows as the run progresses.
+#[derive(Debug, Clone)]
 struct PendingUsage {
     input_tokens: u64,
     output_tokens: u64,
     cache_read_tokens: u64,
     cost_usd: Option<f64>,
     duration_secs: Option<f64>,
+    provider: Option<&'static str>,
+    model: Option<String>,
     seen: bool,
 }
 
@@ -71,6 +79,8 @@ impl PendingUsage {
             cache_read_tokens: 0,
             cost_usd: None,
             duration_secs: None,
+            provider: None,
+            model: None,
             seen: false,
         }
     }
@@ -88,26 +98,44 @@ pub fn record_usage(input: Option<u64>, output: Option<u64>, cache_read: Option<
 }
 
 /// Record the stream's final cost/duration report for the current run.
+///
+/// Every usage field on a ledger row is cumulative to that point in the run, so
+/// a reader diffs consecutive rows for a per-skill figure and reads the terminal
+/// row for the run total. Cost used to overwrite instead of accumulate, which
+/// made a multi-skill run report only its last agent invocation's cost — and a
+/// run's cost could *fall* between skills, which no running total ever does.
 pub fn record_result(cost_usd: Option<f64>, duration_secs: Option<f64>) {
     PENDING_USAGE.with(|cell| {
         let mut usage = cell.borrow_mut();
-        if cost_usd.is_some() {
-            usage.cost_usd = cost_usd;
+        if let Some(cost) = cost_usd {
+            usage.cost_usd = Some(usage.cost_usd.unwrap_or(0.0) + cost);
         }
-        if duration_secs.is_some() {
-            usage.duration_secs = match usage.duration_secs {
-                Some(existing) => Some(existing + duration_secs.unwrap_or(0.0)),
-                None => duration_secs,
-            };
+        if let Some(duration) = duration_secs {
+            usage.duration_secs = Some(usage.duration_secs.unwrap_or(0.0) + duration);
         }
         usage.seen = true;
     });
 }
 
+/// Name the harness the current agent launch is spending tokens through, and
+/// the model it drove. Recorded without marking usage seen — a launch that
+/// reports no tokens names an agent but should not materialize a row.
+///
+/// Set both fields together. A process may launch several agents, and an
+/// unconfigured model on the second launch must clear the first launch's model
+/// rather than producing a fictitious `codex:opus` boundary.
+pub fn record_agent(provider: Option<&'static str>, model: Option<&str>) {
+    PENDING_USAGE.with(|cell| {
+        let mut usage = cell.borrow_mut();
+        usage.provider = provider;
+        usage.model = model.map(str::to_string);
+    });
+}
+
 fn snapshot_usage() -> Option<PendingUsage> {
     PENDING_USAGE.with(|cell| {
-        let usage = *cell.borrow();
-        usage.seen.then_some(usage)
+        let usage = cell.borrow();
+        usage.seen.then(|| usage.clone())
     })
 }
 
@@ -258,6 +286,7 @@ fn try_emit(
         if context.minted_run_id {
             std::env::remove_var(LF_RUN_ID_ENV);
         }
+        std::env::remove_var(LF_PROCESS_ID_ENV);
         clear_context();
         clear_usage();
     }
@@ -286,6 +315,11 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
 
     let row = RunEventRow {
         run_id: event.run_id.as_str().to_string(),
+        process_id: context.process_id.as_str().to_string(),
+        parent_process_id: context
+            .parent_process_id
+            .as_ref()
+            .map(|id| id.as_str().to_string()),
         seq,
         ts: event.ts.unix_timestamp(),
         repo: context.repo.clone(),
@@ -296,28 +330,50 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
         command: event
             .command
             .as_ref()
-            .and_then(|argv| serde_json::to_string(argv).ok()),
+            .and_then(|argv| serde_json::to_string(argv).ok())
+            .or_else(|| context.command.clone()),
         flow: event.flow.clone(),
         skill: event.skill.clone(),
         step_index: event.index.map(i64::from),
         error: event.error.clone(),
-        input_tokens: usage.map(|u| u.input_tokens as i64),
-        output_tokens: usage.map(|u| u.output_tokens as i64),
-        cache_read_tokens: usage.map(|u| u.cache_read_tokens as i64),
-        cost_usd: usage.and_then(|u| u.cost_usd),
-        duration_secs: usage.and_then(|u| u.duration_secs),
+        input_tokens: usage.as_ref().map(|u| u.input_tokens as i64),
+        output_tokens: usage.as_ref().map(|u| u.output_tokens as i64),
+        cache_read_tokens: usage.as_ref().map(|u| u.cache_read_tokens as i64),
+        cost_usd: usage.as_ref().and_then(|u| u.cost_usd),
+        duration_secs: usage.as_ref().and_then(|u| u.duration_secs),
+        provider: usage.as_ref().and_then(|u| u.provider).map(str::to_string),
+        model: usage.as_ref().and_then(|u| u.model.clone()),
     };
 
     match open_ledger() {
         Ok(store) => {
             if let Err(err) = store.insert_run_event(&row) {
-                debug!(error = %err, run_id = %row.run_id, "ledger insert failed");
+                if first_ledger_failure() {
+                    warn!(error = %err, run_id = %row.run_id, "ledger insert failed — this run is not being recorded");
+                } else {
+                    debug!(error = %err, run_id = %row.run_id, "ledger insert failed");
+                }
             }
         }
         Err(err) => {
-            debug!(error = %err, "ledger unavailable");
+            if first_ledger_failure() {
+                warn!(error = %err, "ledger unavailable — runs are not being recorded");
+            } else {
+                debug!(error = %err, "ledger unavailable");
+            }
         }
     }
+}
+
+/// True exactly once per process. A ledger write must never fail a run, but a
+/// silent best-effort write turns a schema break into invisible data loss: a
+/// `step_index`/`skill_index` drift once cost 29 hours of run history while
+/// every reader failed loudly and every writer whispered at `debug!`. Say it
+/// once, at a level someone runs; stay quiet after so a broken ledger does not
+/// drown the run's own output.
+fn first_ledger_failure() -> bool {
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    !WARNED.swap(true, Ordering::Relaxed)
 }
 
 /// Open the local ledger store, creating and migrating it if needed.
@@ -386,6 +442,10 @@ fn ensure_run_context(
         }
     };
 
+    let parent_process_id = std::env::var(LF_PROCESS_ID_ENV).ok().map(LfdId::from_raw);
+    let process_id = LfdId::default();
+    std::env::set_var(LF_PROCESS_ID_ENV, process_id.as_str());
+
     // Write the file journal wherever we can, wave or not — the daemon's
     // poller only tails wave worktrees today, but the record should exist in
     // any repo. Fall back to ledger-only when the journal can't be
@@ -409,14 +469,19 @@ fn ensure_run_context(
     let repo = main_repo
         .as_deref()
         .unwrap_or(repo_root)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(str::to_string);
+        .display()
+        .to_string();
 
     let context = RunContext {
         run_id,
+        process_id,
+        parent_process_id,
+        command: fields
+            .command
+            .as_ref()
+            .and_then(|argv| serde_json::to_string(argv).ok()),
         run_dir,
-        repo,
+        repo: Some(repo),
         wave: wave_name.clone(),
         seq: 0,
         minted_run_id,
@@ -580,6 +645,47 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_usage_field_accumulates_across_a_multi_skill_run() {
+        // A ledger row's usage is cumulative to that point. Cost once
+        // overwrote, so a run could report a *lower* cost after a later skill
+        // and `lf usage` summed only the final skill's spend.
+        super::clear_usage();
+        super::record_usage(Some(100), Some(10), Some(5));
+        super::record_result(Some(1.00), Some(2.0));
+        super::record_usage(Some(50), Some(5), Some(0));
+        super::record_result(Some(0.25), Some(3.0));
+
+        let usage = super::snapshot_usage().expect("usage seen");
+        assert_eq!(usage.input_tokens, 150);
+        assert_eq!(usage.output_tokens, 15);
+        assert_eq!(usage.cache_read_tokens, 5);
+        assert_eq!(usage.duration_secs, Some(5.0));
+        assert_eq!(
+            usage.cost_usd,
+            Some(1.25),
+            "cost must accumulate, not overwrite"
+        );
+        super::clear_usage();
+    }
+
+    #[test]
+    fn each_agent_launch_replaces_provider_and_model_attribution() {
+        super::clear_usage();
+        super::record_agent(Some("claude"), Some("opus"));
+        super::record_usage(Some(100), Some(10), None);
+        let first = super::snapshot_usage().expect("first usage");
+        assert_eq!(first.provider, Some("claude"));
+        assert_eq!(first.model.as_deref(), Some("opus"));
+
+        super::record_agent(Some("codex"), None);
+        super::record_usage(Some(50), Some(5), None);
+        let second = super::snapshot_usage().expect("second usage");
+        assert_eq!(second.provider, Some("codex"));
+        assert_eq!(second.model, None, "the prior launch's model must not leak");
+        super::clear_usage();
+    }
+
     use super::{
         emit, events_path, read_events, runs_root, test_env_lock, LfEvent, LfEventFields,
         LfEventType, LfNode,
@@ -602,6 +708,8 @@ mod tests {
         let home = tempfile::TempDir::new().expect("ledger home");
         std::env::set_var("LF_HOME", home.path());
         let previous = std::env::var(super::LF_RUN_ID_ENV).ok();
+        let previous_process = std::env::var(super::LF_PROCESS_ID_ENV).ok();
+        std::env::remove_var(super::LF_PROCESS_ID_ENV);
         match value {
             Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
             None => std::env::remove_var(super::LF_RUN_ID_ENV),
@@ -611,6 +719,10 @@ mod tests {
         match previous {
             Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
             None => std::env::remove_var(super::LF_RUN_ID_ENV),
+        }
+        match previous_process {
+            Some(value) => std::env::set_var(super::LF_PROCESS_ID_ENV, value),
+            None => std::env::remove_var(super::LF_PROCESS_ID_ENV),
         }
         result
     }
@@ -622,6 +734,7 @@ mod tests {
         super::clear_context();
         super::clear_usage();
         std::env::remove_var(super::LF_RUN_ID_ENV);
+        std::env::remove_var(super::LF_PROCESS_ID_ENV);
         let home = tempfile::TempDir::new().expect("ledger home");
         std::env::set_var("LF_HOME", home.path());
         (guard, home)
@@ -760,20 +873,15 @@ mod tests {
         assert!(is_clean(repo.path()).expect("journal stays git-excluded"));
 
         // And the machine-grain ledger has the run, with usage on the
-        // terminal event and a null wave. Filter by this repo's unique name —
-        // concurrent tests may write other repos' rows into the ledger.
-        let repo_name = repo.path().file_name().unwrap().to_str().unwrap();
+        // terminal event and a null wave. LF_HOME points this test at its own
+        // store, so every row here belongs to this invocation.
         let store = super::open_ledger().expect("ledger");
-        let events: Vec<_> = store
-            .list_run_events_since(0)
-            .expect("ledger rows")
-            .into_iter()
-            .filter(|event| event.repo.as_deref() == Some(repo_name))
-            .collect();
+        let events = store.list_run_events_since(0).expect("ledger rows");
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].node, "run");
         assert_eq!(events[0].event, "started");
         assert!(events[0].repo.is_some());
+        assert!(std::path::Path::new(events[0].repo.as_deref().unwrap()).is_absolute());
         assert_eq!(events[0].wave, None);
         assert!(events[0]
             .command
@@ -784,6 +892,57 @@ mod tests {
         assert_eq!(events[1].input_tokens, Some(100));
         assert_eq!(events[1].output_tokens, Some(20));
         assert_eq!(events[1].cache_read_tokens, Some(5));
+        assert_eq!(events[0].process_id, events[1].process_id);
+        assert_eq!(events[1].command, events[0].command);
+    }
+
+    #[test]
+    fn a_nested_lf_gets_its_own_span_and_names_its_parent() {
+        let _guard = journal_test_guard();
+        let repo = TestRepo::new();
+        let fields = started_fields(&["lf".to_string(), "wave".to_string()], repo.path(), "main");
+
+        let parent = super::ensure_run_context(repo.path(), &fields)
+            .expect("parent context")
+            .expect("parent");
+        super::clear_context();
+        let child = super::ensure_run_context(repo.path(), &fields)
+            .expect("child context")
+            .expect("child");
+
+        assert_ne!(parent.process_id, child.process_id);
+        assert_eq!(child.parent_process_id, Some(parent.process_id));
+        super::clear_context();
+        std::env::remove_var(super::LF_PROCESS_ID_ENV);
+        std::env::remove_var(super::LF_RUN_ID_ENV);
+    }
+
+    #[test]
+    fn a_terminal_row_names_the_work_its_started_row_named() {
+        let _guard = journal_test_guard();
+        let repo = TestRepo::new();
+        let command = vec!["lf".to_string(), "gate".to_string()];
+
+        emit(
+            repo.path(),
+            LfNode::Run,
+            LfEventType::Started,
+            started_fields(&command, repo.path(), "main"),
+        );
+        emit(
+            repo.path(),
+            LfNode::Run,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        );
+
+        let events = super::open_ledger()
+            .expect("ledger")
+            .list_run_events_since(0)
+            .expect("events");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].command, events[0].command);
+        assert!(events[1].command.as_deref().unwrap_or("").contains("gate"));
     }
 
     #[test]

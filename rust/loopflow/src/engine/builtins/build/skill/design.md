@@ -92,21 +92,20 @@ This is the natural session exit point. The user's answer determines what to run
      Linear.
 3. Write `wave/<name>/MEMORY.md` — seed it with the load-bearing context from the
    Detail phase (key decisions, constraints, what's known). Short is fine.
-4. Create `wave/<name>/projects/` with one file per measured bet. A project is
-   either a completable behavioral improvement or a standing quality frontier.
-   Each project belongs to this wave, has no child projects, and carries a
-   definition plus proof-shaped `## KRs`.
-5. Connect and seed tasks in Linear:
-   - `lf pm init --wave <name>` creates the Linear Initiative, migrates the
-     seeded project files into native Linear Projects, and writes
-     `linear_initiative` into `GOAL.md`.
+4. Connect Linear with `lf pm init --wave <name>`. It links or creates the
+   Initiative and writes `linear_initiative` into `GOAL.md`.
+5. Create each measured bet with `lf pm project create`. A project is either a
+   completable behavioral improvement or a standing quality frontier. Each
+   belongs to this wave, has no child projects, and carries a definition plus
+   proof-shaped KRs in Linear Project content.
+6. Seed tasks in Linear:
    - File the opening items with
      `lf pm task create --project <project> --title "…" --notes "…"` — the urgent
      and next-step work, one task each. Tasks start in Linear, not on disk.
-6. The first item you expect to build now becomes the design doc for this branch
+7. The first item you expect to build now becomes the design doc for this branch
    (`scratch/<branch>.md`).
-7. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`.
-8. End session and tell the user what to run next:
+8. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`.
+9. End session and tell the user what to run next:
    - `lf implement` (for the immediate item)
    - `lf ship`
 

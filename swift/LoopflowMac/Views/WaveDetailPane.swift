@@ -215,7 +215,7 @@ private struct WavePlanView: View {
                     operationalRow(
                         icon: "tray",
                         title: item.name,
-                        detail: item.labels.filter { $0.hasPrefix("project:") }.joined(separator: " · ")
+                        detail: item.project.map { "project:\($0)" } ?? ""
                     )
                 }
             }

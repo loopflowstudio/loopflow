@@ -1,24 +1,22 @@
 ---
 requires: diff vs main | scratch/ analysis | both
-produces: wave/<wave>/ (GOAL.md, MEMORY.md, projects/), task updates in Linear, scratch/ cleanup
+produces: wave/<wave>/ (GOAL.md, MEMORY.md), Project/task updates in Linear, scratch/ cleanup
 ---
 Single owner of `wave/<wave>/`. Keeps the wave's identity current and folds what the branch learned into memory.
 
 ## The wave's shape
 
-A wave is a local operating context plus remote task tracking:
+A wave is a local operating context plus Linear-owned planning:
 
 - **`wave/<wave>/GOAL.md`** — the wave's identity: what it's for, how it judges
   progress, the loop prompt it runs. Frontmatter carries machine config and the
   Linear handle (`pm.linear_initiative`). This is the anchor; it changes rarely.
 - **`wave/<wave>/MEMORY.md`** — what the wave remembers between loops. Durable
   observations, decisions, and context. This is where branch learnings land.
-- **`wave/<wave>/projects/<project>.md`** — generated offline cache of a Linear
-  Project's definition and KRs. Projects belong to exactly one wave; Linear is
-  authoritative after `lf pm init`.
-- **Tasks live in Linear**, not in the repo. Read them with `lf pm show`;
-  change them with `lf pm task ...`. There is no local task mirror — never
-  write `N-*.md` item files, task lists in project docs, or a roadmap table.
+- **Projects and tasks live in Linear**, not in the repo. `lf pm sync` projects
+  them into SQLite. Read them with `lf pm show`;
+  change them with `lf pm project ...` and `lf pm task ...`. There is no local
+  planning mirror — never write `N-*.md` item files or a roadmap table.
 
 ## Orientation
 
@@ -28,8 +26,7 @@ Before starting, orient yourself in this branch:
   here (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds
   open questions and assumptions).
 - Read `wave/<wave>/GOAL.md` and `MEMORY.md`.
-- Read `wave/<wave>/projects/*.md`.
-- Read the live PM tasks: `lf pm show` (add `--wave <name>` if ambiguous).
+- Read the local PM snapshot: `lf pm show` (add `--wave <name>` if ambiguous).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 ## Goal
@@ -40,8 +37,8 @@ Whether you're cleaning up after a build, reconciling scratch analysis, or both:
 - `GOAL.md` still describes the wave truthfully — if the branch changed the
   wave's intent, flow, or metrics, update it. Otherwise leave it.
 - Linear Projects still describe the live measured bets truthfully. If a branch
-  changes a project's definition or KR set, update it in Linear, then refresh
-  the local cache with `lf pm sync`.
+  changes a project's definition or KR set, update it with `lf pm project
+  update`; the command refreshes SQLite before returning.
 - The PM tasks in Linear reflect reality: shipped work is closed, new work is
   filed, stale items are corrected — all through `lf pm task ...`.
 - `scratch/` is trimmed to what a reviewer needs (see below).
@@ -69,7 +66,7 @@ fold it. If it only describes what was already built, let it go.
 
 1. Read the diff (if any) to understand what this branch built.
 2. Read `GOAL.md`, `MEMORY.md`, and the live PM tasks (`lf pm show`).
-3. Read `wave/<wave>/projects/*.md` and `scratch/` — every file, completely.
+3. Read the PM snapshot and `scratch/` — every file, completely.
 4. **Reconcile Linear tasks against reality.** For each task, ask:
    - **Shipped?** If this branch (or main) crossed its finish line, close it:
      `lf pm task done --id <task-id>`.
@@ -80,7 +77,7 @@ fold it. If it only describes what was already built, let it go.
 5. **Fold scratch learnings into `MEMORY.md`.** Merge into existing sections
    where there's a clear match; add sections for new durable context. Keep it
    tight — memory is a working store, not an archive.
-6. **Update Linear Projects when measured bets moved, then run `lf pm sync`.**
+6. **Update Linear Projects when measured bets moved.**
    Project KRs should read as proof: observable end states, not backlog bullets,
    issue ids, status, or implementation receipts. Individual technical-debt
    cleanup is a task; a standing debt frontier can be a project.
@@ -103,11 +100,10 @@ When `scratch/` holds a proposal and no wave exists yet, create one:
 1. Write `wave/<wave>/GOAL.md` (see below).
 2. Create `wave/<wave>/MEMORY.md` — seed it with the load-bearing context from
    the proposal (key decisions, constraints, what's known). It can be short.
-3. Create `wave/<wave>/projects/` with one file per measured bet. Each project
-   gets a definition and `## KRs`.
-4. Connect Linear: `lf pm init --wave <name>` creates the wave's Initiative,
-   migrates the seeded project files into native Linear Projects, and writes
-   `linear_initiative` into `GOAL.md`.
+3. Connect Linear: `lf pm init --wave <name>` creates or links the wave's
+   Initiative and writes `linear_initiative` into `GOAL.md`.
+4. Create measured bets with `lf pm project create`; definitions and KRs live
+   in Linear Project content.
 5. File the opening tasks in Linear with `lf pm task create` — the urgent and
    next-step work, one task each. Tasks start in Linear, not on disk.
 

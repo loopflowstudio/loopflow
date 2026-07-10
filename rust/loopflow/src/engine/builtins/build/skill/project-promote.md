@@ -14,20 +14,18 @@ child's work.
 
 ## Work
 
-1. Read `wave/<parent>/projects/<slug>.md`, the parent's `GOAL.md`, and its
-   current memory. Refuse a missing source or an existing `wave/<slug>/GOAL.md`.
-2. Move the project document to `wave/<slug>/GOAL.md`. Preserve its definition
-   and KRs, then add valid GOAL frontmatter with a cadence suited to the bet.
-   Also copy the original measured bet to
-   `wave/<slug>/projects/<slug>.md` as the native Linear Project migration seed.
-   Use a weekly pursue cadence when the document gives no sharper signal.
+1. Read the source with `lf pm show --wave <parent> --project <slug> --json`,
+   plus the parent's `GOAL.md` and current memory. Refuse a missing Project or
+   an existing `wave/<slug>/GOAL.md`.
+2. Create `wave/<slug>/GOAL.md`. Preserve the Project definition as the child
+   objective, then add valid GOAL frontmatter with a cadence suited to the bet.
+   Use a weekly pursue cadence when the Project gives no sharper signal.
 3. Create an empty `wave/<slug>/MEMORY.md`. Never copy parent memory: the
    runtime inherits it through `parent_wave_id`.
-4. Initialize the child's Linear Initiative and seeded Project with
-   `lf pm init --wave <slug>`. Read the parent Project's tasks with
-   `lf pm show --wave <parent> --project <slug> --json` and move every task with
-   `lf pm task move --id <id> --wave <slug> --project <slug>`.
-5. Delete the source project file only after the destination is complete.
+4. Initialize the child's Linear Initiative with `lf pm init --wave <slug>`,
+   recreate the measured bet there with `lf pm project create`, and move every
+   source task with `lf pm task move --id <id> --wave <slug> --project <slug>`.
+   Archive the parent Linear Project only after the child snapshot is complete.
 6. Add a child `Process` instruction requiring its first pass to report the
    newly owned definition and KRs in its own thread, then publish that concise
    report to the parent with `lf radio pub --parent`.

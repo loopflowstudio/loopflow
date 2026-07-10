@@ -483,7 +483,7 @@ pub enum MemoryCommand {
 pub enum ProjectCommand {
     /// Promote a project into a resident child wave through the authored flow
     Promote {
-        /// Project slug under wave/<parent>/projects/
+        /// Linear Project slug under the parent wave
         slug: String,
         /// Parent wave (default: ambient wave)
         #[arg(short = 'w', long = "wave")]
@@ -575,7 +575,7 @@ pub enum CronCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PmCommand {
-    /// Connect a wave to a Linear Initiative and migrate its projects and tasks
+    /// Connect a wave to a Linear Initiative
     Init {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
@@ -586,7 +586,7 @@ pub enum PmCommand {
         #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
         all: bool,
     },
-    /// Print the wave's live Linear tasks
+    /// Read the wave's local Project and task snapshot
     Show {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
@@ -598,41 +598,20 @@ pub enum PmCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Create, edit, or close a Linear task
-    Update {
-        /// Wave name (auto-detected if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Linear Project slug
-        #[arg(short = 'p', long = "project")]
-        project: Option<String>,
-        /// Existing task id to edit or close; omit to create a new task
-        #[arg(long = "id")]
-        id: Option<String>,
-        /// Task title
-        #[arg(long = "title")]
-        title: Option<String>,
-        /// Task notes/description
-        #[arg(long = "notes")]
-        notes: Option<String>,
-        /// Set to `done` to close the task
-        #[arg(long = "status")]
-        status: Option<String>,
-        /// PR URL to attach as a comment (the loop's write-back link)
-        #[arg(long = "pr")]
-        pr: Option<String>,
-    },
-    /// Show PM task status for linked waves
+    /// Show local PM status for linked waves
     Status {
         /// Wave name (all PM-enabled waves if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
     },
-    /// Diagnose wave/project/task drift
+    /// Compare Linear with local wave bindings
     Doctor,
-    /// Reconcile low-risk PM drift
+    /// Refresh the local PM snapshot from Linear
     Sync {
-        /// Print the planned changes without applying them
+        /// Wave name (all linked waves if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Compare without writing the SQLite snapshot
         #[arg(long = "plan")]
         plan: bool,
     },
@@ -649,6 +628,41 @@ pub enum PmCommand {
     Task {
         #[command(subcommand)]
         cmd: PmTaskCommand,
+    },
+    /// Linear Project operations
+    Project {
+        #[command(subcommand)]
+        cmd: PmProjectCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PmProjectCommand {
+    /// Create a Linear Project in the wave's Initiative
+    Create {
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        #[arg(long = "title")]
+        title: String,
+        #[arg(long = "definition")]
+        definition: String,
+        /// Key result; repeat for each KR. Prefix with `[x] ` when it holds.
+        #[arg(long = "kr", required = true)]
+        krs: Vec<String>,
+    },
+    /// Replace a Linear Project's definition and KRs
+    Update {
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        #[arg(short = 'p', long = "project")]
+        project: String,
+        #[arg(long = "title")]
+        title: Option<String>,
+        #[arg(long = "definition")]
+        definition: String,
+        /// Key result; repeat for each KR. Prefix with `[x] ` when it holds.
+        #[arg(long = "kr", required = true)]
+        krs: Vec<String>,
     },
 }
 
@@ -909,66 +923,6 @@ mod tests {
         assert_eq!(wave.as_deref(), Some("goals"));
         assert_eq!(project, None);
         assert!(!json);
-    }
-
-    #[test]
-    fn pm_update_parses_create_and_close() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "pm",
-            "update",
-            "--project",
-            "wave-chat",
-            "--title",
-            "Ship it",
-            "--notes",
-            "details",
-        ])
-        .expect("parse");
-        let Some(Commands::Pm {
-            cmd:
-                PmCommand::Update {
-                    wave,
-                    project,
-                    id,
-                    title,
-                    notes,
-                    status,
-                    pr,
-                },
-        }) = cli.command
-        else {
-            panic!("expected pm update command");
-        };
-        assert_eq!(wave, None);
-        assert_eq!(project.as_deref(), Some("wave-chat"));
-        assert_eq!(id, None);
-        assert_eq!(title.as_deref(), Some("Ship it"));
-        assert_eq!(notes.as_deref(), Some("details"));
-        assert_eq!(status, None);
-        assert_eq!(pr, None);
-
-        let cli = Cli::try_parse_from([
-            "lf",
-            "pm",
-            "update",
-            "--id",
-            "123",
-            "--status",
-            "done",
-            "--pr",
-            "https://github.com/acme/repo/pull/7",
-        ])
-        .expect("parse");
-        let Some(Commands::Pm {
-            cmd: PmCommand::Update { id, status, pr, .. },
-        }) = cli.command
-        else {
-            panic!("expected pm update command");
-        };
-        assert_eq!(id.as_deref(), Some("123"));
-        assert_eq!(status.as_deref(), Some("done"));
-        assert_eq!(pr.as_deref(), Some("https://github.com/acme/repo/pull/7"));
     }
 
     #[test]

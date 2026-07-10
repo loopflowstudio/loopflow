@@ -18,8 +18,8 @@ telemetry, a vector backend, or a hidden knowledge store.
 
 ## Projects
 
-Projects live in `projects/`, one measured bet per file. Tasks live in Linear.
-Projects do not own memory, cadence, child projects, or task lists.
+Projects and tasks live in Linear and sync into the local SQLite registry.
+Projects do not own memory, cadence, or child projects.
 
 ## Bounds
 

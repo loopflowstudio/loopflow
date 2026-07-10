@@ -1,19 +1,20 @@
 ---
-description: Make the project's KR set measurable in its own doc.
+description: Make the Linear Project's KR set measurable.
 default_agent: codex
 action_style: procedural
 ---
-Clarify the project artifact: its KR set.
+Clarify the Linear Project's KR set.
 
 ## Orientation
 
 The project seed is in `<lf:message>`. A project is a measured bet inside one
 wave; it owns KRs and closure criteria, not memory, cadence, or child projects.
-Read the seed, the cached project doc if present, and the wave's GOAL.md and MEMORY.md.
+Read the seed, `lf pm show --wave <wave> --project <project> --json`, and the
+wave's GOAL.md and MEMORY.md.
 
-Linear Project content is authoritative. The generated offline cache lives at
-`wave/<wave>/projects/<project>.md`; refresh it with `lf pm sync` after changing
-the Linear Project. During an isolated project loop, draft the clarification in
+Linear Project content is authoritative. Update it with `lf pm project update`;
+that write refreshes the SQLite snapshot before returning. During an isolated
+project loop, draft the clarification in
 `scratch/<branch>.md` until it can be written to Linear. Concrete tasks live
 outside the KR set.
 

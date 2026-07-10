@@ -389,21 +389,27 @@ pm:
   linear_initiative: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
 ```
 
+When no id is pinned, `lf pm init` links one exact Initiative-title match,
+creates one when none exists, and fails on duplicates. The persisted id keeps
+later reads stable across title changes and machines.
+
 ```bash
-lf pm init --wave designer                # create the Initiative and migrate projects/tasks
-lf pm show --wave designer                # print an aligned live-task table
+lf pm init --wave designer                # connect the wave to its Initiative
+lf pm sync --wave designer                # refresh the local SQLite snapshot
+lf pm show --wave designer                # read projects and tasks locally
 lf pm show --wave designer --project ui   # filter to one Linear Project
+lf pm project update --wave designer --project ui --definition "..." --kr "..."
 lf pm task create --wave designer --project ui --title "Add dark mode" --notes "..."
 lf pm task done --id 1207... --pr "..."   # close a shipped task
-lf pm sync --plan                         # show Linear/cache drift
+lf pm sync --plan                         # compare without writing SQLite
 lf pm status                              # show linked waves and task counts
 ```
 
 `lf pm` maps wave → Initiative, project → Project, and task → Issue. Linear owns
-project definitions and KRs in Project content. `wave/<wave>/projects/` is an
-offline cache refreshed by `lf pm sync` and a migration seed for `lf pm init`;
-do not edit both copies. Issue descriptions and comments are Markdown, which
-Linear renders natively.
+project definitions and KRs in Project content. `lf pm sync` stores one local
+SQLite snapshot for fast CLI, agent, and app reads; it does not write planning
+files into the repo. Issue descriptions and comments are Markdown, which Linear
+renders natively.
 
 The `loopflow` Python package is a library only (wire models).
 Use the install script or cargo to install `lf` and `lfd`.

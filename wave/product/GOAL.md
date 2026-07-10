@@ -20,8 +20,8 @@ caring which process owns the machinery underneath.
 
 ## Projects
 
-Projects live in `projects/`, one measured bet per file. Tasks live in Linear.
-Projects do not own memory, cadence, child projects, or task lists.
+Projects and tasks live in Linear and sync into the local SQLite registry.
+Projects do not own memory, cadence, or child projects.
 
 ## Cron
 
@@ -31,7 +31,7 @@ Projects do not own memory, cadence, child projects, or task lists.
 
 ## Process
 
-Read the projects, then dogfood before guessing. Keep the API and surfaces in
+Read the synced projects, then dogfood before guessing. Keep the API and surfaces in
 lockstep: CLI, Mac, iOS, prompts, and workers should expose the same product
 model, not parallel concepts. Product work starts from the user contract; when
 it changes process ownership, wire shape, launch lifecycle, or distributed

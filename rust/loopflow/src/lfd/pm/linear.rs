@@ -7,7 +7,7 @@ use tracing::warn;
 
 use crate::lfd::pm::{
     parse_project_content, project_slug, render_project_content, PmError, PmItem, PmItemCreate,
-    PmItemUpdate, PmKr, PmLegacyItem, PmProject, PmResult, PmWave, RATE_LIMIT_RETRIES,
+    PmItemUpdate, PmKr, PmProject, PmResult, PmWave, RATE_LIMIT_RETRIES,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
@@ -93,6 +93,14 @@ const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, 
   }
 }"#;
 
+const UPDATE_PROJECT_MUTATION: &str = r#"mutation UpdateProject($id: String!, $name: String!, $description: String!, $content: String!) {
+  projectUpdate(id: $id, input: { name: $name, description: $description, content: $content }) {
+    project {
+      id
+    }
+  }
+}"#;
+
 const ATTACH_PROJECT_MUTATION: &str = r#"mutation AttachProject($initiativeId: String!, $projectId: String!) {
   initiativeToProjectCreate(input: { initiativeId: $initiativeId, projectId: $projectId }) {
     initiativeToProject {
@@ -112,35 +120,6 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
         sortOrder
         assignee {
           id
-        }
-        state {
-          type
-        }
-      }
-      pageInfo {
-        hasNextPage
-        endCursor
-      }
-    }
-  }
-}"#;
-
-const LIST_LEGACY_ITEMS_QUERY: &str = r#"query ListLegacyProjectIssues($projectId: String!, $after: String, $first: Int!) {
-  project(id: $projectId) {
-    issues(first: $first, after: $after) {
-      nodes {
-        id
-        title
-        description
-        prioritySortOrder
-        sortOrder
-        assignee {
-          id
-        }
-        labels {
-          nodes {
-            name
-          }
         }
         state {
           type
@@ -427,6 +406,28 @@ impl LinearClient {
         Ok(project_id)
     }
 
+    pub async fn update_project(
+        &self,
+        project_id: &str,
+        name: &str,
+        summary: &str,
+        definition: &str,
+        krs: &[PmKr],
+    ) -> PmResult<()> {
+        let _: Value = self
+            .graphql(
+                UPDATE_PROJECT_MUTATION,
+                json!({
+                    "id": project_id,
+                    "name": name,
+                    "description": linear_description(summary),
+                    "content": render_project_content(definition, krs),
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
     pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<PmProject>> {
         let mut after = None;
         let mut projects = Vec::new();
@@ -457,28 +458,6 @@ impl LinearClient {
             .into_iter()
             .enumerate()
             .map(|(rank, issue)| issue.into_pm_item(rank as u32))
-            .collect())
-    }
-
-    pub(crate) async fn list_legacy_items(&self, project_id: &str) -> PmResult<Vec<PmLegacyItem>> {
-        Ok(self
-            .list_issue_nodes(LIST_LEGACY_ITEMS_QUERY, project_id)
-            .await?
-            .into_iter()
-            .enumerate()
-            .map(|(rank, issue)| {
-                let project_slugs = issue
-                    .labels
-                    .nodes
-                    .iter()
-                    .filter_map(|label| label.name.strip_prefix("project:"))
-                    .map(str::to_string)
-                    .collect();
-                PmLegacyItem {
-                    item: issue.into_pm_item(rank as u32),
-                    project_slugs,
-                }
-            })
             .collect())
     }
 
@@ -682,20 +661,7 @@ struct IssueNode {
     #[serde(default)]
     assignee: Option<IdNode>,
     #[serde(default)]
-    labels: LabelConnection,
-    #[serde(default)]
     state: Option<WorkflowStateRef>,
-}
-
-#[derive(Default, Deserialize)]
-struct LabelConnection {
-    #[serde(default)]
-    nodes: Vec<LabelNode>,
-}
-
-#[derive(Deserialize)]
-struct LabelNode {
-    name: String,
 }
 
 impl IssueNode {
@@ -1047,43 +1013,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_items_preserve_project_labels_for_migration() {
-        let (base_url, _requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "project": { "issues": {
-                "nodes": [{
-                    "id": "issue-1",
-                    "title": "Move me",
-                    "description": "",
-                    "prioritySortOrder": 0.0,
-                    "sortOrder": 0.0,
-                    "labels": { "nodes": [
-                        { "name": "project:wave-chat" },
-                        { "name": "bug" }
-                    ] },
-                    "state": { "type": "unstarted" }
-                }],
-                "pageInfo": { "hasNextPage": false, "endCursor": null }
-            } } } }),
-        )])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-9".to_string()),
-            base_url,
-        );
-
-        let items = client
-            .list_legacy_items("legacy-project")
-            .await
-            .expect("list legacy items");
-
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].item.id, "issue-1");
-        assert_eq!(items[0].project_slugs, vec!["wave-chat"]);
-    }
-
-    #[tokio::test]
     async fn create_project_writes_content_then_attaches_to_initiative() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(
@@ -1127,6 +1056,42 @@ mod tests {
         let attach: Value = serde_json::from_str(&requests[1].body).expect("attach json");
         assert_eq!(attach["variables"]["initiativeId"], "initiative-1");
         assert_eq!(attach["variables"]["projectId"], "project-1");
+    }
+
+    #[tokio::test]
+    async fn update_project_replaces_definition_and_krs() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "projectUpdate": { "project": { "id": "project-1" } } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-9".to_string()),
+            base_url,
+        );
+
+        client
+            .update_project(
+                "project-1",
+                "Wave Chat",
+                "Conversation stays in flow.",
+                "Conversation stays in flow.",
+                &[PmKr {
+                    text: "Replies survive every restart boundary".to_string(),
+                    holds: false,
+                }],
+            )
+            .await
+            .expect("update project");
+
+        let requests = requests.lock().await;
+        let update: Value = serde_json::from_str(&requests[0].body).expect("update json");
+        assert_eq!(update["variables"]["id"], "project-1");
+        assert!(update["variables"]["content"]
+            .as_str()
+            .expect("content")
+            .contains("Replies survive every restart boundary"));
     }
 
     #[tokio::test]

@@ -1219,12 +1219,30 @@ public final class RepoState {
         }
 
         let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: wave.name, branch: wave.branch)
-        let plan = WavePlanParser.parse(repoRoot: repoRoot, waveName: wave.name)
+        let objective = WavePlanParser.objective(repoRoot: repoRoot, waveName: wave.name) ?? ""
         _ = waveStore.applyOptimistic(waveId) {
             $0.content = content
-            $0.plan = plan
+            $0.plan = objective.isEmpty ? nil : WavePlan(objective: objective)
         }
         waveStore.commitMutation(waveId)
+
+        guard let registryQuery else { return }
+        Task { [weak self] in
+            do {
+                let plan = try await registryQuery.plan(
+                    wave: wave.name,
+                    objective: objective,
+                    cwd: repoRoot.path
+                )
+                guard let self, self.waveStore.wave(for: waveId) != nil else { return }
+                _ = self.waveStore.applyOptimistic(waveId) { $0.plan = plan }
+                self.waveStore.commitMutation(waveId)
+            } catch {
+                LoggingService.model(
+                    "loadWaveContent: PM snapshot unavailable for \(wave.name): \(error.localizedDescription)"
+                )
+            }
+        }
     }
 
     private func preloadWaveContent(for waves: [WaveViewModel]) {

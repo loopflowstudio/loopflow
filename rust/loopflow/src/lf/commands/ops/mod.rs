@@ -15,7 +15,9 @@ use crate::engine::{
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_skill;
 use crate::lf::output::{column_width, Colors};
-use crate::lf::{CronCommand, PmCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand};
+use crate::lf::{
+    CronCommand, PmCommand, PmProjectCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand,
+};
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, current_pr, land, plan_rebase,
@@ -393,14 +395,15 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             project,
             json,
         } => {
-            let result = crate::ops::pm::pm_show(
-                &repo_root,
-                &crate::ops::pm::PmShowOptions {
-                    wave: wave.clone(),
-                    project: project.clone(),
-                },
-                progress,
-            )?;
+            let options = crate::ops::pm::PmShowOptions {
+                wave: wave.clone(),
+                project: project.clone(),
+            };
+            let result = if *json {
+                crate::ops::pm::pm_show(&repo_root, &options, &crate::ops::NullProgress)?
+            } else {
+                crate::ops::pm::pm_show(&repo_root, &options, progress)?
+            };
             if *json {
                 println!(
                     "{}",
@@ -409,42 +412,14 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                         "provider": result.provider,
                         "initiative": result.initiative,
                         "project": result.project,
+                        "synced_at": result.synced_at,
+                        "projects": result.projects,
                         "items": result.items,
                     }))?
                 );
             } else {
                 print_pm_show_result(&result);
             }
-        }
-        PmCommand::Update {
-            wave,
-            project,
-            id,
-            title,
-            notes,
-            status,
-            pr,
-        } => {
-            let result = crate::ops::pm::pm_update(
-                &repo_root,
-                &crate::ops::pm::PmUpdateOptions {
-                    wave: wave.clone(),
-                    project: project.clone(),
-                    id: id.clone(),
-                    title: title.clone(),
-                    notes: notes.clone(),
-                    status: status.clone(),
-                    pr: pr.clone(),
-                },
-                progress,
-            )?;
-            let verb = if result.created { "created" } else { "updated" };
-            let closed = if result.completed { ", closed" } else { "" };
-            let linked = match result.linked_pr {
-                Some(pr) => format!(", linked {pr}"),
-                None => String::new(),
-            };
-            println!("{}: {verb} task {}{closed}{linked}", result.wave, result.id);
         }
         PmCommand::Status { wave } => {
             let result = crate::ops::pm::pm_status(
@@ -456,21 +431,14 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 println!("no PM-linked waves");
             } else {
                 for wave in result.waves {
-                    let linear_initiative = wave.initiative_name.as_deref().unwrap_or("-");
                     println!(
-                        "{}: Linear Initiative `{linear_initiative}` ({}) — {} open / {} total",
-                        wave.wave, wave.initiative, wave.open, wave.total
+                        "{}: Linear Initiative `{}` ({}) — {} open / {} total",
+                        wave.wave, wave.initiative_name, wave.initiative, wave.open, wave.total
                     );
                     for (project, open) in wave.open_by_project {
                         println!("  {project:<28} {open} open");
                     }
                 }
-            }
-            for initiative in result.stranded_waves {
-                println!(
-                    "stranded: Linear Initiative `{}` ({}) — no local wave points here",
-                    initiative.name, initiative.id
-                );
             }
         }
         PmCommand::Rename { wave, title } => {
@@ -570,18 +538,69 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 );
             }
         },
+        PmCommand::Project { cmd } => {
+            let (wave, project, title, definition, krs) = match cmd {
+                PmProjectCommand::Create {
+                    wave,
+                    title,
+                    definition,
+                    krs,
+                } => (
+                    wave.clone(),
+                    None,
+                    Some(title.clone()),
+                    definition.clone(),
+                    krs.clone(),
+                ),
+                PmProjectCommand::Update {
+                    wave,
+                    project,
+                    title,
+                    definition,
+                    krs,
+                } => (
+                    wave.clone(),
+                    Some(project.clone()),
+                    title.clone(),
+                    definition.clone(),
+                    krs.clone(),
+                ),
+            };
+            let result = crate::ops::pm::pm_project_write(
+                &repo_root,
+                &crate::ops::pm::PmProjectWriteOptions {
+                    wave,
+                    project,
+                    title,
+                    definition,
+                    krs,
+                },
+                progress,
+            )?;
+            let verb = if result.created { "created" } else { "updated" };
+            println!(
+                "{}: {verb} project:{} ({})",
+                result.wave, result.slug, result.id
+            );
+        }
         PmCommand::Doctor => {
             let result = crate::ops::pm::pm_sync(
                 &repo_root,
-                &crate::ops::pm::PmSyncOptions { plan: true },
+                &crate::ops::pm::PmSyncOptions {
+                    wave: None,
+                    plan: true,
+                },
                 progress,
             )?;
             print_pm_sync_result(&result);
         }
-        PmCommand::Sync { plan } => {
+        PmCommand::Sync { wave, plan } => {
             let result = crate::ops::pm::pm_sync(
                 &repo_root,
-                &crate::ops::pm::PmSyncOptions { plan: *plan },
+                &crate::ops::pm::PmSyncOptions {
+                    wave: wave.clone(),
+                    plan: *plan,
+                },
                 progress,
             )?;
             print_pm_sync_result(&result);

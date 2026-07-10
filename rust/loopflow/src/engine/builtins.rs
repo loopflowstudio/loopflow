@@ -296,7 +296,7 @@ mod tests {
         let skill = get_builtin_skill("project-promote").expect("promotion skill");
 
         assert!(flow.contains("- project-promote"));
-        assert!(skill.contains("wave/<parent>/projects/<slug>.md"));
+        assert!(skill.contains("lf pm show --wave <parent> --project <slug> --json"));
         assert!(skill.contains("parent_wave_id"));
         assert!(skill.contains("lf pm show"));
         assert!(skill.contains("lf radio pub --parent"));

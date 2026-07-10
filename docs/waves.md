@@ -14,9 +14,9 @@ You author wave files under `wave/<name>/`:
 |------|-------|
 | **`GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
 | **`MEMORY.md`** | What the wave remembers between loops — written by the wave agent |
-| **`projects/*.md`** | One measured bet per file, with KRs and closure criteria |
 
-Tasks live in Linear. Run the agent and it works a loop: read its projects,
+Projects and tasks live in Linear and sync into the local SQLite registry. Run
+`lf pm sync`, then run the agent: it reads its projects,
 tasks, and memory; pick the next move; execute it inline or place a justified
 child loop; watch the PR; and fold what changed back into memory.
 

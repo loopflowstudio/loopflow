@@ -79,6 +79,26 @@ public struct RegistryQuery: Sendable {
         return snapshot.items.filter { !$0.completed }
     }
 
+    /// A wave's measured bets from the local PM snapshot. `lf pm show` reads
+    /// SQLite, so rendering the plan never waits on Linear.
+    public func plan(wave: String, objective: String, cwd: String?) async throws -> WavePlan {
+        let stdout = try await run(["pm", "show", "--wave", wave, "--json"], cwd)
+        let snapshot = try Self.decode(PmShowSnapshot.self, from: stdout)
+        return WavePlan(
+            objective: objective,
+            projects: snapshot.projects.map { project in
+                WaveProject(
+                    id: project.slug,
+                    title: project.name,
+                    summary: project.summary.isEmpty ? nil : project.summary,
+                    krs: project.krs.map {
+                        WaveKeyResult(text: $0.text, proof: $0.holds ? .holds : .open)
+                    }
+                )
+            }
+        )
+    }
+
     /// Per-boundary spend over a window: what each skill, and each terminal run,
     /// actually spent. `lf usage --json` applies the cumulative-diff rule, so
     /// these rows are additive and sum to the totals `lf usage` prints.
@@ -123,17 +143,49 @@ public struct RegistryQuery: Sendable {
     }
 }
 
-/// `lf pm show --json`. The envelope names the wave, provider, and project it
-/// read; the Mac only renders the items.
 private struct PmShowSnapshot: Decodable {
+    let wave: String
+    let provider: String
+    let initiative: String
+    let project: String?
+    let syncedAt: Int64
+    let projects: [PmProjectSnapshot]
     let items: [BacklogItem]
+
+    enum CodingKeys: String, CodingKey {
+        case wave, provider, initiative, project, projects, items
+        case syncedAt = "synced_at"
+    }
+}
+
+private struct PmProjectSnapshot: Decodable {
+    let id: String
+    let slug: String
+    let name: String
+    let summary: String
+    let definition: String
+    let krs: [PmKrSnapshot]
+    let initiativeIds: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, slug, name, summary, definition, krs
+        case initiativeIds = "initiative_ids"
+    }
+}
+
+private struct PmKrSnapshot: Decodable {
+    let text: String
+    let holds: Bool
 }
 
 public struct BacklogItem: Decodable, Sendable, Identifiable, Hashable {
     public let id: String
     public let name: String
+    public let description: String
+    public let rank: UInt32
     public let completed: Bool
-    public let labels: [String]
+    public let project: String?
+    public let assignee: String?
 }
 
 // MARK: - Wire snapshots (mirror the Rust `--json` types)

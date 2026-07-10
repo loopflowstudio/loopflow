@@ -103,58 +103,59 @@ Headless release automation does not require a runner-local agent CLI. If the `r
 
 ## lf pm
 
-Read and edit a wave's Linear tasks. Each wave is backed by one Linear project;
-local projects live under `wave/<wave>/projects/` and tasks attach to them with
-labels named `project:<slug>`.
+Read and edit a wave's Linear planning state. Each wave is backed by one Linear
+Initiative, projects are Linear Projects, and tasks are Issues. `sync` refreshes
+the local SQLite read model used by every other read surface.
 
 ```bash
 lf pm status                                                     # show linked waves and task counts
-lf pm sync --plan                                                # report Linear/local drift
-lf pm show --wave designer                                       # group tasks by local project
-lf pm show --wave designer --project ui                          # filter to one local project
+lf pm sync --wave designer                                       # refresh SQLite from Linear
+lf pm show --wave designer                                       # read projects and tasks locally
+lf pm show --wave designer --project ui                          # filter to one project
+lf pm project update --wave designer --project ui --definition "..." --kr "..."
 lf pm task create --wave designer --project ui --title "Dark mode"
 lf pm task update --id 1207... --title "Refine dark mode"
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 lf pm task move --id 1207... --wave designer --project api
-lf pm rename --wave designer --title "Designer"                  # rename the backing Linear project
-lf pm init --wave designer                                       # connect/create the Linear project
+lf pm rename --wave designer --title "Designer"                  # rename the backing Linear Initiative
+lf pm init --wave designer                                       # connect the Initiative
 ```
 
 | Command | What it does |
 |---------|--------------|
-| `status` | Show linked waves, backing Linear project names, and task counts by local project |
-| `show` | Print Linear tasks grouped by local project; `--project` filters to one project |
-| `task create` | Create a Linear task, optionally attached to a local project |
+| `status` | Show linked waves, backing Linear Initiative names, and task counts by Project |
+| `show` | Export the SQLite Project/task snapshot; `--project` filters it |
+| `project create/update` | Write Linear Project definitions and KRs, then refresh SQLite |
+| `task create` | Create a Linear task attached to a Project |
 | `task update` | Edit an existing Linear task |
 | `task done` | Close a Linear task and optionally comment with a PR link |
-| `task move` | Move a task to another wave's Linear project and attach a local project label |
-| `sync --plan` | Report backing Linear project drift, missing labels, stranded Linear projects, and unassigned tasks |
-| `rename` | Rename the Linear project backing a wave |
-| `init` | Connect or create the wave's Linear project and write `linear_project` into `wave/<name>/GOAL.md` |
+| `task move` | Move a task into a wave's Linear Project |
+| `sync` | Fetch Linear Initiatives, Projects, KRs, and Issues into SQLite |
+| `sync --plan` | Report Initiative/Project drift without writing SQLite |
+| `rename` | Rename the Linear Initiative backing a wave |
+| `init` | Create or connect the wave's Linear Initiative and write its stable id into `GOAL.md` |
 
 | Flag | Description |
 |------|-------------|
 | `--wave NAME` | Target wave (defaults to the current branch's wave) |
-| `--project SLUG` | Local project from `wave/<wave>/projects/<slug>.md` |
+| `--project SLUG` | Linear Project slug from the synced snapshot |
 | `--id TASK-ID` | Existing Linear issue to update or close |
 | `--title` | Task title (required when creating) |
 | `--notes` | Task notes/description |
 | `--pr URL` | PR link to comment on a closed or updated task |
 
-`lf pm update` remains as a compatibility alias for create/update/done:
-
-```bash
-lf pm update --wave designer --project ui --title "Add dark mode"
-lf pm update --id 1207... --status done --pr "https://github.com/acme/app/pull/42"
-```
-
-Connect Linear first with `lf auth linear`. `lf pm init` pins the project into `GOAL.md`:
+Connect Linear first with `lf auth linear`. `lf pm init` pins the Initiative into `GOAL.md`:
 
 ```yaml
 # wave/designer/GOAL.md frontmatter
 pm:
-  linear_project: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
+  provider: linear
+  linear_initiative: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
 ```
+
+When the id is absent, init derives the Initiative title from the wave name.
+It links one exact match, creates one when none exists, and fails when the title
+is ambiguous. Later commands use the persisted id, never the mutable title.
 
 ---
 

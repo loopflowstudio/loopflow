@@ -46,13 +46,13 @@ impl FromStr for PmProviderKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmKr {
     pub text: String,
     pub holds: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmProject {
     pub id: String,
     pub slug: String,
@@ -80,12 +80,6 @@ pub struct PmItem {
     pub project: Option<String>,
     /// Provider user ID of the assignee, if any.
     pub assignee: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PmLegacyItem {
-    pub item: PmItem,
-    pub project_slugs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,14 +150,21 @@ pub fn parse_project_content(content: &str) -> (String, Vec<PmKr>) {
     let mut section = Section::None;
     let mut definition = Vec::new();
     let mut krs = Vec::new();
+    let mut current_kr: Option<PmKr> = None;
     for line in content.lines() {
         let trimmed = line.trim();
         match trimmed {
             "## Definition" => {
+                if let Some(kr) = current_kr.take() {
+                    krs.push(kr);
+                }
                 section = Section::Definition;
                 continue;
             }
             "## KRs" => {
+                if let Some(kr) = current_kr.take() {
+                    krs.push(kr);
+                }
                 section = Section::Krs;
                 continue;
             }
@@ -181,26 +182,38 @@ pub fn parse_project_content(content: &str) -> (String, Vec<PmKr>) {
         match section {
             Section::Definition => definition.push(line),
             Section::Krs => {
-                let (holds, text) = if let Some(text) = trimmed.strip_prefix("- [x] ") {
-                    (true, text)
+                let item = if let Some(text) = trimmed.strip_prefix("- [x] ") {
+                    Some((true, text))
                 } else if let Some(text) = trimmed.strip_prefix("- [X] ") {
-                    (true, text)
+                    Some((true, text))
                 } else if let Some(text) = trimmed.strip_prefix("- [ ] ") {
-                    (false, text)
-                } else if let Some(text) = trimmed.strip_prefix("- ") {
-                    (false, text)
+                    Some((false, text))
                 } else {
-                    continue;
+                    trimmed.strip_prefix("- ").map(|text| (false, text))
                 };
-                if !text.trim().is_empty() {
-                    krs.push(PmKr {
-                        text: text.trim().to_string(),
-                        holds,
-                    });
+
+                if let Some((holds, text)) = item {
+                    if let Some(kr) = current_kr.take() {
+                        krs.push(kr);
+                    }
+                    if !text.trim().is_empty() {
+                        current_kr = Some(PmKr {
+                            text: text.trim().to_string(),
+                            holds,
+                        });
+                    }
+                } else if !trimmed.is_empty() {
+                    if let Some(kr) = current_kr.as_mut() {
+                        kr.text.push(' ');
+                        kr.text.push_str(trimmed);
+                    }
                 }
             }
             Section::None => {}
         }
+    }
+    if let Some(kr) = current_kr {
+        krs.push(kr);
     }
 
     (definition.join("\n").trim().to_string(), krs)
@@ -377,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn project_content_round_trips_linear_and_local_markdown() {
+    fn project_content_round_trips_linear_markdown() {
         let krs = vec![
             PmKr {
                 text: "One proof holds".to_string(),
@@ -394,13 +407,13 @@ mod tests {
             ("A measured bet.".to_string(), krs.clone())
         );
 
-        let local = "# Project Name\n\nA measured bet.\n\n## KRs\n\n- One proof holds\n";
+        let local = "# Project Name\n\nA measured bet.\n\n## KRs\n\n- One proof holds\n  across wrapped lines.\n";
         assert_eq!(
             parse_project_content(local),
             (
                 "A measured bet.".to_string(),
                 vec![PmKr {
-                    text: "One proof holds".to_string(),
+                    text: "One proof holds across wrapped lines.".to_string(),
                     holds: false,
                 }]
             )

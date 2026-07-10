@@ -47,7 +47,8 @@ Linear tasks move as-is — each one lands in exactly one child. But `GOAL.md` n
 4. Create the new waves
    - `wave/<child>/GOAL.md` — fresh intent, measures, and process judgment for each child; draw scope boundaries between siblings
    - `wave/<child>/MEMORY.md` — the decisions and context this child inherits
-   - `lf pm init --wave <child>` — connect each child's Linear project
+   - distribute the parent's project cache files under each child's `projects/`
+   - `lf pm init --wave <child>` — create each child's Linear Initiative and Projects
    - Move allocated tasks with `lf pm task move --id <task> --wave <child> --project <project>`. Use `lf pm task done --id <task>` only for shipped work.
 
 5. Remove the parent
@@ -55,7 +56,7 @@ Linear tasks move as-is — each one lands in exactly one child. But `GOAL.md` n
    - Commit: `split-wave: <parent> → <child-a>, <child-b>`
 
 6. Verify
-   - Each child has a `GOAL.md`, a `MEMORY.md`, and a connected Linear project
+   - Each child has a `GOAL.md`, a `MEMORY.md`, and a connected Linear Initiative
    - No content from the parent is unaccounted for
 
 ## Guardrails

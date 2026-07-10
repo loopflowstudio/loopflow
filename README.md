@@ -379,25 +379,31 @@ lf auth disconnect github
 Linear refreshes OAuth automatically before expiry. Connections created before
 this release may need one `lf auth linear` reconnect to record their PKCE client ID.
 
-Tasks live in Linear. Pin a wave to its Linear project in `wave/<name>/GOAL.md` frontmatter — `lf pm init` writes this for you:
+Planning lives in Linear. Pin a wave to its Linear Initiative in
+`wave/<name>/GOAL.md` frontmatter — `lf pm init` writes this for you:
 
 ```yaml
 # wave/designer/GOAL.md frontmatter
 pm:
-  linear_project: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
+  provider: linear
+  linear_initiative: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
 ```
 
 ```bash
-lf pm init --wave designer                # connect/create the Linear project
+lf pm init --wave designer                # create the Initiative and migrate projects/tasks
 lf pm show --wave designer                # print an aligned live-task table
-lf pm show --wave designer --project ui   # filter to one local project
+lf pm show --wave designer --project ui   # filter to one Linear Project
 lf pm task create --wave designer --project ui --title "Add dark mode" --notes "..."
 lf pm task done --id 1207... --pr "..."   # close a shipped task
-lf pm sync --plan                         # show Linear/task/project drift
+lf pm sync --plan                         # show Linear/cache drift
 lf pm status                              # show linked waves and task counts
 ```
 
-`lf pm` reads and edits tasks directly in Linear. Local projects stay in `wave/<wave>/projects/`; Linear tasks attach to them with labels named `project:<slug>`. Issue descriptions and comments are Markdown, which Linear renders natively.
+`lf pm` maps wave → Initiative, project → Project, and task → Issue. Linear owns
+project definitions and KRs in Project content. `wave/<wave>/projects/` is an
+offline cache refreshed by `lf pm sync` and a migration seed for `lf pm init`;
+do not edit both copies. Issue descriptions and comments are Markdown, which
+Linear renders natively.
 
 The `loopflow` Python package is a library only (wire models).
 Use the install script or cargo to install `lf` and `lfd`.

@@ -6,11 +6,13 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmLabel, PmProject, PmResult, RATE_LIMIT_RETRIES,
+    parse_project_content, project_slug, render_project_content, PmError, PmItem, PmItemCreate,
+    PmItemUpdate, PmKr, PmLegacyItem, PmProject, PmResult, PmWave, RATE_LIMIT_RETRIES,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
 const LIST_ITEMS_PAGE_SIZE: u32 = 50;
+const LIST_PROJECTS_PAGE_SIZE: u32 = 50;
 const COMPLETED_STATE_TYPE: &str = "completed";
 const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Loopflow";
 
@@ -31,23 +33,99 @@ const CREATE_TEAM_MUTATION: &str = r#"mutation CreateTeam($name: String!, $key: 
   }
 }"#;
 
-const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, $description: String!, $teamId: ID!) {
-  projectCreate(input: { name: $name, description: $description, teamIds: [$teamId] }) {
+const CREATE_INITIATIVE_MUTATION: &str = r#"mutation CreateInitiative($name: String!, $description: String!) {
+  initiativeCreate(input: { name: $name, description: $description }) {
+    initiative {
+      id
+    }
+  }
+}"#;
+
+const UPDATE_INITIATIVE_MUTATION: &str = r#"mutation UpdateInitiative($id: String!, $name: String!) {
+  initiativeUpdate(id: $id, input: { name: $name }) {
+    initiative {
+      id
+    }
+  }
+}"#;
+
+const LIST_INITIATIVES_QUERY: &str = r#"query ListInitiatives($after: String, $first: Int!) {
+  initiatives(after: $after, first: $first) {
+    nodes {
+      id
+      name
+      description
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}"#;
+
+const LIST_INITIATIVE_PROJECTS_QUERY: &str = r#"query ListInitiativeProjects($initiativeId: String!, $after: String, $first: Int!) {
+  initiative(id: $initiativeId) {
+    projects(after: $after, first: $first, includeSubInitiatives: false) {
+      nodes {
+        id
+        name
+        description
+        content
+        initiatives(first: 50) {
+          nodes {
+            id
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}"#;
+
+const CREATE_PROJECT_MUTATION: &str = r#"mutation CreateProject($name: String!, $description: String!, $content: String!, $teamId: String!) {
+  projectCreate(input: { name: $name, description: $description, content: $content, teamIds: [$teamId] }) {
     project {
       id
     }
   }
 }"#;
 
-const UPDATE_PROJECT_MUTATION: &str = r#"mutation UpdateProject($id: ID!, $name: String!) {
-  projectUpdate(id: $id, input: { name: $name }) {
-    project {
+const ATTACH_PROJECT_MUTATION: &str = r#"mutation AttachProject($initiativeId: String!, $projectId: String!) {
+  initiativeToProjectCreate(input: { initiativeId: $initiativeId, projectId: $projectId }) {
+    initiativeToProject {
       id
     }
   }
 }"#;
 
 const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $after: String, $first: Int!) {
+  project(id: $projectId) {
+    issues(first: $first, after: $after) {
+      nodes {
+        id
+        title
+        description
+        prioritySortOrder
+        sortOrder
+        assignee {
+          id
+        }
+        state {
+          type
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}"#;
+
+const LIST_LEGACY_ITEMS_QUERY: &str = r#"query ListLegacyProjectIssues($projectId: String!, $after: String, $first: Int!) {
   project(id: $projectId) {
     issues(first: $first, after: $after) {
       nodes {
@@ -76,8 +154,8 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
   }
 }"#;
 
-const CREATE_ITEM_MUTATION: &str = r#"mutation CreateIssue($teamId: ID!, $projectId: ID!, $title: String!, $description: String!, $stateId: ID, $labelIds: [ID!]) {
-  issueCreate(input: { teamId: $teamId, projectId: $projectId, title: $title, description: $description, stateId: $stateId, labelIds: $labelIds }) {
+const CREATE_ITEM_MUTATION: &str = r#"mutation CreateIssue($teamId: String!, $projectId: String!, $title: String!, $description: String!, $stateId: String) {
+  issueCreate(input: { teamId: $teamId, projectId: $projectId, title: $title, description: $description, stateId: $stateId }) {
     issue {
       id
     }
@@ -122,41 +200,6 @@ const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowSta
       id
       position
     }
-  }
-}"#;
-
-const LIST_TEAM_PROJECTS_QUERY: &str = r#"query ListTeamProjects($teamId: ID!) {
-  team(id: $teamId) {
-    projects {
-      nodes {
-        id
-        name
-      }
-    }
-  }
-}"#;
-
-const LIST_LABELS_QUERY: &str = r#"query ListIssueLabels($teamId: ID!) {
-  issueLabels(filter: { team: { id: { eq: $teamId } } }) {
-    nodes {
-      id
-      name
-    }
-  }
-}"#;
-
-const CREATE_LABEL_MUTATION: &str = r##"mutation CreateIssueLabel($teamId: ID!, $name: String!) {
-  issueLabelCreate(input: { teamId: $teamId, name: $name, color: "#4f46e5" }) {
-    issueLabel {
-      id
-      name
-    }
-  }
-}"##;
-
-const ADD_ISSUE_LABEL_MUTATION: &str = r#"mutation AddIssueLabel($id: ID!, $labelId: ID!) {
-  issueAddLabel(id: $id, labelId: $labelId) {
-    success
   }
 }"#;
 
@@ -299,28 +342,25 @@ impl LinearClient {
             .map(|state| state.id))
     }
 
-    pub async fn create_project(&self, name: &str, description: &str) -> PmResult<String> {
-        let team_id = self.resolve_team_id().await?;
-        let response: ProjectCreateData = self
+    pub async fn create_wave(&self, name: &str, summary: &str) -> PmResult<String> {
+        let response: InitiativeCreateData = self
             .graphql(
-                CREATE_PROJECT_MUTATION,
+                CREATE_INITIATIVE_MUTATION,
                 json!({
                     "name": name,
-                    "description": linear_project_description(description),
-                    "teamId": team_id,
+                    "description": summary,
                 }),
             )
             .await?;
-
-        Ok(response.project_create.project.id)
+        Ok(response.initiative_create.initiative.id)
     }
 
-    pub async fn rename_project(&self, project_id: &str, name: &str) -> PmResult<()> {
+    pub async fn rename_wave(&self, initiative_id: &str, name: &str) -> PmResult<()> {
         let _: Value = self
             .graphql(
-                UPDATE_PROJECT_MUTATION,
+                UPDATE_INITIATIVE_MUTATION,
                 json!({
-                    "id": project_id,
+                    "id": initiative_id,
                     "name": name,
                 }),
             )
@@ -328,70 +368,128 @@ impl LinearClient {
         Ok(())
     }
 
-    pub async fn list_projects(&self) -> PmResult<Vec<PmProject>> {
-        let team_id = self.resolve_team_id().await?;
-        let response: TeamProjectsData = self
-            .graphql(LIST_TEAM_PROJECTS_QUERY, json!({ "teamId": team_id }))
-            .await?;
-        Ok(response
-            .team
-            .projects
-            .nodes
-            .into_iter()
-            .map(|project| PmProject {
-                id: project.id,
-                name: project.name,
-            })
-            .collect())
-    }
-
-    pub async fn list_labels(&self) -> PmResult<Vec<PmLabel>> {
-        let team_id = self.resolve_team_id().await?;
-        let response: LabelsData = self
-            .graphql(LIST_LABELS_QUERY, json!({ "teamId": team_id }))
-            .await?;
-        Ok(response
-            .issue_labels
-            .nodes
-            .into_iter()
-            .map(|label| PmLabel {
-                id: label.id,
-                name: label.name,
-            })
-            .collect())
-    }
-
-    pub async fn ensure_label(&self, name: &str) -> PmResult<String> {
-        if let Some(label) = self
-            .list_labels()
-            .await?
-            .into_iter()
-            .find(|label| label.name == name)
-        {
-            return Ok(label.id);
+    pub async fn list_waves(&self) -> PmResult<Vec<PmWave>> {
+        let mut after = None;
+        let mut waves = Vec::new();
+        loop {
+            let response: InitiativesData = self
+                .graphql(
+                    LIST_INITIATIVES_QUERY,
+                    json!({
+                        "after": after,
+                        "first": LIST_PROJECTS_PAGE_SIZE,
+                    }),
+                )
+                .await?;
+            let page = response.initiatives;
+            waves.extend(page.nodes.into_iter().map(|initiative| PmWave {
+                id: initiative.id,
+                name: initiative.name,
+                summary: initiative.description.unwrap_or_default(),
+            }));
+            if !page.page_info.has_next_page {
+                return Ok(waves);
+            }
+            after = page.page_info.end_cursor;
         }
+    }
 
+    pub async fn create_project(
+        &self,
+        initiative_id: &str,
+        name: &str,
+        summary: &str,
+        definition: &str,
+        krs: &[PmKr],
+    ) -> PmResult<String> {
         let team_id = self.resolve_team_id().await?;
-        let response: LabelCreateData = self
+        let response: ProjectCreateData = self
             .graphql(
-                CREATE_LABEL_MUTATION,
+                CREATE_PROJECT_MUTATION,
                 json!({
-                    "teamId": team_id,
                     "name": name,
+                    "description": linear_project_description(summary),
+                    "content": render_project_content(definition, krs),
+                    "teamId": team_id,
                 }),
             )
             .await?;
-        Ok(response.issue_label_create.issue_label.id)
+        let project_id = response.project_create.project.id;
+        let _: Value = self
+            .graphql(
+                ATTACH_PROJECT_MUTATION,
+                json!({
+                    "initiativeId": initiative_id,
+                    "projectId": project_id,
+                }),
+            )
+            .await?;
+        Ok(project_id)
+    }
+
+    pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<PmProject>> {
+        let mut after = None;
+        let mut projects = Vec::new();
+        loop {
+            let response: InitiativeProjectsData = self
+                .graphql(
+                    LIST_INITIATIVE_PROJECTS_QUERY,
+                    json!({
+                        "initiativeId": initiative_id,
+                        "after": after,
+                        "first": LIST_PROJECTS_PAGE_SIZE,
+                    }),
+                )
+                .await?;
+            let page = response.initiative.projects;
+            projects.extend(page.nodes.into_iter().map(ProjectNode::into_pm_project));
+            if !page.page_info.has_next_page {
+                return Ok(projects);
+            }
+            after = page.page_info.end_cursor;
+        }
     }
 
     pub async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
+        Ok(self
+            .list_issue_nodes(LIST_ITEMS_QUERY, project_id)
+            .await?
+            .into_iter()
+            .enumerate()
+            .map(|(rank, issue)| issue.into_pm_item(rank as u32))
+            .collect())
+    }
+
+    pub(crate) async fn list_legacy_items(&self, project_id: &str) -> PmResult<Vec<PmLegacyItem>> {
+        Ok(self
+            .list_issue_nodes(LIST_LEGACY_ITEMS_QUERY, project_id)
+            .await?
+            .into_iter()
+            .enumerate()
+            .map(|(rank, issue)| {
+                let project_slugs = issue
+                    .labels
+                    .nodes
+                    .iter()
+                    .filter_map(|label| label.name.strip_prefix("project:"))
+                    .map(str::to_string)
+                    .collect();
+                PmLegacyItem {
+                    item: issue.into_pm_item(rank as u32),
+                    project_slugs,
+                }
+            })
+            .collect())
+    }
+
+    async fn list_issue_nodes(&self, query: &str, project_id: &str) -> PmResult<Vec<IssueNode>> {
         let mut after = None;
         let mut issues = Vec::new();
 
         loop {
             let response: ProjectIssuesData = self
                 .graphql(
-                    LIST_ITEMS_QUERY,
+                    query,
                     json!({
                         "projectId": project_id,
                         "after": after,
@@ -409,11 +507,7 @@ impl LinearClient {
                         .total_cmp(&right.priority_sort_order)
                         .then_with(|| left.sort_order.total_cmp(&right.sort_order))
                 });
-                return Ok(issues
-                    .into_iter()
-                    .enumerate()
-                    .map(|(rank, issue)| issue.into_pm_item(rank as u32))
-                    .collect());
+                return Ok(issues);
             }
 
             after = page.page_info.end_cursor;
@@ -432,7 +526,6 @@ impl LinearClient {
                     "title": item.name,
                     "description": item.description,
                     "stateId": state_id,
-                    "labelIds": &item.label_ids,
                 }),
             )
             .await?;
@@ -465,19 +558,6 @@ impl LinearClient {
                 json!({
                     "id": item_id,
                     "projectId": project_id,
-                }),
-            )
-            .await?;
-        Ok(())
-    }
-
-    pub async fn add_label_to_item(&self, item_id: &str, label_id: &str) -> PmResult<()> {
-        let _: Value = self
-            .graphql(
-                ADD_ISSUE_LABEL_MUTATION,
-                json!({
-                    "id": item_id,
-                    "labelId": label_id,
                 }),
             )
             .await?;
@@ -557,6 +637,12 @@ struct ProjectCreateData {
 }
 
 #[derive(Deserialize)]
+struct InitiativeCreateData {
+    #[serde(rename = "initiativeCreate")]
+    initiative_create: InitiativePayload,
+}
+
+#[derive(Deserialize)]
 struct IssueCreateData {
     #[serde(rename = "issueCreate")]
     issue_create: IssuePayload,
@@ -568,20 +654,13 @@ struct ProjectPayload {
 }
 
 #[derive(Deserialize)]
+struct InitiativePayload {
+    initiative: IdNode,
+}
+
+#[derive(Deserialize)]
 struct IssuePayload {
     issue: IdNode,
-}
-
-#[derive(Deserialize)]
-struct LabelCreateData {
-    #[serde(rename = "issueLabelCreate")]
-    issue_label_create: LabelPayload,
-}
-
-#[derive(Deserialize)]
-struct LabelPayload {
-    #[serde(rename = "issueLabel")]
-    issue_label: LabelNode,
 }
 
 #[derive(Deserialize)]
@@ -608,6 +687,17 @@ struct IssueNode {
     state: Option<WorkflowStateRef>,
 }
 
+#[derive(Default, Deserialize)]
+struct LabelConnection {
+    #[serde(default)]
+    nodes: Vec<LabelNode>,
+}
+
+#[derive(Deserialize)]
+struct LabelNode {
+    name: String,
+}
+
 impl IssueNode {
     fn into_pm_item(self, rank: u32) -> PmItem {
         let completed = self
@@ -621,28 +711,10 @@ impl IssueNode {
             description: self.description.unwrap_or_default(),
             rank,
             completed,
-            labels: self
-                .labels
-                .nodes
-                .into_iter()
-                .map(|label| label.name)
-                .collect(),
+            project: None,
             assignee: self.assignee.map(|assignee| assignee.id),
         }
     }
-}
-
-#[derive(Default, Deserialize)]
-struct LabelConnection {
-    #[serde(default)]
-    nodes: Vec<LabelNode>,
-}
-
-#[derive(Deserialize)]
-struct LabelNode {
-    #[serde(default)]
-    id: String,
-    name: String,
 }
 
 #[derive(Deserialize)]
@@ -721,30 +793,78 @@ struct TeamCreatePayload {
 }
 
 #[derive(Deserialize)]
-struct TeamProjectsData {
-    team: TeamWithProjects,
+struct ProjectNode {
+    id: String,
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    initiatives: IdConnection,
+}
+
+impl ProjectNode {
+    fn into_pm_project(self) -> PmProject {
+        let (definition, krs) = parse_project_content(self.content.as_deref().unwrap_or_default());
+        PmProject {
+            id: self.id,
+            slug: project_slug(&self.name),
+            name: self.name,
+            summary: self.description.unwrap_or_default(),
+            definition,
+            krs,
+            initiative_ids: self
+                .initiatives
+                .nodes
+                .into_iter()
+                .map(|initiative| initiative.id)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Default, Deserialize)]
+struct IdConnection {
+    #[serde(default)]
+    nodes: Vec<IdNode>,
 }
 
 #[derive(Deserialize)]
-struct TeamWithProjects {
+struct InitiativesData {
+    initiatives: InitiativesConnection,
+}
+
+#[derive(Deserialize)]
+struct InitiativesConnection {
+    nodes: Vec<InitiativeNode>,
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
+}
+
+#[derive(Deserialize)]
+struct InitiativeNode {
+    id: String,
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct InitiativeProjectsData {
+    initiative: InitiativeWithProjects,
+}
+
+#[derive(Deserialize)]
+struct InitiativeWithProjects {
     projects: ProjectsConnection,
 }
 
 #[derive(Deserialize)]
 struct ProjectsConnection {
     nodes: Vec<ProjectNode>,
-}
-
-#[derive(Deserialize)]
-struct ProjectNode {
-    id: String,
-    name: String,
-}
-
-#[derive(Deserialize)]
-struct LabelsData {
-    #[serde(rename = "issueLabels")]
-    issue_labels: LabelConnection,
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
 }
 
 async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response) -> PmResult<T> {
@@ -898,7 +1018,6 @@ mod tests {
         assert_eq!(items[0].id, "issue-2");
         assert!(items[0].completed);
         assert_eq!(items[1].assignee.as_deref(), Some("user-1"));
-        assert_eq!(items[1].labels, vec!["kr"]);
         let requests = requests.lock().await;
         assert_eq!(requests.len(), 1);
         assert_eq!(
@@ -910,6 +1029,89 @@ mod tests {
             .as_str()
             .expect("query string")
             .contains("$projectId: String!"));
+    }
+
+    #[tokio::test]
+    async fn legacy_items_preserve_project_labels_for_migration() {
+        let (base_url, _requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "project": { "issues": {
+                "nodes": [{
+                    "id": "issue-1",
+                    "title": "Move me",
+                    "description": "",
+                    "prioritySortOrder": 0.0,
+                    "sortOrder": 0.0,
+                    "labels": { "nodes": [
+                        { "name": "project:wave-chat" },
+                        { "name": "bug" }
+                    ] },
+                    "state": { "type": "unstarted" }
+                }],
+                "pageInfo": { "hasNextPage": false, "endCursor": null }
+            } } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-9".to_string()),
+            base_url,
+        );
+
+        let items = client
+            .list_legacy_items("legacy-project")
+            .await
+            .expect("list legacy items");
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item.id, "issue-1");
+        assert_eq!(items[0].project_slugs, vec!["wave-chat"]);
+    }
+
+    #[tokio::test]
+    async fn create_project_writes_content_then_attaches_to_initiative() {
+        let (base_url, requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "projectCreate": { "project": { "id": "project-1" } } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "initiativeToProjectCreate": { "initiativeToProject": { "id": "link-1" } } } }),
+            ),
+        ])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-9".to_string()),
+            base_url,
+        );
+
+        let project_id = client
+            .create_project(
+                "initiative-1",
+                "Wave Chat",
+                "Conversation stays in flow.",
+                "Conversation stays in flow.",
+                &[PmKr {
+                    text: "Replies stream".to_string(),
+                    holds: false,
+                }],
+            )
+            .await
+            .expect("create project");
+
+        assert_eq!(project_id, "project-1");
+        let requests = requests.lock().await;
+        let create: Value = serde_json::from_str(&requests[0].body).expect("create json");
+        assert_eq!(create["variables"]["name"], "Wave Chat");
+        assert!(create["variables"]["content"]
+            .as_str()
+            .expect("content")
+            .contains("- [ ] Replies stream"));
+        let attach: Value = serde_json::from_str(&requests[1].body).expect("attach json");
+        assert_eq!(attach["variables"]["initiativeId"], "initiative-1");
+        assert_eq!(attach["variables"]["projectId"], "project-1");
     }
 
     #[tokio::test]
@@ -954,8 +1156,6 @@ mod tests {
                 &PmItemCreate {
                     name: "Implement client".to_string(),
                     description: "Build the GraphQL adapter".to_string(),
-                    rank: 7,
-                    label_ids: Vec::new(),
                 },
             )
             .await
@@ -966,7 +1166,6 @@ mod tests {
                 &PmItemUpdate {
                     name: Some("Implement Linear client".to_string()),
                     description: Some("Build the GraphQL adapter and tests".to_string()),
-                    rank: Some(0),
                 },
             )
             .await
@@ -1020,8 +1219,6 @@ mod tests {
                 &PmItemCreate {
                     name: "Implement client".to_string(),
                     description: "Build the GraphQL adapter".to_string(),
-                    rank: 7,
-                    label_ids: Vec::new(),
                 },
             )
             .await

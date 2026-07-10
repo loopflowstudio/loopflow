@@ -179,7 +179,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ReleaseCommand,
     },
-    /// Linear tasks for waves and local projects
+    /// Linear Initiatives, Projects, and tasks for waves
     Pm {
         #[command(subcommand)]
         cmd: PmCommand,
@@ -555,7 +555,7 @@ pub enum CronCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PmCommand {
-    /// Connect (or create) the wave's Linear project; write linear_project to GOAL.md
+    /// Connect a wave to a Linear Initiative and migrate its projects and tasks
     Init {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
@@ -571,7 +571,7 @@ pub enum PmCommand {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// Local project slug from wave/<wave>/projects/
+        /// Linear Project slug
         #[arg(short = 'p', long = "project")]
         project: Option<String>,
         /// Emit the task snapshot as JSON
@@ -583,7 +583,7 @@ pub enum PmCommand {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// Local project slug from wave/<wave>/projects/
+        /// Linear Project slug
         #[arg(short = 'p', long = "project")]
         project: Option<String>,
         /// Existing task id to edit or close; omit to create a new task
@@ -616,12 +616,12 @@ pub enum PmCommand {
         #[arg(long = "plan")]
         plan: bool,
     },
-    /// Rename the Linear project backing a wave
+    /// Rename the Linear Initiative backing a wave
     Rename {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// Linear project title
+        /// Linear Initiative title
         #[arg(long = "title")]
         title: String,
     },
@@ -639,9 +639,9 @@ pub enum PmTaskCommand {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// Local project slug from wave/<wave>/projects/
+        /// Linear Project slug
         #[arg(short = 'p', long = "project")]
-        project: Option<String>,
+        project: String,
         /// Task title
         #[arg(long = "title")]
         title: String,
@@ -657,7 +657,7 @@ pub enum PmTaskCommand {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// Local project slug from wave/<wave>/projects/
+        /// Linear Project slug
         #[arg(short = 'p', long = "project")]
         project: Option<String>,
         /// Task title
@@ -679,7 +679,7 @@ pub enum PmTaskCommand {
         #[arg(long = "pr")]
         pr: Option<String>,
     },
-    /// Move a task into a wave's Linear project and attach a local project label
+    /// Move a task into a wave's Linear Project
     Move {
         /// Existing task id to move
         #[arg(long = "id")]
@@ -687,7 +687,7 @@ pub enum PmTaskCommand {
         /// Destination wave
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-        /// Destination local project slug
+        /// Destination Linear Project slug
         #[arg(short = 'p', long = "project")]
         project: String,
     },

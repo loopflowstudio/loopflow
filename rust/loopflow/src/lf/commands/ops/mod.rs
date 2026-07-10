@@ -383,8 +383,8 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     "already linked"
                 };
                 println!(
-                    "{}: Linear project {} ({state})",
-                    result.wave, result.project_id
+                    "{}: Linear Initiative {} ({state})",
+                    result.wave, result.initiative_id
                 );
             }
         }
@@ -407,8 +407,8 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     serde_json::to_string(&serde_json::json!({
                         "wave": result.wave,
                         "provider": result.provider,
+                        "initiative": result.initiative,
                         "project": result.project,
-                        "local_project": result.local_project,
                         "items": result.items,
                     }))?
                 );
@@ -456,20 +456,20 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 println!("no PM-linked waves");
             } else {
                 for wave in result.waves {
-                    let linear_project = wave.project_name.as_deref().unwrap_or("-");
+                    let linear_initiative = wave.initiative_name.as_deref().unwrap_or("-");
                     println!(
-                        "{}: Linear project `{linear_project}` ({}) — {} open / {} total, {} unassigned",
-                        wave.wave, wave.project, wave.open, wave.total, wave.unassigned
+                        "{}: Linear Initiative `{linear_initiative}` ({}) — {} open / {} total",
+                        wave.wave, wave.initiative, wave.open, wave.total
                     );
                     for (project, open) in wave.open_by_project {
                         println!("  {project:<28} {open} open");
                     }
                 }
             }
-            for project in result.stranded_projects {
+            for initiative in result.stranded_waves {
                 println!(
-                    "stranded: Linear project `{}` ({}) — no local wave points here",
-                    project.name, project.id
+                    "stranded: Linear Initiative `{}` ({}) — no local wave points here",
+                    initiative.name, initiative.id
                 );
             }
         }
@@ -483,8 +483,8 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 progress,
             )?;
             println!(
-                "{}: renamed Linear project {} to `{}`",
-                result.wave, result.project, result.title
+                "{}: renamed Linear Initiative {} to `{}`",
+                result.wave, result.initiative, result.title
             );
         }
         PmCommand::Task { cmd } => match cmd {
@@ -498,7 +498,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     &repo_root,
                     &crate::ops::pm::PmUpdateOptions {
                         wave: wave.clone(),
-                        project: project.clone(),
+                        project: Some(project.clone()),
                         id: None,
                         title: Some(title.clone()),
                         notes: notes.clone(),
@@ -507,11 +507,10 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     },
                     progress,
                 )?;
-                let suffix = project
-                    .as_deref()
-                    .map(|project| format!(" project:{project}"))
-                    .unwrap_or_default();
-                println!("{}: created task {}{suffix}", result.wave, result.id);
+                println!(
+                    "{}: created task {} in project:{}",
+                    result.wave, result.id, project
+                );
             }
             PmTaskCommand::Update {
                 id,
@@ -594,7 +593,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
 fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {
     if result.items.is_empty() {
         let suffix = result
-            .local_project
+            .project
             .as_deref()
             .map(|project| format!(" project:{project}"))
             .unwrap_or_default();
@@ -626,21 +625,14 @@ struct PmTaskRow {
 fn format_pm_task_table(items: &[crate::lfd::pm::PmItem]) -> Vec<String> {
     let mut rows: Vec<_> = items
         .iter()
-        .map(|item| {
-            let projects = crate::ops::pm::item_project_labels(item);
-            PmTaskRow {
-                status: if item.completed { "done" } else { "open" },
-                title: item.name.split_whitespace().collect::<Vec<_>>().join(" "),
-                project: if projects.is_empty() {
-                    "-".to_string()
-                } else {
-                    projects.join(",")
-                },
-                assignee: item.assignee.clone().unwrap_or_else(|| "-".to_string()),
-                id: item.id.clone(),
-                completed: item.completed,
-                rank: item.rank,
-            }
+        .map(|item| PmTaskRow {
+            status: if item.completed { "done" } else { "open" },
+            title: item.name.split_whitespace().collect::<Vec<_>>().join(" "),
+            project: item.project.clone().unwrap_or_else(|| "-".to_string()),
+            assignee: item.assignee.clone().unwrap_or_else(|| "-".to_string()),
+            id: item.id.clone(),
+            completed: item.completed,
+            rank: item.rank,
         })
         .collect();
     rows.sort_by_key(|row| (row.completed, row.rank));
@@ -678,7 +670,7 @@ mod pm_output_tests {
                 description: String::new(),
                 rank: 0,
                 completed: true,
-                labels: Vec::new(),
+                project: None,
                 assignee: None,
             },
             PmItem {
@@ -687,7 +679,7 @@ mod pm_output_tests {
                 description: String::new(),
                 rank: 1,
                 completed: false,
-                labels: vec!["project:wave-chat".to_string()],
+                project: Some("wave-chat".to_string()),
                 assignee: Some("me".to_string()),
             },
         ]);

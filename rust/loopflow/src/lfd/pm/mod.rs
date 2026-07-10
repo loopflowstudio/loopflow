@@ -20,9 +20,9 @@ impl PmProviderKind {
         }
     }
 
-    pub fn project_key(self) -> &'static str {
+    pub fn initiative_key(self) -> &'static str {
         match self {
-            Self::Linear => "linear_project",
+            Self::Linear => "linear_initiative",
         }
     }
 }
@@ -47,15 +47,27 @@ impl FromStr for PmProviderKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmProject {
-    pub id: String,
-    pub name: String,
+pub struct PmKr {
+    pub text: String,
+    pub holds: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PmLabel {
+pub struct PmProject {
+    pub id: String,
+    pub slug: String,
+    pub name: String,
+    pub summary: String,
+    pub definition: String,
+    pub krs: Vec<PmKr>,
+    pub initiative_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmWave {
     pub id: String,
     pub name: String,
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,18 +77,21 @@ pub struct PmItem {
     pub description: String,
     pub rank: u32,
     pub completed: bool,
-    pub labels: Vec<String>,
+    pub project: Option<String>,
     /// Provider user ID of the assignee, if any.
     pub assignee: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PmLegacyItem {
+    pub item: PmItem,
+    pub project_slugs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmItemCreate {
     pub name: String,
     pub description: String,
-    pub rank: u32,
-    #[serde(default)]
-    pub label_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -85,8 +100,6 @@ pub struct PmItemUpdate {
     pub name: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
-    pub rank: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +128,93 @@ pub enum PmError {
 }
 
 pub type PmResult<T> = Result<T, PmError>;
+
+pub fn project_slug(name: &str) -> String {
+    let mut slug = String::new();
+    let mut separator = false;
+    for character in name.chars().flat_map(char::to_lowercase) {
+        if character.is_ascii_alphanumeric() {
+            if separator && !slug.is_empty() {
+                slug.push('-');
+            }
+            slug.push(character);
+            separator = false;
+        } else if !slug.is_empty() {
+            separator = true;
+        }
+    }
+    slug
+}
+
+pub fn parse_project_content(content: &str) -> (String, Vec<PmKr>) {
+    enum Section {
+        None,
+        Definition,
+        Krs,
+    }
+
+    let mut section = Section::None;
+    let mut definition = Vec::new();
+    let mut krs = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        match trimmed {
+            "## Definition" => {
+                section = Section::Definition;
+                continue;
+            }
+            "## KRs" => {
+                section = Section::Krs;
+                continue;
+            }
+            _ => {}
+        }
+
+        if matches!(section, Section::None)
+            && trimmed.starts_with("# ")
+            && !trimmed.starts_with("## ")
+        {
+            section = Section::Definition;
+            continue;
+        }
+
+        match section {
+            Section::Definition => definition.push(line),
+            Section::Krs => {
+                let (holds, text) = if let Some(text) = trimmed.strip_prefix("- [x] ") {
+                    (true, text)
+                } else if let Some(text) = trimmed.strip_prefix("- [X] ") {
+                    (true, text)
+                } else if let Some(text) = trimmed.strip_prefix("- [ ] ") {
+                    (false, text)
+                } else if let Some(text) = trimmed.strip_prefix("- ") {
+                    (false, text)
+                } else {
+                    continue;
+                };
+                if !text.trim().is_empty() {
+                    krs.push(PmKr {
+                        text: text.trim().to_string(),
+                        holds,
+                    });
+                }
+            }
+            Section::None => {}
+        }
+    }
+
+    (definition.join("\n").trim().to_string(), krs)
+}
+
+pub fn render_project_content(definition: &str, krs: &[PmKr]) -> String {
+    let mut content = format!("## Definition\n\n{}\n\n## KRs", definition.trim());
+    for kr in krs {
+        let marker = if kr.holds { "x" } else { " " };
+        content.push_str(&format!("\n\n- [{marker}] {}", kr.text.trim()));
+    }
+    content.push('\n');
+    content
+}
 
 pub(crate) const RATE_LIMIT_RETRIES: u8 = 3;
 const RETRY_AFTER_FALLBACK: Duration = Duration::from_secs(60);
@@ -248,11 +348,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pm_item_update_text_update_skips_rank_only_changes() {
-        let update = PmItemUpdate {
-            rank: Some(1),
-            ..PmItemUpdate::default()
-        };
+    fn pm_item_update_text_update_skips_empty_changes() {
+        let update = PmItemUpdate::default();
 
         assert_eq!(update.text_update(), None);
     }
@@ -262,7 +359,6 @@ mod tests {
         let update = PmItemUpdate {
             name: Some("Ship roadmap".to_string()),
             description: Some("Build the roadmap client".to_string()),
-            rank: Some(1),
         };
 
         assert_eq!(
@@ -271,6 +367,43 @@ mod tests {
                 name: Some("Ship roadmap"),
                 description: Some("Build the roadmap client"),
             })
+        );
+    }
+
+    #[test]
+    fn project_slug_is_deterministic() {
+        assert_eq!(project_slug("Mac Surface UX"), "mac-surface-ux");
+        assert_eq!(project_slug("  API / Auditability  "), "api-auditability");
+    }
+
+    #[test]
+    fn project_content_round_trips_linear_and_local_markdown() {
+        let krs = vec![
+            PmKr {
+                text: "One proof holds".to_string(),
+                holds: true,
+            },
+            PmKr {
+                text: "Another remains".to_string(),
+                holds: false,
+            },
+        ];
+        let rendered = render_project_content("A measured bet.", &krs);
+        assert_eq!(
+            parse_project_content(&rendered),
+            ("A measured bet.".to_string(), krs.clone())
+        );
+
+        let local = "# Project Name\n\nA measured bet.\n\n## KRs\n\n- One proof holds\n";
+        assert_eq!(
+            parse_project_content(local),
+            (
+                "A measured bet.".to_string(),
+                vec![PmKr {
+                    text: "One proof holds".to_string(),
+                    holds: false,
+                }]
+            )
         );
     }
 }

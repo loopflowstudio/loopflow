@@ -9,12 +9,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::lfdb::rows::now_unix;
 use crate::lfdb::{ProviderToken, SharedStore};
-use crate::provider_auth::{
-    preserve_provider_token_metadata, refresh_stored_provider_token, Provider,
-};
+use crate::provider_auth::{refresh_stored_provider_token, Provider, TOKEN_REFRESH_LEAD_SECONDS};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
-const REFRESH_THRESHOLD: Duration = Duration::from_secs(20 * 60);
+const REFRESH_THRESHOLD: Duration = Duration::from_secs(TOKEN_REFRESH_LEAD_SECONDS as u64);
 const REFRESH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[async_trait]
@@ -196,7 +194,7 @@ async fn refresh_provider_token_row(
     };
 
     match refreshed {
-        Ok(mut refreshed_token) => {
+        Ok(refreshed_token) => {
             if refreshed_token
                 .expires_at
                 .is_some_and(|expires_at| expires_at <= now_unix())
@@ -204,8 +202,6 @@ async fn refresh_provider_token_row(
                 log_refresh_failure(provider, "refreshed token is already expired".to_string());
                 return;
             }
-
-            preserve_provider_token_metadata(&mut refreshed_token, &current_token);
 
             if let Err(err) = deps.store.upsert_provider_token(&refreshed_token).await {
                 log_refresh_failure(provider, err.to_string());
@@ -275,7 +271,7 @@ mod tests {
         async fn refresh(
             &self,
             provider: Provider,
-            _current_token: &ProviderToken,
+            current_token: &ProviderToken,
         ) -> Result<ProviderToken, String> {
             let plan = {
                 let mut plans = self.plans.lock().expect("plans mutex poisoned");
@@ -286,8 +282,12 @@ mod tests {
             };
 
             match plan {
-                RefreshPlan::Success { token, delay } => {
+                RefreshPlan::Success { mut token, delay } => {
                     tokio::time::sleep(delay).await;
+                    crate::provider_auth::preserve_provider_token_metadata(
+                        &mut token,
+                        current_token,
+                    );
                     Ok(token)
                 }
                 RefreshPlan::Failure { reason, delay } => {

@@ -499,12 +499,8 @@ async fn pm_init_async(
     let existing_projects = if created {
         Vec::new()
     } else {
-        client
-            .list_projects(&initiative_id)
-            .await
-            .map_err(pm_to_ops)?
+        checked_projects(&client, &initiative_id, &wave).await?
     };
-    ensure_unique_project_slugs(&existing_projects, &wave)?;
     let mut project_ids: BTreeMap<String, String> = existing_projects
         .into_iter()
         .map(|project| (project.slug, project.id))
@@ -621,12 +617,7 @@ async fn fetch_items(
         "fetching {} Linear Initiative {} for wave/{wave}",
         ctx.provider, ctx.initiative
     ));
-    let projects = ctx
-        .client
-        .list_projects(&ctx.initiative)
-        .await
-        .map_err(pm_to_ops)?;
-    ensure_unique_project_slugs(&projects, wave)?;
+    let projects = checked_projects(&ctx.client, &ctx.initiative, wave).await?;
     let projects = match project_slug {
         Some(slug) => vec![find_project(&projects, wave, slug)?.clone()],
         None => projects,
@@ -680,12 +671,7 @@ async fn apply_update(
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
     let mark_done = parse_done_status(options.status.as_deref())?;
-    let projects = ctx
-        .client
-        .list_projects(&ctx.initiative)
-        .await
-        .map_err(pm_to_ops)?;
-    ensure_unique_project_slugs(&projects, wave)?;
+    let projects = checked_projects(&ctx.client, &ctx.initiative, wave).await?;
     let project = project_slug
         .map(|slug| find_project(&projects, wave, slug))
         .transpose()?;
@@ -839,8 +825,7 @@ async fn pm_status_async(
             .into_iter()
             .find(|candidate| candidate.id == initiative)
             .map(|candidate| candidate.name);
-        let projects = client.list_projects(&initiative).await.map_err(pm_to_ops)?;
-        ensure_unique_project_slugs(&projects, &wave)?;
+        let projects = checked_projects(&client, &initiative, &wave).await?;
         let mut total = 0;
         let mut open = 0;
         let mut open_by_project = BTreeMap::new();
@@ -905,14 +890,15 @@ async fn pm_sync_async(
     for wave in &waves {
         let provider = resolve_provider(repo, wave)?;
         provider_by_kind.insert(provider.as_str().to_string(), provider);
+        let has_legacy_project = read_legacy_project(repo, wave).is_some();
         if let Some(initiative) = read_initiative(repo, wave, provider) {
             linked_initiative_ids.insert(initiative);
-            if read_legacy_project(repo, wave).is_some() {
+            if has_legacy_project {
                 diagnostics.push(format!(
                     "wave/{wave} retains pm.linear_project because legacy task migration is incomplete; run `lf pm init --wave {wave}` after assigning project labels"
                 ));
             }
-        } else if read_legacy_project(repo, wave).is_some() {
+        } else if has_legacy_project {
             diagnostics.push(format!(
                 "wave/{wave} still uses pm.linear_project; run `lf pm init --wave {wave}` to migrate"
             ));
@@ -969,11 +955,7 @@ async fn pm_sync_async(
             _ => {}
         }
 
-        let projects = client
-            .list_projects(&initiative_id)
-            .await
-            .map_err(pm_to_ops)?;
-        ensure_unique_project_slugs(&projects, wave)?;
+        let projects = checked_projects(&client, &initiative_id, wave).await?;
         let project_slugs: BTreeSet<_> = projects
             .iter()
             .map(|project| project.slug.clone())
@@ -1063,12 +1045,7 @@ async fn pm_task_move_async(
 ) -> OpsResult<PmTaskMoveResult> {
     let wave = resolve_wave(repo, options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
-    let projects = ctx
-        .client
-        .list_projects(&ctx.initiative)
-        .await
-        .map_err(pm_to_ops)?;
-    ensure_unique_project_slugs(&projects, &wave)?;
+    let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
     let project = find_project(&projects, &wave, &options.project)?;
     progress.status(&format!(
         "moving {} task {} to wave/{wave} Linear Project {}",
@@ -1247,6 +1224,17 @@ fn ensure_unique_project_slugs(projects: &[PmProject], wave: &str) -> OpsResult<
         }
     }
     Ok(())
+}
+
+/// List an initiative's Linear Projects and validate their slugs are unique.
+async fn checked_projects(
+    client: &PmClient,
+    initiative: &str,
+    wave: &str,
+) -> OpsResult<Vec<PmProject>> {
+    let projects = client.list_projects(initiative).await.map_err(pm_to_ops)?;
+    ensure_unique_project_slugs(&projects, wave)?;
+    Ok(projects)
 }
 
 fn find_project<'a>(projects: &'a [PmProject], wave: &str, slug: &str) -> OpsResult<&'a PmProject> {

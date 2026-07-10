@@ -922,21 +922,11 @@ def _bundle_executable_name(info_plist: Path) -> str:
     return name
 
 
-def _remove_stale_executables(macos_dir: Path, keep: str) -> None:
-    """Drop a previously-installed binary under the build product's own name.
-
-    Leaving `LoopflowMac` beside `Loopflow` is harmless but confusing: it is the
-    fresh build, and it is the one nothing runs.
-    """
-    stale = macos_dir / "LoopflowMac"
-    if stale.name != keep and stale.exists():
-        stale.unlink()
-
-
 def _install_dev_app() -> None:
     """Install debug build to stable location for permissions persistence."""
     app_dir = DEV_APP / "Contents"
-    (app_dir / "MacOS").mkdir(parents=True, exist_ok=True)
+    macos_dir = app_dir / "MacOS"
+    macos_dir.mkdir(parents=True, exist_ok=True)
     (app_dir / "Resources").mkdir(parents=True, exist_ok=True)
 
     # `swift build` names the product LoopflowMac, but Info.plist declares
@@ -945,8 +935,10 @@ def _install_dev_app() -> None:
     # to run forever: the app keeps starting a stale binary while the fresh one
     # sits beside it, and codesigning bumps the stale mtime so it even looks new.
     executable = _bundle_executable_name(SWIFT_DIR / "LoopflowMac" / "Info.plist")
-    shutil.copy(SWIFT_DIR / ".build" / "debug" / "LoopflowMac", app_dir / "MacOS" / executable)
-    _remove_stale_executables(app_dir / "MacOS", keep=executable)
+    shutil.copy(SWIFT_DIR / ".build" / "debug" / "LoopflowMac", macos_dir / executable)
+    stale = macos_dir / "LoopflowMac"
+    if stale.name != executable and stale.exists():
+        stale.unlink()
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     _apply_dev_identity(app_dir / "Info.plist")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Loopflow.sdef", app_dir / "Resources")

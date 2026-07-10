@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Result};
 
 use crate::journal::open_ledger;
-use crate::lf::output::Colors;
+use crate::lf::output::{format_cost, truncate, Colors};
 use crate::lfdb::RunEventRow;
 use crate::wave::journal::short_id;
 
@@ -32,8 +32,7 @@ pub fn list(json: bool) -> Result<()> {
     summaries.truncate(MAX_RUNS);
 
     if json {
-        let entries: Vec<RunLedgerEntry> = summaries.iter().map(RunLedgerEntry::from).collect();
-        println!("{}", serde_json::to_string(&entries)?);
+        println!("{}", serde_json::to_string(&summaries)?);
         return Ok(());
     }
 
@@ -152,37 +151,13 @@ pub fn trace(run_id: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug)]
-struct RunSummary {
-    run_id: String,
-    process_id: String,
-    parent_process_id: Option<String>,
-    repo: Option<String>,
-    wave: Option<String>,
-    label: String,
-    started: i64,
-    ended: Option<i64>,
-    status: &'static str,
-    input_tokens: i64,
-    output_tokens: i64,
-    cache_read_tokens: i64,
-    cost_usd: Option<f64>,
-    duration_secs: Option<f64>,
-    provider: Option<String>,
-    model: Option<String>,
-}
-
-impl RunSummary {
-    fn total_tokens(&self) -> i64 {
-        self.input_tokens + self.output_tokens
-    }
-}
-
-/// `lf runs --json` entry: one folded run from the ledger. Wire type consumed
-/// by Loopflow — every field required or explicitly Optional, no serde
-/// defaults. `started`/`ended` are unix seconds (the ledger's grain).
+/// One run folded out of the ledger — the shape `lf runs` prints and
+/// `lf runs --json` emits. Wire type consumed by Loopflow: every field required
+/// or explicitly Optional, no serde defaults. `started`/`ended` are unix seconds
+/// (the ledger's grain).
 #[derive(Debug, serde::Serialize)]
 struct RunLedgerEntry {
+    /// The process is the run's identity here; `id` is the key Loopflow keys on.
     id: String,
     run_id: String,
     process_id: String,
@@ -202,31 +177,13 @@ struct RunLedgerEntry {
     model: Option<String>,
 }
 
-impl From<&RunSummary> for RunLedgerEntry {
-    fn from(run: &RunSummary) -> Self {
-        Self {
-            id: run.process_id.clone(),
-            run_id: run.run_id.clone(),
-            process_id: run.process_id.clone(),
-            parent_process_id: run.parent_process_id.clone(),
-            repo: run.repo.clone(),
-            wave: run.wave.clone(),
-            label: run.label.clone(),
-            status: run.status.to_string(),
-            started: run.started,
-            ended: run.ended,
-            input_tokens: run.input_tokens,
-            output_tokens: run.output_tokens,
-            cache_read_tokens: run.cache_read_tokens,
-            cost_usd: run.cost_usd,
-            duration_secs: run.duration_secs,
-            provider: run.provider.clone(),
-            model: run.model.clone(),
-        }
+impl RunLedgerEntry {
+    fn total_tokens(&self) -> i64 {
+        self.input_tokens + self.output_tokens
     }
 }
 
-fn summarize(events: &[RunEventRow]) -> Vec<RunSummary> {
+fn summarize(events: &[RunEventRow]) -> Vec<RunLedgerEntry> {
     let mut by_process: BTreeMap<&str, Vec<&RunEventRow>> = BTreeMap::new();
     for event in events {
         by_process.entry(&event.process_id).or_default().push(event);
@@ -235,29 +192,29 @@ fn summarize(events: &[RunEventRow]) -> Vec<RunSummary> {
     by_process
         .into_iter()
         .map(|(process_id, events)| {
-            let started = events.iter().map(|e| e.ts).min().unwrap_or(0);
             let terminal = events
                 .iter()
                 .rev()
                 .find(|e| e.node == "run" && e.event != "started");
-            let label = events
-                .iter()
-                .find_map(|e| e.command.as_deref().and_then(command_label))
-                .or_else(|| events.iter().find_map(|e| e.flow.clone()))
-                .or_else(|| events.iter().find_map(|e| e.skill.clone()))
-                .unwrap_or_else(|| "-".to_string());
-            RunSummary {
+            RunLedgerEntry {
+                id: process_id.to_string(),
                 run_id: events[0].run_id.clone(),
                 process_id: process_id.to_string(),
                 parent_process_id: events[0].parent_process_id.clone(),
                 repo: events.iter().find_map(|e| e.repo.clone()),
                 wave: events.iter().find_map(|e| e.wave.clone()),
-                label,
-                started,
+                label: events
+                    .iter()
+                    .find_map(|e| e.command.as_deref().and_then(command_label))
+                    .or_else(|| events.iter().find_map(|e| e.flow.clone()))
+                    .or_else(|| events.iter().find_map(|e| e.skill.clone()))
+                    .unwrap_or_else(|| "-".to_string()),
+                started: events.iter().map(|e| e.ts).min().unwrap_or(0),
                 ended: terminal.map(|e| e.ts),
                 status: terminal
                     .map(|e| status_label(&e.event))
-                    .unwrap_or("running"),
+                    .unwrap_or("running")
+                    .to_string(),
                 input_tokens: terminal.and_then(|e| e.input_tokens).unwrap_or(0),
                 output_tokens: terminal.and_then(|e| e.output_tokens).unwrap_or(0),
                 cache_read_tokens: terminal.and_then(|e| e.cache_read_tokens).unwrap_or(0),
@@ -624,18 +581,6 @@ fn format_tokens(value: i64) -> String {
     }
 }
 
-fn format_cost(value: f64) -> String {
-    format!("${value:.2}")
-}
-
-fn truncate(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
-        return value.to_string();
-    }
-    let head: String = value.chars().take(width.saturating_sub(1)).collect();
-    format!("{head}\u{2026}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -805,14 +750,11 @@ mod tests {
 
     #[test]
     fn json_entry_carries_fold_and_stable_keys() {
-        use super::RunLedgerEntry;
         let mut terminal = row("abc", 1, 110, "run", "completed");
         terminal.input_tokens = Some(1000);
         terminal.output_tokens = Some(200);
         let events = vec![row("abc", 0, 100, "run", "started"), terminal];
-        let summaries = summarize(&events);
-        let entry = RunLedgerEntry::from(&summaries[0]);
-        let value = serde_json::to_value(&entry).expect("serialize");
+        let value = serde_json::to_value(&summarize(&events)[0]).expect("serialize");
         assert_eq!(value["id"], "abc");
         assert_eq!(value["status"], "ok");
         assert_eq!(value["started"], 100);
@@ -821,8 +763,7 @@ mod tests {
         // Explicitly-Optional fields stay present (a running run's `ended` is
         // null, never absent) — one stable shape for the client.
         let running = summarize(&[row("xyz", 0, 100, "run", "started")]);
-        let entry = RunLedgerEntry::from(&running[0]);
-        let value = serde_json::to_value(&entry).expect("serialize");
+        let value = serde_json::to_value(&running[0]).expect("serialize");
         assert_eq!(value["ended"], serde_json::Value::Null);
         assert_eq!(value["status"], "running");
     }

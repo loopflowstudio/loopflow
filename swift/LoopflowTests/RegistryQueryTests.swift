@@ -116,21 +116,24 @@ struct RegistryQueryTests {
         #expect(runs[0].model == "opus")
     }
 
-    @Test("lf trace preserves open spans and lineage")
-    func traceDecodes() async throws {
+    @Test("lf usage --json preserves lineage and unspent spans")
+    func spendDecodes() async throws {
         let json = """
         [{"run_id":"abc","process_id":"child","parent_process_id":"parent","node":"run","name":"lf pm show","started_at":100,"ended_at":null,"status":"open","input_tokens":null,"output_tokens":null,"cache_read_tokens":null,"cost_usd":null,"duration_secs":null,"provider":null,"model":null}]
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["trace", "abc", "--json"])
+            #expect(args == ["usage", "--json", "--days", "30"])
             return json
         }
 
-        let spans = try await query.trace(runID: "abc")
+        let spans = try await query.spend()
         #expect(spans[0].processId == "child")
         #expect(spans[0].parentProcessId == "parent")
         #expect(spans[0].status == "open")
         #expect(spans[0].endedAt == nil)
+        // A span that spent nothing carries nulls, not zeros.
+        #expect(spans[0].totalTokens == 0)
+        #expect(spans[0].agent == "unattributed")
     }
 
     @Test("lf doctor decodes every check")

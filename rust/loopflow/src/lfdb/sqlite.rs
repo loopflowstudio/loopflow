@@ -13,12 +13,13 @@ use crate::lfd::types::{
 use crate::lfdb::catalog::{list_runs_query, list_waves_query, sql, Query, SqlDialect};
 use crate::lfdb::rows::{
     map_chat_memory_block_row, map_chat_message_row, map_fork_run_row, map_live_pr_state_row,
-    map_provider_usage_row, map_repo_edge_row, map_repo_provider_usage_row, map_repo_row,
-    map_run_row, map_summary_row, map_wave_provider_usage_row, map_wave_row, now_unix,
-    serialize_pr,
+    map_repo_edge_row, map_repo_provider_usage_row, map_repo_row, map_run_row, map_summary_row,
+    map_wave_row, now_unix, serialize_pr,
 };
 use crate::lfdb::token_crypto;
-use crate::lfdb::{ForkRun, ForkRunStatus, RunEventRow, StoreError, StoreResult, TokenUsageReport};
+use crate::lfdb::{
+    ForkRun, ForkRunStatus, RepoProviderUsage, RunEventRow, StoreError, StoreResult,
+};
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
@@ -1334,38 +1335,14 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Sum token usage and cost out of the run ledger. Every group is its own
-    /// query — the per-provider rollup is not folded from the wave rows, so a
-    /// run that belongs to no wave still lands in the totals.
-    pub fn aggregate_token_usage(&self) -> StoreResult<TokenUsageReport> {
+    /// Sum token usage and cost out of the run ledger, one row per (repo,
+    /// provider). Coarser rollups are folds of these rows; the ledger does not
+    /// aggregate them a second time.
+    pub fn aggregate_token_usage(&self) -> StoreResult<Vec<RepoProviderUsage>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-
-        let mut repo_stmt = conn.prepare(Self::sql(Query::AggregateTokenUsageByRepoProvider))?;
-        let repo_rows = repo_stmt.query_map([], |row| Ok(map_repo_provider_usage_row(row)))?;
-        let mut by_repo_provider = Vec::new();
-        for row in repo_rows {
-            by_repo_provider.push(row??);
-        }
-
-        let mut wave_stmt = conn.prepare(Self::sql(Query::AggregateTokenUsageByWaveProvider))?;
-        let wave_rows = wave_stmt.query_map([], |row| Ok(map_wave_provider_usage_row(row)))?;
-        let mut by_wave_provider = Vec::new();
-        for row in wave_rows {
-            by_wave_provider.push(row??);
-        }
-
-        let mut provider_stmt = conn.prepare(Self::sql(Query::AggregateTokenUsageByProvider))?;
-        let provider_rows = provider_stmt.query_map([], |row| Ok(map_provider_usage_row(row)))?;
-        let mut by_provider = Vec::new();
-        for row in provider_rows {
-            by_provider.push(row??);
-        }
-
-        Ok(TokenUsageReport {
-            by_repo_provider,
-            by_wave_provider,
-            by_provider,
-        })
+        let mut stmt = conn.prepare(Self::sql(Query::AggregateTokenUsageByRepoProvider))?;
+        let rows = stmt.query_map([], |row| Ok(map_repo_provider_usage_row(row)))?;
+        rows.map(|row| row?).collect()
     }
 
     // Run ledger (`run_events`): the machine-grain, append-only record of

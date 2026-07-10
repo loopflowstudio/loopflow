@@ -140,22 +140,42 @@ pub fn format_context_header(breakdown: &ContextBreakdown) -> String {
 }
 
 fn format_row(label: &str, tokens: usize, detail: &str) -> String {
-    format!("  {:<12} {:>6}  {}", label, format_tokens(tokens), detail)
+    format!(
+        "  {:<12} {:>6}  {}",
+        label,
+        format_int(tokens as u64),
+        detail
+    )
 }
 
-fn format_tokens(n: usize) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-    let s = n.to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
+// -- Table cells --------------------------------------------------------------
+// Every `lf` reader that prints a table wants the same three: a number a human
+// can read at a glance, a name that fits its column, and a cost in cents.
+
+/// `1234567` -> `1,234,567`.
+pub fn format_int(value: u64) -> String {
+    let digits = value.to_string();
+    let mut out = String::new();
+    for (index, ch) in digits.chars().rev().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            out.push(',');
         }
-        result.push(c);
+        out.push(ch);
     }
-    result.chars().rev().collect()
+    out.chars().rev().collect()
+}
+
+/// Clip to `width` characters, marking the clip with an ellipsis.
+pub fn truncate(value: &str, width: usize) -> String {
+    if value.chars().count() <= width {
+        return value.to_string();
+    }
+    let head: String = value.chars().take(width.saturating_sub(1)).collect();
+    format!("{head}\u{2026}")
+}
+
+pub fn format_cost(value: f64) -> String {
+    format!("${value:.2}")
 }
 
 /// Build a reproducible lf command from run parameters.
@@ -199,12 +219,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn format_tokens_basic() {
-        assert_eq!(format_tokens(0), "0");
-        assert_eq!(format_tokens(42), "42");
-        assert_eq!(format_tokens(1234), "1,234");
-        assert_eq!(format_tokens(75000), "75,000");
-        assert_eq!(format_tokens(123456), "123,456");
+    fn format_int_groups_thousands() {
+        assert_eq!(format_int(0), "0");
+        assert_eq!(format_int(42), "42");
+        assert_eq!(format_int(1234), "1,234");
+        assert_eq!(format_int(1_234_567), "1,234,567");
+    }
+
+    #[test]
+    fn truncate_adds_ellipsis_past_width() {
+        assert_eq!(truncate("short", 10), "short");
+        assert_eq!(truncate("abcdefghij", 5), "abcd\u{2026}");
+    }
+
+    #[test]
+    fn format_cost_always_shows_cents() {
+        assert_eq!(format_cost(0.0), "$0.00");
+        assert_eq!(format_cost(61.851), "$61.85");
     }
 
     #[test]

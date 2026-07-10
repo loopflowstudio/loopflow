@@ -87,21 +87,10 @@ pub struct RunEventRow {
     pub model: Option<String>,
 }
 
-/// Summed token usage and cost for one group of `run_events` rows. `provider`
-/// is optional: rows recorded before `056_run_events_provider` never captured
-/// the harness they spent through.
-#[derive(Debug, Clone, PartialEq)]
-pub struct WaveProviderUsage {
-    pub wave: Option<String>,
-    pub provider: Option<String>,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_tokens: u64,
-    pub cost_usd: f64,
-}
-
-/// Summed usage for one (repo, provider) pair. `repo` is optional to account
-/// for rows recorded before the repo dimension existed.
+/// Summed token usage and cost for one (repo, provider) pair — the finest
+/// grain the ledger aggregates, and the only one queried: every coarser
+/// rollup is a fold of these rows. `repo` and `provider` are optional because
+/// rows recorded before those dimensions existed carry neither.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RepoProviderUsage {
     pub repo: Option<String>,
@@ -110,25 +99,6 @@ pub struct RepoProviderUsage {
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cost_usd: f64,
-}
-
-/// Summed usage for one provider across every run, waved or not.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProviderUsage {
-    pub provider: Option<String>,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_tokens: u64,
-    pub cost_usd: f64,
-}
-
-/// Aggregated token usage: per (repo, provider), per (wave, provider), plus
-/// per-provider rollups. Each group is queried directly from `run_events`.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct TokenUsageReport {
-    pub by_repo_provider: Vec<RepoProviderUsage>,
-    pub by_wave_provider: Vec<WaveProviderUsage>,
-    pub by_provider: Vec<ProviderUsage>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1781,7 +1751,6 @@ mod tests {
         let report = store.aggregate_token_usage().expect("aggregate");
 
         let claude = report
-            .by_repo_provider
             .iter()
             .find(|row| row.provider.as_deref() == Some("claude"))
             .expect("claude row");
@@ -1792,10 +1761,8 @@ mod tests {
         assert_eq!(claude.cache_read_tokens, 1500);
         assert_eq!(claude.cost_usd, 0.25);
 
-        // The per-provider rollup is queried, not folded from the wave rows,
-        // so the wave-less codex run is present.
+        // A wave-less run still aggregates: the grain is (repo, provider).
         let codex = report
-            .by_provider
             .iter()
             .find(|row| row.provider.as_deref() == Some("codex"))
             .expect("codex belongs in the rollup despite having no wave");
@@ -1833,9 +1800,9 @@ mod tests {
         }
 
         let report = store.aggregate_token_usage().expect("aggregate");
-        assert_eq!(report.by_provider.len(), 1);
-        assert_eq!(report.by_provider[0].input_tokens, 105);
-        assert!((report.by_provider[0].cost_usd - 0.11).abs() < f64::EPSILON);
+        assert_eq!(report.len(), 1);
+        assert_eq!(report[0].input_tokens, 105);
+        assert!((report[0].cost_usd - 0.11).abs() < f64::EPSILON);
     }
 
     #[test]

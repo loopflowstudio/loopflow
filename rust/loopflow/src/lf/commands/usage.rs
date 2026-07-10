@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 
 use crate::journal::open_ledger;
 use crate::lf::commands::runs::{boundary_spans, own_spend};
-use crate::lf::output::Colors;
-use crate::lfdb::{ProviderUsage, RepoProviderUsage, TokenUsageReport};
+use crate::lf::output::{format_cost, format_int, truncate, Colors};
+use crate::lfdb::RepoProviderUsage;
 
 const REPO_WIDTH: usize = 32;
 const PROVIDER_WIDTH: usize = 12;
@@ -23,8 +25,7 @@ pub fn run(json: bool, days: u32) -> Result<()> {
     if json {
         return print_spend_json(days);
     }
-    let report = open_ledger()?.aggregate_token_usage()?;
-    print_report(&report);
+    print_report(&open_ledger()?.aggregate_token_usage()?);
     Ok(())
 }
 
@@ -42,118 +43,106 @@ fn or_unattributed(value: Option<&str>) -> &str {
     value.unwrap_or("(unattributed)")
 }
 
-fn print_report(report: &TokenUsageReport) {
-    let colors = Colors::default();
+/// A running sum over `(repo, provider)` rows — the only grain the ledger
+/// aggregates. Every coarser row in this table is one of these.
+#[derive(Default)]
+struct Totals {
+    input: u64,
+    output: u64,
+    cache: u64,
+    cost: f64,
+}
 
-    if report.by_repo_provider.is_empty() {
+impl Totals {
+    fn add(&mut self, row: &RepoProviderUsage) {
+        self.input += row.input_tokens;
+        self.output += row.output_tokens;
+        self.cache += row.cache_read_tokens;
+        self.cost += row.cost_usd;
+    }
+
+    fn cells(&self) -> [String; 5] {
+        [
+            format_int(self.input),
+            format_int(self.output),
+            format_int(self.cache),
+            format_int(self.input + self.output),
+            format_cost(self.cost),
+        ]
+    }
+}
+
+fn print_report(rows: &[RepoProviderUsage]) {
+    if rows.is_empty() {
         println!("No token usage recorded yet.");
         return;
     }
 
-    print_repo_header(&colors);
-    let (mut grand_input, mut grand_output, mut grand_cache, mut grand_cost) =
-        (0u64, 0u64, 0u64, 0.0);
-    for row in &report.by_repo_provider {
-        print_repo_row(row);
-        grand_input += row.input_tokens;
-        grand_output += row.output_tokens;
-        grand_cache += row.cache_read_tokens;
-        grand_cost += row.cost_usd;
+    let mut by_provider: BTreeMap<Option<&str>, Totals> = BTreeMap::new();
+    let mut grand = Totals::default();
+
+    print_row(
+        &repo_lead("REPO", "PROVIDER"),
+        HEADINGS.map(String::from),
+        true,
+    );
+    for row in rows {
+        let mut totals = Totals::default();
+        totals.add(row);
+        print_row(
+            &repo_lead(
+                &truncate(
+                    &short_repo(or_unattributed(row.repo.as_deref())),
+                    REPO_WIDTH,
+                ),
+                or_unattributed(row.provider.as_deref()),
+            ),
+            totals.cells(),
+            false,
+        );
+        by_provider
+            .entry(row.provider.as_deref())
+            .or_default()
+            .add(row);
+        grand.add(row);
     }
     println!();
 
-    print_provider_header(&colors);
-    for row in &report.by_provider {
-        print_provider_row(row);
+    print_row(&provider_lead("PROVIDER"), HEADINGS.map(String::from), true);
+    for (provider, totals) in &by_provider {
+        print_row(
+            &provider_lead(or_unattributed(*provider)),
+            totals.cells(),
+            false,
+        );
     }
     println!();
 
-    print_total_row(&colors, grand_input, grand_output, grand_cache, grand_cost);
+    print_row(&provider_lead("TOTAL"), grand.cells(), true);
 }
 
-fn print_repo_header(colors: &Colors) {
-    println!(
-        "{bold}{repo:<repo_w$}  {provider:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}  {cost:>cost_w$}{reset}",
-        bold = colors.bold,
-        reset = colors.reset,
-        repo = "REPO",
-        provider = "PROVIDER",
-        input = "INPUT",
-        output = "OUTPUT",
-        cache = "CACHE READ",
-        total = "TOTAL",
-        cost = "COST",
-        repo_w = REPO_WIDTH,
-        prov_w = PROVIDER_WIDTH,
-        num_w = NUM_WIDTH,
-        cost_w = COST_WIDTH,
-    );
+const HEADINGS: [&str; 5] = ["INPUT", "OUTPUT", "CACHE READ", "TOTAL", "COST"];
+
+fn repo_lead(repo: &str, provider: &str) -> String {
+    format!("{repo:<REPO_WIDTH$}  {provider:<PROVIDER_WIDTH$}")
 }
 
-fn print_repo_row(row: &RepoProviderUsage) {
-    let repo = or_unattributed(row.repo.as_deref());
-    let total = row.input_tokens + row.output_tokens;
-    println!(
-        "{repo:<repo_w$}  {provider:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}  {cost:>cost_w$}",
-        repo = truncate(&short_repo(repo), REPO_WIDTH),
-        provider = or_unattributed(row.provider.as_deref()),
-        input = format_int(row.input_tokens),
-        output = format_int(row.output_tokens),
-        cache = format_int(row.cache_read_tokens),
-        total = format_int(total),
-        cost = format_cost(row.cost_usd),
-        repo_w = REPO_WIDTH,
-        prov_w = PROVIDER_WIDTH,
-        num_w = NUM_WIDTH,
-        cost_w = COST_WIDTH,
-    );
+fn provider_lead(provider: &str) -> String {
+    format!("{provider:<PROVIDER_WIDTH$}")
 }
 
-fn print_provider_header(colors: &Colors) {
+/// Both tables are the same five columns behind a label; only the label differs,
+/// so one printer serves headers, rows, and totals.
+fn print_row(lead: &str, cells: [String; 5], bold: bool) {
+    let colors = Colors::default();
+    let (on, off) = if bold {
+        (colors.bold, colors.reset)
+    } else {
+        ("", "")
+    };
+    let [input, output, cache, total, cost] = cells;
     println!(
-        "{bold}{provider:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}  {cost:>cost_w$}{reset}",
-        bold = colors.bold,
-        reset = colors.reset,
-        provider = "PROVIDER",
-        input = "INPUT",
-        output = "OUTPUT",
-        cache = "CACHE READ",
-        total = "TOTAL",
-        cost = "COST",
-        prov_w = PROVIDER_WIDTH,
-        num_w = NUM_WIDTH,
-        cost_w = COST_WIDTH,
-    );
-}
-
-fn print_provider_row(row: &ProviderUsage) {
-    let total = row.input_tokens + row.output_tokens;
-    println!(
-        "{provider:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}  {cost:>cost_w$}",
-        provider = or_unattributed(row.provider.as_deref()),
-        input = format_int(row.input_tokens),
-        output = format_int(row.output_tokens),
-        cache = format_int(row.cache_read_tokens),
-        total = format_int(total),
-        cost = format_cost(row.cost_usd),
-        prov_w = PROVIDER_WIDTH,
-        num_w = NUM_WIDTH,
-        cost_w = COST_WIDTH,
-    );
-}
-
-fn print_total_row(colors: &Colors, input: u64, output: u64, cache: u64, cost: f64) {
-    println!(
-        "{bold}{label:<prov_w$}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}  {cost:>cost_w$}{reset}",
-        bold = colors.bold,
-        reset = colors.reset,
-        label = "TOTAL",
-        input = format_int(input),
-        output = format_int(output),
-        cache = format_int(cache),
-        total = format_int(input + output),
-        cost = format_cost(cost),
-        prov_w = PROVIDER_WIDTH,
+        "{on}{lead}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}  {cost:>cost_w$}{off}",
         num_w = NUM_WIDTH,
         cost_w = COST_WIDTH,
     );
@@ -168,40 +157,20 @@ fn short_repo(repo: &str) -> String {
         .to_string()
 }
 
-fn truncate(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
-        return value.to_string();
-    }
-    let head: String = value.chars().take(width.saturating_sub(1)).collect();
-    format!("{head}\u{2026}")
-}
-
-fn format_cost(value: f64) -> String {
-    format!("${value:.2}")
-}
-
-fn format_int(value: u64) -> String {
-    let digits = value.to_string();
-    let mut out = String::new();
-    for (idx, ch) in digits.chars().rev().enumerate() {
-        if idx > 0 && idx % 3 == 0 {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out.chars().rev().collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{format_cost, format_int, or_unattributed, short_repo, truncate};
+    use super::{or_unattributed, short_repo, Totals};
+    use crate::lfdb::RepoProviderUsage;
 
-    #[test]
-    fn format_int_groups_thousands() {
-        assert_eq!(format_int(0), "0");
-        assert_eq!(format_int(999), "999");
-        assert_eq!(format_int(1_000), "1,000");
-        assert_eq!(format_int(1_234_567), "1,234,567");
+    fn row(repo: Option<&str>, provider: Option<&str>, input: u64, cost: f64) -> RepoProviderUsage {
+        RepoProviderUsage {
+            repo: repo.map(str::to_string),
+            provider: provider.map(str::to_string),
+            input_tokens: input,
+            output_tokens: 1,
+            cache_read_tokens: 2,
+            cost_usd: cost,
+        }
     }
 
     #[test]
@@ -212,20 +181,32 @@ mod tests {
     }
 
     #[test]
-    fn truncate_adds_ellipsis_past_width() {
-        assert_eq!(truncate("short", 10), "short");
-        assert_eq!(truncate("abcdefghij", 5), "abcd\u{2026}");
-    }
-
-    #[test]
-    fn format_cost_always_shows_cents() {
-        assert_eq!(format_cost(0.0), "$0.00");
-        assert_eq!(format_cost(61.851), "$61.85");
-    }
-
-    #[test]
     fn null_repo_and_provider_read_as_unattributed() {
         assert_eq!(or_unattributed(None), "(unattributed)");
         assert_eq!(or_unattributed(Some("claude")), "claude");
+    }
+
+    /// The per-provider table is a fold of the repo rows, so a run with no repo
+    /// still reaches the provider's total — and the grand total is every row.
+    #[test]
+    fn a_repoless_run_still_lands_in_the_provider_rollup() {
+        let rows = [
+            row(Some("/src/loopflow"), Some("claude"), 100, 1.0),
+            row(None, Some("claude"), 50, 0.5),
+            row(Some("/src/cadenza"), None, 7, 0.25),
+        ];
+
+        let mut claude = Totals::default();
+        let mut grand = Totals::default();
+        for row in &rows {
+            if row.provider.as_deref() == Some("claude") {
+                claude.add(row);
+            }
+            grand.add(row);
+        }
+
+        assert_eq!(claude.input, 150);
+        assert_eq!(claude.cost, 1.5);
+        assert_eq!(grand.input, 157);
     }
 }

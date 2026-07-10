@@ -70,14 +70,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([RunLedgerEntry].self, from: stdout)
     }
 
-    /// One run's process tree. Open spans carry no end timestamp; consumers
-    /// render them to the trace's last recorded timestamp, never to now.
-    public func trace(runID: String) async throws -> [TraceSpan] {
-        let stdout = try await run(["trace", runID, "--json"], nil)
-        return try Self.decode([TraceSpan].self, from: stdout)
-    }
-
-    /// The ledger's self-audit, including continuity and lineage tripwires.
     /// Per-boundary spend over a window: what each skill, and each terminal run,
     /// actually spent. `lf usage --json` applies the cumulative-diff rule, so
     /// these rows are additive and sum to the totals `lf usage` prints.
@@ -102,6 +94,7 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([CodeSnapshot].self, from: stdout)
     }
 
+    /// The ledger's self-audit, including continuity and lineage tripwires.
     public func doctor() async throws -> DoctorReport {
         let stdout = try await run(["doctor", "--json"], nil)
         return try Self.decode(DoctorReport.self, from: stdout)
@@ -367,7 +360,6 @@ public struct CodeNode: Decodable, Sendable, Identifiable {
     public let path: String
     public let name: String
     public let lines: Int
-    public let bytes: Int
     public let tokens: Int
     public let children: [CodeNode]
 }

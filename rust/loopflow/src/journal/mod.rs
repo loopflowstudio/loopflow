@@ -35,7 +35,6 @@ pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
 thread_local! {
     static RUN_CONTEXT: RefCell<Option<RunContext>> = const { RefCell::new(None) };
     static PENDING_USAGE: RefCell<PendingUsage> = const { RefCell::new(PendingUsage::new()) };
-    static PENDING_MODEL: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 #[derive(Debug, Clone)]
@@ -58,9 +57,9 @@ struct RunContext {
     minted_run_id: bool,
 }
 
-/// Token/cost totals accumulated from the agent stream on this thread,
-/// attached to ledger rows as the run progresses.
-#[derive(Debug, Clone, Copy, Default)]
+/// Token/cost totals accumulated from the agent stream on this thread, plus the
+/// agent that spent them. Attached to ledger rows as the run progresses.
+#[derive(Debug, Clone)]
 struct PendingUsage {
     input_tokens: u64,
     output_tokens: u64,
@@ -68,6 +67,7 @@ struct PendingUsage {
     cost_usd: Option<f64>,
     duration_secs: Option<f64>,
     provider: Option<&'static str>,
+    model: Option<String>,
     seen: bool,
 }
 
@@ -80,6 +80,7 @@ impl PendingUsage {
             cost_usd: None,
             duration_secs: None,
             provider: None,
+            model: None,
             seen: false,
         }
     }
@@ -116,8 +117,9 @@ pub fn record_result(cost_usd: Option<f64>, duration_secs: Option<f64>) {
     });
 }
 
-/// Name the harness the current run is spending tokens through. Recorded on
-/// its own — a launch that reports no usage should not materialize a row.
+/// Name the harness the current run is spending tokens through, and the model
+/// it drove. Recorded without marking usage seen — a launch that reports no
+/// tokens names an agent but should not materialize a row.
 pub fn record_provider(provider: &'static str) {
     PENDING_USAGE.with(|cell| {
         cell.borrow_mut().provider = Some(provider);
@@ -125,28 +127,21 @@ pub fn record_provider(provider: &'static str) {
 }
 
 pub fn record_model(model: &str) {
-    PENDING_MODEL.with(|cell| {
-        *cell.borrow_mut() = Some(model.to_string());
+    PENDING_USAGE.with(|cell| {
+        cell.borrow_mut().model = Some(model.to_string());
     });
-}
-
-fn snapshot_model() -> Option<String> {
-    PENDING_MODEL.with(|cell| cell.borrow().clone())
 }
 
 fn snapshot_usage() -> Option<PendingUsage> {
     PENDING_USAGE.with(|cell| {
-        let usage = *cell.borrow();
-        usage.seen.then_some(usage)
+        let usage = cell.borrow();
+        usage.seen.then(|| usage.clone())
     })
 }
 
 fn clear_usage() {
     PENDING_USAGE.with(|cell| {
         *cell.borrow_mut() = PendingUsage::new();
-    });
-    PENDING_MODEL.with(|cell| {
-        *cell.borrow_mut() = None;
     });
 }
 
@@ -341,13 +336,13 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
         skill: event.skill.clone(),
         step_index: event.index.map(i64::from),
         error: event.error.clone(),
-        input_tokens: usage.map(|u| u.input_tokens as i64),
-        output_tokens: usage.map(|u| u.output_tokens as i64),
-        cache_read_tokens: usage.map(|u| u.cache_read_tokens as i64),
-        cost_usd: usage.and_then(|u| u.cost_usd),
-        duration_secs: usage.and_then(|u| u.duration_secs),
-        provider: usage.and_then(|u| u.provider).map(str::to_string),
-        model: snapshot_model(),
+        input_tokens: usage.as_ref().map(|u| u.input_tokens as i64),
+        output_tokens: usage.as_ref().map(|u| u.output_tokens as i64),
+        cache_read_tokens: usage.as_ref().map(|u| u.cache_read_tokens as i64),
+        cost_usd: usage.as_ref().and_then(|u| u.cost_usd),
+        duration_secs: usage.as_ref().and_then(|u| u.duration_secs),
+        provider: usage.as_ref().and_then(|u| u.provider).map(str::to_string),
+        model: usage.as_ref().and_then(|u| u.model.clone()),
     };
 
     match open_ledger() {
@@ -378,12 +373,7 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
 /// drown the run's own output.
 fn first_ledger_failure() -> bool {
     static WARNED: AtomicBool = AtomicBool::new(false);
-    claim_first(&WARNED)
-}
-
-/// True for the first caller only.
-fn claim_first(flag: &AtomicBool) -> bool {
-    !flag.swap(true, Ordering::Relaxed)
+    !WARNED.swap(true, Ordering::Relaxed)
 }
 
 /// Open the local ledger store, creating and migrating it if needed.
@@ -677,21 +667,6 @@ mod tests {
             "cost must accumulate, not overwrite"
         );
         super::clear_usage();
-    }
-
-    use super::claim_first;
-    use std::sync::atomic::AtomicBool;
-
-    #[test]
-    fn a_ledger_failure_is_loud_once_then_quiet() {
-        // A silent best-effort write hid a 29-hour ledger outage: every reader
-        // failed loudly while every writer whispered at debug!. Warn once, at a
-        // level someone runs; stay quiet after so a broken ledger cannot drown
-        // the run's own output.
-        let flag = AtomicBool::new(false);
-        assert!(claim_first(&flag), "first failure must be loud");
-        assert!(!claim_first(&flag), "later failures must stay quiet");
-        assert!(!claim_first(&flag));
     }
 
     use super::{

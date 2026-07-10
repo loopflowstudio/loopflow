@@ -22,7 +22,7 @@ use serde::Serialize;
 
 use crate::engine::prompt::count_tokens;
 use crate::journal::open_ledger;
-use crate::lf::output::Colors;
+use crate::lf::output::{format_int, truncate, Colors};
 use crate::lfdb::sqlite::SqliteStore;
 
 const NAME_WIDTH: usize = 44;
@@ -36,7 +36,6 @@ pub struct CodeNode {
     pub path: String,
     pub name: String,
     pub lines: usize,
-    pub bytes: u64,
     pub tokens: usize,
     pub children: Vec<CodeNode>,
 }
@@ -311,8 +310,8 @@ fn print_history(snapshots: &[CodeSnapshot]) {
         println!(
             "{date:<12}  {lines:>num_w$}  {tokens:>num_w$}  {delta:>num_w$}",
             date = snapshot.date,
-            lines = format_int(snapshot.lines),
-            tokens = format_int(snapshot.tokens),
+            lines = format_int(snapshot.lines as u64),
+            tokens = format_int(snapshot.tokens as u64),
             delta = delta,
             num_w = NUM_WIDTH,
         );
@@ -348,10 +347,9 @@ fn tracked_files(root: &Path) -> Result<Vec<PathBuf>> {
 
 /// A measured file. `None` for binaries: a token estimate over bytes that are
 /// not text is a number with no meaning, and a wrong number is worse than a gap.
-fn measure(path: &Path) -> Option<(usize, u64, usize)> {
-    let bytes = std::fs::read(path).ok()?;
-    let text = String::from_utf8(bytes).ok()?;
-    Some((text.lines().count(), text.len() as u64, count_tokens(&text)))
+fn measure(path: &Path) -> Option<(usize, usize)> {
+    let text = String::from_utf8(std::fs::read(path).ok()?).ok()?;
+    Some((text.lines().count(), count_tokens(&text)))
 }
 
 fn build_tree(root: &Path, files: &[PathBuf]) -> CodeNode {
@@ -363,16 +361,15 @@ fn build_tree(root: &Path, files: &[PathBuf]) -> CodeNode {
             .unwrap_or("repo")
             .to_string(),
         lines: 0,
-        bytes: 0,
         tokens: 0,
         children: Vec::new(),
     };
 
     for relative in files {
-        let Some((lines, bytes, tokens)) = measure(&root.join(relative)) else {
+        let Some((lines, tokens)) = measure(&root.join(relative)) else {
             continue;
         };
-        insert(&mut tree, relative, lines, bytes, tokens);
+        insert(&mut tree, relative, lines, tokens);
     }
     sort_by_tokens(&mut tree);
     tree
@@ -380,9 +377,8 @@ fn build_tree(root: &Path, files: &[PathBuf]) -> CodeNode {
 
 /// Walk the path, creating directories as we go, and add the file's weight to
 /// every ancestor — a directory's tokens are its subtree's tokens.
-fn insert(tree: &mut CodeNode, relative: &Path, lines: usize, bytes: u64, tokens: usize) {
+fn insert(tree: &mut CodeNode, relative: &Path, lines: usize, tokens: usize) {
     tree.lines += lines;
-    tree.bytes += bytes;
     tree.tokens += tokens;
 
     let components: Vec<_> = relative
@@ -411,7 +407,6 @@ fn insert(tree: &mut CodeNode, relative: &Path, lines: usize, bytes: u64, tokens
                     path: prefix.clone(),
                     name: (*component).to_string(),
                     lines: 0,
-                    bytes: 0,
                     tokens: 0,
                     children: Vec::new(),
                 });
@@ -420,7 +415,6 @@ fn insert(tree: &mut CodeNode, relative: &Path, lines: usize, bytes: u64, tokens
         };
         node = &mut node.children[position];
         node.lines += lines;
-        node.bytes += bytes;
         node.tokens += tokens;
         if is_file {
             break;
@@ -456,8 +450,8 @@ fn print_tree(tree: &CodeNode) {
         bold = colors.bold,
         reset = colors.reset,
         total = "TOTAL",
-        lines = format_int(tree.lines),
-        tokens = format_int(tree.tokens),
+        lines = format_int(tree.lines as u64),
+        tokens = format_int(tree.tokens as u64),
         name_w = NAME_WIDTH,
         num_w = NUM_WIDTH,
     );
@@ -475,8 +469,8 @@ fn print_node(node: &CodeNode, total: usize, depth: usize) {
         println!(
             "{label:<name_w$}  {lines:>num_w$}  {tokens:>num_w$}  {share:>6.1}%",
             label = truncate(&label, NAME_WIDTH),
-            lines = format_int(node.lines),
-            tokens = format_int(node.tokens),
+            lines = format_int(node.lines as u64),
+            tokens = format_int(node.tokens as u64),
             share = share,
             name_w = NAME_WIDTH,
             num_w = NUM_WIDTH,
@@ -488,26 +482,6 @@ fn print_node(node: &CodeNode, total: usize, depth: usize) {
     for child in &node.children {
         print_node(child, total, depth + 1);
     }
-}
-
-fn truncate(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
-        return value.to_string();
-    }
-    let head: String = value.chars().take(width.saturating_sub(1)).collect();
-    format!("{head}\u{2026}")
-}
-
-fn format_int(value: usize) -> String {
-    let digits = value.to_string();
-    let mut out = String::new();
-    for (index, ch) in digits.chars().rev().enumerate() {
-        if index > 0 && index % 3 == 0 {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out.chars().rev().collect()
 }
 
 #[cfg(test)]
@@ -524,7 +498,6 @@ mod tests {
             path: String::new(),
             name: name.to_string(),
             lines: 0,
-            bytes: 0,
             tokens: 0,
             children: Vec::new(),
         }
@@ -568,9 +541,9 @@ mod tests {
     #[test]
     fn a_directory_weighs_what_its_subtree_weighs() {
         let mut tree = empty("repo");
-        insert(&mut tree, Path::new("src/a.rs"), 10, 100, 40);
-        insert(&mut tree, Path::new("src/b.rs"), 5, 50, 20);
-        insert(&mut tree, Path::new("README.md"), 3, 30, 12);
+        insert(&mut tree, Path::new("src/a.rs"), 10, 40);
+        insert(&mut tree, Path::new("src/b.rs"), 5, 20);
+        insert(&mut tree, Path::new("README.md"), 3, 12);
 
         assert_eq!(tree.tokens, 72);
         assert_eq!(tree.lines, 18);
@@ -584,8 +557,8 @@ mod tests {
     #[test]
     fn children_sort_by_tokens_so_the_expensive_paths_read_first() {
         let mut tree = empty("repo");
-        insert(&mut tree, Path::new("small.rs"), 1, 10, 5);
-        insert(&mut tree, Path::new("huge.rs"), 1, 10, 500);
+        insert(&mut tree, Path::new("small.rs"), 1, 5);
+        insert(&mut tree, Path::new("huge.rs"), 1, 500);
         sort_by_tokens(&mut tree);
 
         assert_eq!(tree.children[0].name, "huge.rs");
@@ -596,7 +569,7 @@ mod tests {
     #[test]
     fn a_file_contributes_to_every_ancestor_exactly_once() {
         let mut tree = empty("repo");
-        insert(&mut tree, Path::new("a/b/c.rs"), 7, 70, 28);
+        insert(&mut tree, Path::new("a/b/c.rs"), 7, 28);
 
         let a = &tree.children[0];
         let b = &a.children[0];

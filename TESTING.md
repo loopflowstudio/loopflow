@@ -7,7 +7,7 @@ CI runs six test suites. All must pass before merging.
 ```bash
 # Run all checks (what CI runs)
 cargo fmt --check                      # Rust formatting
-cargo clippy -- -D warnings            # Rust lints (warnings = errors)
+cargo clippy --all-targets -- -D warnings # Rust lints (warnings = errors)
 cargo test --all                       # Rust tests
 uv run pytest python/tests/            # Python tests
 cd website && uv run python dev.py test # Website tests
@@ -43,10 +43,10 @@ Path → suite mapping:
 
 | Changed | Suite | Runs |
 |---------|-------|------|
-| `rust/`, `Cargo.toml/lock` | rust | `cargo nextest run --all` (falls back to `cargo test --all`) |
+| `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy`, then `cargo nextest run --all` (falls back to `cargo test --all`) |
 | `python/`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
-| `swift/` | swift | `swift test --package-path swift -Xswiftc -gnone` |
+| `swift/` | swift | `swift test --package-path swift -Xswiftc -gnone`, then the multiplatform boundary check |
 | `swift/LoopflowMac/`, `swift/project.yml` | loopflow *(slow)* | xcodegen + xcodebuild |
 | lfd `http`/`store`, `tests/e2e/` | e2e *(slow)* | e2e + API smoke |
 

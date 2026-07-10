@@ -122,10 +122,18 @@ class Suite:
 
 def _rust_commands(_changed: list[str]) -> list[Command]:
     if shutil.which("cargo-nextest"):
-        argv = ["cargo", "nextest", "run", "--all"]
+        test_argv = ["cargo", "nextest", "run", "--all"]
     else:
-        argv = ["cargo", "test", "--all"]
-    return [Command(argv, REPO_ROOT, "rust")]
+        test_argv = ["cargo", "test", "--all"]
+    return [
+        Command(["cargo", "fmt", "--all", "--", "--check"], REPO_ROOT, "rustfmt"),
+        Command(
+            ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"],
+            REPO_ROOT,
+            "clippy",
+        ),
+        Command(test_argv, REPO_ROOT, "rust"),
+    ]
 
 
 def _python_commands(changed: list[str]) -> list[Command]:
@@ -162,7 +170,12 @@ def _swift_commands(_changed: list[str]) -> list[Command]:
             ["swift", "test", "--package-path", "swift", "-Xswiftc", "-gnone"],
             REPO_ROOT,
             "swift",
-        )
+        ),
+        Command(
+            ["uv", "run", "python", "scripts/check_swift_multiplatform_boundaries.py"],
+            REPO_ROOT,
+            "swift-boundaries",
+        ),
     ]
 
 
@@ -272,7 +285,7 @@ def build_plan(changed: list[str], run_all: bool, forced: set[str]) -> list[Plan
     for suite in SUITES:
         matched = suite.match(changed)
         if run_all:
-            plans.append(Plan(suite, True, "all suites (--all)", suite.build(changed)))
+            plans.append(Plan(suite, True, "all suites (--all)", suite.build([])))
             continue
         if suite.name in forced:
             plans.append(Plan(suite, True, f"forced (--{suite.name})", suite.build(changed)))

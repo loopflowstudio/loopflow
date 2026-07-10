@@ -1,6 +1,7 @@
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -473,3 +474,43 @@ def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
     assert '"CODE_SIGN_IDENTITY=-"' in screenshot_script
     assert "-disableAutomaticPackageResolution" in ci
     assert "-disableAutomaticPackageResolution" in docs
+
+
+def test_changed_aware_runner_includes_ci_static_checks():
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/test.py"),
+            "--list",
+            "--rust",
+            "--swift",
+            "--base",
+            "HEAD",
+        ],
+        cwd=ROOT,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    assert "cargo fmt --all -- --check" in result.stdout
+    assert "cargo clippy --all-targets -- -D warnings" in result.stdout
+    assert "cargo nextest run --all" in result.stdout or "cargo test --all" in result.stdout
+    assert "uv run python scripts/check_swift_multiplatform_boundaries.py" in result.stdout
+
+    full = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/test.py"),
+            "--list",
+            "--all",
+            "--base",
+            "HEAD",
+        ],
+        cwd=ROOT,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    assert "$ uv run pytest python/tests/" in full.stdout
+    assert "python/tests/test_release_automation.py" not in full.stdout.split("Plan:", 1)[1]

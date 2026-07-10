@@ -18,6 +18,7 @@ struct TelemetryDashboardView: View {
     @State private var growth: [CodeSnapshot] = []
     @State private var selectedRepo: String?
     @State private var errorMessage: String?
+    @State private var codebaseError: String?
     @State private var isLoading = true
 
     /// Repos the ledger has seen, by absolute path. The codebase charts measure
@@ -54,7 +55,7 @@ struct TelemetryDashboardView: View {
                         "Codebase over time · \(Self.windowDays) days",
                         subtitle: "What a model pays to read this repo, per top-level directory"
                     ) {
-                        CodebaseGrowthChart(snapshots: growth)
+                        CodebaseGrowthChart(snapshots: growth, failure: codebaseError)
                             .frame(height: 260)
                     }
 
@@ -62,7 +63,7 @@ struct TelemetryDashboardView: View {
                         codebaseTitle,
                         subtitle: "Files on disk. Width is tokens; a lockfile is cheap in lines and ruinous here."
                     ) {
-                        CodeFlame(root: codebase)
+                        CodeFlame(root: codebase, failure: codebaseError)
                             .frame(minHeight: 200)
                     }
 
@@ -212,17 +213,26 @@ struct TelemetryDashboardView: View {
     }
 
     /// A repo the ledger remembers may no longer exist on disk (a worktree that
-    /// was removed). That is a missing chart, not a failed dashboard.
+    /// was removed). That is a missing chart — but say why, because a silently
+    /// empty chart is indistinguishable from a codebase of size zero.
     private func loadCodebase() async {
         guard let selectedRepo else {
             codebase = nil
             growth = []
+            codebaseError = "No repo in the ledger to measure"
             return
         }
-        codebase = try? await RegistryQueryLocal.shared.codebase(repoPath: selectedRepo)
-        growth = (try? await RegistryQueryLocal.shared.codebaseHistory(
-            repoPath: selectedRepo, days: Self.windowDays
-        )) ?? []
+        do {
+            codebase = try await RegistryQueryLocal.shared.codebase(repoPath: selectedRepo)
+            growth = try await RegistryQueryLocal.shared.codebaseHistory(
+                repoPath: selectedRepo, days: Self.windowDays
+            )
+            codebaseError = nil
+        } catch {
+            codebase = nil
+            growth = []
+            codebaseError = error.localizedDescription
+        }
     }
 
     private func healthColor(_ status: String) -> Color {
@@ -309,6 +319,7 @@ private struct DailyTokensChart: View {
 private struct CodebaseGrowthChart: View {
     @Environment(\.palette) private var palette
     let snapshots: [CodeSnapshot]
+    var failure: String?
 
     private struct Point: Identifiable {
         let id: String
@@ -336,7 +347,7 @@ private struct CodebaseGrowthChart: View {
     var body: some View {
         if points.isEmpty {
             EmptyChartHint(
-                message: "No git history in this window",
+                message: failure ?? "No git history in this window",
                 hint: "`lf tokens --days 30` walks the repo's commits"
             )
         } else {
@@ -366,6 +377,7 @@ private struct CodebaseGrowthChart: View {
 /// the tokens its subtree costs. Width is tokens, never lines and never time.
 private struct CodeFlame: View {
     let root: CodeNode?
+    var failure: String?
 
     var body: some View {
         if let root, root.tokens > 0 {
@@ -374,8 +386,8 @@ private struct CodeFlame: View {
             }
         } else {
             EmptyChartHint(
-                message: "No codebase measured",
-                hint: "The repo may no longer exist on disk"
+                message: failure ?? "No codebase measured",
+                hint: "`lf tokens` measures the selected repo"
             )
         }
     }

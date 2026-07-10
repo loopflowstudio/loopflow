@@ -303,17 +303,48 @@ enum LocalWaveAgentLauncher {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
         }
 
+        let outHandle = stdout.fileHandleForReading
+        let errHandle = stderr.fileHandleForReading
+
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             return nil
         }
 
-        let stdoutText = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderrText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        return (process.terminationStatus, stdoutText, stderrText)
+        // Drain both pipes while the child is still writing. A pipe holds 64KB;
+        // waiting for exit first deadlocks the moment a command says more than
+        // that, and `lf tokens --json` says about 120KB. `lf runs`/`lf doctor`
+        // are small, which is why this only ever bit the largest reader.
+        let collector = OutputCollector()
+        let group = DispatchGroup()
+        let queue = DispatchQueue.global(qos: .userInitiated)
+        queue.async(group: group) { collector.setStdout(outHandle.readDataToEndOfFile()) }
+        queue.async(group: group) { collector.setStderr(errHandle.readDataToEndOfFile()) }
+
+        process.waitUntilExit()
+        group.wait()
+
+        return (
+            process.terminationStatus,
+            String(data: collector.stdout, encoding: .utf8) ?? "",
+            String(data: collector.stderr, encoding: .utf8) ?? ""
+        )
     }
+}
+
+/// Two reader threads, one box. The pipes must be drained concurrently with the
+/// child's execution, so their results cross a thread boundary.
+private final class OutputCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var out = Data()
+    private var err = Data()
+
+    var stdout: Data { lock.withLock { out } }
+    var stderr: Data { lock.withLock { err } }
+
+    func setStdout(_ data: Data) { lock.withLock { out = data } }
+    func setStderr(_ data: Data) { lock.withLock { err = data } }
 }
 
 private final class ResolvedLfCache: @unchecked Sendable {

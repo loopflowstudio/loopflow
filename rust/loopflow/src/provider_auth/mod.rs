@@ -384,7 +384,7 @@ struct OAuthErrorResponse {
 /// Linear OAuth uses a loopback redirect (`http://localhost:19222/oauth/callback`):
 /// consent is a single click and the code arrives on a short-lived local listener.
 /// Once Linear returns a refresh token, `refresh_pm_oauth_token` renews headlessly
-/// via the client creds.
+/// with the stored PKCE client ID.
 #[derive(Debug, Clone)]
 struct LinearOAuthBroker {
     completed_token: Arc<Mutex<Option<ProviderToken>>>,

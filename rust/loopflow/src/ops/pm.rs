@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::Path;
 
+use futures_util::future::try_join_all;
+
 use crate::engine::config::load_config_or_default;
 use crate::engine::wave_config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 use crate::lfd::pm::linear::LinearClient;
@@ -292,6 +294,10 @@ fn read_legacy_project(repo: &Path, wave: &str) -> Option<String> {
         .filter(|project| !project.trim().is_empty())
 }
 
+fn project_seed_pending(repo: &Path, wave: &str) -> bool {
+    read_wave_pm_config(repo, wave).is_some_and(|pm| pm.linear_seed_pending)
+}
+
 /// Whether a wave has a Linear Initiative pinned for its resolved provider.
 fn wave_has_pm_initiative(repo: &Path, wave: &str) -> bool {
     resolve_provider(repo, wave)
@@ -312,6 +318,11 @@ async fn build_client(repo: &Path, provider: PmProviderKind) -> OpsResult<PmClie
 
 async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     let provider = resolve_provider(repo, wave)?;
+    if project_seed_pending(repo, wave) {
+        return Err(OpsError::Message(format!(
+            "wave/{wave} has an incomplete Linear Project seed. Run `lf pm init --wave {wave}` to resume it."
+        )));
+    }
     let initiative = read_initiative(repo, wave, provider).ok_or_else(|| {
         OpsError::Message(format!(
             "wave/{wave}/GOAL.md has no `pm.{}`. \
@@ -456,7 +467,8 @@ async fn pm_init_async(
     let provider = resolve_provider(repo, &wave)?;
     let existing_initiative = read_initiative(repo, &wave, provider);
     let legacy_project = read_legacy_project(repo, &wave);
-    if legacy_project.is_none() {
+    let seed_pending = project_seed_pending(repo, &wave);
+    if legacy_project.is_none() && !seed_pending {
         if let Some(existing) = existing_initiative.as_ref() {
             progress.status(&format!(
                 "wave/{wave} already linked to {provider} Linear Initiative {existing}"
@@ -469,13 +481,16 @@ async fn pm_init_async(
         }
     }
 
-    let (summary, local_projects) = if existing_initiative.is_none() {
-        (
-            wave_summary(repo, &wave)?,
-            load_local_projects(repo, &wave)?,
-        )
+    let should_seed_projects = existing_initiative.is_none() || seed_pending;
+    let summary = if existing_initiative.is_none() {
+        wave_summary(repo, &wave)?
     } else {
-        (String::new(), Vec::new())
+        String::new()
+    };
+    let local_projects = if should_seed_projects {
+        load_local_projects(repo, &wave)?
+    } else {
+        Vec::new()
     };
     let client = build_client(repo, provider).await?;
     let (initiative_id, created) = if let Some(existing) = existing_initiative {
@@ -487,13 +502,15 @@ async fn pm_init_async(
         progress.status(&format!(
             "creating {provider} Linear Initiative for wave/{wave}"
         ));
-        (
-            client
-                .create_wave(&title_case(&wave), &summary)
-                .await
-                .map_err(pm_to_ops)?,
-            true,
-        )
+        let initiative_id = client
+            .create_wave(&title_case(&wave), &summary)
+            .await
+            .map_err(pm_to_ops)?;
+        // Persist the remote handle before creating child projects. If a later
+        // request fails, rerunning init resumes the seed instead of creating a
+        // duplicate Initiative.
+        write_initiative_to_goal(repo, &wave, provider, &initiative_id, false, true)?;
+        (initiative_id, true)
     };
 
     let existing_projects = if created {
@@ -505,8 +522,11 @@ async fn pm_init_async(
         .into_iter()
         .map(|project| (project.slug, project.id))
         .collect();
-    if created {
+    if should_seed_projects {
         for project in local_projects {
+            if project_ids.contains_key(&project.slug) {
+                continue;
+            }
             progress.status(&format!(
                 "creating {provider} Linear Project {} for wave/{wave}",
                 project.name
@@ -517,13 +537,7 @@ async fn pm_init_async(
                 .map_err(pm_to_ops)?;
             project_ids.insert(project.slug, project_id);
         }
-        write_initiative_to_goal(
-            repo,
-            &wave,
-            provider,
-            &initiative_id,
-            legacy_project.is_none(),
-        )?;
+        write_initiative_to_goal(repo, &wave, provider, &initiative_id, false, false)?;
     }
 
     let mut unmigrated = 0;
@@ -536,13 +550,11 @@ async fn pm_init_async(
             .await
             .map_err(pm_to_ops)?
         {
-            let Some((slug, project_id)) = legacy
-                .project_slugs
-                .iter()
-                .find_map(|slug| project_ids.get(slug).map(|project_id| (slug, project_id)))
+            let Some((slug, project_id)) =
+                unique_legacy_project_destination(&legacy.project_slugs, &project_ids)
             else {
                 progress.status(&format!(
-                    "leaving legacy task {} without a recognized project label in {legacy_project_id}",
+                    "leaving legacy task {} without exactly one recognized project label in {legacy_project_id}",
                     legacy.item.id,
                 ));
                 unmigrated += 1;
@@ -553,19 +565,26 @@ async fn pm_init_async(
                 legacy.item.id
             ));
             client
-                .move_item_to_project(&legacy.item.id, project_id)
+                .move_item_to_project(&legacy.item.id, &project_id)
                 .await
                 .map_err(pm_to_ops)?;
         }
     }
     if unmigrated > 0 {
         progress.status(&format!(
-            "kept pm.linear_project because {unmigrated} legacy task(s) still need a recognized project:<slug> label"
+            "kept pm.linear_project because {unmigrated} legacy task(s) still need exactly one recognized project:<slug> label"
         ));
     }
-    let config_changed = created || legacy_project.is_some();
+    let config_changed = created || legacy_project.is_some() || seed_pending;
     if legacy_project.is_some() {
-        write_initiative_to_goal(repo, &wave, provider, &initiative_id, unmigrated == 0)?;
+        write_initiative_to_goal(
+            repo,
+            &wave,
+            provider,
+            &initiative_id,
+            unmigrated == 0,
+            false,
+        )?;
     }
 
     if config_changed {
@@ -622,24 +641,24 @@ async fn fetch_items(
         Some(slug) => vec![find_project(&projects, wave, slug)?.clone()],
         None => projects,
     };
-    let mut items = Vec::new();
-    for project in projects {
-        let mut project_items = ctx
+    let project_items = try_join_all(projects.into_iter().map(|project| async move {
+        let mut items = ctx
             .client
             .list_items(&project.id)
             .await
             .map_err(pm_to_ops)?;
-        for item in &mut project_items {
+        for item in &mut items {
             item.project = Some(project.slug.clone());
         }
-        items.extend(project_items);
-    }
+        Ok::<_, OpsError>(items)
+    }))
+    .await?;
     Ok(PmShowResult {
         wave: wave.to_string(),
         provider: ctx.provider,
         initiative: ctx.initiative.clone(),
         project: project_slug.map(str::to_string),
-        items,
+        items: project_items.into_iter().flatten().collect(),
     })
 }
 
@@ -893,7 +912,11 @@ async fn pm_sync_async(
         let has_legacy_project = read_legacy_project(repo, wave).is_some();
         if let Some(initiative) = read_initiative(repo, wave, provider) {
             linked_initiative_ids.insert(initiative);
-            if has_legacy_project {
+            if project_seed_pending(repo, wave) {
+                diagnostics.push(format!(
+                    "wave/{wave} has an incomplete Linear Project seed; run `lf pm init --wave {wave}` to resume"
+                ));
+            } else if has_legacy_project {
                 diagnostics.push(format!(
                     "wave/{wave} retains pm.linear_project because legacy task migration is incomplete; run `lf pm init --wave {wave}` after assigning project labels"
                 ));
@@ -935,6 +958,9 @@ async fn pm_sync_async(
         let Some(initiative_id) = read_initiative(repo, wave, provider) else {
             continue;
         };
+        if project_seed_pending(repo, wave) {
+            continue;
+        }
         let expected_initiative_name = title_case(wave);
         match linear_waves_by_id.get(&initiative_id) {
             Some(actual) if actual != &expected_initiative_name => {
@@ -1113,6 +1139,7 @@ fn write_initiative_to_goal(
     provider: PmProviderKind,
     initiative_id: &str,
     clear_legacy_project: bool,
+    seed_pending: bool,
 ) -> OpsResult<()> {
     update_wave_goal_config(repo, wave, |map| {
         let pm_key = serde_yaml_ng::Value::String("pm".to_string());
@@ -1131,6 +1158,12 @@ fn write_initiative_to_goal(
         );
         if clear_legacy_project {
             pm_map.remove(serde_yaml_ng::Value::String("linear_project".to_string()));
+        }
+        let seed_key = serde_yaml_ng::Value::String("linear_seed_pending".to_string());
+        if seed_pending {
+            pm_map.insert(seed_key, serde_yaml_ng::Value::Bool(true));
+        } else {
+            pm_map.remove(&seed_key);
         }
         map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm_map));
         Ok(())
@@ -1205,6 +1238,19 @@ fn first_paragraph(content: &str) -> String {
         .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
         .find(|paragraph| !paragraph.is_empty())
         .unwrap_or_default()
+}
+
+fn unique_legacy_project_destination(
+    project_slugs: &[String],
+    project_ids: &BTreeMap<String, String>,
+) -> Option<(String, String)> {
+    let mut destinations = project_slugs.iter().filter_map(|slug| {
+        project_ids
+            .get(slug)
+            .map(|project_id| (slug.clone(), project_id.clone()))
+    });
+    let destination = destinations.next()?;
+    destinations.next().is_none().then_some(destination)
 }
 
 fn ensure_unique_project_slugs(projects: &[PmProject], wave: &str) -> OpsResult<()> {
@@ -1489,6 +1535,7 @@ mod tests {
             PmProviderKind::Linear,
             "initiative-1",
             true,
+            false,
         )
         .expect("write initiative");
 
@@ -1513,12 +1560,45 @@ mod tests {
             PmProviderKind::Linear,
             "initiative-1",
             false,
+            true,
         )
         .expect("write initiative");
 
         let pm = read_wave_pm_config(repo.path(), "product").expect("pm config");
         assert_eq!(pm.linear_initiative.as_deref(), Some("initiative-1"));
         assert_eq!(pm.linear_project.as_deref(), Some("legacy-1"));
+        assert!(pm.linear_seed_pending);
+
+        write_initiative_to_goal(
+            repo.path(),
+            "product",
+            PmProviderKind::Linear,
+            "initiative-1",
+            false,
+            false,
+        )
+        .expect("finish project seed");
+        assert!(
+            !read_wave_pm_config(repo.path(), "product")
+                .expect("pm config")
+                .linear_seed_pending
+        );
+    }
+
+    #[tokio::test]
+    async fn incomplete_project_seed_blocks_task_operations() {
+        let repo = tempfile::tempdir().expect("temp dir");
+        write_goal(
+            repo.path(),
+            "product",
+            "pm:\n  provider: linear\n  linear_initiative: initiative-1\n  linear_seed_pending: true\n",
+        );
+
+        let error = match resolve_context(repo.path(), "product").await {
+            Err(error) => error,
+            Ok(_) => panic!("incomplete seed must block task operations"),
+        };
+        assert!(error.to_string().contains("lf pm init --wave product"));
     }
 
     #[test]
@@ -1592,6 +1672,30 @@ mod tests {
         let error = ensure_unique_project_slugs(&projects, "product")
             .expect_err("duplicate slug must fail");
         assert!(error.to_string().contains("both derive slug `wave-chat`"));
+    }
+
+    #[test]
+    fn legacy_task_migration_requires_one_recognized_project() {
+        let projects = BTreeMap::from([
+            ("context".to_string(), "project-1".to_string()),
+            ("evals".to_string(), "project-2".to_string()),
+        ]);
+
+        assert_eq!(
+            unique_legacy_project_destination(&["context".to_string()], &projects),
+            Some(("context".to_string(), "project-1".to_string()))
+        );
+        assert_eq!(
+            unique_legacy_project_destination(&["unknown".to_string()], &projects),
+            None
+        );
+        assert_eq!(
+            unique_legacy_project_destination(
+                &["context".to_string(), "evals".to_string()],
+                &projects,
+            ),
+            None
+        );
     }
 
     #[test]

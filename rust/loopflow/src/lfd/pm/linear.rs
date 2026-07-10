@@ -162,7 +162,7 @@ const CREATE_ITEM_MUTATION: &str = r#"mutation CreateIssue($teamId: String!, $pr
   }
 }"#;
 
-const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: ID!, $title: String, $description: String) {
+const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: String!, $title: String, $description: String) {
   issueUpdate(id: $id, input: { title: $title, description: $description }) {
     issue {
       id
@@ -170,7 +170,7 @@ const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: ID!, $title: Str
   }
 }"#;
 
-const MOVE_ITEM_MUTATION: &str = r#"mutation MoveIssueToProject($id: ID!, $projectId: ID!) {
+const MOVE_ITEM_MUTATION: &str = r#"mutation MoveIssueToProject($id: String!, $projectId: String!) {
   issueUpdate(id: $id, input: { projectId: $projectId }) {
     issue {
       id
@@ -178,7 +178,7 @@ const MOVE_ITEM_MUTATION: &str = r#"mutation MoveIssueToProject($id: ID!, $proje
   }
 }"#;
 
-const COMPLETE_ITEM_MUTATION: &str = r#"mutation CompleteIssue($id: ID!, $stateId: ID!) {
+const COMPLETE_ITEM_MUTATION: &str = r#"mutation CompleteIssue($id: String!, $stateId: String!) {
   issueUpdate(id: $id, input: { stateId: $stateId }) {
     issue {
       id
@@ -203,7 +203,7 @@ const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowSta
   }
 }"#;
 
-const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: ID!, $body: String!) {
+const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: String!, $body: String!) {
   commentCreate(input: { issueId: $issueId, body: $body }) {
     comment {
       id
@@ -963,6 +963,21 @@ mod tests {
     use crate::lfd::pm::test_server::{self, json_response};
     use axum::http::StatusCode;
     use serde_json::json;
+
+    #[test]
+    fn issue_mutations_use_linear_string_ids() {
+        for query in [
+            UPDATE_ITEM_MUTATION,
+            MOVE_ITEM_MUTATION,
+            COMPLETE_ITEM_MUTATION,
+            CREATE_COMMENT_MUTATION,
+        ] {
+            assert!(!query.contains(": ID!"));
+        }
+        assert!(MOVE_ITEM_MUTATION.contains("$projectId: String!"));
+        assert!(COMPLETE_ITEM_MUTATION.contains("$stateId: String!"));
+        assert!(CREATE_COMMENT_MUTATION.contains("$issueId: String!"));
+    }
 
     #[tokio::test]
     async fn list_items_maps_linear_project_issues() {

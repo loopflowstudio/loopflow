@@ -20,6 +20,9 @@ pub struct WavePmConfig {
     pub provider: Option<String>,
     #[serde(default)]
     pub linear_initiative: Option<String>,
+    /// True only while `lf pm init` is seeding Linear Projects.
+    #[serde(default)]
+    pub linear_seed_pending: bool,
     /// Migration input for repositories created before native Linear hierarchy.
     #[serde(default)]
     pub linear_project: Option<String>,

@@ -69,3 +69,14 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   other left the assertion on the old shape. Nothing enforces one writer per
   worktree. Whether that is a wave-home invariant or a lock is open; until it
   is settled, check for a live agent before working a wave worktree.
+
+  It recurred during the rebase onto main, and a rebase is the worse case. Two
+  drivers shared one `rebase-merge` state dir: conflicts resolved themselves
+  between one command and the next, and `done` advanced 6→22 with no
+  `--continue` from this session. Nothing was lost — the resolutions were
+  right, and the loser noticed in time to stop touching git — but interleaved
+  `--continue` calls have no reason to land on a coherent tree, and a
+  mid-rebase write to `scratch/` would have wedged the other driver's next
+  checkout. Concurrent editing corrupts a file; concurrent rebasing corrupts
+  history. The store lease in `minds.md` §9 / Next-session item 5 is the fix;
+  it should cover `.git`'s sequencer state, not just the worktree's files.

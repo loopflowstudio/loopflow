@@ -13,8 +13,8 @@ use std::sync::Arc;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage, LivePrState,
-    LivePullRequestState, QueueBlock, Repo, RepoEdge, RepoId, Run, RunStackStatus, Session,
-    SessionStatus, Summary, Wave,
+    LivePullRequestState, Repo, RepoEdge, RepoId, Run, RunStackStatus, Session, SessionStatus,
+    Summary, Wave,
 };
 use crate::task::{
     TaskCommand, TaskCommandId, TaskEvent, TaskEventKind, TaskSession, TaskSessionId,
@@ -494,18 +494,6 @@ impl Store {
         WaveStateStore::delete_attention_item(self, attention_id).await
     }
 
-    pub async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
-        WaveStateStore::list_queue_blocks(self, wave_id).await
-    }
-
-    pub async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
-        WaveStateStore::upsert_queue_block(self, block).await
-    }
-
-    pub async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
-        WaveStateStore::delete_queue_block(self, wave_id, run_id).await
-    }
-
     pub async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
         WaveStateStore::get_summary(self, wave_id).await
     }
@@ -754,10 +742,6 @@ pub trait WaveStateStore: Send + Sync {
     ) -> StoreResult<Option<AttentionItem>>;
     async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()>;
     async fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32>;
-    async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>>;
-    async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()>;
-    async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32>;
-
     async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>>;
     async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()>;
 
@@ -1103,31 +1087,6 @@ impl WaveStateStore for Store {
             let attention_id = attention_id.clone();
             run_sqlite(&self.sqlite, move |store| {
                 store.delete_attention_item(&attention_id)
-            })
-            .await
-        }
-    }
-
-    async fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
-        {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.list_queue_blocks(&wave_id)).await
-        }
-    }
-
-    async fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
-        {
-            let block = block.clone();
-            run_sqlite(&self.sqlite, move |store| store.upsert_queue_block(&block)).await
-        }
-    }
-
-    async fn delete_queue_block(&self, wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
-        {
-            let wave_id = wave_id.clone();
-            let run_id = run_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.delete_queue_block(&wave_id, &run_id)
             })
             .await
         }
@@ -1499,9 +1458,8 @@ mod tests {
     };
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest, QueueBlock,
-        QueueBlockReason, Repo, RepoEdge, RepoId, Run, RunStackStatus, RunStatus, Summary, Wave,
-        WaveStatus, DEFAULT_WAVE_FLOW,
+        ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest, Repo, RepoEdge, RepoId,
+        Run, RunStackStatus, RunStatus, Summary, Wave, WaveStatus, DEFAULT_WAVE_FLOW,
     };
     use crate::task::{
         LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, TaskCommand,
@@ -2523,53 +2481,6 @@ mod tests {
                 .expect("find unmerged");
             assert_eq!(pending.map(|run| run.id), expected);
         }
-
-        store.delete_wave(wave.id()).await.expect("delete wave");
-    }
-
-    #[tokio::test]
-    async fn queue_block_and_merge_event_crud() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let wave = make_wave("/repo-queue");
-        store.create_wave(&wave).await.expect("create wave");
-
-        let mut run = make_run(&wave, RunStatus::Completed);
-        run.pr = Some(PullRequest {
-            url: "https://example.test/pr/42".to_string(),
-            number: Some(42),
-            state: Some("open".to_string()),
-            title: Some("feature".to_string()),
-            branch: Some("feature-42".to_string()),
-        });
-        run.parent_pr_number = Some(42);
-        store.create_run(&run).await.expect("create run");
-
-        let block = QueueBlock {
-            wave_id: wave.id().clone(),
-            run_id: run.id.clone(),
-            reason: QueueBlockReason::RebaseConflict,
-            attempted_at: OffsetDateTime::now_utc(),
-            conflict_files: vec!["src/lib.rs".to_string()],
-            error: Some("merge failed".to_string()),
-        };
-        store
-            .upsert_queue_block(&block)
-            .await
-            .expect("upsert block");
-        let blocks = store
-            .list_queue_blocks(wave.id())
-            .await
-            .expect("list blocks");
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].reason, QueueBlockReason::RebaseConflict);
-        let deleted = store
-            .delete_queue_block(wave.id(), &run.id)
-            .await
-            .expect("delete block");
-        assert_eq!(deleted, 1);
 
         store.delete_wave(wave.id()).await.expect("delete wave");
     }

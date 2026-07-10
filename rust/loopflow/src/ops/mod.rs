@@ -9,7 +9,6 @@ pub mod pm;
 mod pr;
 mod progress;
 pub mod project;
-pub mod queue;
 mod rebase;
 mod release;
 pub mod task;
@@ -31,7 +30,6 @@ pub use flow::execute_flow_ops;
 pub use land::{land, mark_ready, submit, LandOptions};
 pub use pr::{create_or_update_pr, current_or_merged_pr, current_pr, PrInfo, PrOptions, PrResult};
 pub use progress::{NullProgress, Progress};
-pub(crate) use rebase::merged_parent_fork_point;
 pub use rebase::{
     plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, RebaseClass,
     RebaseOptions, RebasePlan, RebaseStrategy,

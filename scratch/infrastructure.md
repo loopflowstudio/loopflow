@@ -143,9 +143,13 @@ delete the Task Session. Resuming does not create a second task.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskSession {
     pub id: TaskSessionId,
-    pub issue: LinearIssueRef,
-    pub project: LinearProjectRef,
+    pub issue_id: String,         // PmItem.id: canonical Linear UUID
+    pub issue_identifier: String, // PmItem.identifier: INF-123
+    pub project_id: String,       // PmProject.id
+    pub project_slug: String,     // PmProject.slug
     pub wave_id: WaveId,
+    pub pm_snapshot_synced_at: i64,
+    pub pm_writeback: PmWritebackState,
     pub status: TaskSessionStatus,
     pub worktree: PathBuf,
     pub branch: BranchName,
@@ -159,15 +163,17 @@ pub struct TaskSession {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinearIssueRef {
-    pub id: LinearIssueId,  // canonical UUID
-    pub identifier: String, // INF-123
+pub enum PmWritebackState {
+    Current,
+    Pending {
+        operation: PmWritebackOperation,
+        error: String,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinearProjectRef {
-    pub id: LinearProjectId,
-    pub slug: String,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PmWritebackOperation {
+    CompleteTask,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,6 +189,10 @@ pub enum TaskSessionStatus {
     Abandoned,
 }
 ```
+
+These PM fields are an immutable launch receipt copied from the shared
+`PmShowResult`; they are not a second editable Project/Task model. Current
+Project definitions, KRs, and task state always come from the PM snapshot.
 
 `Merged` and `Abandoned` are terminal. `Submitted` is not complete: review
 feedback may resume the same worker in the same worktree days later.
@@ -234,6 +244,113 @@ It launches a normal provider harness inside a Loopflow Task Session so Linear
 identity, worktree isolation, control, audit, and recovery behave the same on
 Codex, Claude, and OpenCode.
 
+## Incoming PM API contract
+
+The product worktree changes the PM boundary this design builds on:
+
+- Linear is the only durable author of Initiatives, Projects, definitions,
+  KRs, and Tasks.
+- SQLite stores one atomic `PmShowResult` snapshot per canonical repository and
+  Wave. It is a daemonless read model, not an authoring surface.
+- `lf pm show` reads that snapshot through `PmRefresh::{Auto, Force, Never}`.
+- `lf pm task create/update/done/move` and `lf pm project
+  create/update/archive` write Linear, then refresh the affected snapshot
+  before returning.
+- `lf pm init` owns only the Wave→Initiative binding, with snapshot seeding
+  expected as part of settling the first-read cliff.
+- `wave/<wave>/projects/*.md` is deleted. Roadmap changes go through `lf pm`.
+
+| Before product PM change | After product PM change |
+|---|---|
+| Project definitions/KRs live or mirror under `wave/*/projects/` | Project definitions/KRs live only in Linear Project content |
+| `pm init` may seed/migrate Projects | `pm init` establishes only the Initiative binding; snapshot seeding is the remaining first-read policy decision |
+| Reads reconstruct from files or query provider-shaped paths | `pm show` exports one typed SQLite `PmShowResult` |
+| Sync diagnoses/reconciles several local representations | `pm sync` explicitly replaces one Wave snapshot from Linear |
+| Callers may perform provider reads during their own workflow | CLI, Wave, Task lifecycle, and Swift consume the snapshot |
+| A mutation and local read state can drift independently | Every successful PM mutation refreshes the affected snapshot before returning |
+
+Task lifecycle code composes this API; it never constructs a `LinearClient`,
+queries Linear directly, parses project files, or writes planning rows into
+SQLite.
+
+The intended read modes are:
+
+```rust
+enum PmRefresh {
+    Auto,  // fresh cache; bounded refresh when stale; cached soft-stale fallback
+    Force, // explicit network refresh
+    Never, // deterministic cache-only read
+}
+```
+
+The product checkout is currently mid-transition. Before implementing this
+design, rebase onto its landed PM contract and verify four integration points:
+
+1. `PmShowOptions.refresh` is honored by `pm_show`, not merely declared.
+2. CLI `--sync` and `--no-sync` map to `Force` and `Never`.
+3. `PmItem` includes Linear's human identifier (`INF-123`) as well as its UUID.
+4. `pm init` leaves a readable snapshot, or the lifecycle owns one temporary
+   post-init sync.
+5. A PM mutation preserves its committed provider result when the following
+   snapshot refresh fails. The current `write Linear; refresh?; return result`
+   shape must not collapse “issue created, cache refresh failed” into an error
+   that discards the created UUID.
+
+Use one narrow function module while those APIs settle; do not introduce a PM
+provider trait or compatibility model:
+
+```rust
+mod task_pm {
+    pub fn load_wave(repo: &Path, wave: &str, refresh: PmRefresh)
+        -> OpsResult<PmShowResult>;
+
+    pub fn create_and_load_task(
+        repo: &Path,
+        wave: &str,
+        project: &str,
+        title: &str,
+        notes: &str,
+    ) -> OpsResult<(PmShowResult, PmItem)>;
+
+    pub fn complete_task(
+        repo: &Path,
+        wave: &str,
+        item_id: &str,
+        pr: &str,
+    ) -> OpsResult<()>;
+}
+```
+
+`create_and_load_task` may temporarily call `pm_update`, then load
+`PmShowResult` with `Never` and find the returned UUID because the incoming
+mutation result returns only an id. Mark that bridge
+`TODO(product-pm): return the refreshed PmItem from task creation`, and remove
+it once the PM mutation API returns the created item. If `pm init` lands
+without snapshot seeding, a single `ensure_snapshot_after_init` bridge may call
+`pm sync`; mark it for removal when init owns that invariant. These shims adapt
+an in-flight internal API only—there is no compatibility path for project
+files or old PM commands.
+
+Do not shim an ambiguous committed mutation by matching title or creating
+again. The PM API must return either a refreshed item or a structured committed
+outcome such as:
+
+```rust
+pub struct PmMutationResult<T> {
+    pub value: T,
+    pub snapshot: PmSnapshotWrite,
+}
+
+pub enum PmSnapshotWrite {
+    Refreshed { synced_at: i64 },
+    Pending { error: String },
+}
+```
+
+When creation is committed but refresh is pending, `task start` retains the
+real UUID, reports that no execution was placed, and retries refresh/resolution
+for that same item. It never issues a second create.
+
 ## Public API
 
 ### Formal record-first API
@@ -263,6 +380,14 @@ has started. It never blocks until completion; `wait` is the explicit blocking
 verb. There is no `dispatch` mode because every task is a managed child
 session. Parallelism is simply several running tasks.
 
+For a task with no existing session, `task run` loads the owning Wave's
+`PmShowResult` in `Auto` mode, resolves one open `PmItem` and its `PmProject`,
+and records the snapshot's `synced_at` in the launch receipt. A fresh snapshot
+is network-free; a soft-stale refresh failure may use the labeled cached
+snapshot; a hard-stale failure stops before placement. Controls for an existing
+Task Session use its persisted ids and never refresh PM merely to send a
+message or resume its provider process.
+
 ### Natural-language wrappers
 
 ```text
@@ -274,6 +399,20 @@ lf task start "add a hello-world command" --project <linear-project-id>
 the returned id. It is not an overloaded identifier parser. If record creation
 fails, no Task Session, worktree, branch, or provider process is created.
 
+If Linear creation commits but snapshot refresh fails, the PM result retains
+the UUID and a durable PM mutation receipt. `start` creates no worktree or
+provider process; it reports the committed issue and resumes from that receipt
+after sync. A retry reuses the committed UUID rather than issuing another
+create. If the provider cannot make create idempotent directly, a local
+request-id receipt belongs inside the PM mutation layer as a temporary shim,
+not inside Task placement.
+
+The wrapper calls `lf pm task create` semantics, which write Linear and refresh
+the snapshot before returning. It then resolves the returned UUID from that
+fresh snapshot with `Never`; it does not make another opportunistic network
+read. `project start` follows the same write-then-refresh contract through
+`lf pm project create`.
+
 A Wave normally calls the same operations itself. The human's natural-language
 request is not a hidden local task; the Wave creates the record first and
 receives its id before starting execution.
@@ -282,7 +421,12 @@ receives its id before starting execution.
 
 ```json
 {
-  "issue_id": "INF-123",
+  "issue_id": "5ed…",
+  "issue_identifier": "INF-123",
+  "project_id": "8ab…",
+  "project_slug": "work-isolation",
+  "pm_snapshot_synced_at": 1783728000,
+  "pm_writeback": { "state": "current" },
   "session_id": "ts_01J...",
   "wave": "infrastructure",
   "status": "running",
@@ -311,8 +455,9 @@ Linear issue
 
 Starting is transactional in intent:
 
-1. Resolve the Linear issue and its Linear Project/Initiative.
-2. Resolve exactly one owning Loopflow Wave.
+1. Load the owning Wave's `PmShowResult` through the selected freshness mode.
+2. Resolve exactly one open `PmItem`, its `PmProject`, and owning Wave from that
+   snapshot; persist their ids plus `synced_at` as the launch receipt.
 3. Reserve the issue and concurrency slot in sqlite.
 4. Record `TaskSession { status: Created }`.
 5. Create one sibling worktree from current `main`; persist its exact base.
@@ -468,6 +613,7 @@ The initial task prompt contains:
 
 - Linear issue id, title, description, and owning Linear Project;
 - the Project definition and KRs;
+- the PM snapshot `synced_at` and any stale-cache fallback warning;
 - the Wave objective and curated memory;
 - repository instructions and the selected Task flow/skills;
 - the immutable worktree, base commit, delivery target, and completion rules;
@@ -476,30 +622,44 @@ The initial task prompt contains:
 Provider/model, permission mode, reasoning settings, and budgets snapshot from
 the Wave at launch. Cwd never inherits: it is always the task worktree.
 
+These planning fields come from one `PmShowResult` read. Prompt assembly does
+not issue per-Project or per-Task Linear calls. Resuming an existing Task
+Session uses its durable launch receipt and transcript; review feedback does
+not implicitly refresh PM unless it performs a PM mutation.
+
 Persist the provider session id after the provider announces it. Resume the
 same provider history when supported; otherwise rebuild a bounded task prompt
 from the durable Task transcript. Full Wave-history forks are deferred until
 real runs show focused context is insufficient.
 
-## Linear semantics
+## PM identity, snapshots, and failure policy
 
-Linear identity remains in the hot path by design.
+Linear identity remains mandatory, but a live Linear network call does not.
 
-- `project run` accepts an existing Linear Project id.
-- `task run` accepts an existing Linear issue id.
-- Natural-language `start` wrappers create the record first.
+- `project run` resolves an existing `PmProject` from `PmShowResult`.
+- `task run` resolves an existing open `PmItem` from `PmShowResult`.
+- Natural-language `start` wrappers create the record through the PM mutation
+  API, which refreshes the snapshot before Task Session placement.
 - Every task belongs to exactly one known Project and Wave before execution.
-- Linear creation failure is fail-closed: report the error, remain steerable,
-  and create no worktree or local pending task.
+- A known task in an acceptable cached snapshot may start while Linear is
+  unreachable; the snapshot is the official local read model.
+- A missing snapshot, unknown item, hard-stale refresh failure, or failed PM
+  mutation stops before worktree creation.
 
-This deliberately prefers one source of truth over an offline reconciliation
-state machine. If real Linear outages materially block Jack, that evidence can
-justify a locally minted formal identity plus forward sync later. Do not build
-it speculatively or backfill anonymous work.
+This is the precise fail-closed boundary: Loopflow never invents an unlinked
+local task, but it does not make cached, already-identified work depend on a
+fresh SaaS round trip. The error reports snapshot age and whether refresh was
+skipped, attempted with cached fallback, or required and failed.
 
-Credential refresh and bounded retry happen before surfacing failure. A retry
-of `task start` after an ambiguous network response must query Linear by the
-idempotency marker before creating another issue.
+If real Linear outages materially block creation, that evidence can justify a
+locally minted formal identity plus forward sync later. Do not build it
+speculatively or backfill anonymous work.
+
+Credential refresh and bounded retry happen inside the PM mutation/refresh
+path before surfacing failure. A retry of `task start` after an ambiguous
+network response must query through PM reconciliation/idempotency before
+creating another issue. Task lifecycle code must not reach around `lf pm` to
+perform that check directly against Linear.
 
 ## Project execution
 
@@ -507,10 +667,12 @@ idempotency marker before creating another issue.
 lf project run <linear-project-id>
 ```
 
-This resolves the owning Wave, appends a durable project directive to its
-inbox, and wakes the Wave when its server is live. If the Wave is stopped, the
-command reports `queued` and the next `lf serve` consumes it. It does not spawn
-a Project Worker or create a project worktree.
+This loads `PmShowResult` in `Auto`, resolves the Project by canonical id (or
+its unique snapshot slug), appends its snapshot-backed definition/KRs and a
+durable project directive to the owning Wave's inbox, and wakes the Wave when
+its server is live. If the Wave is stopped, the command reports `queued` and
+the next `lf serve` consumes it. It does not read a project file, spawn a
+Project Worker, or create a project worktree.
 
 The Wave may then:
 
@@ -559,13 +721,22 @@ Opening a PR transitions the session to `Submitted`; it does not end the Task.
 - A sleeping provider/tmux process may be relaunched without changing the Task
   Session id.
 - The task becomes `Merged` only after its PR is observed merged into `main`.
+- On merge, the lifecycle calls the PM `task done` mutation with the PR URL;
+  that mutation comments the link, completes the Linear issue, and refreshes
+  the Wave snapshot.
+- If PM finalization fails after code has merged, delivery remains truthfully
+  `Merged` and `pm_writeback` becomes `Pending { CompleteTask, error }`. The
+  Wave receives an attention item and retries through the PM API; it never
+  edits the SQLite snapshot or claims Linear is already complete.
 - Cleanup may remove the worktree and local branch only after `Merged`.
 - `Abandoned` requires an explicit reason. Before cleanup, every commit must be
   reachable from a pushed branch or recorded recovery ref.
 - `Failed` and `Blocked` retain the worktree and remain resumable.
 
 This makes the PR's afterlife part of the original Task rather than a new task
-or an unowned branch.
+or an unowned branch. PM writeback failure does not resurrect delivered code or
+pin a safe-to-remove worktree, but the Task is not reported fully reconciled
+until `pm_writeback` returns to `Current`.
 
 ## Crash recovery
 
@@ -636,19 +807,24 @@ not keep a speculative proxy.
 
 One PR should deliver the complete independent-task lifecycle:
 
-1. Add Linear-backed Project/Task CLI verbs and JSON contracts.
-2. Add `TaskSession`, statuses, commands, events, persistence, reservations,
+1. Rebase onto the landed product PM branch and verify the snapshot freshness,
+   mutation-refresh, identifier, and init-seeding integration points above.
+2. Add the narrow `task_pm` adapter, with removal TODOs only for confirmed
+   in-flight PM return-shape/init gaps.
+3. Add Linear-backed Project/Task CLI verbs and JSON contracts composed from
+   `PmShowResult`, `PmProject`, and `PmItem`.
+4. Add `TaskSession`, statuses, commands, events, persistence, reservations,
    and process generations.
-3. Add sibling task placement from `main` and one-PR delivery.
-4. Add the steerable task runner and provider-neutral control behavior.
-5. Add tmux launch, writable attach/control prompt, liveness, resume, wait, and
+5. Add sibling task placement from `main` and one-PR delivery.
+6. Add the steerable task runner and provider-neutral control behavior.
+7. Add tmux launch, writable attach/control prompt, liveness, resume, wait, and
    cleanup.
-6. Fold Task control/result events into the Wave journal and status.
-7. Update built-in Wave/Project/Task skills to create records before execution
+8. Fold Task control/result events into the Wave journal and status.
+9. Update built-in Wave/Project/Task skills to create records before execution
    and supervise Task Sessions.
-8. Move Swift to the CLI JSON contract for the MVP fields it displays.
-9. Remove every old public path that competes with the new lifecycle.
-10. Migrate the local sqlite schema and dogfood the hello-world path.
+10. Move Swift to the CLI JSON contract for the MVP fields it displays.
+11. Remove every old public path that competes with the new lifecycle.
+12. Migrate the local sqlite schema and dogfood the hello-world path.
 
 Target at most roughly 5,000 added or substantially rewritten implementation
 lines, excluding mechanical test fixtures and code deletion. The PR should be
@@ -682,6 +858,9 @@ net-negative or close to it because the old generic/stacked paths disappear.
   remote tracking for wave anchor branches.
 - Any Swift session lifecycle or mutation stubs whose only caller was the old
   HTTP/placement model.
+- The branch's temporary edits under `wave/*/projects/`; accept the product
+  branch's deletion and move those roadmap changes through `lf pm` after its PM
+  API lands.
 - Documentation, prompts, and tests teaching rotation, generic detached loops,
   stacks, queues, sandbox workers, or task work in wave homes.
 
@@ -689,12 +868,20 @@ net-negative or close to it because the old generic/stacked paths disappear.
 
 - One task placement function: Linear issue + `main` → reserved Task Session +
   sibling worktree.
+- One planning read shape: `PmShowResult`; Task lifecycle adds no provider
+  query DTO or normalized planning tables.
+- One planning mutation owner: `lf pm`; Task lifecycle never instantiates a
+  `LinearClient` or edits PM snapshots.
 - One task process launcher: Task Session → tmux runner.
 - One provider control loop behind `Harness`.
 - One Task command/event store used by CLI, Wave, tmux attachment, and Swift.
 - One completion definition: merged or explicitly abandoned.
 - One PR target: `main`.
 - One source of roadmap identity: Linear.
+
+The `task_pm` module is a composition seam, not a second PM layer. TODO shims
+must name the exact incoming API gap and be deleted when that gap closes; no
+shim may read project markdown or support the superseded PM schema.
 
 Manual `lf wt create` may remain as a diagnostic escape hatch only in sibling
 mode. It is never how roadmap work starts.
@@ -715,6 +902,11 @@ settled Task Session model.
 | Evidence-based focused-context vs history-fork tuning | Intelligence / Context | Compare real Task streaks and token cost before adding a context-fork mode |
 | Multiple-task project autonomy and budget scheduling | Product / Loopflow API | Run a Project through several Task Sessions with caps and no escaped work |
 
+This table is a design routing map, not a repository roadmap mirror. After the
+product PM change lands, create/update these Projects and Tasks through `lf pm`
+so Linear authors them and the SQLite snapshot refreshes. Do not recreate
+`wave/*/projects/*.md`.
+
 Do not file an offline Linear identity task now. If Linear availability becomes
 a measured source of blocked work, file it under Infrastructure / Developer
 Efficiency with the outage evidence.
@@ -725,8 +917,11 @@ Efficiency with the outage evidence.
    messages to the Wave remain in the Wave thread; every Wave→Task or direct
    human→Task command is mirrored there as a linked event. The Wave remembers
    the negotiation without ingesting raw child tool chatter.
-2. **Linear in the hot path** — fail closed for MVP. This is deliberate and
-   avoids an offline identity/sync system without evidence.
+2. **Linear in the hot path** — identity is fail-closed, network access is not.
+   Creation uses the PM mutation API and must reach Linear; an existing task
+   may launch from the bounded-freshness SQLite snapshot. Missing/unknown or
+   unusably stale PM state stops before placement. No offline authoring or
+   backfill system is added.
 3. **`--after` conflicts** — deferred. When built, the original Task Session
    and worktree remain waiting and resume to perform/resolve the rebase; no
    anonymous submission process handles conflicts.
@@ -746,6 +941,12 @@ Efficiency with the outage evidence.
   base commit remains recorded even if normal review work later rebases it.
 - One live writer owns one worktree.
 - Every file-writing task has a Linear issue before its worktree exists.
+- Every planning read comes from the canonical-repo `PmShowResult`; a task
+  worktree never creates its own PM snapshot namespace.
+- Every planning mutation goes through `lf pm` semantics and refreshes the
+  affected snapshot; Task lifecycle code never writes planning state locally.
+- No repository Project mirror or `wave/*/projects/` compatibility reader is
+  introduced.
 - Every independent task produces zero or one PR, always targeting `main`.
 - Projects own no worktree or branch.
 - No task-specific server is created.
@@ -766,11 +967,24 @@ Efficiency with the outage evidence.
   or task commands in that workflow.
 - `lf task run INF-123 --json` reports the same issue/session/worktree visible
   in `lf task status INF-123 --json` and the Wave status.
-- Retrying `task start` after an ambiguous Linear response creates no duplicate
+- `INF-123` and the canonical Linear UUID resolve to the same `PmItem` and Task
+  Session; the identifier is carried by `PmShowResult`, not reconstructed from
+  branch names or task titles.
+- Retrying `task start` after an ambiguous Linear response or committed-create
+  snapshot failure reuses the PM mutation receipt/UUID and creates no duplicate
   issue.
+- A committed create followed by refresh failure reports the real issue UUID,
+  creates no worktree/provider process, and can continue after `pm sync`.
 - With Linear unavailable after credential refresh/retry, `task start` exits
   nonzero, the Wave stays steerable, and no branch, worktree, session, or
   provider process appears.
+- With Linear unavailable but an acceptable snapshot containing INF-123,
+  `task run INF-123` starts from that snapshot and records its age/fallback in
+  the launch receipt.
+- A missing snapshot, unknown task, or hard-stale refresh failure stops before
+  reservation and gives an actionable `lf pm sync --wave <wave>` instruction.
+- A successful `task start` observes the item in the mutation-refreshed
+  snapshot without a second network refresh.
 - An issue belonging to no known Project/Wave is refused before placement.
 - A second simultaneous `task run INF-123` receives the existing session or a
   clear already-running result; it never creates a second writer.
@@ -823,6 +1037,11 @@ Efficiency with the outage evidence.
   new task or worktree.
 - A merged PR transitions the session to `Merged`, emits one completion event,
   then permits worktree/branch cleanup.
+- Merge finalization calls the PM task-done mutation with the PR URL and the
+  refreshed `PmShowResult` shows the item complete.
+- If that PM mutation fails after merge, delivery remains `Merged`, cleanup is
+  safe, `pm_writeback` is visibly pending, and a later retry reconciles Linear
+  without recreating the Task Session.
 - Failed and blocked sessions are never cleaned automatically.
 - Abandonment requires a reason and refuses cleanup until commits are pushed
   or otherwise reachable.
@@ -882,8 +1101,9 @@ scripts/test.py --rust --python --swift
 
 Add focused end-to-end tests for create/run, concurrent reservation, live and
 queued steer, interrupt-and-message, crash/resume, submitted-review-resume,
-merge cleanup, Linear failure, Wave journal folding, JSON round trips, and
-stale-symbol deletion.
+merge cleanup, PM create-refresh-run composition, identifier/UUID resolution,
+fresh/soft-stale/hard-stale snapshot behavior, post-merge PM writeback retry,
+Wave journal folding, JSON round trips, and stale-symbol deletion.
 
 The known headless Loopflow UI runner hang remains “unproven,” not a regression
 signal. Perform the required simulated operational review before handoff:

@@ -566,7 +566,6 @@ struct ParseWaveFromJSONTests {
             "iteration": 0,
             "open_pr_count": 3,
             "commits": [],
-            "stack_count": 0,
             "active_run": [
                 "id": "run-1",
                 "wave_id": "wave-1",
@@ -605,7 +604,6 @@ struct ParseWaveFromJSONTests {
             "iteration": 0,
             "open_pr_count": 0,
             "commits": [],
-            "stack_count": 0
         ]
 
         let wave = WaveService.parseWaveFromJSON(json)

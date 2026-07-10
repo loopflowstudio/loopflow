@@ -903,8 +903,6 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
         WtCommand::Create { name, plan } => wt_create(name, *plan),
         WtCommand::Switch { name } => wt_switch(name),
-        WtCommand::Up => wt_up(),
-        WtCommand::Down { name } => wt_down(name.as_deref()),
         WtCommand::List { format, .. } => wt_list(format.as_deref()),
         WtCommand::Remove { name, force } => wt_remove(name, *force),
         WtCommand::Prune {
@@ -1078,89 +1076,6 @@ fn cd_directive(path: &Path) -> Result<()> {
         println!("cd {}", path.display());
     }
     Ok(())
-}
-
-/// The parent branch of `branch`: its chain minus the last segment, or the
-/// default branch for a bare wave (or a branch that isn't a wave at all).
-fn parent_branch_of(branch: &str, user: &str, default_branch: &str) -> String {
-    WaveId::parse(branch, user)
-        .and_then(|id| id.parent())
-        .unwrap_or_else(|| default_branch.to_string())
-}
-
-/// `lf wt up` — skill to the parent worktree in the stack (toward main).
-fn wt_up() -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
-    let default_branch = get_default_branch(&main_repo)?;
-    let current = current_branch(&repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
-    if current == default_branch {
-        return Err(anyhow!("already at the root ({default_branch})"));
-    }
-    let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
-    let parent = parent_branch_of(&current, &user, &default_branch);
-
-    let target = list_worktrees(&main_repo)?
-        .into_iter()
-        .find(|wt| wt.branch.as_deref() == Some(parent.as_str()))
-        .map(|wt| wt.path)
-        .ok_or_else(|| anyhow!("no worktree for parent branch '{parent}'"))?;
-    cd_directive(&target)
-}
-
-/// `lf wt down [name]` — skill to a child worktree (away from main). When
-/// there is more than one child, `name` picks it by leaf.
-fn wt_down(name: Option<&str>) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
-    let default_branch = get_default_branch(&main_repo)?;
-    let current = current_branch(&repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
-    let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
-
-    let mut children: Vec<_> = list_worktrees(&main_repo)?
-        .into_iter()
-        .filter(|wt| {
-            let branch = match wt.branch.as_deref() {
-                Some(branch) if branch != current => branch,
-                _ => return false,
-            };
-            parent_branch_of(branch, &user, &default_branch) == current
-        })
-        .collect();
-
-    if let Some(name) = name {
-        children.retain(|wt| {
-            wt.branch
-                .as_deref()
-                .and_then(|branch| WaveId::parse(branch, &user))
-                .map(|id| id.leaf() == name)
-                .unwrap_or(false)
-        });
-    }
-
-    match children.len() {
-        0 => Err(anyhow!(
-            "no child worktree{}",
-            name.map(|n| format!(" named '{n}'")).unwrap_or_default()
-        )),
-        1 => cd_directive(&children.remove(0).path),
-        _ => {
-            let leaves: Vec<String> = children
-                .iter()
-                .filter_map(|wt| {
-                    wt.branch
-                        .as_deref()
-                        .and_then(|branch| WaveId::parse(branch, &user))
-                        .map(|id| id.leaf().to_string())
-                })
-                .collect();
-            Err(anyhow!(
-                "{} children — pick one: lf wt down <{}>",
-                leaves.len(),
-                leaves.join("|")
-            ))
-        }
-    }
 }
 
 fn wt_list(format: Option<&str>) -> Result<()> {

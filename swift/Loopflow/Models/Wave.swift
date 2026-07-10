@@ -218,7 +218,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var commits: [CommitEntry]
     public var diffStat: String?
     public var openPRCount: Int
-    public var stackCount: Int
     public var activeRun: Run?
     public var pr: PullRequest?
     public var flowSteps: [String]
@@ -246,7 +245,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
         diffStat: String? = nil,
         flowSteps: [String] = [],
         openPRCount: Int = 0,
-        stackCount: Int = 0,
         activeRun: Run? = nil,
         pr: PullRequest? = nil,
         createdAt: Date? = nil,
@@ -270,7 +268,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.commits = commits
         self.diffStat = diffStat
         self.openPRCount = openPRCount
-        self.stackCount = stackCount
         self.activeRun = activeRun
         self.pr = pr
         self.flowSteps = flowSteps

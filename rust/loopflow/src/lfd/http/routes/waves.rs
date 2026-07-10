@@ -295,8 +295,6 @@ pub async fn delete_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    crate::lfd::queue::remove_reconcile_lock(&wave_id).await;
-
     // Clean up the worktree on disk.
     let repo = wave.repo().to_string();
     let wave_name = wave.name().clone();

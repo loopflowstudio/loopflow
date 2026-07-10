@@ -3,12 +3,11 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
-use crate::lfd::attention::{queue_block_attention_item, queue_block_from_attention};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
-    LivePullRequestState, QueueBlock, Repo, RepoEdge, RepoId, Run, RunStatus, Session,
-    SessionStatus, SessionUse, Summary, Wave, WaveStatus,
+    LivePullRequestState, Repo, RepoEdge, RepoId, Run, RunStatus, Session, SessionStatus,
+    SessionUse, Summary, Wave, WaveStatus,
 };
 use crate::lfdb::catalog::{list_runs_query, list_waves_query, sql, Query, SqlDialect};
 use crate::lfdb::rows::{
@@ -1191,34 +1190,6 @@ impl SqliteStore {
             rusqlite::params![attention_id],
         )?;
         Ok(deleted as u32)
-    }
-
-    pub fn list_queue_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<QueueBlock>> {
-        let blocks = self
-            .list_attention_items(
-                Some(AttentionStatus::Surfaced),
-                Some(AttentionKind::Algedonic),
-            )?
-            .into_iter()
-            .filter(|item| &item.wave_id == wave_id)
-            .filter_map(|item| queue_block_from_attention(&item).ok().flatten())
-            .collect();
-        Ok(blocks)
-    }
-
-    pub fn upsert_queue_block(&self, block: &QueueBlock) -> StoreResult<()> {
-        self.upsert_attention_item(&queue_block_attention_item(block))
-    }
-
-    pub fn delete_queue_block(&self, _wave_id: &LfdId, run_id: &LfdId) -> StoreResult<u32> {
-        let id = crate::lfd::attention::attention_id_for_queue_block(run_id);
-        let Some(mut item) = self.get_attention_item(&id)? else {
-            return Ok(0);
-        };
-        item.status = AttentionStatus::Resolved;
-        item.resolved_at = Some(time::OffsetDateTime::now_utc());
-        self.upsert_attention_item(&item)?;
-        Ok(1)
     }
 
     pub fn fail_orphaned_runs(&self) -> StoreResult<u32> {

@@ -46,7 +46,9 @@ the message honestly.
 ### Key abstractions
 
 - Wave: durable conversation, memory, project selection, and steerable parent.
-- Linear project/task: formal roadmap identity before execution.
+- Linear project/task: formal roadmap identity before execution; the incoming
+  product PM API projects it into one atomic per-Wave SQLite `PmShowResult`
+  snapshot used by CLI, agents, and Swift.
 - Task session: missing first-class concept joining a Linear issue, immutable
   worktree, provider thread, controls, status, transcript, and PR lifecycle.
 - Harness: already the correct provider-neutral control boundary.
@@ -145,8 +147,10 @@ second generic loop implementation.
 
 - Task conversation is separate, but every Wave→Task instruction and terminal
   result is mirrored into the Wave journal as a linked event.
-- Linear identity is required before worktree creation; MVP fails closed during
-  a Linear outage instead of adding an offline reconciliation state machine.
+- Linear identity is required before worktree creation. New-record mutation
+  fails closed during a Linear outage, while an already-identified task may
+  launch from an acceptable cached PM snapshot; no offline authoring or
+  reconciliation state machine is added.
 - Task worktrees and sessions remain resumable through review and dependency
   waits; completion means merged or explicitly abandoned, not PR opened.
 - Dependent delivery and multi-contributor integration are deferred until the

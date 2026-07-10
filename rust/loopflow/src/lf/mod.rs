@@ -899,13 +899,6 @@ pub enum WtCommand {
         /// Worktree name or full branch name to switch to
         name: String,
     },
-    /// Switch to the parent worktree in the stack (toward main)
-    Up,
-    /// Switch to a child worktree in the stack (away from main)
-    Down {
-        /// Which child to descend into, when there is more than one
-        name: Option<String>,
-    },
     /// List worktrees
     List {
         #[arg(long)]
@@ -1031,6 +1024,8 @@ mod tests {
         assert!(matches!(loop_cli.command, Some(Commands::External(_))));
         assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--stack"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "up"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "down"]).is_err());
     }
 
     #[test]

@@ -19,13 +19,11 @@ use crate::lfd::http::dto::{
     format_datetime, run_dto, CommitEntryDto, ErrorResponse, PullRequestDto, WaveDto,
 };
 use crate::lfd::id::LfdId;
-use crate::lfd::live_pr::{build_live_pr_snapshot, LivePrSnapshot};
-use crate::lfd::queue::{project_queue_views, QueueRunView};
+use crate::lfd::live_pr::build_live_pr_snapshot;
 use crate::lfd::types::{Run, Wave, DEFAULT_WAVE_FLOW};
 use crate::lfdb::{SharedStore, StoreError};
 use axum::http::StatusCode;
 use axum::Json;
-use std::collections::HashMap;
 
 pub type ApiError = (StatusCode, Json<ErrorResponse>);
 
@@ -72,12 +70,7 @@ pub async fn build_wave_dto(
     wave: Wave,
     include_active_run: bool,
 ) -> Result<WaveDto, StoreError> {
-    let stack_runs = store.list_stack_runs(wave.id()).await?;
-    let blocks = store.list_queue_blocks(wave.id()).await?;
-    let blocks_by_run = blocks
-        .into_iter()
-        .map(|block| (block.run_id.clone(), block))
-        .collect::<HashMap<_, _>>();
+    let stored_runs = store.list_runs(Some(wave.id()), None).await?;
 
     let flow_name = DEFAULT_WAVE_FLOW.to_string();
     let flow_repo = wave.repo().to_string();
@@ -89,19 +82,13 @@ pub async fn build_wave_dto(
 
     // Execution surface for the wave's single repo: infer git state + live-PR
     // snapshot for the runs that touched it.
-    let repo_runs: Vec<Run> = stack_runs
+    let repo_runs: Vec<Run> = stored_runs
         .iter()
         .filter(|run| run.repo == wave.repo)
         .cloned()
         .collect();
     let snapshot = build_live_pr_snapshot(store, github_config, &repo_runs).await?;
     let has_stale_pr_state = snapshot.has_stale_pr_state();
-    let queue_views = project_queue_views(
-        &repo_runs,
-        |run| snapshot.state_for_run(run).cloned(),
-        &blocks_by_run,
-    );
-
     let repo = wave.repo.clone();
     let name = wave.name().clone();
     let git_state = tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
@@ -132,15 +119,12 @@ pub async fn build_wave_dto(
         latest_for_repo.map(|run| {
             let live_pr_state = snapshot.state_for_run(run);
             let pr_state_stale = snapshot.stale_for_run(run);
-            let queue_view = queue_views.get(&run.id);
-            run_dto(run.clone(), live_pr_state, pr_state_stale, queue_view)
+            run_dto(run.clone(), live_pr_state, pr_state_stale)
         })
     } else {
         None
     };
     let open_pr_count = snapshot.open_pr_count();
-    let stack_count = repo_runs.len() as u32;
-
     let wave_config = crate::engine::wave_config::read_wave_config(
         std::path::Path::new(wave.repo()),
         wave.name(),
@@ -168,29 +152,10 @@ pub async fn build_wave_dto(
         commits,
         diff_stat,
         open_pr_count,
-        stack_count,
         active_run,
         pr,
         parent_wave_id: wave.parent_wave_id().map(|id| id.to_string()),
     })
-}
-
-pub(crate) async fn build_wave_queue_views(
-    store: &SharedStore,
-    wave_id: &LfdId,
-    snapshot: &LivePrSnapshot,
-) -> Result<HashMap<LfdId, QueueRunView>, StoreError> {
-    let stack_runs = store.list_stack_runs(wave_id).await?;
-    let blocks = store.list_queue_blocks(wave_id).await?;
-    let blocks_by_run = blocks
-        .into_iter()
-        .map(|block| (block.run_id.clone(), block))
-        .collect::<HashMap<_, _>>();
-    Ok(project_queue_views(
-        &stack_runs,
-        |run| snapshot.state_for_run(run).cloned(),
-        &blocks_by_run,
-    ))
 }
 
 /// Cursor-based pagination over a list of items with an `id: LfdId` field.
@@ -422,6 +387,7 @@ fn git_diff_stat(worktree: &std::path::Path, diff_ref: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::lfd::id::LfdId;
+    use crate::lfd::live_pr::LivePrSnapshot;
     use crate::lfd::types::{
         LivePrState, LivePullRequestState, PullRequest, Run, RunStackStatus, RunStatus, Wave,
         WaveStatus,
@@ -646,7 +612,6 @@ mod tests {
             dto.open_pr_count, 0,
             "closed live PRs should not count as open even if snapshot says open"
         );
-        assert_eq!(dto.stack_count, 1);
         assert!(dto.has_stale_pr_state);
     }
 

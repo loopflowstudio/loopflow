@@ -3,7 +3,7 @@ use axum::Json;
 use serde::Deserialize;
 
 use crate::lfd::http::dto::{run_dto, ListResponse, RunDto};
-use crate::lfd::http::routes::{build_wave_queue_views, resolve_wave_id};
+use crate::lfd::http::routes::resolve_wave_id;
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{map_store_error, ApiResult};
 use crate::lfd::id::LfdId;
@@ -53,28 +53,12 @@ async fn list_runs(
     };
     let wave_id = path_wave_id.or(query_wave_id);
     let order = parse_run_order(query.order.as_deref());
-    let stack_runs = if let Some(wave_id) = wave_id.as_ref() {
-        Some(
-            state
-                .store
-                .list_stack_runs(wave_id)
-                .await
-                .map_err(map_store_error)?,
-        )
-    } else {
-        None
-    };
-
     let runs = if let Some(wave_id) = wave_id.as_ref() {
-        if order == RunOrder::OldestFirst {
-            stack_runs.clone().unwrap_or_default()
-        } else {
-            state
-                .store
-                .list_runs(Some(wave_id), None)
-                .await
-                .map_err(map_store_error)?
-        }
+        state
+            .store
+            .list_runs(Some(wave_id), None)
+            .await
+            .map_err(map_store_error)?
     } else {
         state
             .store
@@ -84,9 +68,19 @@ async fn list_runs(
     };
 
     let mut filtered = runs;
-    if wave_id.is_none() && order == RunOrder::OldestFirst {
+    if order == RunOrder::OldestFirst {
         filtered.sort_by_key(|left| left.started_at);
     }
+
+    let live_snapshot = if wave_id.is_some() {
+        Some(
+            build_live_pr_snapshot(&state.store, &state.github, &filtered)
+                .await
+                .map_err(map_store_error)?,
+        )
+    } else {
+        None
+    };
 
     if let Some(repo) = query.repo.as_deref() {
         filtered.retain(|run| run.repo == repo);
@@ -100,35 +94,12 @@ async fn list_runs(
         |r| &r.id,
     );
 
-    // Queue roles are global to the wave stack, so projections must use the full
-    // stack regardless of pagination/order of the response slice.
-    let live_snapshot = if let Some(stack_runs) = stack_runs.as_ref() {
-        Some(
-            build_live_pr_snapshot(&state.store, &state.github, stack_runs)
-                .await
-                .map_err(map_store_error)?,
-        )
-    } else {
-        None
-    };
-    let queue_views =
-        if let (Some(wave_id), Some(snapshot)) = (wave_id.as_ref(), live_snapshot.as_ref()) {
-            Some(
-                build_wave_queue_views(&state.store, wave_id, snapshot)
-                    .await
-                    .map_err(map_store_error)?,
-            )
-        } else {
-            None
-        };
-
     let mut data = Vec::with_capacity(runs.len());
     for run in runs {
         if let Some(snapshot) = live_snapshot.as_ref() {
             let live_pr_state = snapshot.state_for_run(&run);
             let pr_state_stale = snapshot.stale_for_run(&run);
-            let queue_view = queue_views.as_ref().and_then(|views| views.get(&run.id));
-            data.push(run_dto(run, live_pr_state, pr_state_stale, queue_view));
+            data.push(run_dto(run, live_pr_state, pr_state_stale));
             continue;
         }
 
@@ -143,7 +114,7 @@ async fn list_runs(
             pr_state_stale = live_pr_state.is_none();
         }
 
-        data.push(run_dto(run, live_pr_state.as_ref(), pr_state_stale, None));
+        data.push(run_dto(run, live_pr_state.as_ref(), pr_state_stale));
     }
 
     Ok(Json(ListResponse::new(data, has_more)))
@@ -152,9 +123,7 @@ async fn list_runs(
 fn parse_run_order(value: Option<&str>) -> RunOrder {
     match value {
         Some(value)
-            if value.eq_ignore_ascii_case("oldest")
-                || value.eq_ignore_ascii_case("asc")
-                || value.eq_ignore_ascii_case("stack") =>
+            if value.eq_ignore_ascii_case("oldest") || value.eq_ignore_ascii_case("asc") =>
         {
             RunOrder::OldestFirst
         }

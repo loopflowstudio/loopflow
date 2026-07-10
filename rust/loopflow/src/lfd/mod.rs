@@ -10,7 +10,6 @@ pub mod live_pr;
 pub mod obs;
 pub mod pm;
 pub mod providers;
-pub mod queue;
 pub(crate) mod redaction;
 pub mod security;
 pub mod service;

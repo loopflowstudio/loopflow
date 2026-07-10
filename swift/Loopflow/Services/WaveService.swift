@@ -333,7 +333,6 @@ public extension WaveService {
             diffStat: json["diff_stat"] as? String,
             flowSteps: json["flow_steps"] as? [String] ?? [],
             openPRCount: normalizeInt(json["open_pr_count"]),
-            stackCount: normalizeInt(json["stack_count"]),
             activeRun: (json["active_run"] as? [String: Any]).flatMap(parseRunFromJSON),
             pr: parsePullRequest(json["pr"]),
             createdAt: parseDate(json["created_at"]),

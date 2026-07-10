@@ -137,6 +137,10 @@ pub fn run_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<()>
         &trace_id,
         &Placement::Fresh,
     )?;
+    let _channel_env = EnvGuard::set(
+        crate::lf::session::CHANNEL_ENV,
+        crate::engine::wave_context::placed_channel_name(&wave_name, &run.run.id),
+    );
     let worktree = run.worktree();
     eprintln!("loop {} running in {}", options.flow, worktree.display());
     let result = drive(

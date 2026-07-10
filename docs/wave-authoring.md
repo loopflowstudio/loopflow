@@ -5,7 +5,9 @@ title: Wave Authoring
 
 # Wave Authoring
 
-A wave is a named agent with a goal. You author its intent, memory, and project bets; it works tasks, dispatches workers, watches their PRs, and loops.
+A wave is a named agent with a goal. You author its intent, memory, and project
+bets; it works the next blocker inline, spins off independent loops when they
+earn a separate lifecycle, and remembers what ships.
 
 ---
 
@@ -82,8 +84,8 @@ workers: 2
 ## Objective
 
 Harden the daemon. Each loop: read Linear tasks and memory, pick the next useful
-move, dispatch a worker to build it, watch the PR, and fold what shipped into
-memory.
+move, resolve its local blocker, spin off independent work only when parallelism
+earns it, and fold what shipped into memory.
 
 ## Measures
 
@@ -93,8 +95,8 @@ memory.
 
 ## Process
 
-Use a direct worker for mechanical changes; write a scratch design first when the
-blast radius crosses storage, auth, or public APIs.
+Make mechanical changes directly; write a scratch design first when the blast
+radius crosses storage, auth, or public APIs.
 ```
 
 Run `lf serve <wave>` to start that wave directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
@@ -288,7 +290,10 @@ Migration shim     → Legacy API compatibility layer
 Cleanup            → Remove old billing code
 ```
 
-The wave agent reads tasks with `lf pm show`, picks the highest-priority task, dispatches a worker per task, and loops — folding each shipped PR into memory and closing the task with `lf pm task done` — until no open tasks remain.
+The wave agent reads tasks with `lf pm show`, picks the highest-priority move,
+and resolves its local blocker inline. It creates a child loop only when an
+independent task earns its own lifecycle or useful parallelism, then folds each
+shipped PR into memory and closes the task with `lf pm task done`.
 
 ---
 

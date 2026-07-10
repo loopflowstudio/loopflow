@@ -22,8 +22,8 @@ workers: 2
 ## Objective
 
 Keep the design system coherent. Each loop: read the Linear tasks, pick the next
-useful design move, dispatch a worker to build it, and fold what changed into
-memory.
+useful design move, execute its local blocker, spin off independent work only
+when parallelism earns it, and fold what changed into memory.
 
 ## Measures
 

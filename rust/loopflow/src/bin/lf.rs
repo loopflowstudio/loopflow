@@ -603,6 +603,13 @@ fn run_placed_target(
     let _wave_env = EnvGuard::set("LFD_WAVE_ID", run.wave_id.to_string());
     let _run_env = EnvGuard::set("LFD_RUN_ID", run.id.to_string());
     let _lf_run_env = EnvGuard::set("LF_RUN_ID", run.id.to_string());
+    // Placement starts a trace and a work line: neither identity may leak from
+    // the caller even though the target executes synchronously in this process.
+    let _channel_env = EnvGuard::set(
+        loopflow::lf::session::CHANNEL_ENV,
+        loopflow::engine::wave_context::placed_channel_name(&wave_name, &run.id),
+    );
+    let _process_env = EnvGuard::remove(loopflow::journal::LF_PROCESS_ID_ENV);
 
     let (inner_cli, inner_command) = inner_placement_invocation(command)?;
     let result = run_target_in_repo(
@@ -653,6 +660,12 @@ impl EnvGuard {
     fn set(key: &'static str, value: impl Into<String>) -> Self {
         let previous = std::env::var_os(key);
         std::env::set_var(key, value.into());
+        Self { key, previous }
+    }
+
+    fn remove(key: &'static str) -> Self {
+        let previous = std::env::var_os(key);
+        std::env::remove_var(key);
         Self { key, previous }
     }
 }

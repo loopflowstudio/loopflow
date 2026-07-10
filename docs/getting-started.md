@@ -148,7 +148,9 @@ lf pr land    # submit to merge queue
 
 Ready to automate? Waves run your workflows continuously.
 
-`lf` skills are manual building blocks. A wave is a named agent that runs them for you — reading Linear tasks, dispatching workers to build each item, watching their PRs, and looping.
+`lf` skills are manual building blocks. A wave is a named agent that runs them
+for you — reading Linear tasks, resolving the next blocker inline, spinning off
+independent work when parallelism earns it, and looping.
 
 Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter sets machine config such as `workers:`, `crons:`, and `pm:`), then run the agent:
 

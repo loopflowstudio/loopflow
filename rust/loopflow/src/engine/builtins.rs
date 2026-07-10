@@ -235,6 +235,39 @@ mod tests {
     }
 
     #[test]
+    fn execution_context_grants_delegation_by_tier() {
+        assert!(LOOPFLOW_DOC.contains("Execute Here First"));
+        assert!(!LOOPFLOW_DOC.contains("lf pm show"));
+        assert!(!LOOPFLOW_DOC.contains("--detach"));
+
+        let wave = get_builtin_skill("wave_pursue").expect("wave pursue");
+        assert!(wave.contains("loop <project-or-task-flow>"));
+        assert!(wave.contains("--detach"));
+        assert!(wave.contains("Execute the next move inline by default"));
+
+        let project = get_builtin_skill("project_pursue").expect("project pursue");
+        assert!(project.contains("loop task"));
+        assert!(!project.contains("loop project"));
+        assert!(!project.contains("loop wave"));
+
+        let task = get_builtin_skill("task_pursue").expect("task pursue");
+        assert!(task.contains("Never invoke `lf loop`"));
+        assert!(task.contains("lf pr land"));
+        assert!(task.contains("lf pm task done"));
+        assert!(task.contains("lf pm task create"));
+    }
+
+    #[test]
+    fn generic_execution_skills_never_infer_a_wave_or_require_pm() {
+        for name in ["implement", "gate", "qa", "research", "rebase"] {
+            let skill = get_builtin_skill(name).expect("generic skill");
+            assert!(skill.contains("seed names the exact wave"), "{name}");
+            assert!(!skill.contains("matches this work"), "{name}");
+            assert!(!skill.contains("lf pm show"), "{name}");
+        }
+    }
+
+    #[test]
     fn vsm_system_goals_are_registered() {
         let key = resolve_builtin_goal("s3").expect("s3 goal");
         let goal = get_builtin_goal(key).expect("registered goal");

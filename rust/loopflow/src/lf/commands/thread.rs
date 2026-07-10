@@ -1,4 +1,4 @@
-//! The served mind's thread, rendered live — the read half of `lf wavechat`.
+//! The served mind's thread, rendered live — the read half of `lf chat --follow`.
 //!
 //! The thread is the product surface: journaled, durable, replayed. It stays
 //! SSE on the listener (`GET /events`), because a thread has a past and a
@@ -37,8 +37,8 @@ use crate::wave::subscription::{stream_events, Frame};
 const BACKOFF_FLOOR: Duration = Duration::from_secs(1);
 const BACKOFF_CEIL: Duration = Duration::from_secs(30);
 
-/// Follow the thread until the process ends. `lf wavechat` runs this as a task
-/// so one terminal both monitors and steers.
+/// Follow the thread until the process ends. `lf chat --follow` runs this as a
+/// task so one terminal both monitors and steers.
 pub(crate) async fn follow(wave: Option<&str>, json: bool) -> Result<()> {
     let target = WaveTargetArgs {
         wave: wave.map(str::to_string),
@@ -405,6 +405,7 @@ mod tests {
             server::SubagentDoor::new(),
             None,
             None,
+            server::ShutdownDoor::new(),
         );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();

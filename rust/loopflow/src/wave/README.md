@@ -24,7 +24,7 @@
   Continuity is the journaled thread, playhead, GOAL.md, and memory. It
   bootstraps and enters the wave's `<repo>.<wave>` sibling worktree — passes
   never run in the main checkout. Its input is its own wave's
-  `/events?inbox=true` subscription — the SSE thread stream `lf wavechat`
+  `/events?inbox=true` subscription — the SSE thread stream `lf chat --follow`
   follows, plus the inbox scope, and nothing to do with `lf sub`, which polls
   the bus table and never opens a socket. Its
   output is ordered turn deltas through the token-gated resident door. It
@@ -41,6 +41,11 @@ child, a promoted subwave — then booted the wrong half by accident. Serving is
 now `lf serve`, batch looping is `lf loop`, and the body is `lf __resident`.
 Environment configures a process; it no longer decides what the process is.
 
+`lf stop <name>` posts to the listener's lifecycle door. The listener stands
+down its supervisor, terminates the resident, deregisters its session, and
+removes this boot's discovery files. Detached worker loops are separate tmux
+sessions and keep running.
+
 - **One Loop, one thread.** Chat and progress share the same context. A
   message while idle reaches the next body. A steer while a compatible
   harness is active is injected with `send_input`; unsupported harnesses
@@ -55,10 +60,11 @@ Environment configures a process; it no longer decides what the process is.
   the loop dispatches with judgment. Mid-pass due dates fire at the
   boundary; occurrences older than 24h are missed, not replayed. The
   daemon's cron poller and `wave_crons` table died in the collapse.
-- **The loop inhabits or delegates.** Each pass's seed is the rendered
-  `GOAL.md` plus the coordinating-session discipline. It inhabits one
-  context-sensitive hand with `lf loop <flow> "task" --wave <wave>` and
-  delegates self-sufficient work with `--detach`; both use placed worktrees.
+- **The loop executes inline first.** Each pass's seed is the rendered
+  `GOAL.md` plus the coordinating-session discipline. A sole blocker stays in
+  the wave process. A strict subset that needs a repeated lifecycle may run as
+  `lf --wave <wave> loop <flow> "task"`; add `--detach` only when the wave has
+  another useful move while that child runs. Both loop forms use placed worktrees.
   The LISTENER polls the shared store
   and journals `RunObserved`/`RunCompleted` observations — every ~10s and
   once per `GET /resident/context` (the resident calls it before each pass).
@@ -183,8 +189,8 @@ context anywhere, `lf chat` and `lf memory` writes exit 0 with one stderr note.
 A resolvable wave whose server is down errors instead (mail to a dead wave
 bounces, it doesn't vanish).
 
-`lf wavechat` reads that stream and writes into it from one pane. The resident
-is the subscription's second customer — same machinery, plus the inbox scope.
+`lf chat --follow` reads that stream and writes into it from one pane. The
+resident is the subscription's second customer — same machinery, plus the inbox scope.
 Placed `lf` runs carry `LFD_CHANNEL` in the worker's env and knock once on
 `POST /channels` so the wave's thread shows "work line <name> opened".
 
@@ -253,6 +259,7 @@ curl -X POST 127.0.0.1:52306/messages -H 'content-type: application/json' \
      -d '{"op":"message","text":"status?"}'
 curl 127.0.0.1:52306/conversation
 curl -N 127.0.0.1:52306/events
+lf stop demo
 ```
 
 The full guided walk — chat, steer, interrupt, worker dispatch, attributed

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -9,17 +9,92 @@ use tracing_subscriber::EnvFilter;
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
 use loopflow::lf::{Cli, Commands, ProjectCommand};
 
+#[derive(Clone, Default)]
+struct FlagTables {
+    /// Flags that take a value (the next arg belongs to them).
+    value: HashSet<String>,
+    /// Boolean flags (no value).
+    boolean: HashSet<String>,
+}
+
+impl FlagTables {
+    fn insert(&mut self, arg: &clap::Arg) {
+        let flags = if arg.get_action().takes_values() {
+            &mut self.value
+        } else {
+            &mut self.boolean
+        };
+        if let Some(short) = arg.get_short() {
+            flags.insert(format!("-{short}"));
+        }
+        for alias in arg.get_all_short_aliases().into_iter().flatten() {
+            flags.insert(format!("-{alias}"));
+        }
+        if let Some(long) = arg.get_long() {
+            flags.insert(format!("--{long}"));
+        }
+        for alias in arg.get_all_aliases().into_iter().flatten() {
+            flags.insert(format!("--{alias}"));
+        }
+    }
+
+    fn contains(&self, arg: &str) -> bool {
+        self.boolean.contains(flag_name(arg)) || self.takes_value(arg)
+    }
+
+    fn takes_value(&self, arg: &str) -> bool {
+        self.value.contains(flag_name(arg))
+    }
+
+    fn extend(&mut self, other: &Self) {
+        self.value.extend(other.value.iter().cloned());
+        self.boolean.extend(other.boolean.iter().cloned());
+    }
+}
+
+#[derive(Clone, Default)]
+struct CommandArgTables {
+    /// Flags owned directly by this command.
+    direct: FlagTables,
+    /// Flags owned here or by any descendant, used only to find the command path.
+    recursive: FlagTables,
+    /// Direct subcommands, indexed by canonical name and aliases.
+    subcommands: HashMap<String, CommandArgTables>,
+}
+
 /// What `reorder_args` needs to know about the CLI, derived from the clap
 /// definition so it can never drift from it (the old hand-maintained lists
 /// were missing the uppercase short aliases `-D`/`-C`/`-M`/`-I`/`-B`/`-W`,
 /// misrouting e.g. `lf debug -M codex`).
 struct ArgTables {
-    /// Top-level subcommand names and aliases — never reordered.
-    commands: HashSet<String>,
-    /// Top-level flags that take a value (the next arg belongs to them).
-    value_flags: HashSet<String>,
-    /// Top-level boolean flags (no value).
-    bool_flags: HashSet<String>,
+    /// Top-level subcommands, indexed by canonical name and aliases.
+    commands: HashMap<String, CommandArgTables>,
+    /// Top-level flags accepted on either side of an unambiguous command.
+    top_level: FlagTables,
+}
+
+fn command_arg_tables(command: &clap::Command) -> CommandArgTables {
+    let mut direct = FlagTables::default();
+    for arg in command.get_arguments() {
+        direct.insert(arg);
+    }
+
+    let mut recursive = direct.clone();
+    let mut subcommands = HashMap::new();
+    for subcommand in command.get_subcommands() {
+        let child = command_arg_tables(subcommand);
+        recursive.extend(&child.recursive);
+        let names = std::iter::once(subcommand.get_name()).chain(subcommand.get_all_aliases());
+        for name in names {
+            subcommands.insert(name.to_string(), child.clone());
+        }
+    }
+
+    CommandArgTables {
+        direct,
+        recursive,
+        subcommands,
+    }
 }
 
 fn arg_tables() -> &'static ArgTables {
@@ -29,52 +104,194 @@ fn arg_tables() -> &'static ArgTables {
         // Materialize the built-ins (help subcommand, -h/--help, -V/--version).
         cli.build();
 
-        let mut commands = HashSet::new();
+        let mut commands = HashMap::new();
         for sub in cli.get_subcommands() {
-            commands.insert(sub.get_name().to_string());
-            commands.extend(sub.get_all_aliases().map(String::from));
+            let table = command_arg_tables(sub);
+            let names = std::iter::once(sub.get_name()).chain(sub.get_all_aliases());
+            for name in names {
+                commands.insert(name.to_string(), table.clone());
+            }
         }
 
-        let mut value_flags = HashSet::new();
-        let mut bool_flags = HashSet::new();
+        let mut top_level = FlagTables::default();
         for arg in cli.get_arguments() {
-            let flags = if arg.get_action().takes_values() {
-                &mut value_flags
-            } else {
-                &mut bool_flags
-            };
-            if let Some(short) = arg.get_short() {
-                flags.insert(format!("-{short}"));
-            }
-            for alias in arg.get_all_short_aliases().into_iter().flatten() {
-                flags.insert(format!("-{alias}"));
-            }
-            if let Some(long) = arg.get_long() {
-                flags.insert(format!("--{long}"));
-            }
-            for alias in arg.get_all_aliases().into_iter().flatten() {
-                flags.insert(format!("--{alias}"));
-            }
+            top_level.insert(arg);
         }
 
         ArgTables {
             commands,
-            value_flags,
-            bool_flags,
+            top_level,
         }
     })
 }
 
+fn flag_name(arg: &str) -> &str {
+    arg.split_once('=').map_or(arg, |(name, _)| name)
+}
+
+fn has_inline_value(arg: &str) -> bool {
+    arg.starts_with('-') && arg.contains('=')
+}
+
 fn is_value_flag(arg: &str) -> bool {
-    arg_tables().value_flags.contains(arg)
+    arg_tables().top_level.takes_value(arg)
 }
 
 fn is_known_flag(arg: &str) -> bool {
-    arg_tables().bool_flags.contains(arg) || is_value_flag(arg)
+    arg_tables().top_level.contains(arg)
 }
 
-/// Reorder args so flags come before the skill/flow name.
-/// This allows `lf debug -c` to work like `lf -c debug`.
+fn push_flag(args: &[String], output: &mut Vec<String>, index: &mut usize, takes_value: bool) {
+    output.push(args[*index].clone());
+    if takes_value && !has_inline_value(&args[*index]) && *index + 1 < args.len() {
+        *index += 1;
+        output.push(args[*index].clone());
+    }
+}
+
+fn first_target_index(args: &[String]) -> Option<usize> {
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--" {
+            return None;
+        }
+        if !arg.starts_with('-') {
+            return Some(index);
+        }
+        if is_value_flag(arg) && !has_inline_value(arg) {
+            index += 1;
+        }
+        index += 1;
+    }
+    None
+}
+
+#[derive(Clone, Copy)]
+struct SelectedCommand<'a> {
+    index: usize,
+    args: &'a CommandArgTables,
+}
+
+fn selected_command_path<'a>(
+    rest: &[String],
+    command_index: usize,
+    command: &'a CommandArgTables,
+) -> Vec<SelectedCommand<'a>> {
+    let mut path = vec![SelectedCommand {
+        index: command_index,
+        args: command,
+    }];
+    let mut index = command_index + 1;
+
+    while index < rest.len() {
+        let arg = &rest[index];
+        if arg == "--" {
+            break;
+        }
+
+        let current = path.last().expect("command path is never empty").args;
+        if arg.starts_with('-') {
+            let recognized = current.recursive.contains(arg) || is_known_flag(arg);
+            let takes_value = current.recursive.takes_value(arg) || is_value_flag(arg);
+            if recognized && takes_value && !has_inline_value(arg) && index + 1 < rest.len() {
+                index += 1;
+            }
+            index += 1;
+            continue;
+        }
+
+        let Some(child) = current.subcommands.get(arg) else {
+            break;
+        };
+        path.push(SelectedCommand { index, args: child });
+        index += 1;
+    }
+
+    path
+}
+
+fn deepest_command_before(path: &[SelectedCommand<'_>], index: usize) -> usize {
+    path.iter()
+        .rposition(|command| command.index < index)
+        .expect("the top-level command precedes its arguments")
+}
+
+fn local_flag_owner(path: &[SelectedCommand<'_>], arg: &str, current: usize) -> Option<usize> {
+    if path[current].args.direct.contains(arg) {
+        return Some(current);
+    }
+    path.iter()
+        .rposition(|command| command.args.direct.contains(arg))
+}
+
+fn reorder_command_args(
+    program: String,
+    rest: &[String],
+    command_index: usize,
+    command: &CommandArgTables,
+) -> Vec<String> {
+    let path = selected_command_path(rest, command_index, command);
+    let mut moved_globals = Vec::new();
+    let mut moved_locals: HashMap<usize, Vec<String>> = HashMap::new();
+    let mut retained = vec![true; rest.len()];
+    let mut index = command_index + 1;
+
+    while index < rest.len() {
+        let arg = &rest[index];
+        if arg == "--" {
+            break;
+        }
+
+        let current = deepest_command_before(&path, index);
+        let local_owner = local_flag_owner(&path, arg, current);
+        let destination = if let Some(owner) = local_owner {
+            (owner != current).then_some(Some(owner))
+        } else if is_known_flag(arg) {
+            Some(None)
+        } else {
+            None
+        };
+
+        let Some(destination) = destination else {
+            index += 1;
+            continue;
+        };
+
+        let takes_value = destination.map_or_else(
+            || is_value_flag(arg),
+            |owner| path[owner].args.direct.takes_value(arg),
+        );
+        let mut moved = Vec::new();
+        push_flag(rest, &mut moved, &mut index, takes_value);
+        let moved_start = index + 1 - moved.len();
+        retained[moved_start..=index].fill(false);
+        if let Some(owner) = destination {
+            moved_locals.entry(owner).or_default().extend(moved);
+        } else {
+            moved_globals.extend(moved);
+        }
+        index += 1;
+    }
+
+    let mut result = vec![program];
+    result.extend_from_slice(&rest[..command_index]);
+    result.extend(moved_globals);
+    for (index, arg) in rest.iter().enumerate().skip(command_index) {
+        if retained[index] {
+            result.push(arg.clone());
+        }
+        if let Some(owner) = path.iter().position(|command| command.index == index) {
+            if let Some(flags) = moved_locals.remove(&owner) {
+                result.extend(flags);
+            }
+        }
+    }
+    result
+}
+
+/// Accept top-level flags on either side of a target when their meaning is
+/// unambiguous. Local command flags win collisions, and `--` ends reordering.
 fn reorder_args(args: Vec<String>) -> Vec<String> {
     if args.len() <= 1 {
         return args;
@@ -83,11 +300,11 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
     let program = args[0].clone();
     let rest = &args[1..];
 
-    // If first arg is a known command, don't reorder
-    if let Some(first) = rest.first() {
-        if arg_tables().commands.contains(first.as_str()) {
-            return args;
-        }
+    let Some(target_index) = first_target_index(rest) else {
+        return args;
+    };
+    if let Some(command) = arg_tables().commands.get(rest[target_index].as_str()) {
+        return reorder_command_args(program, rest, target_index, command);
     }
 
     // Find where the skill name is and collect flags that come after it
@@ -101,11 +318,16 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
     while i < rest.len() {
         let arg = &rest[i];
 
+        if arg == "--" {
+            skill_and_args.extend_from_slice(&rest[i..]);
+            break;
+        }
+
         if !found_skill {
             if arg.starts_with('-') {
                 // It's a flag before the skill
                 flags_before.push(arg.clone());
-                if is_value_flag(arg) && i + 1 < rest.len() {
+                if is_value_flag(arg) && !has_inline_value(arg) && i + 1 < rest.len() {
                     i += 1;
                     flags_before.push(rest[i].clone());
                 }
@@ -120,7 +342,7 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
                 // Check if it's a known lf flag
                 if is_known_flag(arg) {
                     flags_after.push(arg.clone());
-                    if is_value_flag(arg) && i + 1 < rest.len() {
+                    if is_value_flag(arg) && !has_inline_value(arg) && i + 1 < rest.len() {
                         i += 1;
                         flags_after.push(rest[i].clone());
                     }
@@ -162,13 +384,7 @@ fn with_runtime<T>(
         LfNode::Run,
         LfEventType::Started,
         LfEventFields {
-            wave_name: loopflow::engine::worktrees::main_repo_root(repo_root)
-                .ok()
-                .and_then(|main_repo| {
-                    loopflow::engine::worktrees::wave_name_from_worktree_and_main(
-                        repo_root, &main_repo,
-                    )
-                }),
+            wave_name: loopflow::engine::wave_context::resolve_run_wave_name(repo_root),
             worktree: Some(repo_root.display().to_string()),
             command: Some(command.to_vec()),
             ..LfEventFields::default()
@@ -316,6 +532,16 @@ fn placement_requested(cli: &Cli) -> bool {
     cli.stack.is_some() || cli.fork
 }
 
+fn validate_loop_command(cli: &Cli) -> anyhow::Result<()> {
+    if let Some(Commands::Loop {
+        name, max_passes, ..
+    }) = &cli.command
+    {
+        loopflow::flowloop::driver::validate_loop_passes(name, *max_passes)?;
+    }
+    Ok(())
+}
+
 fn inner_placement_invocation(command: &[String]) -> anyhow::Result<(Cli, Vec<String>)> {
     let inner_command = strip_placement_args(command);
     let inner_cli = Cli::try_parse_from(inner_command.clone())?;
@@ -362,10 +588,12 @@ fn run_placed_target(
     };
     // The same registry-backed run lifecycle `lf loop` uses; only the
     // placement and what happens inside the worktree differ.
+    let run_id = loopflow::lfd::id::LfdId::new();
     let placed = loopflow::flowloop::run::LoopRun::start(
         &wave_name,
         name.trim_end_matches(':'),
         message.map(str::to_string),
+        &run_id,
         &placement,
     )?;
     let run = &placed.run;
@@ -375,6 +603,13 @@ fn run_placed_target(
     let _wave_env = EnvGuard::set("LFD_WAVE_ID", run.wave_id.to_string());
     let _run_env = EnvGuard::set("LFD_RUN_ID", run.id.to_string());
     let _lf_run_env = EnvGuard::set("LF_RUN_ID", run.id.to_string());
+    // Placement starts a trace and a work line: neither identity may leak from
+    // the caller even though the target executes synchronously in this process.
+    let _channel_env = EnvGuard::set(
+        loopflow::lf::session::CHANNEL_ENV,
+        loopflow::engine::wave_context::placed_channel_name(&wave_name, &run.id),
+    );
+    let _process_env = EnvGuard::remove(loopflow::journal::LF_PROCESS_ID_ENV);
 
     let (inner_cli, inner_command) = inner_placement_invocation(command)?;
     let result = run_target_in_repo(
@@ -427,6 +662,12 @@ impl EnvGuard {
         std::env::set_var(key, value.into());
         Self { key, previous }
     }
+
+    fn remove(key: &'static str) -> Self {
+        let previous = std::env::var_os(key);
+        std::env::remove_var(key);
+        Self { key, previous }
+    }
 }
 
 impl Drop for EnvGuard {
@@ -468,7 +709,27 @@ fn main() -> anyhow::Result<()> {
     let raw_args: Vec<String> = std::env::args().collect();
     let args = reorder_args(raw_args.clone());
 
-    let cli = Cli::parse_from(args.clone());
+    let mut cli = Cli::parse_from(args.clone());
+    // A one-shot invocation is not a loop. Reject it before explicit wave
+    // resolution, placement, registry access, or detached-server discovery.
+    validate_loop_command(&cli)?;
+    let explicit_wave = cli
+        .wave
+        .as_deref()
+        .map(loopflow::lf::session::resolve_explicit_wave)
+        .transpose()?;
+    if let Some(wave) = &explicit_wave {
+        cli.wave = Some(wave.name().to_string());
+    }
+    // One resolved wave identity drives prompt context, registry attribution,
+    // journaling, and every child process. An explicit wave is also the
+    // default bus channel for this invocation.
+    let _explicit_wave_env = explicit_wave
+        .as_ref()
+        .map(|wave| EnvGuard::set(loopflow::lf::session::WAVE_ID_ENV, wave.id().to_string()));
+    let _explicit_channel_env = explicit_wave
+        .as_ref()
+        .map(|wave| EnvGuard::set(loopflow::lf::session::CHANNEL_ENV, wave.name().to_string()));
     debug!(?cli, "parsed CLI arguments");
 
     // Inside a wave context, agent-launching runs register themselves as lfd
@@ -479,6 +740,7 @@ fn main() -> anyhow::Result<()> {
             &skill,
             cli.model.as_deref().unwrap_or("lf"),
             &raw_args,
+            explicit_wave.as_ref(),
         ),
         None => {
             loopflow::lf::session::mark_child_sessions_inherited();
@@ -535,6 +797,7 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Serve { name, force }) => {
                 in_repo_runtime(&args, |_| loopflow::wave::serve(name, *force))
             }
+            Some(Commands::Stop { name }) => in_repo_runtime(&args, |_| loopflow::wave::stop(name)),
             Some(Commands::Resident { name }) => {
                 in_repo_runtime(&args, |_| loopflow::wave::resident::run(name))
             }
@@ -547,7 +810,12 @@ fn main() -> anyhow::Result<()> {
                 wall_clock_secs,
                 poll_secs,
                 max_turns,
-            }) => in_repo_runtime(&args, |repo| {
+            }) => {
+                // A placed loop owns a fresh trace just like --fork/--stack.
+                // Do not start the generic invocation runtime first: it may
+                // have inherited its caller's trace, and two loops from one
+                // pass must never compete for the same registry Run id.
+                let repo = loopflow::lf::commands::util::find_repo_root()?;
                 let mut options =
                     loopflow::flowloop::driver::LoopOptions::new(name.clone(), cli.wave.clone());
                 options.max_passes = *max_passes;
@@ -556,16 +824,16 @@ fn main() -> anyhow::Result<()> {
                 options.poll = std::time::Duration::from_secs(*poll_secs);
                 options.max_turns = max_turns.or(cli.max_turns);
                 if *detach {
-                    let session = loopflow::flowloop::driver::detach_loop(repo, seed, &options)
+                    let session = loopflow::flowloop::driver::detach_loop(&repo, seed, &options)
                         .map_err(anyhow::Error::from)?;
                     println!("detached {name} loop in tmux session {session}");
                     println!("inspect: tmux attach -r -t {session}");
                     Ok(())
                 } else {
-                    loopflow::flowloop::driver::run_loop(repo, seed, &options)
+                    loopflow::flowloop::driver::run_loop(&repo, seed, &options)
                         .map_err(anyhow::Error::from)
                 }
-            }),
+            }
             Some(Commands::Enqueue { flow }) => in_repo_runtime(&args, |repo| {
                 loopflow::lf::commands::playhead::enqueue(repo, cli.wave.as_deref(), flow)
             }),
@@ -608,12 +876,10 @@ fn main() -> anyhow::Result<()> {
             }
             Some(Commands::Chat {
                 text,
+                follow,
                 steer,
                 target,
-            }) => loopflow::lf::commands::chat::run(text, *steer, target),
-            Some(Commands::Wavechat { wave }) => {
-                loopflow::lf::commands::wavechat::run(wave.as_deref())
-            }
+            }) => loopflow::lf::commands::chat::run(text, *follow, *steer, target),
             Some(Commands::Radio {
                 text,
                 channel,
@@ -700,6 +966,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::SyncSkills { .. })
         | Some(Commands::Cron { .. })
         | Some(Commands::Serve { .. })
+        | Some(Commands::Stop { .. })
         | Some(Commands::Resident { .. })
         | Some(Commands::Loop { .. })
         | Some(Commands::Enqueue { .. })
@@ -715,7 +982,6 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Chat { .. })
         | Some(Commands::Radio { .. })
         | Some(Commands::Sub { .. })
-        | Some(Commands::Wavechat { .. })
         | Some(Commands::Memory { .. })
         | Some(Commands::Ssh { .. }) => None,
         Some(Commands::Project { .. }) => Some("project-promote".to_string()),
@@ -724,10 +990,13 @@ fn run_label(cli: &Cli) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{arg_tables, inner_placement_invocation, placement_requested, reorder_args};
+    use super::{
+        arg_tables, inner_placement_invocation, placement_requested, reorder_args,
+        validate_loop_command,
+    };
 
     use clap::Parser;
-    use loopflow::lf::{Cli, Commands};
+    use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand};
 
     /// The derived tables cover everything the old hand lists carried, plus
     /// the uppercase short aliases those lists had drifted away from.
@@ -738,7 +1007,7 @@ mod tests {
             ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "loop", "project",
             "flow", "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace", "help",
         ] {
-            assert!(tables.commands.contains(command), "command {command}");
+            assert!(tables.commands.contains_key(command), "command {command}");
         }
         for flag in [
             "-d",
@@ -754,7 +1023,7 @@ mod tests {
             "--wave",
             "--stack",
         ] {
-            assert!(tables.value_flags.contains(flag), "value flag {flag}");
+            assert!(tables.top_level.value.contains(flag), "value flag {flag}");
         }
         for flag in [
             "-l",
@@ -783,7 +1052,7 @@ mod tests {
             "-V",
             "--version",
         ] {
-            assert!(tables.bool_flags.contains(flag), "bool flag {flag}");
+            assert!(tables.top_level.boolean.contains(flag), "bool flag {flag}");
         }
     }
 
@@ -881,6 +1150,24 @@ mod tests {
         assert!(Cli::try_parse_from(["lf", "loop", "goals"]).is_err());
     }
 
+    #[test]
+    fn one_pass_loop_is_rejected_before_explicit_wave_resolution() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "--wave",
+            "not-registered",
+            "loop",
+            "task",
+            "ship it",
+            "--max-passes",
+            "1",
+        ])
+        .expect("loop syntax parses");
+
+        let error = validate_loop_command(&cli).expect_err("one pass is a direct flow");
+        assert!(error.to_string().contains("lf flow task \"<seed>\""));
+    }
+
     /// Serving a mind is its own command. Nothing about the ambient
     /// environment can turn one of these into the other.
     #[test]
@@ -895,6 +1182,12 @@ mod tests {
         assert!(matches!(
             forced.command,
             Some(Commands::Serve { force: true, .. })
+        ));
+
+        let stopped = Cli::try_parse_from(["lf", "stop", "goals"]).unwrap();
+        assert!(matches!(
+            stopped.command,
+            Some(Commands::Stop { name }) if name == "goals"
         ));
 
         // The listener's own body — hidden, but spellable, because the
@@ -1037,8 +1330,180 @@ mod tests {
             "msg".to_string(),
         ];
         let result = reorder_args(args);
-        // Known commands should not be reordered
+        // `-m` is local to commit, so the local meaning wins.
         assert_eq!(result, vec!["lf", "commit", "-m", "msg"]);
+    }
+
+    #[test]
+    fn reorder_args_hoists_unambiguous_globals_after_loop() {
+        let args: Vec<String> = [
+            "lf", "loop", "task", "ship it", "-M", "codex", "--wave", "goals", "--detach",
+        ]
+        .map(String::from)
+        .to_vec();
+        let reordered = reorder_args(args);
+        assert_eq!(
+            reordered,
+            vec!["lf", "-M", "codex", "--wave", "goals", "loop", "task", "ship it", "--detach"]
+        );
+        let cli = Cli::try_parse_from(reordered).unwrap();
+        assert_eq!(cli.model.as_deref(), Some("codex"));
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Loop { detach: true, .. })
+        ));
+    }
+
+    #[test]
+    fn reorder_args_accepts_equals_globals_after_command() {
+        let args: Vec<String> = ["lf", "loop", "task", "ship it", "--wave=goals"]
+            .map(String::from)
+            .to_vec();
+        let reordered = reorder_args(args);
+        assert_eq!(
+            reordered,
+            vec!["lf", "--wave=goals", "loop", "task", "ship it"]
+        );
+        assert_eq!(
+            Cli::try_parse_from(reordered).unwrap().wave.as_deref(),
+            Some("goals")
+        );
+    }
+
+    #[test]
+    fn reorder_args_preserves_local_collision_after_leading_global() {
+        let args: Vec<String> = ["lf", "--wave", "goals", "commit", "-m", "ship it"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            reorder_args(args),
+            vec!["lf", "--wave", "goals", "commit", "-m", "ship it"]
+        );
+    }
+
+    #[test]
+    fn reorder_args_keeps_loop_max_turns_local() {
+        let args: Vec<String> = [
+            "lf",
+            "loop",
+            "task",
+            "ship it",
+            "--max-turns",
+            "4",
+            "--wave",
+            "goals",
+        ]
+        .map(String::from)
+        .to_vec();
+        let reordered = reorder_args(args);
+        assert_eq!(
+            reordered,
+            vec![
+                "lf",
+                "--wave",
+                "goals",
+                "loop",
+                "task",
+                "ship it",
+                "--max-turns",
+                "4"
+            ]
+        );
+        assert!(matches!(
+            Cli::try_parse_from(reordered).unwrap().command,
+            Some(Commands::Loop {
+                max_turns: Some(4),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn reorder_args_stops_at_double_dash() {
+        let args: Vec<String> = ["lf", "skill", "debug", "--", "--wave", "literal"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            reorder_args(args),
+            vec!["lf", "skill", "debug", "--", "--wave", "literal"]
+        );
+    }
+
+    #[test]
+    fn reorder_args_moves_flags_to_nested_owners() {
+        let args: Vec<String> = ["lf", "pm", "--wave", "systems", "show"]
+            .map(String::from)
+            .to_vec();
+        let reordered = reorder_args(args);
+        assert_eq!(reordered, vec!["lf", "pm", "show", "--wave", "systems"]);
+        assert!(matches!(
+            Cli::try_parse_from(reordered).unwrap().command,
+            Some(Commands::Pm {
+                cmd: PmCommand::Show { .. }
+            })
+        ));
+
+        let args: Vec<String> = [
+            "lf", "pm", "task", "--wave", "systems", "create", "--title", "file it",
+        ]
+        .map(String::from)
+        .to_vec();
+        let reordered = reorder_args(args);
+        assert_eq!(
+            reordered,
+            vec!["lf", "pm", "task", "create", "--wave", "systems", "--title", "file it"]
+        );
+        assert!(matches!(
+            Cli::try_parse_from(reordered).unwrap().command,
+            Some(Commands::Pm {
+                cmd: PmCommand::Task {
+                    cmd: PmTaskCommand::Create { .. }
+                }
+            })
+        ));
+
+        let args: Vec<String> = ["lf", "pr", "-m", "codex", "open"]
+            .map(String::from)
+            .to_vec();
+        let reordered = reorder_args(args);
+        assert_eq!(reordered, vec!["lf", "pr", "open", "-m", "codex"]);
+        assert!(matches!(
+            Cli::try_parse_from(reordered).unwrap().command,
+            Some(Commands::Pr {
+                cmd: Some(PrCommand::Open { .. })
+            })
+        ));
+
+        let args: Vec<String> = ["lf", "pr", "--strict", "submit"]
+            .map(String::from)
+            .to_vec();
+        let reordered = reorder_args(args);
+        assert_eq!(reordered, vec!["lf", "pr", "submit", "--strict"]);
+        assert!(matches!(
+            Cli::try_parse_from(reordered).unwrap().command,
+            Some(Commands::Pr {
+                cmd: Some(PrCommand::Submit { strict: true, .. })
+            })
+        ));
+
+        let args: Vec<String> = ["lf", "wt", "--force", "rm", "old-tree"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            reorder_args(args),
+            vec!["lf", "wt", "rm", "--force", "old-tree"]
+        );
+    }
+
+    #[test]
+    fn reorder_args_keeps_valid_parent_flags_on_the_parent() {
+        let args: Vec<String> = ["lf", "memory", "--wave", "systems", "add", "fact"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            reorder_args(args),
+            vec!["lf", "memory", "--wave", "systems", "add", "fact"]
+        );
     }
 
     /// `lf chat --wave X text` must reach the chat subcommand untouched —
@@ -1059,6 +1524,14 @@ mod tests {
         assert_eq!(
             reorder_args(args),
             vec!["lf", "memory", "add", "fact", "--wave", "systems"]
+        );
+
+        let args: Vec<String> = ["lf", "pm", "show", "--wave", "systems"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            reorder_args(args),
+            vec!["lf", "pm", "show", "--wave", "systems"]
         );
     }
 

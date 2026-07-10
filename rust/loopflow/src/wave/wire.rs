@@ -64,6 +64,7 @@ pub const SUBAGENT_TOKEN_ENV: &str = "LF_SUBAGENT_TOKEN";
 /// execution have the same contract.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DetachedLoopRequest {
+    pub run_id: crate::lfd::id::LfdId,
     pub flow: String,
     pub seed: String,
     pub max_passes: u32,
@@ -379,6 +380,7 @@ mod tests {
     #[test]
     fn detached_loop_wire_requires_effective_caps() {
         let request = DetachedLoopRequest {
+            run_id: crate::lfd::id::LfdId::new(),
             flow: "task".into(),
             seed: "ship it".into(),
             max_passes: 8,

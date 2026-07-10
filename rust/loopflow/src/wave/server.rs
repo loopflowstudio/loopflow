@@ -82,6 +82,8 @@
 //!   loop-state name when the request was accepted — ops are applied by the
 //!   loop asynchronously, so watch the stream's `state` events for the
 //!   outcome.
+//! - `POST /stop` → 202 and requests graceful listener shutdown. The listener
+//!   remains the sole owner of resident, registry, and discovery-file cleanup.
 //! - `POST /channels {name, run_id}` → `{turn}` — the dispatch notification
 //!   door: placed `lf` minted a work-line worktree, and knocks here so the
 //!   PARENT channel's thread shows "work line <name> opened" (journaled as
@@ -119,11 +121,13 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use time::OffsetDateTime;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
-use crate::lfd::executor::helpers::{resolve_lf_binary, spawn_detached_lf, tmux_session_slug};
+use crate::lfd::executor::helpers::{
+    resolve_lf_binary, spawn_detached_lf_with_env, tmux_session_slug,
+};
 use crate::lfd::http::routes::exec::{ExecRequest, ExecResponse};
 use crate::lfd::lf_exec::{exec_lf, validate_lf_argv};
 use crate::wave::journal::{MessageOp, PendingMessage};
@@ -232,6 +236,38 @@ pub fn generate_resident_token() -> String {
 #[derive(Debug, Clone, Default)]
 pub struct SubagentDoor {
     accepted: Arc<Mutex<Vec<SecretString>>>,
+}
+
+/// One-shot lifecycle door for `POST /stop`. The listener owns the receiver;
+/// the HTTP surface only requests shutdown, leaving cleanup to `run_listener`.
+#[derive(Debug, Clone)]
+pub struct ShutdownDoor {
+    requested: watch::Sender<bool>,
+}
+
+impl ShutdownDoor {
+    pub fn new() -> Self {
+        let (requested, _) = watch::channel(false);
+        Self { requested }
+    }
+
+    fn request(&self) {
+        self.requested.send_replace(true);
+    }
+
+    pub async fn wait(&self) {
+        let mut receiver = self.requested.subscribe();
+        if *receiver.borrow() {
+            return;
+        }
+        let _ = receiver.changed().await;
+    }
+}
+
+impl Default for ShutdownDoor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SubagentDoor {
@@ -405,6 +441,7 @@ struct ServerState {
     subagent: SubagentDoor,
     observer: Option<Arc<StoreObserver>>,
     supervisor: Option<SupervisorHandle>,
+    shutdown: ShutdownDoor,
     started_at: OffsetDateTime,
 }
 
@@ -418,9 +455,20 @@ async fn launch_detached_loop(
 ) -> Result<String, String> {
     let session = detached_loop_session_name(wave);
     let argv = detached_loop_argv(&resolve_lf_binary(), request, wave);
-    spawn_detached_lf(&session, repo_root, &argv)
-        .await
-        .map_err(|err| format!("failed to launch detached loop: {err}"))?;
+    spawn_detached_lf_with_env(
+        &session,
+        repo_root,
+        &argv,
+        &[
+            (crate::journal::LF_RUN_ID_ENV, request.run_id.as_str()),
+            (
+                crate::flowloop::driver::LF_LOOP_RUN_ID_ENV,
+                request.run_id.as_str(),
+            ),
+        ],
+    )
+    .await
+    .map_err(|err| format!("failed to launch detached loop: {err}"))?;
     tracing::info!(session, wave, flow = request.flow, "detached loop launched");
     Ok(session)
 }
@@ -433,11 +481,11 @@ fn detached_loop_session_name(wave: &str) -> String {
 fn detached_loop_argv(executable: &Path, request: &DetachedLoopRequest, wave: &str) -> Vec<String> {
     let mut argv = vec![
         executable.display().to_string(),
+        "--wave".to_string(),
+        wave.to_string(),
         "loop".to_string(),
         request.flow.clone(),
         request.seed.clone(),
-        "--wave".to_string(),
-        wave.to_string(),
         "--max-passes".to_string(),
         request.max_passes.to_string(),
         "--pass-timeout-secs".to_string(),
@@ -469,6 +517,7 @@ pub fn router(
     subagent: SubagentDoor,
     observer: Option<Arc<StoreObserver>>,
     supervisor: Option<SupervisorHandle>,
+    shutdown: ShutdownDoor,
 ) -> Router {
     let state = ServerState {
         runtime,
@@ -476,10 +525,12 @@ pub fn router(
         subagent,
         observer,
         supervisor,
+        shutdown,
         started_at: OffsetDateTime::now_utc(),
     };
     Router::new()
         .route("/health", get(health_handler))
+        .route("/stop", post(stop_handler))
         .route("/conversation", get(conversation_handler))
         .route("/playhead", get(playhead_handler))
         .route("/playhead/enqueue", post(playhead_enqueue_handler))
@@ -496,6 +547,11 @@ pub fn router(
         .route("/resident/context", get(resident_context_handler))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
+}
+
+async fn stop_handler(State(state): State<ServerState>) -> StatusCode {
+    state.shutdown.request();
+    StatusCode::ACCEPTED
 }
 
 async fn playhead_handler(
@@ -722,10 +778,10 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         // The exec door is held only by agents. The thread is the human's
         // surface; machine speech must retain its byline on the bus.
         Some(Commands::Chat { .. }) => ExecVerdict::Deny("chat".to_string()),
-        Some(Commands::Wavechat { .. }) => ExecVerdict::Deny("wavechat".to_string()),
         // Booting a listener, or a resident body against one, is wave
         // lifecycle: the door process would become the long-lived owner.
         Some(Commands::Serve { .. }) => ExecVerdict::Deny("serve".to_string()),
+        Some(Commands::Stop { .. }) => ExecVerdict::Deny("stop".to_string()),
         Some(Commands::Resident { .. }) => ExecVerdict::Deny("__resident".to_string()),
         Some(Commands::External(parts)) => {
             ExecVerdict::Deny(parts.first().cloned().unwrap_or_else(|| "flow".to_string()))
@@ -842,11 +898,16 @@ async fn loops_handler(
             "flow and seed are required".to_string(),
         ));
     }
-    if request.max_passes == 0
-        || request.pass_timeout_secs == 0
-        || request.wall_clock_secs == 0
-        || request.poll_secs == 0
-    {
+    if request.max_passes < crate::flowloop::driver::MIN_LOOP_PASSES {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "max_passes must be at least {}; use a direct flow for one-shot work",
+                crate::flowloop::driver::MIN_LOOP_PASSES
+            ),
+        ));
+    }
+    if request.pass_timeout_secs == 0 || request.wall_clock_secs == 0 || request.poll_secs == 0 {
         return Err((
             StatusCode::BAD_REQUEST,
             "loop caps and poll interval must be positive".to_string(),
@@ -1239,6 +1300,7 @@ pub fn remove_resident_token(repo_root: &Path, wave: &str, own_token: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
     #[test]
     fn write_and_remove_endpoint_roundtrips() {
@@ -1292,6 +1354,36 @@ mod tests {
         assert!(read_resident_token(tmp.path(), "ship").is_none());
     }
 
+    #[tokio::test]
+    async fn stop_route_requests_listener_shutdown() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+        let shutdown = ShutdownDoor::new();
+        let requested = shutdown.clone();
+        let app = router(
+            runtime,
+            ResidentDoor::new("resident"),
+            SubagentDoor::new(),
+            None,
+            None,
+            shutdown,
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        let response = reqwest::Client::new()
+            .post(format!("http://{addr}/stop"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
+        requested.wait().await;
+        server.abort();
+    }
+
     /// Boot the HTTP surface over a runtime we control, with a subagent door
     /// we can mint from. Returns the base URL and the minted token.
     async fn boot_exec() -> (String, String, tempfile::TempDir) {
@@ -1303,7 +1395,14 @@ mod tests {
 
         let subagent = SubagentDoor::new();
         let token = subagent.mint();
-        let app = router(runtime, ResidentDoor::new("resident"), subagent, None, None);
+        let app = router(
+            runtime,
+            ResidentDoor::new("resident"),
+            subagent,
+            None,
+            None,
+            ShutdownDoor::new(),
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
@@ -1372,6 +1471,7 @@ mod tests {
             SubagentDoor::new(),
             None,
             None,
+            ShutdownDoor::new(),
         );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
@@ -1460,10 +1560,10 @@ mod tests {
             // must not boot a listener, nor a resident body against one.
             argv(&["serve", "ship"]),
             argv(&["serve", "ship", "--force"]),
+            argv(&["stop", "ship"]),
             argv(&["__resident", "ship"]),
             argv(&["sync-skills", "--yes"]),
             argv(&["chat", "pretend to be human"]),
-            argv(&["wavechat", "ship"]),
             argv(&["implement", "ship it"]),
             argv(&[":", "do", "something"]),
         ];
@@ -1503,6 +1603,7 @@ mod tests {
     #[test]
     fn detached_loop_argv_forces_the_server_owned_blocking_form() {
         let request = DetachedLoopRequest {
+            run_id: crate::lfd::id::LfdId::new(),
             flow: "task".into(),
             seed: "fix 'quoted' behavior".into(),
             max_passes: 8,
@@ -1513,17 +1614,57 @@ mod tests {
         };
         let argv = detached_loop_argv(Path::new("/opt/lf"), &request, "platform");
         assert_eq!(
-            &argv[..4],
-            ["/opt/lf", "loop", "task", "fix 'quoted' behavior"]
+            &argv[..6],
+            [
+                "/opt/lf",
+                "--wave",
+                "platform",
+                "loop",
+                "task",
+                "fix 'quoted' behavior"
+            ]
         );
-        assert!(argv.windows(2).any(|pair| pair == ["--wave", "platform"]));
+        let parsed = crate::lf::Cli::try_parse_from(&argv).expect("server argv parses");
+        assert_eq!(parsed.wave.as_deref(), Some("platform"));
+        assert!(matches!(
+            parsed.command,
+            Some(crate::lf::Commands::Loop {
+                name,
+                seed,
+                detach: false,
+                ..
+            }) if name == "task" && seed == "fix 'quoted' behavior"
+        ));
         assert!(!argv.iter().any(|arg| arg == "--detach"));
+
+        let shell = crate::lfd::executor::helpers::detached_lf_shell_command(
+            &argv,
+            &[
+                (crate::journal::LF_RUN_ID_ENV, request.run_id.as_str()),
+                (
+                    crate::flowloop::driver::LF_LOOP_RUN_ID_ENV,
+                    request.run_id.as_str(),
+                ),
+            ],
+        );
+        for key in [
+            crate::journal::LF_RUN_ID_ENV,
+            crate::flowloop::driver::LF_LOOP_RUN_ID_ENV,
+        ] {
+            let assignment = format!(
+                "{}={}",
+                crate::lfd::executor::helpers::shell_escape(key),
+                crate::lfd::executor::helpers::shell_escape(request.run_id.as_str())
+            );
+            assert!(shell.contains(&assignment));
+        }
     }
 
     #[tokio::test]
     async fn loop_door_requires_capability_before_validating_or_launching() {
         let (base, token, _tmp) = boot_exec().await;
         let request = DetachedLoopRequest {
+            run_id: crate::lfd::id::LfdId::new(),
             flow: String::new(),
             seed: "ship it".into(),
             max_passes: 8,
@@ -1549,6 +1690,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(invalid.status(), reqwest::StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn loop_door_rejects_one_pass_before_launching() {
+        let (base, token, _tmp) = boot_exec().await;
+        let request = DetachedLoopRequest {
+            run_id: crate::lfd::id::LfdId::new(),
+            flow: "task".into(),
+            seed: "ship it".into(),
+            max_passes: 1,
+            pass_timeout_secs: 1800,
+            wall_clock_secs: 7200,
+            poll_secs: 60,
+            max_turns: None,
+        };
+        let response = reqwest::Client::new()
+            .post(format!("{base}/loops"))
+            .header(SUBAGENT_TOKEN_HEADER, token)
+            .json(&request)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        assert!(response
+            .text()
+            .await
+            .unwrap()
+            .contains("max_passes must be at least 2"));
     }
 
     /// A minted subagent token authorizes but a forbidden verb still 400s over

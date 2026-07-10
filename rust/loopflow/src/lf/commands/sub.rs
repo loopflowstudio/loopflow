@@ -14,7 +14,7 @@
 //! The mind's own ear is [`crate::wave::bus::BusListener`], the same poll with
 //! a durable cursor — at-least-once across a crash, and nothing replayed on a
 //! clean restart. The mind's THREAD — durable, replayed, human — is the other
-//! wire: [`super::thread`], still SSE on the listener, and what `lf wavechat`
+//! wire: [`super::thread`], still SSE on the listener, and what `lf chat --follow`
 //! follows. `lf sub` never touches it.
 
 use anyhow::Result;

@@ -7,12 +7,12 @@ CI runs six test suites. All must pass before merging.
 ```bash
 # Run all checks (what CI runs)
 cargo fmt --check                      # Rust formatting
-cargo clippy -- -D warnings            # Rust lints (warnings = errors)
+cargo clippy --all-targets -- -D warnings # Rust lints (warnings = errors)
 cargo test --all                       # Rust tests
 uv run pytest python/tests/            # Python tests
 cd website && uv run python dev.py test # Website tests
 swift test --package-path swift        # Swift package tests
-cd swift && xcodegen generate && xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO  # Loopflow UI compile
+cd swift && xcodegen generate && xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=  # Loopflow UI compile
 tests/e2e/test_smoke.sh               # E2E smoke
 uv run pytest tests/regression/ -v     # nightly/weekly release gate
 ```
@@ -43,10 +43,10 @@ Path → suite mapping:
 
 | Changed | Suite | Runs |
 |---------|-------|------|
-| `rust/`, `Cargo.toml/lock` | rust | `cargo nextest run --all` (falls back to `cargo test --all`) |
+| `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy`, then `cargo nextest run --all` (falls back to `cargo test --all`) |
 | `python/`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
-| `swift/` | swift | `swift test --package-path swift -Xswiftc -gnone` |
+| `swift/` | swift | `swift test --package-path swift -Xswiftc -gnone`, then the multiplatform boundary check |
 | `swift/LoopflowMac/`, `swift/project.yml` | loopflow *(slow)* | xcodegen + xcodebuild |
 | lfd `http`/`store`, `tests/e2e/` | e2e *(slow)* | e2e + API smoke |
 
@@ -83,14 +83,14 @@ swift test --package-path swift --filter SomeTestClass  # Filtered
 
 ## Loopflow UI Tests
 
-Compile the macOS app and its test targets. Requires Xcode and xcodegen. Swift
-package tests already exercise the shared suites; CI uses `build-for-testing`
-here because launching the hosted app test runner can exit before bootstrapping.
+Compile the macOS app and its signed test runners. Swift package tests already
+exercise the shared suites; UI-test execution additionally requires macOS UI
+automation permission on the host.
 
 ```bash
 cd swift
 xcodegen generate
-xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
 ```
 
 ## What CI Runs
@@ -104,7 +104,7 @@ See `.github/workflows/ci.yml`. Six parallel jobs:
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` |
 | `swift-test` | macos-15 | `swift test --package-path swift` |
-| `loopflow-ui-test` | macos-15 | xcodegen + xcodebuild build-for-testing |
+| `loopflow-ui-test` | macos-15 | xcodegen + xcodebuild |
 
 All six must pass for PRs to merge.
 

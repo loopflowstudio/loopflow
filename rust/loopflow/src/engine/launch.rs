@@ -314,8 +314,10 @@ Test skill body.
         .expect("prepare prompt");
         assert!(prepared.prompt.contains("<lf:loopflow>"));
         assert!(prepared.config.system_prompt.contains("lf commit"));
-        assert!(prepared.config.system_prompt.contains("lf loop"));
-        assert!(prepared.config.system_prompt.contains("tmux attach -r"));
+        assert!(prepared.config.system_prompt.contains("Execute Here First"));
+        assert!(!prepared.config.system_prompt.contains("lf pm show"));
+        assert!(!prepared.config.system_prompt.contains("lf loop <flow>"));
+        assert!(!prepared.config.system_prompt.contains("tmux attach -r"));
     }
 
     #[test]

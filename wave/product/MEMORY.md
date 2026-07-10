@@ -19,7 +19,7 @@ long form and dies at land; this is what survives.
   | `lf serve <wave>` | boot a mind: listener, thread, playhead. Steerable. |
   | `lf loop <flow> <seed>` | run a bounded child loop to its bit. Batch. `--detach` is the concurrency switch; `--dispatch` is deleted. |
   | `lf chat` | humans only: converse with a served mind's thread. HTTP/SSE on the listener. |
-  | `lf radio` | agents only: broadcast on the bus. An INSERT; no server in the path. |
+  | `lf radio pub` / `lf radio sub` | agents only: publish/subscribe on the bus. Publish is an INSERT; no server in the path. |
   `lf __resident` is hidden. **Environment configures a process; it must never
   decide what the process is** — the earlier `lf loop <name>` chose between
   booting a listener and being a resident by reading `WAVE_SERVER_ENDPOINT` from
@@ -77,8 +77,8 @@ long form and dies at land; this is what survives.
 
 ### Minds: what did not land
 
-- **A detached loop's driver holds no subscription.** `lf radio -c <hand>`
-  reaches live `lf sub` listeners and nobody else; steering a hand means speaking
+- **A detached loop's driver holds no subscription.** `lf radio pub -c <hand>`
+  reaches live `lf radio sub` listeners and nobody else; steering a hand means speaking
   on the wave's thread. On a store bus the fast path is a poll cursor in the
   driver's pass boundary — cheap to build, or to skip deliberately. Open fork.
 - **Mid-turn steer is Codex-only.** Claude and OpenCode queue to the next body.
@@ -106,18 +106,31 @@ long form and dies at land; this is what survives.
 - The vendor-session launch mechanism (`vendor-session-launch`) lives in `workflows`; Concerto consumes it.
 - lfd owns the goal-loop harness runtime; Concerto attaches to and frames the session, it does not own the loop.
 
-### Charter model (restarted 2026-07-07, resettled 2026-07-08)
+### Charter model (restarted 2026-07-07, resettled 2026-07-08, Linear-owned 2026-07-10)
 
 - **GOAL.md holds the Objective only** — mission/vision/vibe collapsed into one
-  `## Objective` paragraph. The Measures (KRs) left the charter.
-- **`projects/*.md` holds the durable middle tier** — one file per live bet, a
-  title + `## KRs`. `ls projects/` *is* the roster of live bets. No status field;
-  a dead bet is **deleted** (git is the tombstone). Crons live on the wave only
-  (the one heartbeat), never per-project. KRs read as proof — observable end
-  states, not backlog bullets or implementation receipts.
-- **task = one Linear issue**, labeled `project:<slug>` to attach it to the bet
-  it advances. Linear is the only roadmap.
-- The seven live bets after the wave/project/task restructure: loopflow-api,
+  `## Objective` paragraph. The Measures (KRs) left the charter. Frontmatter now
+  binds a Linear **Initiative** (`pm.linear_initiative`, was `linear_project`);
+  product's is `33e774b0-ec3b-4bd6-a4f8-07676f9e897b`.
+- **Linear owns the durable middle tier now — `wave/<wave>/projects/*.md` is
+  gone (this branch).** The Initiative → its Projects (definition + KRs) → their
+  Issues is the sole authoring surface; the machine SQLite registry is a **read
+  model**. `lf pm sync` fetches the linked Initiative and atomically replaces the
+  wave's snapshot; ordinary reads (`lf pm show`, project selection, agent
+  context, the Mac) read the snapshot, never Linear. `lf pm init` links/creates
+  Initiatives and writes the binding; `lf pm project create/update` and the
+  `lf pm task ...` mutations write Linear then refresh SQLite. Design in
+  `scratch/pm-linear-source.md`. KRs still read as proof, not backlog bullets.
+- **Not fully wired (open, filed under loopflow-api
+  `8e77a60f-71e7-4e73-8471-2a1d9c2deb58`):** `lf pm show --json` emits
+  `{initiative, items, project, provider, wave}` — item fields (`description`,
+  `rank`, `project`, `assignee`) are present, but there is **no `projects` array
+  or `synced_at`**. This branch's Swift `PmShowSnapshot`/`RegistryQuery.plan()`
+  require both as non-optional Codable, so the Mac plan decode throws and renders
+  objective-only. And `lf pm sync` still writes `projects/*.md` markdown that the
+  new model says shouldn't exist. Pick one source before trusting the plan render.
+- **task = one Linear issue** under a Project. Linear is the only roadmap.
+- The seven live bets (Linear Projects under the product Initiative): loopflow-api,
   wave-chat, mac-surface-ux, ios-surface-ux, distributed-computing,
   product-performance, auditability. The old Concerto project set
   (session-lifecycle, attention-navigation, wave-conducting, remote-connection,
@@ -127,15 +140,25 @@ long form and dies at land; this is what survives.
 
 - **`lf` is the single implementation.** It queries lfdb directly (daemon-less
   local reads) and runs commands. Primitives already on the Rust side: `lf runs`
-  (`lf/commands/runs.rs`, RunSummary + event-folding), `lf sub`
+  (`lf/commands/runs.rs`, RunSummary + event-folding), `lf radio sub`
   (`lf/commands/sub.rs`, pubsub), lfd exec door (`http/routes/exec.rs`).
 - **lfd demotes to proxy + pubsub** — proxies `lf` over HTTP so remote looks like
   local, and streams new runs. It is NOT how things execute, NOT a parallel impl.
   Concerto's bundled lfd earns its keep solely as the pubsub pipe feeding the ledger.
-- **Superseded on the agent side:** `lf sub` no longer opens a socket — it polls
-  the store bus by channel prefix. Its SSE follower moved verbatim to
+- **Superseded on the agent side:** `lf radio sub` no longer opens a socket — it
+  polls the store bus by channel prefix. Its SSE follower moved verbatim to
   `lf/commands/thread.rs` and backs `lf wavechat`. HTTP/SSE remains the *thread's*
   transport (`lf chat`, the Mac); the bus never had a server in its path.
+- **The agent bus is one explicit namespace (this branch, `lf radio: make agent
+  bus operations explicit`).** `lf radio pub [TEXT] [-c NAME | --parent] [--from
+  NAME]` and `lf radio sub [CHANNEL] [--json]`; bare `lf radio` prints subcommand
+  help. The old top-level `lf sub` and `lf radio TEXT` spellings were removed with
+  no alias — a hidden always-failing parser branch reserves top-level `sub` so the
+  external-skill fallback can't reinterpret it as a skill name. Transport, cursor,
+  prefix, and byline behavior are unchanged; command ownership only. Every builtin
+  prompt, webhook argv, doc, and test moved to the one grammar in the same build.
+  Resident crons evaluate in **UTC**, so the product `wave` flow at `0 0 8 …` fires
+  08:00 UTC regardless of host timezone.
 - **Why:** one implementation at the daemon layer, matching "keep one
   implementation"; kills the two-code-path / three-mirror drift the DTO rule fights.
 - **This branch is Swift catching up.** Scope boundary: redo Swift to match; do
@@ -145,25 +168,25 @@ long form and dies at land; this is what survives.
 
 - Swift `Wave` = **objective** (GOAL.md prose; old `goal`/`metrics: [String]`
   retired) + **projects** (the plan) + **runs** (the ledger). `WavePlan` /
-  `WaveProject` in `LoopflowCore/Models/WavePlan.swift`; `WavePlanParser`
-  (`Services/WavePlanParser.swift`) maps `GOAL.md` (`## Objective`) +
-  `projects/*.md` (title + `## KRs` list) into the plan. `WaveDetailPane` splits
-  the surface: plan on the left, live WaveChat on the right.
-- **Parser recognizes the exact committed grammar** — `## Objective`, `## KRs`
-  headings with markdown list items. Change the file shape ⇒ update
-  `WavePlanParserTests` first.
+  `WaveProject` in `Loopflow/Models/WavePlan.swift`. **The plan's two halves now
+  read from two sources (this branch):** `WavePlanParser.objective(...)` reads
+  only `## Objective` from `GOAL.md` (its `projects/*.md` parsing — title, summary,
+  KR checkbox proof — was deleted with the files), and
+  `RegistryQuery.plan(wave:objective:cwd:)` builds the projects+KRs from
+  `lf pm show --json`'s SQLite snapshot. `RepoState` paints the objective
+  synchronously, then fills projects from an async `registryQuery.plan` task.
+  `WaveDetailPane` splits the surface: plan left, live WaveChat right.
+- **`BacklogItem` (this branch)** decodes `id, name, description, rank, completed,
+  project, assignee` — matching the item shape `lf pm show --json` actually emits;
+  the old `labels: [String]` was dropped for the explicit `project` slug.
 - **Vocabulary locked:** *Run* = ledger entry (reuses lfd's existing `Run` DTO);
   *session* = a live run's attachable tmux (`/attach`, `TerminalSession`); *exec*
   retired from the frontend (stays loop's word for how a run is born).
-- **Slice 1 is local & file-first** — reads the wave dir directly, no new wire
-  shape. Plan renders only when local files exist; remote/iOS/authorless waves
-  fall back to WaveChat-only. Projects are modeled with `tasks`, left empty in
-  Swift. The per-project split now exists on the CLI side (PR #852: tasks carry a
-  `project:<slug>` Linear label, `lf op pm show --project <slug>` filters by it);
-  wiring it into `WaveProject.tasks` is unbuilt, and the Swift side must read the
-  label rather than invent its own grouping.
-- Not yet built: runs ledger renderer, live pubsub wiring, Linear task loading,
-  remote/`lf loop show` plan query (slices 2–4).
+- **Plan render is blocked until the `--json` contract carries projects** — see
+  the loopflow-api task above; `RegistryQuery.plan`'s `PmShowSnapshot` decode
+  throws today because the CLI omits `projects`/`synced_at`.
+- Not yet built: runs ledger renderer, live pubsub wiring, remote/`lf loop show`
+  plan query (slices 2–4).
 
 ## Swift data path — RegistryQuery is the single reader
 

@@ -27,3 +27,18 @@ concurrent driver pushed first — do not re-force; reconcile by hand.
 I did **not** stash-pop the earlier `.lf/metrics/ops.jsonl` snapshot
 (`stash@{0}`) — it is a stale metrics artifact and the file has a live writer;
 popping risks clobbering concurrent appends.
+
+## update-wave run (2026-07-10)
+
+Reconciled MEMORY.md to the two efforts on this branch (`lf radio` explicit
+pub/sub; Linear-owned PM with `projects/*.md` deleted). Two calls made headless:
+
+- **Filed loopflow-api task `8e77a60f`** for a real contract gap this branch
+  introduced: `lf pm show --json` emits no `projects`/`synced_at`, but the new
+  Swift `PmShowSnapshot`/`RegistryQuery.plan()` require both as non-optional
+  Codable, so the Mac plan decode throws. Also `lf pm sync` still writes the
+  `projects/*.md` markdown the Linear-owned design says shouldn't exist. Pick one
+  source before trusting the plan render.
+- **Removed the `wave/*/projects/` dirs** that `lf pm sync` regenerated while I
+  inspected live state. The branch deleted them on purpose; they're regenerable
+  by re-running sync, so restoring the branch's clean tree was the safe call.

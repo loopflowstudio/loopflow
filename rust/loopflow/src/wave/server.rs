@@ -123,7 +123,9 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
-use crate::lfd::executor::helpers::{resolve_lf_binary, spawn_detached_lf, tmux_session_slug};
+use crate::lfd::executor::helpers::{
+    resolve_lf_binary, spawn_detached_lf_with_env, tmux_session_slug,
+};
 use crate::lfd::http::routes::exec::{ExecRequest, ExecResponse};
 use crate::lfd::lf_exec::{exec_lf, validate_lf_argv};
 use crate::wave::journal::{MessageOp, PendingMessage};
@@ -418,9 +420,20 @@ async fn launch_detached_loop(
 ) -> Result<String, String> {
     let session = detached_loop_session_name(wave);
     let argv = detached_loop_argv(&resolve_lf_binary(), request, wave);
-    spawn_detached_lf(&session, repo_root, &argv)
-        .await
-        .map_err(|err| format!("failed to launch detached loop: {err}"))?;
+    spawn_detached_lf_with_env(
+        &session,
+        repo_root,
+        &argv,
+        &[
+            (crate::journal::LF_RUN_ID_ENV, request.run_id.as_str()),
+            (
+                crate::flowloop::driver::LF_LOOP_RUN_ID_ENV,
+                request.run_id.as_str(),
+            ),
+        ],
+    )
+    .await
+    .map_err(|err| format!("failed to launch detached loop: {err}"))?;
     tracing::info!(session, wave, flow = request.flow, "detached loop launched");
     Ok(session)
 }
@@ -433,11 +446,11 @@ fn detached_loop_session_name(wave: &str) -> String {
 fn detached_loop_argv(executable: &Path, request: &DetachedLoopRequest, wave: &str) -> Vec<String> {
     let mut argv = vec![
         executable.display().to_string(),
+        "--wave".to_string(),
+        wave.to_string(),
         "loop".to_string(),
         request.flow.clone(),
         request.seed.clone(),
-        "--wave".to_string(),
-        wave.to_string(),
         "--max-passes".to_string(),
         request.max_passes.to_string(),
         "--pass-timeout-secs".to_string(),
@@ -842,11 +855,16 @@ async fn loops_handler(
             "flow and seed are required".to_string(),
         ));
     }
-    if request.max_passes == 0
-        || request.pass_timeout_secs == 0
-        || request.wall_clock_secs == 0
-        || request.poll_secs == 0
-    {
+    if request.max_passes < crate::flowloop::driver::MIN_LOOP_PASSES {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "max_passes must be at least {}; use a direct flow for one-shot work",
+                crate::flowloop::driver::MIN_LOOP_PASSES
+            ),
+        ));
+    }
+    if request.pass_timeout_secs == 0 || request.wall_clock_secs == 0 || request.poll_secs == 0 {
         return Err((
             StatusCode::BAD_REQUEST,
             "loop caps and poll interval must be positive".to_string(),
@@ -1239,6 +1257,7 @@ pub fn remove_resident_token(repo_root: &Path, wave: &str, own_token: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
     #[test]
     fn write_and_remove_endpoint_roundtrips() {
@@ -1503,6 +1522,7 @@ mod tests {
     #[test]
     fn detached_loop_argv_forces_the_server_owned_blocking_form() {
         let request = DetachedLoopRequest {
+            run_id: crate::lfd::id::LfdId::new(),
             flow: "task".into(),
             seed: "fix 'quoted' behavior".into(),
             max_passes: 8,
@@ -1513,17 +1533,57 @@ mod tests {
         };
         let argv = detached_loop_argv(Path::new("/opt/lf"), &request, "platform");
         assert_eq!(
-            &argv[..4],
-            ["/opt/lf", "loop", "task", "fix 'quoted' behavior"]
+            &argv[..6],
+            [
+                "/opt/lf",
+                "--wave",
+                "platform",
+                "loop",
+                "task",
+                "fix 'quoted' behavior"
+            ]
         );
-        assert!(argv.windows(2).any(|pair| pair == ["--wave", "platform"]));
+        let parsed = crate::lf::Cli::try_parse_from(&argv).expect("server argv parses");
+        assert_eq!(parsed.wave.as_deref(), Some("platform"));
+        assert!(matches!(
+            parsed.command,
+            Some(crate::lf::Commands::Loop {
+                name,
+                seed,
+                detach: false,
+                ..
+            }) if name == "task" && seed == "fix 'quoted' behavior"
+        ));
         assert!(!argv.iter().any(|arg| arg == "--detach"));
+
+        let shell = crate::lfd::executor::helpers::detached_lf_shell_command(
+            &argv,
+            &[
+                (crate::journal::LF_RUN_ID_ENV, request.run_id.as_str()),
+                (
+                    crate::flowloop::driver::LF_LOOP_RUN_ID_ENV,
+                    request.run_id.as_str(),
+                ),
+            ],
+        );
+        for key in [
+            crate::journal::LF_RUN_ID_ENV,
+            crate::flowloop::driver::LF_LOOP_RUN_ID_ENV,
+        ] {
+            let assignment = format!(
+                "{}={}",
+                crate::lfd::executor::helpers::shell_escape(key),
+                crate::lfd::executor::helpers::shell_escape(request.run_id.as_str())
+            );
+            assert!(shell.contains(&assignment));
+        }
     }
 
     #[tokio::test]
     async fn loop_door_requires_capability_before_validating_or_launching() {
         let (base, token, _tmp) = boot_exec().await;
         let request = DetachedLoopRequest {
+            run_id: crate::lfd::id::LfdId::new(),
             flow: String::new(),
             seed: "ship it".into(),
             max_passes: 8,
@@ -1549,6 +1609,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(invalid.status(), reqwest::StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn loop_door_rejects_one_pass_before_launching() {
+        let (base, token, _tmp) = boot_exec().await;
+        let request = DetachedLoopRequest {
+            run_id: crate::lfd::id::LfdId::new(),
+            flow: "task".into(),
+            seed: "ship it".into(),
+            max_passes: 1,
+            pass_timeout_secs: 1800,
+            wall_clock_secs: 7200,
+            poll_secs: 60,
+            max_turns: None,
+        };
+        let response = reqwest::Client::new()
+            .post(format!("{base}/loops"))
+            .header(SUBAGENT_TOKEN_HEADER, token)
+            .json(&request)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        assert!(response
+            .text()
+            .await
+            .unwrap()
+            .contains("max_passes must be at least 2"));
     }
 
     /// A minted subagent token authorizes but a forbidden verb still 400s over

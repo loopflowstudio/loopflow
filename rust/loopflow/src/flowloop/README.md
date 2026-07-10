@@ -8,8 +8,11 @@ define.
 
 ```
 lf loop task "fix the flaky chord-timeout test"  # inhabit until the PR merges
-lf loop scan-pass "scan the runtime" --detach    # delegate the same primitive
+lf flow scan-pass "scan the runtime"             # run once in this worktree
+lf --wave infra loop scan-pass "scan" --detach  # server owns a justified loop
 ```
+
+A loop must allow at least two passes. Use `lf flow` when one pass is enough.
 
 **The termination bit is one generic contract, identical for every
 loop**, and the runner teaches it itself: every pass's seed carries a
@@ -40,7 +43,9 @@ hands. Filing intent is legitimate, but never substitutes for selection.
 Foreground and detached loops are one primitive. Foreground inhabitation
 blocks the caller until the bit flips. `--detach` asks the live wave server to
 own the loop in a named tmux session; attach with `tmux attach -r` for
-read-only inspection. Both execute headlessly and fork a worktree.
+read-only inspection. Both execute headlessly and fork a worktree. Detachment
+is useful only when the parent has another move while the child runs; it is not
+permission to create a loop.
 
 ## Layout
 
@@ -61,7 +66,9 @@ The canonical flows live in `engine/builtins/build/`: `task`
 `project` (`project_clarify → project_pursue → project_mutate`, KR set
 in the project's own doc, bit = all KRs checked). Tier behavior lives in the
 skill texts — defining a new kind of loop is writing a flow + skills,
-zero Rust.
+zero Rust. Those skills are inline-first: waves may create project/task loops,
+projects may create task loops, and tasks never invoke `lf loop`. Operational
+child commands such as `lf pr land` remain inline execution at every tier.
 
 Phase runs are plumbing — never surfaced in the product. A served wave's
 thread is the one conversation surface; bounded loops are hands, with only

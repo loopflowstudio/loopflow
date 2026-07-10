@@ -39,7 +39,7 @@ pub fn resolve_wave_name(repo: &Path, explicit: Option<&str>) -> Option<String> 
     None
 }
 
-fn normalize_wave_name(value: &str) -> Option<String> {
+pub fn normalize_wave_name(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return None;

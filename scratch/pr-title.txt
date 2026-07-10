@@ -1,1 +1,0 @@
-wave chat: add graceful stop, truthful retries, and signed Mac gates

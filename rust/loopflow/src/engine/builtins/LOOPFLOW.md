@@ -81,18 +81,22 @@ text. Everything proactive goes through `lf`:
 - `lf radio "<note>"` - the agent bus: report up when you finish, fail, or get
   stuck. Broadcast, not delivery - whoever is tuned in hears it, nobody
   guarantees receipt; it is not a log and not a notebook. Bare, it publishes on
-  your own channel, which the wave records as an attributed report and its loop
-  wakes on. One short paragraph; pipe stdin for longer.
+  your own channel, and that report is the one thing the wave records: one
+  attributed copy in its journal, which wakes its loop. One short paragraph;
+  pipe stdin for longer.
 - `lf radio --parent "<report>"` - escalate to the parent wave.
-- `lf radio --channel <name> "<steer>"` - steer another hand: broadcast on its
-  channel; if a live turn can take it, it lands mid-pass, otherwise the next
-  pass hears it. The byline is server-stamped from your channel, so you cannot
-  post as someone else.
+- `lf radio --channel <name> "<msg>"` - broadcast on another channel. Whoever
+  is tuned in hears it now; nothing is delivered to a hand that is mid-pass.
+  Say it on the wave's thread instead when a hand must act on it - hands
+  re-read that thread at every pass boundary.
 - `lf sub [<channel>]` - tune in: follow live events (turns, loop state,
   memory) until killed. Bare, your own wave; `<channel>` listens to a hand.
 - `lf memory add "<fact>"` - record a durable learning. `lf memory update`
   rewrites the whole file from stdin.
 - `wave/<name>/MEMORY.md` is server-owned - never edit the file directly.
+
+The byline is server-stamped from the channel, so a report cannot claim to be
+another speaker. Speak on your own channel; a channel's name is who it is.
 
 `lf chat` is the human's conversation with a served mind - the durable,
 replayed thread. It is not an agent verb; agents use `lf radio`. Use these

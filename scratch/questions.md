@@ -27,14 +27,30 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   liveness without inventing an unreliable foreground/background label.
 - The bus/thread scope changed mid-branch, deliberately: channels became
   ephemeral pubsub wires and journaling became a property of served minds only
-  (`scratch/minds.md` §8, with done-whens). Child journals delete rather than
-  move; attribution becomes server-stamped; the prefix write-gate sketch is
-  dropped in favor of open publish with honest bylines. The verb splits with
-  the wires: `lf radio` is the agent bus (broadcast, ephemeral), `lf chat`
-  narrows to the human client for a served mind's thread, and `lf serve` stays
-  lifecycle — chat boots nothing. Until §8's done-whens hold, chat still
-  carries client-supplied `from`, still doubles as the agent verb, and work
-  lines still write worktree journals nobody reads.
+  (`scratch/minds.md` §8). That landed. Child journals are deleted rather than
+  moved, the prefix write-gate sketch is dropped in favor of open publish with
+  honest bylines, and the verb splits with the wires: `lf radio` is the agent
+  bus, `lf chat` is the human client for a served mind's thread, `lf serve`
+  stays lifecycle. `lf radio` and `lf chat` deliberately share one transport
+  and one door — postgres and psql, not two implementations of one wire.
+- **The byline is stamped from the channel, not from the token.** §8 says "the
+  token names the writer"; it cannot yet. `SubagentDoor` mints one token per
+  boot and hands it to every descendant, so the server has no way to tell which
+  hand presented it. Deriving the byline from the addressed channel is
+  unforgeable and is exactly right for a report — a hand speaks on its own
+  channel, and "this is goals.148e reporting" is how radio speech works. It is
+  wrong in one direction: a mind that publishes a recorded `say` on a hand's
+  channel is bylined as that hand. Steering therefore belongs on the wave's own
+  thread, and the doctrine now points there. Per-hand tokens, minted at loop
+  launch and bound to that loop's channel, would close this.
+- **A detached loop's driver holds no subscription.** §8's model assumed one,
+  live for the loop's lifetime, queueing steers in memory. The driver has no
+  such thing, so `lf radio --channel <hand>` reaches `lf sub` listeners and
+  nobody else. The design's own slow path still holds and is what the doctrine
+  teaches: a hand re-reads the wave's memory and thread at every pass boundary,
+  so speech on the wave's thread is the ear a hand reliably has. Building the
+  fast path is a decision about whether a hand deserves a private steer channel
+  at all, not a bug to fix on the way past.
 - Two agents wrote this worktree at once. HEAD advanced under a running skill
   while unrelated files were being edited, and the two writers left a
   self-contradicting test behind — one updated the frame it waited for, the

@@ -20,10 +20,10 @@ state. Trust worker summaries; do not reread worker transcripts.
   `--detach`. A seed you cannot make computable on its own is the work to keep.
 - Require detached hands to report with `lf radio`, record live learnings with
   `lf memory add`, and leave done as a PR. No writes means failed work.
-- To steer a hand, tune in with `lf sub <channel>` and broadcast back with
-  `lf radio --channel <channel> "<steer>"`; a live turn takes it mid-pass,
-  otherwise the next pass hears it. You already hear their reports — they land
-  in this thread attributed.
+- Watch a hand with `lf sub <channel>`. You already hear its reports: they land
+  in this thread, attributed. To change what a hand does, say it here — hands
+  re-read this thread at every pass boundary; a `lf radio --channel` broadcast
+  only reaches whoever is tuned in right now.
 - Answer human steering before returning to the goal.
 
 Keep the turn focused: select, inhabit or delegate, record what changed.

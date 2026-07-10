@@ -430,12 +430,18 @@ covered by its chat-command tests and the live-body done-when test.
 | `lf chat --steer` reaches live Codex bodies; attributed reports stay queued | `lf/commands/chat.rs` |
 | §4 tmux door read-only · §5 backlogs allowed · §7 doctrine | `engine/builtins/**` |
 | §6 Mac surface — five panes, playhead header, body provenance | `swift/LoopflowMac/Views/**` |
+| §8 Channels are wires: `ChildChannel`, child journals, `child_worktree_path`, `scan_child_channels`, the worktree-liveness dance, and the FLAGGED archive all deleted | `wave/channel.rs`, `wave/runtime.rs`, `wave/server.rs`, `wave/registry.rs` |
+| §8 Byline server-stamped from the channel; a forged `from` never survives | `wave/runtime.rs` (`deliver_to_channel`) |
+| §8 `lf radio` = the agent bus; `lf chat` = the human↔mind thread; one transport, two verbs | `lf/mod.rs`, `bin/lf.rs`, `lf/commands/chat.rs` |
+| §8 Doctrine: LOOPFLOW.md teaches radio; the five skills escalate with `lf radio --parent` | `engine/builtins/**` |
+| §8 A hand reads its wave's thread — the two-section work-line overlay collapses | `engine/wave_context.rs` (`gather_channel_chat`) |
 
 **Not built.** Each is a real gap, not a rough edge.
 
 | Gap | Consequence today |
 | --- | --- |
-| Channels-as-wires (§8, **in progress this branch**): child journals delete, server-stamped attribution, `lf radio` = the agent bus, `lf chat` narrows to the human↔mind thread | Until it lands: chat still carries client-supplied `from`, still doubles as the agent verb, and work lines still write worktree journals nobody reads. |
+| A detached loop's driver holds **no** live subscription (§8 assumed one) | `lf radio --channel <hand>` broadcasts to whoever is tuned in and dies there. The only path that reaches a hand is the slow one — it re-reads the wave's thread each pass boundary. Steering a hand therefore means speaking on the wave's thread, not on the hand's channel. |
+| The token names the wave, not the hand | `SubagentDoor` mints one token per boot, inherited by every descendant, so the server cannot stamp *which* hand spoke. The byline is derived from the **channel** instead — unforgeable and right for a report (a hand speaks on its own channel), but a mind that `say`s on a hand's channel gets bylined as that hand. Per-hand minted tokens are the fix. |
 | Mid-turn steer for Claude and OpenCode → *roadmap* | Only Codex steers; the others queue to the next body. Vendor-gated; the product question lives in `wave/product/projects/wave-chat.md`. |
 | Composite flow nodes (and/xor/or/loop) as first-class playhead frames | They run through the internal headless `__flow-step` fallback (`flowloop/wave.rs:311`). |
 | PM `project:<slug>` label removal on promotion → *roadmap* | The provider has no remove-label op; residual labels are recorded, not cleared. |
@@ -484,18 +490,24 @@ covered by its chat-command tests and the live-body done-when test.
 Work that is schedulable now, ordered by what unblocks the most. Everything here
 is ours to write; nothing waits on anyone else.
 
-1. **Channels are wires, not records — pulled into this branch.** See §8 in
-   Changes for the model, the deletion list, and its done-whens. This subsumes
-   most of the old "bus/thread wires" item: server-stamped attribution ships
-   with it; the prefix write-gate sketch is dropped in favor of open publish
-   with honest bylines; the bus verb becomes `lf radio` and `lf chat` narrows
-   to the human↔served-mind thread.
-2. **Project-loop caps.** Needs dogfood data, not a guessed weeks-scale timeout.
+1. **Per-hand tokens, so the byline names the speaker.** §8 says "the token
+   names the writer." It does not yet: one token is minted per boot and
+   inherited by every descendant, so the server stamps the *channel* instead.
+   That is unforgeable and correct for a report, but it cannot tell a hand's
+   report from a mind speaking on the hand's channel. Mint a token per detached
+   loop, bind it to that loop's channel, and stamp from the binding. This also
+   unblocks honest steer-down attribution.
+2. **The detached loop's live subscription.** §8 assumed the driver holds one
+   for its lifetime and queues steers in memory. It holds none, so a broadcast
+   at a hand reaches only whoever is tuned in. Either build it — SSE client on
+   the hand's own channel, in-memory queue drained into the next pass — or
+   delete the claim and let the wave's thread be the one ear a hand has.
+3. **Project-loop caps.** Needs dogfood data, not a guessed weeks-scale timeout.
    Run one real project loop first, then pick.
-3. **Composite playhead frames.** Promote branch/loop internals out of the
+4. **Composite playhead frames.** Promote branch/loop internals out of the
    `__flow-step` fallback. Separate graph-runtime work; do it when the Mac's
    breadcrumb starts lying about nested flows.
-4. **One writer per worktree.** Decide whether it's a wave-home invariant or a
+5. **One writer per worktree.** Decide whether it's a wave-home invariant or a
    lock. Until then, check for a live agent before working a wave worktree.
 
 ### Punted to the roadmap

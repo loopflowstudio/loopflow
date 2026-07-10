@@ -339,15 +339,16 @@ pub enum Commands {
         from: Option<String>,
     },
     /// Broadcast on the agent bus (agents): report up when you finish, fail,
-    /// or get stuck; steer a hand with --channel. Broadcast, not delivery —
-    /// whoever is tuned in hears it, nobody guarantees receipt. Not a log, not
-    /// the human surface. Tune in with `lf sub`.
+    /// or get stuck. Broadcast, not delivery — whoever is tuned in hears it,
+    /// nobody guarantees receipt. Not a log, not the human surface. Bare, it
+    /// publishes on your own channel, which the wave records as one attributed
+    /// report. Tune in with `lf sub`.
     Radio {
         /// Message text (reads stdin when omitted — heredoc-friendly)
         #[arg(trailing_var_arg = true)]
         text: Vec<String>,
-        /// Address a specific channel (a hand's `goals.<run>`); default is the
-        /// invoking context's own channel.
+        /// Broadcast on another channel (a hand's `goals.<run>`) instead of
+        /// your own. Live listeners hear it; a mid-pass hand does not.
         #[arg(short = 'c', long = "channel", conflicts_with = "parent")]
         channel: Option<String>,
         /// Broadcast to the parent wave's channel (escalation up the tree).

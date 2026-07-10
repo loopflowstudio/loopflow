@@ -1,6 +1,8 @@
 pub mod auth;
 pub mod chat;
 pub mod doctor;
+#[cfg(test)]
+pub(crate) mod fixtures;
 pub mod flow;
 pub mod list;
 pub mod memory;

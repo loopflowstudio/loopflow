@@ -147,3 +147,11 @@ Correction to §9's durability claim:
   `open_existing_store`, so on a machine with no `~/.lf/lfd.db` it drops with
   exit 0 and a note, exactly as `lf chat` drops with no wave. Publishing does not
   mint a registry.
+- **`item_line` stays duplicated between `thread.rs` and `journal.rs`.** The
+  three format strings (`$ cmd → status`, `tool → status`, `edit → status`) are
+  verbatim copies, but `journal.rs` wraps each in a `Narration` and also handles
+  the prose variants (`Message`, `Thought`) that `thread.rs` drops. Sharing one
+  `Option<String>`-returning helper would force an `unwrap_or_default()` at the
+  journal's call site, trading twelve duplicated lines for a silent-empty path
+  when `ConversationItem` grows a variant. Left as-is deliberately; revisit if a
+  third renderer appears.

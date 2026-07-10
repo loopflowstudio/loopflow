@@ -169,11 +169,10 @@ pub(crate) async fn write_memory(
 mod tests {
     use super::*;
     use std::path::Path;
-    use std::sync::Arc;
 
+    use crate::lf::commands::fixtures::boot_server;
     use crate::wave::journal::{journal_path, EventKind, Journal};
     use crate::wave::runtime::WaveRuntime;
-    use crate::wave::server;
 
     fn resolved(name: &str, endpoint: Option<String>, root: Option<&Path>) -> ResolvedWave {
         ResolvedWave {
@@ -181,24 +180,6 @@ mod tests {
             endpoint,
             repo_root: root.map(Path::to_path_buf),
         }
-    }
-
-    async fn boot_server(origin: &Path, wave: &str) -> (String, Arc<WaveRuntime>) {
-        let runtime =
-            WaveRuntime::open(wave.to_string(), origin.to_path_buf()).expect("open runtime");
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let app = server::router(
-            runtime.clone(),
-            server::ResidentDoor::new("test-token"),
-            server::SubagentDoor::new(),
-            None,
-            None,
-        );
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
-        });
-        (addr.to_string(), runtime)
     }
 
     fn memory_events(origin: &Path, wave: &str) -> Vec<EventKind> {
@@ -213,7 +194,7 @@ mod tests {
     async fn update_writes_the_origin_file_and_add_journals() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path();
-        let (addr, _runtime) = boot_server(origin, "ship").await;
+        let (addr, _runtime, _inbox) = boot_server(origin, "ship").await;
         let target = resolved("ship", Some(addr), None);
 
         let summary = write_memory(&target, "update", "# Ship\n\nfold is truth\n", None)
@@ -258,7 +239,7 @@ mod tests {
     async fn log_reads_through_the_server_when_live() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path();
-        let (addr, runtime) = boot_server(origin, "ship").await;
+        let (addr, runtime, _inbox) = boot_server(origin, "ship").await;
         runtime.append_memory("first").expect("append");
         runtime.append_memory("second").expect("append");
 
@@ -310,7 +291,7 @@ mod tests {
         let dir = tmp.path().join("wave/ship");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("MEMORY.md"), "served content\n").unwrap();
-        let (addr, _runtime) = boot_server(tmp.path(), "ship").await;
+        let (addr, _runtime, _inbox) = boot_server(tmp.path(), "ship").await;
 
         let content = read_memory(&resolved("ship", Some(addr), None))
             .await

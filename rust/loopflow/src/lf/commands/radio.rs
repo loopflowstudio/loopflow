@@ -153,39 +153,7 @@ async fn target_channel(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
-    use std::sync::Arc;
-
-    use crate::lfdb::{open_store, StorageConfig};
-
-    async fn temp_store(dir: &Path) -> SharedStore {
-        Arc::new(
-            open_store(&StorageConfig::sqlite(dir.join("lfd.db")))
-                .await
-                .expect("open sqlite store"),
-        )
-    }
-
-    fn make_wave(name: &str, repo: &Path, parent: Option<&crate::lfd::id::LfdId>) -> Wave {
-        Wave {
-            id: crate::lfd::id::LfdId::new(),
-            name: name.to_string(),
-            goal: String::new(),
-            metrics: Vec::new(),
-            repo: repo.display().to_string(),
-            worktree: String::new(),
-            branch: String::new(),
-            status: crate::lfd::types::WaveStatus::Idle,
-            iteration: 0,
-            cycle_start_iteration: 0,
-            direction: Vec::new(),
-            area: Vec::new(),
-            paused: false,
-            created_at: Some(time::OffsetDateTime::now_utc()),
-            workers: 1,
-            parent_wave_id: parent.cloned(),
-        }
-    }
+    use crate::lf::commands::fixtures::{make_wave, temp_store};
 
     fn context(store: Option<SharedStore>, channel: Option<&str>) -> CliContext {
         CliContext {

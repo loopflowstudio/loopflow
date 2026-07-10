@@ -196,11 +196,6 @@ public struct WaveService: @unchecked Sendable {
         throw unsupported("Wave landing must run through lf with explicit worktree context.")
     }
 
-    public func nextWave(_ id: String) async throws -> String {
-        _ = id
-        throw unsupported("Wave rotation must run through lf with explicit worktree context.")
-    }
-
     public func listFlowsAndDirections(repo: RepoTarget) async throws -> WaveFlowsResult {
         guard case .local(let url) = repo else {
             return WaveFlowsResult(flows: [], directions: [])

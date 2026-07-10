@@ -444,7 +444,6 @@ mod tests {
         let app = server::router(
             runtime,
             server::ResidentDoor::new("right-token"),
-            server::SubagentDoor::new(),
             None,
             None,
             server::ShutdownDoor::new(),

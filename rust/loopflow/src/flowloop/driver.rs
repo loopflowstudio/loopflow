@@ -38,9 +38,7 @@ use crate::flowloop::run::LoopRun;
 use crate::lfd::executor::Placement;
 use crate::lfd::id::LfdId;
 use crate::ops::{OpsError, OpsResult};
-use crate::wave::wire::{
-    DetachedLoopRequest, DetachedLoopResponse, RESIDENT_TOKEN_HEADER, SUBAGENT_TOKEN_HEADER,
-};
+use crate::wave::wire::{DetachedLoopRequest, DetachedLoopResponse, RESIDENT_TOKEN_HEADER};
 
 const LOOP_FILE: &str = "scratch/loop.yaml";
 pub(crate) const LF_LOOP_RUN_ID_ENV: &str = "LF_LOOP_RUN_ID";
@@ -174,9 +172,8 @@ pub fn detach_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
     let trace_id = LfdId::new();
     let origin = crate::engine::wave_context::wave_origin(repo);
-    let endpoint = crate::lfq::env_endpoint()
-        .or_else(|| crate::engine::wave_context::read_endpoint_pointer(&origin, &wave))
-        .ok_or_else(|| {
+    let endpoint =
+        crate::engine::wave_context::read_endpoint_pointer(&origin, &wave).ok_or_else(|| {
             OpsError::Message(format!(
                 "wave '{wave}' has no live server; start it with `lf serve {wave}`"
             ))
@@ -276,12 +273,7 @@ pub fn validate_loop_passes(flow: &str, max_passes: u32) -> OpsResult<()> {
     Ok(())
 }
 
-/// A sandboxed hand presents its own subagent capability; a shell beside the
-/// wave falls back to the resident token file.
 fn detached_loop_credential(origin: &Path, wave: &str) -> Option<(&'static str, String)> {
-    if let Some(token) = crate::lfq::subagent_token() {
-        return Some((SUBAGENT_TOKEN_HEADER, token));
-    }
     crate::wave::server::read_resident_token(origin, wave)
         .map(|token| (RESIDENT_TOKEN_HEADER, token))
 }

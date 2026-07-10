@@ -209,7 +209,6 @@ fn resident_spawner(
     repo_root: PathBuf,
     endpoint: String,
     token: String,
-    subagent_token: String,
     session_env: Vec<(String, String)>,
 ) -> supervisor::SpawnResident {
     Box::new(move || {
@@ -221,11 +220,6 @@ fn resident_spawner(
             .current_dir(&repo_root)
             .env(WAVE_SERVER_ENDPOINT_ENV, &endpoint)
             .env(wire::RESIDENT_TOKEN_ENV, &token)
-            // The per-subagent exec-door token, inherited by every sandboxed
-            // process the resident spawns: a worker reads it (with the
-            // endpoint above) and runs `lfq exec <lf argv>` back through the
-            // wave's `/v0/exec`, unsandboxed in the outwave.
-            .env(wire::SUBAGENT_TOKEN_ENV, &subagent_token)
             // The resident's children must resolve `lf` to this binary.
             .env("PATH", crate::flowloop::wave::path_for_children())
             .stdin(std::process::Stdio::null());
@@ -375,12 +369,6 @@ async fn run_listener(
     let door = server::ResidentDoor::new(token.clone());
     server::write_resident_token(&repo_root, &wave, &token)?;
 
-    // The exec door's authority: a per-subagent capability set. Minted into
-    // when the resident is spawned (below) and validated on `/v0/exec`. In
-    // memory, per boot — no store, no schema. Listener-only tests spawn no
-    // resident, so the set stays empty and `/exec` accepts nothing.
-    let subagent_door = server::SubagentDoor::new();
-
     // The keeper's watch: resident liveness, respawn ladder, interrupt
     // janitor. Runs even without a spawner — the pen-side anti-wedges (janitor, attach
     // probe) never depend on who spawned the resident.
@@ -390,7 +378,6 @@ async fn run_listener(
             repo_root.clone(),
             addr.to_string(),
             token.clone(),
-            subagent_door.mint(),
             session_env,
         )
     });
@@ -446,7 +433,6 @@ async fn run_listener(
     let app = server::router(
         runtime.clone(),
         door.clone(),
-        subagent_door,
         observer,
         Some(supervisor_handle),
         shutdown_door,
@@ -558,7 +544,6 @@ mod tests {
         let app = server::router(
             runtime.clone(),
             ResidentDoor::new("test-token"),
-            server::SubagentDoor::new(),
             None,
             None,
             server::ShutdownDoor::new(),
@@ -1291,7 +1276,6 @@ mod tests {
         let app = server::router(
             runtime.clone(),
             ResidentDoor::new("test-token"),
-            server::SubagentDoor::new(),
             None,
             None,
             server::ShutdownDoor::new(),
@@ -1335,7 +1319,6 @@ mod tests {
         let app = server::router(
             runtime.clone(),
             ResidentDoor::new("test-token"),
-            server::SubagentDoor::new(),
             None,
             None,
             server::ShutdownDoor::new(),

@@ -59,7 +59,6 @@ pub(crate) async fn boot_server(
     let app = server::router(
         runtime.clone(),
         server::ResidentDoor::new("test-token"),
-        server::SubagentDoor::new(),
         None,
         None,
         server::ShutdownDoor::new(),

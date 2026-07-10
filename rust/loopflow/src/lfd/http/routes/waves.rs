@@ -17,8 +17,8 @@ use crate::engine::worktree::remove_worktree;
 use crate::engine::worktrees::{branch_exists, ensure_wave_worktree, worktree_path};
 use crate::lfd::http::dto::{
     session_connection_info_dto, session_dto, CombineResponse, CombineResponseResult,
-    DeletedResourceResponse, LandWaveResponse, ListResponse, NextWaveResponse, StopWaveResponse,
-    WaveAgentTreeDto, WaveAgentTreeSessionDto, WaveDto,
+    DeletedResourceResponse, LandWaveResponse, ListResponse, StopWaveResponse, WaveAgentTreeDto,
+    WaveAgentTreeSessionDto, WaveDto,
 };
 use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
@@ -536,36 +536,6 @@ pub async fn land_wave_handler(
     }
 
     Ok(Json(LandWaveResponse { merged: true }))
-}
-
-pub async fn next_wave_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-) -> ApiResult<NextWaveResponse> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let (wave, work_dir) = wave_and_work_dir(&state, &wave_id).await?;
-
-    let wave_name = wave.name().clone();
-    let result = run_blocking_result(
-        move || {
-            let progress = crate::ops::NullProgress;
-            crate::ops::next_branch(
-                std::path::Path::new(&work_dir),
-                &crate::ops::NextOptions {
-                    wave_name: Some(wave_name),
-                    create_pr: true,
-                    ..Default::default()
-                },
-                &progress,
-            )
-        },
-        StatusCode::BAD_REQUEST,
-    )
-    .await?;
-
-    Ok(Json(NextWaveResponse {
-        new_branch: result.new_branch,
-    }))
 }
 
 pub async fn combine_wave_handler(

@@ -10,7 +10,7 @@ use loopflow::chat::types::{ConversationItem, Lifecycle};
 use loopflow::wave::journal::{fold_thread, journal_path, Journal, MessageOp};
 use loopflow::wave::playhead::BodyProvenance;
 use loopflow::wave::runtime::WaveRuntime;
-use loopflow::wave::server::{self, ResidentDoor, SubagentDoor};
+use loopflow::wave::server::{self, ResidentDoor};
 use loopflow::wave::state::LoopState;
 use loopflow::wave::wire::ResidentDelta;
 
@@ -277,7 +277,6 @@ async fn health_reports_channel_liveness_and_the_loop_state() {
     let app = server::router(
         rt.clone(),
         ResidentDoor::new("test-token"),
-        SubagentDoor::new(),
         None,
         None,
         server::ShutdownDoor::new(),

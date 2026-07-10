@@ -100,7 +100,6 @@ enum ShortcutAction: Hashable {
     case retryWave
     case stopWave
     case landWave
-    case nextWave
 
     // Tools
     case openTerminal
@@ -196,14 +195,6 @@ enum ShortcutCatalog {
             category: .waveActions,
             requiresWave: true
         ),
-        ShortcutBinding(
-            gesture: ShortcutGesture(key: .character("n"), modifiers: [], allowsRepeat: false),
-            action: .nextWave,
-            label: "Next iteration",
-            category: .waveActions,
-            requiresWave: true
-        ),
-
         // Tools
         ShortcutBinding(
             gesture: ShortcutGesture(key: .character("t"), modifiers: [], allowsRepeat: false),

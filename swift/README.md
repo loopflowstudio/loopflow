@@ -189,7 +189,7 @@ Open the prototype gallery from **Debug → Reply Demo** (`⇧⌘R`).
 J / K        Move wave focus down/up
 Enter        Select focused wave
 C            Create wave
-D R S L N    Delete/Retry/Stop/Land/Next
+D R S L      Delete/Retry/Stop/Land
 T I F P      Open Terminal/IDE/Finder/PR
 1 / 2        Switch Current/Runs tab
 / or ⌘K      Open command palette

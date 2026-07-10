@@ -1,7 +1,6 @@
 pub mod attention;
 pub mod auth;
 pub mod catalog;
-pub mod exec;
 pub mod flows;
 pub mod hooks;
 pub mod providers;
@@ -271,8 +270,8 @@ pub(crate) fn is_open_pr_state(state: Option<&str>) -> bool {
 /// Candidates are the default branch plus any remote branches belonging to this wave
 /// (matched by the sanitized wave name in the branch). For each candidate, compute
 /// merge-base with HEAD and pick the closest one (fewest commits away). This handles
-/// stacking: after `next`, the previous iteration branch is a closer ancestor than main.
-/// After the parent merges and you rebase onto main, main becomes closest again.
+/// stacked workers: the parent branch can be a closer ancestor than main. After the
+/// parent merges and the worker rebases onto main, main becomes closest again.
 fn nearest_base_ref(worktree: &std::path::Path, wave_name: &str) -> String {
     let main_repo = crate::engine::worktrees::main_repo_root(worktree)
         .unwrap_or_else(|_| worktree.to_path_buf());

@@ -6,7 +6,6 @@ pub mod cron;
 mod error;
 mod flow;
 mod land;
-mod next;
 pub mod pm;
 mod pr;
 mod progress;
@@ -31,7 +30,6 @@ pub use cron::{
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
 pub use land::{land, mark_ready, submit, LandOptions};
-pub use next::{next_branch, NextOptions, NextResult};
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
 pub use progress::{NullProgress, Progress};
 pub(crate) use rebase::merged_parent_fork_point;

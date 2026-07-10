@@ -306,11 +306,6 @@ pub struct LandWaveResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct NextWaveResponse {
-    pub new_branch: String,
-}
-
-#[derive(Debug, Serialize)]
 pub struct CombineResponse {
     pub ok: bool,
     pub result: CombineResponseResult,

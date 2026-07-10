@@ -6,7 +6,6 @@ pub mod github;
 pub mod http;
 pub(crate) mod http_client;
 pub mod id;
-pub mod lf_exec;
 pub mod live_pr;
 pub mod obs;
 pub mod pm;

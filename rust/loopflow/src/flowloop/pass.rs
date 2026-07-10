@@ -17,7 +17,7 @@ pub struct PassOptions {
 
 /// One bounded, headless pass of ANY flow in a worktree — the loop
 /// primitive. The tiers bind their `<tier>-pass` flows here, but a skill
-/// loop or a scan flow loops the same way: `lf -b <flow>`, killed on
+/// loop or a scan flow loops the same way: `lf --yolo -b <flow>`, killed on
 /// timeout.
 pub fn run_pass(
     worktree: &Path,
@@ -47,6 +47,10 @@ fn pass_command(
     options: &PassOptions,
 ) -> Command {
     let mut cmd = lf_command();
+    // Loopflow-owned workers already have an isolated worktree. Give the
+    // worker direct authority there instead of routing privileged operations
+    // through a second exec service.
+    cmd.arg("--yolo");
     cmd.arg("-b");
     if let Some(max_turns) = options.max_turns {
         cmd.arg("--max-turns").arg(max_turns.to_string());
@@ -126,6 +130,9 @@ mod tests {
             .expect("pass trace env");
 
         assert_eq!(trace, OsStr::new(run_id.as_str()));
+        assert!(command
+            .get_args()
+            .any(|argument| argument == OsStr::new("--yolo")));
         let inherited_process = command
             .get_envs()
             .find(|(key, _)| *key == OsStr::new(crate::journal::LF_PROCESS_ID_ENV))

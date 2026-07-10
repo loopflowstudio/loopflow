@@ -429,16 +429,6 @@ struct WaveStoreOptimisticTests {
         #expect(store.groups.idle.count == 0)
     }
 
-    @Test("optimistic next sets status to idle")
-    func optimisticNextSetsIdle() {
-        let store = WaveStore()
-        store.set(makeWave(status: .waiting))
-
-        _ = store.applyOptimistic("wave-1") { $0.status = .idle }
-
-        #expect(store.wave(for: "wave-1")?.status == .idle)
-    }
-
     @Test("event overwrites optimistic status after commit")
     func eventOverwritesAfterCommit() {
         let store = WaveStore()

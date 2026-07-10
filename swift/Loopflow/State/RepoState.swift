@@ -877,12 +877,6 @@ public final class RepoState {
         try await waveService.landWave(wave.id)
     }
 
-    public func nextWave(_ wave: WaveViewModel) async throws {
-        try await optimisticAction(wave.id, mutation: { $0.status = .idle }) {
-            _ = try await self.waveService.nextWave(wave.id)
-        }
-    }
-
     public func connectLfd(outputBuffer: OutputBuffer) async throws {
         updateConnectionState(.connecting(.startingDaemon))
         let connection = try await resolveConnection()
@@ -1192,8 +1186,7 @@ public final class RepoState {
     }
 
     /// Like `optimistic`, but also schedules a safety-net refresh after commit.
-    /// Used for actions (run/stop/next) where the real state lands on the next
-    /// registry snapshot.
+    /// Used for actions where the real state lands on the next registry snapshot.
     private func optimisticAction(
         _ id: String,
         mutation: (inout WaveViewModel) -> Void,

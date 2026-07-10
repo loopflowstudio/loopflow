@@ -466,7 +466,7 @@ Keybindings start with `prefix+l`:
 | `s` | Stop |
 | `o` | Open logs |
 | `p` | Open PR |
-| `n` | Next iteration |
+| `n` | New worktree |
 | `d` | Land PR |
 | `u` | Start/bootstrap |
 | `w` | Pick wave/worktree |

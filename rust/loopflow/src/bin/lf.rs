@@ -544,12 +544,16 @@ fn validate_loop_command(cli: &Cli) -> anyhow::Result<()> {
 
 fn inner_placement_invocation(command: &[String]) -> anyhow::Result<(Cli, Vec<String>)> {
     let inner_command = strip_placement_args(command);
-    let inner_cli = Cli::try_parse_from(inner_command.clone())?;
+    let mut inner_cli = Cli::try_parse_from(inner_command.clone())?;
     if placement_requested(&inner_cli) {
         return Err(anyhow::anyhow!(
             "placement flags leaked into placed invocation"
         ));
     }
+    // A placed invocation already owns an isolated worktree. Give its worker
+    // direct authority there instead of depending on an out-of-process exec
+    // proxy for commits and delegation.
+    inner_cli.yolo = true;
     Ok((inner_cli, inner_command))
 }
 
@@ -1136,6 +1140,7 @@ mod tests {
         let (inner_cli, inner_command) = inner_placement_invocation(&command).unwrap();
 
         assert!(!placement_requested(&inner_cli));
+        assert!(inner_cli.yolo);
         assert_eq!(
             inner_command,
             vec!["lf", "-b", "--wave", "goals", "implement", "ship it"]
@@ -1252,6 +1257,7 @@ mod tests {
             .to_vec();
         let (inner_cli, inner_command) = inner_placement_invocation(&spaced).unwrap();
         assert!(!placement_requested(&inner_cli));
+        assert!(inner_cli.yolo);
         assert_eq!(inner_command, vec!["lf", "implement"]);
 
         let equals: Vec<String> = ["lf", "--stack=01JSTACK", "implement"]
@@ -1259,6 +1265,7 @@ mod tests {
             .to_vec();
         let (inner_cli, inner_command) = inner_placement_invocation(&equals).unwrap();
         assert!(!placement_requested(&inner_cli));
+        assert!(inner_cli.yolo);
         assert_eq!(inner_command, vec!["lf", "implement"]);
     }
 

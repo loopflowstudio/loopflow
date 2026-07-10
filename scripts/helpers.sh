@@ -306,7 +306,7 @@ prefix+$prefix+r  run step/wave
 prefix+$prefix+s  stop
 prefix+$prefix+o  open logs
 prefix+$prefix+p  open PR
-prefix+$prefix+n  create next worktree
+prefix+$prefix+n  create worktree
 prefix+$prefix+d  land PR
 prefix+$prefix+u  start/bootstrap
 prefix+$prefix+w  pick wave

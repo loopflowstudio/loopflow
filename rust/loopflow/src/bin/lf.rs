@@ -360,29 +360,15 @@ fn run_placed_target(
     } else {
         loopflow::lfd::executor::Placement::Fresh
     };
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store: loopflow::lfdb::SharedStore = std::sync::Arc::new(runtime.block_on(async {
-        loopflow::lfdb::open_existing_store().await.ok_or_else(|| {
-            anyhow::anyhow!(
-                "no run registry on this machine — nothing has created ~/.lf/lfd.db yet"
-            )
-        })
-    })?);
-
-    let mut run = runtime.block_on(async {
-        let wave = store
-            .get_wave_by_name(&wave_name)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("wave '{wave_name}' not found in the registry"))?;
-        let run_id = loopflow::lfd::id::LfdId::new();
-        let mut run =
-            loopflow::lfd::executor::create_run_for_placement(&store, &wave, &run_id, &placement)
-                .await?;
-        run.flow = name.trim_end_matches(':').to_string();
-        run.task = message.map(str::to_string);
-        store.update_run(&run).await?;
-        anyhow::Ok(run)
-    })?;
+    // The same registry-backed run lifecycle `lf loop` uses; only the
+    // placement and what happens inside the worktree differ.
+    let placed = loopflow::flowloop::run::LoopRun::start(
+        &wave_name,
+        name.trim_end_matches(':'),
+        message.map(str::to_string),
+        &placement,
+    )?;
+    let run = &placed.run;
 
     eprintln!("placed {name} in {}", run.worktree);
     let _cwd = CurrentDirGuard::set(&run.worktree)?;
@@ -398,19 +384,7 @@ fn run_placed_target(
         &inner_cli,
         &inner_command,
     );
-    let succeeded = result.is_ok();
-    let error = result.as_ref().err().map(ToString::to_string);
-    runtime.block_on(async {
-        run.status = if succeeded {
-            loopflow::lfd::types::RunStatus::Completed
-        } else {
-            loopflow::lfd::types::RunStatus::Failed
-        };
-        run.ended_at = Some(time::OffsetDateTime::now_utc());
-        run.error = error;
-        store.update_run(&run).await
-    })?;
-    result
+    placed.finish(result)
 }
 
 fn resolve_placement_wave(repo_root: &Path, cli: &Cli) -> anyhow::Result<String> {
@@ -562,7 +536,7 @@ fn main() -> anyhow::Result<()> {
                 in_repo_runtime(&args, |_| loopflow::wave::serve(name, *force))
             }
             Some(Commands::Resident { name }) => {
-                in_repo_runtime(&args, |_| loopflow::wave::resident(name))
+                in_repo_runtime(&args, |_| loopflow::wave::resident::run(name))
             }
             Some(Commands::Loop {
                 name,

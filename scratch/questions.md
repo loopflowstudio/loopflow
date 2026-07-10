@@ -41,8 +41,10 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   channel, and "this is goals.148e reporting" is how radio speech works. It is
   wrong in one direction: a mind that publishes a recorded `say` on a hand's
   channel is bylined as that hand. Steering therefore belongs on the wave's own
-  thread, and the doctrine now points there. Per-hand tokens, minted at loop
-  launch and bound to that loop's channel, would close this.
+  thread, and the doctrine now points there. Superseded by `minds.md` §9: the
+  bus moves to the shared store, no server sits in the publish path, and the
+  byline becomes client-submitted testimony recorded beside the channel's
+  evidence — per-hand tokens stop being needed.
 - **A detached loop's driver holds no subscription.** §8's model assumed one,
   live for the loop's lifetime, queueing steers in memory. The driver has no
   such thing, so `lf radio --channel <hand>` reaches `lf sub` listeners and
@@ -50,7 +52,9 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   teaches: a hand re-reads the wave's memory and thread at every pass boundary,
   so speech on the wave's thread is the ear a hand reliably has. Building the
   fast path is a decision about whether a hand deserves a private steer channel
-  at all, not a bug to fix on the way past.
+  at all, not a bug to fix on the way past. `minds.md` §9 makes both answers
+  cheap: on a store bus the hand's ear is a poll cursor, held or deliberately
+  not.
 - Two agents wrote this worktree at once. HEAD advanced under a running skill
   while unrelated files were being edited, and the two writers left a
   self-contradicting test behind — one updated the frame it waited for, the

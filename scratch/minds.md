@@ -440,8 +440,8 @@ covered by its chat-command tests and the live-body done-when test.
 
 | Gap | Consequence today |
 | --- | --- |
-| A detached loop's driver holds **no** live subscription (§8 assumed one) | `lf radio --channel <hand>` broadcasts to whoever is tuned in and dies there. The only path that reaches a hand is the slow one — it re-reads the wave's thread each pass boundary. Steering a hand therefore means speaking on the wave's thread, not on the hand's channel. |
-| The token names the wave, not the hand | `SubagentDoor` mints one token per boot, inherited by every descendant, so the server cannot stamp *which* hand spoke. The byline is derived from the **channel** instead — unforgeable and right for a report (a hand speaks on its own channel), but a mind that `say`s on a hand's channel gets bylined as that hand. Per-hand minted tokens are the fix. |
+| A detached loop's driver holds **no** live subscription (§8 assumed one) → **§9 dissolves this** | `lf radio --channel <hand>` broadcasts to whoever is tuned in and dies there; steering a hand means speaking on the wave's thread. Under §9 the hand's ear becomes a poll cursor on the store bus — cheap enough to build, or to skip deliberately. |
+| The token names the wave, not the hand → **§9 dissolves this** | The byline is stamped from the **channel** because one token per boot means the server can't tell hands apart. §9 removes the server from the publish path entirely: bylines become client-submitted testimony recorded beside the channel's evidence, and per-hand tokens stop being needed. |
 | Mid-turn steer for Claude and OpenCode → *roadmap* | Only Codex steers; the others queue to the next body. Vendor-gated; the product question lives in `wave/product/projects/wave-chat.md`. |
 | Composite flow nodes (and/xor/or/loop) as first-class playhead frames | They run through the internal headless `__flow-step` fallback (`flowloop/wave.rs:311`). |
 | PM `project:<slug>` label removal on promotion → *roadmap* | The provider has no remove-label op; residual labels are recorded, not cleared. |
@@ -485,30 +485,48 @@ covered by its chat-command tests and the live-body done-when test.
   normally own open PRs. `lf status` now exposes live PR state and title, and
   the pane filters all recent runs by open or draft PR state.
 
+**Reduction pass** (post-review, triaged; details in Next implementation
+session item 2). Applied in-tree and verified green: the `TurnFinished` +
+`BodyFinished` terminal pair collapsed to one helper (was hand-copied at four
+sites — the same drift disease this branch already caught once in its tests);
+`bin/lf.rs` reuses a now-`pub` `LoopRun` instead of reimplementing it (the
+copy existed because `pub(crate)` doesn't cross from lib to bin); the
+`playhead.rs` error hint prescribing the unparseable `lf loop {wave}` now says
+`lf serve`. Open: shared inbox arms + lease-renewal lift, `begin_interrupt`,
+resolver consolidation, `require_loop_flow` inline. Kept deliberately:
+`heartbeat_idle`.
+
 ## Next implementation session
 
 Work that is schedulable now, ordered by what unblocks the most. Everything here
 is ours to write; nothing waits on anyone else.
 
-1. **Per-hand tokens, so the byline names the speaker.** §8 says "the token
-   names the writer." It does not yet: one token is minted per boot and
-   inherited by every descendant, so the server stamps the *channel* instead.
-   That is unforgeable and correct for a report, but it cannot tell a hand's
-   report from a mind speaking on the hand's channel. Mint a token per detached
-   loop, bind it to that loop's channel, and stamp from the binding. This also
-   unblocks honest steer-down attribution.
-2. **The detached loop's live subscription.** §8 assumed the driver holds one
-   for its lifetime and queues steers in memory. It holds none, so a broadcast
-   at a hand reaches only whoever is tuned in. Either build it — SSE client on
-   the hand's own channel, in-memory queue drained into the next pass — or
-   delete the claim and let the wave's thread be the one ear a hand has.
+1. **§9: the bus is the store, not the listener.** Supersedes both of the §8
+   gaps that used to sit here: per-hand tokens die (with no server in the
+   publish path, bylines are client-submitted testimony beside the channel's
+   evidence), and the detached driver's missing subscription becomes a cheap
+   poll cursor. See §9's four done-whens; the deletion list is large and the
+   demo is serverless.
+2. **Reduction leftovers from the review pass** (findings already triaged;
+   1, 2, and 5's stale-hint bug are applied in the tree): factor the shared
+   inbox-interrupt arms and lift the lease-renewal block (finding 3 — take
+   the lease lift; judge the arms enum on readability, interrupt semantics
+   should be lockstep across both loops), merge `interrupt_child`/
+   `interrupt_harness` behind one `begin_interrupt` (4), finish the endpoint
+   resolver consolidation (5), inline `require_loop_flow` (6).
+   `heartbeat_idle` stays — deliberately: it is a real scheduler input with a
+   plausible product future, and deleting it to satisfy a lint instinct would
+   be reshaping production code around tests in reverse.
 3. **Project-loop caps.** Needs dogfood data, not a guessed weeks-scale timeout.
    Run one real project loop first, then pick.
 4. **Composite playhead frames.** Promote branch/loop internals out of the
    `__flow-step` fallback. Separate graph-runtime work; do it when the Mac's
    breadcrumb starts lying about nested flows.
-5. **One writer per worktree.** Decide whether it's a wave-home invariant or a
-   lock. Until then, check for a live agent before working a wave worktree.
+5. **One writer per worktree — as a store lease.** §9 names the mechanism:
+   one-brain-per-wave is already a pid-probed store row, and a worktree lease
+   is the same row one table over. Four writers hit this worktree in one day.
+   Until the lease exists, check for a live agent before working a wave
+   worktree.
 
 ### Punted to the roadmap
 
@@ -765,13 +783,17 @@ lf radio --channel goals.<run> "skip the migration, just gate it"  # steer it
 - The hand's report (`lf radio` from inside its worktree — bare, it publishes
   on its own channel) appears in the wave's thread attributed `[goals.<run>]`,
   queued for the loop — one copy, in the wave's journal, nowhere else.
-- The steer reaches the hand: its driver's live subscription picks it up and
-  the next pass acts on it. Kill the driver and the queued steer dies with it —
-  demonstrated, not apologized for.
+- ~~The steer reaches the hand: its driver's live subscription picks it up.~~
+  **Did not land as written** — the driver holds no subscription, so the
+  broadcast reaches `lf sub` listeners only; steering a hand means speaking on
+  the wave's thread (the ear it reliably has). §9 reopens the fast path as a
+  cheap poll cursor.
 - A message published to a channel nobody is listening on writes no file
   anywhere.
-- The byline on every frame is server-stamped; a forged `from` in the POST body
-  does not survive to subscribers.
+- The byline on every frame is server-stamped *from the channel* (one token
+  per boot means the server can't tell hands apart); a forged `from` does not
+  survive. §9 supersedes this with client-submitted bylines — see its
+  testimony/evidence done-when.
 
 #### Done when: LOOPFLOW.md teaches radio as agent-to-agent comms
 
@@ -784,6 +806,101 @@ lf radio --channel goals.<run> "skip the migration, just gate it"  # steer it
   context — doctrine only where it's exercised.
 - Nothing in the builtins still describes channel journals, worktree-bound
   records, `chat` as an agent verb, or `--parent` as a special transport.
+
+### 9. The bus is the store, not the listener
+
+§8 split the wires conceptually and left the bus living inside the thread's
+process. Trace what `lf radio` actually does at HEAD: resolve the family
+head's endpoint, `POST /messages` to the mind's listener, which sends one
+tagged frame on `family_tx` — a tokio broadcast channel in the listener's
+memory — and, for a `say`, folds one copy into the wave's journal. So there is
+no bus; there is a broker, and the broker is the mind. "Anyone can publish"
+means "anyone can RPC the one process that owns this family, if it is
+running." Two detached hands cannot hear each other unless their wave is
+awake. A human running batch loops with no served wave is deaf. "Tuned in"
+means "holding an open SSE socket at that instant" — ephemerality is an
+implementation accident, not a designed property.
+
+The trace also shows radio is two primitives wearing one verb. *Narration*:
+ephemeral fan-out, no guarantee — genuinely radio. *Report*: a durable write
+that wakes one named consumer — a mailbox, not radio. They want different
+things, and neither wants a broker.
+
+The design: **the db IS the bus**, the same move that made the db the
+registry. One table in the shared store — `{rowid, channel, byline, text,
+at}`. Publish is an INSERT; no server is in the path, so publishing works
+with zero loopflow processes running. Subscribe is a forward poll from a
+rowid cursor: you hear what is said while you listen, from where you tuned
+in. A sweeper deletes rows past a wall-clock window — the bus is not a log,
+and the temptation to treat it as one is the failure mode to guard.
+
+What falls out:
+
+- **Byline is testimony; channel is evidence — structurally.** With no server
+  in the path, client-submitted attribution is the only kind possible. The
+  client derives its byline from the ambient identity it already resolves for
+  routing (`LFD_CHANNEL` → `LFD_WAVE_ID` → worktree name) and writes it into
+  the row next to the channel. A forged byline is visible as a mismatch in
+  the record, not prevented. This deletes both §8 gaps at once: no per-hand
+  tokens (nothing stamps), and no steering-direction hole (a mind speaking on
+  a hand's channel is bylined as the mind).
+- **The listener demotes to a subscriber.** It polls the bus like anyone,
+  records reports addressed to its family into its own journal (the §8 fold,
+  now reading from a table instead of its own arm), and wakes its loop. Its
+  cursor is durable, so a mind that was asleep when a hand reported catches
+  up on wake — the sleeping-mind hole closes, within the sweep window. A mind
+  asleep longer than the window misses the report; the PR and run ledger
+  remain the records of record. Disclosed, not hidden.
+- **A hand's ear is a cursor too.** The detached driver polls its own channel
+  between passes — the "live subscription" §8 imagined becomes a poll loop it
+  can actually hold, or stays unbuilt with the wave's thread as the one ear.
+  That fork stays open; the bus makes both cheap.
+- **The deletion list grows again**: `family_tx`, `ChannelFrame`, tagged SSE
+  frames, the `?channel=`/`?prefix=` scopes on `/events`, the `channel` field
+  on `POST /messages`, `deliver_to_channel`, radio's endpoint resolution, and
+  the `--steer` flag on radio (steer is a thread op; the shared dispatch let
+  it leak across the verb split — separate transports make the leak
+  unspellable). `POST /messages` becomes purely the thread door. Chat and the
+  Mac are untouched: the thread stays SSE on the listener.
+- **The same table pattern is the one-writer answer.** One-brain-per-wave is
+  already a pid-probed store row; a worktree lease is the identical mechanism
+  one table over. Four writers hit this branch's worktree in one day on luck
+  and vigilance. The db IS the registry, the db IS the bus, the db IS the
+  lock.
+
+#### Done when: publishing needs no server
+
+- With zero loopflow processes running, `lf radio "note"` exits 0 and the row
+  is in the bus table. `lf sub <channel>` in another terminal, started first,
+  prints it within a poll interval. No HTTP anywhere in the path.
+- Two detached hands exchange messages with no served wave.
+- A row older than the sweep window is gone, and the bus table stays small
+  under a day of real use — measured, not assumed.
+
+#### Done when: a sleeping mind catches up
+
+- Serve a wave, kill it, have a hand `lf radio` a report, restart the wave:
+  the report lands in its thread, attributed, exactly once — the cursor, not
+  luck, decides. Repeat the restart; still exactly once.
+- A report published beyond the sweep window is missed and the miss is
+  visible (the journal shows the cursor jump), not silent.
+
+#### Done when: byline is testimony, channel is evidence
+
+- Every row carries the client-submitted byline and the arrival channel; the
+  reader can see both. No code path derives identity server-side.
+- `lf radio --from ci` on a hand's channel produces a row whose byline says
+  `ci` and whose channel says the hand — the mismatch is in the record.
+
+#### Done when: the broker is gone
+
+- `family_tx`, `ChannelFrame`, tagged `/events` frames, `?channel=`/`?prefix=`
+  scopes, the `channel` field on `/messages`, and radio's endpoint resolution
+  no longer exist in the tree. Radio compiles with no dependency on
+  `wave::server`.
+- `lf radio --steer` is a parse error, not a forward to chat.
+- LOOPFLOW.md's radio block needs no "if the wave is running" caveat, because
+  there isn't one.
 
 ## MVP product proof
 

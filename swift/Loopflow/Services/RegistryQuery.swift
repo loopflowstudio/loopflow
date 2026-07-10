@@ -123,27 +123,17 @@ public struct RegistryQuery: Sendable {
     }
 }
 
+/// `lf pm show --json`. The envelope names the wave, provider, and project it
+/// read; the Mac only renders the items.
 private struct PmShowSnapshot: Decodable {
-    let wave: String
-    let provider: String
-    let project: String
-    let localProject: String?
     let items: [BacklogItem]
-
-    enum CodingKeys: String, CodingKey {
-        case wave, provider, project, items
-        case localProject = "local_project"
-    }
 }
 
 public struct BacklogItem: Decodable, Sendable, Identifiable, Hashable {
     public let id: String
     public let name: String
-    public let description: String
-    public let rank: Int
     public let completed: Bool
     public let labels: [String]
-    public let assignee: String?
 }
 
 // MARK: - Wire snapshots (mirror the Rust `--json` types)

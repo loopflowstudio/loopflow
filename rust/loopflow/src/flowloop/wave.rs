@@ -872,12 +872,18 @@ impl WaveLoop {
         true
     }
 
-    async fn interrupt_harness(&mut self, body_id: &str, harness: &mut dyn Harness, skip: bool) {
+    /// The interrupt protocol: announce, tear the body down, close the pass.
+    /// Only the teardown differs between a harness session and a child process.
+    async fn announce_interrupt(&mut self) {
         self.send(vec![ResidentDelta::LoopState {
             to: ResidentStateTo::Interrupting,
             reason: "user interrupt".to_string(),
         }])
         .await;
+    }
+
+    async fn interrupt_harness(&mut self, body_id: &str, harness: &mut dyn Harness, skip: bool) {
+        self.announce_interrupt().await;
         let _ = harness.interrupt().await;
         let _ = harness.stop().await;
         self.finish_interrupted_pass(body_id, skip).await;
@@ -905,20 +911,8 @@ impl WaveLoop {
                     return;
                 }
                 self.consecutive_failures = 0;
-                self.send(vec![
-                    ResidentDelta::TurnFinished {
-                        status,
-                        cost_usd,
-                        reason: None,
-                    },
-                    ResidentDelta::BodyFinished {
-                        body_id: body_id.to_string(),
-                        outcome: StepOutcome::Completed,
-                        reason: "completed".to_string(),
-                    },
-                ])
-                .await;
-                self.idle_since = Instant::now();
+                self.finish_pass(body_id, StepOutcome::Completed, None, cost_usd)
+                    .await;
             }
             Lifecycle::Interrupted => self.finish_interrupted_pass(body_id, false).await,
             Lifecycle::Failed => {
@@ -941,20 +935,8 @@ impl WaveLoop {
             Ok(output) if output.status.success() => {
                 self.consecutive_failures = 0;
                 self.ship_output(output).await;
-                self.send(vec![
-                    ResidentDelta::TurnFinished {
-                        status: Lifecycle::Completed,
-                        cost_usd: None,
-                        reason: None,
-                    },
-                    ResidentDelta::BodyFinished {
-                        body_id: body_id.to_string(),
-                        outcome: StepOutcome::Completed,
-                        reason: "completed".to_string(),
-                    },
-                ])
-                .await;
-                self.idle_since = Instant::now();
+                self.finish_pass(body_id, StepOutcome::Completed, None, None)
+                    .await;
             }
             Ok(output) => {
                 self.ship_output(output).await;
@@ -988,57 +970,58 @@ impl WaveLoop {
         wait_task: &mut tokio::task::JoinHandle<std::io::Result<std::process::Output>>,
         skip: bool,
     ) {
-        self.send(vec![ResidentDelta::LoopState {
-            to: ResidentStateTo::Interrupting,
-            reason: "user interrupt".to_string(),
-        }])
-        .await;
+        self.announce_interrupt().await;
         wait_task.abort();
         self.finish_interrupted_pass(body_id, skip).await;
     }
 
-    async fn finish_interrupted_pass(&mut self, body_id: &str, skip: bool) {
-        self.consecutive_failures = 0;
-        let reason = if skip {
-            "skipped by user"
-        } else {
-            "interrupted by user"
+    /// Every terminal end of a body, and the only place the pair is built: the
+    /// turn closes and the playhead's body closes with it. The outcome picks
+    /// the turn's lifecycle — a skip is an interrupted turn whose playhead
+    /// advances anyway — and names itself when the caller has nothing to add.
+    async fn finish_pass(
+        &mut self,
+        body_id: &str,
+        outcome: StepOutcome,
+        reason: Option<String>,
+        cost_usd: Option<f64>,
+    ) {
+        let status = match outcome {
+            StepOutcome::Completed => Lifecycle::Completed,
+            StepOutcome::Skipped | StepOutcome::Interrupted => Lifecycle::Interrupted,
+            StepOutcome::Failed => Lifecycle::Failed,
         };
+        let reason = reason.unwrap_or_else(|| outcome.name().to_string());
         self.send(vec![
             ResidentDelta::TurnFinished {
-                status: Lifecycle::Interrupted,
-                cost_usd: None,
-                reason: Some(reason.to_string()),
+                status,
+                cost_usd,
+                reason: (status != Lifecycle::Completed).then(|| reason.clone()),
             },
             ResidentDelta::BodyFinished {
                 body_id: body_id.to_string(),
-                outcome: if skip {
-                    StepOutcome::Skipped
-                } else {
-                    StepOutcome::Interrupted
-                },
-                reason: reason.to_string(),
+                outcome,
+                reason,
             },
         ])
         .await;
         self.idle_since = Instant::now();
     }
 
+    async fn finish_interrupted_pass(&mut self, body_id: &str, skip: bool) {
+        self.consecutive_failures = 0;
+        let (outcome, reason) = if skip {
+            (StepOutcome::Skipped, "skipped by user")
+        } else {
+            (StepOutcome::Interrupted, "interrupted by user")
+        };
+        self.finish_pass(body_id, outcome, Some(reason.to_string()), None)
+            .await;
+    }
+
     async fn finish_failed_pass(&mut self, body_id: &str, reason: &str) {
-        self.send(vec![
-            ResidentDelta::TurnFinished {
-                status: Lifecycle::Failed,
-                cost_usd: None,
-                reason: Some(reason.to_string()),
-            },
-            ResidentDelta::BodyFinished {
-                body_id: body_id.to_string(),
-                outcome: StepOutcome::Failed,
-                reason: reason.to_string(),
-            },
-        ])
-        .await;
-        self.idle_since = Instant::now();
+        self.finish_pass(body_id, StepOutcome::Failed, Some(reason.to_string()), None)
+            .await;
         self.consecutive_failures += 1;
         if self.consecutive_failures >= MAX_CONSECUTIVE_PASS_FAILURES {
             self.fail(&format!(

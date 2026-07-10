@@ -290,12 +290,12 @@ impl WaveRuntime {
         // Janitor: an active body belonged to the dead server process. Keep
         // its logical step selected, close only the abandoned attempt, and
         // let the fresh resident retry it in a new body.
+        const ABANDONED: &str = "startup janitor: body abandoned by server restart";
         let mut playhead = fold.playhead.take();
         if let Some(state) = playhead.as_mut() {
             if let Some(active) = state.active.clone() {
-                let reason = "startup janitor: body abandoned by server restart";
                 let events =
-                    state.finish_body(&active.body_id, StepOutcome::Interrupted, reason)?;
+                    state.finish_body(&active.body_id, StepOutcome::Interrupted, ABANDONED)?;
                 for event in events {
                     journal.append(|_| EventKind::PlayheadChanged {
                         event,
@@ -307,18 +307,14 @@ impl WaveRuntime {
 
         // Janitor: a turn without a TurnFinished crashed with the server.
         for mut turn in fold.open {
-            let reason = "startup janitor: body abandoned by server restart";
             let finished = journal.append(|_| EventKind::TurnFinished {
                 turn_id: turn.id.clone(),
                 status: Lifecycle::Failed,
                 usage: Usage::empty(),
-                termination_reason: Some(reason.to_string()),
+                termination_reason: Some(ABANDONED.to_string()),
             });
             turn.status = Lifecycle::Failed;
-            if let Some(body) = turn.body.as_mut() {
-                body.ended_at = Some(finished.at_rfc3339());
-                body.termination_reason = Some(reason.to_string());
-            }
+            turn.close_body(finished.at_rfc3339(), Some(ABANDONED.to_string()));
             fold.turns.push(turn);
         }
         // Janitor: what the crashed turns claimed goes back in the queue —
@@ -794,14 +790,13 @@ impl WaveRuntime {
         text: String,
         from: Option<Attribution>,
     ) -> anyhow::Result<Option<ChatTurn>> {
-        if self.is_primary(channel) {
-            return Ok(self.deliver(op, text, from));
-        }
-        if channel_role(&self.name, channel) != Some(ChannelRole::Child) {
-            anyhow::bail!(
+        match channel_role(&self.name, channel) {
+            Some(ChannelRole::Primary) => return Ok(self.deliver(op, text, from)),
+            Some(ChannelRole::Child) => {}
+            None => anyhow::bail!(
                 "channel '{channel}' is not in wave '{}''s family",
                 self.name
-            );
+            ),
         }
         if op == MessageOp::Interrupt && text.trim().is_empty() {
             return Ok(None);
@@ -822,7 +817,6 @@ impl WaveRuntime {
         let _ = self.family_tx.send(ChannelFrame {
             channel: channel.to_string(),
             json: tagged_turn_json(channel, &turn).into(),
-            turn: Arc::new(turn.clone()),
         });
         if op == MessageOp::Say {
             self.deliver_say(text, from);
@@ -1005,10 +999,7 @@ impl WaveRuntime {
                 self.requeue_locked(&mut inner, &claims);
             }
             turn.status = status;
-            if let Some(body) = turn.body.as_mut() {
-                body.ended_at = Some(finished.at_rfc3339());
-                body.termination_reason = Some(reason.to_string());
-            }
+            turn.close_body(finished.at_rfc3339(), Some(reason.to_string()));
             self.transition_locked(&mut inner, LoopState::Idle, reason);
             self.commit_locked(&mut inner, turn);
         }
@@ -1406,14 +1397,7 @@ impl WaveRuntime {
             self.requeue_locked(&mut inner, &claims);
         }
         turn.status = status;
-        if let Some(body) = turn.body.as_mut() {
-            body.ended_at = Some(
-                time::OffsetDateTime::now_utc()
-                    .format(&time::format_description::well_known::Rfc3339)
-                    .unwrap_or_default(),
-            );
-            body.termination_reason = reason;
-        }
+        turn.close_body(now_rfc3339(), reason);
         self.transition_locked(&mut inner, LoopState::Idle, "turn finalized");
         self.commit_locked(&mut inner, turn);
     }
@@ -2134,7 +2118,9 @@ mod tests {
 
         let frame = bus.try_recv().expect("the listener heard it");
         assert_eq!(frame.channel, "ship.a");
-        assert_eq!(frame.turn.text, "steer left");
+        let wire: serde_json::Value = serde_json::from_str(&frame.json).expect("tagged turn");
+        assert_eq!(wire["text"], "steer left");
+        assert_eq!(wire["channel"], "ship.a");
         assert!(
             rt.thread_snapshot().is_empty(),
             "a plain child message never reaches the wave's thread"

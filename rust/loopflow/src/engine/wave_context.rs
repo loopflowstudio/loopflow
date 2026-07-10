@@ -297,18 +297,6 @@ fn gather_memory_chain(origin: &Path, chain: &[String]) -> Option<String> {
     (!scoped.is_empty()).then(|| scoped.join("\n\n"))
 }
 
-/// The `<lf:wave-chat-recent>` body for an ambient CHANNEL — the wave's thread,
-/// whichever channel this run speaks on.
-///
-/// A hand lives INSIDE its wave's mind: it re-reads that thread at every pass
-/// boundary. Work-line channels are ephemeral bus topics with no thread of
-/// their own — a hand's reports land in the wave's journal, so reading the
-/// wave is reading everything it has said. The channel only names its family
-/// head.
-pub fn gather_channel_chat(repo_root: &Path, channel: &str) -> Option<String> {
-    gather_wave_chat(repo_root, crate::wave::channel::family_head(channel))
-}
-
 /// The `wave/<name>/.wave-endpoint` discovery pointer's contents, trimmed.
 /// Missing or empty pointer → `None`. Shared by every pointer reader (`lf
 /// chat` targeting and the ambient read here); the wave server owns writes.
@@ -565,32 +553,22 @@ mod tests {
     }
 
     /// A hand lives inside its wave's mind: a run in a work-line worktree reads
-    /// the WAVE's thread, byte-identical to a run at the wave home. Work-line
-    /// channels keep no thread of their own — a hand's reports are already in
-    /// the wave's journal, so there is nothing else to read.
+    /// the WAVE's thread — the journal lives at the origin, and the worktree
+    /// carries none of its own — byte-identical to a run at the wave home.
     #[test]
-    fn channel_chat_in_a_work_line_reads_the_waves_thread() {
+    fn a_work_line_worktree_reads_the_waves_thread() {
         let repo = loopflow_test_support::TestRepo::new();
         let worktree = repo.create_wave_worktree("goals.148e");
         seed_journal(repo.path(), "goals", "wave-level question?");
 
         let from_work_line =
-            gather_channel_chat(&worktree, "goals.148e").expect("work line reads its wave");
+            gather_wave_chat(&worktree, "goals").expect("work line reads its wave");
         assert!(from_work_line.contains("wave-level question?"));
-        assert!(
-            !from_work_line.contains("## "),
-            "one thread, no sections: {from_work_line}"
+        assert_eq!(
+            from_work_line,
+            gather_wave_chat(repo.path(), "goals").expect("wave chat"),
+            "the wave home reads exactly the same thread"
         );
-
-        // The wave home reads exactly the same thread.
-        let from_home = gather_channel_chat(repo.path(), "goals").expect("wave chat");
-        assert_eq!(from_work_line, from_home);
-
-        // A work line whose worktree carries no journal of its own is normal,
-        // not empty: it reads the wave like every other body.
-        let bare = repo.create_wave_worktree("goals.bare0");
-        let from_bare = gather_channel_chat(&bare, "goals.bare0").expect("bare work line");
-        assert_eq!(from_bare, from_home);
     }
 
     #[test]

@@ -35,6 +35,7 @@ use serde::Deserialize;
 
 use crate::flowloop::pass::{run_pass, PassOptions};
 use crate::flowloop::run::LoopRun;
+use crate::lfd::executor::Placement;
 use crate::ops::{OpsError, OpsResult};
 use crate::wave::wire::{
     DetachedLoopRequest, DetachedLoopResponse, RESIDENT_TOKEN_HEADER, SUBAGENT_TOKEN_HEADER,
@@ -87,7 +88,12 @@ pub fn run_loop(repo: &Path, seed: &str, options: &LoopOptions) -> OpsResult<()>
     require_loop_flow(repo, &options.flow)?;
     let wave_name = crate::ops::util::resolve_wave_name(repo, options.wave.as_deref())
         .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))?;
-    let mut run = LoopRun::start(&wave_name, &options.flow, seed.to_string())?;
+    let mut run = LoopRun::start(
+        &wave_name,
+        &options.flow,
+        Some(seed.to_string()),
+        &Placement::Fresh,
+    )?;
     let worktree = run.worktree();
     eprintln!("loop {} running in {}", options.flow, worktree.display());
     let result = drive(

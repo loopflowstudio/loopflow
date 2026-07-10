@@ -50,5 +50,5 @@ fn endpoint(repo: &Path, wave: Option<&str>) -> Result<String> {
         .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?;
     let origin = crate::engine::wave_context::wave_origin(repo);
     read_endpoint_pointer(&origin, &wave)
-        .ok_or_else(|| anyhow!("wave '{wave}' is not running; start it with `lf loop {wave}`"))
+        .ok_or_else(|| anyhow!("wave '{wave}' is not running; start it with `lf serve {wave}`"))
 }

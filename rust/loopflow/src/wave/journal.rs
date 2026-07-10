@@ -909,10 +909,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 };
                 let mut turn = open.remove(pos);
                 turn.status = *status;
-                if let Some(body) = turn.body.as_mut() {
-                    body.ended_at = Some(event.at_rfc3339());
-                    body.termination_reason = termination_reason.clone();
-                }
+                turn.close_body(event.at_rfc3339(), termination_reason.clone());
                 claims_by_open_turn.remove(turn_id);
                 turns.push(turn);
             }

@@ -29,13 +29,13 @@ pub fn family_head(channel: &str) -> &str {
 
 /// One live frame from a child channel, tagged with its name so a family
 /// subscription can tell the streams apart (the primary channel's frames ride
-/// untagged — absent means the wave's own channel).
+/// untagged — absent means the wave's own channel). A topic has no past, so a
+/// frame is only ever forwarded, never folded: the tagged wire JSON is the
+/// whole frame, serialized once at the send site so N subscribers share one
+/// serialization.
 #[derive(Debug, Clone)]
 pub struct ChannelFrame {
     pub channel: String,
-    pub turn: std::sync::Arc<ChatTurn>,
-    /// The tagged wire JSON (turn + `"channel"` key), serialized once at the
-    /// send site so N subscribers share one serialization.
     pub json: std::sync::Arc<str>,
 }
 

@@ -73,17 +73,6 @@ use crate::lfdb::{open_existing_store, SharedStore};
 use crate::ops::util::resolve_wave_name;
 use crate::wave::runtime::WaveRuntime;
 
-/// Whether the listener spawns (and supervises) a resident.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LoopPolicy {
-    /// Spawn the internal resident child and keep it alive
-    /// (respawn ladder, immediate respawn on a human message).
-    Spawn,
-    /// Test-only listener with no resident.
-    #[cfg(test)]
-    Dormant,
-}
-
 /// The hidden subcommand a listener spawns for its own resident body. Named
 /// here so the spawner and the CLI cannot drift apart silently.
 pub(crate) const RESIDENT_SUBCOMMAND: &str = "__resident";
@@ -109,17 +98,11 @@ pub fn serve(name: &str, force: bool) -> Result<()> {
             wave,
             registry_config,
             force,
-            LoopPolicy::Spawn,
+            true,
             shutdown_signal(),
         )
         .await
     })
-}
-
-/// `lf __resident <name>` — the resident body a listener spawns for its own
-/// wave. Attaches to the endpoint/token its parent listener put in env.
-pub fn resident(name: &str) -> Result<()> {
-    resident::run(name)
 }
 
 /// Open the machine's shared registry and resolve this wave's row, creating
@@ -202,17 +185,18 @@ fn resident_spawner(
 }
 
 /// Serve the wave until `shutdown` resolves. Vendor-free by construction:
-/// no harness, no vendor process — the resident (spawned per `loop_policy`, or
-/// attached by hand) owns those. `registry_config` is `None` in tests that
-/// exercise the server without a registry store; `force` rides separately
-/// because the endpoint-file floor must honor it even when there is no
-/// registry config at all.
+/// no harness, no vendor process — the resident owns those. Production always
+/// spawns one; `spawn_resident` is `false` only in tests that exercise the
+/// listener alone. `registry_config` is `None` in tests that exercise the
+/// server without a registry store; `force` rides separately because the
+/// endpoint-file floor must honor it even when there is no registry config at
+/// all.
 async fn run_listener(
     repo_root: PathBuf,
     wave: String,
     registry_config: Option<registry::RegistryConfig>,
     force: bool,
-    loop_policy: LoopPolicy,
+    spawn_resident: bool,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
     // File-level one-brain floor, before anything else: an existing pointer
@@ -339,18 +323,16 @@ async fn run_listener(
     // The keeper's watch: resident liveness, respawn ladder, interrupt
     // janitor. Runs even without a spawner — the pen-side anti-wedges (janitor, attach
     // probe) never depend on who spawned the resident.
-    let spawner = match loop_policy {
-        LoopPolicy::Spawn => Some(resident_spawner(
+    let spawner = spawn_resident.then(|| {
+        resident_spawner(
             wave.clone(),
             repo_root.clone(),
             addr.to_string(),
             token.clone(),
             subagent_door.mint(),
             session_env,
-        )),
-        #[cfg(test)]
-        LoopPolicy::Dormant => None,
-    };
+        )
+    });
     // Build the supervisor before spawning so the attach door can hold its
     // handle: an attached resident signals the keeper to
     // stand the respawn ladder down, so the deadline never spawns a second
@@ -385,10 +367,10 @@ async fn run_listener(
     println!(
         "lf serve · {wave} · listener on http://{addr}{} \
          (Ctrl-C to stop, RUST_LOG=loopflow=debug for the firehose)",
-        match loop_policy {
-            LoopPolicy::Spawn => " · spawning resident",
-            #[cfg(test)]
-            LoopPolicy::Dormant => " · dormant test listener",
+        if spawn_resident {
+            " · spawning resident"
+        } else {
+            " · no resident"
         }
     );
 
@@ -1540,16 +1522,9 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
         let handle = tokio::spawn(async move {
-            run_listener(
-                repo2,
-                "ship".into(),
-                None,
-                false,
-                LoopPolicy::Dormant,
-                async {
-                    let _ = shutdown_rx.await;
-                },
-            )
+            run_listener(repo2, "ship".into(), None, false, false, async {
+                let _ = shutdown_rx.await;
+            })
             .await
         });
 
@@ -1608,16 +1583,9 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
         let handle = tokio::spawn(async move {
-            run_listener(
-                repo2,
-                "ship".into(),
-                None,
-                false,
-                LoopPolicy::Dormant,
-                async {
-                    let _ = shutdown_rx.await;
-                },
-            )
+            run_listener(repo2, "ship".into(), None, false, false, async {
+                let _ = shutdown_rx.await;
+            })
             .await
         });
 
@@ -1644,16 +1612,9 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
         let first = tokio::spawn(async move {
-            run_listener(
-                repo2,
-                "ship".into(),
-                None,
-                false,
-                LoopPolicy::Dormant,
-                async {
-                    let _ = shutdown_rx.await;
-                },
-            )
+            run_listener(repo2, "ship".into(), None, false, false, async {
+                let _ = shutdown_rx.await;
+            })
             .await
         });
         let endpoint = server::endpoint_path(&repo, "ship");
@@ -1662,16 +1623,9 @@ mod tests {
 
         // Second server: probed live, refused, pointer untouched.
         let (_shutdown_tx2, shutdown_rx2) = tokio::sync::oneshot::channel::<()>();
-        let err = run_listener(
-            repo.clone(),
-            "ship".into(),
-            None,
-            false,
-            LoopPolicy::Dormant,
-            async {
-                let _ = shutdown_rx2.await;
-            },
-        )
+        let err = run_listener(repo.clone(), "ship".into(), None, false, false, async {
+            let _ = shutdown_rx2.await;
+        })
         .await
         .expect_err("live endpoint refuses a second server");
         assert!(
@@ -1739,16 +1693,9 @@ mod tests {
             force: false,
         };
         let handle = tokio::spawn(async move {
-            run_listener(
-                repo2,
-                "ship".into(),
-                Some(config),
-                false,
-                LoopPolicy::Dormant,
-                async {
-                    let _ = shutdown_rx.await;
-                },
-            )
+            run_listener(repo2, "ship".into(), Some(config), false, false, async {
+                let _ = shutdown_rx.await;
+            })
             .await
         });
 
@@ -1825,7 +1772,7 @@ mod tests {
                 force: false,
             }),
             false,
-            LoopPolicy::Dormant,
+            false,
             async {
                 let _ = shutdown_rx.await;
             },

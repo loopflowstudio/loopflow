@@ -90,6 +90,17 @@ impl ChatTurn {
         }
     }
 
+    /// Close the body that produced this turn, if it had one. Every terminal
+    /// path goes through here — the live finalizers, the boot janitor, and the
+    /// journal fold — so a replayed turn's body reads exactly as the live one
+    /// did. Human and attributed turns have no body and close as a no-op.
+    pub fn close_body(&mut self, ended_at: String, reason: Option<String>) {
+        if let Some(body) = self.body.as_mut() {
+            body.ended_at = Some(ended_at);
+            body.termination_reason = reason;
+        }
+    }
+
     /// Join a prose fragment into the turn text, newline-separated.
     pub fn push_text(&mut self, fragment: &str) {
         if !self.text.is_empty() {

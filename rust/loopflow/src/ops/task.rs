@@ -162,6 +162,7 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
                     .map_err(|error| task_error(error.to_string()))?,
                 slug: resolved.project.slug.clone(),
                 name: resolved.project.name.clone(),
+                context: project_context(&resolved.project),
             },
             wave_id: wave.id().clone(),
             wave: resolved.wave.clone(),
@@ -237,6 +238,18 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
         launch_task_process(&store, &mut session).await?;
         wait_until_running(&store, &session.id).await
     })
+}
+
+fn project_context(project: &crate::lfd::pm::PmProject) -> String {
+    let mut context = format!("Definition:\n{}", project.definition.trim());
+    if !project.krs.is_empty() {
+        context.push_str("\n\nKRs:");
+        for kr in &project.krs {
+            let mark = if kr.holds { "x" } else { " " };
+            context.push_str(&format!("\n- [{mark}] {}", kr.text));
+        }
+    }
+    context
 }
 
 pub fn task_start(repo: &Path, title: String, project_id: &str) -> OpsResult<TaskSession> {
@@ -415,6 +428,28 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
                     )
                     .await
                     .map_err(|error| task_error(error.to_string()))?;
+                store
+                    .append_task_event(
+                        &session.id,
+                        &TaskEventKind::Failed {
+                            error: session.status_reason.clone(),
+                            resumable: true,
+                        },
+                    )
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?;
+                crate::lf::commands::chat::post_to_named_wave(
+                    &session.wave,
+                    &format!(
+                        "Task {} → failed: {}",
+                        session.issue.identifier, session.status_reason
+                    ),
+                )
+                .await
+                .map_err(|error| {
+                    task_error(format!("failed to mirror task failure to Wave: {error}"))
+                })?;
+                return Ok(session);
             }
         }
         if !session.status.is_process_active() && !session.status.is_terminal() {
@@ -677,4 +712,37 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
         return Err(task_error(format!("tmux attach failed for {tmux_name}")));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::project_context;
+    use crate::lfd::pm::{PmKr, PmProject};
+
+    #[test]
+    fn task_context_captures_project_definition_and_kr_state() {
+        let project = PmProject {
+            id: "project-1".to_string(),
+            slug: "delivery".to_string(),
+            name: "Delivery".to_string(),
+            summary: "Ship reliably".to_string(),
+            definition: "Every task has one durable session.".to_string(),
+            krs: vec![
+                PmKr {
+                    text: "Review resumes the same session".to_string(),
+                    holds: true,
+                },
+                PmKr {
+                    text: "Merge wakes the Wave".to_string(),
+                    holds: false,
+                },
+            ],
+            initiative_ids: vec!["initiative-1".to_string()],
+        };
+
+        assert_eq!(
+            project_context(&project),
+            "Definition:\nEvery task has one durable session.\n\nKRs:\n- [x] Review resumes the same session\n- [ ] Merge wakes the Wave"
+        );
+    }
 }

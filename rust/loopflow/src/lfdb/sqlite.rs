@@ -1526,14 +1526,14 @@ impl SqliteStore {
         conn.execute(
             "INSERT INTO task_sessions (
                 id, issue_id, issue_identifier, issue_title, issue_description,
-                project_id, project_slug, project_name, wave_id, wave_name,
+                project_id, project_slug, project_name, project_context, wave_id, wave_name,
                 status, status_reason, status_at, worktree, branch, base_commit,
                 agent, provider, provider_session_id, process_generation, process_pid,
                 process_tmux_name, process_started_at, pr_number, pr_url,
                 created_at, updated_at
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
              )",
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
@@ -1560,14 +1560,14 @@ impl SqliteStore {
         transaction.execute(
             "INSERT INTO task_sessions (
                 id, issue_id, issue_identifier, issue_title, issue_description,
-                project_id, project_slug, project_name, wave_id, wave_name,
+                project_id, project_slug, project_name, project_context, wave_id, wave_name,
                 status, status_reason, status_at, worktree, branch, base_commit,
                 agent, provider, provider_session_id, process_generation, process_pid,
                 process_tmux_name, process_started_at, pr_number, pr_url,
                 created_at, updated_at
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
              )",
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
@@ -1581,12 +1581,12 @@ impl SqliteStore {
         let changed = conn.execute(
             "UPDATE task_sessions SET
                 issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
-                project_id=?6, project_slug=?7, project_name=?8, wave_id=?9,
-                wave_name=?10, status=?11, status_reason=?12, status_at=?13,
-                worktree=?14, branch=?15, base_commit=?16, agent=?17, provider=?18,
-                provider_session_id=?19, process_generation=?20, process_pid=?21,
-                process_tmux_name=?22, process_started_at=?23, pr_number=?24,
-                pr_url=?25, created_at=?26, updated_at=?27
+                project_id=?6, project_slug=?7, project_name=?8, project_context=?9,
+                wave_id=?10, wave_name=?11, status=?12, status_reason=?13, status_at=?14,
+                worktree=?15, branch=?16, base_commit=?17, agent=?18, provider=?19,
+                provider_session_id=?20, process_generation=?21, process_pid=?22,
+                process_tmux_name=?23, process_started_at=?24, pr_number=?25,
+                pr_url=?26, created_at=?27, updated_at=?28
              WHERE id=?1",
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
@@ -2418,7 +2418,7 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
 
 const TASK_SESSION_COLUMNS: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
-    project_id, project_slug, project_name, wave_id, wave_name,
+    project_id, project_slug, project_name, project_context, wave_id, wave_name,
     status, status_reason, status_at, worktree, branch, base_commit,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
@@ -2426,7 +2426,7 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
     FROM task_sessions";
 const TASK_SESSION_SELECT: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
-    project_id, project_slug, project_name, wave_id, wave_name,
+    project_id, project_slug, project_name, project_context, wave_id, wave_name,
     status, status_reason, status_at, worktree, branch, base_commit,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
@@ -2443,6 +2443,7 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.project.id.as_str().to_string()),
         Box::new(session.project.slug.clone()),
         Box::new(session.project.name.clone()),
+        Box::new(session.project.context.clone()),
         Box::new(session.wave_id.clone()),
         Box::new(session.wave.clone()),
         Box::new(session.status.as_str().to_string()),
@@ -2503,23 +2504,23 @@ fn invalid_column(
 }
 
 fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession> {
-    let status_text: String = row.get(10)?;
+    let status_text: String = row.get(11)?;
     let status = status_text
         .parse()
-        .map_err(|error| invalid_column(10, error))?;
-    let process_generation: Option<i64> = row.get(19)?;
-    let process_started_at: Option<i64> = row.get(22)?;
+        .map_err(|error| invalid_column(11, error))?;
+    let process_generation: Option<i64> = row.get(20)?;
+    let process_started_at: Option<i64> = row.get(23)?;
     let process = match (process_generation, process_started_at) {
         (Some(generation), Some(started_at)) => Some(TaskProcess {
             generation: generation as u32,
-            pid: row.get::<_, Option<i64>>(20)?.map(|pid| pid as u32),
-            tmux_name: row.get::<_, Option<String>>(21)?.unwrap_or_default(),
+            pid: row.get::<_, Option<i64>>(21)?.map(|pid| pid as u32),
+            tmux_name: row.get::<_, Option<String>>(22)?.unwrap_or_default(),
             started_at: crate::lfdb::rows::unix_to_datetime(started_at),
         }),
         _ => None,
     };
-    let pr_number: Option<i64> = row.get(23)?;
-    let pr_url: Option<String> = row.get(24)?;
+    let pr_number: Option<i64> = row.get(24)?;
+    let pr_url: Option<String> = row.get(25)?;
     let pull_request = match (pr_number, pr_url) {
         (Some(number), Some(url)) => Some(PullRequestRef {
             number: number as u32,
@@ -2539,22 +2540,23 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
             id: LinearProjectId::from_raw(row.get::<_, String>(5)?),
             slug: row.get(6)?,
             name: row.get(7)?,
+            context: row.get(8)?,
         },
-        wave_id: LfdId::from_raw(row.get::<_, String>(8)?),
-        wave: row.get(9)?,
+        wave_id: LfdId::from_raw(row.get::<_, String>(9)?),
+        wave: row.get(10)?,
         status,
-        status_reason: row.get(11)?,
-        status_at: crate::lfdb::rows::unix_to_datetime(row.get(12)?),
-        worktree: PathBuf::from(row.get::<_, String>(13)?),
-        branch: row.get(14)?,
-        base_commit: row.get(15)?,
-        agent: row.get(16)?,
-        provider: row.get(17)?,
-        provider_session_id: row.get(18)?,
+        status_reason: row.get(12)?,
+        status_at: crate::lfdb::rows::unix_to_datetime(row.get(13)?),
+        worktree: PathBuf::from(row.get::<_, String>(14)?),
+        branch: row.get(15)?,
+        base_commit: row.get(16)?,
+        agent: row.get(17)?,
+        provider: row.get(18)?,
+        provider_session_id: row.get(19)?,
         process,
         pull_request,
-        created_at: crate::lfdb::rows::unix_to_datetime(row.get(25)?),
-        updated_at: crate::lfdb::rows::unix_to_datetime(row.get(26)?),
+        created_at: crate::lfdb::rows::unix_to_datetime(row.get(26)?),
+        updated_at: crate::lfdb::rows::unix_to_datetime(row.get(27)?),
     })
 }
 

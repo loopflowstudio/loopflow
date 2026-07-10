@@ -1580,6 +1580,7 @@ mod tests {
                 id: LinearProjectId::new("project-uuid").unwrap(),
                 slug: "developer-efficiency".to_string(),
                 name: "Developer Efficiency".to_string(),
+                context: "Definition:\nKeep local work fast.".to_string(),
             },
             wave_id: wave.id().clone(),
             wave: wave.name().to_string(),

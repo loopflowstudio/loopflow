@@ -175,7 +175,7 @@ async fn plan_check_run_notifications(
     cache: &Arc<Mutex<HashSet<String>>>,
     event: &GitHubCheckRunEvent,
 ) -> Result<Vec<LfExec>, String> {
-    let mut execs = Vec::new();
+    let execs = Vec::new();
     let mut planned: HashSet<String> = HashSet::new();
     for pr in &event.check_run.pull_requests {
         let targets = find_wave_ci_targets(
@@ -266,14 +266,15 @@ async fn complete_merged_task_sessions(
             )
             .await
             .map_err(|error| error.to_string())?;
-        execs.push(LfExec::radio(
-            wave.name(),
-            format!(
+        crate::lf::commands::chat::post_to_wave(
+            &wave,
+            &format!(
                 "Task {} → merged: {}",
                 session.issue.identifier, session.status_reason
             ),
-            "github",
-        ));
+        )
+        .await
+        .map_err(|error| error.to_string())?;
         processed += 1;
     }
     Ok((processed, execs))
@@ -735,6 +736,7 @@ mod tests {
                 id: LinearProjectId::new("project-uuid").expect("project id"),
                 slug: "delivery".to_string(),
                 name: "Delivery".to_string(),
+                context: "Definition:\nShip task sessions.".to_string(),
             },
             wave_id: wave.id().clone(),
             wave: wave.name().to_string(),
@@ -967,13 +969,21 @@ mod tests {
                 .await
                 .expect("complete task");
         assert_eq!(processed, 1);
-        assert_eq!(execs.len(), 1);
+        assert!(execs.is_empty());
         let merged = store
             .get_task_session(&task.id)
             .await
             .expect("read task")
             .expect("task remains");
         assert_eq!(merged.status, TaskSessionStatus::Merged);
+        let (_, events) =
+            crate::wave::journal::Journal::open(&crate::wave::journal::journal_path(&repo, "ship"))
+                .expect("wave journal");
+        assert!(events.iter().any(|event| matches!(
+            &event.kind,
+            crate::wave::journal::EventKind::UserMessage { text, .. }
+                if text.contains("Task INF-123 → merged")
+        )));
 
         let (processed_again, execs_again) =
             complete_merged_task_sessions(&store, "loopflowstudio/loopflow", 7)

@@ -133,6 +133,8 @@ pub struct LinearProjectRef {
     pub id: LinearProjectId,
     pub slug: String,
     pub name: String,
+    /// Definition and proof-shaped KRs captured when the Task Session starts.
+    pub context: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

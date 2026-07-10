@@ -20,6 +20,14 @@ struct PendingInput {
 }
 
 pub async fn run_task_session(session_id: TaskSessionId, generation: u32) -> Result<()> {
+    let result = run_task_session_inner(session_id.clone(), generation).await;
+    if let Err(error) = &result {
+        record_unhandled_failure(&session_id, generation, error).await;
+    }
+    result
+}
+
+async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> Result<()> {
     let store: SharedStore = Arc::new(
         open_existing_store()
             .await
@@ -61,6 +69,7 @@ pub async fn run_task_session(session_id: TaskSessionId, generation: u32) -> Res
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn("implement", &seed, &session.wave, None)?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
+    let resuming = generation > 1 || session.provider_session_id.is_some();
     prepared.config.agent = Some(session.agent.clone());
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
@@ -92,16 +101,12 @@ pub async fn run_task_session(session_id: TaskSessionId, generation: u32) -> Res
     {
         return finish_abandoned(&store, &mut session, harness.as_mut(), reason).await;
     }
-    let first_input = if let Some(input) = pending.pop_front() {
-        if let Some(command_id) = input.command_id {
-            store.acknowledge_task_command(&command_id).await?;
-            record_command_accepted(&store, &session, command_id).await?;
-        }
-        input.text
-    } else {
-        prepared.input
-    };
+    let (first_input, first_command_id) = take_first_input(prepared.input, resuming, &mut pending);
     harness.send_input(&first_input).await?;
+    if let Some(command_id) = first_command_id {
+        store.acknowledge_task_command(&command_id).await?;
+        record_command_accepted(&store, &session, command_id).await?;
+    }
 
     let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
     std::thread::spawn(move || {
@@ -270,6 +275,19 @@ pub async fn run_task_session(session_id: TaskSessionId, generation: u32) -> Res
     }
 }
 
+fn take_first_input(
+    task_seed: String,
+    resuming: bool,
+    pending: &mut VecDeque<PendingInput>,
+) -> (String, Option<TaskCommandId>) {
+    if !resuming {
+        return (task_seed, None);
+    }
+    pending
+        .pop_front()
+        .map_or((task_seed, None), |input| (input.text, input.command_id))
+}
+
 async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: String) -> Result<()> {
     let line = line.trim();
     if line.is_empty() {
@@ -348,7 +366,9 @@ async fn absorb_commands(
                 record_command_accepted(store, session, command.id).await?;
             }
             TaskCommandKind::Interrupt { next_message } => {
-                harness.interrupt().await?;
+                if turn_active {
+                    harness.interrupt().await?;
+                }
                 if let Some(text) = next_message {
                     pending.push_back(PendingInput {
                         command_id: Some(command.id),
@@ -367,6 +387,54 @@ async fn absorb_commands(
         }
     }
     Ok(None)
+}
+
+async fn record_unhandled_failure(
+    session_id: &TaskSessionId,
+    generation: u32,
+    error: &anyhow::Error,
+) {
+    let Some(store) = open_existing_store().await.map(Arc::new) else {
+        return;
+    };
+    let Ok(Some(mut session)) = store.get_task_session(session_id).await else {
+        return;
+    };
+    if !session.status.is_process_active()
+        || session.process.as_ref().map(|process| process.generation) != Some(generation)
+    {
+        return;
+    }
+    let from = session.status;
+    let message = format!("task process failed: {error}");
+    session.set_status(TaskSessionStatus::Failed, &message);
+    if store.update_task_session(&session).await.is_err() {
+        return;
+    }
+    let _ = store
+        .append_task_event(
+            &session.id,
+            &TaskEventKind::StatusChanged {
+                from,
+                to: TaskSessionStatus::Failed,
+                reason: message.clone(),
+            },
+        )
+        .await;
+    let _ = store
+        .append_task_event(
+            &session.id,
+            &TaskEventKind::Failed {
+                error: message.clone(),
+                resumable: true,
+            },
+        )
+        .await;
+    let _ = crate::lf::commands::chat::post_to_named_wave(
+        &session.wave,
+        &format!("Task {} → failed: {message}", session.issue.identifier),
+    )
+    .await;
 }
 
 async fn record_command_accepted(
@@ -430,12 +498,13 @@ async fn finish_abandoned(
 
 fn task_seed(session: &TaskSession) -> String {
     format!(
-        "Implement Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nBase commit: {base_commit}\nDelivery: one pull request targeting main. Opening the PR submits the task; completion is merge or explicit abandonment.",
+        "Implement Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nBase commit: {base_commit}\nDelivery: one pull request targeting main. Opening the PR submits the task; completion is merge or explicit abandonment.",
         identifier = session.issue.identifier,
         title = session.issue.title,
         description = session.issue.description,
         project = session.project.name,
         project_id = session.project.id.as_str(),
+        project_context = session.project.context,
         wave = session.wave,
         session_id = session.id,
         worktree = session.worktree.display(),
@@ -456,12 +525,46 @@ fn progress_summary(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::progress_summary;
+    use std::collections::VecDeque;
+
+    use super::{progress_summary, take_first_input, PendingInput};
+    use crate::task::TaskCommandId;
 
     #[test]
     fn progress_summary_bounds_wave_visible_text() {
         let summary = progress_summary(&"x".repeat(2_500));
         assert_eq!(summary.chars().count(), 2_000);
         assert!(summary.ends_with('…'));
+    }
+
+    #[test]
+    fn fresh_session_keeps_task_seed_ahead_of_racing_commands() {
+        let command_id = TaskCommandId::new();
+        let mut pending = VecDeque::from([PendingInput {
+            command_id: Some(command_id.clone()),
+            text: "rename the flag".to_string(),
+        }]);
+
+        let first = take_first_input("implement INF-123".to_string(), false, &mut pending);
+
+        assert_eq!(first, ("implement INF-123".to_string(), None));
+        assert_eq!(
+            pending.front().and_then(|input| input.command_id.clone()),
+            Some(command_id)
+        );
+    }
+
+    #[test]
+    fn resumed_session_starts_with_the_oldest_queued_command() {
+        let command_id = TaskCommandId::new();
+        let mut pending = VecDeque::from([PendingInput {
+            command_id: Some(command_id.clone()),
+            text: "address review".to_string(),
+        }]);
+
+        let first = take_first_input("original seed".to_string(), true, &mut pending);
+
+        assert_eq!(first, ("address review".to_string(), Some(command_id)));
+        assert!(pending.is_empty());
     }
 }

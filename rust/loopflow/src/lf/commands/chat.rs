@@ -256,6 +256,30 @@ pub(crate) async fn post_to_named_wave(wave: &str, text: &str) -> Result<bool> {
     Ok(false)
 }
 
+/// Record one Task lifecycle fact in the owning Wave's durable conversation.
+/// A live Wave receives the normal message request so it wakes once; a stopped
+/// Wave receives the same journal row directly and replays it on next serve.
+pub(crate) async fn post_to_wave(wave: &Wave, text: &str) -> Result<bool> {
+    if wave.repo().is_empty() {
+        bail!("wave {:?} has no registered repository", wave.name());
+    }
+    if let Some(endpoint) =
+        crate::wave::server::live_endpoint(Path::new(wave.repo()), wave.name()).await
+    {
+        post_message(&endpoint, text, false).await?;
+        return Ok(true);
+    }
+    let path = crate::wave::journal::journal_path(Path::new(wave.repo()), wave.name());
+    let (mut journal, _) = Journal::open(&path)?;
+    journal.append(|seq| EventKind::UserMessage {
+        id: MessageId(format!("msg-{seq}")),
+        op: MessageOp::Message,
+        text: text.to_string(),
+        from: None,
+    });
+    Ok(false)
+}
+
 /// What the process can see: the registry (if this machine has one), the repo
 /// the command runs in, and the wave env. Gathered once at the edge so the
 /// resolution logic below stays a pure function of its inputs.

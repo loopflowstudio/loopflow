@@ -125,7 +125,7 @@ async fn handle_command(command: &str, endpoint: &str) -> Result<bool> {
         Command::Quit => return Ok(false),
         Command::Status => print_status(endpoint).await?,
         Command::Help => println!(
-            "  /status   the wave's flowloop state\n  \
+            "  /status   the wave's loop state\n  \
                /quit     leave (Ctrl-D also works)\n  \
              anything else is spoken into the thread"
         ),

@@ -55,6 +55,14 @@ file carries only the judgment calls a reader would otherwise re-litigate.
   at all, not a bug to fix on the way past. `minds.md` §9 makes both answers
   cheap: on a store bus the hand's ear is a poll cursor, held or deliberately
   not.
+- **`lf wavechat` and `lf chat` now overlap.** The rebase onto main picked up
+  `lf wavechat` — a one-pane TUI that both follows a wave's events and posts
+  typed lines into its thread. This branch splits that surface three ways:
+  `lf serve` boots the mind, `lf chat` attaches to its thread, `lf sub` reads
+  the stream. `wavechat` is `chat` + `sub` fused, which is the fusion §8 argues
+  against. Both were kept through the rebase; deleting a verb that just landed
+  on main is not a rebase's call. One of them should go, and the split is the
+  one this design defends.
 - Two agents wrote this worktree at once. HEAD advanced under a running skill
   while unrelated files were being edited, and the two writers left a
   self-contradicting test behind — one updated the frame it waited for, the

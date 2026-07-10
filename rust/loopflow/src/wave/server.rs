@@ -778,7 +778,6 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         // The exec door is held only by agents. The thread is the human's
         // surface; machine speech must retain its byline on the bus.
         Some(Commands::Chat { .. }) => ExecVerdict::Deny("chat".to_string()),
-        Some(Commands::Wavechat { .. }) => ExecVerdict::Deny("wavechat".to_string()),
         // Booting a listener, or a resident body against one, is wave
         // lifecycle: the door process would become the long-lived owner.
         Some(Commands::Serve { .. }) => ExecVerdict::Deny("serve".to_string()),
@@ -1565,7 +1564,6 @@ mod tests {
             argv(&["__resident", "ship"]),
             argv(&["sync-skills", "--yes"]),
             argv(&["chat", "pretend to be human"]),
-            argv(&["wavechat", "ship"]),
             argv(&["implement", "ship it"]),
             argv(&[":", "do", "something"]),
         ];

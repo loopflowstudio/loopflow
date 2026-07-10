@@ -17,5 +17,4 @@ pub mod thread;
 pub mod tokens;
 pub mod usage;
 pub mod util;
-pub mod wavechat;
 pub mod waves;

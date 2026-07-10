@@ -167,7 +167,7 @@ the shared store, ephemeral, no server in the path.
 lf chat "ship the button audit first"       # post into the current wave's thread
 lf chat -w infra "CI is red on the PR"      # target a wave by name
 lf chat --parent "blocked on schema change" # escalate to the parent wave
-lf wavechat intelligence                    # watch and speak from one terminal pane
+lf chat --follow -w intelligence            # watch and speak from one terminal pane
 lf memory                                   # print the wave's MEMORY.md
 lf memory add "buttons: variants unified"   # publish one replayable fact
 lf memory log                               # print facts added since the last update
@@ -176,16 +176,16 @@ lf memory update < MEMORY.md                # replace it from stdin
 
 | Command | What it does |
 |---------|--------------|
-| `lf chat [TEXT]` | Post a message into a wave's thread; reads stdin when TEXT is omitted. Outside any wave it prints a short drop note and exits 0, so the verb is safe in every prompt |
-| `lf wavechat [WAVE]` | Replay and follow a served mind's thread while typed lines post into it; `/status` reads health and `/quit` leaves |
+| `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays and follows while typed lines post, `/status` reads health, and `/quit` leaves. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
 | `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 
-All three default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
+Both default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
 
 | Flag | Description |
 |------|-------------|
 | `-w, --wave NAME` | Target a wave by name |
 | `--parent` | Target the invoking wave's parent (`lf chat` / `lf memory`) |
+| `--follow` | Replay and follow the selected thread while typed lines post into it (`lf chat`) |
 
 ## The Agent Bus
 

@@ -24,7 +24,7 @@
   Continuity is the journaled thread, playhead, GOAL.md, and memory. It
   bootstraps and enters the wave's `<repo>.<wave>` sibling worktree — passes
   never run in the main checkout. Its input is its own wave's
-  `/events?inbox=true` subscription — the SSE thread stream `lf wavechat`
+  `/events?inbox=true` subscription — the SSE thread stream `lf chat --follow`
   follows, plus the inbox scope, and nothing to do with `lf sub`, which polls
   the bus table and never opens a socket. Its
   output is ordered turn deltas through the token-gated resident door. It
@@ -189,8 +189,8 @@ context anywhere, `lf chat` and `lf memory` writes exit 0 with one stderr note.
 A resolvable wave whose server is down errors instead (mail to a dead wave
 bounces, it doesn't vanish).
 
-`lf wavechat` reads that stream and writes into it from one pane. The resident
-is the subscription's second customer — same machinery, plus the inbox scope.
+`lf chat --follow` reads that stream and writes into it from one pane. The
+resident is the subscription's second customer — same machinery, plus the inbox scope.
 Placed `lf` runs carry `LFD_CHANNEL` in the worker's env and knock once on
 `POST /channels` so the wave's thread shows "work line <name> opened".
 

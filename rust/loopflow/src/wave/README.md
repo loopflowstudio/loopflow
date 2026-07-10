@@ -13,9 +13,10 @@
 ```
 
 - **The listener** is the channel made durable — hear / check / fold / tell,
-  **vendor-free**. It holds every journal pen (the wave channel and the
-  family's work lines), serves the doors, folds the store's worker
-  observations, keeps the registry seat and the discovery pointer, and
+  **vendor-free**. It holds the wave's one journal pen (work-line channels are
+  ephemeral bus topics and journal nothing), serves the doors, folds the
+  store's worker observations, keeps the registry seat and the discovery
+  pointer, and
   supervises the resident. It serves from the **origin repo** and creates no
   worktrees.
 - **The resident** is the wave's Loop (see `flowloop/wave.rs`): the durable
@@ -89,7 +90,10 @@ Environment configures a process; it no longer decides what the process is.
 
 Truth is the per-wave append-only journal —
 `.lf/journal/waves/<name>/journal.jsonl` under the **origin (main) repo**,
-per-machine, never committed. The in-process state (`WaveRuntime`) is a fold
+per-machine, never committed. One journal per served mind, zero per channel: a
+journal buys delivery to a subscriber who was absent at publish time, which is
+a need minds have and topics never do. A work line's report reaches the wave as
+one attributed copy in *this* journal; nothing is written in its worktree. The in-process state (`WaveRuntime`) is a fold
 of it: the `thread` and the loop state are rebuilt from the journal on
 boot, so a restart keeps the full conversation and turn ids continue
 monotonically. The journal event vocabulary predates the pass model —

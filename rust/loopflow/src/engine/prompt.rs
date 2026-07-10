@@ -2266,7 +2266,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-        assert!(prompt.contains("lf chat --parent"));
+        assert!(prompt.contains("lf radio --parent"));
         assert!(prompt.contains("lf memory add"));
         assert!(prompt.contains("server-owned"));
     }

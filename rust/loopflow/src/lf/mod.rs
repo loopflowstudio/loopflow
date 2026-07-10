@@ -312,7 +312,9 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Post to a wave's thread; use --steer to reach the live body.
+    /// Converse with a served mind's thread (humans); --steer reaches the
+    /// live body. The human surface: journaled, durable, replayed. Agents use
+    /// `lf radio` for agent-to-agent comms, not this.
     Chat {
         /// Message text (reads stdin when omitted — heredoc-friendly)
         #[arg(trailing_var_arg = true)]
@@ -335,6 +337,28 @@ pub enum Commands {
         /// Attribution label for machine speech (e.g. --from ci)
         #[arg(long)]
         from: Option<String>,
+    },
+    /// Broadcast on the agent bus (agents): report up when you finish, fail,
+    /// or get stuck; steer a hand with --channel. Broadcast, not delivery —
+    /// whoever is tuned in hears it, nobody guarantees receipt. Not a log, not
+    /// the human surface. Tune in with `lf sub`.
+    Radio {
+        /// Message text (reads stdin when omitted — heredoc-friendly)
+        #[arg(trailing_var_arg = true)]
+        text: Vec<String>,
+        /// Address a specific channel (a hand's `goals.<run>`); default is the
+        /// invoking context's own channel.
+        #[arg(short = 'c', long = "channel", conflicts_with = "parent")]
+        channel: Option<String>,
+        /// Broadcast to the parent wave's channel (escalation up the tree).
+        #[arg(long)]
+        parent: bool,
+        /// Attribution label for machine speech (e.g. --from ci).
+        #[arg(long, conflicts_with = "steer")]
+        from: Option<String>,
+        /// Reach a live steer-capable turn on the channel; otherwise queue.
+        #[arg(long)]
+        steer: bool,
     },
     /// Follow a wave's live event stream (turns, loop state, memory) until
     /// killed. Defaults to the invoking context's wave; exits 0 with a note
@@ -991,6 +1015,56 @@ mod tests {
 
         // --wave and --parent are mutually exclusive.
         assert!(Cli::try_parse_from(["lf", "chat", "--wave", "goals", "--parent", "x"]).is_err());
+    }
+
+    #[test]
+    fn radio_parses_channel_parent_and_steer() {
+        // `-c`/`--channel` addresses a hand's channel; text trails.
+        let cli =
+            Cli::try_parse_from(["lf", "radio", "-c", "goals.148e", "landed PR"]).expect("parse");
+        let Some(Commands::Radio {
+            text,
+            channel,
+            parent,
+            from,
+            steer,
+        }) = cli.command
+        else {
+            panic!("expected radio command");
+        };
+        assert_eq!(text, vec!["landed PR"]);
+        assert_eq!(channel.as_deref(), Some("goals.148e"));
+        assert!(!parent);
+        assert_eq!(from, None);
+        assert!(!steer);
+
+        // Steering a hand's live turn.
+        let cli = Cli::try_parse_from([
+            "lf",
+            "radio",
+            "--channel",
+            "goals.148e",
+            "--steer",
+            "gate it",
+        ])
+        .expect("parse steer");
+        let Some(Commands::Radio { steer, channel, .. }) = cli.command else {
+            panic!("expected radio command");
+        };
+        assert!(steer);
+        assert_eq!(channel.as_deref(), Some("goals.148e"));
+
+        // Escalation up the tree.
+        let cli =
+            Cli::try_parse_from(["lf", "radio", "--parent", "blocked"]).expect("parse parent");
+        let Some(Commands::Radio { parent, .. }) = cli.command else {
+            panic!("expected radio command");
+        };
+        assert!(parent);
+
+        // A channel and the parent are mutually exclusive — a report goes to
+        // one place.
+        assert!(Cli::try_parse_from(["lf", "radio", "-c", "goals.148e", "--parent", "x"]).is_err());
     }
 
     #[test]

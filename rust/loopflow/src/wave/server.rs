@@ -14,9 +14,9 @@
 //! listener holds every pen; the resident holds the vendor.
 //!
 //! The server serves the wave's CHANNEL FAMILY (see [`crate::wave::channel`]):
-//! the primary channel is the wave's name; work-line channels are addressed
-//! by their ownership names (`goals.148e0e02`). It holds the pen for every
-//! child journal; doors are name-addressed.
+//! the primary channel is the wave's name and the only journaled one — the
+//! served mind. Work-line channels (`goals.148e0e02`) are live bus topics: no
+//! journal, no worktree binding. Doors are name-addressed.
 //!
 //! Wire contract (snake_case, stable — a Loopflow worker builds against it):
 //! - `GET /health` → `{status, loop_state, wave, turns, workers, uptime_seconds}`;
@@ -38,9 +38,10 @@
 //!     every transition — the composer keys its verb off it. Primary channel
 //!     only — child channels have no loop, so a child-only subscription
 //!     carries no `state` frames.
-//!   - `turn`: data is a `Turn` JSON; the thread replays on connect
-//!     (including the open turn), then streams live. A turn from a CHILD
-//!     channel carries one extra key, `"channel": "<name>"`; the primary
+//!   - `turn`: data is a `Turn` JSON; the PRIMARY thread replays on connect
+//!     (including the open turn), then streams live. CHILD channels are
+//!     live-only — a topic has no past, so nothing replays for them. A turn
+//!     from a child carries one extra key, `"channel": "<name>"`; the primary
 //!     channel's turns ride untagged (absent `channel` = the wave's own
 //!     channel), so a family of one is byte-identical to the pre-family wire.
 //!     Turn ids repeat — and repeat across channels: an in-progress turn is
@@ -87,20 +88,21 @@
 //!   empty only for `interrupt` (400 otherwise). `from {session_id?, label}`
 //!   is required for `say` and rejected for every other op (400) — human
 //!   turns are unattributed by convention. `channel` is explicitly Optional:
-//!   null targets the wave channel (unchanged); a child name lands the
-//!   message in THAT channel's journal (404 outside the family or when the
-//!   work line's worktree is gone). On a child channel there is no resident:
-//!   steer degrades to a plain message, a bare interrupt is a no-op. `turn`
-//!   is the appended user `Turn`, or null for a bare interrupt (nothing was
-//!   said); `state` is the loop-state name when the request was accepted —
-//!   ops are applied by the loop asynchronously, so watch the stream's
-//!   `state` events for the outcome.
+//!   null targets the wave channel (unchanged); a child name broadcasts one
+//!   tagged frame on the bus (404 only outside the family — a topic needs no
+//!   worktree). A child `say` is a report: the served wave records ONE copy in
+//!   its own journal, bylined with the channel, and queues it for the loop.
+//!   On a child channel there is no resident: steer degrades to a plain
+//!   message, a bare interrupt is a no-op. `turn` is the appended user `Turn`,
+//!   or null for a bare interrupt (nothing was said); `state` is the
+//!   loop-state name when the request was accepted — ops are applied by the
+//!   loop asynchronously, so watch the stream's `state` events for the
+//!   outcome.
 //! - `POST /channels {name, run_id}` → `{turn}` — the dispatch notification
-//!   door: placed `lf` minted a work-line worktree and its channel
-//!   journal, and knocks here so the PARENT channel's thread shows
-//!   "work line <name> opened" (journaled as `ChannelOpened`, idempotent on
-//!   `run_id` — a repeated knock returns `{turn: null}`). 404 outside the
-//!   family.
+//!   door: placed `lf` minted a work-line worktree, and knocks here so the
+//!   PARENT channel's thread shows "work line <name> opened" (journaled as
+//!   `ChannelOpened`, idempotent on `run_id` — a repeated knock returns
+//!   `{turn: null}`). 404 outside the family.
 //! - `POST /loops {flow, seed, caps…}` → `{session}` — capability-gated
 //!   detached loop launch. The listener starts a headless `lf loop` in a
 //!   named tmux session; callers may inspect it with `tmux attach -r`, never
@@ -333,9 +335,11 @@ struct ConversationQuery {
 
 /// `POST /messages` request body. `op` is required — explicit, never inferred
 /// (no serde default; an op-less body is a 422). `from` is explicitly
-/// Optional: required for `say`, rejected otherwise. `channel` is explicitly
-/// Optional: null = the wave channel; a child name addresses that channel's
-/// journal (404 outside the family).
+/// Optional: required for `say`, rejected otherwise — and on a child channel
+/// only its `session_id` is honored, since the byline is stamped from the
+/// channel name (a client cannot speak as another). `channel` is explicitly
+/// Optional: null = the wave channel; a child name is a bus topic that needs
+/// no worktree and keeps no journal (404 only outside the family).
 #[derive(Debug, Deserialize)]
 struct PostMessage {
     op: MessageOp,
@@ -599,7 +603,7 @@ async fn resident_attach_handler(
                 StatusCode::CONFLICT,
                 format!(
                     "wave '{}' already has a live resident on the seat (pid {seated}); \
-                     stop it before attaching, or use `lf loop <name> --force` to take over",
+                     stop it before attaching, or use `lf serve <name> --force` to take over",
                     state.runtime.name()
                 ),
             ));
@@ -690,7 +694,8 @@ enum ExecVerdict {
 ///
 /// Permitted:
 /// - Git/GitHub/pm/release/queue commands EXCEPT `auth` — the commit-and-land path.
-/// - `chat`, `memory` — a worker reporting up and curating wave memory.
+/// - `radio`, `chat`, `memory` — a worker reporting up on the agent bus and
+///   curating wave memory (`chat` stays permitted for human/CLI use).
 /// - the read verbs `ls`/`status`/`runs`/`sub`/`trace`/`usage` — inspection.
 /// - `loop … --detach`, whose only execution path is a server-owned fresh
 ///   worktree.
@@ -725,6 +730,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         ) => ExecVerdict::Allow,
         Some(Commands::Auth { .. }) => ExecVerdict::Deny("auth".to_string()),
         Some(Commands::Chat { .. })
+        | Some(Commands::Radio { .. })
         | Some(Commands::Memory { .. })
         | Some(Commands::Ls { .. })
         | Some(Commands::Status { .. })
@@ -940,8 +946,8 @@ async fn messages_handler(
 
 /// The dispatch notification door: journal `ChannelOpened` on the primary
 /// channel (idempotent on run id) so the wave's thread shows the work line
-/// opening. The child channel itself materializes lazily on first delivery
-/// or subscription — the journal file was already minted by the dispatcher.
+/// opening. The child channel itself needs no materializing — it is a name on
+/// the bus, and speaking it into existence is the whole of its creation.
 async fn channels_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostChannel>,

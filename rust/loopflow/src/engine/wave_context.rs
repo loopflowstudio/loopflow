@@ -297,60 +297,16 @@ fn gather_memory_chain(origin: &Path, chain: &[String]) -> Option<String> {
     (!scoped.is_empty()).then(|| scoped.join("\n\n"))
 }
 
-/// Turn/char budget for the parent-wave section of a work line's overlay —
-/// the parent rides compactly beside the work line's own thread; the two
-/// budgets together stay within [`WAVE_CHAT_MAX_CHARS`].
-const PARENT_CHAT_TURNS: usize = 6;
-const PARENT_CHAT_MAX_CHARS: usize = 1_500;
-/// What the work line's own section may spend when the parent section rides
-/// along (`WAVE_CHAT_MAX_CHARS - PARENT_CHAT_MAX_CHARS`).
-const CHILD_CHAT_MAX_CHARS: usize = WAVE_CHAT_MAX_CHARS - PARENT_CHAT_MAX_CHARS;
-
-/// The `<lf:wave-chat-recent>` body for an ambient CHANNEL: the wave channel
-/// reads exactly as [`gather_wave_chat`]; a work-line channel reads down the
-/// tree — its own thread (folded from the journal in THIS worktree, where
-/// the channel lives) plus, compactly, the parent wave channel's recent
-/// turns — under the same total cap as a wave-home overlay.
+/// The `<lf:wave-chat-recent>` body for an ambient CHANNEL — the wave's thread,
+/// whichever channel this run speaks on.
+///
+/// A hand lives INSIDE its wave's mind: it re-reads that thread at every pass
+/// boundary. Work-line channels are ephemeral bus topics with no thread of
+/// their own — a hand's reports land in the wave's journal, so reading the
+/// wave is reading everything it has said. The channel only names its family
+/// head.
 pub fn gather_channel_chat(repo_root: &Path, channel: &str) -> Option<String> {
-    // Family membership and the head split are ONE predicate, shared with the
-    // server's scoping (`crate::wave::channel::family_head`): a channel with
-    // no dot (the wave's own channel) reads as a plain wave chat; a work-line
-    // channel reads down the tree from its family head.
-    let wave = crate::wave::channel::family_head(channel);
-    if wave == channel {
-        return gather_wave_chat(repo_root, channel);
-    }
-    // The work line's own thread: its journal travels with the branch —
-    // journal fold only, read-only (the family head's server holds the pen;
-    // a vanished/never-opened journal is just an empty section).
-    let own = {
-        let events = read_events(&journal_path(repo_root, channel));
-        let fold = fold_thread(&events);
-        let mut turns = fold.turns;
-        turns.extend(fold.open);
-        render_wave_chat_budget(&turns, WAVE_CHAT_RECENT_TURNS, CHILD_CHAT_MAX_CHARS)
-    };
-    let parent = {
-        let origin = wave_origin(repo_root);
-        live_turns(&origin, wave)
-            .or_else(|| journal_turns(&origin, wave))
-            .and_then(|turns| {
-                render_wave_chat_budget(&turns, PARENT_CHAT_TURNS, PARENT_CHAT_MAX_CHARS)
-            })
-    };
-    match (own, parent) {
-        (None, None) => None,
-        (own, parent) => {
-            let mut sections = Vec::new();
-            if let Some(own) = own {
-                sections.push(format!("## this work line ({channel})\n{own}"));
-            }
-            if let Some(parent) = parent {
-                sections.push(format!("## wave {wave}\n{parent}"));
-            }
-            Some(sections.join("\n\n"))
-        }
-    }
+    gather_wave_chat(repo_root, crate::wave::channel::family_head(channel))
 }
 
 /// The `wave/<name>/.wave-endpoint` discovery pointer's contents, trimmed.
@@ -608,50 +564,33 @@ mod tests {
         );
     }
 
-    /// A run inside a work-line worktree reads down the tree: its own
-    /// channel's thread plus, compactly, the parent wave channel's — both
-    /// sections labeled; a run at the wave home reads the wave channel alone,
-    /// exactly as before.
+    /// A hand lives inside its wave's mind: a run in a work-line worktree reads
+    /// the WAVE's thread, byte-identical to a run at the wave home. Work-line
+    /// channels keep no thread of their own — a hand's reports are already in
+    /// the wave's journal, so there is nothing else to read.
     #[test]
-    fn channel_chat_in_a_work_line_carries_child_and_parent_sections() {
+    fn channel_chat_in_a_work_line_reads_the_waves_thread() {
         let repo = loopflow_test_support::TestRepo::new();
         let worktree = repo.create_wave_worktree("goals.148e");
-
-        // Parent wave channel: journal at the origin.
         seed_journal(repo.path(), "goals", "wave-level question?");
-        // The work line's own channel: journal in ITS worktree.
-        let (mut child, _) =
-            Journal::open(&journal_path(&worktree, "goals.148e")).expect("child journal");
-        child.append(|seq| EventKind::UserMessage {
-            id: MessageId(format!("msg-{seq}")),
-            op: MessageOp::Say,
-            text: "child-level report".to_string(),
-            from: None,
-        });
-        drop(child);
 
-        let overlay =
-            gather_channel_chat(&worktree, "goals.148e").expect("work-line overlay renders");
-        assert!(overlay.contains("## this work line (goals.148e)"));
-        assert!(overlay.contains("child-level report"));
-        assert!(overlay.contains("## wave goals"));
-        assert!(overlay.contains("wave-level question?"));
-        let child_pos = overlay.find("child-level report").unwrap();
-        let parent_pos = overlay.find("wave-level question?").unwrap();
-        assert!(child_pos < parent_pos, "own channel first, parent after");
-
-        // A wave-channel gather stays the plain single-section render.
-        let wave_only = gather_channel_chat(repo.path(), "goals").expect("wave chat");
+        let from_work_line =
+            gather_channel_chat(&worktree, "goals.148e").expect("work line reads its wave");
+        assert!(from_work_line.contains("wave-level question?"));
         assert!(
-            !wave_only.contains("## "),
-            "no section headers at the wave home"
+            !from_work_line.contains("## "),
+            "one thread, no sections: {from_work_line}"
         );
 
-        // A work line with no thread yet still inherits the parent section.
+        // The wave home reads exactly the same thread.
+        let from_home = gather_channel_chat(repo.path(), "goals").expect("wave chat");
+        assert_eq!(from_work_line, from_home);
+
+        // A work line whose worktree carries no journal of its own is normal,
+        // not empty: it reads the wave like every other body.
         let bare = repo.create_wave_worktree("goals.bare0");
-        let overlay = gather_channel_chat(&bare, "goals.bare0").expect("parent-only overlay");
-        assert!(!overlay.contains("## this work line"));
-        assert!(overlay.contains("## wave goals"));
+        let from_bare = gather_channel_chat(&bare, "goals.bare0").expect("bare work line");
+        assert_eq!(from_bare, from_home);
     }
 
     #[test]

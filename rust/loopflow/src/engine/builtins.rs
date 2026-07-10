@@ -266,6 +266,6 @@ mod tests {
         assert!(skill.contains("wave/<parent>/projects/<slug>.md"));
         assert!(skill.contains("parent_wave_id"));
         assert!(skill.contains("lf pm show"));
-        assert!(skill.contains("lf chat --parent"));
+        assert!(skill.contains("lf radio --parent"));
     }
 }

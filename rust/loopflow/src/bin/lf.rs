@@ -641,6 +641,21 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Wavechat { wave, from }) => {
                 loopflow::lf::commands::wavechat::run(wave.as_deref(), from.as_deref())
             }
+            Some(Commands::Radio {
+                text,
+                channel,
+                parent,
+                from,
+                steer,
+            }) => {
+                // Radio and chat share one transport (postgres and psql over
+                // one wire): a channel is a dotted wave name to the door.
+                let target = loopflow::lf::WaveTargetArgs {
+                    wave: channel.clone(),
+                    parent: *parent,
+                };
+                loopflow::lf::commands::chat::run(text, from.as_deref(), *steer, &target)
+            }
             Some(Commands::Sub { wave, json }) => {
                 loopflow::lf::commands::sub::run(wave.as_deref(), *json)
             }
@@ -731,6 +746,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Runs { .. })
         | Some(Commands::Trace { .. })
         | Some(Commands::Chat { .. })
+        | Some(Commands::Radio { .. })
         | Some(Commands::Sub { .. })
         | Some(Commands::Wavechat { .. })
         | Some(Commands::Memory { .. })

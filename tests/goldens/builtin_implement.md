@@ -67,7 +67,7 @@ tool call, so the wave cannot reply until the inner loop returns. Detach only
 when the seed is the whole handoff.
 
 A detached loop is headless and non-interactive. Its contract is durable writes:
-PRs record done, `lf chat` reports progress/completion, and `lf memory add`
+PRs record done, `lf radio` reports progress/completion, and `lf memory add`
 records learnings as they happen. Invisible work is failed work. Inspect its
 terminal read-only with `tmux attach -r -t <name>`; never type into it.
 
@@ -79,17 +79,25 @@ launch - there is no live feed to poll mid-run. Answers return on the channel
 they came in: when a human's message reaches you, reply in your own turn
 text. Everything proactive goes through `lf`:
 
-- `lf chat "<note>"` - report outcomes, FYIs, and blockers to the wave's
-  thread; the post wakes the wave's loop like any message. One short
-  paragraph: what landed, links, anything surprising. Pipe stdin for longer.
-- `lf chat --parent "<report>"` - escalate to the parent wave.
-- `lf sub` - listen to your wave: follow its live events (turns, loop state,
-  memory) until killed. Outside a wave it exits silently.
+- `lf radio "<note>"` - the agent bus: report up when you finish, fail, or get
+  stuck. Broadcast, not delivery - whoever is tuned in hears it, nobody
+  guarantees receipt; it is not a log and not a notebook. Bare, it publishes on
+  your own channel, which the wave records as an attributed report and its loop
+  wakes on. One short paragraph; pipe stdin for longer.
+- `lf radio --parent "<report>"` - escalate to the parent wave.
+- `lf radio --channel <name> "<steer>"` - steer another hand: broadcast on its
+  channel; if a live turn can take it, it lands mid-pass, otherwise the next
+  pass hears it. The byline is server-stamped from your channel, so you cannot
+  post as someone else.
+- `lf sub [<channel>]` - tune in: follow live events (turns, loop state,
+  memory) until killed. Bare, your own wave; `<channel>` listens to a hand.
 - `lf memory add "<fact>"` - record a durable learning. `lf memory update`
   rewrites the whole file from stdin.
 - `wave/<name>/MEMORY.md` is server-owned - never edit the file directly.
 
-Use these unconditionally. Outside any wave they drop silently (exit 0) -
+`lf chat` is the human's conversation with a served mind - the durable,
+replayed thread. It is not an agent verb; agents use `lf radio`. Use these
+unconditionally. Outside any wave they drop silently (exit 0) -
 publish-to-no-subscriber is correct pubsub, never a blocker. A wave whose
 server is down errors instead; note it and move on.
 

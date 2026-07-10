@@ -798,7 +798,10 @@ impl WaveRuntime {
             return Ok(self.deliver(op, text, from));
         }
         if channel_role(&self.name, channel) != Some(ChannelRole::Child) {
-            anyhow::bail!("channel '{channel}' is not in wave '{}''s family", self.name);
+            anyhow::bail!(
+                "channel '{channel}' is not in wave '{}''s family",
+                self.name
+            );
         }
         if op == MessageOp::Interrupt && text.trim().is_empty() {
             return Ok(None);
@@ -2568,7 +2571,10 @@ mod tests {
         let wave = rt.thread_snapshot();
         assert_eq!(wave.len(), 2);
         assert_eq!(wave[0].text, "to the wave");
-        assert_eq!(wave[1].text, "to a", "the say recorded; the message did not");
+        assert_eq!(
+            wave[1].text, "to a",
+            "the say recorded; the message did not"
+        );
         assert_eq!(wave[1].from.as_deref(), Some("ship.a"));
 
         // On disk: exactly one journal, the served wave's, with both rows.

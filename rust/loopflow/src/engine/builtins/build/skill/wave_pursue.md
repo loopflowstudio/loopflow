@@ -18,8 +18,12 @@ state. Trust worker summaries; do not reread worker transcripts.
   reply until the inner loop returns, so choose it knowingly.
 - Delegate other self-sufficient work with the identical command plus
   `--detach`. A seed you cannot make computable on its own is the work to keep.
-- Require detached hands to report with `lf chat`, record live learnings with
+- Require detached hands to report with `lf radio`, record live learnings with
   `lf memory add`, and leave done as a PR. No writes means failed work.
+- To steer a hand, tune in with `lf sub <channel>` and broadcast back with
+  `lf radio --channel <channel> "<steer>"`; a live turn takes it mid-pass,
+  otherwise the next pass hears it. You already hear their reports — they land
+  in this thread attributed.
 - Answer human steering before returning to the goal.
 
 Keep the turn focused: select, inhabit or delegate, record what changed.

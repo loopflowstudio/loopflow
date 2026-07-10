@@ -608,7 +608,7 @@ mod tests {
             1,
             "the skill seed carries the loopflow operating document once"
         );
-        assert!(seed.contains("lf chat --parent"));
+        assert!(seed.contains("lf radio --parent"));
         assert!(seed.contains("lf memory add"));
     }
 

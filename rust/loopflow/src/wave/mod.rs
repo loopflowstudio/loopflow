@@ -1476,9 +1476,7 @@ mod tests {
                 Ok(Ok(0)) | Err(_) => break,
                 Ok(Ok(n)) => {
                     acc.push_str(&String::from_utf8_lossy(&buf[..n]));
-                    if acc.contains("wave turn")
-                        && acc.contains("a live")
-                        && acc.contains("b live")
+                    if acc.contains("wave turn") && acc.contains("a live") && acc.contains("b live")
                     {
                         break;
                     }

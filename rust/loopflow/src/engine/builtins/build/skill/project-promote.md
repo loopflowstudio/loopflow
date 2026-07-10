@@ -30,7 +30,7 @@ child's work.
 5. Delete the source project file only after the destination is complete.
 6. Add a child `Process` instruction requiring its first pass to report the
    newly owned definition and KRs in its own thread, then publish that concise
-   report to the parent with `lf chat --parent`.
+   report to the parent with `lf radio --parent`.
 
 The command's mechanical postflight links the registry ancestry, launches the
 child residency, waits for `.wave-endpoint`, and sends the bootstrap message

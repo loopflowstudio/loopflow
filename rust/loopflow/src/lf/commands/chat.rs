@@ -1,28 +1,27 @@
-//! `lf chat` — post a message into a wave's thread through its live server.
-//!
-//! The speech surface of the one-door calling convention: loops, workers,
-//! humans, and scripts all emit through the same verb. `--steer` uses the
-//! `steer` op, reaching a live steer-capable turn and otherwise queueing for
-//! the next one. The default `say` op lands in the thread with a byline and
-//! queues for the loop.
+//! The transport under two verbs: `lf chat` (the human conversing with a
+//! served mind's durable thread) and `lf radio` (the agent bus — broadcast,
+//! ephemeral). Two words, two wires, one door: both POST `/messages` on the
+//! family head's server, the way psql and any other client share postgres's
+//! wire. `--steer` uses the `steer` op, reaching a live steer-capable turn and
+//! otherwise queueing for the next one. The default `say` op lands in the
+//! served mind's thread with a byline and queues for its loop.
 //!
 //! # Targeting (by CHANNEL name — dots are the tree)
 //! - default: the invoking context's channel — `LFD_CHANNEL` env first (set
 //!   by dispatch), else `LFD_WAVE_ID`, else the worktree name, which IS the
-//!   channel name under the ownership naming (`<repo>.<wave>` → the wave
-//!   channel; `<repo>.<wave>.<id>` → that work line's channel — speak
-//!   locally). No wave context at all (no env, worktree not wave-shaped)
-//!   means there is no subscriber: the publish drops with exit 0 and one
-//!   stderr note — correct pubsub semantics, which is what makes the speech
-//!   vocabulary safe in every prompt unconditionally.
+//!   channel name (`<repo>.<wave>` → the wave channel; `<repo>.<wave>.<id>` →
+//!   that work line's channel — speak locally). No wave context at all (no
+//!   env, worktree not wave-shaped) means there is no subscriber: the publish
+//!   drops with exit 0 and one stderr note — correct pubsub semantics, which
+//!   is what makes the speech vocabulary safe in every prompt unconditionally.
 //! - `--parent`: walk `parent_wave_id` in the registry and post to the parent
 //!   wave's live server; its endpoint rides the parent's WaveAgent session
 //!   row, so cross-repo parents resolve through the store, not the
 //!   filesystem. A root wave errors (the human fall-through arrives with
 //!   Decisions).
-//! - `--wave <name>`: explicit target. A dotted name (`goals.148e0e02`)
-//!   addresses that channel through its FAMILY HEAD's server (the wave
-//!   `goals` — the head holds every child channel's pen).
+//! - a dotted name (`goals.148e0e02`) addresses that channel through its
+//!   FAMILY HEAD's server. A child channel is a name on the bus, not a place:
+//!   it needs no worktree and keeps no journal of its own.
 //!
 //! # Endpoint resolution
 //! Always the family head's: its live WaveAgent session row carries
@@ -30,17 +29,17 @@
 //! registry on this machine), the local `wave/<name>/.wave-endpoint`
 //! discovery file is the fallback. A resolvable wave with no live server is
 //! a clear error — a dead wave's mail bounces, it doesn't vanish (child
-//! channels included: the pen is the parent's, so speech to a work line of a
+//! channels included: the head serves the mind, so speech to a work line of a
 //! down listener bounces the same way); queuing for offline waves is future
 //! work.
 //!
 //! # Attribution
-//! Sender context comes from env: `LFD_SESSION_ID` (the registry session, when
-//! there is one) plus a label — `LFD_AGENT_ROLE` when set (workers), `wave
-//! <own>` when escalating with `--parent`, else `cli`. `--from <label>`
-//! overrides the label outright: machine speech (the webhook gatekeeper's
-//! `--from ci` / `--from github`) must arrive attributed, never riding the
-//! from-absent human path.
+//! Only the sender's `LFD_SESSION_ID` and a suggested label leave the client.
+//! On a CHILD channel the server stamps the byline from the channel name
+//! itself, so a `from` in the body cannot claim to be another speaker; the
+//! label survives only on the wave's own channel, where `--from <label>` marks
+//! machine speech (the webhook gatekeeper's `--from ci` / `--from github`) so
+//! it never rides the from-absent human path.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -176,7 +175,7 @@ impl ResolvedWave {
     pub fn require_endpoint(&self) -> Result<String> {
         self.endpoint.clone().ok_or_else(|| {
             anyhow!(
-                "wave '{name}' has no live server — start one with `lf loop {name}`. \
+                "wave '{name}' has no live server — serve one with `lf serve {name}`. \
                  (Queuing for offline waves is not implemented yet.)",
                 name = self.name
             )
@@ -342,7 +341,7 @@ pub(crate) async fn post_json(
         .await
         .map_err(|err| {
             anyhow!(
-                "wave server at {endpoint} is not answering ({err}) — is `lf loop` still running?"
+                "wave server at {endpoint} is not answering ({err}) — is `lf serve` still running?"
             )
         })?;
     let status = response.status();
@@ -359,7 +358,7 @@ pub(crate) async fn get_json(endpoint: &str, path: &str) -> Result<serde_json::V
         .await
         .map_err(|err| {
             anyhow!(
-                "wave server at {endpoint} is not answering ({err}) — is `lf loop` still running?"
+                "wave server at {endpoint} is not answering ({err}) — is `lf serve` still running?"
             )
         })?;
     let status = response.status();
@@ -840,6 +839,59 @@ mod tests {
         );
     }
 
+    /// The whole `lf radio --channel ship.148e --from ship` path: radio shares
+    /// this transport, and the server stamps the byline from the CHANNEL. A
+    /// hand cannot post as its wave, however it labels itself.
+    #[tokio::test]
+    async fn a_forged_byline_does_not_survive_the_channel_stamp() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let origin = tmp.path().join("repo");
+        std::fs::create_dir_all(&origin).unwrap();
+        let (addr, runtime, mut inbox) = boot_server(&origin, "ship").await;
+        let wave = make_wave("ship", &origin, None);
+        store.create_wave(&wave).await.expect("seed wave");
+        store
+            .register_session(&live_server_session(&wave, &addr))
+            .await
+            .expect("seed brain");
+
+        let context = CliContext {
+            store: Some(store),
+            repo: None,
+            env_wave_id: None,
+            env_channel: None,
+        };
+        // `--from ship` claims the wave's own byline; the channel is a hand's.
+        run_with_context(
+            &context,
+            &["landed".into()],
+            Some("ship"),
+            false,
+            &WaveTargetArgs {
+                wave: Some("ship.148e".into()),
+                parent: false,
+            },
+        )
+        .await
+        .expect("radio publishes on the hand's channel");
+
+        let thread = runtime.thread_snapshot();
+        assert_eq!(thread.len(), 1);
+        assert_eq!(
+            thread[0].from.as_deref(),
+            Some("ship.148e"),
+            "the forged 'ship' byline did not survive the server stamp"
+        );
+        let InboxItem::Message(msg) = inbox.try_recv().expect("the report woke the loop") else {
+            panic!("expected a message");
+        };
+        assert_eq!(
+            msg.from.as_ref().map(|f| f.label.as_str()),
+            Some("ship.148e")
+        );
+    }
+
     /// No live server anywhere (no registry row, no discovery file): the
     /// error says so and names the fix.
     #[tokio::test]
@@ -862,7 +914,9 @@ mod tests {
         let err = resolved.require_endpoint().expect_err("no server");
         let message = err.to_string();
         assert!(message.contains("no live server"), "{message}");
-        assert!(message.contains("lf loop ship"), "{message}");
+        // `lf serve` boots a mind; `lf loop` is the batch verb and needs a
+        // flow plus a seed — naming it here would name an unspellable command.
+        assert!(message.contains("lf serve ship"), "{message}");
         assert!(message.contains("not implemented yet"), "{message}");
     }
 }

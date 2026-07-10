@@ -238,6 +238,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "057_run_events_identity",
         sql: include_str!("migrations/057_run_events_identity.sql"),
     },
+    Migration {
+        version: "058_blob_tokens",
+        sql: include_str!("migrations/058_blob_tokens.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the

@@ -248,6 +248,15 @@ pub enum Commands {
         #[arg(long = "max-turns")]
         max_turns: Option<u32>,
     },
+    /// Measure this codebase: lines and tokens per directory (tracked files only)
+    Tokens {
+        /// Emit as JSON
+        #[arg(long)]
+        json: bool,
+        /// Walk git history instead: the codebase's size on each day it changed
+        #[arg(long, value_name = "DAYS")]
+        days: Option<u32>,
+    },
     /// Show token usage and cost by repo and provider (from the local ledger)
     Usage {
         /// Emit per-boundary spend (skill, provider:model, repo) as JSON

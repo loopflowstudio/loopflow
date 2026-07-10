@@ -597,6 +597,9 @@ fn main() -> anyhow::Result<()> {
                 loopflow::flowloop::driver::run_flowloop(repo, seed, &options)
                     .map_err(anyhow::Error::from)
             }),
+            Some(Commands::Tokens { json, days }) => {
+                loopflow::lf::commands::tokens::run(*json, *days)
+            }
             Some(Commands::Usage { json, days }) => {
                 loopflow::lf::commands::usage::run(*json, *days)
             }
@@ -694,6 +697,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Wave { .. })
         | Some(Commands::Task { .. })
         | Some(Commands::Usage { .. })
+        | Some(Commands::Tokens { .. })
         | Some(Commands::Doctor { .. })
         | Some(Commands::Ls { .. })
         | Some(Commands::Status { .. })

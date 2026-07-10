@@ -14,8 +14,17 @@ struct TelemetryDashboardView: View {
 
     @State private var spend: [TraceSpan] = []
     @State private var doctor: DoctorReport?
+    @State private var codebase: CodeNode?
+    @State private var growth: [CodeSnapshot] = []
+    @State private var selectedRepo: String?
     @State private var errorMessage: String?
     @State private var isLoading = true
+
+    /// Repos the ledger has seen, by absolute path. The codebase charts measure
+    /// one repo at a time; the spend charts are machine-wide.
+    private var repos: [String] {
+        Array(Set(spend.compactMap(\.repo))).sorted()
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,10 +51,18 @@ struct TelemetryDashboardView: View {
                     }
 
                     chartCard(
-                        "Token flame · by repo",
-                        subtitle: "repo → wave → flow → skill. Width is tokens, not time."
+                        "Codebase over time · \(Self.windowDays) days",
+                        subtitle: "What a model pays to read this repo, per top-level directory"
                     ) {
-                        TokenFlame(spend: spend)
+                        CodebaseGrowthChart(snapshots: growth)
+                            .frame(height: 260)
+                    }
+
+                    chartCard(
+                        codebaseTitle,
+                        subtitle: "Files on disk. Width is tokens; a lockfile is cheap in lines and ruinous here."
+                    ) {
+                        CodeFlame(root: codebase)
                             .frame(minHeight: 200)
                     }
 
@@ -62,6 +79,9 @@ struct TelemetryDashboardView: View {
         }
         .background(palette.background)
         .task { await refresh() }
+        .onChange(of: selectedRepo) { _, _ in
+            Task { await loadCodebase() }
+        }
     }
 
     /// A boundary with no skill is a run that never entered one — an inline
@@ -81,6 +101,15 @@ struct TelemetryDashboardView: View {
                     .foregroundStyle(palette.textSecondary)
             }
             Spacer()
+            if repos.count > 1 {
+                Picker("Repo", selection: $selectedRepo) {
+                    ForEach(repos, id: \.self) { repo in
+                        Text(shortRepoName(repo)).tag(Optional(repo))
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 220)
+            }
             Text(totalLabel)
                 .font(Typography.code(12))
                 .foregroundStyle(palette.textSecondary)
@@ -95,6 +124,15 @@ struct TelemetryDashboardView: View {
         }
         .padding(.horizontal, Spacing.xxl)
         .padding(.vertical, Spacing.lg)
+    }
+
+    private var codebaseTitle: String {
+        guard let codebase else { return "Codebase flame" }
+        return "Codebase flame · \(codebase.lines.formatted()) lines · \(compactTokens(codebase.tokens)) tokens"
+    }
+
+    private func shortRepoName(_ repo: String) -> String {
+        repo.split(separator: "/").last.map(String.init) ?? repo
     }
 
     private var totalLabel: String {
@@ -167,6 +205,24 @@ struct TelemetryDashboardView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+        if selectedRepo == nil || !repos.contains(selectedRepo ?? "") {
+            selectedRepo = repos.first
+        }
+        await loadCodebase()
+    }
+
+    /// A repo the ledger remembers may no longer exist on disk (a worktree that
+    /// was removed). That is a missing chart, not a failed dashboard.
+    private func loadCodebase() async {
+        guard let selectedRepo else {
+            codebase = nil
+            growth = []
+            return
+        }
+        codebase = try? await RegistryQueryLocal.shared.codebase(repoPath: selectedRepo)
+        growth = (try? await RegistryQueryLocal.shared.codebaseHistory(
+            repoPath: selectedRepo, days: Self.windowDays
+        )) ?? []
     }
 
     private func healthColor(_ status: String) -> Color {
@@ -245,84 +301,93 @@ private struct DailyTokensChart: View {
     }
 }
 
-// MARK: - Token flame
+// MARK: - Codebase: growth over time, and the flame on disk
 
-/// A node in the repo → wave → flow → skill rollup. Width is tokens.
-private struct FlameNode: Identifiable {
-    let id: String
-    let label: String
-    let tokens: Int
-    var children: [FlameNode]
-}
+/// Stacked by top-level directory. Lines are what a human counts; tokens are
+/// what a run costs, and they disagree — a lockfile is cheap in lines and
+/// ruinous here. This plots the number the context budget spends.
+private struct CodebaseGrowthChart: View {
+    @Environment(\.palette) private var palette
+    let snapshots: [CodeSnapshot]
 
-/// An icicle chart: the repo on top, each level below partitioned by the tokens
-/// its children spent. Width is tokens, never time — a fast skill can be the
-/// widest thing on the page, which is exactly what a cost chart should say.
-private struct TokenFlame: View {
-    let spend: [TraceSpan]
+    private struct Point: Identifiable {
+        let id: String
+        let date: Date
+        let path: String
+        let tokens: Int
+    }
 
-    private var roots: [FlameNode] { Self.build(spend) }
+    private var points: [Point] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return snapshots.flatMap { snapshot -> [Point] in
+            guard let date = formatter.date(from: snapshot.date) else { return [] }
+            return snapshot.slices.map { slice in
+                Point(
+                    id: "\(snapshot.commit)-\(slice.path)",
+                    date: date,
+                    path: slice.path,
+                    tokens: slice.tokens
+                )
+            }
+        }
+    }
 
     var body: some View {
-        if roots.isEmpty {
-            EmptyChartHint()
+        if points.isEmpty {
+            EmptyChartHint(
+                message: "No git history in this window",
+                hint: "`lf tokens --days 30` walks the repo's commits"
+            )
         } else {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(roots) { root in
-                    FlameRow(node: root, total: root.tokens, depth: 0)
+            Chart(points) { point in
+                AreaMark(
+                    x: .value("Day", point.date, unit: .day),
+                    y: .value("Tokens", point.tokens)
+                )
+                .foregroundStyle(by: .value("Directory", point.path))
+            }
+            .chartLegend(position: .bottom, spacing: Spacing.sm)
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisGridLine().foregroundStyle(palette.border)
+                    AxisValueLabel {
+                        if let tokens = value.as(Int.self) {
+                            Text(compactTokens(tokens))
+                        }
+                    }
                 }
             }
         }
     }
+}
 
-    /// Group by the dimensions each row carries, skipping the ones it doesn't.
-    static func build(_ spend: [TraceSpan]) -> [FlameNode] {
-        let rows = spend.filter { $0.totalTokens > 0 }
-        let byRepo = Dictionary(grouping: rows) { $0.repo.map(shortRepo) ?? "(unattributed)" }
-        return byRepo
-            .map { repo, repoRows in
-                FlameNode(
-                    id: repo,
-                    label: repo,
-                    tokens: repoRows.reduce(0) { $0 + $1.totalTokens },
-                    children: level(repoRows, prefix: repo, path: [\.wave, \.flow, \.skill])
-                )
+/// An icicle over the files on disk: repo on top, each directory partitioned by
+/// the tokens its subtree costs. Width is tokens, never lines and never time.
+private struct CodeFlame: View {
+    let root: CodeNode?
+
+    var body: some View {
+        if let root, root.tokens > 0 {
+            VStack(alignment: .leading, spacing: 2) {
+                CodeFlameRow(node: root, total: root.tokens, depth: 0)
             }
-            .sorted { $0.tokens > $1.tokens }
-    }
-
-    private static func level(
-        _ rows: [TraceSpan],
-        prefix: String,
-        path: [KeyPath<TraceSpan, String?>]
-    ) -> [FlameNode] {
-        guard let keyPath = path.first else { return [] }
-        let rest = Array(path.dropFirst())
-        // A dimension nothing in this subtree carries adds a row of noise; skip it.
-        guard rows.contains(where: { $0[keyPath: keyPath] != nil }) else {
-            return level(rows, prefix: prefix, path: rest)
+        } else {
+            EmptyChartHint(
+                message: "No codebase measured",
+                hint: "The repo may no longer exist on disk"
+            )
         }
-        let groups = Dictionary(grouping: rows) { $0[keyPath: keyPath] ?? "—" }
-        return groups
-            .map { label, groupRows in
-                FlameNode(
-                    id: "\(prefix)/\(label)",
-                    label: label,
-                    tokens: groupRows.reduce(0) { $0 + $1.totalTokens },
-                    children: level(groupRows, prefix: "\(prefix)/\(label)", path: rest)
-                )
-            }
-            .sorted { $0.tokens > $1.tokens }
-    }
-
-    private static func shortRepo(_ repo: String) -> String {
-        repo.split(separator: "/").last.map(String.init) ?? repo
     }
 }
 
-private struct FlameRow: View {
+/// Depth is capped: below three levels the bars are thinner than their labels,
+/// and a chart nobody can read is worse than one that stops.
+private let maxFlameDepth = 3
+
+private struct CodeFlameRow: View {
     @Environment(\.palette) private var palette
-    let node: FlameNode
+    let node: CodeNode
     let total: Int
     let depth: Int
 
@@ -334,7 +399,7 @@ private struct FlameRow: View {
                     RoundedRectangle(cornerRadius: CornerRadius.sm)
                         .fill(depthColor.opacity(0.85))
                         .frame(width: max(2, geometry.size.width * fraction))
-                    Text("\(node.label)  \(compactTokens(node.tokens))")
+                    Text("\(node.name)  \(compactTokens(node.tokens))")
                         .font(Typography.code(11))
                         .foregroundStyle(palette.text)
                         .padding(.leading, Spacing.xs)
@@ -342,11 +407,13 @@ private struct FlameRow: View {
                 }
             }
             .frame(height: 22)
-            .help("\(node.label): \(node.tokens.formatted()) tokens")
+            .help("\(node.path.isEmpty ? node.name : node.path): \(node.tokens.formatted()) tokens · \(node.lines.formatted()) lines")
 
-            ForEach(node.children) { child in
-                FlameRow(node: child, total: total, depth: depth + 1)
-                    .padding(.leading, Spacing.md)
+            if depth < maxFlameDepth {
+                ForEach(node.children.prefix(12)) { child in
+                    CodeFlameRow(node: child, total: total, depth: depth + 1)
+                        .padding(.leading, Spacing.md)
+                }
             }
         }
     }
@@ -416,12 +483,15 @@ private struct CacheRatioChart: View {
 private struct EmptyChartHint: View {
     @Environment(\.palette) private var palette
 
+    var message: String = "No recorded spend in this window"
+    var hint: String = "Run `lf doctor` to check the ledger is being written"
+
     var body: some View {
         VStack(spacing: Spacing.xs) {
-            Text("No recorded spend in this window")
+            Text(message)
                 .font(Typography.caption())
                 .foregroundStyle(palette.textSecondary)
-            Text("Run `lf doctor` to check the ledger is being written")
+            Text(hint)
                 .font(Typography.code(11))
                 .foregroundStyle(palette.textSecondary)
         }

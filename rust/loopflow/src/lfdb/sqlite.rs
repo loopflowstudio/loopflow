@@ -1371,6 +1371,36 @@ impl SqliteStore {
     // Run ledger (`run_events`): the machine-grain, append-only record of
     // every run written directly by `lf`. Read by `lf runs` / `lf trace`.
 
+    /// Cached line/token counts for a git blob. Content-addressed, so a hit is
+    /// always correct and a miss only costs one tokenization.
+    pub fn blob_tokens(&self, sha: &str) -> StoreResult<Option<(i64, i64, i64)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row = conn
+            .query_row(
+                "SELECT lines, bytes, tokens FROM blob_tokens WHERE sha = ?1",
+                params![sha],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    pub fn put_blob_tokens(
+        &self,
+        sha: &str,
+        lines: i64,
+        bytes: i64,
+        tokens: i64,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO blob_tokens (sha, lines, bytes, tokens) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(sha) DO NOTHING",
+            params![sha, lines, bytes, tokens],
+        )?;
+        Ok(())
+    }
+
     pub fn insert_run_event(&self, row: &RunEventRow) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(

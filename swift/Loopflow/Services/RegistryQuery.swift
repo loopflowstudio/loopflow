@@ -86,6 +86,22 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([TraceSpan].self, from: stdout)
     }
 
+    /// The codebase on disk, as a tree of directories weighted by tokens.
+    /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf tokens` measures the
+    /// repo it is invoked in.
+    public func codebase(repoPath: String) async throws -> CodeNode {
+        let stdout = try await run(["tokens", "--json"], repoPath)
+        return try Self.decode(CodeNode.self, from: stdout)
+    }
+
+    /// How big the codebase was on each day it changed. Mirrors Rust
+    /// `CodeSnapshot`. Blob counts are cached by sha, so only the first walk of
+    /// a window pays to tokenize.
+    public func codebaseHistory(repoPath: String, days: Int = 30) async throws -> [CodeSnapshot] {
+        let stdout = try await run(["tokens", "--json", "--days", String(days)], repoPath)
+        return try Self.decode([CodeSnapshot].self, from: stdout)
+    }
+
     public func doctor() async throws -> DoctorReport {
         let stdout = try await run(["doctor", "--json"], nil)
         return try Self.decode(DoctorReport.self, from: stdout)
@@ -341,4 +357,37 @@ private enum RegistrySnapshotDate {
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
     }
+}
+
+/// A directory or file in the codebase, weighted by the tokens a model pays to
+/// read it. Mirrors Rust `CodeNode` exactly.
+public struct CodeNode: Decodable, Sendable, Identifiable {
+    public var id: String { path.isEmpty ? name : path }
+
+    public let path: String
+    public let name: String
+    public let lines: Int
+    public let bytes: Int
+    public let tokens: Int
+    public let children: [CodeNode]
+}
+
+/// The codebase's size on one day. Mirrors Rust `CodeSnapshot` exactly.
+public struct CodeSnapshot: Decodable, Sendable, Identifiable {
+    public var id: String { commit }
+
+    public let date: String
+    public let commit: String
+    public let lines: Int
+    public let tokens: Int
+    public let slices: [CodeSlice]
+}
+
+/// One top-level directory's weight in a snapshot. Mirrors Rust `CodeSlice`.
+public struct CodeSlice: Decodable, Sendable, Identifiable {
+    public var id: String { path }
+
+    public let path: String
+    public let lines: Int
+    public let tokens: Int
 }

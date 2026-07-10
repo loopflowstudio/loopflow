@@ -5,7 +5,9 @@ title: Wave Authoring
 
 # Wave Authoring
 
-A wave is a named agent with a goal. You author its intent, memory, and project bets; it works tasks, dispatches workers, watches their PRs, and loops.
+A wave is a named agent with a goal. You author its intent, memory, and project
+bets; it works the next blocker inline, spins off independent loops when they
+earn a separate lifecycle, and remembers what ships.
 
 ---
 
@@ -82,8 +84,8 @@ workers: 2
 ## Objective
 
 Harden the daemon. Each loop: read Linear tasks and memory, pick the next useful
-move, dispatch a worker to build it, watch the PR, and fold what shipped into
-memory.
+move, resolve its local blocker, spin off independent work only when parallelism
+earns it, and fold what shipped into memory.
 
 ## Measures
 
@@ -93,8 +95,8 @@ memory.
 
 ## Process
 
-Use a direct worker for mechanical changes; write a scratch design first when the
-blast radius crosses storage, auth, or public APIs.
+Make mechanical changes directly; write a scratch design first when the blast
+radius crosses storage, auth, or public APIs.
 ```
 
 Run `lf serve <wave>` to start that wave directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
@@ -223,16 +225,18 @@ Run the wave agent and it works one move at a time:
 
 1. **Read** — its `GOAL.md`, `MEMORY.md`, Linear tasks, and any work already in flight.
 2. **Decide** — pick the next useful move against the task list and metrics.
-3. **Dispatch** — hand a scoped task to a worker, which runs a flow in its own worktree and opens a PR:
+3. **Execute** — resolve the sole blocker inline. Create a worker only when a
+   strict subset needs its own repeated lifecycle or can run usefully in parallel:
 
    ```bash
-   lf loop build "wrap SQLite migrations in a transaction" --wave infra --detach
+   lf --wave infra loop build "wrap SQLite migrations in a transaction" --detach
    ```
 
 4. **Watch** — the PR is how the worker reports back. The agent reads its diff, checks, and comments.
 5. **Remember** — the agent folds what shipped into `MEMORY.md` and updates Linear tasks.
 
-The wave agent coordinates; it rarely writes code itself. Substantial work becomes a worker session you can watch and steer; only atomic fixes are done inline.
+The wave agent coordinates and executes. Work becomes a worker session only
+when a separate lifecycle or real parallelism earns the extra worktree.
 
 ### Fold, Don't Drop
 
@@ -286,7 +290,10 @@ Migration shim     → Legacy API compatibility layer
 Cleanup            → Remove old billing code
 ```
 
-The wave agent reads tasks with `lf pm show`, picks the highest-priority task, dispatches a worker per task, and loops — folding each shipped PR into memory and closing the task with `lf pm task done` — until no open tasks remain.
+The wave agent reads tasks with `lf pm show`, picks the highest-priority move,
+and resolves its local blocker inline. It creates a child loop only when an
+independent task earns its own lifecycle or useful parallelism, then folds each
+shipped PR into memory and closes the task with `lf pm task done`.
 
 ---
 

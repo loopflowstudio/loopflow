@@ -34,7 +34,13 @@
 //! rejects a byline on this door. Machine speech — webhook facts, worker
 //! reports, escalations — rides the bus with `lf radio --from`, and the
 //! listener's bus sweep folds it into the thread attributed.
+//!
+//! # Following
+//! `--follow` composes the same post door with [`super::thread`]'s SSE replay.
+//! Typed lines are ordinary messages, or steer requests when `--steer` is set;
+//! slash commands stay local to the terminal session.
 
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -43,6 +49,7 @@ use anyhow::{anyhow, bail, Result};
 use crate::engine::wave_context::{
     read_endpoint_pointer, resolve_ambient_channel, wave_origin, AmbientWaveRef,
 };
+use crate::lf::commands::thread;
 use crate::lf::commands::util::{find_repo_root, message_text};
 use crate::lf::WaveTargetArgs;
 use crate::lfd::types::Wave;
@@ -50,11 +57,15 @@ use crate::lfdb::{open_existing_store, SharedStore};
 use crate::wave::channel::family_head;
 use crate::wave::journal::MessageOp;
 
-pub fn run(text_args: &[String], steer: bool, target: &WaveTargetArgs) -> Result<()> {
+pub fn run(text_args: &[String], follow: bool, steer: bool, target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let context = CliContext::detect().await;
-        run_with_context(&context, text_args, steer, target).await
+        if follow {
+            follow_with_context(&context, steer, target).await
+        } else {
+            run_with_context(&context, text_args, steer, target).await
+        }
     })
 }
 
@@ -80,16 +91,7 @@ pub(crate) async fn run_with_context(
     };
     let text = message_text(text_args, std::io::stdin())?;
     let endpoint = resolved.require_endpoint()?;
-    // Chat is the human's verb: unattributed, like the Mac composer — the
-    // same human act must journal the same way on every surface. Machine
-    // speech carries a byline and rides the bus (`lf radio`).
-    let op = if steer {
-        MessageOp::Steer
-    } else {
-        MessageOp::Message
-    };
-    let body = serde_json::json!({ "op": op, "text": text });
-    post_json(&endpoint, "/messages", &body).await?;
+    post_message(&endpoint, &text, steer).await?;
     println!(
         "sent to '{}' ({})",
         resolved.name,
@@ -99,6 +101,122 @@ pub(crate) async fn run_with_context(
             "queued for the next turn"
         }
     );
+    Ok(())
+}
+
+/// Replay and follow the resolved thread while stdin supplies human speech.
+async fn follow_with_context(
+    context: &CliContext,
+    steer: bool,
+    target: &WaveTargetArgs,
+) -> Result<()> {
+    let Some(resolved) = resolve_target(
+        target,
+        context.store.as_ref(),
+        context.repo.as_deref(),
+        context.env_wave_id.as_deref(),
+        context.env_channel.as_deref(),
+    )
+    .await?
+    else {
+        bail!("no wave here — name one with `lf chat --follow -w <wave>`");
+    };
+    follow_thread(&resolved, steer).await
+}
+
+async fn follow_thread(resolved: &ResolvedWave, steer: bool) -> Result<()> {
+    let endpoint = resolved.require_endpoint()?;
+    println!(
+        "chat: {} @ {endpoint}   (/help, Ctrl-D to leave)",
+        resolved.name
+    );
+
+    // The stream replays on connect. Use the resolved family-head name so an
+    // ambient hand or --parent follows the same wave that receives speech.
+    let wave_name = resolved.name.clone();
+    let stream = tokio::spawn(async move { thread::follow(Some(wave_name.as_str()), false).await });
+
+    // stdin blocks, so it reads on its own thread and hands lines to the loop.
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(16);
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            if tx.blocking_send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    loop {
+        let line = tokio::select! {
+            line = rx.recv() => line,
+            _ = tokio::signal::ctrl_c() => None,
+        };
+        // EOF (Ctrl-D) or Ctrl-C leaves the chat; the wave keeps running.
+        let Some(line) = line else { break };
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(command) = line.strip_prefix('/') {
+            if !handle_command(command, &endpoint).await? {
+                break;
+            }
+            continue;
+        }
+        post_message(&endpoint, line, steer).await?;
+    }
+
+    stream.abort();
+    Ok(())
+}
+
+/// A steering verb typed inside an interactive chat rather than speech.
+#[derive(Debug, PartialEq, Eq)]
+enum Command {
+    Quit,
+    Status,
+    Help,
+    Unknown,
+}
+
+fn parse_command(command: &str) -> Command {
+    match command.trim() {
+        "q" | "quit" | "exit" => Command::Quit,
+        "status" => Command::Status,
+        "help" | "?" => Command::Help,
+        _ => Command::Unknown,
+    }
+}
+
+/// Returns false when the interactive chat should end.
+async fn handle_command(command: &str, endpoint: &str) -> Result<bool> {
+    match parse_command(command) {
+        Command::Quit => return Ok(false),
+        Command::Status => {
+            let health = get_json(endpoint, "/health").await?;
+            println!("{}", serde_json::to_string_pretty(&health)?);
+        }
+        Command::Help => println!(
+            "  /status   the wave's loop state\n  \
+               /quit     leave (Ctrl-D also works)\n  \
+             anything else is spoken into the thread"
+        ),
+        Command::Unknown => eprintln!("unknown command '/{}' — try /help", command.trim()),
+    }
+    Ok(true)
+}
+
+/// Post one unattributed human act, shared by one-shot and followed chat.
+async fn post_message(endpoint: &str, text: &str, steer: bool) -> Result<()> {
+    // Machine speech carries a byline and rides the bus (`lf radio`).
+    let op = if steer {
+        MessageOp::Steer
+    } else {
+        MessageOp::Message
+    };
+    let body = serde_json::json!({ "op": op, "text": text });
+    post_json(endpoint, "/messages", &body).await?;
     Ok(())
 }
 
@@ -328,6 +446,17 @@ mod tests {
     use crate::wave::journal::{EventKind, MessageOp};
     use crate::wave::runtime::InboxItem;
     use crate::wave::server;
+
+    #[test]
+    fn interactive_commands_parse_and_everything_else_is_speech() {
+        assert_eq!(parse_command("quit"), Command::Quit);
+        assert_eq!(parse_command(" q "), Command::Quit);
+        assert_eq!(parse_command("exit"), Command::Quit);
+        assert_eq!(parse_command("status"), Command::Status);
+        assert_eq!(parse_command("help"), Command::Help);
+        assert_eq!(parse_command("?"), Command::Help);
+        assert_eq!(parse_command("deploy"), Command::Unknown);
+    }
 
     /// A live wave_server WaveAgent row carrying `endpoint` in its env — the
     /// shape `lf serve` registers (see crate::wave::registry).

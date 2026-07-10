@@ -17,8 +17,8 @@ You author wave files under `wave/<name>/`:
 | **`projects/*.md`** | One measured bet per file, with KRs and closure criteria |
 
 Tasks live in Linear. Run the agent and it works a loop: read its projects,
-tasks, and memory; pick the next move; inhabit or delegate a loop; watch the PR; and fold
-what changed back into memory.
+tasks, and memory; pick the next move; execute it inline or place a justified
+child loop; watch the PR; and fold what changed back into memory.
 
 ```bash
 lf serve shipper            # start the wave agent
@@ -26,11 +26,12 @@ tmux ls                    # the wave agent and every worker it launches
 tmux attach -r -t <name>   # inspect one without direct control
 ```
 
-The wave agent can inhabit one loop and delegate self-sufficient work:
+The wave agent resolves the sole blocker inline. It creates a child loop only
+for a strict subset that needs its own repeated lifecycle or useful parallelism:
 
 ```bash
-lf loop build "add retry to token refresh" --wave shipper
-lf loop build "audit retry callers" --wave shipper --detach
+lf --wave shipper loop build "add retry to token refresh"
+lf --wave shipper loop build "audit retry callers" --detach
 ```
 
 A worker runs the flow in its own worktree, opens a PR, and reports back. It inherits the wave's `GOAL.md` and `MEMORY.md`, so it builds with the wave's intent in view.
@@ -39,13 +40,14 @@ Each loop gets a fresh sibling worktree — `<repo>.<wave>.<run-id>` — off the
 default branch, with its own branch and PR:
 
 ```bash
-lf loop task "…" --wave shipper           # foreground: block until done
-lf loop task "…" --wave shipper --detach  # background: server-owned
+lf --wave shipper loop task "…"           # foreground: caller-owned
+lf --wave shipper loop task "…" --detach  # background: server-owned
 ```
 
 Both forms create the same placed worktree. `--detach` changes attention and
 ownership, not execution: the server launches a headless loop and the caller
-returns immediately.
+returns immediately. It requires an already-running server and is useful only
+when the parent has another move; otherwise keep the loop foreground.
 
 Waves are independent by default. Humans steer a served mind with `lf chat`;
 agents report on its bus with `lf radio --channel <name> "…"`, even while the

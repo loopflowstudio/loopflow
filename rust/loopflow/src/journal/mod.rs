@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tracing::{debug, warn};
 
-use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
+use crate::engine::worktrees::main_repo_root;
 use crate::lfd::id::LfdId;
 use crate::lfdb::sqlite::SqliteStore;
 use crate::lfdb::RunEventRow;
@@ -426,9 +426,7 @@ fn ensure_run_context(
     }
 
     let main_repo = main_repo_root(repo_root).ok();
-    let wave_name = main_repo
-        .as_ref()
-        .and_then(|main| wave_name_from_worktree_and_main(repo_root, main));
+    let wave_name = crate::engine::wave_context::resolve_run_wave_name(repo_root);
 
     let (run_id, minted_run_id) = match configured_run_id(repo_root) {
         Some(run_id) => (run_id, false),
@@ -692,6 +690,7 @@ mod tests {
     };
     use crate::engine::git::is_clean;
     use crate::lfd::id::LfdId;
+    use crate::lfd::types::Wave;
     use loopflow_test_support::TestRepo;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
@@ -894,6 +893,47 @@ mod tests {
         assert_eq!(events[1].cache_read_tokens, Some(5));
         assert_eq!(events[0].process_id, events[1].process_id);
         assert_eq!(events[1].command, events[0].command);
+    }
+
+    #[test]
+    fn explicit_wave_env_overrides_the_worktree_for_ledger_attribution() {
+        let _guard = journal_test_guard();
+        let repo = TestRepo::new();
+        let worktree = repo.create_wave_worktree("ambient");
+        let wave = Wave::new(
+            LfdId::new(),
+            "context".to_string(),
+            repo.path().display().to_string(),
+        );
+        super::open_ledger()
+            .expect("ledger")
+            .create_wave(&wave)
+            .expect("explicit wave row");
+        std::env::set_var(crate::lf::session::WAVE_ID_ENV, wave.id().as_str());
+
+        emit(
+            &worktree,
+            LfNode::Run,
+            LfEventType::Started,
+            started_fields(
+                &["lf".to_string(), "design".to_string()],
+                &worktree,
+                "context",
+            ),
+        );
+        emit(
+            &worktree,
+            LfNode::Run,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        );
+
+        let events = super::open_ledger()
+            .expect("ledger")
+            .list_run_events_since(0)
+            .expect("events");
+        assert_eq!(events[0].wave.as_deref(), Some("context"));
+        std::env::remove_var(crate::lf::session::WAVE_ID_ENV);
     }
 
     #[test]

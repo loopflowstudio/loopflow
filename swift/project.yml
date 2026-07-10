@@ -5,6 +5,7 @@ options:
     macOS: "15.0"
     iOS: "18.0"
   xcodeVersion: "15.0"
+  postGenCommand: "mkdir -p LoopflowSwift.xcodeproj/project.xcworkspace/xcshareddata/swiftpm && cp Package.resolved LoopflowSwift.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 
 settings:
   base:
@@ -14,9 +15,6 @@ packages:
   ViewInspector:
     url: https://github.com/nalexn/ViewInspector.git
     from: 0.10.0
-  WhisperKit:
-    url: https://github.com/argmaxinc/WhisperKit.git
-    minorVersion: 0.9.0
 
 targets:
   Loopflow:
@@ -35,9 +33,6 @@ targets:
         INFOPLIST_FILE: Loopflow/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.framework
         DEFINES_MODULE: YES
-    dependencies:
-      - package: WhisperKit
-
   LoopflowMac:
     type: application
     platform: macOS
@@ -47,7 +42,6 @@ targets:
           - Info.plist
     dependencies:
       - target: Loopflow
-      - package: WhisperKit
       # GhosttyKit is available via SPM binary target. For local development with
       # GhosttyKit, use `swift build` or add the framework manually after building
       # with: cd vendor/ghostty && zig build -Doptimize=ReleaseFast
@@ -69,8 +63,9 @@ targets:
           - "$(inherited)"
           - "@executable_path/../Frameworks"
           - "@loader_path/../Frameworks"
-        CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: 2V3M244HF2
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
         # GhosttyKit is disabled in Xcode project - use SPM build for full terminal support
         # To enable locally, build Ghostty and add GHOSTTY_ENABLED to compilation conditions
 
@@ -81,7 +76,6 @@ targets:
       - path: LoopflowiOS
     dependencies:
       - target: Loopflow
-      - package: WhisperKit
     settings:
       base:
         PRODUCT_NAME: Loopflow
@@ -93,7 +87,6 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Loopflow
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Loopflow uses the microphone for voice-to-text input."
 
   LoopflowTests:
     type: bundle.unit-test
@@ -108,6 +101,9 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSPrincipalClass: LoopflowTestsPrincipal
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/Loopflow.app/Contents/MacOS/Loopflow
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
 
   LoopflowUITests:
     type: bundle.ui-testing
@@ -120,3 +116,6 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: LoopflowMac
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""

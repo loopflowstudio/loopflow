@@ -62,7 +62,7 @@ enum LocalWaveAgentLauncher {
         ) {
             throw WaveLaunchError.alreadyRunning(reason)
         }
-        let lfPath = try resolveServeCapableLf(originRepo: origin)
+        let lfPath = try resolveWaveCapableLf(originRepo: origin)
         let args = waveLaunchCommand(
             lfPath: lfPath,
             sessionName: sessionName,
@@ -70,6 +70,18 @@ enum LocalWaveAgentLauncher {
             waveName: waveName
         )
         try runChecked(args, cwd: origin)
+    }
+
+    /// Stop the listener through the same `lf` lifecycle surface the CLI uses.
+    /// The server performs resident, registry, and discovery-file cleanup.
+    static func stopWave(repoPath: String, waveName: String) throws {
+        let origin = WaveOrigin.resolve(repoPath)
+        let lfPath = try resolveWaveCapableLf(originRepo: origin)
+        try runChecked(waveStopCommand(lfPath: lfPath, waveName: waveName), cwd: origin)
+    }
+
+    static func waveStopCommand(lfPath: String, waveName: String) -> [String] {
+        [lfPath, "stop", waveName]
     }
 
     /// Why a launch must not happen, or nil when the way is clear. `endpoint`
@@ -162,22 +174,22 @@ enum LocalWaveAgentLauncher {
         return candidates
     }
 
-    /// First candidate that actually has the `serve` subcommand. Resolving `lf`
-    /// from PATH can find a build that predates `lf serve`; it launches fine,
-    /// exits instantly, and the UI sits on a dead 20s wait (observed live) —
-    /// so every candidate is capability-probed before it's trusted.
+    /// First candidate that has both wave lifecycle commands. Resolving `lf`
+    /// from PATH can find a build that predates `serve` or `stop`; treating an
+    /// unknown lifecycle verb as a skill would launch the wrong work, so every
+    /// candidate is capability-probed before it's trusted.
     ///
     /// The probe is `lf help serve`, NOT `lf serve --help`: lf's arg reorderer
     /// treats an unknown `serve` as a skill name, so `lf serve --help` prints the
     /// root help and exits 0 even on a build without the subcommand. `lf help
     /// serve` exits 0 only when the subcommand exists, and clap answers it without touching
-    /// any wave state.
-    static func resolveServeCapableLf(
+    /// any wave state. The same holds for `lf help stop`.
+    static func resolveWaveCapableLf(
         originRepo: String,
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
         pathEnv: String = GUIProcessEnvironment.enrichedPath(from: ProcessInfo.processInfo.environment["PATH"]),
         isExecutableFile: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
-        probe: (String) -> Bool = hasServeCommand,
+        probe: (String) -> Bool = hasWaveCommands,
         useCache: Bool = true
     ) throws -> String {
         let cacheKey = "\(originRepo)|\(bundled?.path ?? "")|\(pathEnv)"
@@ -205,14 +217,15 @@ enum LocalWaveAgentLauncher {
             return candidate
         }
         throw WaveLaunchError.noUsableLf(
-            "No lf with the serve command. Rejected (each failed `lf help serve`, "
-                + "so it predates `lf serve`): " + candidates.joined(separator: ", ")
+            "No lf with the wave lifecycle commands. Rejected (each failed "
+                + "`lf help serve` or `lf help stop`): " + candidates.joined(separator: ", ")
         )
     }
 
-    /// `lf help serve` exits 0 only when this build knows the subcommand.
-    static func hasServeCommand(lfPath: String) -> Bool {
+    /// Help probes parse without touching wave state.
+    static func hasWaveCommands(lfPath: String) -> Bool {
         run([lfPath, "help", "serve"])?.status == 0
+            && run([lfPath, "help", "stop"])?.status == 0
     }
 
     static func tmuxSessionNames() -> Set<String> {
@@ -236,7 +249,7 @@ enum LocalWaveAgentLauncher {
     /// the enriched GUI PATH. Throws on a spawn failure or a non-zero exit.
     static func queryLf(_ subargs: [String], cwd: String?) throws -> String {
         let origin = cwd.map(WaveOrigin.resolve) ?? FileManager.default.currentDirectoryPath
-        let lfPath = try resolveServeCapableLf(originRepo: origin)
+        let lfPath = try resolveWaveCapableLf(originRepo: origin)
         guard let result = run([lfPath] + subargs, cwd: cwd) else {
             throw WaveLaunchError.launchFailed("Failed to spawn: lf \(subargs.joined(separator: " "))")
         }

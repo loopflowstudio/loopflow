@@ -109,6 +109,30 @@ pub fn resolve_ambient_channel_name(repo_root: &Path) -> Option<String> {
     }
 }
 
+/// The bus channel owned by a placed run. The worktree carries a timestamp for
+/// filesystem freshness; the channel stays stable at `wave.<short-run-id>`.
+pub fn placed_channel_name(wave_name: &str, run_id: &crate::lfd::id::LfdId) -> String {
+    format!(
+        "{wave_name}.{}",
+        crate::engine::worktrees::short_run_id(run_id.as_str())
+    )
+}
+
+/// The wave a run is attributed to. A dispatcher or explicit `--wave` owns
+/// attribution through `LFD_WAVE_ID`; a bare run may use a recognized sibling
+/// wave worktree. Branch-name inference is intentionally excluded: the main
+/// checkout's ordinary branch is not a wave identity.
+pub fn resolve_run_wave_name(repo_root: &Path) -> Option<String> {
+    if let Some(id) = std::env::var(crate::lf::session::WAVE_ID_ENV)
+        .ok()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+    {
+        return wave_name_for_id(&id);
+    }
+    crate::engine::worktrees::wave_name_from_worktree(repo_root)
+}
+
 /// What the ambient-wave paths ask git about a repo root.
 #[derive(Debug, Clone)]
 struct RepoGitInfo {
@@ -550,6 +574,12 @@ mod tests {
             Some(AmbientWaveRef::Name("ship.148e".to_string())),
             "the work-line worktree's name is its channel"
         );
+    }
+
+    #[test]
+    fn placed_channel_uses_the_wave_and_registry_run_id() {
+        let run_id = crate::lfd::id::LfdId::from_raw("a1b2c3d4-rest");
+        assert_eq!(placed_channel_name("ship", &run_id), "ship.a1b2c3d4");
     }
 
     /// A hand lives inside its wave's mind: a run in a work-line worktree reads

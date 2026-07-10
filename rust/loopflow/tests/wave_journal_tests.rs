@@ -280,6 +280,7 @@ async fn health_reports_channel_liveness_and_the_loop_state() {
         SubagentDoor::new(),
         None,
         None,
+        server::ShutdownDoor::new(),
     );
     tokio::spawn(async move {
         axum::serve(listener, app).await.ok();

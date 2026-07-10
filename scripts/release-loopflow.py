@@ -91,10 +91,10 @@ def _notarize_dmg(dmg_path: Path) -> int:
 
     if not all([key, key_id, issuer]):
         print(
-            "Skipping notarization (NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER not set)",
+            "Missing notarization credentials: NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER",
             flush=True,
         )
-        return 0
+        return 1
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".p8", delete=False) as f:
         f.write(key)
@@ -195,11 +195,12 @@ def release() -> int:
             print("Codesigning failed")
             return rc
     else:
-        print("No Developer ID found — signing ad-hoc (DMG will trigger Gatekeeper)")
-        run(
-            ["codesign", "--force", "--deep", "--sign", "-", str(dist_dir / f"{app_name}.app")],
-            timeout=5 * 60,
+        print(
+            "No Developer ID Application identity found; refusing to build a user DMG "
+            "that would trigger Gatekeeper.",
+            flush=True,
         )
+        return 1
 
     # Create DMG
     dmg_path = dist_dir / f"{app_name}.dmg"

@@ -53,7 +53,7 @@ struct TelemetryDashboardView: View {
 
                     chartCard(
                         "Codebase over time · \(Self.windowDays) days",
-                        subtitle: "What a model pays to read this repo, per top-level directory"
+                        subtitle: "What a model pays to read this repo, by file extension"
                     ) {
                         CodebaseGrowthChart(snapshots: growth, failure: codebaseError)
                             .frame(height: 260)
@@ -244,11 +244,18 @@ struct TelemetryDashboardView: View {
     }
 }
 
+/// Integer division made 1,802,919 and 1,033,737 both read "1M" — two bars that
+/// differ by 770k tokens wearing the same label. Keep a decimal in the millions.
 private func compactTokens(_ tokens: Int) -> String {
     switch tokens {
-    case 1_000_000...: return "\(tokens / 1_000_000)M"
-    case 1_000...: return "\(tokens / 1_000)k"
-    default: return "\(tokens)"
+    case 1_000_000...:
+        return String(format: "%.1fM", Double(tokens) / 1_000_000)
+    case 10_000...:
+        return "\(tokens / 1_000)k"
+    case 1_000...:
+        return String(format: "%.1fk", Double(tokens) / 1_000)
+    default:
+        return "\(tokens)"
     }
 }
 
@@ -313,9 +320,9 @@ private struct DailyTokensChart: View {
 
 // MARK: - Codebase: growth over time, and the flame on disk
 
-/// Stacked by top-level directory. Lines are what a human counts; tokens are
-/// what a run costs, and they disagree — a lockfile is cheap in lines and
-/// ruinous here. This plots the number the context budget spends.
+/// Stacked by file extension. Lines are what a human counts; tokens are what a
+/// run costs, and they disagree — a lockfile is cheap in lines and ruinous here.
+/// This plots the number the context budget spends.
 private struct CodebaseGrowthChart: View {
     @Environment(\.palette) private var palette
     let snapshots: [CodeSnapshot]
@@ -324,7 +331,7 @@ private struct CodebaseGrowthChart: View {
     private struct Point: Identifiable {
         let id: String
         let date: Date
-        let path: String
+        let ext: String
         let tokens: Int
     }
 
@@ -335,9 +342,9 @@ private struct CodebaseGrowthChart: View {
             guard let date = formatter.date(from: snapshot.date) else { return [] }
             return snapshot.slices.map { slice in
                 Point(
-                    id: "\(snapshot.commit)-\(slice.path)",
+                    id: "\(snapshot.commit)-\(slice.ext)",
                     date: date,
-                    path: slice.path,
+                    ext: slice.ext,
                     tokens: slice.tokens
                 )
             }
@@ -356,7 +363,7 @@ private struct CodebaseGrowthChart: View {
                     x: .value("Day", point.date, unit: .day),
                     y: .value("Tokens", point.tokens)
                 )
-                .foregroundStyle(by: .value("Directory", point.path))
+                .foregroundStyle(by: .value("Extension", point.ext))
             }
             .chartLegend(position: .bottom, spacing: Spacing.sm)
             .chartYAxis {
@@ -373,17 +380,23 @@ private struct CodebaseGrowthChart: View {
     }
 }
 
-/// An icicle over the files on disk: repo on top, each directory partitioned by
-/// the tokens its subtree costs. Width is tokens, never lines and never time.
+/// An icicle over the files on disk. Each node's bar fills the width its parent
+/// allotted it, and its children tile that width in proportion to their tokens.
+/// A child can never be wider than its parent — which is what makes the picture
+/// readable, and what the first version got wrong by indenting each row while
+/// still sizing it against the root.
+///
+/// Width is tokens, never lines and never time.
 private struct CodeFlame: View {
     let root: CodeNode?
     var failure: String?
 
     var body: some View {
         if let root, root.tokens > 0 {
-            VStack(alignment: .leading, spacing: 2) {
-                CodeFlameRow(node: root, total: root.tokens, depth: 0)
+            GeometryReader { geometry in
+                IcicleNode(node: root, width: geometry.size.width, depth: 0)
             }
+            .frame(height: flameHeight(root))
         } else {
             EmptyChartHint(
                 message: failure ?? "No codebase measured",
@@ -391,42 +404,74 @@ private struct CodeFlame: View {
             )
         }
     }
+
+    private func flameHeight(_ root: CodeNode) -> CGFloat {
+        CGFloat(min(depth(of: root), maxFlameDepth + 1)) * (barHeight + barGap)
+    }
+
+    private func depth(of node: CodeNode) -> Int {
+        1 + (node.children.map(depth).max() ?? 0)
+    }
 }
 
-/// Depth is capped: below three levels the bars are thinner than their labels,
-/// and a chart nobody can read is worse than one that stops.
+/// Below this the bars are thinner than their labels, and a chart nobody can
+/// read is worse than one that stops.
 private let maxFlameDepth = 3
+private let barHeight: CGFloat = 22
+private let barGap: CGFloat = 2
+/// A segment narrower than this cannot show even one character; drawing it adds
+/// noise, not information.
+private let minSegmentWidth: CGFloat = 3
 
-private struct CodeFlameRow: View {
+private struct IcicleNode: View {
     @Environment(\.palette) private var palette
     let node: CodeNode
-    let total: Int
+    let width: CGFloat
     let depth: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            GeometryReader { geometry in
-                let fraction = total > 0 ? Double(node.tokens) / Double(total) : 0
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: CornerRadius.sm)
-                        .fill(depthColor.opacity(0.85))
-                        .frame(width: max(2, geometry.size.width * fraction))
-                    Text("\(node.name)  \(compactTokens(node.tokens))")
-                        .font(Typography.code(11))
-                        .foregroundStyle(palette.text)
-                        .padding(.leading, Spacing.xs)
-                        .lineLimit(1)
+        VStack(alignment: .leading, spacing: barGap) {
+            bar
+            if depth < maxFlameDepth, node.tokens > 0 {
+                HStack(alignment: .top, spacing: barGap) {
+                    ForEach(visibleChildren, id: \.node.id) { child in
+                        IcicleNode(node: child.node, width: child.width, depth: depth + 1)
+                            .frame(width: child.width, alignment: .leading)
+                    }
                 }
+                .frame(width: width, alignment: .leading)
             }
-            .frame(height: 22)
-            .help("\(node.path.isEmpty ? node.name : node.path): \(node.tokens.formatted()) tokens · \(node.lines.formatted()) lines")
+        }
+        .frame(width: width, alignment: .leading)
+    }
 
-            if depth < maxFlameDepth {
-                ForEach(node.children.prefix(12)) { child in
-                    CodeFlameRow(node: child, total: total, depth: depth + 1)
-                        .padding(.leading, Spacing.md)
-                }
+    private var bar: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: CornerRadius.sm)
+                .fill(depthColor.opacity(0.85))
+            if width > 44 {
+                Text("\(node.name)  \(compactTokens(node.tokens))")
+                    .font(Typography.code(11))
+                    .foregroundStyle(palette.text)
+                    .padding(.leading, Spacing.xs)
+                    .lineLimit(1)
+                    .allowsTightening(true)
             }
+        }
+        .frame(width: width, height: barHeight)
+        .help("\(node.path.isEmpty ? node.name : node.path): \(node.tokens.formatted()) tokens · \(node.lines.formatted()) lines")
+    }
+
+    /// Children share exactly the width this node was given, minus the gaps
+    /// between them, so a subtree always fits inside its parent.
+    private var visibleChildren: [(node: CodeNode, width: CGFloat)] {
+        guard node.tokens > 0, !node.children.isEmpty else { return [] }
+        let gaps = CGFloat(max(node.children.count - 1, 0)) * barGap
+        let usable = max(width - gaps, 0)
+        return node.children.compactMap { child in
+            let childWidth = usable * CGFloat(child.tokens) / CGFloat(node.tokens)
+            guard childWidth >= minSegmentWidth else { return nil }
+            return (child, childWidth)
         }
     }
 

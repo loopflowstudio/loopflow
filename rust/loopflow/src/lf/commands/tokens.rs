@@ -75,12 +75,40 @@ pub struct CodeSnapshot {
     pub slices: Vec<CodeSlice>,
 }
 
-/// One top-level directory's weight in a snapshot.
+/// One file extension's weight in a snapshot. `ext` is lowercase and carries no
+/// dot; a file with no extension is `(none)`, and the long tail is `other`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CodeSlice {
-    pub path: String,
+    pub ext: String,
     pub lines: usize,
     pub tokens: usize,
+}
+
+/// Beyond this the legend is longer than the chart. The tail collapses to
+/// `other` — chosen once across the whole window, so a series never appears in
+/// one snapshot and vanishes from the next.
+const MAX_EXTENSIONS: usize = 8;
+const OTHER: &str = "other";
+const NO_EXTENSION: &str = "(none)";
+
+/// `src/main.rs` -> `rs`. A dotfile is not an extension: `.gitignore` has none.
+fn extension_of(path: &str) -> String {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    match file.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => ext.to_ascii_lowercase(),
+        _ => NO_EXTENSION.to_string(),
+    }
+}
+
+/// The extensions worth their own series, by total tokens across the window.
+fn dominant_extensions(totals: &BTreeMap<String, usize>) -> Vec<String> {
+    let mut ranked: Vec<_> = totals.iter().collect();
+    ranked.sort_by_key(|(ext, tokens)| (std::cmp::Reverse(**tokens), (*ext).clone()));
+    ranked
+        .into_iter()
+        .take(MAX_EXTENSIONS)
+        .map(|(ext, _)| ext.clone())
+        .collect()
 }
 
 /// One commit per day — the last one that day — over the window.
@@ -151,12 +179,27 @@ fn blob_weight(root: &Path, store: &SqliteStore, sha: &str) -> Option<(usize, us
     Some((lines, tokens))
 }
 
+/// One day's measurement, before the long tail of extensions is folded.
+struct RawSnapshot {
+    date: String,
+    commit: String,
+    lines: usize,
+    tokens: usize,
+    /// extension -> (lines, tokens)
+    by_ext: BTreeMap<String, (usize, usize)>,
+}
+
 fn history(root: &Path, days: u32) -> Result<Vec<CodeSnapshot>> {
     let store = open_ledger()?;
-    let mut snapshots = Vec::new();
+
+    // Measure every day first, then decide which extensions get their own
+    // series. Deciding per snapshot would make a series flicker in and out as a
+    // language crosses the threshold on a given day.
+    let mut raw: Vec<RawSnapshot> = Vec::new();
+    let mut window_totals: BTreeMap<String, usize> = BTreeMap::new();
 
     for (date, commit) in daily_commits(root, days)? {
-        let mut slices: BTreeMap<String, CodeSlice> = BTreeMap::new();
+        let mut by_ext: BTreeMap<String, (usize, usize)> = BTreeMap::new();
         let (mut total_lines, mut total_tokens) = (0usize, 0usize);
 
         for (sha, path) in commit_blobs(root, &commit)? {
@@ -166,26 +209,61 @@ fn history(root: &Path, days: u32) -> Result<Vec<CodeSnapshot>> {
             total_lines += lines;
             total_tokens += tokens;
 
-            let top = path.split('/').next().unwrap_or(&path).to_string();
-            let slice = slices.entry(top.clone()).or_insert(CodeSlice {
-                path: top,
-                lines: 0,
-                tokens: 0,
-            });
-            slice.lines += lines;
-            slice.tokens += tokens;
+            let entry = by_ext.entry(extension_of(&path)).or_insert((0, 0));
+            entry.0 += lines;
+            entry.1 += tokens;
         }
 
-        let mut slices: Vec<_> = slices.into_values().collect();
-        slices.sort_by_key(|slice| std::cmp::Reverse(slice.tokens));
-        snapshots.push(CodeSnapshot {
+        for (ext, (_, tokens)) in &by_ext {
+            *window_totals.entry(ext.clone()).or_insert(0) += tokens;
+        }
+        raw.push(RawSnapshot {
             date,
             commit,
             lines: total_lines,
             tokens: total_tokens,
-            slices,
+            by_ext,
         });
     }
+
+    let dominant = dominant_extensions(&window_totals);
+    let snapshots = raw
+        .into_iter()
+        .map(
+            |RawSnapshot {
+                 date,
+                 commit,
+                 lines,
+                 tokens,
+                 by_ext,
+             }| {
+                let mut folded: BTreeMap<String, CodeSlice> = BTreeMap::new();
+                for (ext, (ext_lines, ext_tokens)) in by_ext {
+                    let key = if dominant.contains(&ext) {
+                        ext
+                    } else {
+                        OTHER.to_string()
+                    };
+                    let slice = folded.entry(key.clone()).or_insert(CodeSlice {
+                        ext: key,
+                        lines: 0,
+                        tokens: 0,
+                    });
+                    slice.lines += ext_lines;
+                    slice.tokens += ext_tokens;
+                }
+                let mut slices: Vec<_> = folded.into_values().collect();
+                slices.sort_by_key(|slice| std::cmp::Reverse(slice.tokens));
+                CodeSnapshot {
+                    date,
+                    commit,
+                    lines,
+                    tokens,
+                    slices,
+                }
+            },
+        )
+        .collect();
     Ok(snapshots)
 }
 
@@ -414,7 +492,11 @@ fn format_int(value: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{insert, sort_by_tokens, CodeNode};
+    use super::{
+        dominant_extensions, extension_of, insert, sort_by_tokens, CodeNode, MAX_EXTENSIONS,
+        NO_EXTENSION,
+    };
+    use std::collections::BTreeMap;
     use std::path::Path;
 
     fn empty(name: &str) -> CodeNode {
@@ -426,6 +508,41 @@ mod tests {
             tokens: 0,
             children: Vec::new(),
         }
+    }
+
+    #[test]
+    fn an_extension_is_the_suffix_and_a_dotfile_has_none() {
+        assert_eq!(extension_of("rust/src/main.rs"), "rs");
+        assert_eq!(extension_of("Cargo.lock"), "lock");
+        assert_eq!(
+            extension_of("README.MD"),
+            "md",
+            "extensions fold to lowercase"
+        );
+        assert_eq!(
+            extension_of(".gitignore"),
+            NO_EXTENSION,
+            "a dotfile is not an extension"
+        );
+        assert_eq!(extension_of("Makefile"), NO_EXTENSION);
+        assert_eq!(extension_of("scripts/helpers.sh"), "sh");
+    }
+
+    /// The tail is chosen once for the whole window, so a language never appears
+    /// in one snapshot's legend and vanishes from the next.
+    #[test]
+    fn only_the_dominant_extensions_get_their_own_series() {
+        let totals: BTreeMap<String, usize> = (0..12)
+            .map(|index| (format!("ext{index}"), 1000 - index * 10))
+            .collect();
+        let dominant = dominant_extensions(&totals);
+
+        assert_eq!(dominant.len(), MAX_EXTENSIONS);
+        assert_eq!(dominant[0], "ext0", "the heaviest extension leads");
+        assert!(
+            !dominant.contains(&"ext11".to_string()),
+            "the tail folds to `other`"
+        );
     }
 
     #[test]

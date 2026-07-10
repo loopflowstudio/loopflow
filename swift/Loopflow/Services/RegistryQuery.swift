@@ -383,11 +383,13 @@ public struct CodeSnapshot: Decodable, Sendable, Identifiable {
     public let slices: [CodeSlice]
 }
 
-/// One top-level directory's weight in a snapshot. Mirrors Rust `CodeSlice`.
+/// One file extension's weight in a snapshot. Mirrors Rust `CodeSlice`.
+/// `ext` carries no dot; a file with no extension is `(none)` and the long tail
+/// is folded into `other`.
 public struct CodeSlice: Decodable, Sendable, Identifiable {
-    public var id: String { path }
+    public var id: String { ext }
 
-    public let path: String
+    public let ext: String
     public let lines: Int
     public let tokens: Int
 }

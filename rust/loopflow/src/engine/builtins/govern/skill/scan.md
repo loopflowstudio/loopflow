@@ -38,7 +38,7 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 2. **Read runtime state.** For each member wave:
    - `wave/<wave-name>/.wave-endpoint` — a live wave server publishes its
      endpoint here; absent means the wave is not running
-   - `tmux ls` — the wave's server and any dispatched worker sessions
+   - `tmux ls` — the wave's server and any detached loop sessions
    - Open PRs on the wave's branches (`gh pr list`) and their queue state
 
 3. **Read recent activity.** For each member wave:

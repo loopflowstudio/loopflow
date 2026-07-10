@@ -146,7 +146,7 @@ struct ContractTests {
         #expect(turn.status == .completed)
         #expect(turn.from == nil, "explicit null decodes as absent")
         #expect(turn.items.isEmpty)
-        #expect(WaveFlowloopState(rawValue: posted.state) == .turning)
+        #expect(WaveLoopState(rawValue: posted.state) == .turning)
 
         // `turn` is explicitly Optional: null for a bare interrupt.
         var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -158,41 +158,15 @@ struct ContractTests {
         #expect(bareInterrupt.turn == nil)
     }
 
-    @Test("channel_tagged_turn.json decodes through FrameChannelTag + ChatTurn")
-    func channelTaggedTurnFixtureParses() throws {
-        // A work-line channel's `turn` SSE frame: the ChatTurn JSON plus one
-        // extra top-level `channel` key. Pinned against Rust's dto_fixtures —
-        // WaveChatConnection peels the tag with FrameChannelTag, then decodes
-        // the same bytes as the turn.
-        let data = try fixtureData("dto/channel_tagged_turn.json")
-        let tag = try JSONDecoder().decode(FrameChannelTag.self, from: data)
-        #expect(tag.channel == "ship.148e0e02")
-
-        let turn = try JSONDecoder().decode(ChatTurn.self, from: data)
-        #expect(turn.id == "turn-7")
-        #expect(turn.role == .assistant)
-        #expect(turn.status == .completed)
-        #expect(turn.from == "worker")
-
-        // Untagged frame (the primary channel): absent key decodes as nil.
-        var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        json.removeValue(forKey: "channel")
-        let untagged = try JSONDecoder().decode(
-            FrameChannelTag.self,
-            from: JSONSerialization.data(withJSONObject: json)
-        )
-        #expect(untagged.channel == nil, "absent channel = the wave's own channel")
-    }
-
-    @Test("wave_flowloop_states.json pins the shared SSE state vocabulary")
-    func flowloopStateVocabularyPinned() throws {
-        // The same fixture Rust's dto_fixtures checks against FlowloopState::name;
+    @Test("wave_loop_states.json pins the shared SSE state vocabulary")
+    func loopStateVocabularyPinned() throws {
+        // The same fixture Rust's dto_fixtures checks against LoopState::name;
         // a renamed state fails both languages. Swift still deliberately drops
         // unknown names off the stream (see WaveChatConnectionTests) — this
         // pins the vocabulary, not the tolerance.
-        let json = try fixtureJSON("dto/wave_flowloop_states.json")
+        let json = try fixtureJSON("dto/wave_loop_states.json")
         let names = try #require(json["states"] as? [String])
-        #expect(names.map { WaveFlowloopState(rawValue: $0) } == [.idle, .turning, .interrupting, .failed])
+        #expect(names.map { WaveLoopState(rawValue: $0) } == [.idle, .turning, .interrupting, .failed])
     }
 }
 

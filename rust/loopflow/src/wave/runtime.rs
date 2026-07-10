@@ -10,7 +10,7 @@
 //! - the open turn is a live snapshot grown from the same deltas the journal
 //!   records — served after the finalized thread and re-broadcast as it grows,
 //!   so subscribers watch a turn stream instead of minutes of silence;
-//! - the flowloop state is the last `FlowloopState` event;
+//! - the loop state is the last `LoopState` event;
 //! - the SSE broadcast is liveness only — a subscriber that lags resyncs from
 //!   the store.
 //!
@@ -33,14 +33,18 @@ use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
 use crate::lfd::security::sanitize_fs_component;
-use crate::wave::channel::{matches_prefix, scan_child_channels, ChannelFrame, ChildChannel};
+use crate::wave::channel::matches_prefix;
 use crate::wave::journal::{
     channel_opened_turn, fold_thread, fold_workers, journal_path, restore_pending,
-    run_completed_turn, Attribution, EventKind, Journal, MessageId, MessageOp, PendingMessage,
-    Usage, WorkerOutcome, WorkerRecord,
+    run_completed_turn, EventKind, Journal, MessageId, MessageOp, PendingMessage, Usage,
+    WorkerOutcome, WorkerRecord,
 };
 use crate::wave::memory::Memory;
-use crate::wave::state::{can_transition, FlowloopState};
+use crate::wave::playhead::{
+    now_rfc3339, BodyProvenance, Playhead, PlayheadEvent, PlayheadView, QueuedInvocation,
+    StepOutcome,
+};
+use crate::wave::state::{can_transition, LoopState};
 use crate::wave::wire::{OpFrame, ResidentDelta, ResidentStateTo};
 
 /// Capacity of the live turn broadcast. SSE clients that fall this far behind
@@ -48,17 +52,17 @@ use crate::wave::wire::{OpFrame, ResidentDelta, ResidentStateTo};
 /// of truth, so a dropped live turn is never lost.
 const TURN_BROADCAST_CAPACITY: usize = 256;
 
-/// Capacity of the live flowloop-state broadcast. Transitions are rare (a few per
+/// Capacity of the live loop-state broadcast. Transitions are rare (a few per
 /// turn); a lagged subscriber just resyncs from the next transition.
 const STATE_BROADCAST_CAPACITY: usize = 64;
+
+/// Capacity of playhead snapshots. Every cursor mutation is durable; a lagged
+/// client reconnects and receives the current snapshot before live frames.
+const PLAYHEAD_BROADCAST_CAPACITY: usize = 64;
 
 /// Capacity of the live memory broadcast. Curation is deliberate and rare;
 /// a lagged subscriber reads MEMORY.md itself.
 const MEMORY_BROADCAST_CAPACITY: usize = 64;
-
-/// Capacity of the family bus (child-channel turn frames). Same reasoning as
-/// the primary turn broadcast: liveness only, a lagged subscriber resyncs.
-const FAMILY_BROADCAST_CAPACITY: usize = 256;
 
 /// Capacity of the live inbox broadcast (resident-directed ops → the
 /// `/events?inbox=true` frames and the supervisor). The journal is the
@@ -113,7 +117,7 @@ pub struct TurnFrame {
 
 impl TurnFrame {
     fn share(turn: ChatTurn) -> Arc<Self> {
-        let json = serde_json::to_string(&turn).unwrap_or_default();
+        let json = serde_json::to_string(&turn).expect("ChatTurn serializes to JSON");
         Arc::new(Self { turn, json })
     }
 }
@@ -127,11 +131,14 @@ pub enum InboxItem {
     /// `TurnStarted.answers` or `TurnSteered.answers`).
     Message(PendingMessage),
     /// A bare interrupt (no text): cancel the open turn. Nothing is journaled
-    /// for it — the `FlowloopState` transition records the interrupt itself.
+    /// for it — the `LoopState` transition records the interrupt itself.
     Interrupt,
+    /// Skip the selected logical step. The resident interrupts the body and
+    /// reports a skipped playhead outcome instead of a retryable interruption.
+    Skip,
 }
 
-/// An atomic snapshot + live subscription over one wave: the thread and flowloop
+/// An atomic snapshot + live subscription over one wave: the thread and loop
 /// state as of one instant, plus receivers that carry exactly the frames sent
 /// after it (see [`WaveRuntime::subscribe_with_snapshot`]).
 #[derive(Debug)]
@@ -141,8 +148,10 @@ pub struct Subscription {
     /// per subscriber, so N subscribers share one allocation — and one JSON
     /// serialization — per frame instead of N.
     pub turn_rx: broadcast::Receiver<Arc<TurnFrame>>,
-    pub state: FlowloopState,
-    pub state_rx: broadcast::Receiver<FlowloopState>,
+    pub state: LoopState,
+    pub state_rx: broadcast::Receiver<LoopState>,
+    pub playhead: Option<PlayheadView>,
+    pub playhead_rx: broadcast::Receiver<PlayheadView>,
     /// Live `MemoryUpdated` summaries — fired on every curation, no replay
     /// (the file itself is the durable state).
     pub memory_rx: broadcast::Receiver<String>,
@@ -160,30 +169,40 @@ pub struct Subscription {
     pub op_rx: broadcast::Receiver<OpFrame>,
 }
 
+/// The assistant turn in progress. `turn` is the snapshot the wire watches
+/// grow (status `Running`), re-broadcast on every content delta and committed
+/// to `thread` under the same id at finalization; the rest is bookkeeping that
+/// only means anything while the turn is open.
+#[derive(Debug)]
+struct OpenTurn {
+    turn: ChatTurn,
+    /// Usage accrued from this turn's `TurnUsage` deltas.
+    usage: Usage,
+    /// Prose fragments so far, for `Message` item ids (`"text-<n>"`).
+    text_items: usize,
+    /// Message ids this turn claimed (`TurnOpened.answers` plus any mid-turn
+    /// `TurnSteered.answers`). Requeued if the turn ends without completing.
+    claims: Vec<MessageId>,
+}
+
 /// Everything that must stay mutually consistent: the journal (truth), the
-/// thread cache (fold of it), the open-turn snapshot, the flowloop state (last
-/// transition).
+/// thread cache (fold of it), the open turn, the loop state (last transition).
 #[derive(Debug)]
 struct Inner {
     journal: Journal,
     thread: Vec<ChatTurn>,
-    /// The turn currently in progress, grown delta by delta (status
-    /// `Running`). Served after the finalized thread and re-broadcast on every
-    /// content delta so subscribers watch it grow; cleared at finalization,
-    /// when the terminal turn commits to `thread` under the same id.
-    open_turn: Option<ChatTurn>,
-    /// Usage accrued for the open turn from `TurnUsage` deltas.
-    open_usage: Usage,
-    /// Count of prose fragments in the open turn, for `Message` item ids
-    /// (`"text-<n>"`).
-    open_text_items: usize,
+    /// The turn currently in progress, or `None` between turns. Everything
+    /// that is only meaningful while a turn runs lives inside it, so closing a
+    /// turn is one `take()` rather than four fields reset in step.
+    open: Option<OpenTurn>,
     /// Set by a force-finalize (interrupt-deadline janitor, resident death):
     /// the journal already closed the turn, so late wire deltas for it —
     /// including the resident's own eventual `TurnFinished` — are dropped
     /// until the next `TurnOpened`.
     drop_deltas_until_opened: bool,
-    state: FlowloopState,
-    /// Id of the flowloop's current or most recently committed assistant turn —
+    state: LoopState,
+    playhead: Option<Playhead>,
+    /// Id of the loop's current or most recently committed assistant turn —
     /// what `journal_steered` falls back to when the turn closed during the
     /// send (the thread's *last* turn at that point is usually the steer's
     /// own user turn, which must never be named as a consumer).
@@ -198,10 +217,6 @@ struct Inner {
     /// Every journaled user message by id — requeues restore pending entries
     /// from it (an id alone can't rebuild the text/op/from).
     messages: HashMap<MessageId, PendingMessage>,
-    /// Message ids the OPEN turn claimed (`TurnOpened.answers` plus any
-    /// mid-turn `TurnSteered.answers`). Requeued if the turn ends without
-    /// completing; cleared on any close.
-    open_turn_claims: Vec<MessageId>,
     /// Run ids whose `ChannelOpened` is already journaled — the dispatch
     /// notification door's idempotence guard, folded from the journal.
     opened_channel_runs: HashSet<String>,
@@ -219,7 +234,7 @@ pub struct WaveRuntime {
     /// dot-descendants.
     channel_name: String,
     repo_root: PathBuf,
-    /// Journal + materialized thread + flowloop state, behind one lock so their
+    /// Journal + materialized thread + loop state, behind one lock so their
     /// orders never diverge.
     inner: Mutex<Inner>,
     /// Fans turn frames out to live SSE subscribers: open-turn snapshots as a
@@ -227,32 +242,25 @@ pub struct WaveRuntime {
     /// `Arc`-shared so a delta costs one clone (and one serialization) total,
     /// not one per subscriber.
     turn_tx: broadcast::Sender<Arc<TurnFrame>>,
-    /// Fans flowloop-state transitions out to live SSE subscribers (the composer
+    /// Fans loop-state transitions out to live SSE subscribers (the composer
     /// keys its verb off this).
-    state_tx: broadcast::Sender<FlowloopState>,
+    state_tx: broadcast::Sender<LoopState>,
+    /// Fans the complete playhead view after every journaled transition.
+    playhead_tx: broadcast::Sender<PlayheadView>,
     /// Fans `MemoryUpdated` summaries out to live SSE subscribers.
     memory_tx: broadcast::Sender<String>,
     /// Fans `MemoryAdded` facts out to live SSE subscribers.
     memory_add_tx: broadcast::Sender<String>,
-    /// Durable shared brain (read-only here; the flowloop curates it deliberately).
+    /// Durable shared brain (read-only here; the loop curates it deliberately).
     memory: Memory,
     /// Fans resident-directed ops out to the resident's `/events?inbox=true`
     /// subscription and the supervisor. Liveness only — the journal's pending
     /// fold is the durable queue.
     inbox_tx: broadcast::Sender<InboxItem>,
     /// Whether a resident has ever been spawned for / attached to this
-    /// listener. `/health` serves `flowloop: null` until then (a dormant channel
-    /// has no flowloop to report on).
+    /// listener. `/health` serves `loop_state: null` until then (a dormant channel
+    /// has no loop to report on).
     resident_expected: AtomicBool,
-    /// The channel family's child channels, materialized on demand. This
-    /// server holds the pen for every one of them (single-writer per journal
-    /// file, all pens in one process); the primary channel stays in `inner`
-    /// so its hot path is untouched.
-    children: Mutex<HashMap<String, Arc<ChildChannel>>>,
-    /// The family bus: child-channel turn frames, tagged with their channel
-    /// name. The primary channel's frames ride the dedicated broadcasts above
-    /// (untagged — absent channel means the wave's own).
-    family_tx: broadcast::Sender<ChannelFrame>,
     /// Fans worker-run motion (`op` frames) out to live `/events` subscribers.
     /// Sent under the append lock in [`WaveRuntime::journal_run_observed`] /
     /// [`WaveRuntime::journal_run_completed`], so op order matches journal
@@ -267,7 +275,7 @@ impl WaveRuntime {
     /// Boot janitor: turns left open by a crash are finalized as `Failed`
     /// (appended to the journal, so the log itself is closed), the messages
     /// those turns had claimed are requeued (`MessagesRequeued` — a crashed
-    /// turn never answered them), and a non-idle flowloop state settles back to
+    /// turn never answered them), and a non-idle loop state settles back to
     /// `Idle`.
     ///
     /// # Errors
@@ -277,14 +285,34 @@ impl WaveRuntime {
         let mut fold = fold_thread(&events);
         let workers = fold_workers(&events);
 
+        // Janitor: an active body belonged to the dead server process. Keep
+        // its logical step selected, close only the abandoned attempt, and
+        // let the fresh resident retry it in a new body.
+        const ABANDONED: &str = "startup janitor: body abandoned by server restart";
+        let mut playhead = fold.playhead.take();
+        if let Some(state) = playhead.as_mut() {
+            if let Some(active) = state.active.clone() {
+                let events =
+                    state.finish_body(&active.body_id, StepOutcome::Interrupted, ABANDONED)?;
+                for event in events {
+                    journal.append(|_| EventKind::PlayheadChanged {
+                        event,
+                        playhead: Box::new(state.clone()),
+                    });
+                }
+            }
+        }
+
         // Janitor: a turn without a TurnFinished crashed with the server.
         for mut turn in fold.open {
-            journal.append(|_| EventKind::TurnFinished {
+            let finished = journal.append(|_| EventKind::TurnFinished {
                 turn_id: turn.id.clone(),
                 status: Lifecycle::Failed,
                 usage: Usage::empty(),
+                termination_reason: Some(ABANDONED.to_string()),
             });
             turn.status = Lifecycle::Failed;
+            turn.close_body(finished.at_rfc3339(), Some(ABANDONED.to_string()));
             fold.turns.push(turn);
         }
         // Janitor: what the crashed turns claimed goes back in the queue —
@@ -307,22 +335,22 @@ impl WaveRuntime {
             .find(|turn| turn.role == ChatRole::Assistant)
             .map(|turn| turn.id.clone());
         // Janitor: no turn is live on a fresh boot, whatever the log says.
-        let state = if fold.state == FlowloopState::Idle {
-            FlowloopState::Idle
+        let state = if fold.state == LoopState::Idle {
+            LoopState::Idle
         } else {
-            journal.append(|_| EventKind::FlowloopState {
+            journal.append(|_| EventKind::LoopState {
                 from: fold.state.clone(),
-                to: FlowloopState::Idle,
+                to: LoopState::Idle,
                 reason: "startup janitor: no live turn after restart".to_string(),
             });
-            FlowloopState::Idle
+            LoopState::Idle
         };
 
         let (turn_tx, _) = broadcast::channel(TURN_BROADCAST_CAPACITY);
         let (state_tx, _) = broadcast::channel(STATE_BROADCAST_CAPACITY);
+        let (playhead_tx, _) = broadcast::channel(PLAYHEAD_BROADCAST_CAPACITY);
         let (memory_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
         let (memory_add_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
-        let (family_tx, _) = broadcast::channel(FAMILY_BROADCAST_CAPACITY);
         let (inbox_tx, _) = broadcast::channel(INBOX_BROADCAST_CAPACITY);
         let (op_tx, _) = broadcast::channel(OP_BROADCAST_CAPACITY);
         let memory = Memory::for_wave(&repo_root, &name);
@@ -333,28 +361,25 @@ impl WaveRuntime {
             inner: Mutex::new(Inner {
                 journal,
                 thread: fold.turns,
-                open_turn: None,
-                open_usage: Usage::empty(),
-                open_text_items: 0,
+                open: None,
                 drop_deltas_until_opened: false,
                 state,
+                playhead,
                 last_assistant_turn_id,
                 workers,
                 pending_messages: fold.pending_messages,
                 messages: fold.messages,
-                open_turn_claims: Vec::new(),
                 opened_channel_runs: fold.opened_channel_runs,
                 memory_adds: fold.memory_adds,
             }),
             turn_tx,
             state_tx,
+            playhead_tx,
             memory_tx,
             memory_add_tx,
             memory,
             inbox_tx,
             resident_expected: AtomicBool::new(false),
-            children: Mutex::new(HashMap::new()),
-            family_tx,
             op_tx,
         }))
     }
@@ -404,14 +429,14 @@ impl WaveRuntime {
     /// whole thread. `None` serves everything.
     pub fn thread_tail(&self, limit: Option<usize>) -> Vec<ChatTurn> {
         let inner = self.inner();
-        let open_count = usize::from(inner.open_turn.is_some());
+        let open_count = usize::from(inner.open.is_some());
         let total = inner.thread.len() + open_count;
         let take = limit.unwrap_or(total).min(total);
         let take_open = take.min(open_count);
         let take_thread = take - take_open;
         let mut turns = inner.thread[inner.thread.len() - take_thread..].to_vec();
         if take_open == 1 {
-            turns.extend(inner.open_turn.clone());
+            turns.extend(inner.open.as_ref().map(|open| open.turn.clone()));
         }
         turns
     }
@@ -420,15 +445,164 @@ impl WaveRuntime {
     /// `/health`'s counter.
     pub fn thread_len(&self) -> usize {
         let inner = self.inner();
-        inner.thread.len() + usize::from(inner.open_turn.is_some())
+        inner.thread.len() + usize::from(inner.open.is_some())
     }
 
-    /// Current flowloop state, for `/health` and the composer.
-    pub fn flowloop_state(&self) -> FlowloopState {
+    /// Current loop state, for `/health` and the composer.
+    pub fn loop_state(&self) -> LoopState {
         self.inner().state.clone()
     }
 
-    /// The last journaled vendor thread id, if any — the flowloop's resume handle.
+    /// Current durable playhead view. `None` exists only before the first
+    /// resident attachment initializes the default `wave` invocation.
+    pub fn playhead(&self) -> Option<PlayheadView> {
+        self.inner().playhead.as_ref().map(Playhead::view)
+    }
+
+    /// Initialize the default wave invocation once. Replay wins over code:
+    /// after restart the journaled cursor is reused even if definitions moved.
+    pub fn ensure_playhead(&self) -> anyhow::Result<PlayheadView> {
+        let mut inner = self.inner();
+        if let Some(playhead) = inner.playhead.as_ref() {
+            return Ok(playhead.view());
+        }
+        let root = QueuedInvocation::load(&self.repo_root, "wave")?;
+        let (playhead, event) = Playhead::new(root);
+        let view = playhead.view();
+        inner.journal.append(|_| EventKind::PlayheadChanged {
+            event,
+            playhead: Box::new(playhead.clone()),
+        });
+        inner.playhead = Some(playhead);
+        let _ = self.playhead_tx.send(view.clone());
+        Ok(view)
+    }
+
+    /// Enqueue a flow at the innermost active invocation. The flow is
+    /// resolved now, so the queue carries stable step names and paths.
+    pub fn enqueue_flow(&self, flow: &str) -> anyhow::Result<PlayheadView> {
+        self.ensure_playhead()?;
+        let invocation = QueuedInvocation::load(&self.repo_root, flow)?;
+        let mut inner = self.inner();
+        let event = inner
+            .playhead
+            .as_mut()
+            .expect("ensure_playhead initialized it")
+            .enqueue(invocation)?;
+        self.journal_playhead_locked(&mut inner, vec![event])
+    }
+
+    /// Open a body attempt for the selected logical step.
+    pub fn start_body(&self, body: BodyProvenance) -> anyhow::Result<PlayheadView> {
+        self.ensure_playhead()?;
+        let mut inner = self.inner();
+        let event = inner
+            .playhead
+            .as_mut()
+            .expect("ensure_playhead initialized it")
+            .start_body(body)?;
+        self.journal_playhead_locked(&mut inner, vec![event])
+    }
+
+    /// Close one body attempt. Completed and skipped bodies advance; failed
+    /// and interrupted bodies leave the same logical step selected for retry.
+    fn finish_body(
+        &self,
+        body_id: &str,
+        outcome: StepOutcome,
+        reason: &str,
+    ) -> anyhow::Result<PlayheadView> {
+        let mut inner = self.inner();
+        self.finish_body_locked(&mut inner, body_id, outcome, reason)
+    }
+
+    /// The lock-held half of [`Self::finish_body`], for callers already inside
+    /// the `inner` guard (which cannot re-lock through `finish_body`).
+    fn finish_body_locked(
+        &self,
+        inner: &mut Inner,
+        body_id: &str,
+        outcome: StepOutcome,
+        reason: &str,
+    ) -> anyhow::Result<PlayheadView> {
+        let events = inner
+            .playhead
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("playhead is not initialized"))?
+            .finish_body(body_id, outcome, reason)?;
+        self.journal_playhead_locked(inner, events)
+    }
+
+    fn update_body_session(&self, body_id: &str, session_id: &str) -> anyhow::Result<PlayheadView> {
+        let mut inner = self.inner();
+        let event = inner
+            .playhead
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("playhead is not initialized"))?
+            .update_body_session(body_id, session_id)?;
+        let view = self.journal_playhead_locked(&mut inner, vec![event])?;
+        if let Some(open) = inner.open.as_mut() {
+            if let Some(body) = open
+                .turn
+                .body
+                .as_mut()
+                .filter(|body| body.body_id == body_id)
+            {
+                body.session_id = Some(session_id.to_string());
+                let _ = self.turn_tx.send(TurnFrame::share(open.turn.clone()));
+            }
+        }
+        Ok(view)
+    }
+
+    /// Skip a selected step that has no live body (for example after a body
+    /// failed and the resident could not restart). A live body must instead
+    /// receive [`InboxItem::Skip`] so its terminal turn closes before advance.
+    pub fn skip_current(&self, reason: &str) -> anyhow::Result<PlayheadView> {
+        self.ensure_playhead()?;
+        let mut inner = self.inner();
+        let playhead = inner
+            .playhead
+            .as_mut()
+            .expect("ensure_playhead initialized it");
+        if playhead.active.is_some() {
+            return Err(anyhow::anyhow!("current step still has a live body"));
+        }
+        let step = playhead
+            .current()
+            .ok_or_else(|| anyhow::anyhow!("playhead has no current step"))?;
+        // A skipped step's body is instantaneous: it starts and ends at the
+        // same moment, having never run.
+        let mut body = BodyProvenance::for_step(&step, &self.repo_root);
+        let body_id = body.body_id.clone();
+        body.ended_at = Some(body.started_at.clone());
+        body.termination_reason = Some(reason.to_string());
+        let mut events = vec![playhead.start_body(body)?];
+        events.extend(playhead.finish_body(&body_id, StepOutcome::Skipped, reason)?);
+        self.journal_playhead_locked(&mut inner, events)
+    }
+
+    fn journal_playhead_locked(
+        &self,
+        inner: &mut Inner,
+        events: Vec<PlayheadEvent>,
+    ) -> anyhow::Result<PlayheadView> {
+        let playhead = inner
+            .playhead
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("playhead is not initialized"))?;
+        for event in events {
+            inner.journal.append(|_| EventKind::PlayheadChanged {
+                event,
+                playhead: Box::new(playhead.clone()),
+            });
+        }
+        let view = playhead.view();
+        let _ = self.playhead_tx.send(view.clone());
+        Ok(view)
+    }
+
+    /// The last journaled vendor thread id, if any — the loop's resume handle.
     /// User messages journaled but not yet consumed by a turn — the durable
     /// queue. Replayed as `inbox` frames when a resident subscribes, and the
     /// validator for the resident's `answers` declarations.
@@ -443,8 +617,8 @@ impl WaveRuntime {
         self.inbox_tx.subscribe()
     }
 
-    /// Live flowloop-state transitions (no snapshot).
-    pub fn subscribe_states(&self) -> broadcast::Receiver<FlowloopState> {
+    /// Live loop-state transitions (no snapshot).
+    pub fn subscribe_states(&self) -> broadcast::Receiver<LoopState> {
         self.state_tx.subscribe()
     }
 
@@ -454,7 +628,7 @@ impl WaveRuntime {
     }
 
     /// Whether a resident has ever been spawned for / attached to this
-    /// listener (see `/health`'s `flowloop` field).
+    /// listener (see `/health`'s `loop` field).
     pub fn resident_expected(&self) -> bool {
         self.resident_expected.load(Ordering::Relaxed)
     }
@@ -555,7 +729,10 @@ impl WaveRuntime {
     }
 
     /// Subscribe to this wave's live `op` stream (worker-run motion). Live-only
-    /// — the past is a `lf runs` query, so nothing replays.
+    /// — the past is a `lf runs` query, so nothing replays. The SSE route takes
+    /// its receiver from `subscribe_with_snapshot`, so this bare accessor
+    /// exists for tests that want the op stream without the snapshot.
+    #[cfg(test)]
     pub fn subscribe_ops(&self) -> broadcast::Receiver<OpFrame> {
         self.op_tx.subscribe()
     }
@@ -566,7 +743,7 @@ impl WaveRuntime {
         self.inner().workers.iter().any(|w| w.run_id == run_id)
     }
 
-    /// Workers dispatched and not yet finished — folded into the flowloop's
+    /// Workers dispatched and not yet finished — folded into the loop's
     /// heartbeat seed as the `<in_flight>` section.
     pub fn in_flight_workers(&self) -> Vec<WorkerRecord> {
         self.inner()
@@ -577,13 +754,12 @@ impl WaveRuntime {
             .collect()
     }
 
-    // -- Channel family (this server holds every child channel's pen) --
+    // -- Channel family --
     //
-    // The primary (wave) channel lives in `inner`, exactly as before —
-    // flowloop-attached, hot path untouched. Child channels are pure streams
-    // (no flowloop, no memory), materialized on demand from their worktree
-    // journals and folded separately; the family view folds upward through
-    // the tagged `family_tx` bus. Consumption markers never cross journals.
+    // The primary channel is the served mind and the only journaled one. Child
+    // names are addresses on the shared-store bus; this runtime never brokers
+    // them, it only recognizes which ones its ear should fold
+    // (`crate::wave::bus`).
 
     /// Whether `channel` is within this wave's family: the primary channel
     /// or a dot-descendant of the sanitized wave name (see [`channel_role`]).
@@ -595,74 +771,6 @@ impl WaveRuntime {
     /// sanitized spelling).
     pub fn is_primary(&self, channel: &str) -> bool {
         channel_role(&self.name, channel) == Some(ChannelRole::Primary)
-    }
-
-    /// Materialize (or fetch) a child channel by name. `Ok(None)` when the
-    /// channel's worktree is gone — a landed/deleted work line's channel just
-    /// ends (its journal died with the tree; the flagged persistent archive,
-    /// `~/.lf/journal/<repo>/<worktree>`, is unbuilt). Errors on a name
-    /// outside this wave's family, or journal I/O.
-    pub fn child_channel(&self, name: &str) -> anyhow::Result<Option<Arc<ChildChannel>>> {
-        if channel_role(&self.name, name) != Some(ChannelRole::Child) {
-            anyhow::bail!("channel '{name}' is not a child of wave '{}'", self.name);
-        }
-        let mut children = self.children.lock().expect("children lock poisoned");
-        if let Some(existing) = children.get(name) {
-            if existing.alive() {
-                return Ok(Some(existing.clone()));
-            }
-            // The worktree vanished under an open pen: the channel ended.
-            children.remove(name);
-            return Ok(None);
-        }
-        let Some(channel) = ChildChannel::open(&self.repo_root, name)? else {
-            return Ok(None);
-        };
-        let channel = Arc::new(channel);
-        children.insert(name.to_string(), channel.clone());
-        Ok(Some(channel))
-    }
-
-    /// Deliver one op to a named channel of this family. The wave's own name
-    /// routes through the primary path ([`WaveRuntime::deliver`], byte
-    /// identical to an unaddressed delivery); a child name journals in that
-    /// channel's worktree journal and broadcasts tagged. `Ok(None)` = nothing
-    /// appended (a bare interrupt).
-    ///
-    /// Fold-upward doctrine: a `say` on a child channel is a worker report —
-    /// the flowloop must hear it. The child journal keeps its record, AND the
-    /// same speech lands on the primary channel attributed to the work line
-    /// ("[goals.148e] landed PR #42"), queued for the flowloop like any input;
-    /// consumption is marked parent-side (it entered the parent's pending).
-    pub fn deliver_to_channel(
-        &self,
-        channel: &str,
-        op: MessageOp,
-        text: String,
-        from: Option<Attribution>,
-    ) -> anyhow::Result<Option<ChatTurn>> {
-        if self.is_primary(channel) {
-            return Ok(self.deliver(op, text, from));
-        }
-        let Some(child) = self.child_channel(channel)? else {
-            anyhow::bail!(
-                "channel '{channel}' has no live worktree — the work line is gone or was never opened"
-            );
-        };
-        let turn = child.deliver(&self.family_tx, op, text.clone(), from.clone())?;
-        if turn.is_some() && op == MessageOp::Say {
-            // The byline is the CHANNEL — which work line spoke — richer than
-            // the say's own label; the sender's session id rides along.
-            let session_id = from.and_then(|from| from.session_id);
-            self.deliver_say(
-                text,
-                Attribution {
-                    session_id,
-                    label: channel.to_string(),
-                },
-            );
-        }
-        Ok(turn)
     }
 
     /// Journal a `ChannelOpened` fact on the PRIMARY channel (the dispatch
@@ -680,69 +788,6 @@ impl WaveRuntime {
         });
         let turn = channel_opened_turn(&event, name);
         Some(self.commit_locked(&mut inner, turn))
-    }
-
-    /// Subscribe to the family bus and snapshot every live child channel
-    /// matching `prefix` (channels discovered on disk are materialized —
-    /// this server holds their pens). Bus first, snapshots second: a frame
-    /// can arrive twice across the boundary, never be missed — turn frames
-    /// are upserts by (channel, id), so duplicates are harmless by contract.
-    pub fn subscribe_children(
-        &self,
-        prefix: &str,
-    ) -> (
-        Vec<(String, Vec<ChatTurn>)>,
-        broadcast::Receiver<ChannelFrame>,
-    ) {
-        self.sweep_dead_children();
-        let rx = self.family_tx.subscribe();
-        let mut snapshots = Vec::new();
-        for name in scan_child_channels(&self.repo_root, &self.channel_name) {
-            if !matches_prefix(&name, prefix) {
-                continue;
-            }
-            match self.child_channel(&name) {
-                Ok(Some(channel)) => snapshots.push((name, channel.thread_snapshot())),
-                Ok(None) => {} // vanished between the scan and the open
-                Err(err) => {
-                    tracing::warn!(channel = name, error = %err, "child channel failed to open");
-                }
-            }
-        }
-        (snapshots, rx)
-    }
-
-    /// Subscribe to the family bus and snapshot exactly ONE child channel —
-    /// the strict `?channel=` scope, no descendants (a `?prefix=` subtree
-    /// goes through [`WaveRuntime::subscribe_children`]). Bus first, snapshot
-    /// second, same duplicate-not-missed contract. The snapshot is `None`
-    /// when the channel has no live worktree yet — the subscription still
-    /// carries later frames if the channel opens.
-    pub fn subscribe_child(
-        &self,
-        name: &str,
-    ) -> (Option<Vec<ChatTurn>>, broadcast::Receiver<ChannelFrame>) {
-        self.sweep_dead_children();
-        let rx = self.family_tx.subscribe();
-        let snapshot = match self.child_channel(name) {
-            Ok(Some(channel)) => Some(channel.thread_snapshot()),
-            Ok(None) => None,
-            Err(err) => {
-                tracing::warn!(channel = name, error = %err, "child channel failed to open");
-                None
-            }
-        };
-        (snapshot, rx)
-    }
-
-    /// Drop dead child channels (worktree gone): a lingering entry pins the
-    /// journal's file handle until removed. Runs on every family subscribe
-    /// and on the store observer's poll cadence.
-    pub fn sweep_dead_children(&self) {
-        self.children
-            .lock()
-            .expect("children lock poisoned")
-            .retain(|_, channel| channel.alive());
     }
 
     // -- Memory (the server holds MEMORY.md's pen) --
@@ -797,7 +842,7 @@ impl WaveRuntime {
         });
     }
 
-    /// Atomically snapshot the thread (including the open turn) and the flowloop
+    /// Atomically snapshot the thread (including the open turn) and the loop
     /// state, and subscribe to live frames for both. Every broadcast happens
     /// under the same lock as the append it reflects, so the receiver sees
     /// exactly the frames sent after this snapshot — no gap, no overlap, no
@@ -810,6 +855,8 @@ impl WaveRuntime {
             turn_rx: self.turn_tx.subscribe(),
             state: inner.state.clone(),
             state_rx: self.state_tx.subscribe(),
+            playhead: inner.playhead.as_ref().map(Playhead::view),
+            playhead_rx: self.playhead_tx.subscribe(),
             memory_rx: self.memory_tx.subscribe(),
             memory_adds: inner.memory_adds.clone(),
             memory_add_rx: self.memory_add_tx.subscribe(),
@@ -819,26 +866,26 @@ impl WaveRuntime {
         }
     }
 
-    /// Attempt a flowloop-state transition. Legal moves append a `FlowloopState` event
+    /// Attempt a loop-state transition. Legal moves append a `LoopState` event
     /// and apply; illegal moves are refused and logged — an illegal transition
     /// is a bug, never silently applied.
-    pub fn transition(&self, to: FlowloopState, reason: &str) -> bool {
+    pub fn transition(&self, to: LoopState, reason: &str) -> bool {
         let mut inner = self.inner();
         self.transition_locked(&mut inner, to, reason)
     }
 
-    fn transition_locked(&self, inner: &mut Inner, to: FlowloopState, reason: &str) -> bool {
+    fn transition_locked(&self, inner: &mut Inner, to: LoopState, reason: &str) -> bool {
         if !can_transition(&inner.state, &to) {
             tracing::warn!(
                 from = inner.state.name(),
                 to = to.name(),
                 reason,
-                "illegal flowloop-state transition refused"
+                "illegal loop-state transition refused"
             );
             return false;
         }
         let from = std::mem::replace(&mut inner.state, to.clone());
-        inner.journal.append(|_| EventKind::FlowloopState {
+        inner.journal.append(|_| EventKind::LoopState {
             from,
             to: to.clone(),
             reason: reason.to_string(),
@@ -853,40 +900,62 @@ impl WaveRuntime {
     /// no turn is live.
     fn begin_interrupt(&self, reason: &str) -> bool {
         let mut inner = self.inner();
-        let FlowloopState::Turning { turn_id } = inner.state.clone() else {
+        let LoopState::Turning { turn_id } = inner.state.clone() else {
             return false;
         };
-        self.transition_locked(&mut inner, FlowloopState::Interrupting { turn_id }, reason)
+        self.transition_locked(&mut inner, LoopState::Interrupting { turn_id }, reason)
     }
 
     /// Janitor: finalize the open turn without a resident terminal delta —
     /// the interrupt deadline expired with the resident silent, or the
-    /// resident process died mid-turn. Journals `TurnFinished`, requeues what
-    /// the turn had claimed (it never answered it), commits and broadcasts
-    /// the turn as accumulated so far, settles the flowloop to `Idle`, and arms
-    /// the drop guard: late wire deltas for the closed turn are ignored until
-    /// the next `TurnOpened`. Returns whether there was an open turn to
-    /// finalize.
+    /// resident process died mid-turn. Journals `TurnFinished`, closes the
+    /// matching playhead body without advancing its logical step, requeues
+    /// what the turn had claimed (it never answered it), commits and
+    /// broadcasts the turn as accumulated so far, settles the loop to `Idle`,
+    /// and arms the drop guard: late wire deltas for the closed turn are
+    /// ignored until the next `TurnOpened`. Returns whether there was an open
+    /// turn or active body to finalize.
     pub fn force_finalize_open_turn(&self, status: Lifecycle, reason: &str) -> bool {
         let mut inner = self.inner();
-        let Some(mut turn) = inner.open_turn.take() else {
+        let open = inner.open.take();
+        let active_body_id = inner
+            .playhead
+            .as_ref()
+            .and_then(|playhead| playhead.active.as_ref())
+            .map(|body| body.body_id.clone());
+        if open.is_none() && active_body_id.is_none() {
             return false;
-        };
-        inner.drop_deltas_until_opened = true;
-        inner.open_usage = Usage::empty();
-        inner.open_text_items = 0;
-        inner.journal.append(|_| EventKind::TurnFinished {
-            turn_id: turn.id.clone(),
-            status,
-            usage: Usage::empty(),
-        });
-        let claims = std::mem::take(&mut inner.open_turn_claims);
-        if status != Lifecycle::Completed {
-            self.requeue_locked(&mut inner, &claims);
         }
-        turn.status = status;
-        self.transition_locked(&mut inner, FlowloopState::Idle, reason);
-        self.commit_locked(&mut inner, turn);
+
+        if let Some(OpenTurn {
+            mut turn, claims, ..
+        }) = open
+        {
+            inner.drop_deltas_until_opened = true;
+            let finished = inner.journal.append(|_| EventKind::TurnFinished {
+                turn_id: turn.id.clone(),
+                status,
+                usage: Usage::empty(),
+                termination_reason: Some(reason.to_string()),
+            });
+            if status != Lifecycle::Completed {
+                self.requeue_locked(&mut inner, &claims);
+            }
+            turn.status = status;
+            turn.close_body(finished.at_rfc3339(), Some(reason.to_string()));
+            self.transition_locked(&mut inner, LoopState::Idle, reason);
+            self.commit_locked(&mut inner, turn);
+        }
+
+        if let Some(body_id) = active_body_id {
+            let outcome = match status {
+                Lifecycle::Interrupted => StepOutcome::Interrupted,
+                Lifecycle::Completed => StepOutcome::Completed,
+                Lifecycle::Pending | Lifecycle::Running | Lifecycle::Failed => StepOutcome::Failed,
+            };
+            self.finish_body_locked(&mut inner, &body_id, outcome, reason)
+                .expect("the active body belongs to an initialized playhead");
+        }
         true
     }
 
@@ -894,7 +963,7 @@ impl WaveRuntime {
     /// `MessagesRequeued` and restore the pending fold, exactly what the fold
     /// replays. No live inbox re-broadcast — redelivery is the pending
     /// replay's job (the resident's next subscription), never a silent
-    /// double-send to a flowloop that may still hold its own copy.
+    /// double-send to a loop that may still hold its own copy.
     fn requeue_locked(&self, inner: &mut Inner, ids: &[MessageId]) {
         let restored = restore_pending(&mut inner.pending_messages, &inner.messages, ids);
         if restored.is_empty() {
@@ -917,41 +986,29 @@ impl WaveRuntime {
         turn
     }
 
-    /// Deliver one resident-directed op, uninterpreted by the caller: the
-    /// door validates SHAPE (op names, text/`from` presence) and hands the op
-    /// here; what an op *means* lives in this runtime and the flowloop's
-    /// scheduler. A bare interrupt (empty text) journals nothing and appends
-    /// no turn — `None`; every other delivery journals a `UserMessage`,
-    /// commits the user turn, and queues for the flowloop.
-    pub fn deliver(
-        &self,
-        op: MessageOp,
-        text: String,
-        from: Option<Attribution>,
-    ) -> Option<ChatTurn> {
+    /// Deliver one human op from the thread door, uninterpreted by the caller:
+    /// the door validates SHAPE (op names, text presence) and hands the op
+    /// here; what an op *means* lives in this runtime and the loop's
+    /// scheduler. The thread is unattributed — bylines arrive on the bus, via
+    /// [`Self::deliver_say`]. A bare interrupt (empty text) journals nothing
+    /// and appends no turn — `None`; every other delivery journals a
+    /// `UserMessage`, commits the user turn, and queues for the loop.
+    pub fn deliver(&self, op: MessageOp, text: String) -> Option<ChatTurn> {
         if op == MessageOp::Interrupt && text.trim().is_empty() {
             self.deliver_interrupt();
             return None;
         }
-        Some(self.deliver_message(text, op, from))
+        Some(self.deliver_message(text, op, None))
     }
 
-    /// Deliver a user message: append its `UserMessage` event (recording the
-    /// op — intent), commit the user turn (id from the event's seq), and hand
-    /// it to the inbox for the flowloop's scheduler. Returns the stored user turn
-    /// so the HTTP handler can echo it.
-    pub fn deliver_user_message(&self, text: String, op: MessageOp) -> ChatTurn {
-        self.deliver_message(text, op, None)
-    }
-
-    /// Deliver an attributed emission (`lf chat` — a worker report, child-wave
-    /// escalation, or CLI FYI). Same journal row, thread commit, and inbox
-    /// path as any user message; the byline rides along.
-    pub fn deliver_say(&self, text: String, from: Attribution) -> ChatTurn {
+    /// Deliver an attributed emission folded off the bus — a worker report,
+    /// child-wave escalation, or CLI FYI. Same journal row, thread commit, and
+    /// inbox path as any user message; the byline rides along.
+    pub fn deliver_say(&self, text: String, from: String) -> ChatTurn {
         self.deliver_message(text, MessageOp::Say, Some(from))
     }
 
-    fn deliver_message(&self, text: String, op: MessageOp, from: Option<Attribution>) -> ChatTurn {
+    fn deliver_message(&self, text: String, op: MessageOp, from: Option<String>) -> ChatTurn {
         let mut inner = self.inner();
         let event = inner.journal.append(|seq| EventKind::UserMessage {
             id: MessageId(format!("msg-{seq}")),
@@ -962,7 +1019,7 @@ impl WaveRuntime {
         let id = MessageId(format!("msg-{}", event.seq));
         let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
         turn.created_at = event.at_rfc3339();
-        turn.from = from.as_ref().map(|from| from.label.clone());
+        turn.from = from.clone();
         let turn = self.commit_locked(&mut inner, turn);
         // The pending fold stays live (not boot-only): it is the replay the
         // resident's subscription serves and the validator for its `answers`.
@@ -977,22 +1034,27 @@ impl WaveRuntime {
     }
 
     /// Deliver a bare interrupt (no text). Nothing is journaled here — the
-    /// resident reports the `FlowloopState` transition when it fires the cancel;
+    /// resident reports the `LoopState` transition when it fires the cancel;
     /// an interrupt while idle is a no-op by design.
     pub fn deliver_interrupt(&self) {
         let _ = self.inbox_tx.send(InboxItem::Interrupt);
     }
 
+    pub fn deliver_skip(&self) {
+        let _ = self.inbox_tx.send(InboxItem::Skip);
+    }
+
     /// Record an already-finalized turn as its full event triple
     /// (`TurnStarted` + `TurnItem`s + `TurnFinished`) and commit it. Text
     /// becomes a `Message` item so the fold reproduces it. Does not touch the
-    /// flowloop state — this is for instantaneous turns (injected narration), not
-    /// flowloop turns.
+    /// loop state — this is for instantaneous turns (injected narration), not
+    /// loop turns.
     pub fn append_finalized_turn(&self, turn: ChatTurn, answers: Vec<MessageId>) -> ChatTurn {
         let mut inner = self.inner();
         let started = inner.journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers,
+            body: turn.body.clone().map(Box::new),
         });
         let turn_id = format!("turn-{}", started.seq);
         if !turn.text.is_empty() {
@@ -1015,6 +1077,7 @@ impl WaveRuntime {
             turn_id: turn_id.clone(),
             status: turn.status,
             usage: Usage::empty(),
+            termination_reason: None,
         });
         let committed = ChatTurn {
             id: turn_id,
@@ -1048,12 +1111,36 @@ impl WaveRuntime {
                 output_tokens,
                 cache_read_tokens,
             } => self.resident_turn_usage(input_tokens, output_tokens, cache_read_tokens),
-            ResidentDelta::TurnFinished { status, cost_usd } => {
-                self.resident_turn_finished(status, cost_usd)
-            }
+            ResidentDelta::TurnFinished {
+                status,
+                cost_usd,
+                reason,
+            } => self.resident_turn_finished(status, cost_usd, reason),
             ResidentDelta::TurnSteered { answers } => self.resident_turn_steered(answers),
             ResidentDelta::MessagesRequeued { ids } => self.resident_requeue(ids),
-            ResidentDelta::FlowloopState { to, reason } => match to {
+            ResidentDelta::BodyStarted { body } => {
+                if let Err(err) = self.start_body(body) {
+                    tracing::warn!(error = %err, "resident body start rejected");
+                }
+            }
+            ResidentDelta::BodySessionUpdated {
+                body_id,
+                session_id,
+            } => {
+                if let Err(err) = self.update_body_session(&body_id, &session_id) {
+                    tracing::warn!(error = %err, "resident body session update rejected");
+                }
+            }
+            ResidentDelta::BodyFinished {
+                body_id,
+                outcome,
+                reason,
+            } => {
+                if let Err(err) = self.finish_body(&body_id, outcome, &reason) {
+                    tracing::warn!(error = %err, "resident body finish rejected");
+                }
+            }
+            ResidentDelta::LoopState { to, reason } => match to {
                 ResidentStateTo::Interrupting => {
                     if !self.begin_interrupt(&reason) {
                         tracing::warn!(reason, "resident reported Interrupting with no live turn");
@@ -1061,7 +1148,7 @@ impl WaveRuntime {
                 }
                 ResidentStateTo::Failed => {
                     self.transition(
-                        FlowloopState::Failed {
+                        LoopState::Failed {
                             reason: reason.clone(),
                         },
                         &reason,
@@ -1079,21 +1166,26 @@ impl WaveRuntime {
         // (the resident's adapter prevents this; a rogue sequence must not
         // wedge the fold). What the stale turn claimed is requeued — it never
         // answered it.
-        if let Some(mut stale) = inner.open_turn.take() {
+        if let Some(OpenTurn {
+            turn: mut stale,
+            usage,
+            claims,
+            ..
+        }) = inner.open.take()
+        {
             tracing::warn!(
                 turn_id = stale.id,
                 "TurnOpened over an open turn; closing the stale turn as failed"
             );
-            let stale_usage = std::mem::replace(&mut inner.open_usage, Usage::empty());
             inner.journal.append(|_| EventKind::TurnFinished {
                 turn_id: stale.id.clone(),
                 status: Lifecycle::Failed,
-                usage: stale_usage,
+                usage,
+                termination_reason: Some("stale open turn closed".to_string()),
             });
-            let claims = std::mem::take(&mut inner.open_turn_claims);
             self.requeue_locked(&mut inner, &claims);
             stale.status = Lifecycle::Failed;
-            self.transition_locked(&mut inner, FlowloopState::Idle, "stale open turn closed");
+            self.transition_locked(&mut inner, LoopState::Idle, "stale open turn closed");
             self.commit_locked(&mut inner, stale);
         }
         // The safety valve: a paused wave (GOAL.md `paused: true`) refuses to
@@ -1108,15 +1200,20 @@ impl WaveRuntime {
             return;
         }
         let answers = claim_answers(&mut inner, answers);
-        inner.open_turn_claims = answers.clone();
+        let claims = answers.clone();
+        let body = inner
+            .playhead
+            .as_ref()
+            .and_then(|playhead| playhead.active.clone());
         let event = inner.journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),
             answers,
+            body: body.clone().map(Box::new),
         });
         let turn_id = format!("turn-{}", event.seq);
         self.transition_locked(
             &mut inner,
-            FlowloopState::Turning {
+            LoopState::Turning {
                 turn_id: turn_id.clone(),
             },
             "turn opened",
@@ -1129,11 +1226,15 @@ impl WaveRuntime {
             items: Vec::new(),
             created_at: event.at_rfc3339(),
             from: None,
+            body,
         };
         let _ = self.turn_tx.send(TurnFrame::share(open.clone()));
-        inner.open_turn = Some(open);
-        inner.open_usage = Usage::empty();
-        inner.open_text_items = 0;
+        inner.open = Some(OpenTurn {
+            turn: open,
+            usage: Usage::empty(),
+            text_items: 0,
+            claims,
+        });
     }
 
     fn resident_turn_text(&self, text: String) {
@@ -1141,16 +1242,16 @@ impl WaveRuntime {
         if inner.drop_deltas_until_opened {
             return;
         }
-        if inner.open_turn.is_none() {
+        let Some(open) = inner.open.as_mut() else {
             tracing::warn!("text delta with no open turn; dropped");
             return;
-        }
-        let item = ConversationItem::Message {
-            id: format!("text-{}", inner.open_text_items),
-            text,
-            phase: None,
         };
-        inner.open_text_items += 1;
+        let item = ConversationItem::Message {
+            id: format!("text-{}", open.text_items),
+            text,
+            phase: Some("stream".to_string()),
+        };
+        open.text_items += 1;
         self.append_turn_item_locked(&mut inner, item);
     }
 
@@ -1159,7 +1260,7 @@ impl WaveRuntime {
         if inner.drop_deltas_until_opened {
             return;
         }
-        if inner.open_turn.is_none() {
+        if inner.open.is_none() {
             tracing::warn!("item delta with no open turn; dropped");
             return;
         }
@@ -1171,7 +1272,7 @@ impl WaveRuntime {
     /// the journal fold makes), and re-broadcast it so live subscribers watch
     /// the turn in progress.
     fn append_turn_item_locked(&self, inner: &mut Inner, item: ConversationItem) {
-        let open = inner.open_turn.as_mut().expect("checked by callers");
+        let open = &mut inner.open.as_mut().expect("checked by callers").turn;
         let turn_id = open.id.clone();
         open.absorb_item(item.clone());
         let frame = TurnFrame::share(open.clone());
@@ -1188,41 +1289,53 @@ impl WaveRuntime {
         cache_read_tokens: Option<u64>,
     ) {
         let mut inner = self.inner();
-        if inner.drop_deltas_until_opened || inner.open_turn.is_none() {
+        if inner.drop_deltas_until_opened {
             return;
         }
-        inner.open_usage.input_tokens = add_opt(inner.open_usage.input_tokens, input_tokens);
-        inner.open_usage.output_tokens = add_opt(inner.open_usage.output_tokens, output_tokens);
-        inner.open_usage.cache_read_tokens =
-            add_opt(inner.open_usage.cache_read_tokens, cache_read_tokens);
+        let Some(open) = inner.open.as_mut() else {
+            return;
+        };
+        open.usage.input_tokens = add_opt(open.usage.input_tokens, input_tokens);
+        open.usage.output_tokens = add_opt(open.usage.output_tokens, output_tokens);
+        open.usage.cache_read_tokens = add_opt(open.usage.cache_read_tokens, cache_read_tokens);
     }
 
-    fn resident_turn_finished(&self, status: Lifecycle, cost_usd: Option<f64>) {
+    fn resident_turn_finished(
+        &self,
+        status: Lifecycle,
+        cost_usd: Option<f64>,
+        reason: Option<String>,
+    ) {
         let mut inner = self.inner();
         if inner.drop_deltas_until_opened {
             tracing::debug!("late TurnFinished after a force-finalize; dropped");
             return;
         }
-        let Some(mut turn) = inner.open_turn.take() else {
+        let Some(OpenTurn {
+            mut turn,
+            mut usage,
+            claims,
+            ..
+        }) = inner.open.take()
+        else {
             tracing::warn!("TurnFinished with no open turn; dropped");
             return;
         };
-        let mut usage = std::mem::replace(&mut inner.open_usage, Usage::empty());
         usage.cost_usd = cost_usd;
-        inner.open_text_items = 0;
         inner.journal.append(|_| EventKind::TurnFinished {
             turn_id: turn.id.clone(),
             status,
             usage,
+            termination_reason: reason.clone(),
         });
         // Any non-Completed end requeues what the turn claimed: a failed or
         // interrupted turn never answered its messages.
-        let claims = std::mem::take(&mut inner.open_turn_claims);
         if status != Lifecycle::Completed {
             self.requeue_locked(&mut inner, &claims);
         }
         turn.status = status;
-        self.transition_locked(&mut inner, FlowloopState::Idle, "turn finalized");
+        turn.close_body(now_rfc3339(), reason);
+        self.transition_locked(&mut inner, LoopState::Idle, "turn finalized");
         self.commit_locked(&mut inner, turn);
     }
 
@@ -1238,9 +1351,7 @@ impl WaveRuntime {
     fn resident_turn_steered(&self, answers: Vec<String>) {
         let mut inner = self.inner();
         let (turn_id, turn_live) = match inner.state.clone() {
-            FlowloopState::Turning { turn_id } | FlowloopState::Interrupting { turn_id } => {
-                (turn_id, true)
-            }
+            LoopState::Turning { turn_id } | LoopState::Interrupting { turn_id } => (turn_id, true),
             _ => match inner.last_assistant_turn_id.clone() {
                 Some(turn_id) => (turn_id, false),
                 None => {
@@ -1257,7 +1368,9 @@ impl WaveRuntime {
         // if the turn ends without completing. The boundary-race fallback
         // names a turn that already closed completed — nothing to track.
         if turn_live {
-            inner.open_turn_claims.extend(answers.iter().cloned());
+            if let Some(open) = inner.open.as_mut() {
+                open.claims.extend(answers.iter().cloned());
+            }
         }
         inner
             .journal
@@ -1273,7 +1386,9 @@ impl WaveRuntime {
         let mut inner = self.inner();
         let ids: Vec<MessageId> = ids.into_iter().map(MessageId).collect();
         // Undone claims must not requeue a second time when the turn ends.
-        inner.open_turn_claims.retain(|claim| !ids.contains(claim));
+        if let Some(open) = inner.open.as_mut() {
+            open.claims.retain(|claim| !ids.contains(claim));
+        }
         self.requeue_locked(&mut inner, &ids);
     }
 }
@@ -1303,7 +1418,7 @@ fn claim_answers(inner: &mut Inner, answers: Vec<String>) -> Vec<MessageId> {
 /// clients order by the sequence in the turn id, not array position.
 fn snapshot_locked(inner: &Inner) -> Vec<ChatTurn> {
     let mut turns = inner.thread.clone();
-    turns.extend(inner.open_turn.clone());
+    turns.extend(inner.open.as_ref().map(|open| open.turn.clone()));
     turns
 }
 
@@ -1315,12 +1430,6 @@ fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
 }
 
 /// Current time as an RFC3339 string for `op` frame timestamps.
-fn now_rfc3339() -> String {
-    time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1348,6 +1457,7 @@ mod tests {
             items: Vec::new(),
             created_at: String::new(),
             from: None,
+            body: None,
         }
     }
 
@@ -1391,6 +1501,7 @@ mod tests {
         ResidentDelta::TurnFinished {
             status,
             cost_usd: None,
+            reason: None,
         }
     }
 
@@ -1410,16 +1521,18 @@ mod tests {
         let rt = open_runtime(tmp.path());
         rt.append_finalized_turn(progress_turn("landed the parser"), Vec::new());
         // The journal carries raw history; MEMORY.md stays untouched until
-        // the flowloop curates it deliberately.
+        // the loop curates it deliberately.
         assert_eq!(rt.memory().read(), "");
     }
 
     #[test]
-    fn deliver_user_message_appends_user_turn_and_broadcasts() {
+    fn deliver_appends_user_turn_and_broadcasts() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
         let mut rx = rt.subscribe_inbox();
-        let turn = rt.deliver_user_message("how goes it?".into(), MessageOp::Message);
+        let turn = rt
+            .deliver(MessageOp::Message, "how goes it?".into())
+            .expect("user turn");
         assert_eq!(turn.role, ChatRole::User);
         assert_eq!(turn.text, "how goes it?");
         // The op rode the live inbox broadcast, id tied to its journal event.
@@ -1434,19 +1547,16 @@ mod tests {
     }
 
     #[test]
-    fn deliver_say_journals_attribution_and_queues_for_the_flowloop() {
+    fn deliver_say_journals_attribution_and_queues_for_the_loop() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
         let mut rx = rt.subscribe_inbox();
-        let from = Attribution {
-            session_id: Some("sess-9".into()),
-            label: "worker".into(),
-        };
+        let from = "worker".to_string();
         let turn = rt.deliver_say("PR landed; one surprise in the fold".into(), from.clone());
         assert_eq!(turn.role, ChatRole::User);
         assert_eq!(turn.from.as_deref(), Some("worker"));
 
-        // Inbox: an attributed Say message the flowloop reacts to like any input.
+        // Inbox: an attributed Say message the loop reacts to like any input.
         let InboxItem::Message(msg) = rx.try_recv().expect("inbox item") else {
             panic!("expected a message inbox item");
         };
@@ -1509,7 +1619,7 @@ mod tests {
     fn subscription_replays_full_memory_facts_in_order() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let long_fact = "workers report via lf chat with the full useful detail";
+        let long_fact = "workers report via lf radio with the full useful detail";
 
         rt.append_memory(long_fact).expect("append");
         rt.append_memory("second fact").expect("append");
@@ -1565,31 +1675,31 @@ mod tests {
     fn illegal_transition_is_refused_and_leaves_state_alone() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        assert_eq!(rt.flowloop_state(), FlowloopState::Idle);
+        assert_eq!(rt.loop_state(), LoopState::Idle);
 
         // Nothing to interrupt when idle.
         assert!(!rt.transition(
-            FlowloopState::Interrupting {
+            LoopState::Interrupting {
                 turn_id: "turn-1".into()
             },
             "test"
         ));
-        assert_eq!(rt.flowloop_state(), FlowloopState::Idle);
+        assert_eq!(rt.loop_state(), LoopState::Idle);
 
         // Legal: a turn opens, then finishes.
         assert!(rt.transition(
-            FlowloopState::Turning {
+            LoopState::Turning {
                 turn_id: "turn-1".into()
             },
             "test"
         ));
         assert!(!rt.transition(
-            FlowloopState::Turning {
+            LoopState::Turning {
                 turn_id: "turn-2".into()
             },
             "test"
         ));
-        assert!(rt.transition(FlowloopState::Idle, "test"));
+        assert!(rt.transition(LoopState::Idle, "test"));
     }
 
     #[test]
@@ -1599,9 +1709,9 @@ mod tests {
 
         rt.apply_resident_delta(d_opened(&[]));
         assert_eq!(
-            rt.flowloop_state().name(),
+            rt.loop_state().name(),
             "turning",
-            "mid-turn the flowloop is Turning"
+            "mid-turn the loop is Turning"
         );
         rt.apply_resident_delta(d_text("hello"));
         rt.apply_resident_delta(d_tool());
@@ -1609,13 +1719,10 @@ mod tests {
         rt.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
             cost_usd: Some(0.02),
+            reason: None,
         });
 
-        assert_eq!(
-            rt.flowloop_state(),
-            FlowloopState::Idle,
-            "back to idle after turn"
-        );
+        assert_eq!(rt.loop_state(), LoopState::Idle, "back to idle after turn");
         let thread = rt.thread_snapshot();
         assert_eq!(thread.len(), 1);
         let turn = &thread[0];
@@ -1646,8 +1753,12 @@ mod tests {
     fn turn_opened_answers_are_validated_against_the_pending_fold() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let m1 = rt.deliver_user_message("first".into(), MessageOp::Message);
-        let m2 = rt.deliver_user_message("second".into(), MessageOp::Message);
+        let m1 = rt
+            .deliver(MessageOp::Message, "first".into())
+            .expect("user turn");
+        let m2 = rt
+            .deliver(MessageOp::Message, "second".into())
+            .expect("user turn");
         assert_eq!(rt.pending_messages().len(), 2);
 
         // The turn claims both real messages plus a ghost id.
@@ -1689,7 +1800,7 @@ mod tests {
         let rt = open_runtime(tmp.path());
         let sub = rt.subscribe_with_snapshot();
         assert!(sub.turns.is_empty());
-        assert_eq!(sub.state, FlowloopState::Idle);
+        assert_eq!(sub.state, LoopState::Idle);
         let mut frames = sub.turn_rx;
         let mut states = sub.state_rx;
 
@@ -1734,11 +1845,11 @@ mod tests {
         // Every transition was broadcast: Idle → Turning → Idle.
         assert!(matches!(
             states.try_recv().expect("turning state frame"),
-            FlowloopState::Turning { .. }
+            LoopState::Turning { .. }
         ));
         assert_eq!(
             states.try_recv().expect("idle state frame"),
-            FlowloopState::Idle
+            LoopState::Idle
         );
         assert!(states.try_recv().is_err(), "no extra state frames");
     }
@@ -1750,26 +1861,62 @@ mod tests {
     fn force_finalize_closes_the_turn_and_drops_late_deltas() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
+        let step = rt
+            .ensure_playhead()
+            .expect("initialize playhead")
+            .now
+            .expect("wave has a current step");
+        let body = BodyProvenance {
+            body_id: "body-dead".into(),
+            invocation_id: step.invocation_id,
+            step_index: step.index,
+            flow: step.flow,
+            step: step.step,
+            iteration: step.iteration,
+            session_id: Some("session-dead".into()),
+            harness: Some("codex".into()),
+            model: None,
+            host: "host".into(),
+            worktree: tmp.path().display().to_string(),
+            started_at: "2026-07-09T00:00:00Z".into(),
+            ended_at: None,
+            termination_reason: None,
+        };
+        rt.apply_resident_delta(ResidentDelta::BodyStarted { body });
         rt.apply_resident_delta(d_opened(&[]));
         rt.apply_resident_delta(d_text("half"));
-        rt.apply_resident_delta(ResidentDelta::FlowloopState {
+        rt.apply_resident_delta(ResidentDelta::LoopState {
             to: ResidentStateTo::Interrupting,
             reason: "user interrupt".into(),
         });
-        assert_eq!(rt.flowloop_state().name(), "interrupting");
+        assert_eq!(rt.loop_state().name(), "interrupting");
 
         assert!(rt.force_finalize_open_turn(Lifecycle::Interrupted, "deadline"));
-        assert_eq!(rt.flowloop_state(), FlowloopState::Idle);
+        assert_eq!(rt.loop_state(), LoopState::Idle);
         let thread = rt.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].status, Lifecycle::Interrupted);
         assert_eq!(thread[0].text, "half");
+        let body = thread[0].body.as_ref().expect("turn keeps body provenance");
+        assert!(body.ended_at.is_some());
+        assert_eq!(body.termination_reason.as_deref(), Some("deadline"));
+        let playhead = rt.playhead().expect("playhead survives finalization");
+        assert!(playhead.active.is_none(), "the dead body releases its seat");
+        assert_eq!(
+            playhead.now.expect("failed step remains selected").index,
+            0,
+            "an interrupted body retries the same logical step"
+        );
 
         // The journal is closed: a replay agrees, no open turn survives.
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
         let fold = crate::wave::journal::fold_thread(&events);
         assert!(fold.open.is_empty());
         assert_eq!(fold.turns.last().unwrap().status, Lifecycle::Interrupted);
+        assert!(
+            fold.playhead.expect("replayed playhead").active.is_none(),
+            "replay releases the dead body too"
+        );
 
         // Nothing left to force a second time.
         assert!(!rt.force_finalize_open_turn(Lifecycle::Interrupted, "again"));
@@ -1782,11 +1929,7 @@ mod tests {
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
         assert_eq!(events.len(), journal_len, "late deltas journal nothing");
         assert_eq!(rt.thread_snapshot().len(), 1, "thread untouched");
-        assert_eq!(
-            rt.flowloop_state(),
-            FlowloopState::Idle,
-            "no double transition"
-        );
+        assert_eq!(rt.loop_state(), LoopState::Idle, "no double transition");
 
         // …and the next TurnOpened clears the guard: life goes on.
         rt.apply_resident_delta(d_opened(&[]));
@@ -1798,10 +1941,6 @@ mod tests {
         assert_eq!(thread[1].status, Lifecycle::Completed);
     }
 
-    /// Fold-upward doctrine: a `say` on a CHILD channel journals there AND
-    /// lands on the primary channel's inbox as attributed speech, so the
-    /// flowloop's next turn can answer it. The child's own journal keeps its
-    /// record; consumption is parent-side.
     /// Family membership compares against the SANITIZED wave name: a wave
     /// whose name sanitizes (`web/ui` → `web-ui`) mints `web-ui.<run>`
     /// channels — those must pass `in_family`, and the raw name still
@@ -1829,112 +1968,22 @@ mod tests {
         assert_eq!(channel_role("goals", "concerto"), None);
     }
 
-    /// A sanitized-name wave routes a child delivery by the sanitized channel
-    /// and folds it upward with the channel byline — end to end through
-    /// `deliver_to_channel`, the door's path.
+    /// A sanitized-name wave recognizes its family by the SANITIZED channel
+    /// name — the form hands actually carry. The runtime brokers nothing; it
+    /// only knows which bus channels its ear should fold.
     #[test]
-    fn sanitized_wave_delivers_and_folds_child_channels() {
+    fn a_sanitized_wave_recognizes_its_family_by_the_sanitized_name() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path().join("repo");
-        std::fs::create_dir_all(crate::wave::channel::child_worktree_path(
-            &origin,
-            "web-ui.148e",
-        ))
-        .unwrap();
         let rt = WaveRuntime::open("web/ui".into(), origin).expect("open runtime");
         assert_eq!(rt.channel_name(), "web-ui");
+        assert!(rt.is_primary("web-ui"));
+        assert!(
+            rt.is_primary("web/ui"),
+            "the raw spelling still addresses it"
+        );
         assert!(rt.in_family("web-ui.148e"));
-        rt.deliver_to_channel(
-            "web-ui.148e",
-            MessageOp::Say,
-            "child report".into(),
-            Some(Attribution {
-                session_id: None,
-                label: "worker".into(),
-            }),
-        )
-        .expect("deliver")
-        .expect("appends");
-        // Forwarded to the primary, bylined with the channel.
-        assert_eq!(rt.thread_snapshot()[0].from.as_deref(), Some("web-ui.148e"));
-    }
-
-    #[test]
-    fn child_say_forwards_to_the_primary_inbox_as_attributed_speech() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let origin = tmp.path().join("repo");
-        std::fs::create_dir_all(crate::wave::channel::child_worktree_path(
-            &origin,
-            "ship.148e",
-        ))
-        .unwrap();
-        let rt = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
-        let mut inbox = rt.subscribe_inbox();
-
-        rt.deliver_to_channel(
-            "ship.148e",
-            MessageOp::Say,
-            "landed PR #42".into(),
-            Some(Attribution {
-                session_id: Some("sess-9".into()),
-                label: "worker".into(),
-            }),
-        )
-        .expect("deliver")
-        .expect("say appends");
-
-        // The child journal kept its own row.
-        let child = rt.child_channel("ship.148e").unwrap().expect("child live");
-        assert_eq!(child.thread_snapshot().len(), 1);
-        assert_eq!(child.thread_snapshot()[0].text, "landed PR #42");
-
-        // The primary inbox received the forwarded speech, bylined with the
-        // CHANNEL (which work line spoke), session id carried through.
-        let InboxItem::Message(msg) = inbox.try_recv().expect("forwarded inbox item") else {
-            panic!("expected a message");
-        };
-        assert_eq!(msg.op, MessageOp::Say);
-        assert_eq!(msg.text, "landed PR #42");
-        assert_eq!(
-            msg.from.as_ref().map(|f| f.label.as_str()),
-            Some("ship.148e")
-        );
-        assert_eq!(
-            msg.from.as_ref().and_then(|f| f.session_id.as_deref()),
-            Some("sess-9")
-        );
-
-        // It is on the PRIMARY thread and pending queue — a boundary turn
-        // answering it drains the queue.
-        assert_eq!(rt.thread_snapshot().len(), 1);
-        assert_eq!(rt.pending_messages().len(), 1);
-        let claimed = msg_id(&rt.thread_snapshot()[0]);
-        rt.apply_resident_delta(d_opened(&[&claimed]));
-        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
-        assert!(
-            rt.pending_messages().is_empty(),
-            "the boundary turn answered the forwarded report"
-        );
-    }
-
-    /// A non-say op on a child channel (a plain message) journals in the
-    /// child only — no fold-upward: forwarding is the report doctrine, not
-    /// every child utterance.
-    #[test]
-    fn child_non_say_does_not_forward() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let origin = tmp.path().join("repo");
-        std::fs::create_dir_all(crate::wave::channel::child_worktree_path(&origin, "ship.a"))
-            .unwrap();
-        let rt = WaveRuntime::open("ship".into(), origin).expect("open runtime");
-        rt.deliver_to_channel("ship.a", MessageOp::Message, "note to self".into(), None)
-            .expect("deliver")
-            .expect("appends");
-        assert!(
-            rt.thread_snapshot().is_empty(),
-            "a plain child message never reaches the primary thread"
-        );
-        assert!(rt.pending_messages().is_empty());
+        assert!(!rt.in_family("web-ui-other"));
     }
 
     /// `RunCompleted` commits a thread-visible turn on the primary channel —
@@ -1966,7 +2015,7 @@ mod tests {
         let frame = frames.try_recv().expect("run-completed frame");
         assert_eq!(frame.turn.id, turn.id);
 
-        // Never queued for the flowloop (only UserMessage rows feed pending).
+        // Never queued for the loop (only UserMessage rows feed pending).
         assert!(rt.pending_messages().is_empty());
 
         // A restart folds the same turn back out of the journal, once.
@@ -2026,7 +2075,9 @@ mod tests {
     fn failed_turn_requeues_its_claimed_messages() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let m1 = rt.deliver_user_message("do the thing".into(), MessageOp::Message);
+        let m1 = rt
+            .deliver(MessageOp::Message, "do the thing".into())
+            .expect("user turn");
 
         rt.apply_resident_delta(d_opened(&[&msg_id(&m1)]));
         assert!(rt.pending_messages().is_empty(), "claimed at open");
@@ -2044,7 +2095,9 @@ mod tests {
         // path above still holds m1's requeue, which never re-answered).
         let tmp3 = tempfile::tempdir().expect("tempdir");
         let rt3 = open_runtime(tmp3.path());
-        let m2 = rt3.deliver_user_message("second".into(), MessageOp::Message);
+        let m2 = rt3
+            .deliver(MessageOp::Message, "second".into())
+            .expect("user turn");
         rt3.apply_resident_delta(d_opened(&[&msg_id(&m2)]));
         rt3.apply_resident_delta(d_finished(Lifecycle::Completed));
         assert!(
@@ -2062,7 +2115,9 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let claimed = {
             let rt = open_runtime(tmp.path());
-            let m = rt.deliver_user_message("answer me".into(), MessageOp::Message);
+            let m = rt
+                .deliver(MessageOp::Message, "answer me".into())
+                .expect("user turn");
             // Turn opens and claims it, then the server crashes (no finish).
             rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
             assert!(rt.pending_messages().is_empty());
@@ -2085,7 +2140,9 @@ mod tests {
     fn resident_requeue_undoes_a_claim_at_most_once() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let m = rt.deliver_user_message("steer".into(), MessageOp::Steer);
+        let m = rt
+            .deliver(MessageOp::Steer, "steer".into())
+            .expect("user turn");
         rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
         // The harness send failed after the claim: the resident undoes it.
         rt.apply_resident_delta(ResidentDelta::MessagesRequeued {
@@ -2103,7 +2160,7 @@ mod tests {
     }
 
     /// A paused wave (GOAL.md `paused: true`) refuses to START a turn: the
-    /// TurnOpened is dropped, its would-be claims stay pending, and the flowloop
+    /// TurnOpened is dropped, its would-be claims stay pending, and the loop
     /// settles without a thread turn. Unpausing lets the next turn through.
     #[test]
     fn paused_wave_refuses_to_start_turns() {
@@ -2117,7 +2174,9 @@ mod tests {
         .unwrap();
         let rt = open_runtime(origin);
         assert!(rt.paused(), "GOAL.md says paused");
-        let m = rt.deliver_user_message("go".into(), MessageOp::Message);
+        let m = rt
+            .deliver(MessageOp::Message, "go".into())
+            .expect("user turn");
 
         rt.apply_resident_delta(d_opened(&[&msg_id(&m)]));
         rt.apply_resident_delta(d_text("working"));
@@ -2203,8 +2262,12 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
 
-        let m1 = rt.deliver_user_message("steer me".into(), MessageOp::Steer);
-        let m2 = rt.deliver_user_message("me too".into(), MessageOp::Steer);
+        let m1 = rt
+            .deliver(MessageOp::Steer, "steer me".into())
+            .expect("user turn");
+        let m2 = rt
+            .deliver(MessageOp::Steer, "me too".into())
+            .expect("user turn");
 
         // No assistant turn anywhere: nothing journaled, both stay pending.
         rt.apply_resident_delta(ResidentDelta::TurnSteered {
@@ -2280,7 +2343,9 @@ mod tests {
 
         let rt = open_runtime(tmp.path());
         // The steer's own user turn is now the thread's last turn.
-        let steer = rt.deliver_user_message("steer me".into(), MessageOp::Steer);
+        let steer = rt
+            .deliver(MessageOp::Steer, "steer me".into())
+            .expect("user turn");
         rt.apply_resident_delta(ResidentDelta::TurnSteered {
             answers: vec![msg_id(&steer)],
         });
@@ -2299,130 +2364,43 @@ mod tests {
         );
     }
 
-    /// The channel family: parent + two children, threads independent,
-    /// consumption local. Delivering into a child journals in THAT worktree's
-    /// journal, never the parent's; the parent's pending queue (consumption
-    /// machinery) sees only its own messages.
+    /// One journal per served mind, zero per channel. The mind's own thread is
+    /// the only thing this runtime writes; hands' reports arrive through the
+    /// bus and its ear (`crate::wave::bus`), never through here.
     #[test]
-    fn family_folds_keep_channels_independent_and_consumption_local() {
+    fn only_the_served_mind_journals() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(&origin).unwrap();
-        for channel in ["ship.a", "ship.b"] {
-            std::fs::create_dir_all(crate::wave::channel::child_worktree_path(&origin, channel))
-                .unwrap();
-        }
         let rt = WaveRuntime::open("ship".into(), origin.clone()).expect("open runtime");
 
-        rt.deliver_user_message("to the wave".into(), MessageOp::Message);
-        rt.deliver_to_channel(
-            "ship.a",
-            MessageOp::Say,
-            "to a".into(),
-            Some(Attribution {
-                session_id: None,
-                label: "worker".into(),
-            }),
-        )
-        .expect("deliver a")
-        .expect("appended");
-        rt.deliver_to_channel("ship.b", MessageOp::Message, "to b".into(), None)
-            .expect("deliver b")
-            .expect("appended");
+        rt.deliver(MessageOp::Message, "to the wave".into())
+            .expect("user turn");
+        rt.deliver_say("to a".into(), "ship.a".into());
 
-        // The parent holds its own turn plus the child `say` folded up (the
-        // report doctrine); the child `message` to ship.b does NOT forward.
         let wave = rt.thread_snapshot();
         assert_eq!(wave.len(), 2);
         assert_eq!(wave[0].text, "to the wave");
+        assert_eq!(wave[1].from.as_deref(), Some("ship.a"));
+
+        // On disk: exactly one journal, the served wave's, with both rows.
         assert_eq!(
-            wave[1].text, "to a",
-            "the say folded up; the message did not"
+            loopflow_test_support::journal_files_under(tmp.path()),
+            vec![journal_path(&origin, "ship")]
         );
-        let a = rt.child_channel("ship.a").unwrap().expect("a live");
-        let b = rt.child_channel("ship.b").unwrap().expect("b live");
-        assert_eq!(a.thread_snapshot().len(), 1);
-        assert_eq!(a.thread_snapshot()[0].text, "to a");
-        assert_eq!(a.thread_snapshot()[0].from.as_deref(), Some("worker"));
-        assert_eq!(b.thread_snapshot().len(), 1);
-        assert_eq!(b.thread_snapshot()[0].text, "to b");
+        let events = crate::wave::journal::read_events(&journal_path(&origin, "ship"));
+        let messages = events
+            .iter()
+            .filter(|e| matches!(e.kind, EventKind::UserMessage { .. }))
+            .count();
+        assert_eq!(messages, 2, "the wave's message and the folded report");
 
-        // On disk: three separate journals, each with one UserMessage.
-        for (root, channel) in [
-            (origin.clone(), "ship".to_string()),
-            (
-                crate::wave::channel::child_worktree_path(&origin, "ship.a"),
-                "ship.a".to_string(),
-            ),
-            (
-                crate::wave::channel::child_worktree_path(&origin, "ship.b"),
-                "ship.b".to_string(),
-            ),
-        ] {
-            let events = crate::wave::journal::read_events(&journal_path(&root, &channel));
-            let messages = events
-                .iter()
-                .filter(|e| matches!(e.kind, EventKind::UserMessage { .. }))
-                .count();
-            // The parent carries its own message plus the child say's forward;
-            // each child carries exactly its own.
-            let expected = if channel == "ship" { 2 } else { 1 };
-            assert_eq!(messages, expected, "message count in {channel}'s journal");
-        }
-
-        // Consumption: the parent's queue holds its own message AND the
-        // forwarded report (so the flowloop answers it) — but NOT the plain
-        // `message` to ship.b, which never folds up.
+        // Consumption: both are queued for the loop across a reopen.
         let rt2 = WaveRuntime::open("ship".into(), origin.clone()).expect("reopen");
         let pending = rt2.pending_messages();
-        assert_eq!(
-            pending.len(),
-            2,
-            "the wave message and the forwarded report"
-        );
         let texts: Vec<_> = pending.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(texts.len(), 2);
         assert!(texts.contains(&"to the wave") && texts.contains(&"to a"));
-        assert!(
-            !texts.contains(&"to b"),
-            "the child message never folded up"
-        );
-
-        // Family membership is enforced; a foreign name is refused.
-        assert!(rt2
-            .deliver_to_channel("other.x", MessageOp::Message, "?".into(), None)
-            .is_err());
-    }
-
-    /// A vanished worktree ends its channel: deliveries refuse, folds skip
-    /// it, nothing panics — and the family's other channels are untouched.
-    #[test]
-    fn vanished_worktree_ends_the_channel_without_panic() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let origin = tmp.path().join("repo");
-        std::fs::create_dir_all(&origin).unwrap();
-        let doomed = crate::wave::channel::child_worktree_path(&origin, "ship.gone");
-        std::fs::create_dir_all(&doomed).unwrap();
-        let rt = WaveRuntime::open("ship".into(), origin).expect("open runtime");
-
-        rt.deliver_to_channel("ship.gone", MessageOp::Message, "hi".into(), None)
-            .expect("deliver while alive")
-            .expect("appended");
-
-        // The work line lands/deletes: the tree (journal with it) is gone.
-        std::fs::remove_dir_all(&doomed).unwrap();
-        assert!(
-            rt.deliver_to_channel("ship.gone", MessageOp::Message, "again".into(), None)
-                .is_err(),
-            "speech to an ended channel refuses"
-        );
-        assert!(
-            rt.child_channel("ship.gone").unwrap().is_none(),
-            "the ended channel is no longer materialized"
-        );
-        let (snapshots, _rx) = rt.subscribe_children("ship");
-        assert!(snapshots.is_empty(), "family fold skips the ended channel");
-        // A never-opened channel behaves the same (no dir, no resurrection).
-        assert!(rt.child_channel("ship.never").unwrap().is_none());
     }
 
     /// `ChannelOpened` (the dispatch notification): the thread shows the
@@ -2461,14 +2439,16 @@ mod tests {
     fn subscription_carries_pending_replay_and_live_inbox() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        rt.deliver_user_message("before".into(), MessageOp::Message);
+        rt.deliver(MessageOp::Message, "before".into())
+            .expect("user turn");
 
         let mut sub = rt.subscribe_with_snapshot();
         assert_eq!(sub.pending.len(), 1);
         assert_eq!(sub.pending[0].text, "before");
         assert!(sub.inbox_rx.try_recv().is_err(), "no frames from before");
 
-        rt.deliver_user_message("after".into(), MessageOp::Message);
+        rt.deliver(MessageOp::Message, "after".into())
+            .expect("user turn");
         rt.deliver_interrupt();
         let InboxItem::Message(live) = sub.inbox_rx.try_recv().expect("live frame") else {
             panic!("expected message");
@@ -2494,7 +2474,8 @@ mod tests {
             let rt = rt.clone();
             handles.push(std::thread::spawn(move || {
                 for i in 0..50 {
-                    rt.deliver_user_message(format!("m-{writer}-{i}"), MessageOp::Message);
+                    rt.deliver(MessageOp::Message, format!("m-{writer}-{i}"))
+                        .expect("user turn");
                 }
             }));
         }

@@ -256,4 +256,16 @@ mod tests {
         assert!(skill.contains("Organize into typed blocks"));
         assert!(skill.contains("starting vocabulary, not a schema"));
     }
+
+    #[test]
+    fn project_promotion_is_an_authored_flow() {
+        let flow = get_builtin_flow("project-promote").expect("promotion flow");
+        let skill = get_builtin_skill("project-promote").expect("promotion skill");
+
+        assert!(flow.contains("- project-promote"));
+        assert!(skill.contains("wave/<parent>/projects/<slug>.md"));
+        assert!(skill.contains("parent_wave_id"));
+        assert!(skill.contains("lf pm show"));
+        assert!(skill.contains("lf radio --parent"));
+    }
 }

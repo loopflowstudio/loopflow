@@ -6,7 +6,7 @@ This is the release where the **Wave** becomes loopflow's core primitive: a pers
 
 A wave used to be a config row scoped by `area × flow × direction`, woken by a cold ticker. It is now the looping orchestrator itself. You author one file — `wave/<name>/goal.md`, intent in frontmatter, the loop prompt as body — and the wave runs it as a persistent mind: reading the roadmap, capturing the next move as a task, then dispatching a flow against that task as a session you can attach to and steer. It talks back through a chat/memory speech surface rather than a transcript you have to dig through.
 
-- **`lf goal` and `lf wave` launch and drive looping waves** — `lf goal` starts a wave's goal agent via `lf op dispatch`; `lf wave` adds a foreground progress runtime so a loop's turns, state, and memory are visible as it works (#757, #752, #778).
+- **`lf goal` and `lf loop` launch and drive looping waves** — `lf goal` starts a wave's goal agent via `lf op dispatch`; `lf loop` adds a foreground progress runtime so a loop's turns, state, and memory are visible as it works (#757, #752, #778).
 - **A reactive server, one persistent mind** — the goal loop is replaced by a persistent reactive server with a chat/memory speech surface and a harness engine, so a wave is a single continuous agent rather than repeated cold runs (#796).
 - **`goal.md` + `MEMORY.md` are the wave's authored and remembered state** — one human-authored intent file per wave; server-owned curated memory the agent maintains and never hand-edits (#752, #782).
 - **Chords are just waves with children** — wave ancestry is back, so a parent chord surfaces its children through `parent_wave_id`; no separate chord entity, and the vocabulary is parent/child/sibling (#781).

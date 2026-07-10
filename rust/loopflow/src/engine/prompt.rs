@@ -571,13 +571,13 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         "read clipboard"
     );
 
-    // Ambient wave context: every run born inside a wave inherits recent
-    // chat and memory by CHANNEL. Explicit --wave wins; else env/worktree
-    // (a work-line worktree resolves its own channel — the overlay reads
-    // down the tree: its thread plus the parent wave's, compactly). Memory
-    // stays wave-level: MEMORY.md is wave identity, so it resolves through
-    // the channel's family head. No wave (or no wave state) → both stay
-    // empty and the prompt gains nothing.
+    // Ambient wave context: every run born inside a wave inherits recent chat
+    // and memory. Explicit --wave wins; else env/worktree names the channel.
+    // Both resolve through the channel's family head — a hand lives INSIDE its
+    // wave's mind. Work-line channels are ephemeral bus topics with no thread
+    // and no MEMORY.md of their own; a hand's reports land in the wave's
+    // journal, so reading the wave is reading everything it has said. No wave
+    // (or no wave state) → both stay empty and the prompt gains nothing.
     let ambient_start = Instant::now();
     let ambient_channel = opts
         .wave
@@ -586,9 +586,9 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     let ambient_wave = ambient_channel
         .as_deref()
         .map(|channel| crate::wave::channel::family_head(channel).to_string());
-    let wave_chat = ambient_channel
+    let wave_chat = ambient_wave
         .as_deref()
-        .and_then(|channel| crate::engine::wave_context::gather_channel_chat(repo_root, channel));
+        .and_then(|wave| crate::engine::wave_context::gather_wave_chat(repo_root, wave));
     if wave_memory.is_none() {
         if let Some(wave) = ambient_wave.as_deref() {
             wave_memory = gather_wave_memory_doc(repo_root, Some(wave))?;
@@ -1667,7 +1667,7 @@ pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
 
 /// The one loopflow operating document (including the Speak vocabulary) as a
 /// prompt section. Emitted exactly once per prompt: assembled prompts get it
-/// from [`format_system_sections`]; the wave flowloop's seed bypasses assembly
+/// from [`format_system_sections`]; the wave loop's seed bypasses assembly
 /// and appends the same section itself.
 pub fn loopflow_section() -> String {
     format!(
@@ -2266,7 +2266,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-        assert!(prompt.contains("lf chat --parent"));
+        assert!(prompt.contains("lf radio --parent"));
         assert!(prompt.contains("lf memory add"));
         assert!(prompt.contains("server-owned"));
     }

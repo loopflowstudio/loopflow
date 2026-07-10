@@ -12,6 +12,86 @@ public enum ChatRole: String, Codable, Sendable, Hashable {
     case assistant
 }
 
+public enum PlayheadStepKind: String, Codable, Sendable, Hashable {
+    case skill, op, and, xor, or, loop
+}
+
+public struct PlayheadStepPlan: Codable, Sendable, Hashable {
+    public let name: String
+    public let kind: PlayheadStepKind
+}
+
+public struct QueuedInvocation: Codable, Sendable, Hashable, Identifiable {
+    public let id: String
+    public let flow: String
+    public let steps: [PlayheadStepPlan]
+}
+
+public struct InvocationState: Codable, Sendable, Hashable, Identifiable {
+    public let id: String
+    public let flow: String
+    public let steps: [PlayheadStepPlan]
+    public let cursor: Int
+    public let iteration: Int
+    public let queue: [QueuedInvocation]
+}
+
+public struct PlayheadStepRef: Codable, Sendable, Hashable {
+    public let invocationId: String
+    public let flow: String
+    public let step: String
+    public let kind: PlayheadStepKind
+    public let index: Int
+    public let total: Int
+    public let iteration: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case flow, step, kind, index, total, iteration
+        case invocationId = "invocation_id"
+    }
+}
+
+public struct BodyProvenance: Codable, Sendable, Hashable {
+    public let bodyId: String
+    public let invocationId: String
+    public let stepIndex: Int
+    public let flow: String
+    public let step: String
+    public let iteration: Int
+    public let sessionId: String?
+    public let harness: String?
+    public let model: String?
+    public let host: String
+    public let worktree: String
+    public let startedAt: String
+    public let endedAt: String?
+    public let terminationReason: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case flow, step, iteration, harness, model, host, worktree
+        case bodyId = "body_id"
+        case invocationId = "invocation_id"
+        case stepIndex = "step_index"
+        case sessionId = "session_id"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
+        case terminationReason = "termination_reason"
+    }
+}
+
+public struct PlayheadView: Codable, Sendable, Hashable {
+    public let stack: [InvocationState]
+    public let active: BodyProvenance?
+    public let now: PlayheadStepRef?
+    public let next: PlayheadStepRef?
+    public let returnTo: PlayheadStepRef?
+
+    private enum CodingKeys: String, CodingKey {
+        case stack, active, now, next
+        case returnTo = "return_to"
+    }
+}
+
 // `Lifecycle` and `FileEdit` are shared with the session models in
 // AgentSession.swift (made `Codable` there); the wire shape is identical.
 // One `Lifecycle` covers turns and items; a `user` turn is always `completed`.
@@ -130,17 +210,19 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     public let status: Lifecycle
     public let items: [ConversationItem]
     public let createdAt: String
-    /// Speaker label for attributed emissions (`lf chat` — worker reports,
-    /// child-wave escalations). Absent (`nil`) for the flowloop's own turns and
+    /// Speaker label for attributed emissions (`lf radio` — worker reports,
+    /// child-wave escalations). Absent (`nil`) for the loop's own turns and
     /// plain user turns; mirrors Rust `ChatTurn.from`.
     public let from: String?
+    /// Body that produced an assistant span; nil for human/attributed turns.
+    public let body: BodyProvenance?
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, text, status, items, from
+        case id, role, text, status, items, from, body
         case createdAt = "created_at"
     }
 
-    public init(id: String, role: ChatRole, text: String, status: Lifecycle, items: [ConversationItem], createdAt: String, from: String?) {
+    public init(id: String, role: ChatRole, text: String, status: Lifecycle, items: [ConversationItem], createdAt: String, from: String?, body: BodyProvenance?) {
         self.id = id
         self.role = role
         self.text = text
@@ -148,6 +230,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
         self.items = items
         self.createdAt = createdAt
         self.from = from
+        self.body = body
     }
 
     /// Monotonic sequence parsed from a `"turn-<n>"` id; used to order the thread.

@@ -7,47 +7,40 @@
 //! `127.0.0.1:<port>` and nothing else; `.wave-resident-token` beside it holds
 //! this boot's resident token (see [`crate::wave::wire`]).
 //!
-//! This module is VENDOR-FREE: the flowloop lives in the resident process
+//! This module is VENDOR-FREE: the loop lives in the resident process
 //! ([`crate::wave::resident`]), which publishes through the resident door
 //! (`/resident/attach`, `/resident/deltas`, `/resident/context` — token-gated)
 //! and listens on its own wave's `/events?inbox=true` subscription. The
 //! listener holds every pen; the resident holds the vendor.
 //!
 //! The server serves the wave's CHANNEL FAMILY (see [`crate::wave::channel`]):
-//! the primary channel is the wave's name; work-line channels are addressed
-//! by their ownership names (`goals.148e0e02`). It holds the pen for every
-//! child journal; doors are name-addressed.
+//! the primary channel is the wave's name and the only journaled one — the
+//! served mind. Work-line channels (`goals.148e0e02`) are live bus topics: no
+//! journal, no worktree binding. Doors are name-addressed.
 //!
 //! Wire contract (snake_case, stable — a Loopflow worker builds against it):
-//! - `GET /health` → `{status, flowloop, wave, turns, workers, uptime_seconds}`;
+//! - `GET /health` → `{status, loop_state, wave, turns, workers, paused, uptime_seconds}`;
 //!   `status` is CHANNEL liveness — always `serving` while this process
-//!   answers; `flowloop` is the resident's state (`idle | turning | interrupting
-//!   | failed`), or null while no resident has ever been spawned or attached
-//!   (`--no-flowloop` serves dormant); a served channel whose resident died reads
-//!   `status: "serving", flowloop: "failed"`. `workers` counts this wave's
+//!   answers; `loop_state` is the resident's state (`idle | turning | interrupting
+//!   | failed`), or null before any resident has attached; a served channel whose resident died reads
+//!   `status: "serving", loop_state: "failed"`. `workers` counts this wave's
 //!   observed in-flight worker runs.
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
 //!   `running`), if one is in progress, after the finalized thread. Optional
 //!   `?limit=N` tails the last N turns (open turn included) — `wave_context`
 //!   passes 12; absent means the whole thread. Primary channel only.
-//! - `GET /events` → SSE, the family's one unified stream. Scope by query:
-//!   `?channel=<name>` (exactly one channel), `?prefix=<name>` (that subtree),
-//!   default = the whole family. A name outside this wave's family is a 404.
-//!   Three event names:
-//!   - `state`: data is the flowloop-state name (`idle | turning | interrupting |
+//! - `GET /events` → SSE, the served mind's thread. It carries the PRIMARY
+//!   channel and nothing else: agent-to-agent traffic is the bus, a table in
+//!   the shared store that no server sits in front of (`crate::wave::bus`).
+//!   Event names:
+//!   - `state`: data is the loop-state name (`idle | turning | interrupting |
 //!     failed`), sent once on subscribe (before the turn replay) and again on
-//!     every transition — the composer keys its verb off it. Primary channel
-//!     only — child channels have no flowloop, so a child-only subscription
-//!     carries no `state` frames.
-//!   - `turn`: data is a `Turn` JSON; the thread replays on connect
-//!     (including the open turn), then streams live. A turn from a CHILD
-//!     channel carries one extra key, `"channel": "<name>"`; the primary
-//!     channel's turns ride untagged (absent `channel` = the wave's own
-//!     channel), so a family of one is byte-identical to the pre-family wire.
-//!     Turn ids repeat — and repeat across channels: an in-progress turn is
-//!     re-sent whole as it grows and finalization sends the terminal turn
+//!     every transition — the composer keys its verb off it.
+//!   - `turn`: data is a `Turn` JSON; the thread replays on connect (including
+//!     the open turn), then streams live. Turn ids repeat: an in-progress turn
+//!     is re-sent whole as it grows and finalization sends the terminal turn
 //!     under the same id — each frame replaces the client's previous state
-//!     for that (channel, id) pair (upsert, never append-if-seen).
+//!     for that id (upsert, never append-if-seen).
 //!   - `memory`: data is the `MemoryUpdated` summary string, fired on every
 //!     curation. Live-only, no replay — MEMORY.md itself is the durable
 //!     state. Primary channel only (memory is wave identity; work lines have
@@ -69,39 +62,35 @@
 //! - The resident door (token-gated via the `x-lf-resident-token` header —
 //!   401 without this boot's token):
 //!   - `POST /resident/attach {pid}` → `{wave}` — registers the
-//!     resident's pid for liveness and revives a `failed` flowloop (a fresh
+//!     resident's pid for liveness and revives a `failed` loop (a fresh
 //!     resident IS the revival).
 //!   - `POST /resident/deltas {deltas: [...]}` → `{accepted}` — ordered turn
 //!     deltas, applied to the journal fold
 //!     ([`WaveRuntime::apply_resident_delta`]).
-//!   - `GET /resident/context` → `{in_flight}` — the pre-turn
+//!   - `GET /resident/context` → `{in_flight, playhead}` — the pre-turn
 //!     snapshot; serving it freshens the store observations (one poll).
-//! - `POST /messages {op, text, from?, channel?}` → `{turn, state}`. `op` is
-//!   required — `"message"` (human speech steers a live steer-capable turn;
-//!   otherwise queued, the next turn answers it), `"steer"`
+//! - `POST /messages {op, text}` → `{turn, state}`. `op` is
+//!   required — `"message"` (queued; the next turn answers it), `"steer"`
 //!   (into the live turn when the harness supports it, else degrades to a
 //!   queued message), `"interrupt"` (cancel the open turn; non-empty text
 //!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
-//!   a no-op success), or `"say"` (an attributed emission — `lf chat`: a
-//!   worker report, child-wave escalation, or CLI FYI; lands in the thread
-//!   with its byline AND queues for the flowloop like a message). `text` may be
-//!   empty only for `interrupt` (400 otherwise). `from {session_id?, label}`
-//!   is required for `say` and rejected for every other op (400) — human
-//!   turns are unattributed by convention. `channel` is explicitly Optional:
-//!   null targets the wave channel (unchanged); a child name lands the
-//!   message in THAT channel's journal (404 outside the family or when the
-//!   work line's worktree is gone). On a child channel there is no resident:
-//!   steer degrades to a plain message, a bare interrupt is a no-op. `turn`
-//!   is the appended user `Turn`, or null for a bare interrupt (nothing was
-//!   said); `state` is the flowloop-state name when the request was accepted —
-//!   ops are applied by the flowloop asynchronously, so watch the stream's
-//!   `state` events for the outcome.
+//!   a no-op success). `text` may be empty only for `interrupt` (400
+//!   otherwise). The thread is human and unattributed: `say` and `from` are
+//!   rejected. Machine speech uses `lf radio`, an INSERT on the bus that this
+//!   server later reads back. `turn` is the appended user `Turn`,
+//!   or null for a bare interrupt (nothing was said); `state` is the
+//!   loop-state name when the request was accepted — ops are applied by the
+//!   loop asynchronously, so watch the stream's `state` events for the
+//!   outcome.
 //! - `POST /channels {name, run_id}` → `{turn}` — the dispatch notification
-//!   door: placed `lf` minted a work-line worktree and its channel
-//!   journal, and knocks here so the PARENT channel's thread shows
-//!   "work line <name> opened" (journaled as `ChannelOpened`, idempotent on
-//!   `run_id` — a repeated knock returns `{turn: null}`). 404 outside the
-//!   family.
+//!   door: placed `lf` minted a work-line worktree, and knocks here so the
+//!   PARENT channel's thread shows "work line <name> opened" (journaled as
+//!   `ChannelOpened`, idempotent on `run_id` — a repeated knock returns
+//!   `{turn: null}`). 404 outside the family.
+//! - `POST /loops {flow, seed, caps…}` → `{session}` — capability-gated
+//!   detached loop launch. The listener starts a headless `lf loop` in a
+//!   named tmux session; callers may inspect it with `tmux attach -r`, never
+//!   write through its stdin. The blocking form never crosses this door.
 //! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
 //!   origin repo. Wave-level only: memory is wave identity, channels don't
 //!   have it.
@@ -134,18 +123,19 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
+use crate::lfd::executor::helpers::{resolve_lf_binary, spawn_detached_lf, tmux_session_slug};
 use crate::lfd::http::routes::exec::{ExecRequest, ExecResponse};
 use crate::lfd::lf_exec::{exec_lf, validate_lf_argv};
-use crate::wave::channel::tagged_turn_json;
-use crate::wave::journal::{Attribution, MessageOp, PendingMessage};
+use crate::wave::journal::{MessageOp, PendingMessage};
+use crate::wave::playhead::PlayheadView;
 use crate::wave::registry::{process_alive, StoreObserver};
 use crate::wave::runtime::{InboxItem, WaveRuntime};
-use crate::wave::state::FlowloopState;
+use crate::wave::state::LoopState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
-    AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, OpFrame,
-    PostDeltasRequest, PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
-    SUBAGENT_TOKEN_HEADER,
+    AttachRequest, AttachResponse, ContextResponse, DetachedLoopRequest, DetachedLoopResponse,
+    InFlightWorker, InboxFrame, OpFrame, PostDeltasRequest, PostDeltasResponse,
+    RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER, SUBAGENT_TOKEN_HEADER,
 };
 
 /// Basename of the discovery pointer under `wave/<name>/`.
@@ -293,12 +283,12 @@ impl SubagentDoor {
 #[derive(Debug, Serialize)]
 struct HealthBody {
     /// Channel liveness: always `"serving"` while this process answers. The
-    /// resident's condition is `flowloop` — a served channel whose resident
-    /// died is `status: "serving", flowloop: "failed"`.
+    /// resident's condition is `loop_state` — a served channel whose resident
+    /// died is `status: "serving", loop_state: "failed"`.
     status: String,
-    /// Resident flowloop state name, or null for a channel with no resident
-    /// (a dormant `--no-flowloop` channel, or before any resident attaches).
-    flowloop: Option<String>,
+    /// Resident loop state name, or null for a channel with no resident
+    /// (before any resident attaches).
+    loop_state: Option<String>,
     wave: String,
     turns: usize,
     /// Workers observed in flight for this wave (dispatch is daemonless —
@@ -315,6 +305,11 @@ struct ConversationBody {
     turns: Vec<ChatTurn>,
 }
 
+#[derive(Debug, Deserialize)]
+struct EnqueueFlowRequest {
+    flow: String,
+}
+
 /// `GET /conversation` query. `limit` is explicitly Optional: `None` serves
 /// the whole thread, `Some(n)` tails the last n turns.
 #[derive(Debug, Deserialize)]
@@ -323,16 +318,14 @@ struct ConversationQuery {
 }
 
 /// `POST /messages` request body. `op` is required — explicit, never inferred
-/// (no serde default; an op-less body is a 422). `from` is explicitly
-/// Optional: required for `say`, rejected otherwise. `channel` is explicitly
-/// Optional: null = the wave channel; a child name addresses that channel's
-/// journal (404 outside the family).
+/// (no serde default; an op-less body is a 422). `from` is accepted only so a
+/// byline can be rejected with a 400 that names the bus, rather than silently
+/// dropped as an unknown field.
 #[derive(Debug, Deserialize)]
 struct PostMessage {
     op: MessageOp,
     text: String,
-    from: Option<Attribution>,
-    channel: Option<String>,
+    from: Option<String>,
 }
 
 /// `POST /channels` request body — the dispatch notification (see module
@@ -350,15 +343,11 @@ struct PostChannelResponse {
     turn: Option<ChatTurn>,
 }
 
-/// `GET /events` scope query. `channel`/`prefix` are explicitly Optional;
-/// setting both is a 400; absent = the whole family. `inbox` is explicitly
-/// Optional: `true` adds the resident's `inbox` frames (pending replay +
-/// live ops) to a primary-scope subscription; absent/false leaves the wire
-/// byte-identical to the pre-resident stream.
+/// `GET /events` query. `inbox` is explicitly Optional: `true` adds the
+/// resident's `inbox` frames (pending replay + live ops) to the subscription;
+/// absent/false leaves the wire byte-identical to the pre-resident stream.
 #[derive(Debug, Deserialize)]
 struct EventsQuery {
-    channel: Option<String>,
-    prefix: Option<String>,
     inbox: Option<bool>,
 }
 
@@ -398,7 +387,7 @@ struct PostMemoryResponse {
 }
 
 /// `POST /messages` response. `turn` is the appended user turn; null for a
-/// bare interrupt, which appends nothing. `state` is the flowloop-state name at
+/// bare interrupt, which appends nothing. `state` is the loop-state name at
 /// acceptance time.
 #[derive(Debug, Serialize)]
 struct PostMessageResponse {
@@ -417,6 +406,52 @@ struct ServerState {
     observer: Option<Arc<StoreObserver>>,
     supervisor: Option<SupervisorHandle>,
     started_at: OffsetDateTime,
+}
+
+/// Start the blocking `lf loop` the request names, detached in its own tmux
+/// session. Tmux keeps the child inspectable without granting stdin
+/// (`tmux attach -r`); the loop's own run row is its durable supervision view.
+async fn launch_detached_loop(
+    repo_root: &Path,
+    wave: &str,
+    request: &DetachedLoopRequest,
+) -> Result<String, String> {
+    let session = detached_loop_session_name(wave);
+    let argv = detached_loop_argv(&resolve_lf_binary(), request, wave);
+    spawn_detached_lf(&session, repo_root, &argv)
+        .await
+        .map_err(|err| format!("failed to launch detached loop: {err}"))?;
+    tracing::info!(session, wave, flow = request.flow, "detached loop launched");
+    Ok(session)
+}
+
+fn detached_loop_session_name(wave: &str) -> String {
+    let run = uuid::Uuid::new_v4().simple().to_string();
+    format!("lf-loop-{}-{}", tmux_session_slug(wave), &run[..8])
+}
+
+fn detached_loop_argv(executable: &Path, request: &DetachedLoopRequest, wave: &str) -> Vec<String> {
+    let mut argv = vec![
+        executable.display().to_string(),
+        "loop".to_string(),
+        request.flow.clone(),
+        request.seed.clone(),
+        "--wave".to_string(),
+        wave.to_string(),
+        "--max-passes".to_string(),
+        request.max_passes.to_string(),
+        "--pass-timeout-secs".to_string(),
+        request.pass_timeout_secs.to_string(),
+        "--wall-clock-secs".to_string(),
+        request.wall_clock_secs.to_string(),
+        "--poll-secs".to_string(),
+        request.poll_secs.to_string(),
+    ];
+    if let Some(max_turns) = request.max_turns {
+        argv.push("--max-turns".to_string());
+        argv.push(max_turns.to_string());
+    }
+    argv
 }
 
 /// Build the router over a running [`WaveRuntime`]. `observer` is the store
@@ -446,9 +481,13 @@ pub fn router(
     Router::new()
         .route("/health", get(health_handler))
         .route("/conversation", get(conversation_handler))
+        .route("/playhead", get(playhead_handler))
+        .route("/playhead/enqueue", post(playhead_enqueue_handler))
+        .route("/playhead/skip", post(playhead_skip_handler))
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
         .route("/channels", post(channels_handler))
+        .route("/loops", post(loops_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
         .route("/v0/exec", post(exec_handler))
         .route("/memory/log", get(memory_log_handler))
@@ -459,16 +498,60 @@ pub fn router(
         .with_state(state)
 }
 
+async fn playhead_handler(
+    State(state): State<ServerState>,
+) -> Result<Json<PlayheadView>, (StatusCode, String)> {
+    state
+        .runtime
+        .ensure_playhead()
+        .map(Json)
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
+}
+
+async fn playhead_enqueue_handler(
+    State(state): State<ServerState>,
+    Json(request): Json<EnqueueFlowRequest>,
+) -> Result<Json<PlayheadView>, (StatusCode, String)> {
+    let flow = request.flow.trim();
+    if flow.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "flow is required".to_string()));
+    }
+    state
+        .runtime
+        .enqueue_flow(flow)
+        .map(Json)
+        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))
+}
+
+async fn playhead_skip_handler(
+    State(state): State<ServerState>,
+) -> Result<Json<PlayheadView>, (StatusCode, String)> {
+    let current = state
+        .runtime
+        .ensure_playhead()
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    if current.active.is_some() {
+        state.runtime.deliver_skip();
+        Ok(Json(current))
+    } else {
+        state
+            .runtime
+            .skip_current("skipped by user")
+            .map(Json)
+            .map_err(|err| (StatusCode::CONFLICT, err.to_string()))
+    }
+}
+
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
-    // `flowloop` is null until a resident has ever been spawned or attached —
-    // a dormant channel (`--no-flowloop`) has no flowloop to report on.
-    let flowloop = state
+    // `loop_state` is null until a resident has ever been spawned or attached —
+    // A listener-only test channel has no Loop to report on.
+    let loop_state = state
         .runtime
         .resident_expected()
-        .then(|| state.runtime.flowloop_state().name().to_string());
+        .then(|| state.runtime.loop_state().name().to_string());
     Json(HealthBody {
         status: "serving".to_string(),
-        flowloop,
+        loop_state,
         wave: state.runtime.name().to_string(),
         turns: state.runtime.thread_len(),
         workers: state.runtime.in_flight_workers().len(),
@@ -485,18 +568,18 @@ async fn resident_attach_handler(
     Json(body): Json<AttachRequest>,
 ) -> Result<Json<AttachResponse>, (StatusCode, String)> {
     state.resident.authorize(&headers)?;
-    // Seat exclusivity: one flowloop per wave. A live seat already probed alive
+    // Seat exclusivity: one loop per wave. A live seat already probed alive
     // refuses the attach naming it — a second resident would split-brain the
     // wire. A dead/absent seat is free (takeover after a crash rides the same
     // door; the supervisor's own seat probe frees a dead pid on its cadence).
-    // `--force` is `lf wave`'s boot flag, not the door's business.
+    // `--force` is `lf loop`'s boot flag, not the door's business.
     if let Some(seated) = state.resident.seat_pid() {
         if seated != body.pid && process_alive(seated).await {
             return Err((
                 StatusCode::CONFLICT,
                 format!(
                     "wave '{}' already has a live resident on the seat (pid {seated}); \
-                     stop it before attaching, or use `lf wave <name> --force` to take over",
+                     stop it before attaching, or use `lf serve <name> --force` to take over",
                     state.runtime.name()
                 ),
             ));
@@ -509,12 +592,16 @@ async fn resident_attach_handler(
     if let Some(supervisor) = &state.supervisor {
         supervisor.on_attach(body.pid);
     }
-    // A fresh resident IS the revival: a failed flowloop goes idle on attach.
-    if matches!(state.runtime.flowloop_state(), FlowloopState::Failed { .. }) {
+    // A fresh resident IS the revival: a failed loop goes idle on attach.
+    if matches!(state.runtime.loop_state(), LoopState::Failed { .. }) {
         state
             .runtime
-            .transition(FlowloopState::Idle, "resident attached");
+            .transition(LoopState::Idle, "resident attached");
     }
+    state
+        .runtime
+        .ensure_playhead()
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     tracing::info!(pid = body.pid, "resident attached");
     Ok(Json(AttachResponse {
         wave: state.runtime.name().to_string(),
@@ -554,7 +641,14 @@ async fn resident_context_handler(
             task: worker.task,
         })
         .collect();
-    Ok(Json(ContextResponse { in_flight }))
+    let playhead = state
+        .runtime
+        .ensure_playhead()
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Json(ContextResponse {
+        in_flight,
+        playhead,
+    }))
 }
 
 /// The verb policy's ruling on one argv: run it, or refuse it naming the verb.
@@ -567,7 +661,7 @@ enum ExecVerdict {
 /// The wave `/v0/exec` door's verb allowlist — the F1 containment fix.
 ///
 /// The door is the sandboxed subagent's escape hatch: it exists so a worker
-/// can COMMIT and DISPATCH in the outwave despite its own worktree's
+/// can COMMIT and DELEGATE in the outwave despite its own worktree's
 /// `.git`-write lock. It is NOT a general remote `lf`. `validate_lf_argv`
 /// only proves an argv *parses*, so without this a leaked subagent token (or
 /// a prompt-injected LLM holding it) could run ANY verb — rotate credentials,
@@ -576,24 +670,20 @@ enum ExecVerdict {
 ///
 /// Permitted:
 /// - Git/GitHub/pm/release/queue commands EXCEPT `auth` — the commit-and-land path.
-/// - `chat`, `memory` — a worker reporting up and curating wave memory.
+/// - `radio`, `memory` — a worker reporting up on the agent bus and curating
+///   wave memory.
 /// - the read verbs `ls`/`status`/`runs`/`sub`/`trace`/`usage` — inspection.
-/// - the dispatch path: a flow/skill run or an inline prompt carrying
-///   `--dispatch`, which lands in a FRESH sandboxed worktree.
+/// - `loop … --detach`, whose only execution path is a server-owned fresh
+///   worktree.
 ///
 /// Rejected:
 /// - `auth` — credential rotation is never the escape hatch's job.
-/// - `wave …` — wave lifecycle (start / `--force` take-over / dormant serve).
-/// - `task …` — starts a long-running task flowloop; dispatch it from the
-///   wave flowloop, not through this unsandboxed exec door.
-/// - any flow / inline prompt WITHOUT `--dispatch` — that would run an
-///   arbitrary LLM prompt unsandboxed in the outwave, the exact power this
-///   door must not hand a leaked token.
-///
-/// Note the escape hatch's real invocation is `lf --dispatch <flow> …` (the
-/// `--dispatch` flag PRECEDES the flow name — clap's external-subcommand
-/// capture swallows everything after the flow token, so a trailing
-/// `--dispatch` would be an argument to the flow, not the top-level flag).
+/// - `serve <wave>` — wave lifecycle (start / `--force` take-over).
+/// - blocking `loop …` — the door process would itself become the long-lived
+///   owner, bypassing the listener's supervision.
+/// - every direct flow / skill / inline prompt — those would run an arbitrary
+///   LLM prompt unsandboxed in the outwave, the exact power this door must not
+///   hand a leaked token.
 fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
     use crate::lf::{Cli, Commands};
     use clap::Parser;
@@ -615,43 +705,39 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
             | Commands::Pm { .. },
         ) => ExecVerdict::Allow,
         Some(Commands::Auth { .. }) => ExecVerdict::Deny("auth".to_string()),
-        Some(Commands::Chat { .. })
+        Some(Commands::Radio { .. })
         | Some(Commands::Memory { .. })
         | Some(Commands::Ls { .. })
         | Some(Commands::Status { .. })
         | Some(Commands::Runs { .. })
         | Some(Commands::Sub { .. })
-        | Some(Commands::Wavechat { .. })
         | Some(Commands::Trace { .. })
         | Some(Commands::Usage { .. })
         | Some(Commands::Tokens { .. })
         | Some(Commands::Doctor { .. }) => ExecVerdict::Allow,
-        // A flow/skill run or an inline prompt: allowed only when it will land
-        // in a sandboxed worktree (`--dispatch`), never run in the outwave.
+        // A seedless loop can no longer be spelled: `seed` is required, so the
+        // "detach with nothing to run" case the door used to police is gone.
+        Some(Commands::Loop { detach: true, .. }) => ExecVerdict::Allow,
+        Some(Commands::Loop { detach: false, .. }) => ExecVerdict::Deny("loop".to_string()),
+        // The exec door is held only by agents. The thread is the human's
+        // surface; machine speech must retain its byline on the bus.
+        Some(Commands::Chat { .. }) => ExecVerdict::Deny("chat".to_string()),
+        Some(Commands::Wavechat { .. }) => ExecVerdict::Deny("wavechat".to_string()),
+        // Booting a listener, or a resident body against one, is wave
+        // lifecycle: the door process would become the long-lived owner.
+        Some(Commands::Serve { .. }) => ExecVerdict::Deny("serve".to_string()),
+        Some(Commands::Resident { .. }) => ExecVerdict::Deny("__resident".to_string()),
         Some(Commands::External(parts)) => {
-            if cli.dispatch {
-                ExecVerdict::Allow
-            } else {
-                let flow = parts.first().cloned().unwrap_or_else(|| "flow".to_string());
-                ExecVerdict::Deny(flow)
-            }
+            ExecVerdict::Deny(parts.first().cloned().unwrap_or_else(|| "flow".to_string()))
         }
         Some(Commands::Flow { name, .. }) | Some(Commands::Skill { name, .. }) => {
-            if cli.dispatch {
-                ExecVerdict::Allow
-            } else {
-                ExecVerdict::Deny(name.clone())
-            }
+            ExecVerdict::Deny(name.clone())
         }
-        Some(Commands::Inline { .. }) => {
-            if cli.dispatch {
-                ExecVerdict::Allow
-            } else {
-                ExecVerdict::Deny(":".to_string())
-            }
-        }
-        Some(Commands::Wave { .. }) => ExecVerdict::Deny("wave".to_string()),
-        Some(Commands::Task { .. }) => ExecVerdict::Deny("task".to_string()),
+        Some(Commands::Inline { .. }) => ExecVerdict::Deny(":".to_string()),
+        Some(Commands::Enqueue { .. }) => ExecVerdict::Deny("enqueue".to_string()),
+        Some(Commands::Skip) => ExecVerdict::Deny("skip".to_string()),
+        Some(Commands::FlowStep { .. }) => ExecVerdict::Deny("__flow-step".to_string()),
+        Some(Commands::Project { .. }) => ExecVerdict::Deny("project".to_string()),
         // `lf ssh` forwards the local credential bundle to a remote host and
         // runs an arbitrary command there — the exact power a leaked token
         // must not reach.
@@ -663,6 +749,21 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         // Bare `lf` (interactive launch) has no verb the door can run.
         None => ExecVerdict::Deny("lf".to_string()),
     }
+}
+
+/// A subagent capability belongs to one wave. The exec door runs outside the
+/// worker sandbox, where another wave's resident token file is readable, so an
+/// explicit detached-loop target must stay pinned to this server's wave.
+fn detached_loop_targets_other_wave(argv: &[String], wave: &str) -> bool {
+    use crate::lf::{Cli, Commands};
+    use clap::Parser;
+
+    let full = std::iter::once("lf".to_string()).chain(argv.iter().cloned());
+    let Ok(cli) = Cli::try_parse_from(full) else {
+        return false;
+    };
+    matches!(cli.command, Some(Commands::Loop { detach: true, .. }))
+        && cli.wave.as_deref().is_some_and(|target| target != wave)
 }
 
 /// `POST /v0/exec` — the wave's exec door: "a wave HAS an lfd" in one route.
@@ -694,6 +795,15 @@ async fn exec_handler(
             format!("command '{verb}' is not permitted through the wave exec door"),
         ));
     }
+    if detached_loop_targets_other_wave(&payload.argv, state.runtime.name()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "detached loops through this exec door must target wave '{}'",
+                state.runtime.name()
+            ),
+        ));
+    }
     let cwd = state.runtime.repo_root().display().to_string();
     let result = exec_lf(&payload.argv, Some(&cwd), &[])
         .await
@@ -708,6 +818,46 @@ async fn exec_handler(
         stdout: result.stdout,
         stderr: result.stderr,
     }))
+}
+
+/// `POST /loops` — launch one generic loop in a fresh worktree and return
+/// immediately. Both resident and subagent credentials are accepted: a human
+/// shell beside the wave reads the resident token file, while sandboxed hands
+/// inherit only the narrower subagent capability. Either route can launch only
+/// this worktree-forcing primitive.
+async fn loops_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(request): Json<DetachedLoopRequest>,
+) -> Result<Json<DetachedLoopResponse>, (StatusCode, String)> {
+    if state.subagent.authorize(&headers).is_err() && state.resident.authorize(&headers).is_err() {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "missing or wrong loop-launch credential".to_string(),
+        ));
+    }
+    if request.flow.trim().is_empty() || request.seed.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "flow and seed are required".to_string(),
+        ));
+    }
+    if request.max_passes == 0
+        || request.pass_timeout_secs == 0
+        || request.wall_clock_secs == 0
+        || request.poll_secs == 0
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "loop caps and poll interval must be positive".to_string(),
+        ));
+    }
+    crate::flowloop::driver::require_loop_flow(state.runtime.repo_root(), &request.flow)
+        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
+    let session = launch_detached_loop(state.runtime.repo_root(), state.runtime.name(), &request)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    Ok(Json(DetachedLoopResponse { session }))
 }
 
 async fn conversation_handler(
@@ -732,16 +882,21 @@ async fn messages_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostMessage>,
 ) -> Result<Json<PostMessageResponse>, (StatusCode, String)> {
-    if body.from.is_some() && !matches!(body.op, MessageOp::Say) {
+    // The thread door is the human's: unattributed message/steer/interrupt.
+    // `say` is the journal's vocabulary for folded bus reports — nothing
+    // posts it; agents publish with `lf radio` and the listener's bus sweep
+    // records the attributed copy. Rejecting both here is what makes "agents
+    // don't use chat" a wire property instead of doctrine.
+    if matches!(body.op, MessageOp::Say) {
         return Err((
             StatusCode::BAD_REQUEST,
-            "`from` is only valid for the say op".to_string(),
+            "`say` is not a wire op: machine speech rides the bus (`lf radio`)".to_string(),
         ));
     }
-    if matches!(body.op, MessageOp::Say) && body.from.is_none() {
+    if body.from.is_some() {
         return Err((
             StatusCode::BAD_REQUEST,
-            "`from` is required for the say op".to_string(),
+            "the thread is unattributed: bylines belong to the bus (`lf radio --from`)".to_string(),
         ));
     }
     if body.text.trim().is_empty() && !matches!(body.op, MessageOp::Interrupt) {
@@ -750,32 +905,17 @@ async fn messages_handler(
             "text is required for every op but interrupt".to_string(),
         ));
     }
-    let channel = body
-        .channel
-        .unwrap_or_else(|| state.runtime.name().to_string());
-    if !state.runtime.in_family(&channel) {
-        return Err((
-            StatusCode::NOT_FOUND,
-            format!(
-                "channel '{channel}' is not in wave '{}''s family",
-                state.runtime.name()
-            ),
-        ));
-    }
-    let turn = state
-        .runtime
-        .deliver_to_channel(&channel, body.op, body.text, body.from)
-        .map_err(|err| (StatusCode::NOT_FOUND, err.to_string()))?;
+    let turn = state.runtime.deliver(body.op, body.text);
     Ok(Json(PostMessageResponse {
         turn,
-        state: state.runtime.flowloop_state().name().to_string(),
+        state: state.runtime.loop_state().name().to_string(),
     }))
 }
 
 /// The dispatch notification door: journal `ChannelOpened` on the primary
 /// channel (idempotent on run id) so the wave's thread shows the work line
-/// opening. The child channel itself materializes lazily on first delivery
-/// or subscription — the journal file was already minted by the dispatcher.
+/// opening. The child channel itself needs no materializing — it is a name on
+/// the bus, and speaking it into existence is the whole of its creation.
 async fn channels_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostChannel>,
@@ -847,166 +987,76 @@ fn first_line(content: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The unified `/events` SSE, scoped to one channel, a subtree, or (default)
-/// the whole family.
+/// The served mind's thread as SSE: the loop state, the thread on connect
+/// (open turn included, status `running`), then live frames — `state` on every
+/// transition, `turn` ids repeating by design (every frame replaces the
+/// client's state for that id, so an in-progress turn updates in place and its
+/// terminal frame lands under the same id), `memory` on every curation
+/// (live-only; the file is the durable state), and `memory-add` for replayable
+/// facts. Snapshot and subscription are atomic in the runtime (broadcasts
+/// share the append lock), so no live frame is ever older than the replayed
+/// snapshot.
 ///
-/// The primary channel's replay-then-live shape is unchanged: the flowloop state,
-/// the thread on connect (open turn included, status `running`), then live
-/// frames — `state` on every transition, `turn` ids repeating by design
-/// (every frame replaces the client's state for that (channel, id), so an
-/// in-progress turn updates in place and its terminal frame lands under the
-/// same id), `memory` on every curation (live-only; the file is the durable
-/// state), and `memory-add` for replayable facts. Snapshot and subscription
-/// are atomic in the runtime (broadcasts share the append lock), so no primary
-/// live frame is ever older than the replayed snapshot.
-///
-/// Child channels replay their folded threads (turn frames tagged with
-/// `channel`) and stream live off the family bus, subscribed BEFORE the
-/// snapshots — a frame can repeat across the boundary, never go missing.
-/// A subscription that names a child channel with no journal yet just waits:
-/// the channel may open later.
+/// There is no channel scoping. Agent-to-agent broadcast is the bus — a table,
+/// polled from a cursor, with no server in the path (`crate::wave::bus`).
 async fn events_handler(
     State(state): State<ServerState>,
     Query(query): Query<EventsQuery>,
-) -> Result<axum::response::Response, (StatusCode, String)> {
-    let wave = state.runtime.name().to_string();
+) -> axum::response::Response {
     let include_inbox = query.inbox == Some(true);
-    let (scope, primary) = match (query.channel, query.prefix) {
-        (Some(_), Some(_)) => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "pass channel or prefix, not both".to_string(),
-            ));
-        }
-        (Some(channel), None) => {
-            let primary = state.runtime.is_primary(&channel);
-            (Scope::Channel(channel), primary)
-        }
-        (None, Some(prefix)) => {
-            let primary = state.runtime.is_primary(&prefix);
-            (Scope::Prefix(prefix), primary)
-        }
-        (None, None) => (
-            Scope::Prefix(state.runtime.channel_name().to_string()),
-            true,
-        ),
+    let sub = state.runtime.subscribe_with_snapshot();
+    // The resident's subscription replays the pending queue after the
+    // thread — its boot inbox. Consumption is validated at the resident
+    // door, so a stale replay can never double-consume.
+    let inbox_replay: Vec<Result<Event, Infallible>> = if include_inbox {
+        sub.pending
+            .iter()
+            .map(|message| Ok(inbox_event(&pending_inbox_frame(message))))
+            .collect()
+    } else {
+        Vec::new()
     };
-    let name = scope.name();
-    if !state.runtime.in_family(name) {
-        return Err((
-            StatusCode::NOT_FOUND,
-            format!("'{name}' is not in wave '{wave}''s family"),
-        ));
-    }
-
-    // Child channels: live bus first, snapshots second (see method doc). A
-    // `?channel=` scope replays STRICTLY the one named channel (no
-    // descendants), matching how it streams (strict equality); a `?prefix=`
-    // scope replays the whole subtree. The primary scope carries no child
-    // snapshots — its own thread rides the primary subscription below.
-    let (child_snapshots, family_rx) = match &scope {
-        Scope::Channel(channel) if state.runtime.is_primary(channel) => (Vec::new(), None),
-        Scope::Channel(channel) => {
-            let (snapshot, rx) = state.runtime.subscribe_child(channel);
-            let snapshots = snapshot
-                .map(|turns| vec![(channel.clone(), turns)])
-                .unwrap_or_default();
-            (snapshots, Some(rx))
-        }
-        Scope::Prefix(prefix) => {
-            let (snapshots, rx) = state.runtime.subscribe_children(prefix);
-            (snapshots, Some(rx))
-        }
-    };
-    let child_replay = stream::iter(child_snapshots.into_iter().flat_map(|(channel, turns)| {
-        turns
-            .into_iter()
-            .map(move |turn| Ok(tagged_turn_event(&channel, &turn)))
-            .collect::<Vec<_>>()
-    }));
-    let live_children = family_rx.map(|rx| {
-        let scope = scope.clone();
-        BroadcastStream::new(rx).filter_map(move |res| {
-            let out = match res {
-                // The frame carries its tagged JSON, serialized once at the
-                // send site — every subscriber reuses it.
-                Ok(frame) if scope.matches(&frame.channel) => {
-                    Some(Ok(Event::default().event("turn").data(frame.json.as_ref())))
-                }
-                // Out of scope, or lagged (the journal has it; a client
-                // that fell behind resyncs on reconnect).
-                _ => None,
-            };
-            async move { out }
-        })
+    let replay = stream::iter(
+        std::iter::once(Ok(state_event(&sub.state)))
+            .chain(sub.playhead.into_iter().map(|p| Ok(playhead_event(&p))))
+            .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t))))
+            .chain(
+                sub.memory_adds
+                    .into_iter()
+                    .map(|fact| Ok(memory_add_event(&fact))),
+            )
+            .chain(inbox_replay),
+    );
+    // The frame's wire JSON was serialized once at the send site. Lagged:
+    // the client fell behind; it resyncs from /conversation.
+    let live_turns = live_stream(sub.turn_rx, |frame| {
+        Event::default().event("turn").data(frame.json.as_str())
     });
-
-    let mut streams: Vec<BoxedEventStream> = Vec::new();
-    if primary {
-        let sub = state.runtime.subscribe_with_snapshot();
-        // The resident's subscription replays the pending queue after the
-        // thread — its boot inbox. Consumption is validated at the resident
-        // door, so a stale replay can never double-consume.
-        let inbox_replay: Vec<Result<Event, Infallible>> = if include_inbox {
-            sub.pending
-                .iter()
-                .map(|message| Ok(inbox_event(&pending_inbox_frame(message))))
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let replay = stream::iter(
-            std::iter::once(Ok(state_event(&sub.state)))
-                .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t))))
-                .chain(
-                    sub.memory_adds
-                        .into_iter()
-                        .map(|fact| Ok(memory_add_event(&fact))),
-                )
-                .chain(inbox_replay),
-        );
-        // The frame's wire JSON was serialized once at the send site. Lagged:
-        // the client fell behind; it resyncs from /conversation.
-        let live_turns = live_stream(sub.turn_rx, |frame| {
-            Event::default().event("turn").data(frame.json.as_str())
-        });
-        // Worker-run motion (`op` frames). Live-only — no replay; a client
-        // that lags re-reads history from `lf runs`.
-        let live_ops = live_stream(sub.op_rx, |frame| op_event(&frame));
-        // Lagged: fine — the next transition carries the current state.
-        let live_states = live_stream(sub.state_rx, |s| state_event(&s));
-        // Lagged: reconnect gets a fresh add snapshot.
-        let live_memory_adds = live_stream(sub.memory_add_rx, |fact| memory_add_event(&fact));
-        // Lagged: fine — MEMORY.md itself is the durable state.
-        let live_memory = live_stream(sub.memory_rx, |summary| memory_event(&summary));
-        let mut live: BoxedEventStream = Box::pin(stream::select(
-            stream::select(live_turns, live_ops),
-            stream::select(live_states, stream::select(live_memory, live_memory_adds)),
-        ));
-        if include_inbox {
-            // Lagged: the pending fold is the durable queue; a resident that
-            // falls behind resubscribes.
-            let live_inbox =
-                live_stream(sub.inbox_rx, |item| inbox_event(&inbox_item_frame(&item)));
-            live = Box::pin(stream::select(live, live_inbox));
-        }
-        streams.push(Box::pin(replay.chain(live)));
+    // Worker-run motion (`op` frames). Live-only — no replay; a client
+    // that lags re-reads history from `lf runs`.
+    let live_ops = live_stream(sub.op_rx, |frame| op_event(&frame));
+    // Lagged: fine — the next transition carries the current state.
+    let live_states = live_stream(sub.state_rx, |s| state_event(&s));
+    let live_playhead = live_stream(sub.playhead_rx, |p| playhead_event(&p));
+    // Lagged: reconnect gets a fresh add snapshot.
+    let live_memory_adds = live_stream(sub.memory_add_rx, |fact| memory_add_event(&fact));
+    // Lagged: fine — MEMORY.md itself is the durable state.
+    let live_memory = live_stream(sub.memory_rx, |summary| memory_event(&summary));
+    let mut live: BoxedEventStream = Box::pin(stream::select(
+        stream::select(live_turns, live_ops),
+        stream::select(
+            stream::select(live_states, live_playhead),
+            stream::select(live_memory, live_memory_adds),
+        ),
+    ));
+    if include_inbox {
+        // Lagged: the pending fold is the durable queue; a resident that
+        // falls behind resubscribes.
+        let live_inbox = live_stream(sub.inbox_rx, |item| inbox_event(&inbox_item_frame(&item)));
+        live = Box::pin(stream::select(live, live_inbox));
     }
-    match live_children {
-        Some(live) => streams.push(Box::pin(child_replay.chain(live))),
-        None => streams.push(Box::pin(child_replay)),
-    }
-    let merged: BoxedEventStream = match streams.len() {
-        1 => streams.pop().expect("one stream"),
-        _ => {
-            let children = streams.pop().expect("child stream");
-            let primary = streams.pop().expect("primary stream");
-            Box::pin(stream::select(primary, children))
-        }
-    };
-    Ok(axum::response::IntoResponse::into_response(
-        Sse::new(merged).keep_alive(KeepAlive::default()),
-    ))
+    let merged: BoxedEventStream = Box::pin(replay.chain(live));
+    axum::response::IntoResponse::into_response(Sse::new(merged).keep_alive(KeepAlive::default()))
 }
 
 type BoxedEventStream =
@@ -1029,47 +1079,19 @@ where
     })
 }
 
-/// The scope one `/events` subscription covers.
-#[derive(Debug, Clone)]
-enum Scope {
-    /// Exactly one channel.
-    Channel(String),
-    /// A subtree: the named channel and every dot-descendant.
-    Prefix(String),
-}
-
-impl Scope {
-    fn name(&self) -> &str {
-        match self {
-            Self::Channel(name) | Self::Prefix(name) => name,
-        }
-    }
-
-    fn matches(&self, channel: &str) -> bool {
-        match self {
-            Self::Channel(name) => channel == name,
-            Self::Prefix(prefix) => crate::wave::channel::matches_prefix(channel, prefix),
-        }
-    }
-}
-
 fn turn_event(turn: &ChatTurn) -> Event {
     Event::default()
         .event("turn")
-        .data(serde_json::to_string(turn).unwrap_or_default())
+        .data(serde_json::to_string(turn).expect("ChatTurn serializes to JSON"))
 }
 
-/// A child channel's turn frame for the REPLAY path: the `Turn` JSON plus one
-/// extra key, `"channel"` (the live path reuses the frame's pre-serialized
-/// `json`). Additive — the primary channel's frames stay untagged, so a
-/// family of one is byte-identical to the pre-family wire.
-fn tagged_turn_event(channel: &str, turn: &ChatTurn) -> Event {
+fn playhead_event(playhead: &PlayheadView) -> Event {
     Event::default()
-        .event("turn")
-        .data(tagged_turn_json(channel, turn))
+        .event("playhead")
+        .data(serde_json::to_string(playhead).expect("PlayheadView serializes to JSON"))
 }
 
-fn state_event(state: &FlowloopState) -> Event {
+fn state_event(state: &LoopState) -> Event {
     Event::default().event("state").data(state.name())
 }
 
@@ -1080,7 +1102,7 @@ fn memory_event(summary: &str) -> Event {
 fn op_event(frame: &OpFrame) -> Event {
     Event::default()
         .event("op")
-        .data(serde_json::to_string(frame).unwrap_or_default())
+        .data(serde_json::to_string(frame).expect("OpFrame serializes to JSON"))
 }
 
 fn memory_add_event(fact: &str) -> Event {
@@ -1090,12 +1112,12 @@ fn memory_add_event(fact: &str) -> Event {
 fn inbox_event(frame: &InboxFrame) -> Event {
     Event::default()
         .event("inbox")
-        .data(serde_json::to_string(frame).unwrap_or_default())
+        .data(serde_json::to_string(frame).expect("InboxFrame serializes to JSON"))
 }
 
 fn pending_inbox_frame(message: &PendingMessage) -> InboxFrame {
-    InboxFrame {
-        id: Some(message.id.0.clone()),
+    InboxFrame::Message {
+        id: message.id.0.clone(),
         op: message.op,
         text: message.text.clone(),
         from: message.from.clone(),
@@ -1105,12 +1127,8 @@ fn pending_inbox_frame(message: &PendingMessage) -> InboxFrame {
 fn inbox_item_frame(item: &InboxItem) -> InboxFrame {
     match item {
         InboxItem::Message(message) => pending_inbox_frame(message),
-        InboxItem::Interrupt => InboxFrame {
-            id: None,
-            op: MessageOp::Interrupt,
-            text: String::new(),
-            from: None,
-        },
+        InboxItem::Interrupt => InboxFrame::Interrupt,
+        InboxItem::Skip => InboxFrame::Skip,
     }
 }
 
@@ -1182,8 +1200,8 @@ pub fn resident_token_path(repo_root: &Path, wave: &str) -> PathBuf {
     repo_root.join("wave").join(wave).join(RESIDENT_TOKEN_FILE)
 }
 
-/// Publish this boot's resident token so an attached resident (`lf wave
-/// <name> --flowloop-only`) can present it — the same filesystem-trust domain as
+/// Publish this boot's resident token so the internal resident can present it
+/// — the same filesystem-trust domain as
 /// the endpoint pointer. Owner-only on unix.
 pub fn write_resident_token(repo_root: &Path, wave: &str, token: &str) -> std::io::Result<()> {
     let path = resident_token_path(repo_root, wave);
@@ -1199,7 +1217,7 @@ pub fn write_resident_token(repo_root: &Path, wave: &str, token: &str) -> std::i
     Ok(())
 }
 
-/// Read the current resident token, for `--flowloop-only` attachment.
+/// Read the current resident token for attachment.
 pub fn read_resident_token(repo_root: &Path, wave: &str) -> Option<String> {
     let token = std::fs::read_to_string(resident_token_path(repo_root, wave)).ok()?;
     let token = token.trim().to_string();
@@ -1400,24 +1418,23 @@ mod tests {
     }
 
     /// The escape hatch's real work passes the verb policy: committing and
-    /// landing through git/PR commands, reporting via `chat`/`memory`, inspecting via the
-    /// read verbs, and dispatching a flow into a sandboxed worktree.
+    /// landing through git/PR commands, reporting via `radio`/`memory`, inspecting via the
+    /// read verbs, and delegating a loop into a sandboxed worktree.
     #[test]
     fn wave_exec_policy_permits_the_escape_hatch_essentials() {
         for command in [
             argv(&["commit", "-m", "wip"]),
             argv(&["pr", "land", "--strict"]),
             argv(&["pr", "open"]),
-            argv(&["chat", "worker done"]),
+            argv(&["radio", "worker done"]),
             argv(&["memory", "add", "learned a thing"]),
             argv(&["ls"]),
             argv(&["status"]),
             argv(&["runs"]),
             argv(&["sub"]),
             argv(&["trace", "deadbeef"]),
-            // The dispatch path: `--dispatch` precedes the flow name.
-            argv(&["--dispatch", "implement", "ship it"]),
-            argv(&["--dispatch", "-b", "review"]),
+            argv(&["loop", "task", "ship it", "--detach"]),
+            argv(&["loop", "review", "audit the diff", "--detach"]),
         ] {
             assert_eq!(
                 wave_exec_verdict(&command),
@@ -1427,8 +1444,8 @@ mod tests {
         }
     }
 
-    /// Credentials and wave lifecycle are refused, and a flow run WITHOUT
-    /// `--dispatch` (which would execute an arbitrary prompt unsandboxed in the
+    /// Credentials and wave lifecycle are refused, and a blocking loop or
+    /// direct flow (which would execute an arbitrary prompt unsandboxed in the
     /// outwave) is refused — the F1 containment the door exists to enforce.
     #[test]
     fn wave_exec_policy_rejects_dangerous_verbs() {
@@ -1438,8 +1455,15 @@ mod tests {
             argv(&["wave", "ship"]),
             argv(&["wave", "ship", "--force"]),
             argv(&["task", "ship it"]),
+            argv(&["loop", "task", "ship it"]),
+            // Both halves of a served mind are wave lifecycle: a leaked token
+            // must not boot a listener, nor a resident body against one.
+            argv(&["serve", "ship"]),
+            argv(&["serve", "ship", "--force"]),
+            argv(&["__resident", "ship"]),
             argv(&["sync-skills", "--yes"]),
-            // A flow / inline prompt with no `--dispatch`: no sandbox.
+            argv(&["chat", "pretend to be human"]),
+            argv(&["wavechat", "ship"]),
             argv(&["implement", "ship it"]),
             argv(&[":", "do", "something"]),
         ];
@@ -1463,8 +1487,8 @@ mod tests {
             ExecVerdict::Deny("wave".to_string())
         );
         assert_eq!(
-            wave_exec_verdict(&argv(&["task", "ship it"])),
-            ExecVerdict::Deny("task".to_string())
+            wave_exec_verdict(&argv(&["loop", "task", "ship it"])),
+            ExecVerdict::Deny("loop".to_string())
         );
         assert_eq!(
             wave_exec_verdict(&argv(&["sync-skills", "--yes"])),
@@ -1474,6 +1498,57 @@ mod tests {
             wave_exec_verdict(&argv(&["implement", "ship it"])),
             ExecVerdict::Deny("implement".to_string())
         );
+    }
+
+    #[test]
+    fn detached_loop_argv_forces_the_server_owned_blocking_form() {
+        let request = DetachedLoopRequest {
+            flow: "task".into(),
+            seed: "fix 'quoted' behavior".into(),
+            max_passes: 8,
+            pass_timeout_secs: 1800,
+            wall_clock_secs: 7200,
+            poll_secs: 60,
+            max_turns: Some(20),
+        };
+        let argv = detached_loop_argv(Path::new("/opt/lf"), &request, "platform");
+        assert_eq!(
+            &argv[..4],
+            ["/opt/lf", "loop", "task", "fix 'quoted' behavior"]
+        );
+        assert!(argv.windows(2).any(|pair| pair == ["--wave", "platform"]));
+        assert!(!argv.iter().any(|arg| arg == "--detach"));
+    }
+
+    #[tokio::test]
+    async fn loop_door_requires_capability_before_validating_or_launching() {
+        let (base, token, _tmp) = boot_exec().await;
+        let request = DetachedLoopRequest {
+            flow: String::new(),
+            seed: "ship it".into(),
+            max_passes: 8,
+            pass_timeout_secs: 1800,
+            wall_clock_secs: 7200,
+            poll_secs: 60,
+            max_turns: None,
+        };
+        let client = reqwest::Client::new();
+        let unauthorized = client
+            .post(format!("{base}/loops"))
+            .json(&request)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        let invalid = client
+            .post(format!("{base}/loops"))
+            .header(SUBAGENT_TOKEN_HEADER, token)
+            .json(&request)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(invalid.status(), reqwest::StatusCode::BAD_REQUEST);
     }
 
     /// A minted subagent token authorizes but a forbidden verb still 400s over
@@ -1497,6 +1572,24 @@ mod tests {
             body.contains("not permitted through the wave exec door"),
             "body names the refusal: {body}"
         );
+    }
+
+    #[tokio::test]
+    async fn exec_door_pins_detached_loops_to_its_wave() {
+        let (base, token, _tmp) = boot_exec().await;
+        let response = reqwest::Client::new()
+            .post(format!("{base}/v0/exec"))
+            .header(SUBAGENT_TOKEN_HEADER, token)
+            .json(&serde_json::json!({
+                "argv": ["--wave", "another-wave", "loop", "task", "ship it", "--detach"],
+                "cwd": null
+            }))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        assert!(response.text().await.unwrap().contains("must target wave"));
     }
 
     /// A pointer to a dead address is stale: the probe says no live server.

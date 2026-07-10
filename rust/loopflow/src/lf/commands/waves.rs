@@ -16,7 +16,7 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 
 use crate::lf::output::Colors;
-use crate::lfd::types::{AttentionItem, AttentionStatus, Run, RunStatus, Wave};
+use crate::lfd::types::{AttentionItem, AttentionStatus, LivePrState, Run, RunStatus, Wave};
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::wave::journal::short_id;
 use crate::wave::server::live_endpoint;
@@ -77,6 +77,8 @@ pub struct RunSnapshot {
     pub ended_at: Option<String>,
     pub error: Option<String>,
     pub pr_url: Option<String>,
+    pub pr_state: Option<String>,
+    pub pr_title: Option<String>,
 }
 
 /// One attention item's snapshot for `lf status`. Wire type; no serde defaults.
@@ -137,13 +139,14 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             Some(endpoint) => loop_state(endpoint).await,
             None => None,
         };
-        let runs = store
+        let stored_runs = store
             .list_runs(Some(wave.id()), Some(20))
             .await
-            .map_err(|err| anyhow!("failed to read runs: {err}"))?
-            .into_iter()
-            .map(snapshot_run)
-            .collect::<Vec<_>>();
+            .map_err(|err| anyhow!("failed to read runs: {err}"))?;
+        let mut runs = Vec::with_capacity(stored_runs.len());
+        for run in stored_runs {
+            runs.push(snapshot_run(&store, run).await?);
+        }
         let wave_id = wave.id().clone();
         let attention = store
             .list_attention_items(None, None)
@@ -198,8 +201,22 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
     })
 }
 
-fn snapshot_run(run: Run) -> RunSnapshot {
-    RunSnapshot {
+async fn snapshot_run(store: &SharedStore, run: Run) -> Result<RunSnapshot> {
+    let (pr_url, pr_state, pr_title) = match run.pr {
+        Some(pr) => {
+            let live_state = match pr.number {
+                Some(number) => store
+                    .get_live_pr_state(&run.repo, number)
+                    .await
+                    .map_err(|err| anyhow!("failed to read PR state: {err}"))?
+                    .map(|state| snapshot_pr_state(state.state, state.is_draft).to_string()),
+                None => None,
+            };
+            (Some(pr.url), live_state.or(pr.state), pr.title)
+        }
+        None => (None, None, None),
+    };
+    Ok(RunSnapshot {
         id: run.id.to_string(),
         flow: run.flow,
         task: run.task,
@@ -210,7 +227,17 @@ fn snapshot_run(run: Run) -> RunSnapshot {
         started_at: run.started_at.and_then(format_time),
         ended_at: run.ended_at.and_then(format_time),
         error: run.error,
-        pr_url: run.pr.map(|pr| pr.url),
+        pr_url,
+        pr_state,
+        pr_title,
+    })
+}
+
+fn snapshot_pr_state(state: LivePrState, is_draft: bool) -> &'static str {
+    if state == LivePrState::Open && is_draft {
+        "draft"
+    } else {
+        state.as_str()
     }
 }
 
@@ -428,6 +455,8 @@ mod tests {
                 ended_at: None,
                 error: None,
                 pr_url: None,
+                pr_state: None,
+                pr_title: None,
             }],
             attention: vec![AttentionSnapshot {
                 id: "att-1".into(),
@@ -444,6 +473,15 @@ mod tests {
         assert_eq!(value["loop_state"], serde_json::Value::Null);
         assert_eq!(value["runs"][0]["flow"], "implement");
         assert_eq!(value["runs"][0]["step_index"], 2);
+        assert_eq!(value["runs"][0]["pr_state"], serde_json::Value::Null);
+        assert_eq!(value["runs"][0]["pr_title"], serde_json::Value::Null);
         assert_eq!(value["attention"][0]["kind"], "interactive");
+    }
+
+    #[test]
+    fn draft_live_pr_state_stays_distinct_from_open() {
+        assert_eq!(snapshot_pr_state(LivePrState::Open, true), "draft");
+        assert_eq!(snapshot_pr_state(LivePrState::Open, false), "open");
+        assert_eq!(snapshot_pr_state(LivePrState::Closed, true), "closed");
     }
 }

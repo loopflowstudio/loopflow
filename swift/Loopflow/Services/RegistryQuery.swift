@@ -217,6 +217,8 @@ struct RunSnapshot: Decodable {
     let endedAt: String?
     let error: String?
     let prURL: String?
+    let prState: String?
+    let prTitle: String?
 
     enum CodingKeys: String, CodingKey {
         case id, flow, task, status, branch, worktree, error
@@ -224,12 +226,22 @@ struct RunSnapshot: Decodable {
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case prURL = "pr_url"
+        case prState = "pr_state"
+        case prTitle = "pr_title"
     }
 
     func toRun(waveId: String, repo: String) -> Run {
         let pr: PullRequest? = prURL
             .flatMap { URL(string: $0) }
-            .map { PullRequest(url: $0, number: nil, state: nil, title: nil, branch: nil) }
+            .map {
+                PullRequest(
+                    url: $0,
+                    number: nil,
+                    state: prState.flatMap(PRState.init(rawValue:)),
+                    title: prTitle,
+                    branch: nil
+                )
+            }
         return Run(
             id: id,
             waveId: waveId,

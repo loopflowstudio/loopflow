@@ -16,9 +16,9 @@
 //! [`InboxItem`]s by the resident:
 //! - **Message while idle** → a pass starts now; the `TurnOpened` delta's
 //!   `answers` names the message plus anything already queued.
-//! - **Message while a pass runs** → queued (append-and-coalesce, never
-//!   rejected); one boundary pass drains the whole queue. Steering is
-//!   fold-at-boundary by design — there is no mid-pass injection.
+//! - **Message while a pass runs** → a `steer` reaches a capable live harness;
+//!   other messages queue (append-and-coalesce, never rejected) for the next
+//!   body. Harnesses without live steering degrade `steer` to that queue.
 //! - **Interrupt while a pass runs** → the child is killed and the turn
 //!   closes `Interrupted`; non-empty interrupt text queues for the next pass.
 //! - **Interrupt while idle** → no-op; text, if any, queues like a message.

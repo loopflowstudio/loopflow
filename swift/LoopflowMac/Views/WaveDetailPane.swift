@@ -82,7 +82,9 @@ private struct WavePlanView: View {
     }
 
     private var openPullRequests: [Run] {
-        activeRuns.filter { $0.pr != nil }
+        runs.filter { run in
+            run.pr?.state == .open || run.pr?.state == .draft
+        }
     }
 
     private var filedBacklog: [BacklogItem] {

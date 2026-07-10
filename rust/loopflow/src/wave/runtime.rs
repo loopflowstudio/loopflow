@@ -1052,33 +1052,63 @@ impl WaveRuntime {
 
     /// Janitor: finalize the open turn without a resident terminal delta —
     /// the interrupt deadline expired with the resident silent, or the
-    /// resident process died mid-turn. Journals `TurnFinished`, requeues what
-    /// the turn had claimed (it never answered it), commits and broadcasts
-    /// the turn as accumulated so far, settles the loop to `Idle`, and arms
-    /// the drop guard: late wire deltas for the closed turn are ignored until
-    /// the next `TurnOpened`. Returns whether there was an open turn to
-    /// finalize.
+    /// resident process died mid-turn. Journals `TurnFinished`, closes the
+    /// matching playhead body without advancing its logical step, requeues
+    /// what the turn had claimed (it never answered it), commits and
+    /// broadcasts the turn as accumulated so far, settles the loop to `Idle`,
+    /// and arms the drop guard: late wire deltas for the closed turn are
+    /// ignored until the next `TurnOpened`. Returns whether there was an open
+    /// turn or active body to finalize.
     pub fn force_finalize_open_turn(&self, status: Lifecycle, reason: &str) -> bool {
         let mut inner = self.inner();
-        let Some(mut turn) = inner.open_turn.take() else {
+        let mut turn = inner.open_turn.take();
+        let active_body_id = inner
+            .playhead
+            .as_ref()
+            .and_then(|playhead| playhead.active.as_ref())
+            .map(|body| body.body_id.clone());
+        if turn.is_none() && active_body_id.is_none() {
             return false;
-        };
-        inner.drop_deltas_until_opened = true;
-        inner.open_usage = Usage::empty();
-        inner.open_text_items = 0;
-        inner.journal.append(|_| EventKind::TurnFinished {
-            turn_id: turn.id.clone(),
-            status,
-            usage: Usage::empty(),
-            termination_reason: Some(reason.to_string()),
-        });
-        let claims = std::mem::take(&mut inner.open_turn_claims);
-        if status != Lifecycle::Completed {
-            self.requeue_locked(&mut inner, &claims);
         }
-        turn.status = status;
-        self.transition_locked(&mut inner, LoopState::Idle, reason);
-        self.commit_locked(&mut inner, turn);
+
+        if let Some(mut turn) = turn.take() {
+            inner.drop_deltas_until_opened = true;
+            inner.open_usage = Usage::empty();
+            inner.open_text_items = 0;
+            let finished = inner.journal.append(|_| EventKind::TurnFinished {
+                turn_id: turn.id.clone(),
+                status,
+                usage: Usage::empty(),
+                termination_reason: Some(reason.to_string()),
+            });
+            let claims = std::mem::take(&mut inner.open_turn_claims);
+            if status != Lifecycle::Completed {
+                self.requeue_locked(&mut inner, &claims);
+            }
+            turn.status = status;
+            if let Some(body) = turn.body.as_mut() {
+                body.ended_at = Some(finished.at_rfc3339());
+                body.termination_reason = Some(reason.to_string());
+            }
+            self.transition_locked(&mut inner, LoopState::Idle, reason);
+            self.commit_locked(&mut inner, turn);
+        }
+
+        if let Some(body_id) = active_body_id {
+            let outcome = match status {
+                Lifecycle::Interrupted => StepOutcome::Interrupted,
+                Lifecycle::Completed => StepOutcome::Completed,
+                Lifecycle::Pending | Lifecycle::Running | Lifecycle::Failed => StepOutcome::Failed,
+            };
+            let events = inner
+                .playhead
+                .as_mut()
+                .expect("an active body belongs to an initialized playhead")
+                .finish_body(&body_id, outcome, reason)
+                .expect("the captured body is the active playhead body");
+            self.journal_playhead_locked(&mut inner, events)
+                .expect("the active body belongs to an initialized playhead");
+        }
         true
     }
 
@@ -1990,6 +2020,28 @@ mod tests {
     fn force_finalize_closes_the_turn_and_drops_late_deltas() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
+        let step = rt
+            .ensure_playhead()
+            .expect("initialize playhead")
+            .now
+            .expect("wave has a current step");
+        let body = BodyProvenance {
+            body_id: "body-dead".into(),
+            invocation_id: step.invocation_id,
+            step_index: step.index,
+            flow: step.flow,
+            step: step.step,
+            iteration: step.iteration,
+            session_id: Some("session-dead".into()),
+            harness: Some("codex".into()),
+            model: None,
+            host: "host".into(),
+            worktree: tmp.path().display().to_string(),
+            started_at: "2026-07-09T00:00:00Z".into(),
+            ended_at: None,
+            termination_reason: None,
+        };
+        rt.apply_resident_delta(ResidentDelta::BodyStarted { body });
         rt.apply_resident_delta(d_opened(&[]));
         rt.apply_resident_delta(d_text("half"));
         rt.apply_resident_delta(ResidentDelta::LoopState {
@@ -2004,12 +2056,26 @@ mod tests {
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].status, Lifecycle::Interrupted);
         assert_eq!(thread[0].text, "half");
+        let body = thread[0].body.as_ref().expect("turn keeps body provenance");
+        assert!(body.ended_at.is_some());
+        assert_eq!(body.termination_reason.as_deref(), Some("deadline"));
+        let playhead = rt.playhead().expect("playhead survives finalization");
+        assert!(playhead.active.is_none(), "the dead body releases its seat");
+        assert_eq!(
+            playhead.now.expect("failed step remains selected").index,
+            0,
+            "an interrupted body retries the same logical step"
+        );
 
         // The journal is closed: a replay agrees, no open turn survives.
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
         let fold = crate::wave::journal::fold_thread(&events);
         assert!(fold.open.is_empty());
         assert_eq!(fold.turns.last().unwrap().status, Lifecycle::Interrupted);
+        assert!(
+            fold.playhead.expect("replayed playhead").active.is_none(),
+            "replay releases the dead body too"
+        );
 
         // Nothing left to force a second time.
         assert!(!rt.force_finalize_open_turn(Lifecycle::Interrupted, "again"));

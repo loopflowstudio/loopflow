@@ -433,6 +433,12 @@ covered by its chat-command tests and the live-body done-when test.
   run: a failing lib target makes `cargo test` skip every later target, so the
   lib failures masked them. **Run `cargo test` to completion before trusting a
   green-looking suite.**
+- Listener force-finalization closed the chat turn but left its playhead body
+  active, so the respawned resident could not retry the same logical step. The
+  janitor now closes and journals both records atomically.
+- The Mac Open PRs pane filtered active runs, hiding the completed runs that
+  normally own open PRs. `lf status` now exposes live PR state and title, and
+  the pane filters all recent runs by open or draft PR state.
 
 ## Next implementation session
 

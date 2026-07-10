@@ -54,7 +54,7 @@ struct RegistryQueryTests {
         {
           "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
           "loop_state":"turning",
-          "runs":[{"id":"run-1","flow":"implement","task":"wire it","step_index":2,"status":"running","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null}],
+          "runs":[{"id":"run-1","flow":"implement","task":"wire it","step_index":2,"status":"running","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":"https://example.test/pull/7","pr_state":"draft","pr_title":"Wire it"}],
           "attention":[{"id":"att-1","kind":"interactive","status":"surfaced","title":"needs a human","summary":"review the design","run_id":"run-1","surfaced_at":"2026-07-06T00:00:00Z"}]
         }
         """
@@ -69,6 +69,8 @@ struct RegistryQueryTests {
         #expect(result.runs[0].waveId == "wave-1")
         #expect(result.runs[0].status == .running)
         #expect(result.runs[0].stepIndex == 2)
+        #expect(result.runs[0].pr?.state == .draft)
+        #expect(result.runs[0].pr?.title == "Wire it")
         #expect(result.attention.map(\.id) == ["att-1"])
         #expect(result.attention[0].waveId == "wave-1")
         #expect(result.attention[0].kind == .interactive)
@@ -81,8 +83,8 @@ struct RegistryQueryTests {
           "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
           "mind":null,
           "runs":[
-            {"id":"run-1","flow":"implement","task":null,"step_index":0,"status":"completed","branch":"b","worktree":"/wt","started_at":"2026-07-06T00:00:00Z","ended_at":null,"error":null,"pr_url":null},
-            {"id":"run-2","flow":"gate","task":null,"step_index":0,"status":"new-token","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null}
+            {"id":"run-1","flow":"implement","task":null,"step_index":0,"status":"completed","branch":"b","worktree":"/wt","started_at":"2026-07-06T00:00:00Z","ended_at":null,"error":null,"pr_url":null,"pr_state":null,"pr_title":null},
+            {"id":"run-2","flow":"gate","task":null,"step_index":0,"status":"new-token","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null,"pr_state":null,"pr_title":null}
           ],
           "attention":[]
         }

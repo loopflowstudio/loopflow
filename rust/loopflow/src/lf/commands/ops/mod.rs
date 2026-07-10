@@ -399,11 +399,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 wave: wave.clone(),
                 project: project.clone(),
             };
-            let result = if *json {
-                crate::ops::pm::pm_show(&repo_root, &options, &crate::ops::NullProgress)?
-            } else {
-                crate::ops::pm::pm_show(&repo_root, &options, progress)?
-            };
+            let result = crate::ops::pm::pm_show(&repo_root, &options, progress)?;
             if *json {
                 println!(
                     "{}",

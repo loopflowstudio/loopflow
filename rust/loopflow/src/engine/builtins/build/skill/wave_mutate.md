@@ -22,6 +22,6 @@ terminates; it changes shape.
 - Launch, retire, reset, or split sub-waves when the objective needs a new
   center of work.
 - Update GOAL.md when the current objective no longer asks the honest question.
-- Escalate blockers upward with `lf chat --parent`.
+- Escalate blockers upward with `lf radio --parent`.
 
 The wave oracle is `Never`: stopping is not a runtime decision.

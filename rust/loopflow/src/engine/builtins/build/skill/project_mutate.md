@@ -4,12 +4,12 @@ default_agent: codex
 action_style: procedural
 ---
 Mutate the project honestly. The loop's termination mechanics are in the
-`<lf:flowloop>` instruction; this is the judgment about WHEN.
+`<lf:loop>` instruction; this is the judgment about WHEN.
 
 ## Orientation
 
-Read the KR set in `scratch/<branch>.md`; check running tasks with `lf runs`
-and merged PRs with `gh`.
+Read the KR set in `scratch/<branch>.md`; check filed tasks with `lf pm show`,
+running tasks with `lf runs`, and merged PRs with `gh`.
 
 ## Work
 
@@ -21,7 +21,7 @@ and merged PRs with `gh`.
   runner with a recheck on the state you are waiting for (e.g. a
   `gh pr view` on a task's PR).
 - Blocked on missing authority, credentials, or strategy → escalate with
-  `lf chat --parent` and record the blocker.
+  `lf radio --parent` and record the blocker.
 
 The project's real-world condition: **every KR's observable condition is
 true.** You both drive the KRs there and decide that checking each one means

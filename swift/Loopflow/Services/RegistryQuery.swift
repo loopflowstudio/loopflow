@@ -52,16 +52,16 @@ public struct RegistryQuery: Sendable {
     }
 
     /// One wave's runs and attention (its durable history from the ledger),
-    /// plus the live flowloop state when a server is answering. Feeds `RunStore`
+    /// plus the live loop state when a server is answering. Feeds `RunStore`
     /// and `AttentionStore` for the focused wave.
     public func status(wave: String, waveId: String, cwd: String?) async throws
-        -> (runs: [Run], attention: [AttentionItem], flowloop: String?) {
+        -> (runs: [Run], attention: [AttentionItem], loopState: String?) {
         let stdout = try await run(["status", wave, "--json"], cwd)
         let snapshot = try Self.decode(WaveStatusSnapshot.self, from: stdout)
         let repo = snapshot.wave.repo
         let runs = snapshot.runs.map { $0.toRun(waveId: waveId, repo: repo) }
         let attention = snapshot.attention.map { $0.toItem(waveId: waveId) }
-        return (runs, attention, snapshot.flowloop)
+        return (runs, attention, snapshot.loopState)
     }
 
     /// The recent-run window across every wave on the machine — the ledger the
@@ -69,6 +69,14 @@ public struct RegistryQuery: Sendable {
     public func recentRuns() async throws -> [RunLedgerEntry] {
         let stdout = try await run(["runs", "--json"], nil)
         return try Self.decode([RunLedgerEntry].self, from: stdout)
+    }
+
+    /// Filed PM tasks for one wave. Active runs remain a separate registry
+    /// query; callers subtract running task ids/titles to render backlog.
+    public func backlog(wave: String, cwd: String?) async throws -> [BacklogItem] {
+        let stdout = try await run(["pm", "show", "--wave", wave, "--json"], cwd)
+        let snapshot = try Self.decode(PmShowSnapshot.self, from: stdout)
+        return snapshot.items.filter { !$0.completed }
     }
 
     /// Per-boundary spend over a window: what each skill, and each terminal run,
@@ -113,6 +121,19 @@ public struct RegistryQuery: Sendable {
             throw RegistryQueryError("lf query JSON did not decode: \(error)")
         }
     }
+}
+
+/// `lf pm show --json`. The envelope names the wave, provider, and project it
+/// read; the Mac only renders the items.
+private struct PmShowSnapshot: Decodable {
+    let items: [BacklogItem]
+}
+
+public struct BacklogItem: Decodable, Sendable, Identifiable, Hashable {
+    public let id: String
+    public let name: String
+    public let completed: Bool
+    public let labels: [String]
 }
 
 // MARK: - Wire snapshots (mirror the Rust `--json` types)
@@ -163,9 +184,14 @@ struct WaveSnapshot: Decodable {
 /// `lf status <wave>` snapshot. Mirrors Rust `WaveStatusSnapshot`.
 struct WaveStatusSnapshot: Decodable {
     let wave: WaveSnapshot
-    let flowloop: String?
+    let loopState: String?
     let runs: [RunSnapshot]
     let attention: [AttentionSnapshot]
+
+    enum CodingKeys: String, CodingKey {
+        case wave, runs, attention
+        case loopState = "loop_state"
+    }
 }
 
 /// One run under `lf status`. Mirrors Rust `RunSnapshot`.
@@ -173,6 +199,7 @@ struct RunSnapshot: Decodable {
     let id: String
     let flow: String
     let task: String?
+    let stepIndex: Int
     let status: String
     let branch: String
     let worktree: String
@@ -180,18 +207,31 @@ struct RunSnapshot: Decodable {
     let endedAt: String?
     let error: String?
     let prURL: String?
+    let prState: String?
+    let prTitle: String?
 
     enum CodingKeys: String, CodingKey {
         case id, flow, task, status, branch, worktree, error
+        case stepIndex = "step_index"
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case prURL = "pr_url"
+        case prState = "pr_state"
+        case prTitle = "pr_title"
     }
 
     func toRun(waveId: String, repo: String) -> Run {
         let pr: PullRequest? = prURL
             .flatMap { URL(string: $0) }
-            .map { PullRequest(url: $0, number: nil, state: nil, title: nil, branch: nil) }
+            .map {
+                PullRequest(
+                    url: $0,
+                    number: nil,
+                    state: prState.flatMap(PRState.init(rawValue:)),
+                    title: prTitle,
+                    branch: nil
+                )
+            }
         return Run(
             id: id,
             waveId: waveId,
@@ -199,6 +239,7 @@ struct RunSnapshot: Decodable {
             task: task,
             repo: repo,
             status: RunStatus(lfToken: status),
+            stepIndex: stepIndex,
             worktree: worktree.isEmpty ? nil : worktree,
             branch: branch.isEmpty ? nil : branch,
             error: error,

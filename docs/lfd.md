@@ -5,7 +5,10 @@ title: lfd Daemon Reference
 
 # lfd Daemon Reference
 
-`lfd` runs the loopflow daemon: the HTTP read surface, session registry, GitHub webhook ingress translated to `lf` execs, provider token refresh, and worktree cleanup. It dispatches no agent work; each wave's resident flowloop and ordinary `lf --dispatch` / `--stack` / `--fork` invocations own agent execution.
+`lfd` runs the loopflow daemon: the HTTP read surface, session registry,
+GitHub webhook ingress translated to `lf` execs, provider token refresh, and
+worktree cleanup. It launches no agent work; each wave's resident loop and
+its server-owned `lf loop … --detach` hands own agent execution.
 
 ## Run Native lfd
 
@@ -169,7 +172,7 @@ Run one loop iteration for this wave.
 - **Key Results**: backlog is empty.
 ```
 
-Run it with `lf wave shipper`.
+Run it with `lf serve shipper`.
 
 ## Browse the flow catalog
 
@@ -213,7 +216,9 @@ Cancel the session:
 curl -s -X POST "$LFD_ADDR/v0/sessions/<session_id>/cancel"
 ```
 
-The attach endpoint marks the session attached and returns tmux connection info. For day-to-day use, `tmux ls` and `tmux attach -t <name>` go straight to the session.
+The attach endpoint marks the session attached and returns tmux connection
+info. Use `tmux ls` and `tmux attach -r -t <name>` for read-only inspection;
+steering goes through the wave thread so it remains journaled.
 
 ## GitHub webhooks
 
@@ -223,15 +228,15 @@ POST /v0/hooks/github
 
 Set `github.webhook_secret` or `LFD_GITHUB_WEBHOOK_SECRET` before enabling the webhook. `lfd` verifies `X-Hub-Signature-256` and ignores unsigned requests.
 
-Webhooks translate inward through the daemon. The current demo path keeps CI
-and main-push events as attributed chat notifications; queue maintenance runs
+Webhooks translate inward through the daemon. CI and main-push events ride the
+agent bus and fold into the wave's thread attributed; queue maintenance runs
 in-process.
 
-- check_run failure → `lf chat --wave <wave> "CI failed: …"` (the wave's flowloop decides how to fix)
+- check_run failure → `lf radio --channel <wave> --from github "CI failed: …"` (the wave's loop decides how to fix)
 - PR merged → reconcile stacked queue state for matching waves
-- push to main → `lf chat --wave <wave> "main moved: …"` for each wave in the repo
+- push to main → `lf radio --channel <wave> --from github "main moved: …"` for each wave in the repo
 
-A wave with no live server bounces the notification — logged at debug. No wave resolved → dropped.
+The store accepts the notification even while the wave sleeps. No wave resolved → dropped.
 
 ## Stacked PR queue state
 

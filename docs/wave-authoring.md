@@ -49,7 +49,7 @@ Infrastructure wave
 Author `wave/<name>/GOAL.md` — the body is the goal prompt; optional frontmatter sets machine config such as `workers:`, `crons:`, and `pm:`. Then run the agent:
 
 ```bash
-lf wave infra             # start the wave agent
+lf serve infra             # start the wave agent
 ```
 
 ---
@@ -97,10 +97,10 @@ Use a direct worker for mechanical changes; write a scratch design first when th
 blast radius crosses storage, auth, or public APIs.
 ```
 
-Run `lf wave <wave>` to start that wave directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
+Run `lf serve <wave>` to start that wave directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
 
 ```bash
-lf wave s3           # the s3 (control) charter
+lf serve s3           # the s3 (control) charter
 ```
 
 ### Memory
@@ -118,13 +118,13 @@ does not hold a task list, status table, or independent memory.
 
 Loopflow's architecture is legible from the top down: the key data structures
 and APIs explain the system, the implementation follows that map, and obsolete
-pre-flowloop concepts do not linger as alternate design.
+pre-loop concepts do not linger as alternate design.
 
 ## KRs
 
 - Top-down architecture documentation is complete, published, and centered on the key data structures and public APIs.
 - Every data structure and API in the architecture is ratified as minimally simple for its purpose.
-- The codebase, prompts, docs, and UI contain no stale pre-flowloop technical design language.
+- The codebase, prompts, docs, and UI contain no stale pre-loop technical design language.
 ```
 
 KRs should read as proof under duration: observable end states that show the
@@ -196,10 +196,10 @@ project it advances so a worker knows when to stop.
 |-------|-------------|
 | `workers` | Parallelism for dispatched work. `0` means "don't auto-dispatch" |
 | `agent` | Preferred agent harness/model |
-| `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident flowloop |
+| `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident loop |
 | `pm.linear_project` | Linear project id backing the wave's tasks (written by `lf pm init`) |
 
-The resident flowloop reads `crons:` directly from this frontmatter and opens a system pass when a schedule comes due; edits land without a restart. See [Crons](waves.md#crons).
+The resident loop reads `crons:` directly from this frontmatter and opens a system pass when a schedule comes due; edits land without a restart. See [Crons](waves.md#crons).
 
 ---
 
@@ -211,7 +211,7 @@ The resident flowloop reads `crons:` directly from this frontmatter and opens a 
 lf design: plan infrastructure hardening for the daemon
 ```
 
-The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, `lf wave <name>` runs them and Loopflow picks them up; connect Linear with `lf pm init` and add tasks with `lf pm task create`.
+The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, `lf serve <name>` runs them and Loopflow picks them up; connect Linear with `lf pm init` and add tasks with `lf pm task create`.
 
 **Write by hand.** Sometimes an editor is faster. Create the files, push, done.
 
@@ -226,7 +226,7 @@ Run the wave agent and it works one move at a time:
 3. **Dispatch** — hand a scoped task to a worker, which runs a flow in its own worktree and opens a PR:
 
    ```bash
-   lf build "wrap SQLite migrations in a transaction" --wave infra --dispatch
+   lf loop build "wrap SQLite migrations in a transaction" --wave infra --detach
    ```
 
 4. **Watch** — the PR is how the worker reports back. The agent reads its diff, checks, and comments.
@@ -243,16 +243,16 @@ When a task ships, its context — what was learned, what changed, what downstre
 ## Running and Monitoring
 
 ```bash
-lf wave mywave              # start the wave agent (Ctrl-C to stop)
+lf serve mywave              # start the wave agent (Ctrl-C to stop)
 tmux ls                     # the wave agent and every worker it launched
-tmux attach -t <name>       # jump into one; agent output lives here
+tmux attach -r -t <name>    # inspect one; agent output lives here
 ```
 
 In **Loopflow**, a wave's detail view groups its live work — the wave agent session, worker runs, PR state, and anything needing your attention.
 
 ### Crons
 
-Crons live in `GOAL.md` frontmatter; the wave's resident flowloop fires each due schedule as a system pass and dispatches the flow with judgment. `workers: 0` is valid for a wave that only runs scheduled flows:
+Crons live in `GOAL.md` frontmatter; the wave's resident loop fires each due schedule as a system pass and dispatches the flow with judgment. `workers: 0` is valid for a wave that only runs scheduled flows:
 
 ```markdown
 <!-- wave/governance/GOAL.md -->

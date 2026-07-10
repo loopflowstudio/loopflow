@@ -1,5 +1,5 @@
 //! The resident wire: what crosses between the listener (the wave server,
-//! vendor-free — hear / check / fold / tell) and the resident (the flowloop, its
+//! vendor-free — hear / check / fold / tell) and the resident (the loop, its
 //! own `lf` process owning the vendor harness).
 //!
 //! Two directions, two transports:
@@ -11,7 +11,7 @@
 //!   DTO discipline, plus the consumption markers (`TurnOpened.answers`,
 //!   `TurnSteered.answers` — the RESIDENT decides what a turn answers; the
 //!   listener validates against its queue fold and journals), the resident's
-//!   reported flowloop state, and the vendor thread id. The single writer stays
+//!   reported loop state, and the body's provider session id. The single writer stays
 //!   with the listener: the resident never touches journal files.
 //! - **Listener → resident**: the resident consumes its own wave's `/events`
 //!   subscription with `?inbox=true` — `inbox` SSE frames ([`InboxFrame`])
@@ -30,15 +30,15 @@
 //! ([`RESIDENT_TOKEN_HEADER`]): the listener generates it at bind, passes it
 //! to a spawned resident via [`RESIDENT_TOKEN_ENV`], and writes it to
 //! `wave/<name>/.wave-resident-token` beside the endpoint pointer for
-//! attached residents (`lf wave <name> --flowloop-only`) — the same
-//! filesystem-trust domain as the discovery file. This is a stopgap: when a
-//! human (or a remote flowloop) can hold the resident seat, the token becomes a
-//! credential the gatekeeper issues, not a file the repo trusts.
+//! the internal resident — the same filesystem-trust domain as the discovery
+//! file. This is a stopgap: when a remote Loop can hold the resident seat, the
+//! token becomes a credential the gatekeeper issues, not a file the repo trusts.
 
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::wave::journal::{Attribution, MessageOp};
+use crate::wave::journal::MessageOp;
+use crate::wave::playhead::{BodyProvenance, PlayheadView, StepOutcome};
 
 /// Header carrying the resident token on every `/resident/*` request.
 pub const RESIDENT_TOKEN_HEADER: &str = "x-lf-resident-token";
@@ -58,6 +58,27 @@ pub const SUBAGENT_TOKEN_HEADER: &str = "x-lf-subagent-token";
 /// Env var the listener sets on the resident (and thus every sandboxed
 /// process it spawns) so a subagent can reach its wave's exec door via `lfq`.
 pub const SUBAGENT_TOKEN_ENV: &str = "LF_SUBAGENT_TOKEN";
+
+/// `POST /loops` request: one generic loop invocation. Every field is
+/// required; the client sends the effective caps so detached and blocking
+/// execution have the same contract.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DetachedLoopRequest {
+    pub flow: String,
+    pub seed: String,
+    pub max_passes: u32,
+    pub pass_timeout_secs: u64,
+    pub wall_clock_secs: u64,
+    pub poll_secs: u64,
+    pub max_turns: Option<u32>,
+}
+
+/// `POST /loops` response: the server-owned, read-only-inspectable tmux
+/// session. The loop's durable state remains the run ledger and its reports.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DetachedLoopResponse {
+    pub session: String,
+}
 
 /// One ordered increment from the resident's harness stream, applied by the
 /// listener's fold ([`crate::wave::runtime::WaveRuntime::apply_resident_delta`]).
@@ -89,6 +110,7 @@ pub enum ResidentDelta {
     TurnFinished {
         status: Lifecycle,
         cost_usd: Option<f64>,
+        reason: Option<String>,
     },
     /// Mid-turn consumption: the harness accepted these queued messages as
     /// steering input, so the CURRENT turn answers them (journaled as
@@ -101,14 +123,25 @@ pub enum ResidentDelta {
     /// re-delivers them. The claim rides first, the undo is explicit:
     /// at-most-once to the vendor, never a silent redelivery.
     MessagesRequeued { ids: Vec<String> },
-    /// The resident's reported flowloop state ([`ResidentStateTo`]). `Turning`
+    /// A fresh body took the current logical playhead step.
+    BodyStarted { body: BodyProvenance },
+    /// The harness announced its provider session after the body opened.
+    BodySessionUpdated { body_id: String, session_id: String },
+    /// A body ended. Only completed/skipped outcomes advance the playhead;
+    /// failure/interruption leave the logical step selected for retry.
+    BodyFinished {
+        body_id: String,
+        outcome: StepOutcome,
+        reason: String,
+    },
+    /// The resident's reported loop state ([`ResidentStateTo`]). `Turning`
     /// and the boundary `Idle` are DERIVED by the listener from
     /// `TurnOpened`/`TurnFinished`; only the transitions the turn deltas
     /// can't express ride here.
-    FlowloopState { to: ResidentStateTo, reason: String },
+    LoopState { to: ResidentStateTo, reason: String },
 }
 
-/// Destination of a reported [`ResidentDelta::FlowloopState`] transition. The
+/// Destination of a reported [`ResidentDelta::LoopState`] transition. The
 /// listener supplies the turn id for `Interrupting` (the current open turn —
 /// the resident never learns journal-minted ids).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,7 +149,7 @@ pub enum ResidentDelta {
 pub enum ResidentStateTo {
     /// Cancel fired for the open turn (cooperative interrupt in flight).
     Interrupting,
-    /// The flowloop itself died (harness terminal error, failure cap). The
+    /// The loop itself died (harness terminal error, failure cap). The
     /// resident reports this and exits; the listener's supervisor owns the
     /// respawn ladder from there.
     Failed,
@@ -139,7 +172,7 @@ pub struct PostDeltasResponse {
 
 /// `POST /resident/attach` request: the resident's first call. Registers the
 /// resident's pid for liveness (the listener probes attached residents; a
-/// spawned child is watched by process exit) and revives a `failed` flowloop
+/// spawned child is watched by process exit) and revives a `failed` loop
 /// state — a fresh resident IS the revival.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AttachRequest {
@@ -162,6 +195,7 @@ pub struct AttachResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContextResponse {
     pub in_flight: Vec<InFlightWorker>,
+    pub playhead: PlayheadView,
 }
 
 /// One dispatched-not-finished worker, for the heartbeat's `<in_flight>`
@@ -174,14 +208,19 @@ pub struct InFlightWorker {
 }
 
 /// One `inbox` SSE frame on `/events?inbox=true` — a resident-directed op.
-/// `id` is the journaled message id (`"msg-<seq>"`), or `None` for a bare
-/// interrupt (nothing journaled — the op is control, not content).
+/// A `Message` carries its journaled id (`"msg-<seq>"`). `Interrupt` and `Skip`
+/// carry none: nothing is journaled, because the op is control, not content.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct InboxFrame {
-    pub id: Option<String>,
-    pub op: MessageOp,
-    pub text: String,
-    pub from: Option<Attribution>,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InboxFrame {
+    Message {
+        id: String,
+        op: MessageOp,
+        text: String,
+        from: Option<String>,
+    },
+    Interrupt,
+    Skip,
 }
 
 /// One `op` SSE frame on `/events` — this wave's operational motion: a worker
@@ -244,6 +283,7 @@ mod tests {
             ResidentDelta::TurnFinished {
                 status: Lifecycle::Completed,
                 cost_usd: Some(0.02),
+                reason: None,
             },
             ResidentDelta::TurnSteered {
                 answers: vec!["msg-3".into()],
@@ -251,7 +291,7 @@ mod tests {
             ResidentDelta::MessagesRequeued {
                 ids: vec!["msg-3".into()],
             },
-            ResidentDelta::FlowloopState {
+            ResidentDelta::LoopState {
                 to: ResidentStateTo::Failed,
                 reason: "harness disconnected".into(),
             },
@@ -272,7 +312,7 @@ mod tests {
             serde_json::json!({ "kind": "turn_opened" }),
             serde_json::json!({ "kind": "turn_finished", "cost_usd": null }),
             serde_json::json!({ "kind": "turn_text" }),
-            serde_json::json!({ "kind": "flowloop_state", "to": "failed" }),
+            serde_json::json!({ "kind": "loop_state", "to": "failed" }),
             serde_json::json!({ "kind": "messages_requeued" }),
         ] {
             assert!(
@@ -280,18 +320,22 @@ mod tests {
                 "must reject {bad}"
             );
         }
-        assert!(serde_json::from_value::<InboxFrame>(
-            serde_json::json!({ "id": null, "text": "hi", "from": null })
-        )
+        assert!(serde_json::from_value::<InboxFrame>(serde_json::json!({
+            "kind": "message",
+            "text": "hi",
+            "from": null
+        }))
         .is_err());
 
-        // Explicitly Optional fields may be absent: they decode as None.
-        let frame: InboxFrame = serde_json::from_value(
-            serde_json::json!({ "op": "message", "text": "hi", "id": null, "from": null }),
-        )
-        .expect("explicit nulls parse");
-        assert_eq!(frame.id, None);
-        assert_eq!(frame.from, None);
+        let frame: InboxFrame = serde_json::from_value(serde_json::json!({
+            "kind": "message",
+            "id": "msg-1",
+            "op": "message",
+            "text": "hi",
+            "from": null
+        }))
+        .expect("message frame parses");
+        assert!(matches!(frame, InboxFrame::Message { from: None, .. }));
     }
 
     /// The `op` frame round-trips and holds DTO discipline: `kind`/`run_id`/
@@ -330,5 +374,32 @@ mod tests {
         assert_eq!(finished.flow, None);
         assert_eq!(finished.task, None);
         assert_eq!(finished.summary.as_deref(), Some("session failed"));
+    }
+
+    #[test]
+    fn detached_loop_wire_requires_effective_caps() {
+        let request = DetachedLoopRequest {
+            flow: "task".into(),
+            seed: "ship it".into(),
+            max_passes: 8,
+            pass_timeout_secs: 1800,
+            wall_clock_secs: 7200,
+            poll_secs: 60,
+            max_turns: None,
+        };
+        let decoded: DetachedLoopRequest =
+            serde_json::from_value(serde_json::to_value(&request).unwrap()).unwrap();
+        assert_eq!(decoded, request);
+        assert!(
+            serde_json::from_value::<DetachedLoopRequest>(serde_json::json!({
+                "flow": "task",
+                "seed": "ship it",
+                "max_passes": 8,
+                "pass_timeout_secs": 1800,
+                "wall_clock_secs": 7200,
+                "max_turns": null
+            }))
+            .is_err()
+        );
     }
 }

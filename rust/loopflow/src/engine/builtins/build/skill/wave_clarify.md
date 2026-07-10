@@ -1,5 +1,5 @@
 ---
-description: Keep GOAL.md computable for the wave flowloop.
+description: Keep GOAL.md computable for the wave loop.
 default_agent: codex
 action_style: procedural
 ---

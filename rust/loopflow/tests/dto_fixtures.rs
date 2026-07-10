@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use loopflow::chat::turns::{ChatRole, ChatTurn};
 use loopflow::chat::types::{ConversationItem, Lifecycle};
 use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, WaveDto};
-use loopflow::wave::state::FlowloopState;
+use loopflow::wave::playhead::StepOutcome;
+use loopflow::wave::state::LoopState;
 use loopflow::wave::wire::{
     AttachRequest, AttachResponse, ContextResponse, PostDeltasRequest, ResidentDelta,
     ResidentStateTo,
@@ -131,7 +132,7 @@ fn create_session_request_fixture_pins_required_fields() {
 
 /// `POST /messages` response — `{turn, state}` (wave/server.rs
 /// `PostMessageResponse`). The same fixture Loopflow's ContractTests decodes;
-/// `turn` must parse as a `ChatTurn` and `state` must be a flowloop-state name.
+/// `turn` must parse as a `ChatTurn` and `state` must be a loop-state name.
 #[test]
 fn post_message_response_fixture_pins_wave_chat_reply() {
     let value = load_fixture("post_message_response.json");
@@ -148,43 +149,16 @@ fn post_message_response_fixture_pins_wave_chat_reply() {
         value["turn"]
     );
 
-    // `state` carries the flowloop-state name at acceptance; it must be a name
-    // FlowloopState actually produces (renaming a state fails here AND in Swift).
+    // `state` carries the loop-state name at acceptance; it must be a name
+    // LoopState actually produces (renaming a state fails here AND in Swift).
     let state = value["state"].as_str().expect("state is a string");
     assert_eq!(
         state,
-        FlowloopState::Turning {
+        LoopState::Turning {
             turn_id: turn.id.clone(),
         }
         .name()
     );
-}
-
-/// A work-line channel's `turn` SSE frame (wave/server.rs
-/// `tagged_turn_event`): the ChatTurn JSON plus exactly one extra top-level
-/// key, `"channel"`. The tag is additive — the turn parses whole with the key
-/// present, and stripping it restores the plain turn frame byte-for-value.
-/// Swift's ContractTests decodes the same fixture through FrameChannelTag +
-/// ChatTurn; a drift in either the tag or the turn shape fails one of the two.
-#[test]
-fn channel_tagged_turn_fixture_pins_the_frame_shape() {
-    let value = load_fixture("channel_tagged_turn.json");
-    assert_eq!(value["channel"], "ship.148e0e02");
-
-    // The tag is additive: the whole frame still parses as a ChatTurn.
-    let turn: ChatTurn = serde_json::from_value(value.clone())
-        .expect("tagged frame parses as a ChatTurn (unknown key ignored)");
-    assert_eq!(turn.id, "turn-7");
-    assert_eq!(turn.from.as_deref(), Some("worker"));
-
-    // The frame is EXACTLY turn + channel: re-serialize the turn, re-insert
-    // the tag, and the fixture comes back byte-for-value.
-    let mut rebuilt = serde_json::to_value(&turn).expect("serialize turn");
-    rebuilt
-        .as_object_mut()
-        .expect("object")
-        .insert("channel".to_string(), value["channel"].clone());
-    assert_eq!(rebuilt, value);
 }
 
 /// The resident wire (`POST /resident/deltas` — wave/wire.rs). CARVE-OUT:
@@ -196,17 +170,25 @@ fn resident_deltas_fixture_round_trips_the_wire() {
     let value = load_fixture("resident_deltas.json");
     let request: PostDeltasRequest =
         serde_json::from_value(value.clone()).expect("resident deltas fixture should parse");
-    assert_eq!(request.deltas.len(), 9);
+    assert_eq!(request.deltas.len(), 12);
 
     // Every wire kind appears in the fixture, in a realistic turn order.
     assert!(matches!(
-        &request.deltas[0],
+        &request.deltas[2],
         ResidentDelta::TurnOpened { answers } if answers == &["msg-4", "msg-5"]
     ));
-    assert!(matches!(&request.deltas[1], ResidentDelta::TurnText { .. }));
-    assert!(matches!(&request.deltas[2], ResidentDelta::TurnItem { .. }));
     assert!(matches!(
-        &request.deltas[3],
+        &request.deltas[0],
+        ResidentDelta::BodyStarted { .. }
+    ));
+    assert!(matches!(
+        &request.deltas[1],
+        ResidentDelta::BodySessionUpdated { session_id, .. } if session_id == "session-3"
+    ));
+    assert!(matches!(&request.deltas[3], ResidentDelta::TurnText { .. }));
+    assert!(matches!(&request.deltas[4], ResidentDelta::TurnItem { .. }));
+    assert!(matches!(
+        &request.deltas[5],
         ResidentDelta::TurnUsage {
             input_tokens: Some(1204),
             output_tokens: Some(96),
@@ -214,29 +196,36 @@ fn resident_deltas_fixture_round_trips_the_wire() {
         }
     ));
     assert!(matches!(
-        &request.deltas[4],
-        ResidentDelta::TurnFinished { status: Lifecycle::Completed, cost_usd: Some(cost) }
+        &request.deltas[6],
+        ResidentDelta::TurnFinished { status: Lifecycle::Completed, cost_usd: Some(cost), .. }
             if (cost - 0.0125).abs() < f64::EPSILON
     ));
     assert!(matches!(
-        &request.deltas[5],
+        &request.deltas[8],
         ResidentDelta::TurnSteered { answers } if answers == &["msg-6"]
     ));
     assert!(matches!(
-        &request.deltas[6],
+        &request.deltas[9],
         ResidentDelta::MessagesRequeued { ids } if ids == &["msg-6"]
     ));
     assert!(matches!(
-        &request.deltas[7],
-        ResidentDelta::FlowloopState {
+        &request.deltas[10],
+        ResidentDelta::LoopState {
             to: ResidentStateTo::Interrupting,
             ..
         }
     ));
     assert!(matches!(
-        &request.deltas[8],
-        ResidentDelta::FlowloopState { to: ResidentStateTo::Failed, reason }
+        &request.deltas[11],
+        ResidentDelta::LoopState { to: ResidentStateTo::Failed, reason }
             if reason.contains("codex_disconnected")
+    ));
+    assert!(matches!(
+        &request.deltas[7],
+        ResidentDelta::BodyFinished {
+            outcome: StepOutcome::Completed,
+            ..
+        }
     ));
 
     // Round-trip: serializing back reproduces the fixture byte-for-value —
@@ -273,6 +262,10 @@ fn resident_door_fixture_round_trips_attach_and_context() {
     assert_eq!(context.in_flight.len(), 1);
     assert_eq!(context.in_flight[0].flow, "implement");
     assert_eq!(context.in_flight[0].task, "Wire the endpoint.");
+    assert_eq!(
+        context.playhead.now.as_ref().map(|step| step.step.as_str()),
+        Some("wave_pursue")
+    );
 
     // Round-trip: no defaults injected or dropped.
     assert_eq!(
@@ -293,11 +286,11 @@ fn resident_door_fixture_round_trips_attach_and_context() {
 
 /// The SSE `state` vocabulary (`idle | turning | interrupting | failed`)
 /// crosses the boundary as bare names. The fixture pins the shared list:
-/// renaming a `FlowloopState` variant fails here, and Swift's ContractTests pin
-/// the same file against `WaveFlowloopState`.
+/// renaming a `LoopState` variant fails here, and Swift's ContractTests pin
+/// the same file against `WaveLoopState`.
 #[test]
-fn wave_flowloop_states_fixture_pins_the_state_vocabulary() {
-    let value = load_fixture("wave_flowloop_states.json");
+fn wave_loop_states_fixture_pins_the_state_vocabulary() {
+    let value = load_fixture("wave_loop_states.json");
     let fixture_names: Vec<&str> = value["states"]
         .as_array()
         .expect("states array")
@@ -306,17 +299,17 @@ fn wave_flowloop_states_fixture_pins_the_state_vocabulary() {
         .collect();
 
     let variants = [
-        FlowloopState::Idle,
-        FlowloopState::Turning {
+        LoopState::Idle,
+        LoopState::Turning {
             turn_id: "turn-1".to_string(),
         },
-        FlowloopState::Interrupting {
+        LoopState::Interrupting {
             turn_id: "turn-1".to_string(),
         },
-        FlowloopState::Failed {
+        LoopState::Failed {
             reason: "dead".to_string(),
         },
     ];
-    let names: Vec<&str> = variants.iter().map(FlowloopState::name).collect();
+    let names: Vec<&str> = variants.iter().map(LoopState::name).collect();
     assert_eq!(fixture_names, names);
 }

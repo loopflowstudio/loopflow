@@ -75,58 +75,8 @@ work. `wave/<name>/MEMORY.md` is server-owned; never edit it directly.
 
 `lf chat` is the human surface. Agents use `lf radio`.
 
-## Tasks Live in Linear
-
-Use three planning nouns:
-
-- **Wave**: durable operating context. It owns memory, cadence, budget, chat,
-  and project selection.
-- **Project**: measured bet inside exactly one wave. It owns definition, KRs,
-  and closure criteria.
-- **Task**: concrete work that advances a project — one implementation step,
-  investigation, doc, or shipped change.
-
-Every project belongs to one wave. Projects do not contain projects, and they do
-not own memory or cadence. If a project seems to need subprojects, split it into
-sibling projects, promote the operating context into a wave, or demote the
-pieces into tasks.
-
-Project definitions, KRs, and concrete tasks live in Linear: a wave maps to an
-Initiative, a project maps to a Project, and a task maps to an Issue. Files in
-`wave/<wave>/projects/` are generated offline prompt caches and one-time
-migration seeds, not a second editable source of truth. There are no local task
-lists.
-
-Tasks may be filed before they run. Read the backlog when selecting work; a
-task moves from filed, to a running loop, to a merged PR. Do not let filing
-become a substitute for selection.
-
-```bash
-lf pm show                                          # the wave's live PM tasks
-lf pm show --project wave-chat                      # filter by Linear Project
-lf pm task create --project wave-chat --title "..." --notes "..." # file a task
-lf pm task done --id <task-id> --pr <url>           # close a shipped task with its PR link
-lf pm task update --id <task-id> --title "..."      # edit an existing task
-lf pm sync --plan                                   # report PM/cache drift
-```
-
-Close a shipped task with `lf pm task done --id <task-id> --pr <url>` so the
-task carries a pointer back to the work. The PR link posts as a comment; it
-never clobbers the task's description.
-
-Add `--wave <name>` when the wave is ambiguous. Never write `wave/<name>/N-*.md`
-roadmap files, a roadmap table in `GOAL.md`, or task lists in project docs —
-that mirror is gone.
-
-Write project KRs as proof: observable end states that show the bet now holds.
-Do not mix KRs with backlog bullets, implementation receipts, issue ids, or
-status. Individual technical-debt cleanup is a task; a standing debt frontier can
-be a project.
-
 ## Where To Write
 
-- Linear Project content - project definition and KRs
-- `wave/<wave>/projects/<project>.md` - generated offline cache; refresh with `lf pm sync`
 - `scratch/<branch>.md` - design doc for the current work
 - `scratch/questions.md` - open questions, blockers, assumptions
 - Code - the actual work

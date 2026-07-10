@@ -1444,14 +1444,34 @@ mod tests {
         ));
 
         let args: Vec<String> = [
-            "lf", "pm", "task", "--wave", "systems", "create", "--title", "file it",
+            "lf",
+            "pm",
+            "task",
+            "--wave",
+            "systems",
+            "create",
+            "--project",
+            "wave-chat",
+            "--title",
+            "file it",
         ]
         .map(String::from)
         .to_vec();
         let reordered = reorder_args(args);
         assert_eq!(
             reordered,
-            vec!["lf", "pm", "task", "create", "--wave", "systems", "--title", "file it"]
+            vec![
+                "lf",
+                "pm",
+                "task",
+                "create",
+                "--wave",
+                "systems",
+                "--project",
+                "wave-chat",
+                "--title",
+                "file it"
+            ]
         );
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,

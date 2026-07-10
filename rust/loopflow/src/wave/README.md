@@ -24,7 +24,9 @@
   Continuity is the journaled thread, playhead, GOAL.md, and memory. It
   bootstraps and enters the wave's `<repo>.<wave>` sibling worktree — passes
   never run in the main checkout. Its input is its own wave's
-  `/events?inbox=true` subscription (the same machinery as `lf sub`); its
+  `/events?inbox=true` subscription — the SSE thread stream `lf wavechat`
+  follows, plus the inbox scope, and nothing to do with `lf sub`, which polls
+  the bus table and never opens a socket. Its
   output is ordered turn deltas through the token-gated resident door. It
   never touches a journal file — the single writer stays with the listener.
 
@@ -142,7 +144,8 @@ don't consume this wire):
 `lf radio` publishes with an INSERT; every subscriber polls forward from an id
 cursor. No server is in the path, so publishing works with zero loopflow
 processes running and two detached hands hear each other with no wave awake. A
-sweeper drops rows past a wall-clock window on every publish: the bus is a
+sweeper drops rows past a one-hour wall-clock window — on every publish, and on
+every read, so a bus that went quiet still forgets on schedule: the bus is a
 wire, not a log. Channel names are addresses (`goals`, `goals.148e0e02`), dots
 are the tree, and subscription is by prefix. `lf sub [CHANNEL] [--json]` tunes
 in — you hear what is said while you listen, and nothing published before you
@@ -156,12 +159,17 @@ it, and the row carries both. A forged byline is not prevented — it shows up a
 a mismatch with the channel it arrived on.
 
 A served mind is just another subscriber ([`bus.rs`]). Its `BusListener` polls
-its family's channels from a **durable** cursor, records what it hears as one
+its family's channels from a **durable** cursor, records what it hears as an
 attributed copy in its own journal, and wakes its loop. So a mind asleep when a
-hand reported catches up on wake. Beyond the sweep window the report is gone,
-and the cursor jump is announced in the thread rather than swallowed — the PR
-and `lf runs` remain the records of record. A mind never wakes itself: rows
-bylined with its own channel are read and skipped.
+hand reported catches up on wake, and a clean restart replays nothing. Delivery
+precedes the cursor commit, so the guarantee is at-least-once: a crash between
+journaling a report and committing the cursor re-reads that one row on the next
+boot. Beyond the sweep window the report is gone, and the cursor jump is
+announced in the thread rather than swallowed — `bus_messages` is
+`AUTOINCREMENT`, so the high-water mark outlives the rows and the miss stays
+visible even on a bus swept empty. The PR and `lf runs` remain the records of
+record. A mind never wakes itself: rows bylined with its own channel are read
+and skipped.
 
 **The thread** is the human surface — journaled, durable, replayed — and it
 stays SSE on the listener. `lf chat` resolves its target wave from context

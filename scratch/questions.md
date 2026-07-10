@@ -90,12 +90,39 @@ file carries only the judgment calls a reader would otherwise re-litigate.
 
 Assumptions taken while implementing §9 (`minds.md`, "the bus is the store"):
 
-- **Sweep window is one hour, swept on publish.** The design says "a wall-clock
-  window" and does not name it. One hour is long enough that a mind asleep
-  between passes catches its hands' reports and short enough that the table
-  never reads as a log. The sweep rides every `publish_bus` rather than a
-  background task, because a bus nobody writes to needs no cleaning — and a
-  timer would be a process in a path the whole design exists to empty.
+- **Sweep window is one hour, enforced by readers as well as writers.** The
+  design says "a wall-clock window" and does not name it. One hour is long
+  enough that a mind asleep between passes catches its hands' reports and short
+  enough that the table never reads as a log. The sweep rides `publish_bus` and
+  every bus read (`read_bus_after`, `bus_head`, `bus_floor`) rather than a
+  background task: a timer would be a process in a path the whole design exists
+  to empty. Publish-only sweeping was the first cut and was wrong — "a bus
+  nobody writes to needs no cleaning" ignores the lone report that ages out
+  while the bus is quiet, which a waking mind would then have folded into its
+  thread an hour late as though it were fresh.
+- **The gap survives an emptied bus, via `sqlite_sequence`.** `bus_messages` is
+  `AUTOINCREMENT`, so the high-water mark outlives every row the sweeper takes.
+  `bus_floor()` returns the oldest surviving id, or `high_water + 1` when the
+  bus is swept empty — so a durable cursor below it still reports the jump. Two
+  honest limits remain. The count is of *all* channels, not just the ones this
+  mind hears, so it can overstate what the mind would have folded; and if
+  `bus_messages` is ever dropped and recreated, `sqlite_sequence` resets and
+  that history of misses goes with it. Neither is worth a second counter table:
+  the announcement's job is to send a reader to `lf runs` and the PRs, and it
+  does that whether it says one or three.
+
+Correction to §9's durability claim:
+
+- **The bus is at-least-once, not exactly-once.** `BusListener::poll_once`
+  journals a report and *then* commits the cursor, one row at a time. A crash in
+  that seam re-reads the row on the next boot and journals a second copy. That
+  ordering is deliberate: the alternative loses a hand's report outright, and a
+  duplicated report in a thread is a cheaper failure than a silent one. Making
+  it exactly-once needs the journal write and the cursor commit in one
+  transaction, which the journal (a file, on the served mind's side) and the
+  cursor (a store row) do not share. The normal path is exact — a clean restart
+  replays nothing, and `a_sleeping_mind_catches_up_exactly_once` proves it — but
+  no code and no doc should promise more than that.
 - **A mind skips rows bylined with its own channel.** Not in the design. Without
   it, a mind steering a hand (`lf radio -c goals.<run>`) folds its own steer back
   into its own thread and wakes its own loop with it. The rule is honest — a mind

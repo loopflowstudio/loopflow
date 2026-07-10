@@ -29,6 +29,18 @@ pub struct SqliteStore {
 /// enough that the table never becomes a record anyone is tempted to read.
 pub const BUS_WINDOW_SECS: i64 = 60 * 60;
 
+/// The newest bus id ever assigned. `bus_messages` is `AUTOINCREMENT`, so
+/// `sqlite_sequence` holds a mark the sweeper cannot erase — which is what lets
+/// a subscriber see the gap even when every frame it missed has been deleted.
+fn bus_high_water(conn: &Connection) -> StoreResult<i64> {
+    let high_water = conn.query_row(
+        "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'bus_messages'), 0)",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(high_water)
+}
+
 fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {
     let mut scan = conn.prepare(
         "SELECT provider, access_token, refresh_token
@@ -1360,7 +1372,10 @@ impl SqliteStore {
         Ok(conn.last_insert_rowid())
     }
 
-    /// Drop every frame published before `cutoff` (unix seconds).
+    /// Drop every frame published before `cutoff` (unix seconds). Publishing
+    /// sweeps, and so does every read: a bus that went quiet must still
+    /// forget, or a lone expired report would sit there waiting to be
+    /// delivered an hour late.
     pub fn sweep_bus(&self, cutoff: i64) -> StoreResult<usize> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute("DELETE FROM bus_messages WHERE at < ?1", params![cutoff])?)
@@ -1386,22 +1401,29 @@ impl SqliteStore {
             .map_err(StoreError::from)
     }
 
-    /// The newest published id; `0` on an empty bus. Tuning in means starting
-    /// here — a subscriber hears what is said while it listens.
+    /// The high-water mark: the newest id ever published, `0` if none ever was.
+    /// Read from `sqlite_sequence` rather than `MAX(id)` so it survives the
+    /// sweep — a bus swept empty still remembers how far it got. Tuning in
+    /// means starting here: a subscriber hears what is said while it listens.
     pub fn bus_head(&self) -> StoreResult<i64> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let head = conn.query_row("SELECT COALESCE(MAX(id), 0) FROM bus_messages", [], |row| {
-            row.get(0)
-        })?;
-        Ok(head)
+        bus_high_water(&conn)
     }
 
-    /// The oldest surviving id. A durable cursor below `floor - 1` means the
-    /// sweeper reached frames this subscriber never read.
+    /// The oldest id a subscriber can still read: the oldest surviving frame,
+    /// or — on a bus swept empty — one past the high-water mark, because
+    /// everything ever published is gone. A durable cursor below `floor - 1`
+    /// means the sweeper reached frames this subscriber never read. `None`
+    /// only when nothing was ever published, which nobody can have missed.
     pub fn bus_floor(&self) -> StoreResult<Option<i64>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let floor = conn.query_row("SELECT MIN(id) FROM bus_messages", [], |row| row.get(0))?;
-        Ok(floor)
+        let oldest: Option<i64> =
+            conn.query_row("SELECT MIN(id) FROM bus_messages", [], |row| row.get(0))?;
+        if oldest.is_some() {
+            return Ok(oldest);
+        }
+        let high_water = bus_high_water(&conn)?;
+        Ok((high_water > 0).then_some(high_water + 1))
     }
 
     pub fn bus_cursor(&self, subscriber: &str) -> StoreResult<Option<i64>> {

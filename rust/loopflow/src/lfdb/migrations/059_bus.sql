@@ -4,8 +4,11 @@
 -- with no served wave.
 --
 -- The bus is not a log: a sweeper drops rows past a wall-clock window on every
--- publish. AUTOINCREMENT keeps ids monotonic across those deletes, so a cursor
--- never rewinds. The run ledger and PRs remain the records of record.
+-- publish AND on every read, so a bus that went quiet still forgets on time.
+-- AUTOINCREMENT keeps ids monotonic across those deletes, so a cursor never
+-- rewinds and `sqlite_sequence` holds a high-water mark the sweeper cannot
+-- erase — that mark is how a subscriber sees a gap it can no longer read. The
+-- run ledger and PRs remain the records of record.
 CREATE TABLE IF NOT EXISTS bus_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     channel TEXT NOT NULL,

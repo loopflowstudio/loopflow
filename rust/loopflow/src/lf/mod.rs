@@ -328,9 +328,10 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
-    /// Steer and monitor a wave from one terminal pane: its live events scroll
-    /// past while a typed line is spoken into the thread. `lf chat` publishes;
-    /// `lf sub` reads; this does both.
+    /// Steer and monitor a served mind from one terminal pane: its thread
+    /// scrolls past while a typed line is spoken into it. `lf chat` publishes
+    /// into the thread; this publishes and follows. The agent bus is the other
+    /// wire — see `lf radio` and `lf sub`.
     Wavechat {
         /// Wave name (default: the ambient wave — env, else worktree)
         wave: Option<String>,

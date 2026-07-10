@@ -906,9 +906,13 @@ steerer.
 
 - Serve a wave, kill it, have a hand `lf radio` a report, restart the wave:
   the report lands in its thread, attributed, exactly once — the cursor, not
-  luck, decides. Repeat the restart; still exactly once.
+  luck, decides. Repeat the restart; still exactly once. (The floor is
+  at-least-once: the journal write and the cursor commit are not one
+  transaction, so a crash in that seam replays the row. See
+  `scratch/questions.md`.)
 - A report published beyond the sweep window is missed and the miss is
-  visible (the journal shows the cursor jump), not silent.
+  visible (the journal shows the cursor jump), not silent — including when the
+  sweep left the bus empty and nobody published after it.
 
 #### Done when: byline is testimony, channel is evidence
 

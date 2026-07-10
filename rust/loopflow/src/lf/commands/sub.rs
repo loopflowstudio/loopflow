@@ -12,8 +12,10 @@
 //! family at the wave home, the work line's own channel inside its worktree.
 //!
 //! The mind's own ear is [`crate::wave::bus::BusListener`], the same poll with
-//! a durable cursor. The mind's THREAD — durable, replayed, human — is the
-//! other wire: [`super::thread`], still SSE on the listener.
+//! a durable cursor — at-least-once across a crash, and nothing replayed on a
+//! clean restart. The mind's THREAD — durable, replayed, human — is the other
+//! wire: [`super::thread`], still SSE on the listener, and what `lf wavechat`
+//! follows. `lf sub` never touches it.
 
 use anyhow::Result;
 

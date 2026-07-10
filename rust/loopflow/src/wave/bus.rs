@@ -7,10 +7,18 @@
 //! before, reading a table instead of its own broadcast arm.
 //!
 //! Durability is the cursor, not the socket. A mind that was asleep when a
-//! hand reported catches up on wake; restart it again and the cursor, not
-//! luck, keeps the report at exactly one copy. A report published longer ago
-//! than the sweep window is gone, and the cursor jump says so out loud in the
-//! thread — the PR and the run ledger stay the records of record.
+//! hand reported catches up on wake; restart it and the cursor, not luck,
+//! decides what it has already read. Delivery precedes the cursor commit, so
+//! the guarantee is at-least-once: a clean restart replays nothing, but a crash
+//! between journaling a report and committing the cursor re-reads that one row
+//! on the next boot. The PR and the run ledger stay the records of record.
+//!
+//! A report published longer ago than the retention window is gone. The window
+//! is enforced by whoever looks — attach and poll sweep before they read — so a
+//! lone report on a bus that then went quiet expires on schedule rather than
+//! waiting for the next publish. The cursor jump says the miss out loud in the
+//! thread, even when the sweep left the bus empty: `bus_messages` is
+//! `AUTOINCREMENT`, so the high-water mark outlives the rows.
 //!
 //! Self-speech is not a report: rows whose byline is the wave's own channel
 //! (a mind steering one of its hands, or speaking in its own home) are read
@@ -82,7 +90,8 @@ impl BusListener {
 
     /// One pass: fold every fresh in-family report into the journal, then
     /// commit the cursor. Delivery precedes the commit, so a crash mid-fold
-    /// re-reads a row rather than losing it.
+    /// re-reads a row rather than losing it — at-least-once, chosen over
+    /// silently dropping a hand's report.
     pub async fn poll_once(&self) -> anyhow::Result<()> {
         let mut cursor = self.cursor.lock().await;
         let messages = self.store.read_bus_after(*cursor).await?;
@@ -139,6 +148,7 @@ impl BusListener {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lfdb::sqlite::BUS_WINDOW_SECS;
     use crate::lfdb::{open_store, StorageConfig};
 
     async fn temp_store(dir: &std::path::Path) -> SharedStore {
@@ -150,8 +160,10 @@ mod tests {
     }
 
     /// The whole sleeping-mind path: a hand publishes with no server running,
-    /// the mind boots, and the report lands in its thread exactly once —
-    /// across two restarts, because the cursor decides.
+    /// the mind boots, and the report lands in its thread exactly once across
+    /// two clean restarts, because the cursor decides. (A crash between the
+    /// journal write and the cursor commit replays that row — at-least-once is
+    /// the real floor; this is the normal path.)
     #[tokio::test]
     async fn a_sleeping_mind_catches_up_exactly_once() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -265,5 +277,55 @@ mod tests {
             thread[0].text
         );
         assert_eq!(thread[1].text, "three");
+    }
+
+    /// The quiet bus. One report, nobody publishes after it, and it ages past
+    /// the window. Nothing sweeps on write — so the reader must, or the mind
+    /// wakes to an hour-old report as though it were fresh. It is dropped, and
+    /// the drop is visible: the high-water mark outlives the row it counted.
+    #[tokio::test]
+    async fn a_lone_report_expires_on_a_quiet_bus() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let origin = tmp.path().join("repo");
+        std::fs::create_dir_all(&origin).unwrap();
+        let runtime = WaveRuntime::open("ship".into(), origin).expect("runtime");
+
+        store
+            .set_bus_cursor("ship".into(), 0)
+            .await
+            .expect("cursor");
+        store
+            .publish_bus("ship.a".into(), "ship.a".into(), "stale report".into())
+            .await
+            .expect("publish");
+        age_whole_bus(&tmp.path().join("lfd.db"), BUS_WINDOW_SECS + 60);
+
+        let listener = BusListener::new(runtime.clone(), store.clone());
+        listener.attach().await.expect("attach");
+        listener.poll_once().await.expect("poll");
+
+        let thread = runtime.thread_snapshot();
+        assert!(
+            !thread.iter().any(|turn| turn.text == "stale report"),
+            "an expired report is never delivered"
+        );
+        assert_eq!(thread.len(), 1, "just the jump note");
+        assert_eq!(thread[0].from.as_deref(), Some("bus"));
+        assert!(
+            thread[0].text.contains("cursor jumped 0 → 2")
+                && thread[0].text.contains("1 broadcast(s)"),
+            "the miss is visible on an emptied bus: {}",
+            thread[0].text
+        );
+    }
+
+    /// Backdate every frame on the bus by `seconds`, writing the store's file
+    /// directly. Ageing is what the test is about, and no production caller
+    /// ever wants to move a frame's clock.
+    fn age_whole_bus(db: &std::path::Path, seconds: i64) {
+        let conn = rusqlite::Connection::open(db).expect("open store file");
+        conn.execute("UPDATE bus_messages SET at = at - ?1", [seconds])
+            .expect("age the bus");
     }
 }

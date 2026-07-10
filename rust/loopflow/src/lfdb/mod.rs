@@ -187,16 +187,44 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.sweep_bus(cutoff)).await
     }
 
+    /// The oldest `at` a frame may carry and still be on the bus.
+    fn bus_window_cutoff() -> i64 {
+        time::OffsetDateTime::now_utc().unix_timestamp() - sqlite::BUS_WINDOW_SECS
+    }
+
+    /// Every surviving frame after `cursor`. Sweeps first: the retention window
+    /// is enforced by whoever looks, not only by whoever publishes next, so a
+    /// lone report on a bus that then went quiet expires on schedule instead of
+    /// waiting for a writer that may never come.
     pub async fn read_bus_after(&self, cursor: i64) -> StoreResult<Vec<BusMessage>> {
-        run_sqlite(&self.sqlite, move |store| store.read_bus_after(cursor)).await
+        let cutoff = Self::bus_window_cutoff();
+        run_sqlite(&self.sqlite, move |store| {
+            store.sweep_bus(cutoff)?;
+            store.read_bus_after(cursor)
+        })
+        .await
     }
 
+    /// The high-water mark — where a fresh subscriber tunes in. Sweeps first,
+    /// for the same reason `read_bus_after` does.
     pub async fn bus_head(&self) -> StoreResult<i64> {
-        run_sqlite(&self.sqlite, move |store| store.bus_head()).await
+        let cutoff = Self::bus_window_cutoff();
+        run_sqlite(&self.sqlite, move |store| {
+            store.sweep_bus(cutoff)?;
+            store.bus_head()
+        })
+        .await
     }
 
+    /// The oldest readable id, after sweeping. A durable cursor below
+    /// `floor - 1` is a gap: frames this subscriber will never see.
     pub async fn bus_floor(&self) -> StoreResult<Option<i64>> {
-        run_sqlite(&self.sqlite, move |store| store.bus_floor()).await
+        let cutoff = Self::bus_window_cutoff();
+        run_sqlite(&self.sqlite, move |store| {
+            store.sweep_bus(cutoff)?;
+            store.bus_floor()
+        })
+        .await
     }
 
     pub async fn bus_cursor(&self, subscriber: String) -> StoreResult<Option<i64>> {

@@ -149,8 +149,21 @@ fn format_row(label: &str, tokens: usize, detail: &str) -> String {
 }
 
 // -- Table cells --------------------------------------------------------------
-// Every `lf` reader that prints a table wants the same three: a number a human
-// can read at a glance, a name that fits its column, and a cost in cents.
+// Keep reader output aligned from the visible cell contents. This is the same
+// shape used by tree readers such as `lf wt list`: one record per line, enough
+// spacing to scan it, and no syntax that an agent has to strip first.
+
+/// Measure a left-aligned column from its header and visible cell contents.
+pub fn column_width<I, S>(header: &str, values: I) -> usize
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    values
+        .into_iter()
+        .map(|value| value.as_ref().chars().count())
+        .fold(header.chars().count(), usize::max)
+}
 
 /// `1234567` -> `1,234,567`.
 pub fn format_int(value: u64) -> String {
@@ -224,6 +237,18 @@ mod tests {
         assert_eq!(format_int(42), "42");
         assert_eq!(format_int(1234), "1,234");
         assert_eq!(format_int(1_234_567), "1,234,567");
+    }
+
+    #[test]
+    fn column_width_fits_header_and_owned_cells() {
+        assert_eq!(column_width("STATUS", ["open", "done"]), 6);
+        assert_eq!(
+            column_width(
+                "TITLE",
+                vec!["short".to_string(), "a longer title".to_string()]
+            ),
+            14
+        );
     }
 
     #[test]

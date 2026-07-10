@@ -511,20 +511,6 @@ async fn fetch_items(
     })
 }
 
-/// One scannable line per task: status, name, assignee, id.
-pub fn format_task_item(item: &PmItem) -> String {
-    let status = if item.completed { "done" } else { "open" };
-    let assignee = item.assignee.as_deref().unwrap_or("-");
-    let project = item_project_labels(item)
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| "unassigned".to_string());
-    format!(
-        "{status:<8} {:<40} project:{project:<24} assignee:{assignee:<20} id:{}",
-        item.name, item.id
-    )
-}
-
 // ── update ──────────────────────────────────────────────────────────
 
 pub fn pm_update(
@@ -1169,24 +1155,6 @@ mod tests {
         assert!(parse_done_status(Some("done")).unwrap());
         assert!(parse_done_status(Some("Completed")).unwrap());
         assert!(parse_done_status(Some("blocked")).is_err());
-    }
-
-    #[test]
-    fn format_task_item_is_one_scannable_line() {
-        let line = format_task_item(&PmItem {
-            id: "123".to_string(),
-            name: "Ship it".to_string(),
-            description: String::new(),
-            rank: 0,
-            completed: false,
-            labels: vec!["project:wave-chat".to_string()],
-            assignee: Some("me".to_string()),
-        });
-        assert!(line.starts_with("open"));
-        assert!(line.contains("Ship it"));
-        assert!(line.contains("project:wave-chat"));
-        assert!(line.contains("assignee:me"));
-        assert!(line.contains("id:123"));
     }
 
     #[tokio::test]

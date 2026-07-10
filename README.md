@@ -389,7 +389,7 @@ pm:
 
 ```bash
 lf pm init --wave designer                # connect/create the Linear project
-lf pm show --wave designer                # group live tasks by local project
+lf pm show --wave designer                # print an aligned live-task table
 lf pm show --wave designer --project ui   # filter to one local project
 lf pm task create --wave designer --project ui --title "Add dark mode" --notes "..."
 lf pm task done --id 1207... --pr "..."   # close a shipped task

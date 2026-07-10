@@ -12,7 +12,7 @@ cargo test --all                       # Rust tests
 uv run pytest python/tests/            # Python tests
 cd website && uv run python dev.py test # Website tests
 swift test --package-path swift        # Swift package tests
-cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=  # Loopflow UI
+cd swift && xcodegen generate && xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=  # Loopflow UI compile
 tests/e2e/test_smoke.sh               # E2E smoke
 uv run pytest tests/regression/ -v     # nightly/weekly release gate
 ```
@@ -83,12 +83,14 @@ swift test --package-path swift --filter SomeTestClass  # Filtered
 
 ## Loopflow UI Tests
 
-UI tests for the macOS app. Requires Xcode and xcodegen.
+Compile the macOS app and its signed test runners. Swift package tests already
+exercise the shared suites; UI-test execution additionally requires macOS UI
+automation permission on the host.
 
 ```bash
 cd swift
 xcodegen generate
-xcodebuild test -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
+xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
 ```
 
 ## What CI Runs

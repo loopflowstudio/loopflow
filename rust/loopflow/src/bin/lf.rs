@@ -797,6 +797,7 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Serve { name, force }) => {
                 in_repo_runtime(&args, |_| loopflow::wave::serve(name, *force))
             }
+            Some(Commands::Stop { name }) => in_repo_runtime(&args, |_| loopflow::wave::stop(name)),
             Some(Commands::Resident { name }) => {
                 in_repo_runtime(&args, |_| loopflow::wave::resident::run(name))
             }
@@ -967,6 +968,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::SyncSkills { .. })
         | Some(Commands::Cron { .. })
         | Some(Commands::Serve { .. })
+        | Some(Commands::Stop { .. })
         | Some(Commands::Resident { .. })
         | Some(Commands::Loop { .. })
         | Some(Commands::Enqueue { .. })
@@ -1183,6 +1185,12 @@ mod tests {
         assert!(matches!(
             forced.command,
             Some(Commands::Serve { force: true, .. })
+        ));
+
+        let stopped = Cli::try_parse_from(["lf", "stop", "goals"]).unwrap();
+        assert!(matches!(
+            stopped.command,
+            Some(Commands::Stop { name }) if name == "goals"
         ));
 
         // The listener's own body — hidden, but spellable, because the

@@ -139,13 +139,15 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
 ```bash
 lf serve designer                                  # start the named mind
+lf stop designer                                   # stop its listener and resident
 lf --wave designer loop task "fix the flaky chord-timeout test"
 lf --wave designer loop task "…" --max-passes 4 --wall-clock-secs 3600
 lf --wave designer loop scan-pass "scan the runtime" --detach
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
-With one name, `lf serve <name>` starts that mind and its persistent playhead.
+With one name, `lf serve <name>` starts that mind and its persistent playhead;
+`lf stop <name>` shuts it down without touching detached worker loops.
 With a flow plus free text, it creates a child worktree and loops until the
 flow's skills write `done` to `scratch/loop.yaml` (`task`: when the PR merges).
 Loops allow at least two passes; run the flow directly for one-shot work.

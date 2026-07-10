@@ -41,6 +41,7 @@ Run the wave in your terminal:
 lf serve designer             # the wave's server: one persistent loop, until Ctrl-C
 lf chat --steer "ship the button audit first" # steer the live body, else queue
 lf memory add "buttons: variants unified" # curate what it knows
+lf stop designer              # stop its listener and resident gracefully
 ```
 
 Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
@@ -62,6 +63,7 @@ The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one
 
 ```bash
 lf serve s3           # the s3 (control) charter
+lf stop s3            # stop only this wave
 ```
 
 The wave agent executes the next move inline by default. Give a strict subset

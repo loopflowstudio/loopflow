@@ -27,6 +27,16 @@ struct LocalWaveAgentLauncherTests {
         ])
     }
 
+    @Test("stop command uses the single-wave lifecycle verb")
+    func stopCommandShape() {
+        #expect(LocalWaveAgentLauncher.waveStopCommand(
+            lfPath: "/Applications/Loopflow.app/Contents/MacOS/lf",
+            waveName: "product"
+        ) == [
+            "/Applications/Loopflow.app/Contents/MacOS/lf", "stop", "product",
+        ])
+    }
+
     // MARK: - Binary resolution + capability probe
 
     @Test("candidate order: bundled, PATH hits in order, dev-tree build last")
@@ -48,7 +58,7 @@ struct LocalWaveAgentLauncherTests {
 
     @Test("probe passes: the first candidate wins")
     func probePassesFirstCandidate() throws {
-        let resolved = try LocalWaveAgentLauncher.resolveServeCapableLf(
+        let resolved = try LocalWaveAgentLauncher.resolveWaveCapableLf(
             originRepo: "/Users/jack/src/loopflow",
             bundled: URL(fileURLWithPath: "/Applications/Loopflow.app/Contents/MacOS/lf"),
             pathEnv: "/usr/local/bin",
@@ -63,7 +73,7 @@ struct LocalWaveAgentLauncherTests {
     @Test("a stale PATH lf is rejected by the probe; the dev-tree build wins")
     func staleLfFallsThroughToDevBuild() throws {
         var probed: [String] = []
-        let resolved = try LocalWaveAgentLauncher.resolveServeCapableLf(
+        let resolved = try LocalWaveAgentLauncher.resolveWaveCapableLf(
             originRepo: "/Users/jack/src/loopflow",
             bundled: nil,
             pathEnv: "/Users/jack/.local/bin",
@@ -85,7 +95,7 @@ struct LocalWaveAgentLauncherTests {
     @Test("every candidate rejected: the error names what was found and why")
     func allCandidatesRejected() {
         #expect {
-            try LocalWaveAgentLauncher.resolveServeCapableLf(
+            try LocalWaveAgentLauncher.resolveWaveCapableLf(
                 originRepo: "/Users/jack/src/loopflow",
                 bundled: nil,
                 pathEnv: "/Users/jack/.local/bin",
@@ -98,13 +108,14 @@ struct LocalWaveAgentLauncherTests {
             return detail.contains("/Users/jack/.local/bin/lf")
                 && detail.contains("/Users/jack/src/loopflow/target/release/lf")
                 && detail.contains("lf help serve")
+                && detail.contains("lf help stop")
         }
     }
 
     @Test("nothing bundled, nothing on PATH, no dev build: a clear error")
     func nothingResolves() {
         #expect {
-            try LocalWaveAgentLauncher.resolveServeCapableLf(
+            try LocalWaveAgentLauncher.resolveWaveCapableLf(
                 originRepo: "/Users/jack/src/loopflow",
                 bundled: nil,
                 pathEnv: "/usr/local/bin:/usr/bin",

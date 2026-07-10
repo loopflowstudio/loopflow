@@ -173,25 +173,7 @@ def _loopflow_commands(_changed: list[str]) -> list[Command]:
         Command(
             [
                 "xcodebuild",
-                "clean",
-                "-project",
-                "LoopflowSwift.xcodeproj",
-                "-scheme",
-                "LoopflowMac",
-                "-destination",
-                "platform=macOS",
-                "-derivedDataPath",
-                XCODE_DERIVED_DATA,
-                "-disableAutomaticPackageResolution",
-                *XCODE_LOCAL_SIGNING,
-            ],
-            swift_dir,
-            "xcodebuild-clean",
-        ),
-        Command(
-            [
-                "xcodebuild",
-                "test",
+                "build-for-testing",
                 "-project",
                 "LoopflowSwift.xcodeproj",
                 "-scheme",

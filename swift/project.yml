@@ -15,9 +15,6 @@ packages:
   ViewInspector:
     url: https://github.com/nalexn/ViewInspector.git
     from: 0.10.0
-  WhisperKit:
-    url: https://github.com/argmaxinc/WhisperKit.git
-    minorVersion: 0.9.0
 
 targets:
   Loopflow:
@@ -36,9 +33,6 @@ targets:
         INFOPLIST_FILE: Loopflow/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.framework
         DEFINES_MODULE: YES
-    dependencies:
-      - package: WhisperKit
-
   LoopflowMac:
     type: application
     platform: macOS
@@ -48,7 +42,6 @@ targets:
           - Info.plist
     dependencies:
       - target: Loopflow
-      - package: WhisperKit
       # GhosttyKit is available via SPM binary target. For local development with
       # GhosttyKit, use `swift build` or add the framework manually after building
       # with: cd vendor/ghostty && zig build -Doptimize=ReleaseFast
@@ -83,7 +76,6 @@ targets:
       - path: LoopflowiOS
     dependencies:
       - target: Loopflow
-      - package: WhisperKit
     settings:
       base:
         PRODUCT_NAME: Loopflow
@@ -95,7 +87,6 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Loopflow
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Loopflow uses the microphone for voice-to-text input."
 
   LoopflowTests:
     type: bundle.unit-test

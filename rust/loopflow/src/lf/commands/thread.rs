@@ -405,6 +405,7 @@ mod tests {
             server::SubagentDoor::new(),
             None,
             None,
+            server::ShutdownDoor::new(),
         );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();

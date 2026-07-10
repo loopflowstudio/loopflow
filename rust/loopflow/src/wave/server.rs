@@ -82,6 +82,8 @@
 //!   loop-state name when the request was accepted — ops are applied by the
 //!   loop asynchronously, so watch the stream's `state` events for the
 //!   outcome.
+//! - `POST /stop` → 202 and requests graceful listener shutdown. The listener
+//!   remains the sole owner of resident, registry, and discovery-file cleanup.
 //! - `POST /channels {name, run_id}` → `{turn}` — the dispatch notification
 //!   door: placed `lf` minted a work-line worktree, and knocks here so the
 //!   PARENT channel's thread shows "work line <name> opened" (journaled as
@@ -119,7 +121,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use time::OffsetDateTime;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
@@ -234,6 +236,38 @@ pub fn generate_resident_token() -> String {
 #[derive(Debug, Clone, Default)]
 pub struct SubagentDoor {
     accepted: Arc<Mutex<Vec<SecretString>>>,
+}
+
+/// One-shot lifecycle door for `POST /stop`. The listener owns the receiver;
+/// the HTTP surface only requests shutdown, leaving cleanup to `run_listener`.
+#[derive(Debug, Clone)]
+pub struct ShutdownDoor {
+    requested: watch::Sender<bool>,
+}
+
+impl ShutdownDoor {
+    pub fn new() -> Self {
+        let (requested, _) = watch::channel(false);
+        Self { requested }
+    }
+
+    fn request(&self) {
+        self.requested.send_replace(true);
+    }
+
+    pub async fn wait(&self) {
+        let mut receiver = self.requested.subscribe();
+        if *receiver.borrow() {
+            return;
+        }
+        let _ = receiver.changed().await;
+    }
+}
+
+impl Default for ShutdownDoor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SubagentDoor {
@@ -407,6 +441,7 @@ struct ServerState {
     subagent: SubagentDoor,
     observer: Option<Arc<StoreObserver>>,
     supervisor: Option<SupervisorHandle>,
+    shutdown: ShutdownDoor,
     started_at: OffsetDateTime,
 }
 
@@ -482,6 +517,7 @@ pub fn router(
     subagent: SubagentDoor,
     observer: Option<Arc<StoreObserver>>,
     supervisor: Option<SupervisorHandle>,
+    shutdown: ShutdownDoor,
 ) -> Router {
     let state = ServerState {
         runtime,
@@ -489,10 +525,12 @@ pub fn router(
         subagent,
         observer,
         supervisor,
+        shutdown,
         started_at: OffsetDateTime::now_utc(),
     };
     Router::new()
         .route("/health", get(health_handler))
+        .route("/stop", post(stop_handler))
         .route("/conversation", get(conversation_handler))
         .route("/playhead", get(playhead_handler))
         .route("/playhead/enqueue", post(playhead_enqueue_handler))
@@ -509,6 +547,11 @@ pub fn router(
         .route("/resident/context", get(resident_context_handler))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
+}
+
+async fn stop_handler(State(state): State<ServerState>) -> StatusCode {
+    state.shutdown.request();
+    StatusCode::ACCEPTED
 }
 
 async fn playhead_handler(
@@ -739,6 +782,7 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         // Booting a listener, or a resident body against one, is wave
         // lifecycle: the door process would become the long-lived owner.
         Some(Commands::Serve { .. }) => ExecVerdict::Deny("serve".to_string()),
+        Some(Commands::Stop { .. }) => ExecVerdict::Deny("stop".to_string()),
         Some(Commands::Resident { .. }) => ExecVerdict::Deny("__resident".to_string()),
         Some(Commands::External(parts)) => {
             ExecVerdict::Deny(parts.first().cloned().unwrap_or_else(|| "flow".to_string()))
@@ -1311,6 +1355,36 @@ mod tests {
         assert!(read_resident_token(tmp.path(), "ship").is_none());
     }
 
+    #[tokio::test]
+    async fn stop_route_requests_listener_shutdown() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
+        let shutdown = ShutdownDoor::new();
+        let requested = shutdown.clone();
+        let app = router(
+            runtime,
+            ResidentDoor::new("resident"),
+            SubagentDoor::new(),
+            None,
+            None,
+            shutdown,
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+
+        let response = reqwest::Client::new()
+            .post(format!("http://{addr}/stop"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
+        requested.wait().await;
+        server.abort();
+    }
+
     /// Boot the HTTP surface over a runtime we control, with a subagent door
     /// we can mint from. Returns the base URL and the minted token.
     async fn boot_exec() -> (String, String, tempfile::TempDir) {
@@ -1322,7 +1396,14 @@ mod tests {
 
         let subagent = SubagentDoor::new();
         let token = subagent.mint();
-        let app = router(runtime, ResidentDoor::new("resident"), subagent, None, None);
+        let app = router(
+            runtime,
+            ResidentDoor::new("resident"),
+            subagent,
+            None,
+            None,
+            ShutdownDoor::new(),
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
@@ -1391,6 +1472,7 @@ mod tests {
             SubagentDoor::new(),
             None,
             None,
+            ShutdownDoor::new(),
         );
         tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
@@ -1479,6 +1561,7 @@ mod tests {
             // must not boot a listener, nor a resident body against one.
             argv(&["serve", "ship"]),
             argv(&["serve", "ship", "--force"]),
+            argv(&["stop", "ship"]),
             argv(&["__resident", "ship"]),
             argv(&["sync-skills", "--yes"]),
             argv(&["chat", "pretend to be human"]),

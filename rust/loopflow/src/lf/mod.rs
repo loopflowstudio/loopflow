@@ -210,6 +210,11 @@ pub enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Stop a served wave gracefully
+    Stop {
+        /// Wave name
+        name: String,
+    },
     /// Internal: the resident body a listener spawns for its own wave. Never
     /// booted by hand — `lf serve` owns the listener half.
     #[command(name = "__resident", hide = true)]

@@ -47,7 +47,7 @@ const UPDATE_PROJECT_MUTATION: &str = r#"mutation UpdateProject($id: ID!, $name:
   }
 }"#;
 
-const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: ID!, $after: String, $first: Int!) {
+const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $after: String, $first: Int!) {
   project(id: $projectId) {
     issues(first: $first, after: $after) {
       nodes {
@@ -905,6 +905,11 @@ mod tests {
             requests[0].authorization.as_deref(),
             Some("Bearer linear-secret")
         );
+        let request: Value = serde_json::from_str(&requests[0].body).expect("request body is json");
+        assert!(request["query"]
+            .as_str()
+            .expect("query string")
+            .contains("$projectId: String!"));
     }
 
     #[tokio::test]

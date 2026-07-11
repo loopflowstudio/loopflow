@@ -1504,8 +1504,8 @@ pub fn read_conversation_status(path: &Path) -> StoreResult<ConversationRead> {
 mod tests {
     use super::{
         provider_session_id, read_conversation_status, resolve_artifact, CaptureHandle,
-        ContextAssetKind,
-        ContextAssetSpec, ContextChannel, ContextScope, PreparedTurnContext, TraceCaptureContext,
+        ContextAssetKind, ContextAssetSpec, ContextChannel, ContextScope, PreparedTurnContext,
+        TraceCaptureContext,
     };
     use crate::lfd::id::LfdId;
 

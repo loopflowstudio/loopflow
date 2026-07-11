@@ -1,7 +1,7 @@
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     ChatMemoryBlock, ChatMessage, LivePrState, LivePullRequestState, PullRequest, Repo, RepoEdge,
-    RepoId, Run, RunStackStatus, RunStatus, Summary, Wave, WaveStatus,
+    RepoId, Run, RunStatus, Summary, Wave, WaveStatus,
 };
 use crate::lfdb::{ForkRun, ForkRunStatus, StoreError, StoreResult};
 
@@ -115,9 +115,7 @@ pub fn map_repo_edge_row(row: &rusqlite::Row<'_>) -> StoreResult<RepoEdge> {
 /// SELECT id, wave_id, iteration, step_index, status, worktree, branch,
 ///        started_at, ended_at, error, snapshot_repo, snapshot_flow,
 ///        snapshot_task, snapshot_direction, snapshot_area, snapshot_pr,
-///        flow_parents, execution_cursor, parent_run_id,
-///        parent_pr_number, stack_position, stack_group_id, stack_status,
-///        lineage_inferred, target_branch, repair_of
+///        flow_parents, execution_cursor, parent_run_id, repair_of
 pub fn map_run_row(row: &rusqlite::Row<'_>) -> StoreResult<Run> {
     let started_at = unix_to_datetime(bigint(row, 7)?);
     let ended_at = opt_bigint(row, 8)?;
@@ -127,13 +125,7 @@ pub fn map_run_row(row: &rusqlite::Row<'_>) -> StoreResult<Run> {
     let flow_parents = parse_json_vec(&text(row, 16)?)?;
     let execution_cursor = opt_text(row, 17)?;
     let parent_run_id = opt_text(row, 18)?.map(LfdId::from_raw);
-    let parent_pr_number = opt_bigint(row, 19)?.map(|value| value as u32);
-    let stack_position = int(row, 20)? as u32;
-    let stack_group_id = text(row, 21)?;
-    let stack_status = RunStackStatus::from_i32(int(row, 22)?);
-    let lineage_inferred = int(row, 23)? != 0;
-    let target_branch = text(row, 24)?;
-    let repair_of = opt_text(row, 25)?.map(LfdId::from_raw);
+    let repair_of = opt_text(row, 19)?.map(LfdId::from_raw);
 
     Ok(Run {
         id: LfdId::from_raw(text(row, 0)?),
@@ -154,12 +146,6 @@ pub fn map_run_row(row: &rusqlite::Row<'_>) -> StoreResult<Run> {
         flow_parents,
         execution_cursor,
         parent_run_id,
-        parent_pr_number,
-        stack_position,
-        stack_group_id,
-        stack_status,
-        lineage_inferred,
-        target_branch,
         repair_of,
         pr: snapshot_pr,
     })

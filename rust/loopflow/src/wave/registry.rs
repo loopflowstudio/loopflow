@@ -676,9 +676,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    use crate::lfd::types::{
-        PullRequest, RunStackStatus, RunStatus, WaveStatus, TMUX_TERMINAL_SOURCE,
-    };
+    use crate::lfd::types::{PullRequest, RunStatus, WaveStatus, TMUX_TERMINAL_SOURCE};
     use crate::lfdb::{open_store, StorageConfig};
     use crate::wave::journal::{journal_path, EventKind, Journal};
 
@@ -794,12 +792,6 @@ mod tests {
             flow_parents: Vec::new(),
             execution_cursor: None,
             parent_run_id: None,
-            parent_pr_number: None,
-            stack_position: 0,
-            stack_group_id: wave.id().to_string(),
-            stack_status: RunStackStatus::Active,
-            lineage_inferred: false,
-            target_branch: "main".to_string(),
             repair_of: None,
             pr: None,
         }

@@ -944,12 +944,6 @@ impl SqliteStore {
                 flow_parents_json,
                 execution_cursor,
                 run.parent_run_id.as_ref(),
-                run.parent_pr_number.map(|value| value as i64),
-                run.stack_position as i64,
-                run.stack_group_id,
-                run.stack_status.as_i32() as i64,
-                if run.lineage_inferred { 1i64 } else { 0i64 },
-                run.target_branch,
                 run.repair_of.as_ref(),
             ],
         )?;
@@ -980,12 +974,6 @@ impl SqliteStore {
                 flow_parents_json,
                 execution_cursor,
                 run.parent_run_id.as_ref(),
-                run.parent_pr_number.map(|value| value as i64),
-                run.stack_position as i64,
-                run.stack_group_id,
-                run.stack_status.as_i32() as i64,
-                if run.lineage_inferred { 1i64 } else { 0i64 },
-                run.target_branch,
                 run.repair_of.as_ref(),
                 run.id,
             ],
@@ -994,18 +982,6 @@ impl SqliteStore {
             return Err(StoreError::NotFound);
         }
         Ok(())
-    }
-
-    pub fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<Run>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(Self::sql(Query::ListStackRuns))?;
-        let rows = stmt.query_map(params![wave_id], |row| Ok(map_run_row(row)))?;
-
-        let mut runs = Vec::new();
-        for run in rows {
-            runs.push(run??);
-        }
-        Ok(runs)
     }
 
     pub fn get_live_pr_state(

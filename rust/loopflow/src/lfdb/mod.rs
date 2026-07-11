@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage, LivePrState,
+    AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
     LivePullRequestState, Repo, RepoEdge, RepoId, Run, Session, SessionStatus, Summary, Wave,
 };
 use crate::task::{
@@ -1395,8 +1395,8 @@ mod tests {
     };
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
-        ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest, Repo, RepoEdge, RepoId,
-        Run, RunStatus, Summary, Wave, WaveStatus, DEFAULT_WAVE_FLOW,
+        ChatMemoryBlock, Repo, RepoEdge, RepoId, Run, RunStatus, Summary, Wave, WaveStatus,
+        DEFAULT_WAVE_FLOW,
     };
     use crate::task::{
         LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
@@ -2320,5 +2320,4 @@ mod tests {
 
         store.delete_wave(wave.id()).await.expect("delete wave");
     }
-
 }

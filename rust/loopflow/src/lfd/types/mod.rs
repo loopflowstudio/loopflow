@@ -25,6 +25,6 @@ pub use session::{
 };
 pub use summary::Summary;
 pub use wave::{
-    LivePrState, LivePullRequestState, PullRequest, Run, RunStatus, Wave,
-    WaveStatus, DEFAULT_WAVE_FLOW,
+    LivePrState, LivePullRequestState, PullRequest, Run, RunStatus, Wave, WaveStatus,
+    DEFAULT_WAVE_FLOW,
 };

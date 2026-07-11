@@ -635,7 +635,7 @@ fn wave_ci_target(wave_id: &LfdId, run: &Run) -> Option<WaveCiTarget> {
 mod tests {
     use super::*;
     use crate::lfd::github::{CheckRun, CheckRunPR, CheckRunRef, GitHubRepository};
-    use crate::lfd::types::{PullRequest, RunStackStatus, RunStatus, WaveStatus};
+    use crate::lfd::types::{PullRequest, RunStatus, WaveStatus};
     use crate::lfdb::{open_store, StorageConfig};
     use crate::task::{
         LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackState,
@@ -719,12 +719,6 @@ mod tests {
             flow_parents: Vec::new(),
             execution_cursor: None,
             parent_run_id: None,
-            parent_pr_number: None,
-            stack_position: 0,
-            stack_group_id: wave.id().to_string(),
-            stack_status: RunStackStatus::Active,
-            lineage_inferred: false,
-            target_branch: "main".to_string(),
             repair_of: None,
             pr: Some(PullRequest {
                 url: format!("https://example.test/pr/{pr_number}"),
@@ -1112,12 +1106,6 @@ mod tests {
             flow_parents: Vec::new(),
             execution_cursor: None,
             parent_run_id: None,
-            parent_pr_number: None,
-            stack_position: 0,
-            stack_group_id: "wave-group".to_string(),
-            stack_status: crate::lfd::types::RunStackStatus::Active,
-            lineage_inferred: false,
-            target_branch: "main".to_string(),
             repair_of: None,
             pr: Some(PullRequest {
                 url: "https://example.test/pr/1".to_string(),

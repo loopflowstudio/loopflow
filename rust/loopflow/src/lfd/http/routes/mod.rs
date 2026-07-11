@@ -389,8 +389,7 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::live_pr::LivePrSnapshot;
     use crate::lfd::types::{
-        LivePrState, LivePullRequestState, PullRequest, Run, RunStackStatus, RunStatus, Wave,
-        WaveStatus,
+        LivePrState, LivePullRequestState, PullRequest, Run, RunStatus, Wave, WaveStatus,
     };
     use crate::lfdb::SharedStore;
     use std::collections::{HashMap, HashSet};
@@ -417,12 +416,6 @@ mod tests {
             flow_parents: Vec::new(),
             execution_cursor: None,
             parent_run_id: None,
-            parent_pr_number: None,
-            stack_position: 0,
-            stack_group_id: "wave-group".to_string(),
-            stack_status: RunStackStatus::Active,
-            lineage_inferred: false,
-            target_branch: "main".to_string(),
             repair_of: None,
             pr: Some(PullRequest {
                 url: "https://example.test/pr/1".to_string(),
@@ -485,12 +478,6 @@ mod tests {
             flow_parents: Vec::new(),
             execution_cursor: None,
             parent_run_id: None,
-            parent_pr_number: None,
-            stack_position: pr_number,
-            stack_group_id: wave.id().to_string(),
-            stack_status: RunStackStatus::Active,
-            lineage_inferred: false,
-            target_branch: "main".to_string(),
             repair_of: None,
             pr: Some(PullRequest {
                 url: format!("https://example.test/pr/{pr_number}"),

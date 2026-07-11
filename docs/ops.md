@@ -179,9 +179,9 @@ lf rebase --plan # show the strategy without changing git
 ```
 
 Classifies the branch before mutating git. Disposable branches can reset to
-their base, stack children rebase onto their parent, and authored work uses a
-normal rebase path. If `scratch/` needs to survive a reset, Loopflow stashes it
-under `.lf/scratch-stash/` and restores it afterward.
+their base, while authored work uses a normal rebase path. If `scratch/` needs
+to survive a reset, Loopflow stashes it under `.lf/scratch-stash/` and restores
+it afterward.
 
 Use an explicit target when needed:
 
@@ -224,16 +224,6 @@ Switch to a worktree by wave name, chain leaf, or full branch.
 lf wt switch bugs             # the bugs wave worktree
 lf wt switch fix-auth         # the …bugs.fix-auth… worktree, by leaf
 lf wt switch jack/bugs.fix-auth.20260316_1856  # exact branch
-```
-
-### lf wt up / down
-
-Move through the stack — `up` toward main, `down` away from it.
-
-```bash
-lf wt up              # to the parent worktree
-lf wt down            # to the only child (else lists them)
-lf wt down fix-auth   # to a specific child by leaf
 ```
 
 ### lf wt list

@@ -134,7 +134,7 @@ and folds into its thread attributed on the next sweep.
 | Event | What lfd runs |
 |-------|---------------|
 | CI fails on a wave's PR | `lf radio pub --channel <name> --from ci "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
-| PR merged | queue state reconciles in-process |
+| PR merged | owning Task Session becomes merged; Linear completion is reconciled |
 | Push to main | `lf radio pub --channel <name> --from github "main moved: …"` — the loop decides whether to rebase or integrate |
 
 ## Skills

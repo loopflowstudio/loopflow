@@ -1,12 +1,8 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::engine::worktrees::ensure_wave_worktree as ensure_wave_worktree_lease;
 use anyhow::{anyhow, Result};
-use crate::engine::git::{get_default_branch, sync_main, worktree_add, WorktreeBranch};
-use crate::engine::worktrees::{
-    ensure_wave_worktree as ensure_wave_worktree_lease, schedule_upstream_sync, worker_id,
-    worktree_dir,
-};
 
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{RunStatus, Session};
@@ -15,32 +11,6 @@ use crate::lfd::types::{RunStatus, Session};
 pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result<(String, String)> {
     let lease = ensure_wave_worktree_lease(main_repo, wave_name)?;
     Ok((lease.path.to_string_lossy().to_string(), lease.branch))
-}
-
-/// Create a run-scoped worker worktree: a stamped worker branch
-/// (`<user>/<wave>.<run-id>.<ts>`) forked from the default branch —
-/// independent PR, independent land.
-pub(crate) fn create_run_worktree(
-    main_repo: &Path,
-    wave_name: &str,
-    run_id: &str,
-) -> anyhow::Result<(String, String)> {
-    let id = worker_id(main_repo, wave_name, run_id)?;
-    let run_wt = worktree_dir(main_repo, &id);
-
-    let default_branch = get_default_branch(main_repo)?;
-    let _ = sync_main(main_repo, &default_branch);
-    let branch = id.branch();
-    worktree_add(
-        main_repo,
-        &run_wt,
-        &branch,
-        WorktreeBranch::New {
-            start_point: &default_branch,
-        },
-    )?;
-    schedule_upstream_sync(run_wt.clone(), branch.clone());
-    Ok((run_wt.to_string_lossy().to_string(), branch))
 }
 
 pub(crate) fn is_active_run_status(status: RunStatus) -> bool {

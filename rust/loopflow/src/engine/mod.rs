@@ -14,6 +14,7 @@ pub mod identity;
 pub mod launch;
 pub mod naming;
 pub mod platform;
+pub(crate) mod process;
 pub mod prompt;
 pub mod repo;
 pub mod skills;
@@ -23,6 +24,7 @@ pub mod wave_config;
 pub mod wave_context;
 pub mod worktree;
 pub mod worktrees;
+pub mod workspace;
 
 pub use agent::{
     build_agent_command, build_claude_command, build_codex_command, build_gemini_command,

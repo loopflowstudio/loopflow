@@ -147,7 +147,7 @@ don't consume this wire):
 **The bus** is the `bus_messages` table in the shared store — nothing else.
 `lf radio pub` publishes with an INSERT; every subscriber polls forward from an id
 cursor. No server is in the path, so publishing works with zero loopflow
-processes running and two detached hands hear each other with no wave awake. A
+processes running and two Task Sessions hear each other with no Wave awake. A
 sweeper drops rows past a one-hour wall-clock window — on every publish, and on
 every read, so a bus that went quiet still forgets on schedule: the bus is a
 wire, not a log. Channel names are addresses (`goals`, `goals.148e0e02`), dots
@@ -259,7 +259,7 @@ curl -N 127.0.0.1:52306/events
 lf stop demo
 ```
 
-The full guided walk — chat, steer, interrupt, Task Sessions, attributed
-reports, restart, teardown — is `scripts/demo_wave.sh` (`--smoke` for a
+The full guided walk — chat, steer, interrupt, memory, restart, teardown — is
+`scripts/demo_wave.sh` (`--smoke` for a
 zero-model-turn sanity pass). The two-process topology has its own ignored
 live test, `cargo test -p loopflow --test wave_live_smoke -- --ignored`.

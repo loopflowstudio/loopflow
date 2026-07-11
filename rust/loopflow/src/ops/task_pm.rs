@@ -181,7 +181,12 @@ pub async fn complete_task(repo: &Path, wave: &str, item_id: &str, pr: &str) -> 
     }
 }
 
-pub async fn retry_complete_task(repo: &Path, wave: &str, item_id: &str) -> OpsResult<()> {
+pub async fn retry_complete_task(
+    repo: &Path,
+    wave: &str,
+    item_id: &str,
+    pr: &str,
+) -> OpsResult<()> {
     let snapshot = load_wave_async(repo, wave, PmRefresh::Force).await?;
     let item = snapshot
         .items
@@ -192,13 +197,10 @@ pub async fn retry_complete_task(repo: &Path, wave: &str, item_id: &str) -> OpsR
                 "completed task {item_id} is absent from refreshed wave/{wave} snapshot"
             ))
         })?;
-    if !item.completed {
-        return Err(OpsError::Message(format!(
-            "task {} is still open after PM writeback refresh",
-            item.identifier
-        )));
+    if item.completed {
+        return Ok(());
     }
-    Ok(())
+    complete_task(repo, wave, item_id, pr).await
 }
 
 fn project_for_item(snapshot: &PmShowResult, item: &PmItem) -> OpsResult<PmProject> {

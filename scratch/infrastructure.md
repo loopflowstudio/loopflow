@@ -19,6 +19,9 @@ every following change pay conversion cost again.
 > “As standard operating procedure it makes sense for Waves to first create
 > tasks or projects and then execute or dispatch a worker on top of it.”
 
+> “We should benchmark our steering API for tasks against that of Claude,
+> Codex, and OpenCode and make sure we are at least as powerful.”
+
 > “The important part here is that the wave server is actually doing the work,
 > the wave LM is doing the work, because that is what is directly steerable by
 > the UI.”
@@ -92,7 +95,7 @@ The equivalent formal CLI path is:
 
 ```text
 lf task run INF-123
-lf task send INF-123 "also name the flag --hello"
+lf task steer INF-123 "also name the flag --hello"
 lf task wait INF-123
 ```
 
@@ -360,7 +363,8 @@ lf project run <linear-project-id>
 
 lf task run <linear-issue-id>
 lf task status <linear-issue-id> [--json]
-lf task send <linear-issue-id> <message>
+lf task follow-up <linear-issue-id> <message>
+lf task steer <linear-issue-id> <message>
 lf task interrupt <linear-issue-id> [--message <message>]
 lf task wait <linear-issue-id> [--until submitted|terminal] [--timeout <duration>]
 lf task resume <linear-issue-id> [<message>]
@@ -511,10 +515,29 @@ Task control is structured and durable. Tmux is not the machine protocol.
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskCommandKind {
-    Message { text: String },
-    Interrupt { next_message: Option<String> },
+    FollowUp { text: String },
+    Steer { text: String },
+    Interrupt { replacement: Option<String> },
     Resume { message: Option<String> },
+    Decide { decision_id: TaskDecisionId, choice: String, message: Option<String> },
     Abandon { reason: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskCommandState {
+    Persisted,
+    Claimed,
+    Accepted,
+    Failed,
+    Superseded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskCommandEffect {
+    LiveSteer,
+    NextTurn,
+    Replacement,
+    Decision,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -523,9 +546,12 @@ pub struct TaskCommand {
     pub session_id: TaskSessionId,
     pub source: TaskCommandSource,
     pub kind: TaskCommandKind,
+    pub state: TaskCommandState,
+    pub effect: Option<TaskCommandEffect>,
     pub created_at: OffsetDateTime,
     pub claimed_by_generation: Option<ProcessGeneration>,
-    pub acknowledged_at: Option<OffsetDateTime>,
+    pub accepted_at: Option<OffsetDateTime>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -540,7 +566,17 @@ pub enum TaskCommandSource {
 pub enum TaskEventKind {
     Started,
     StatusChanged { from: TaskSessionStatus, to: TaskSessionStatus, reason: String },
-    CommandAccepted { command_id: TaskCommandId },
+    CommandChanged {
+        command_id: TaskCommandId,
+        state: TaskCommandState,
+        effect: Option<TaskCommandEffect>,
+        error: Option<String>,
+    },
+    DecisionRequested {
+        decision_id: TaskDecisionId,
+        prompt: String,
+        options: Vec<String>,
+    },
     Progress { summary: String },
     PullRequestOpened { number: u32, url: String },
     Completed { pull_request: PullRequestRef, summary: String },
@@ -548,24 +584,47 @@ pub enum TaskEventKind {
 }
 ```
 
-Commands live until acknowledged. A runner generation claims them in order.
-If that process dies, its unacknowledged claims return to pending. Delivery is
-at-least-once and command ids are visible in the transcript; a duplicate must
-be visible rather than silently lost.
+Commands live until accepted, failed, or superseded. A runner generation
+claims them in order. If that process dies, unresolved claims return to pending.
+Every operation returns a receipt from this durable state; `live` is never
+inferred merely because a Codex process happened to be running.
 
-Follow-up messages serialize. If the provider supports mid-turn steering, the
-runner injects the message into the active turn. Otherwise it becomes the next
-turn's input. `interrupt --message` explicitly stops the current turn and makes
-the message next, giving all providers one deterministic redirect operation.
+The three instruction verbs have provider-independent intent:
+
+- `follow-up` preserves the current turn and becomes exactly the next turn.
+- `steer` changes direction now: inject live when supported, otherwise
+  interrupt and resume the same provider session with the instruction next.
+- `interrupt --message` stops the current turn, supersedes every unaccepted
+  instruction, and makes the replacement next. A bare interrupt stops and
+  leaves the Task waiting.
+
+The runner performs one final durable command claim before ending a turn. A
+command racing the boundary is either accepted before exit or automatically
+resumes the same Task Session; it cannot remain stranded in a waiting Task.
 
 Provider behavior:
 
 - Codex: `turn/steer` reaches the current turn; interrupt uses
   `turn/interrupt`.
-- Claude: Loopflow's current per-turn process cannot accept live input; queue
-  for the next `--resume` turn, or interrupt and restart.
-- OpenCode: the current adapter does not claim live steering; serialize a
-  follow-up turn, matching OpenCode's own background `extend` behavior.
+- Claude: Loopflow's current per-turn process cannot accept live input;
+  `steer` interrupts and resumes, while `follow-up` waits for the boundary.
+- OpenCode: the current adapter does not claim live steering; `steer` aborts
+  and resumes, while `follow-up` serializes like OpenCode background `extend`.
+
+This is the minimum parity floor established in the dated capability matrix
+and black-box scenarios in `scratch/research.md`. Loopflow deliberately omits
+peer-to-peer teammate chat and nested teams; neither is necessary for a Wave to
+control a Task. It must match the stronger parent controls: Codex’s addressed
+interrupt-plus-input and structured submission receipt, OpenCode’s serialized
+extensions/wait/cancel, and Claude’s lead-owned plan decision and automatic
+updates.
+
+Task judgment is part of steering. A Task may publish `DecisionRequested` and
+wait without losing its worktree or provider transcript. The owning Wave
+answers with `Decide`; the Task continues in the same session. Plan approval is
+the first use. Provider permission prompts may map into the same protocol later
+only when the Wave has enough context to decide safely; the MVP must not build
+a second generic approvals system.
 
 ## Wave supervision and conversation ownership
 
@@ -591,10 +650,11 @@ into it when needed, but its normal context uses linked control and result
 events. This satisfies the Context project's “act on child reports without
 opening the child transcript” proof while preserving auditability.
 
-If the human uses `lf task send` or direct task UI rather than speaking through
-the Wave, the command still mirrors into the Wave journal. The Wave therefore
-does not forget a consequential instruction merely because it entered through
-a task surface.
+The primary control path is Wave→Task. A human speaks to the Wave, and the Wave
+uses the typed Task API. Direct human Task control remains an explicit escape
+hatch; it is marked `Human` and enters the same typed event history. A process
+carrying a different `LFD_WAVE_ID` is not human—it is a foreign Wave and must be
+refused before command persistence.
 
 Task completion queues one structured Wave event. If the Wave is idle, that
 event wakes pursuit once. If a Wave turn is active, it is delivered at the next
@@ -991,15 +1051,28 @@ Efficiency with the outage evidence.
 
 ## Done when: steering and conversation
 
-- While a Codex task turn is active, `lf task send INF-123 "rename the flag"`
-  reaches that turn through structured steer and records one accepted command.
-- While Claude or OpenCode is active, the same command becomes the next turn's
-  input and is shown as queued, never falsely reported as live injection.
-- `lf task interrupt INF-123 --message "take the smaller approach"` interrupts
-  the current provider turn and delivers the replacement instruction next on
-  all three providers.
-- A message the human sends directly to the Task is visible as a linked event
-  in the Wave journal before the next Wave turn.
+- While a Codex task turn is active, `lf task steer INF-123 "rename the flag"`
+  reaches that turn and returns an accepted `live_steer` receipt.
+- While Claude or OpenCode is active, the same `steer` interrupts the current
+  turn, resumes the same provider session, and returns an accepted
+  `replacement` receipt. It never quietly degrades to a later follow-up.
+- `lf task follow-up INF-123 "then update the docs"` never interrupts. It runs
+  exactly once as the next turn on all three providers.
+- Queue A and B, then run `lf task interrupt INF-123 --message C`: A and B are
+  durably `superseded`, C is the next input, and no provider sees stale work.
+- A command racing provider completion is accepted exactly once before runner
+  exit or automatically resumes the same Task Session. It is never left
+  unclaimed in a waiting Task.
+- Persisted, claimed, accepted, failed, and superseded receipts are truthful
+  and waitable. CLI JSON, Wave events, Swift, and audit history use the same
+  command id/state/effect.
+- A Task can request plan approval; the Wave can reject with feedback and then
+  approve a revision, with the same Task Session and provider transcript
+  continuing throughout.
+- The owning Wave can steer its Task. A process attributed to another Wave is
+  refused rather than relabeled as a human command source.
+- A direct human escape-hatch command is visible as a linked typed event in the
+  Wave journal before the next Wave turn.
 - Raw Task tool events do not flood the Wave thread; the Wave can answer what
   it asked the task to do, its latest status, and its result without opening
   the child transcript.
@@ -1007,6 +1080,10 @@ Efficiency with the outage evidence.
   Wave turn; it never starts concurrent Wave turns.
 - A Wave can steer Task A while Task B runs, and each command resolves to the
   correct Linear issue/session in N/N targeted tests.
+- The provider conformance suite runs the live redirect, gentle follow-up,
+  replacement, boundary race, crash recovery, ownership, decision round trip,
+  automatic observation, parallel targeting, and lifecycle scenarios from
+  `scratch/research.md` against Codex, Claude, and OpenCode adapters.
 
 ## Done when: process, attachment, and recovery
 

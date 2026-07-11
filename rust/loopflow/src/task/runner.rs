@@ -206,6 +206,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                     TaskSessionStatus::Merged,
                                     format!("pull request #{} merged", pr.number),
                                 );
+                                crate::ops::task::reconcile_pm_writeback(&mut session).await;
                                 store.append_task_event(
                                     &session.id,
                                     &TaskEventKind::Completed {
@@ -455,8 +456,19 @@ async fn finish_failed(
     error: &str,
 ) -> Result<()> {
     let _ = harness.stop().await;
+    let from = session.status;
     session.set_status(TaskSessionStatus::Failed, error);
     store.update_task_session(session).await?;
+    store
+        .append_task_event(
+            &session.id,
+            &TaskEventKind::StatusChanged {
+                from,
+                to: TaskSessionStatus::Failed,
+                reason: session.status_reason.clone(),
+            },
+        )
+        .await?;
     store
         .append_task_event(
             &session.id,

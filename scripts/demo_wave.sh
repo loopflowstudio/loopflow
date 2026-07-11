@@ -4,10 +4,10 @@
 # RESIDENT it spawns (`lf __resident`, with private server env,
 # running in the wave's own worktree).
 #
-# Walks the whole surface against a throwaway repo: boot + discovery (both
-# processes from one command), chat, steer, interrupt, hand delegation (real
-# `lf loop … --detach`), attributed worker reports arriving in the thread,
-# memory curation, restart with the thread intact, clean teardown.
+# Walks the Wave surface against a throwaway repo: boot + discovery (both
+# processes from one command), chat, steer, interrupt, memory curation, restart
+# with the thread intact, and clean teardown. Task Sessions require a real
+# Linear-backed Wave and are exercised separately through `lf task`.
 #
 # COSTS: every loop pass runs a real three-phase wave-pass (acts 2-6).
 # REQUIRES: codex CLI authed (`codex login`), tmux, jq, curl.
@@ -256,45 +256,23 @@ if [[ -z "$(new_codex_orphans)" ]]; then
 fi
 pause
 
-# ---------- act 5: dispatch a worker ----------------------------------------
+# ---------- act 5: memory ----------------------------------------------------
 
-hr "act 5 · the loop delegates a hand (lf loop … --detach)"
-say "asking the loop to delegate — orchestration lives in the prompt, loopflow is the toolset"
-curl -sf -X POST "http://$ADDR/messages" -H 'content-type: application/json' \
-    -d "{\"op\":\"message\",\"text\":\"This independent demo task should run in parallel: use lf --wave $WAVE loop task \\\"make the next TODO.md improvement\\\" --detach. After detaching it, reply with the run id.\"}" >/dev/null
-poll "run_observed journaled (loop pass + dispatch; model-dependent)" 300 journal_has run_observed || true
-if journal_has run_observed; then
-    jq -c 'select(.kind.type == "run_observed") | .kind' "$JOURNAL" | sed 's/^/  /'
-    say "the worker is a real detached tmux session:"
-    tmux list-sessions 2>/dev/null | grep -v "^$TMUX_SESSION" | sed 's/^/  /' || true
-    say "and a real sibling worktree — <repo>.<wave>.<id> (three segments = wave worker):"
-    ls -d "$DEMO_ROOT"/demorepo.$WAVE.* 2>/dev/null | sed 's/^/  /' || warn "worktree not visible yet"
-else
-    warn "no dispatch observed — read the loop's reply above and its tmux pane"
-fi
-pause
-
-# ---------- act 6: worker reports + memory -----------------------------------
-
-hr "act 6 · attributed reports and curated memory"
-say "hands finish with 'lf radio pub <report>' — it lands in the thread with the"
-say "hand's channel as its byline and wakes the loop; watch for memory_updated when"
-say "the loop curates what it learned (lf memory add)."
-poll "a bylined hand report in the thread (hands take minutes)" 600 sh -c \
-    "curl -sf http://$ADDR/conversation | jq -e '.turns[] | select(.from != null)'" || true
-thread | tail -6
-poll "run_completed journaled" 120 journal_has run_completed || true
+hr "act 5 · curated memory"
+say "adding one durable fact through the same command a Wave uses"
+(cd "$DEMO_REPO" && "$LF_BIN" --wave "$WAVE" memory add "The guided demo verified chat, steer, and interrupt.")
+poll "memory_updated journaled" 30 journal_has memory_updated || true
 if journal_has memory_updated; then
-    ok "memory_updated journaled — the loop curated MEMORY.md unprompted:"
+    ok "memory_updated journaled:"
     curl -sf "http://$ADDR/memory" | jq -r .content | sed 's/^/  /'
 else
-    warn "no memory_updated yet — curation is the loop's judgment call, not a scripted step"
+    warn "memory update was not visible in the journal"
 fi
 pause
 
-# ---------- act 7: restart, thread intact -------------------------------------
+# ---------- act 6: restart, thread intact -------------------------------------
 
-hr "act 7 · restart the server mid-conversation"
+hr "act 6 · restart the server mid-conversation"
 TURNS_BEFORE="$(curl -sf "http://$ADDR/health" | jq -r .turns)"
 say "turns before restart: $TURNS_BEFORE — Ctrl-C the server, boot a new one"
 tmux send-keys -t "$TMUX_SESSION" C-c
@@ -315,9 +293,9 @@ pause
 
 fi  # SMOKE
 
-# ---------- act 8: teardown ----------------------------------------------------
+# ---------- act 7: teardown ----------------------------------------------------
 
-hr "act 8 · teardown — Ctrl-C, then verify nothing leaked"
+hr "act 7 · teardown — Ctrl-C, then verify nothing leaked"
 tmux send-keys -t "$TMUX_SESSION" C-c
 poll "endpoint removed" 30 sh -c "! test -e '$ENDPOINT_FILE'" || warn "stale .wave-endpoint left behind"
 sleep 1
@@ -334,6 +312,6 @@ else
 fi
 journal_types
 say "demo repo kept for inspection: $DEMO_REPO"
-say "worker tmux sessions/worktrees (if any) are yours to poke at, then delete:"
+say "delete the demo checkout when finished:"
 say "  rm -rf $DEMO_ROOT"
 hr "done"

@@ -221,6 +221,7 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
         }
 
         if let Err(error) = create_from_placement_plan(&main_repo, &plan) {
+            let from = session.status;
             session.set_status(
                 TaskSessionStatus::Failed,
                 format!("worktree creation failed: {error}"),
@@ -230,6 +231,17 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
                     "worktree creation failed ({error}); recording failure also failed: {store_error}"
                 ))
             })?;
+            store
+                .append_task_event(
+                    &session.id,
+                    &TaskEventKind::StatusChanged {
+                        from,
+                        to: TaskSessionStatus::Failed,
+                        reason: session.status_reason.clone(),
+                    },
+                )
+                .await
+                .map_err(|store_error| task_error(store_error.to_string()))?;
             store
                 .append_task_event(
                     &session.id,
@@ -245,7 +257,7 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
             )));
         }
 
-        launch_task_process(&store, &mut session).await?;
+        launch_task_process(&store, &mut session, None).await?;
         wait_until_running(&store, &session.id).await
     })
 }
@@ -307,18 +319,61 @@ pub fn project_start(repo: &Path, title: &str, wave: Option<&str>) -> OpsResult<
     project_run(repo, &project.project.id)
 }
 
-async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> OpsResult<()> {
+async fn launch_task_process(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    max_active: Option<u32>,
+) -> OpsResult<()> {
     let tmux_name = format!(
         "lf-task-{}-{}",
         tmux_session_slug(&session.issue.identifier),
         &session.id.as_str()[3..11]
     );
     let from = session.status;
-    let generation = session.begin_generation(tmux_name.clone());
-    store
-        .update_task_session(session)
-        .await
-        .map_err(|error| task_error(format!("failed to record task launch: {error}")))?;
+    let mut launch = session.clone();
+    let generation = launch.begin_generation(tmux_name.clone());
+    if let Some(max_active) = max_active {
+        let reserved = store
+            .reserve_task_process(&launch, from, max_active)
+            .await
+            .map_err(|error| task_error(format!("failed to reserve task process: {error}")))?;
+        if !reserved {
+            let current = store
+                .get_task_session(&session.id)
+                .await
+                .map_err(|error| task_error(format!("failed to reread task process: {error}")))?
+                .ok_or_else(|| task_error("Task Session disappeared during process reservation"))?;
+            if current.status.is_process_active() {
+                *session = current;
+                return Ok(());
+            }
+            if current.status.is_terminal() {
+                return Err(task_error(format!(
+                    "task {} became {}; terminal Task Sessions cannot start a process",
+                    current.issue.identifier,
+                    current.status.as_str()
+                )));
+            }
+            if current.status != from {
+                return Err(task_error(format!(
+                    "task {} changed from {} to {} during process reservation; retry the command",
+                    current.issue.identifier,
+                    from.as_str(),
+                    current.status.as_str()
+                )));
+            }
+            return Err(task_error(format!(
+                "wave/{} has reached its {max_active} active Task Session limit",
+                session.wave
+            )));
+        }
+    } else {
+        store
+            .update_task_session(&launch)
+            .await
+            .map_err(|error| task_error(format!("failed to record task launch: {error}")))?;
+    }
+    *session = launch;
     store
         .append_task_event(
             &session.id,
@@ -347,12 +402,24 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
     if let Err(error) =
         start_lf_session_with_env(&tmux_name, &session.worktree, &argv, &environment).await
     {
+        let from = session.status;
         session.set_status(
             TaskSessionStatus::Failed,
             format!("task process launch failed: {error}"),
         );
         store
             .update_task_session(session)
+            .await
+            .map_err(|store_error| task_error(store_error.to_string()))?;
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::StatusChanged {
+                    from,
+                    to: TaskSessionStatus::Failed,
+                    reason: session.status_reason.clone(),
+                },
+            )
             .await
             .map_err(|store_error| task_error(store_error.to_string()))?;
         store
@@ -507,6 +574,17 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
                     .map_err(|error| task_error(error.to_string()))?;
                 if from != session.status {
                     store
+                        .append_task_event(
+                            &session.id,
+                            &TaskEventKind::StatusChanged {
+                                from,
+                                to: session.status,
+                                reason: session.status_reason.clone(),
+                            },
+                        )
+                        .await
+                        .map_err(|error| task_error(error.to_string()))?;
+                    store
                         .append_task_event(&session.id, &event)
                         .await
                         .map_err(|error| task_error(error.to_string()))?;
@@ -528,7 +606,7 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
     })
 }
 
-async fn reconcile_pm_writeback(session: &mut TaskSession) {
+pub(crate) async fn reconcile_pm_writeback(session: &mut TaskSession) {
     let Some(pull_request) = session.pull_request.as_ref() else {
         return;
     };
@@ -549,10 +627,14 @@ async fn reconcile_pm_writeback(session: &mut TaskSession) {
 }
 
 async fn retry_pm_writeback(session: &mut TaskSession) {
+    let Some(pull_request) = session.pull_request.as_ref() else {
+        return;
+    };
     session.pm_writeback = match crate::ops::task_pm::retry_complete_task(
         &session.worktree,
         &session.wave,
         session.issue.id.as_str(),
+        &pull_request.url,
     )
     .await
     {
@@ -562,6 +644,7 @@ async fn retry_pm_writeback(session: &mut TaskSession) {
             error: error.to_string(),
         },
     };
+    session.updated_at = time::OffsetDateTime::now_utc();
 }
 
 pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
@@ -698,7 +781,14 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                 "queued"
             }
         } else {
-            launch_task_process(&store, &mut session).await?;
+            let wave = store
+                .get_wave(&session.wave_id)
+                .await
+                .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
+                .ok_or_else(|| {
+                    task_error(format!("owning wave/{} is not registered", session.wave))
+                })?;
+            launch_task_process(&store, &mut session, Some(wave.workers.max(1))).await?;
             "queued"
         };
         Ok(TaskControlResult {
@@ -732,7 +822,16 @@ pub fn task_resume(issue: &str, message: Option<String>) -> OpsResult<TaskContro
 }
 
 pub fn task_abandon(issue: &str, reason: String) -> OpsResult<TaskControlResult> {
-    queue_command(issue, TaskCommandKind::Abandon { reason })
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return Err(task_error("`lf task abandon --reason` cannot be empty"));
+    }
+    queue_command(
+        issue,
+        TaskCommandKind::Abandon {
+            reason: reason.to_string(),
+        },
+    )
 }
 
 pub fn task_wait(
@@ -753,12 +852,19 @@ pub fn task_wait(
         if reached || timeout.is_some_and(|limit| started.elapsed() >= limit) {
             return Ok(session);
         }
-        std::thread::sleep(Duration::from_millis(250));
+        std::thread::sleep(Duration::from_secs(1));
     }
 }
 
 pub fn task_attach(issue: &str) -> OpsResult<()> {
     let session = task_status(issue)?;
+    if !session.status.is_process_active() {
+        return Err(task_error(format!(
+            "task {} is {}; resume it before attaching",
+            session.issue.identifier,
+            session.status.as_str()
+        )));
+    }
     let tmux_name = session
         .process
         .as_ref()

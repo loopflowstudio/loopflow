@@ -17,6 +17,7 @@ use crate::lfd::types::{
 };
 use crate::task::{
     TaskCommand, TaskCommandId, TaskEvent, TaskEventKind, TaskSession, TaskSessionId,
+    TaskSessionStatus,
 };
 
 pub mod catalog;
@@ -285,6 +286,19 @@ impl Store {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.update_task_session(&session)
+        })
+        .await
+    }
+
+    pub async fn reserve_task_process(
+        &self,
+        session: &TaskSession,
+        expected_status: TaskSessionStatus,
+        max_active: u32,
+    ) -> StoreResult<bool> {
+        let session = session.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_task_process(&session, expected_status, max_active)
         })
         .await
     }
@@ -1564,6 +1578,51 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn task_process_resume_reserves_wave_capacity_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+
+        let mut session = make_task_session(&wave);
+        session.set_status(TaskSessionStatus::Waiting, "waiting for review");
+        store.create_task_session(&session).await.unwrap();
+
+        let mut first_resume = session.clone();
+        assert_eq!(first_resume.begin_generation("task-one".to_string()), 1);
+        assert!(store
+            .reserve_task_process(&first_resume, TaskSessionStatus::Waiting, 1)
+            .await
+            .unwrap());
+
+        let mut racing_resume = session.clone();
+        racing_resume.begin_generation("task-one".to_string());
+        assert!(!store
+            .reserve_task_process(&racing_resume, TaskSessionStatus::Waiting, 1)
+            .await
+            .unwrap());
+
+        let mut second = make_task_session(&wave);
+        second.issue.id = LinearIssueId::new("issue-two").unwrap();
+        second.issue.identifier = "INF-124".to_string();
+        second.worktree = PathBuf::from("/repo.inf-124");
+        second.branch = "jack/inf-124".to_string();
+        second.set_status(TaskSessionStatus::Waiting, "waiting for capacity");
+        store.create_task_session(&second).await.unwrap();
+        second.begin_generation("task-two".to_string());
+        assert!(!store
+            .reserve_task_process(&second, TaskSessionStatus::Waiting, 1)
+            .await
+            .unwrap());
+
+        let loaded = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(loaded.status, TaskSessionStatus::Starting);
+        assert_eq!(loaded.process.unwrap().generation, 1);
     }
 
     async fn run_store_basic_suite(store: &super::Store) {

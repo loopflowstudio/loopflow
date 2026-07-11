@@ -7,9 +7,9 @@ Clarify the wave artifact: `wave/<wave>/GOAL.md`.
 
 ## Orientation
 
-Read the wave GOAL/MEMORY, `lf pm show --wave <wave> --json --no-sync`, recent chat, and
-worker state. The wave owns the operating context and project selection, not a
-planning mirror.
+Read the wave GOAL/MEMORY, the PM snapshot's Project definitions, KRs, and
+tasks, and recent chat. The wave owns the operating context and project
+selection, not a task list mirror.
 Each project belongs to exactly one wave and owns KRs, not memory or cadence.
 
 ## Work

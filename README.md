@@ -1,6 +1,6 @@
 # Loopflow
 
-Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it works Linear tasks inline, spins off independent loops when parallelism earns them, remembers what it learns, and shows you every live session.
+Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it coordinates Linear-backed Task Sessions, remembers what it learns, and shows you every live session.
 
 Start a wave by hand and steer it interactively. As it earns trust, let it loop — picking work, dispatching flows, and reacting to changes on its own.
 
@@ -44,8 +44,8 @@ lf memory add "buttons: variants unified" # curate what it knows
 lf stop designer              # stop its listener and resident gracefully
 ```
 
-Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
-`tmux attach -r -t <name>` to inspect one without writing into its session.
+Sessions are plain tmux — `tmux ls` to see the Wave and Task Sessions. Use
+`lf task attach <issue-id>` for the audited writable task prompt.
 
 `lf serve <name>` starts a long-lived server at the repo's main checkout (the
 wave's journal and endpoint live at the origin); its playhead enters the wave's

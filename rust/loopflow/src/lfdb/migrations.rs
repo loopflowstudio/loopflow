@@ -301,6 +301,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "064_task_pm_receipt",
         sql: include_str!("migrations/064_task_pm_receipt.sql"),
     },
+    Migration {
+        version: "065_task_agent",
+        sql: include_str!("migrations/065_task_agent.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the
@@ -518,6 +522,47 @@ mod tests {
             applied.contains("035_session_tmux_name"),
             "migration should be recorded again after convergence"
         );
+    }
+
+    #[test]
+    fn task_agent_migration_repairs_dogfood_schema() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_sqlite(&conn).unwrap();
+
+        conn.execute(
+            "DELETE FROM schema_migrations WHERE version = ?1",
+            rusqlite::params!["065_task_agent"],
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        conn.execute_batch(
+            "ALTER TABLE task_sessions DROP COLUMN agent;
+             INSERT INTO task_sessions (
+                 id, issue_id, issue_identifier, issue_title, issue_description,
+                 project_id, project_slug, project_name, project_context,
+                 wave_id, wave_name, status, status_reason, status_at,
+                 worktree, branch, base_commit, provider, created_at, updated_at,
+                 pm_snapshot_synced_at, pm_writeback_json
+             ) VALUES (
+                 'ts_demo', 'issue-id', 'INF-123', 'Demo task', '',
+                 'project-id', 'work-isolation', 'Work Isolation', '',
+                 'wave-id', 'infrastructure', 'waiting', 'ready', 1,
+                 '/tmp/loopflow.inf-123', 'jack/inf-123', 'abc123', 'codex', 1, 1,
+                 1, '{\"state\":\"current\"}'
+             );",
+        )
+        .unwrap();
+
+        apply_sqlite(&conn).expect("old task-session schemas should migrate");
+
+        let agent: String = conn
+            .query_row(
+                "SELECT agent FROM task_sessions WHERE id = 'ts_demo'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(agent, "codex");
     }
 }
 

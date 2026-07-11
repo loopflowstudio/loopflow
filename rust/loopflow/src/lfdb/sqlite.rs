@@ -26,7 +26,7 @@ use crate::trace::{
 use crate::task::{
     LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PullRequestRef, TaskCommand,
     TaskCommandId, TaskCommandKind, TaskCommandSource, TaskEvent, TaskEventKind, TaskProcess,
-    TaskSession, TaskSessionId,
+    TaskSession, TaskSessionId, TaskSessionStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -1530,23 +1530,75 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let parameters = task_session_params(session);
         let changed = conn.execute(
-            "UPDATE task_sessions SET
-                issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
-                project_id=?6, project_slug=?7, project_name=?8, project_context=?9,
-                wave_id=?10, wave_name=?11, status=?12, status_reason=?13, status_at=?14,
-                worktree=?15, branch=?16, base_commit=?17, agent=?18, provider=?19,
-                provider_session_id=?20, process_generation=?21, process_pid=?22,
-                process_tmux_name=?23, process_started_at=?24, pr_number=?25,
-                pr_url=?26, created_at=?27, updated_at=?28,
-                pm_snapshot_synced_at=?29, pm_snapshot_warning=?30,
-                pm_writeback_json=?31
-             WHERE id=?1",
+            TASK_SESSION_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
         Ok(())
+    }
+
+    pub fn reserve_task_process(
+        &self,
+        session: &TaskSession,
+        expected_status: TaskSessionStatus,
+        max_active: u32,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let current_status: String = transaction.query_row(
+            "SELECT status FROM task_sessions WHERE id = ?1",
+            params![session.id.as_str()],
+            |row| row.get(0),
+        )?;
+        if current_status != expected_status.as_str() {
+            return Ok(false);
+        }
+        let active: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM task_sessions
+             WHERE wave_id = ?1 AND id <> ?2
+               AND status IN ('created', 'starting', 'running')",
+            params![session.wave_id, session.id.as_str()],
+            |row| row.get(0),
+        )?;
+        if active >= i64::from(max_active) {
+            return Ok(false);
+        }
+        let changed = transaction.execute(
+            "UPDATE task_sessions SET
+                status = ?2, status_reason = ?3, status_at = ?4,
+                process_generation = ?5, process_pid = ?6,
+                process_tmux_name = ?7, process_started_at = ?8,
+                updated_at = ?9
+             WHERE id = ?1 AND status = ?10",
+            params![
+                session.id.as_str(),
+                session.status.as_str(),
+                session.status_reason,
+                session.status_at.unix_timestamp(),
+                session
+                    .process
+                    .as_ref()
+                    .map(|process| i64::from(process.generation)),
+                session
+                    .process
+                    .as_ref()
+                    .and_then(|process| process.pid.map(i64::from)),
+                session.process.as_ref().map(|process| &process.tmux_name),
+                session
+                    .process
+                    .as_ref()
+                    .map(|process| process.started_at.unix_timestamp()),
+                session.updated_at.unix_timestamp(),
+                expected_status.as_str(),
+            ],
+        )?;
+        if changed == 0 {
+            return Ok(false);
+        }
+        transaction.commit()?;
+        Ok(true)
     }
 
     pub fn task_session(&self, session_id: &TaskSessionId) -> StoreResult<Option<TaskSession>> {
@@ -2387,6 +2439,17 @@ const TASK_SESSION_SELECT: &str = "SELECT
     created_at, updated_at, pm_snapshot_synced_at,
     pm_snapshot_warning, pm_writeback_json
     FROM task_sessions WHERE id = ?1";
+const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
+    issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
+    project_id=?6, project_slug=?7, project_name=?8, project_context=?9,
+    wave_id=?10, wave_name=?11, status=?12, status_reason=?13, status_at=?14,
+    worktree=?15, branch=?16, base_commit=?17, agent=?18, provider=?19,
+    provider_session_id=?20, process_generation=?21, process_pid=?22,
+    process_tmux_name=?23, process_started_at=?24, pr_number=?25,
+    pr_url=?26, created_at=?27, updated_at=?28,
+    pm_snapshot_synced_at=?29, pm_snapshot_warning=?30,
+    pm_writeback_json=?31
+    WHERE id=?1";
 
 fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
     vec![

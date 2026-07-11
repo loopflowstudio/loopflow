@@ -2,7 +2,7 @@
 //!
 //! The bus is a table in the shared store, so publishing is an INSERT and
 //! nothing else: no endpoint, no HTTP, no served wave. `lf radio pub` works with
-//! zero loopflow processes running, and two detached hands hear each other
+//! zero loopflow processes running, and two Task Sessions hear each other
 //! with no mind awake between them.
 //!
 //! # Targeting
@@ -206,7 +206,7 @@ mod tests {
         assert_eq!(rows[0].channel, "ship.148e", "where it actually arrived");
     }
 
-    /// Two detached hands exchange messages with no served wave: one publishes,
+    /// Two Task Sessions exchange messages with no served Wave: one publishes,
     /// the other reads it off the table.
     #[tokio::test]
     async fn two_hands_converse_with_no_served_wave() {

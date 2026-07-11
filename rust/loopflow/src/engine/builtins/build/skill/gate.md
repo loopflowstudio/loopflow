@@ -123,7 +123,7 @@ Make the change easy to review.
 
 6. **Wave alignment** (if running in a wave context)
    - Does the shipped code advance the wave's Goals?
-   - Were any known risks from `GOAL.md`, `MEMORY.md`, or the PM snapshot introduced or ignored?
+   - Were any known risks from `GOAL.md`, `MEMORY.md`, or the Linear Project definition/KRs introduced or ignored?
    - Are there observable project KRs or measures to note in the review doc?
 
 ## Scope

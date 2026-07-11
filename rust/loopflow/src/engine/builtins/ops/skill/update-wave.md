@@ -14,7 +14,7 @@ A wave is a local operating context plus Linear-owned planning:
 - **`wave/<wave>/MEMORY.md`** — what the wave remembers between loops. Durable
   observations, decisions, and context. This is where branch learnings land.
 - **Projects and tasks live in Linear**, not in the repo. `lf pm sync` projects
-  them into SQLite. Read them with `lf pm show --no-sync`;
+  them into SQLite. Read them with `lf pm show`;
   change them with `lf pm project ...` and `lf pm task ...`. There is no local
   planning mirror — never write `N-*.md` item files or a roadmap table.
 
@@ -26,7 +26,7 @@ Before starting, orient yourself in this branch:
   here (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds
   open questions and assumptions).
 - Read `wave/<wave>/GOAL.md` and `MEMORY.md`.
-- Read the local PM snapshot: `lf pm show --no-sync` (add `--wave <name>` if ambiguous).
+- Read the local PM snapshot: `lf pm show` (add `--wave <name>` if ambiguous).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 ## Goal
@@ -65,7 +65,7 @@ fold it. If it only describes what was already built, let it go.
 ## Workflow
 
 1. Read the diff (if any) to understand what this branch built.
-2. Read `GOAL.md`, `MEMORY.md`, and the live PM tasks (`lf pm show --no-sync`).
+2. Read `GOAL.md`, `MEMORY.md`, and the live PM tasks (`lf pm show`).
 3. Read the PM snapshot and `scratch/` — every file, completely.
 4. **Reconcile Linear tasks against reality.** For each task, ask:
    - **Shipped?** If this branch (or main) crossed its finish line, close it:
@@ -132,18 +132,24 @@ pm:
 
 ### Projects
 
-Projects are measured bets inside the wave. Store the definition and KRs in
-Linear Project content:
+Projects are measured bets inside the wave. Write one file per live project:
 
-```bash
-lf pm project create --wave infrastructure --title "Technical Architecture" \
-  --definition "Loopflow's architecture is legible from the top down." \
-  --kr "Top-down architecture documentation is complete and published." \
-  --kr "Every public API is ratified as minimally simple for its purpose."
+```markdown
+# Technical Architecture
+
+Loopflow's architecture is legible from the top down: the key data structures
+and APIs explain the system, the implementation follows that map, and obsolete
+pre-loop concepts do not linger as alternate design.
+
+## KRs
+
+- Top-down architecture documentation is complete, published, and centered on the key data structures and public APIs.
+- Every data structure and API in the architecture is ratified as minimally simple for its purpose.
+- The codebase, prompts, docs, and UI contain no stale pre-loop technical design language.
 ```
 
-Do not create a repository project file or duplicate tasks in the KR set.
-Concrete work stays in Linear Issues under the Project.
+**Linear Project content must not contain:** child projects or issue mirrors.
+Put concrete work in Linear tasks.
 
 ## Coherence
 

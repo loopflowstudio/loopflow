@@ -251,6 +251,7 @@ async fn complete_merged_task_sessions(
         {
             continue;
         }
+        let from = session.status;
         session.set_status(
             TaskSessionStatus::Merged,
             format!("pull request #{pr_number} merged"),
@@ -271,6 +272,17 @@ async fn complete_merged_task_sessions(
         };
         store
             .update_task_session(&session)
+            .await
+            .map_err(|error| error.to_string())?;
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::StatusChanged {
+                    from,
+                    to: TaskSessionStatus::Merged,
+                    reason: session.status_reason.clone(),
+                },
+            )
             .await
             .map_err(|error| error.to_string())?;
         store

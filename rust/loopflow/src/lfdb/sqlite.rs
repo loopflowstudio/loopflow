@@ -1839,9 +1839,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut turns = Vec::new();
         for launch_ids in launch_ids.chunks(500) {
-            let placeholders = std::iter::repeat_n("?", launch_ids.len())
-                .collect::<Vec<_>>()
-                .join(", ");
+            let placeholders = in_placeholders(launch_ids.len());
             let sql = format!(
                 "SELECT id, launch_id, ordinal, provider_turn_id, started_at, ended_at, status,
                     input_op, context_coverage, tokenizer, system_prompt_path, task_prompt_path,
@@ -1870,9 +1868,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut assets = Vec::new();
         for turn_ids in turn_ids.chunks(500) {
-            let placeholders = std::iter::repeat_n("?", turn_ids.len())
-                .collect::<Vec<_>>()
-                .join(", ");
+            let placeholders = in_placeholders(turn_ids.len());
             let sql = format!(
                 "SELECT turn_id, position, channel, kind, scope, label, source_path, included_by,
                     content_sha256, byte_start, byte_end, bytes, isolated_tokens, attributed_tokens
@@ -1948,9 +1944,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut decisions = Vec::new();
         for turn_ids in turn_ids.chunks(500) {
-            let placeholders = std::iter::repeat_n("?", turn_ids.len())
-                .collect::<Vec<_>>()
-                .join(", ");
+            let placeholders = in_placeholders(turn_ids.len());
             let sql = format!(
                 "SELECT turn_id, position, kind, scope, label, source_path, decision, reason,
                     original_bytes, original_tokens, asset_position
@@ -2007,6 +2001,13 @@ impl SqliteStore {
         decisions.sort_by_key(|row| (row.turn_id.clone(), row.decision.position));
         Ok(decisions)
     }
+}
+
+/// `?, ?, ?` for a `WHERE col IN (...)` clause bound by position.
+fn in_placeholders(count: usize) -> String {
+    std::iter::repeat_n("?", count)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> StoreResult<()> {

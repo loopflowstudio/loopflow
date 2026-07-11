@@ -103,18 +103,16 @@ pub fn trace(
 
     let spans = trace_spans(&events);
     let launches = store.agent_launches_matching(&events[0].run_id)?;
+    if events_mode {
+        return trace_events(&launches, launch_prefix, jsonl);
+    }
     let launch_ids = launches
         .iter()
         .map(|launch| launch.id.clone())
         .collect::<Vec<_>>();
     let turns = store.agent_turns_for_launches(&launch_ids)?;
-    let turn_ids = turns.iter().map(|turn| turn.id.clone()).collect::<Vec<_>>();
-    let assets = store.context_assets_for_turns(&turn_ids)?;
-    let decisions = store.context_decisions_for_turns(&turn_ids)?;
-    if events_mode {
-        return trace_events(&launches, launch_prefix, jsonl);
-    }
     if json {
+        let turn_ids = turns.iter().map(|turn| turn.id.clone()).collect::<Vec<_>>();
         println!(
             "{}",
             serde_json::to_string(&TraceDto {
@@ -122,8 +120,8 @@ pub fn trace(
                 spans,
                 launches,
                 turns,
-                assets,
-                decisions,
+                assets: store.context_assets_for_turns(&turn_ids)?,
+                decisions: store.context_decisions_for_turns(&turn_ids)?,
             })?
         );
         return Ok(());

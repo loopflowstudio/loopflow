@@ -209,11 +209,30 @@ pub struct PullRequestRef {
     pub url: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PmWritebackOperation {
+    CompleteTask,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum PmWritebackState {
+    Current,
+    Pending {
+        operation: PmWritebackOperation,
+        error: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSession {
     pub id: TaskSessionId,
     pub issue: LinearIssueRef,
     pub project: LinearProjectRef,
+    pub pm_snapshot_synced_at: i64,
+    pub pm_snapshot_warning: Option<String>,
+    pub pm_writeback: PmWritebackState,
     pub wave_id: LfdId,
     pub wave: String,
     pub status: TaskSessionStatus,
@@ -344,7 +363,9 @@ pub struct TaskEvent {
 
 #[cfg(test)]
 mod tests {
-    use super::{TaskCommandId, TaskSessionId, TaskSessionStatus};
+    use super::{
+        PmWritebackOperation, PmWritebackState, TaskCommandId, TaskSessionId, TaskSessionStatus,
+    };
 
     #[test]
     fn task_ids_are_prefixed_and_round_trip() {
@@ -361,5 +382,22 @@ mod tests {
         assert!(TaskSessionStatus::Abandoned.is_terminal());
         assert!(!TaskSessionStatus::Submitted.is_terminal());
         assert!(!TaskSessionStatus::Failed.is_terminal());
+    }
+
+    #[test]
+    fn pending_pm_writeback_has_a_stable_json_shape() {
+        let state = PmWritebackState::Pending {
+            operation: PmWritebackOperation::CompleteTask,
+            error: "offline".to_string(),
+        };
+
+        assert_eq!(
+            serde_json::to_value(state).unwrap(),
+            serde_json::json!({
+                "state": "pending",
+                "operation": "complete_task",
+                "error": "offline"
+            })
+        );
     }
 }

@@ -13,8 +13,7 @@ use std::sync::Arc;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
     AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage, LivePrState,
-    LivePullRequestState, Repo, RepoEdge, RepoId, Run, RunStackStatus, Session, SessionStatus,
-    Summary, Wave,
+    LivePullRequestState, Repo, RepoEdge, RepoId, Run, Session, SessionStatus, Summary, Wave,
 };
 use crate::task::{
     TaskCommand, TaskCommandId, TaskEvent, TaskEventKind, TaskSession, TaskSessionId,
@@ -439,18 +438,6 @@ impl Store {
         WaveStateStore::update_run(self, run).await
     }
 
-    pub async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<Run>> {
-        WaveStateStore::list_stack_runs(self, wave_id).await
-    }
-
-    pub async fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
-        WaveStateStore::find_next_unmerged_run(self, wave_id).await
-    }
-
-    pub async fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<Run>> {
-        WaveStateStore::find_descendants(self, run_id).await
-    }
-
     pub async fn get_live_pr_state(
         &self,
         repo_id: &str,
@@ -720,9 +707,6 @@ pub trait WaveStateStore: Send + Sync {
     async fn get_latest_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>>;
     async fn create_run(&self, run: &Run) -> StoreResult<()>;
     async fn update_run(&self, run: &Run) -> StoreResult<()>;
-    async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<Run>>;
-    async fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>>;
-    async fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<Run>>;
     async fn get_live_pr_state(
         &self,
         repo_id: &str,
@@ -962,53 +946,6 @@ impl WaveStateStore for Store {
             let run = run.clone();
             run_sqlite(&self.sqlite, move |store| store.update_run(&run)).await
         }
-    }
-
-    async fn list_stack_runs(&self, wave_id: &LfdId) -> StoreResult<Vec<Run>> {
-        {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.list_stack_runs(&wave_id)).await
-        }
-    }
-
-    async fn find_next_unmerged_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
-        let runs = self.list_stack_runs(wave_id).await?;
-        for run in runs {
-            if matches!(
-                run.stack_status,
-                RunStackStatus::Merged | RunStackStatus::Superseded
-            ) {
-                continue;
-            }
-
-            let Some(pr_number) = run.pr.as_ref().and_then(|pr| pr.number) else {
-                return Ok(Some(run));
-            };
-
-            let Some(live_state) = self.get_live_pr_state(&run.repo, pr_number).await? else {
-                return Ok(Some(run));
-            };
-            if live_state.state != LivePrState::Merged {
-                return Ok(Some(run));
-            }
-        }
-        Ok(None)
-    }
-
-    async fn find_descendants(&self, run_id: &LfdId) -> StoreResult<Vec<Run>> {
-        let Some(parent) = self.get_run(run_id).await? else {
-            return Ok(Vec::new());
-        };
-        let descendants = self
-            .list_stack_runs(&parent.wave_id)
-            .await?
-            .into_iter()
-            .filter(|run| {
-                run.stack_group_id == parent.stack_group_id
-                    && run.stack_position > parent.stack_position
-            })
-            .collect();
-        Ok(descendants)
     }
 
     async fn get_live_pr_state(
@@ -1459,12 +1396,12 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest, Repo, RepoEdge, RepoId,
-        Run, RunStackStatus, RunStatus, Summary, Wave, WaveStatus, DEFAULT_WAVE_FLOW,
+        Run, RunStatus, Summary, Wave, WaveStatus, DEFAULT_WAVE_FLOW,
     };
     use crate::task::{
-        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, TaskCommand,
-        TaskCommandKind, TaskCommandSource, TaskEventKind, TaskSession, TaskSessionId,
-        TaskSessionStatus,
+        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
+        PmWritebackState, TaskCommand, TaskCommandKind, TaskCommandSource, TaskEventKind,
+        TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use std::env;
     use std::path::PathBuf;
@@ -1512,12 +1449,6 @@ mod tests {
             flow_parents: Vec::new(),
             execution_cursor: None,
             parent_run_id: None,
-            parent_pr_number: None,
-            stack_position: 0,
-            stack_group_id: wave.id().to_string(),
-            stack_status: RunStackStatus::Active,
-            lineage_inferred: false,
-            target_branch: "main".to_string(),
             repair_of: None,
             pr: None,
         }
@@ -1540,6 +1471,9 @@ mod tests {
                 name: "Developer Efficiency".to_string(),
                 context: "Definition:\nKeep local work fast.".to_string(),
             },
+            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_warning: None,
+            pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             wave: wave.name().to_string(),
             status: TaskSessionStatus::Created,
@@ -1566,7 +1500,12 @@ mod tests {
             .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
-        let session = make_task_session(&wave);
+        let mut session = make_task_session(&wave);
+        session.pm_snapshot_warning = Some("using cached snapshot".to_string());
+        session.pm_writeback = PmWritebackState::Pending {
+            operation: PmWritebackOperation::CompleteTask,
+            error: "Linear unavailable".to_string(),
+        };
         store.create_task_session(&session).await.unwrap();
 
         let loaded = store
@@ -2382,106 +2321,4 @@ mod tests {
         store.delete_wave(wave.id()).await.expect("delete wave");
     }
 
-    #[tokio::test]
-    async fn find_next_unmerged_transitions() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        let config = StorageConfig::sqlite(db_path);
-        let store = super::open_store(&config).await.expect("store should open");
-
-        let wave = make_wave("/repo-live-pr-transitions");
-        store.create_wave(&wave).await.expect("create wave");
-
-        let make_run =
-            |iteration: u32, parent_run_id: Option<LfdId>, parent_pr_number: Option<u32>| {
-                let pr_number = 100 + iteration;
-                Run {
-                    id: LfdId::new(),
-                    wave_id: wave.id().clone(),
-                    repo: wave.repo().to_string(),
-                    flow: DEFAULT_WAVE_FLOW.to_string(),
-                    task: None,
-                    direction: wave.direction().clone(),
-                    area: wave.area().clone(),
-                    iteration,
-                    step_index: 0,
-                    status: RunStatus::Completed,
-                    worktree: format!("/repo/live-pr/{iteration}"),
-                    branch: format!("feature-{pr_number}"),
-                    started_at: Some(OffsetDateTime::now_utc()),
-                    ended_at: Some(OffsetDateTime::now_utc()),
-                    error: None,
-                    flow_parents: Vec::new(),
-                    execution_cursor: None,
-                    parent_run_id,
-                    parent_pr_number,
-                    stack_position: iteration.saturating_sub(1),
-                    stack_group_id: wave.id().to_string(),
-                    stack_status: RunStackStatus::Active,
-                    lineage_inferred: false,
-                    target_branch: "main".to_string(),
-                    repair_of: None,
-                    pr: Some(PullRequest {
-                        url: format!("https://example.test/pr/{pr_number}"),
-                        number: Some(pr_number),
-                        state: Some("open".to_string()),
-                        title: Some(format!("run-{iteration}")),
-                        branch: Some(format!("feature-{pr_number}")),
-                    }),
-                }
-            };
-
-        let make_pr_state =
-            |pr_number: u32, state: LivePrState, head_sha: &str| LivePullRequestState {
-                repo_id: wave.repo().to_string(),
-                pr_number,
-                state,
-                is_draft: false,
-                head_ref: format!("feature-{pr_number}"),
-                head_sha: head_sha.to_string(),
-                base_ref: "main".to_string(),
-                updated_at: OffsetDateTime::now_utc(),
-                merged_at: (state == LivePrState::Merged).then(OffsetDateTime::now_utc),
-                synced_at: OffsetDateTime::now_utc(),
-            };
-
-        let run1 = make_run(1, None, None);
-        store.create_run(&run1).await.expect("create run1");
-
-        let run2 = make_run(2, Some(run1.id.clone()), Some(101));
-        store.create_run(&run2).await.expect("create run2");
-
-        let first_pending = store
-            .find_next_unmerged_run(wave.id())
-            .await
-            .expect("find first unmerged");
-        assert_eq!(first_pending.map(|run| run.id), Some(run1.id.clone()));
-
-        store
-            .upsert_live_pr_state(&make_pr_state(101, LivePrState::Merged, "sha-101"))
-            .await
-            .expect("upsert pr 101 merged");
-        let second_pending = store
-            .find_next_unmerged_run(wave.id())
-            .await
-            .expect("find second unmerged");
-        assert_eq!(second_pending.map(|run| run.id), Some(run2.id.clone()));
-
-        for (state, sha, expected) in [
-            (LivePrState::Closed, "sha-102", Some(run2.id.clone())),
-            (LivePrState::Unknown, "sha-102b", Some(run2.id.clone())),
-            (LivePrState::Merged, "sha-102c", None),
-        ] {
-            store
-                .upsert_live_pr_state(&make_pr_state(102, state, sha))
-                .await
-                .expect("upsert pr state");
-            let pending = store
-                .find_next_unmerged_run(wave.id())
-                .await
-                .expect("find unmerged");
-            assert_eq!(pending.map(|run| run.id), expected);
-        }
-
-        store.delete_wave(wave.id()).await.expect("delete wave");
-    }
 }

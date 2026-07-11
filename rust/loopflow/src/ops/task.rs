@@ -15,8 +15,9 @@ use crate::lfd::id::LfdId;
 use crate::lfdb::{open_existing_store, SharedStore, StoreError};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::task::{
-    LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, TaskCommand, TaskCommandKind,
-    TaskCommandSource, TaskEventKind, TaskSession, TaskSessionStatus,
+    LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
+    PmWritebackState, TaskCommand, TaskCommandKind, TaskCommandSource, TaskEventKind, TaskSession,
+    TaskSessionStatus,
 };
 use sha2::{Digest, Sha256};
 
@@ -51,10 +52,13 @@ pub struct TaskDeliveryView {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TaskSessionSnapshot {
     pub issue_id: String,
-    pub issue_uuid: String,
+    pub issue_identifier: String,
     pub session_id: String,
     pub project_id: String,
     pub project: String,
+    pub pm_snapshot_synced_at: i64,
+    pub pm_snapshot_warning: Option<String>,
+    pub pm_writeback: crate::task::PmWritebackState,
     pub wave: String,
     pub status: String,
     pub status_reason: String,
@@ -109,7 +113,7 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
     })? {
         return Ok(existing);
     }
-    let resolved = crate::ops::pm::pm_resolve_task(repo, issue)?;
+    let resolved = crate::ops::task_pm::resolve_task(repo, issue, crate::ops::pm::PmRefresh::Auto)?;
     let main_repo = main_repo_root(repo).map_err(|error| task_error(error.to_string()))?;
     let segment = WorktreeSegment::parse(&resolved.item.identifier)
         .map_err(|error| task_error(error.to_string()))?;
@@ -141,11 +145,14 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
             return Ok(existing);
         }
         let wave = store
-            .get_wave_by_name(&resolved.wave)
+            .get_wave_by_name(&resolved.snapshot.wave)
             .await
             .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
             .ok_or_else(|| {
-                task_error(format!("owning Wave {:?} is not registered", resolved.wave))
+                task_error(format!(
+                    "owning Wave {:?} is not registered",
+                    resolved.snapshot.wave
+                ))
             })?;
         let now = time::OffsetDateTime::now_utc();
         let mut session = TaskSession {
@@ -165,7 +172,10 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
                 context: project_context(&resolved.project),
             },
             wave_id: wave.id().clone(),
-            wave: resolved.wave.clone(),
+            pm_snapshot_synced_at: resolved.snapshot.synced_at,
+            pm_snapshot_warning: resolved.snapshot.refresh_warning.clone(),
+            pm_writeback: PmWritebackState::Current,
+            wave: resolved.snapshot.wave.clone(),
             status: TaskSessionStatus::Created,
             status_reason: "Linear task reserved before placement".to_string(),
             status_at: now,
@@ -253,31 +263,32 @@ fn project_context(project: &crate::lfd::pm::PmProject) -> String {
 }
 
 pub fn task_start(repo: &Path, title: String, project_id: &str) -> OpsResult<TaskSession> {
-    let project = crate::ops::pm::pm_resolve_project(repo, project_id)?;
+    let project =
+        crate::ops::task_pm::resolve_project(repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
     let marker = format!(
         "<!-- loopflow-task-start:{} -->",
         hex::encode(Sha256::digest(
             format!("{}\0{}", project.project.id, title).as_bytes()
         ))
     );
-    let created = crate::ops::pm::pm_create_task_idempotent(
+    let created = crate::ops::task_pm::create_and_load_task(
         repo,
-        &project.wave,
+        &project.snapshot.wave,
         &project.project.slug,
         &title,
         &marker,
-        &crate::ops::NullProgress,
     )?;
-    task_run(repo, &created.id)
+    task_run(repo, &created.item.id)
 }
 
 pub fn project_run(repo: &Path, project_id: &str) -> OpsResult<ProjectRunResult> {
-    let project = crate::ops::pm::pm_resolve_project(repo, project_id)?;
+    let project =
+        crate::ops::task_pm::resolve_project(repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
     let message = format!(
         "Run Linear Project {} ({}) under wave/{}. Evaluate its definition and KRs, then select or create concrete Linear tasks and execute each through a Task Session.",
-        project.project.name, project.project.id, project.wave
+        project.project.name, project.project.id, project.snapshot.wave
     );
-    let wave = project.wave.clone();
+    let wave = project.snapshot.wave.clone();
     let live = block_on_task(async move {
         crate::lf::commands::chat::post_to_named_wave(&wave, &message)
             .await
@@ -286,7 +297,7 @@ pub fn project_run(repo: &Path, project_id: &str) -> OpsResult<ProjectRunResult>
     Ok(ProjectRunResult {
         project_id: project.project.id,
         project: project.project.name,
-        wave: project.wave,
+        wave: project.snapshot.wave,
         delivery: if live { "live" } else { "queued" }.to_string(),
     })
 }
@@ -452,6 +463,16 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
                 return Ok(session);
             }
         }
+        if session.status == TaskSessionStatus::Merged
+            && matches!(session.pm_writeback, PmWritebackState::Pending { .. })
+        {
+            retry_pm_writeback(&mut session).await;
+            store
+                .update_task_session(&session)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+            return Ok(session);
+        }
         if !session.status.is_process_active() && !session.status.is_terminal() {
             if let Some(pr) = crate::ops::current_or_merged_pr(&session.worktree)? {
                 let from = session.status;
@@ -465,6 +486,7 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
                         TaskSessionStatus::Merged,
                         format!("pull request #{} merged", pr.number),
                     );
+                    reconcile_pm_writeback(&mut session).await;
                     TaskEventKind::Completed {
                         pull_request,
                         summary: "merge observed by task status".to_string(),
@@ -506,6 +528,42 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
     })
 }
 
+async fn reconcile_pm_writeback(session: &mut TaskSession) {
+    let Some(pull_request) = session.pull_request.as_ref() else {
+        return;
+    };
+    session.pm_writeback = match crate::ops::task_pm::complete_task(
+        &session.worktree,
+        &session.wave,
+        session.issue.id.as_str(),
+        &pull_request.url,
+    )
+    .await
+    {
+        Ok(()) => PmWritebackState::Current,
+        Err(error) => PmWritebackState::Pending {
+            operation: PmWritebackOperation::CompleteTask,
+            error: error.to_string(),
+        },
+    };
+}
+
+async fn retry_pm_writeback(session: &mut TaskSession) {
+    session.pm_writeback = match crate::ops::task_pm::retry_complete_task(
+        &session.worktree,
+        &session.wave,
+        session.issue.id.as_str(),
+    )
+    .await
+    {
+        Ok(()) => PmWritebackState::Current,
+        Err(error) => PmWritebackState::Pending {
+            operation: PmWritebackOperation::CompleteTask,
+            error: error.to_string(),
+        },
+    };
+}
+
 pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
     let session = session.clone();
     block_on_task(async move {
@@ -527,11 +585,14 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             .into_iter()
             .last();
         Ok(TaskSessionSnapshot {
-            issue_id: session.issue.identifier,
-            issue_uuid: session.issue.id.as_str().to_string(),
+            issue_id: session.issue.id.as_str().to_string(),
+            issue_identifier: session.issue.identifier,
             session_id: session.id.to_string(),
             project_id: session.project.id.as_str().to_string(),
             project: session.project.slug,
+            pm_snapshot_synced_at: session.pm_snapshot_synced_at,
+            pm_snapshot_warning: session.pm_snapshot_warning,
+            pm_writeback: session.pm_writeback,
             wave: session.wave,
             status: session.status.as_str().to_string(),
             status_reason: session.status_reason,

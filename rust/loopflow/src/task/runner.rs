@@ -497,14 +497,20 @@ async fn finish_abandoned(
 }
 
 fn task_seed(session: &TaskSession) -> String {
+    let snapshot_warning = session
+        .pm_snapshot_warning
+        .as_deref()
+        .map(|warning| format!("\nPM snapshot warning: {warning}"))
+        .unwrap_or_default();
     format!(
-        "Implement Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nBase commit: {base_commit}\nDelivery: one pull request targeting main. Opening the PR submits the task; completion is merge or explicit abandonment.",
+        "Implement Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nPM snapshot synced at: {snapshot_synced_at}{snapshot_warning}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nBase commit: {base_commit}\nDelivery: one pull request targeting main. Opening the PR submits the task; completion is merge or explicit abandonment.",
         identifier = session.issue.identifier,
         title = session.issue.title,
         description = session.issue.description,
         project = session.project.name,
         project_id = session.project.id.as_str(),
         project_context = session.project.context,
+        snapshot_synced_at = session.pm_snapshot_synced_at,
         wave = session.wave,
         session_id = session.id,
         worktree = session.worktree.display(),

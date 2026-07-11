@@ -1,29 +1,9 @@
-# Open questions / assumptions — rebase run
+# Assumptions
 
-## Concurrent agent active in this worktree (observed 2026-07-10)
-
-During the rebase onto `origin/main` (`05c3a551`), another process was live in
-this same worktree:
-
-- My initial `git log main..HEAD` showed HEAD at `734ccb86` (6 branch commits).
-- By rebase time, HEAD had advanced to `56d37321` — a concurrent process had
-  added two commits: `lf pm: connect infrastructure to linear` and
-  `lf pm: connect intelligence to linear`.
-- After the rebase completed cleanly, fresh **uncommitted** edits appeared in
-  the tree: `rust/loopflow/src/lfd/pm/linear.rs`, `rust/loopflow/src/ops/pm.rs`.
-
-**What I did:** rebased all 8 branch commits (6 original + 2 pm) onto
-`05c3a551`. No conflicts. Net branch-vs-main diff is byte-identical to the
-pre-rebase net diff, so the rebase preserved intent and added only main's one
-new commit (`bytes` bump #859). The concurrent agent's uncommitted pm edits are
-untouched by the rebase (they were written after it) and remain in the tree.
-
-**Assumption / decision:** pushed with `--force-with-lease` so the push aborts
-safely if the remote branch moved under me. The concurrent agent's in-flight
-pm work is local and unpushed, so my push does not clobber it; when that agent
-commits, it builds on the rebased HEAD. If the lease rejects the push, the
-concurrent driver pushed first — do not re-force; reconcile by hand.
-
-I did **not** stash-pop the earlier `.lf/metrics/ops.jsonl` snapshot
-(`stash@{0}`) — it is a stale metrics artifact and the file has a live writer;
-popping risks clobbering concurrent appends.
+- `PmRefresh::Auto` treats snapshots up to 15 minutes old as fresh, permits a
+  cached fallback up to 24 hours old when refresh fails, and rejects older
+  snapshots. The design requires bounded fresh/soft-stale/hard-stale behavior
+  but does not specify durations; these fixed values avoid a new config knob.
+- The existing Linear marker in `task start` is the idempotency receipt for the
+  current provider API. If task creation commits but snapshot refresh fails, a
+  retry finds the same marked issue before attempting another create.

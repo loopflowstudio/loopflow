@@ -572,14 +572,21 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
         let snapshot = loopflow::ops::task::task_snapshot(session)?;
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
+        let pm_writeback = match &session.pm_writeback {
+            loopflow::task::PmWritebackState::Current => "current".to_string(),
+            loopflow::task::PmWritebackState::Pending { error, .. } => {
+                format!("pending: {error}")
+            }
+        };
         println!(
-            "{}  {}  {}\n  session: {}\n  worktree: {}\n  branch: {}\n  reason: {}",
+            "{}  {}  {}\n  session: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             session.issue.identifier,
             session.status.as_str(),
             session.provider,
             session.id,
             session.worktree.display(),
             session.branch,
+            pm_writeback,
             session.status_reason,
         );
     }

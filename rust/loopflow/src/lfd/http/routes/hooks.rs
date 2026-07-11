@@ -43,7 +43,7 @@ use crate::lfd::http::{api_error, ApiMessage, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{Run, Wave, CI_FIX_FLOW};
 use crate::lfdb::SharedStore;
-use crate::task::{TaskEventKind, TaskSessionStatus};
+use crate::task::{PmWritebackOperation, PmWritebackState, TaskEventKind, TaskSessionStatus};
 
 #[derive(Debug, Clone)]
 struct WaveCiTarget {
@@ -252,6 +252,20 @@ async fn complete_merged_task_sessions(
             TaskSessionStatus::Merged,
             format!("pull request #{pr_number} merged"),
         );
+        session.pm_writeback = match crate::ops::task_pm::complete_task(
+            Path::new(wave.repo()),
+            &session.wave,
+            session.issue.id.as_str(),
+            &pull_request.url,
+        )
+        .await
+        {
+            Ok(()) => PmWritebackState::Current,
+            Err(error) => PmWritebackState::Pending {
+                operation: PmWritebackOperation::CompleteTask,
+                error: error.to_string(),
+            },
+        };
         store
             .update_task_session(&session)
             .await
@@ -624,8 +638,8 @@ mod tests {
     use crate::lfd::types::{PullRequest, RunStackStatus, RunStatus, WaveStatus};
     use crate::lfdb::{open_store, StorageConfig};
     use crate::task::{
-        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PullRequestRef,
-        TaskSession, TaskSessionId,
+        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackState,
+        PullRequestRef, TaskSession, TaskSessionId,
     };
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -738,6 +752,9 @@ mod tests {
                 name: "Delivery".to_string(),
                 context: "Definition:\nShip task sessions.".to_string(),
             },
+            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_warning: None,
+            pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             wave: wave.name().to_string(),
             status: TaskSessionStatus::Submitted,
@@ -976,6 +993,13 @@ mod tests {
             .expect("read task")
             .expect("task remains");
         assert_eq!(merged.status, TaskSessionStatus::Merged);
+        assert!(matches!(
+            merged.pm_writeback,
+            PmWritebackState::Pending {
+                operation: PmWritebackOperation::CompleteTask,
+                ..
+            }
+        ));
         let (_, events) =
             crate::wave::journal::Journal::open(&crate::wave::journal::journal_path(&repo, "ship"))
                 .expect("wave journal");

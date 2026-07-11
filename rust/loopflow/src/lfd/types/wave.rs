@@ -95,29 +95,6 @@ impl RunStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum RunStackStatus {
-    #[default]
-    Active = 1,
-    Superseded = 2,
-    Merged = 3,
-}
-
-impl RunStackStatus {
-    pub fn from_i32(value: i32) -> Self {
-        match value {
-            2 => Self::Superseded,
-            3 => Self::Merged,
-            _ => Self::Active,
-        }
-    }
-
-    pub fn as_i32(&self) -> i32 {
-        *self as i32
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
 pub enum LivePrState {
     #[default]
     Unknown = 0,
@@ -311,17 +288,6 @@ pub struct Run {
     #[serde(skip)]
     pub execution_cursor: Option<String>,
     pub parent_run_id: Option<LfdId>,
-    pub parent_pr_number: Option<u32>,
-    pub stack_position: u32,
-    pub stack_group_id: String,
-    #[serde(default)]
-    pub stack_status: RunStackStatus,
-    #[serde(default)]
-    pub lineage_inferred: bool,
-    /// The branch this run targets. "main" means new branch off main (produce
-    /// PR). Any other value means check out that branch and push to it (no PR).
-    #[serde(default = "default_target_branch")]
-    pub target_branch: String,
     /// When set, this run is a repair attempt for the referenced failed run.
     /// Written by dispatchers that retry failed work; nothing acts on it
     /// automatically since the repair chain died with the daemon's organs.
@@ -329,10 +295,6 @@ pub struct Run {
     /// The pull request created or associated with this run.
     /// Set when the run creates a PR (auto-create or land --create-pr).
     pub pr: Option<PullRequest>,
-}
-
-fn default_target_branch() -> String {
-    "main".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -354,7 +316,6 @@ pub struct LivePullRequestState {
 
 impl Run {
     pub fn new(id: LfdId, wave_id: LfdId) -> Self {
-        let stack_group_id = wave_id.to_string();
         Self {
             id,
             wave_id,
@@ -374,12 +335,6 @@ impl Run {
             flow_parents: Vec::new(),
             execution_cursor: None,
             parent_run_id: None,
-            parent_pr_number: None,
-            stack_position: 0,
-            stack_group_id,
-            stack_status: RunStackStatus::Active,
-            lineage_inferred: false,
-            target_branch: "main".to_string(),
             repair_of: None,
             pr: None,
         }

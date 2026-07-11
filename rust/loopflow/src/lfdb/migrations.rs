@@ -291,8 +291,15 @@ const ALL_MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/062_task_sessions.sql"),
     },
     Migration {
+        // Like the two 016 migrations, the full version string is the key.
+        // Keep this name stable because task-session dogfood databases may
+        // already have it recorded.
         version: "062_task_project_context",
         sql: include_str!("migrations/062_task_project_context.sql"),
+    },
+    Migration {
+        version: "064_task_pm_receipt",
+        sql: include_str!("migrations/064_task_pm_receipt.sql"),
     },
 ];
 

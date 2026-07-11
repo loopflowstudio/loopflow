@@ -1501,10 +1501,12 @@ impl SqliteStore {
                 status, status_reason, status_at, worktree, branch, base_commit,
                 agent, provider, provider_session_id, process_generation, process_pid,
                 process_tmux_name, process_started_at, pr_number, pr_url,
-                created_at, updated_at
+                created_at, updated_at, pm_snapshot_synced_at,
+                pm_snapshot_warning, pm_writeback_json
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
+                ?29, ?30, ?31
              )",
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
@@ -1535,10 +1537,12 @@ impl SqliteStore {
                 status, status_reason, status_at, worktree, branch, base_commit,
                 agent, provider, provider_session_id, process_generation, process_pid,
                 process_tmux_name, process_started_at, pr_number, pr_url,
-                created_at, updated_at
+                created_at, updated_at, pm_snapshot_synced_at,
+                pm_snapshot_warning, pm_writeback_json
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
+                ?29, ?30, ?31
              )",
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
@@ -1557,7 +1561,9 @@ impl SqliteStore {
                 worktree=?15, branch=?16, base_commit=?17, agent=?18, provider=?19,
                 provider_session_id=?20, process_generation=?21, process_pid=?22,
                 process_tmux_name=?23, process_started_at=?24, pr_number=?25,
-                pr_url=?26, created_at=?27, updated_at=?28
+                pr_url=?26, created_at=?27, updated_at=?28,
+                pm_snapshot_synced_at=?29, pm_snapshot_warning=?30,
+                pm_writeback_json=?31
              WHERE id=?1",
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
@@ -2393,7 +2399,8 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
     status, status_reason, status_at, worktree, branch, base_commit,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
-    created_at, updated_at
+    created_at, updated_at, pm_snapshot_synced_at,
+    pm_snapshot_warning, pm_writeback_json
     FROM task_sessions";
 const TASK_SESSION_SELECT: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
@@ -2401,7 +2408,8 @@ const TASK_SESSION_SELECT: &str = "SELECT
     status, status_reason, status_at, worktree, branch, base_commit,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
-    created_at, updated_at
+    created_at, updated_at, pm_snapshot_synced_at,
+    pm_snapshot_warning, pm_writeback_json
     FROM task_sessions WHERE id = ?1";
 
 fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
@@ -2464,6 +2472,12 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         ),
         Box::new(session.created_at.unix_timestamp()),
         Box::new(session.updated_at.unix_timestamp()),
+        Box::new(session.pm_snapshot_synced_at),
+        Box::new(session.pm_snapshot_warning.clone()),
+        Box::new(
+            serde_json::to_string(&session.pm_writeback)
+                .expect("Task Session PM writeback state must serialize"),
+        ),
     ]
 }
 
@@ -2513,6 +2527,10 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
             name: row.get(7)?,
             context: row.get(8)?,
         },
+        pm_snapshot_synced_at: row.get(28)?,
+        pm_snapshot_warning: row.get(29)?,
+        pm_writeback: serde_json::from_str(&row.get::<_, String>(30)?)
+            .map_err(|error| invalid_column(30, error))?,
         wave_id: LfdId::from_raw(row.get::<_, String>(9)?),
         wave: row.get(10)?,
         status,

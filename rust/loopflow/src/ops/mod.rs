@@ -12,6 +12,7 @@ pub mod project;
 mod rebase;
 mod release;
 pub mod task;
+pub(crate) mod task_pm;
 pub mod trace;
 pub(crate) mod util;
 

@@ -2,142 +2,14 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
-use tracing::warn;
-
-use time::OffsetDateTime;
-
-use crate::engine::git::{
-    fetch, get_default_branch, is_ancestor, rev_parse, sync_main, worktree_add, WorktreeBranch,
-};
+use crate::engine::git::{get_default_branch, sync_main, worktree_add, WorktreeBranch};
 use crate::engine::worktrees::{
-    branch_exists, ensure_wave_worktree as ensure_wave_worktree_lease, schedule_upstream_sync,
-    worker_id, worktree_dir,
+    ensure_wave_worktree as ensure_wave_worktree_lease, schedule_upstream_sync, worker_id,
+    worktree_dir,
 };
 
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{
-    Run, RunStackStatus, RunStatus, Session, Wave, WaveStatus, DEFAULT_WAVE_FLOW,
-};
-use crate::lfdb::SharedStore;
-
-// TODO(M1): extract dispatch into crate::dispatch. lfd/executor should not own
-// placement, worktree creation, tmux launch wiring, or the run env contract.
-/// Where a dispatched run's work happens on disk.
-///
-/// Every dispatch names its placement explicitly — there is no implicit
-/// shared-vs-per-run heuristic.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Placement {
-    /// New `<repo>.<wave>.<short-run-id>` worktree off the default branch;
-    /// independent branch, independent PR, independent land.
-    Fresh,
-    /// New worktree whose branch forks from the parent run's branch, for
-    /// dependent series. Branch lineage carries the stack; the filesystem
-    /// stays flat.
-    Stack { parent_run_id: LfdId },
-}
-
-/// Create a run with a worktree and branch chosen by `placement`.
-pub async fn create_run_for_placement(
-    store: &SharedStore,
-    wave: &Wave,
-    run_id: &LfdId,
-    placement: &Placement,
-) -> anyhow::Result<Run> {
-    let stack_runs = store.list_stack_runs(wave.id()).await?;
-    let last_run = stack_runs.last().cloned();
-    let iteration = last_run.as_ref().map(|run| run.iteration + 1).unwrap_or(0);
-
-    // Lineage: stacked runs fork from their named parent; fresh
-    // runs continue the wave's linear chain (the existing land queue order).
-    let lineage_parent = match placement {
-        Placement::Stack { parent_run_id } => Some(
-            store
-                .get_run(parent_run_id)
-                .await?
-                .ok_or_else(|| anyhow!("stack parent run not found: {parent_run_id}"))?,
-        ),
-        Placement::Fresh => last_run,
-    };
-    let stack_position = lineage_parent
-        .as_ref()
-        .map(|run| run.stack_position + 1)
-        .unwrap_or(0);
-    let parent_run_id = lineage_parent.as_ref().map(|run| run.id.clone());
-    let parent_pr_number = lineage_parent
-        .as_ref()
-        .and_then(|run| run.pr.as_ref())
-        .and_then(|pr| pr.number);
-    let stack_group_id = lineage_parent
-        .as_ref()
-        .map(|run| run.stack_group_id.clone())
-        .unwrap_or_else(|| wave.id().to_string());
-
-    let main_repo = Path::new(&wave.repo);
-
-    let ((wt_path, branch), run_target_branch) = match placement {
-        Placement::Fresh => (
-            create_run_worktree(main_repo, wave.name(), run_id.as_str())?,
-            "main".to_string(),
-        ),
-        Placement::Stack { .. } => {
-            let parent = lineage_parent
-                .as_ref()
-                .expect("stack placement resolved its parent above");
-            (
-                create_stacked_run_worktree(
-                    main_repo,
-                    wave.name(),
-                    run_id.as_str(),
-                    &parent.branch,
-                )?,
-                parent.branch.clone(),
-            )
-        }
-    };
-
-    let run = Run {
-        id: run_id.clone(),
-        wave_id: wave.id().clone(),
-        repo: wave.repo.clone(),
-        flow: DEFAULT_WAVE_FLOW.to_string(),
-        task: None,
-        direction: wave.direction().clone(),
-        area: wave.area().clone(),
-        iteration,
-        step_index: 0,
-        status: RunStatus::Running,
-        worktree: wt_path,
-        branch,
-        started_at: Some(OffsetDateTime::now_utc()),
-        ended_at: None,
-        error: None,
-        flow_parents: Vec::new(),
-        execution_cursor: None,
-        parent_run_id,
-        parent_pr_number,
-        stack_position,
-        stack_group_id,
-        stack_status: RunStackStatus::Active,
-        lineage_inferred: false,
-        target_branch: run_target_branch,
-        repair_of: None,
-        pr: None,
-    };
-    store.create_run(&run).await?;
-    if let Ok(Some(mut wave)) = store.get_wave(wave.id()).await {
-        // New cycle: record the starting iteration for max_iterations safety valve.
-        if wave.status == WaveStatus::Idle || wave.status == WaveStatus::Paused {
-            wave.cycle_start_iteration = iteration;
-        }
-        wave.status = WaveStatus::Running;
-        wave.iteration = iteration;
-        if let Err(err) = store.update_wave(&wave).await {
-            warn!(wave_id = %wave.id(), error = %err, "failed to set wave status to running");
-        }
-    }
-    Ok(run)
-}
+use crate::lfd::types::{RunStatus, Session};
 
 /// Create a worktree for this wave, or reuse the existing one.
 pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result<(String, String)> {
@@ -169,67 +41,6 @@ pub(crate) fn create_run_worktree(
     )?;
     schedule_upstream_sync(run_wt.clone(), branch.clone());
     Ok((run_wt.to_string_lossy().to_string(), branch))
-}
-
-/// Create a run-scoped worker worktree whose branch forks from `parent_branch`.
-///
-/// Stack placement: the new branch starts at the parent run's branch tip
-/// (remote tip when available), so dependent work builds on unlanded work.
-pub(crate) fn create_stacked_run_worktree(
-    main_repo: &Path,
-    wave_name: &str,
-    run_id: &str,
-    parent_branch: &str,
-) -> anyhow::Result<(String, String)> {
-    let id = worker_id(main_repo, wave_name, run_id)?;
-    let run_wt = worktree_dir(main_repo, &id);
-
-    let _ = fetch(main_repo, "origin", parent_branch);
-    let remote_ref = format!("origin/{parent_branch}");
-    let local_exists = branch_exists(main_repo, parent_branch)?;
-    let remote_exists = rev_parse(main_repo, &remote_ref).is_ok();
-    // Fork from the freshest tip: the parent run's unpushed local commits
-    // must reach the stack, so the local branch wins unless it is strictly
-    // behind the remote (absent, or all its commits already on origin).
-    let start_point = match (local_exists, remote_exists) {
-        (false, false) => {
-            return Err(anyhow!("stack parent branch not found: {parent_branch}"));
-        }
-        (true, false) => parent_branch.to_string(),
-        (false, true) => remote_ref,
-        (true, true) => {
-            if local_strictly_behind(main_repo, parent_branch, &remote_ref)? {
-                remote_ref
-            } else {
-                parent_branch.to_string()
-            }
-        }
-    };
-
-    let branch = id.branch();
-    worktree_add(
-        main_repo,
-        &run_wt,
-        &branch,
-        WorktreeBranch::New {
-            start_point: &start_point,
-        },
-    )?;
-    schedule_upstream_sync(run_wt.clone(), branch.clone());
-    Ok((run_wt.to_string_lossy().to_string(), branch))
-}
-
-/// Whether `local` is strictly behind `remote_ref`: the remote has commits
-/// the local branch lacks and the local branch has none of its own. Equal,
-/// ahead, or diverged all read as "not behind" — the local tip carries
-/// everything the remote does (or more).
-fn local_strictly_behind(repo: &Path, local: &str, remote_ref: &str) -> anyhow::Result<bool> {
-    let local_sha = rev_parse(repo, local)?;
-    let remote_sha = rev_parse(repo, remote_ref)?;
-    if local_sha == remote_sha {
-        return Ok(false);
-    }
-    Ok(is_ancestor(repo, &local_sha, &remote_sha)?)
 }
 
 pub(crate) fn is_active_run_status(status: RunStatus) -> bool {
@@ -511,8 +322,7 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        create_stacked_run_worktree, ensure_wave_worktree, is_ephemeral_worktree_path,
-        tmux_shell_command, TMUX_EXIT_TAIL,
+        ensure_wave_worktree, is_ephemeral_worktree_path, tmux_shell_command, TMUX_EXIT_TAIL,
     };
     use crate::engine::worktrees::worktree_path as wave_worktree_path;
     use crate::lfd::id::LfdId;
@@ -622,73 +432,6 @@ mod tests {
             "exit code lands in the session's exit file: {wrapper}"
         );
         assert!(wrapper.ends_with(TMUX_EXIT_TAIL));
-    }
-
-    #[test]
-    fn stacked_worktree_forks_from_local_parent_when_ahead_of_origin() {
-        let (_temp, main_repo, _origin) = setup_repo_with_remote();
-
-        // Parent branch pushed, then one MORE local commit never pushed.
-        run_git(&main_repo, &["checkout", "-b", "parent-branch"]);
-        write_file(&main_repo.join("pushed.txt"), "pushed\n");
-        run_git(&main_repo, &["add", "."]);
-        run_git(&main_repo, &["commit", "-m", "pushed work"]);
-        run_git(&main_repo, &["push", "-u", "origin", "parent-branch"]);
-        write_file(&main_repo.join("local-only.txt"), "local only\n");
-        run_git(&main_repo, &["add", "."]);
-        run_git(&main_repo, &["commit", "-m", "local-only work"]);
-        run_git(&main_repo, &["checkout", "main"]);
-
-        let (worktree, _branch) =
-            create_stacked_run_worktree(&main_repo, "wave", "a1b2c3d4e5f6", "parent-branch")
-                .expect("stacked worktree");
-
-        assert!(
-            Path::new(&worktree).join("local-only.txt").exists(),
-            "the stack must fork from the local tip when it is ahead of origin"
-        );
-    }
-
-    #[test]
-    fn stacked_worktree_forks_from_origin_when_local_is_behind() {
-        let (_temp, main_repo, origin) = setup_repo_with_remote();
-
-        run_git(&main_repo, &["checkout", "-b", "parent-branch"]);
-        write_file(&main_repo.join("pushed.txt"), "pushed\n");
-        run_git(&main_repo, &["add", "."]);
-        run_git(&main_repo, &["commit", "-m", "pushed work"]);
-        run_git(&main_repo, &["push", "-u", "origin", "parent-branch"]);
-        run_git(&main_repo, &["checkout", "main"]);
-
-        // A collaborator advances the branch on origin; local is now behind.
-        let collaborator = main_repo
-            .parent()
-            .expect("main repo parent")
-            .join("collaborator-stack");
-        run_git(
-            main_repo.parent().expect("main repo parent"),
-            &[
-                "clone",
-                origin.to_str().unwrap_or(""),
-                collaborator.to_str().unwrap_or(""),
-            ],
-        );
-        run_git(&collaborator, &["config", "user.email", "test@example.com"]);
-        run_git(&collaborator, &["config", "user.name", "Test User"]);
-        run_git(&collaborator, &["checkout", "parent-branch"]);
-        write_file(&collaborator.join("remote-only.txt"), "remote only\n");
-        run_git(&collaborator, &["add", "."]);
-        run_git(&collaborator, &["commit", "-m", "remote-only work"]);
-        run_git(&collaborator, &["push"]);
-
-        let (worktree, _branch) =
-            create_stacked_run_worktree(&main_repo, "wave", "b2c3d4e5f6a1", "parent-branch")
-                .expect("stacked worktree");
-
-        assert!(
-            Path::new(&worktree).join("remote-only.txt").exists(),
-            "a strictly-behind local branch must yield to origin's tip"
-        );
     }
 
     #[test]

@@ -231,5 +231,4 @@ mod tests {
         assert!(!is_ephemeral_worktree_path("/tmp/repo.wave.release"));
         assert!(!is_ephemeral_worktree_path("/tmp/repo.wave.a1b2"));
     }
-
 }

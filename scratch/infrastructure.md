@@ -2,16 +2,17 @@
 
 ## What to build
 
-Make Wave, Project, and Task the core Loopflow lifecycle. A Wave remains a
-stable, directly steerable coordinator in its permanent home. Every concrete
-change begins as a Linear task and runs in one durable Task Session with an
-immutable worktree, its own provider transcript, structured Wave controls, and
-one PR to `main`.
+Finish the terminal-first Wave-to-Task control contract. The broad lifecycle
+redesign is already implemented: Linear-backed Task Sessions own immutable
+worktrees, resumable provider sessions, durable commands/events, and one PR to
+`main`; the competing generic-loop, rotation, stacking, queue, sandbox, and
+`lfd` exec paths are gone.
 
-The MVP replaces the competing generic-loop, placement, stacking, queue, and
-wave-shipping APIs in one migration. It is intentionally an ambitious PR:
-shipping half of this API would leave two answers for how work starts and make
-every following change pay conversion cost again.
+This remaining slice has six jobs: deliver typed Task observations to the Wave,
+add Task-to-Wave decisions, prove provider behavior with one conformance suite,
+dogfood the complete lifecycle, close the turn-boundary command race, and make
+durable receipts explicitly waitable. Do not reopen placement, delivery,
+remote execution, or Swift UI design while completing this slice.
 
 > “The standard way to execute a task should basically be to create the Linear
 > task and then just pass the Linear ID to the task.”
@@ -41,24 +42,198 @@ unrelated conversation.
 > “We are trying to make LoopFlow work as well as possible for me and no other
 > developers.”
 
-## Already true on this branch
+## Implementation baseline
 
-The first reduction slice is implementation, not future scope:
+Preserve this working implementation rather than redesigning it again:
 
-- Wave rotation (`lf op next`, wire route, Swift action) is deleted.
-- `lfq`, both generic exec doors, the shared exec engine, and subagent token
-  plumbing are deleted.
-- Loopflow-owned passes launch trusted and unsandboxed in their isolated
-  worktrees.
-- The focused Rust library suite passes after those deletions.
+- `lf task run/start/status/follow-up/steer/interrupt/wait/resume/attach/abandon`
+  operate on one durable Task Session per Linear issue.
+- Task commands persist `persisted`, `claimed`, `accepted`, `failed`, or
+  `superseded` state and record `live_steer`, `next_turn`, or `replacement` as
+  the actual effect.
+- Codex receives live steering when a turn is active. Claude and OpenCode are
+  interrupted and resumed in the same provider session.
+- Interrupt-with-replacement transactionally supersedes unaccepted input.
+- Process generations reclaim unresolved commands after process death.
+- A foreign Wave is refused before command persistence; an unattributed local
+  process is the explicit human escape hatch.
+- Task state, PM writeback, PR lifecycle, worktree identity, and provider
+  session identity survive process restarts.
+- Rotation, `lfq`, generic `lfd` execution, sandbox workers, generic loops,
+  stacks, queues, and project markdown mirrors are removed.
 
-That slice has already removed 1,356 lines from the working tree; stale-symbol
-searches for rotation and `lfq` are clean. Preserve those deletions while the
-larger lifecycle replaces the remaining paths.
+The focused `cargo test -p loopflow task_` suite currently passes 20 tests.
+Those tests prove persistence and local state transitions, not the six product
+behaviors below.
 
-The rest of this document specifies the large MVP still to build. The old
-foreground Wave-epoch design is superseded; do not implement resident-seat
-transfer or harness cwd rebinding.
+## Remaining MVP slice
+
+### 1. Typed Task observations in the Wave
+
+Replace prose calls to `post_to_named_wave("Task …")` with one typed,
+idempotent observation path. The Task ledger remains authoritative; the Wave
+journal records the observation needed to preserve its conversation and wake
+its resident.
+
+```rust
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskObservation {
+    pub session_id: TaskSessionId,
+    pub issue_identifier: String,
+    pub event_id: i64,
+    pub event: TaskEventKind,
+}
+
+pub enum wave::journal::EventKind {
+    // existing variants
+    TaskObserved { observation: TaskObservation },
+}
+
+pub enum InboxItem {
+    Message(PendingMessage),
+    Task(TaskObservation),
+    Interrupt,
+    Skip,
+}
+```
+
+The Wave server is the sole journal writer. A Task publishes an observation
+through a narrow local command/door carrying `(session_id, event_id)`; replay
+or retry deduplicates on that pair. The resident receives the typed inbox item,
+renders a compact structured prompt, and either wakes once while idle or queues
+behind the active Wave turn. It does not masquerade as human speech and does
+not copy raw tool chatter.
+
+Project these events: command state changes, decision requests/resolutions,
+status changes, PR opened, completed, and failed. Progress remains in the Task
+ledger unless explicitly requested by the Wave.
+
+### 2. Task-to-Wave decisions
+
+Add one decision protocol instead of a second approval framework. The first
+use is Task plan approval.
+
+```rust
+string_id!(TaskDecisionId, "td_");
+
+pub enum TaskEventKind {
+    // existing variants
+    DecisionRequested {
+        decision_id: TaskDecisionId,
+        prompt: String,
+        options: Vec<String>,
+    },
+    DecisionResolved {
+        decision_id: TaskDecisionId,
+        choice: String,
+        message: Option<String>,
+    },
+}
+
+pub enum TaskCommandKind {
+    // existing variants
+    Decide {
+        decision_id: TaskDecisionId,
+        choice: String,
+        message: Option<String>,
+    },
+}
+```
+
+A request is durable before the Task stops advancing. The owning Wave receives
+it as a typed observation and answers with `lf task decide`; foreign Waves are
+refused by the existing ownership rule. The runner accepts exactly one answer,
+continues the same Task Session/provider transcript, and records a linked
+resolution. A duplicate answer returns the existing resolution rather than
+starting another provider turn. Human intervention remains possible through
+the same explicit unattributed escape hatch.
+
+### 3. Provider conformance suite
+
+Build one parameterized suite at the `Harness` boundary. Exercise Codex,
+Claude, and OpenCode through their real adapters with scripted protocol peers;
+do not fork the Task runner or encode provider names in orchestration logic.
+
+Every adapter must pass:
+
+1. live redirect;
+2. gentle follow-up;
+3. interrupt-and-replacement supersession;
+4. completion-boundary delivery;
+5. crash recovery at persist, claim, and provider acceptance;
+6. owning-Wave/foreign-Wave/human source rules;
+7. decision request and response;
+8. automatic typed Wave observation;
+9. parallel targeting without cross-talk;
+10. interrupt, abandon, and resume as distinct lifecycle operations.
+
+Codex should report `live_steer`; Claude and OpenCode should report
+`replacement`. Provider-specific live smoke tests may remain opt-in, but the
+deterministic conformance suite must run in the normal Rust gate.
+
+### 4. End-to-end dogfood
+
+Exercise the real path once with a deliberately small Linear task:
+
+```text
+Wave creates/selects Linear issue
+→ lf task run <issue>
+→ Wave sends follow-up and steer
+→ Task requests and receives one decision
+→ Task opens a PR to main
+→ review feedback resumes the same Task Session
+→ PR merges
+→ Linear completion reconciles
+→ Wave receives one typed completion
+```
+
+Capture the issue identifier, Task Session id, command ids/effects, provider
+session id before and after resume, PR, and final Wave journal event in the PR
+notes. This is an explicit side-effecting manual gate, not an automated test.
+
+### 5. Atomic turn-boundary delivery
+
+Remove the correctness dependency on a 200 ms poll and a two-second client
+wait. The runner must atomically choose between claiming work and becoming
+inactive.
+
+```rust
+pub enum BoundaryResult {
+    Commands(Vec<TaskCommand>),
+    Stopped(TaskSession),
+}
+
+async fn claim_commands_or_stop(
+    session_id: &TaskSessionId,
+    generation: u32,
+    stopped_status: TaskSessionStatus,
+    reason: &str,
+) -> StoreResult<BoundaryResult>;
+```
+
+In one SQLite transaction, verify the process generation, claim all unresolved
+commands, and return them; or, only when none exist, transition the generation
+out of the active state. Command insertion then observes either an active
+generation that cannot stop without seeing the command or an inactive session
+that it must reserve and relaunch. `follow-up` receives the same guarantee as
+`steer`; no caller-side sleep is part of correctness.
+
+### 6. Explicitly waitable receipts
+
+Keep command submission and command resolution separate. Submission always
+returns the current durable receipt. Add a read/wait API keyed by command id:
+
+```text
+lf task receipt tc_123 --json
+lf task receipt tc_123 --wait --timeout 30s --json
+```
+
+`--wait` returns on `accepted`, `failed`, or `superseded`; timeout returns the
+latest truthful nonterminal receipt and a distinct timeout exit status. Waiting
+uses store notification/polling and never calls an LM. Existing `steer` and
+`interrupt` may retain their convenient short wait, but callers can always
+recover and continue waiting by command id. Swift later consumes this same JSON
+shape rather than inventing another receipt model.
 
 ## The demo
 
@@ -863,66 +1038,46 @@ or task execution API in machine `lfd`. Remote execution may later transport
 the same typed Task controls over SSH or a narrow receiver, but local MVP does
 not keep a speculative proxy.
 
-## Large MVP implementation
+## Remaining implementation order
 
-One PR should deliver the complete independent-task lifecycle:
+Complete the six remaining behaviors without reopening the shipped lifecycle:
 
-1. Rebase onto the landed product PM branch and verify the snapshot freshness,
-   mutation-refresh, identifier, and init-seeding integration points above.
-2. Add the narrow `task_pm` adapter, with removal TODOs only for confirmed
-   in-flight PM return-shape/init gaps.
-3. Add Linear-backed Project/Task CLI verbs and JSON contracts composed from
-   `PmShowResult`, `PmProject`, and `PmItem`.
-4. Add `TaskSession`, statuses, commands, events, persistence, reservations,
-   and process generations.
-5. Add sibling task placement from `main` and one-PR delivery.
-6. Add the steerable task runner and provider-neutral control behavior.
-7. Add tmux launch, writable attach/control prompt, liveness, resume, wait, and
-   cleanup.
-8. Fold Task control/result events into the Wave journal and status.
-9. Update built-in Wave/Project/Task skills to create records before execution
-   and supervise Task Sessions.
-10. Move Swift to the CLI JSON contract for the MVP fields it displays.
-11. Remove every old public path that competes with the new lifecycle.
-12. Migrate the local sqlite schema and dogfood the hello-world path.
+1. Make boundary settlement atomic and add receipt read/wait. These establish
+   the command-delivery primitive every later test relies on.
+2. Add typed Task observations to the Wave journal/inbox and replace every
+   prose Task notification producer.
+3. Add decision request/response on that typed path.
+4. Build the provider-neutral conformance suite and fix adapters until all ten
+   scenarios pass for Codex, Claude, and OpenCode.
+5. Run the full repository gate and Mitchell Hashimoto-style ownership/failure
+   review. Delete any compatibility or provider-special-case code the slice
+   made unnecessary.
+6. Perform the explicit live dogfood lifecycle and record its evidence.
 
-Target at most roughly 5,000 added or substantially rewritten implementation
-lines, excluding mechanical test fixtures and code deletion. The PR should be
-net-negative or close to it because the old generic/stacked paths disappear.
+This is infrastructure-only. Swift continues to display the existing Task
+Session projection; its richer Task inspector and event rendering follow after
+the terminal contract is proven. No new server, task-specific HTTP service,
+remote transport, placement option, or delivery mode belongs in this slice.
 
 ## Code removed or simplified
 
-### Already removed on this branch
+The broad reduction is complete: rotation, `lfq`, generic exec/loop APIs,
+detached-loop DTOs, stack placement and delivery, queue reconciliation,
+`combine_prs`, wave landing, sandbox execution, project markdown mirrors, and
+their Swift surfaces are gone. Treat their absence as an invariant.
 
-- `ops::next` and wave rotation wire/Swift surfaces.
-- `lfq` binary and library.
-- machine and per-wave generic exec routes.
-- shared exec engine, subagent token, and sandbox escape door.
+The remaining slice should delete or reduce:
 
-### Remove in the large MVP
-
-- Public `lf loop` and `lf loop --detach` task/project lifecycle.
-- `/loops`, `DetachedLoopRequest`, `DetachedLoopResponse`, and generic detached
-  launch authorization.
-- `flowloop/driver.rs`, `flowloop/pass.rs`, and `flowloop/run.rs` once their
-  useful caps/termination behavior lives in Task Sessions.
-- `Placement::Stack`, `PlacementRequest::Stack`, child/stack placement plans,
-  and public `--stack`, `--child`, `--fork`, and generic `--place` work-start
-  flags.
-- Stack queue operations, attention projections, repair/inference, DTOs, and
-  tests.
-- `RunStackStatus`, `stack_position`, `stack_group_id`, `parent_pr_number`,
-  `lineage_inferred`, and arbitrary `target_branch` from the active run model.
-- `combine_prs` and branch-name-substring PR discovery.
-- Direct wave landing, wave PR state, wave-home post-merge reconciliation, and
-  remote tracking for wave anchor branches.
-- Any Swift session lifecycle or mutation stubs whose only caller was the old
-  HTTP/placement model.
-- The branch's temporary edits under `wave/*/projects/`; accept the product
-  branch's deletion and move those roadmap changes through `lf pm` after its PM
-  API lands.
-- Documentation, prompts, and tests teaching rotation, generic detached loops,
-  stacks, queues, sandbox workers, or task work in wave homes.
+- every prose `post_to_named_wave("Task …")` notification once typed Task
+  observations own delivery;
+- the two-second command-resolution wait as a correctness mechanism;
+- duplicated boundary checks split between runner and control caller;
+- provider-name branches in conformance behavior, if any appear—the Harness
+  capability contract owns the difference;
+- any decision-specific approval path that duplicates the Task command/event
+  state machine;
+- test-only production abstractions added to script providers; protocol peers
+  belong under test configuration instead.
 
 ### Reduce to one implementation
 
@@ -1051,39 +1206,37 @@ Efficiency with the outage evidence.
 
 ## Done when: steering and conversation
 
-- While a Codex task turn is active, `lf task steer INF-123 "rename the flag"`
-  reaches that turn and returns an accepted `live_steer` receipt.
-- While Claude or OpenCode is active, the same `steer` interrupts the current
-  turn, resumes the same provider session, and returns an accepted
-  `replacement` receipt. It never quietly degrades to a later follow-up.
-- `lf task follow-up INF-123 "then update the docs"` never interrupts. It runs
-  exactly once as the next turn on all three providers.
-- Queue A and B, then run `lf task interrupt INF-123 --message C`: A and B are
-  durably `superseded`, C is the next input, and no provider sees stale work.
-- A command racing provider completion is accepted exactly once before runner
-  exit or automatically resumes the same Task Session. It is never left
-  unclaimed in a waiting Task.
-- Persisted, claimed, accepted, failed, and superseded receipts are truthful
-  and waitable. CLI JSON, Wave events, Swift, and audit history use the same
-  command id/state/effect.
-- A Task can request plan approval; the Wave can reject with feedback and then
-  approve a revision, with the same Task Session and provider transcript
-  continuing throughout.
-- The owning Wave can steer its Task. A process attributed to another Wave is
-  refused rather than relabeled as a human command source.
-- A direct human escape-hatch command is visible as a linked typed event in the
-  Wave journal before the next Wave turn.
-- Raw Task tool events do not flood the Wave thread; the Wave can answer what
-  it asked the task to do, its latest status, and its result without opening
-  the child transcript.
-- Task completion wakes an idle Wave exactly once or queues behind an active
-  Wave turn; it never starts concurrent Wave turns.
-- A Wave can steer Task A while Task B runs, and each command resolves to the
-  correct Linear issue/session in N/N targeted tests.
-- The provider conformance suite runs the live redirect, gentle follow-up,
-  replacement, boundary race, crash recovery, ownership, decision round trip,
-  automatic observation, parallel targeting, and lifecycle scenarios from
-  `scratch/research.md` against Codex, Claude, and OpenCode adapters.
+- In a deterministic race test, command insertion pauses after the runner's
+  last ordinary poll. Boundary settlement then either claims that command in
+  the current generation or marks the session inactive and causes insertion to
+  reserve the next generation. Repeating this for `follow-up`, `steer`, and
+  `interrupt --message` leaves zero unresolved commands in a waiting session.
+- Killing a runner after persistence and after claim lets the next generation
+  reclaim the command. Killing it after provider acceptance never replays the
+  accepted command.
+- `lf task receipt <id> --wait --timeout 30s --json` returns the same command
+  id, state, effect, generation, accepted timestamp, and error stored in SQLite.
+  A timeout is distinguishable from failure and can be resumed by running the
+  same command again.
+- Every consequential Task event appears once in both `task_events` and the
+  owning Wave journal with the same `(session_id, event_id)`. Restarting either
+  side and retrying delivery creates no duplicate Wave observation.
+- An idle Wave wakes once for a Task observation. An active Wave completes its
+  current turn before consuming it. No observation starts concurrent Wave
+  turns, and no raw Task tool event enters the Wave conversation.
+- A Task requests plan approval, receives a Wave rejection with feedback,
+  submits a revision, and receives approval while retaining the same Task
+  Session and provider session. Duplicate and foreign-Wave answers are refused
+  or idempotently return the existing resolution.
+- The normal Rust gate runs all ten conformance scenarios against Codex,
+  Claude, and OpenCode adapters. Codex proves `live_steer`; Claude/OpenCode prove
+  interrupt-and-resume `replacement`; every provider proves FIFO follow-up,
+  replacement supersession, recovery, ownership, decisions, observations,
+  targeting, and lifecycle distinction.
+- One live Linear-backed dogfood Task runs from creation through steering,
+  decision, PR review/resume, merge, PM reconciliation, and one typed Wave
+  completion. The PR notes contain the linked ids and receipts needed to audit
+  the path.
 
 ## Done when: process, attachment, and recovery
 

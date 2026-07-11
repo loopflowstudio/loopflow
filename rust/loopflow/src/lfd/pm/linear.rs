@@ -476,7 +476,7 @@ impl LinearClient {
 
     pub async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
         Ok(self
-            .list_issue_nodes(LIST_ITEMS_QUERY, project_id)
+            .list_issue_nodes(project_id)
             .await?
             .into_iter()
             .enumerate()
@@ -484,14 +484,14 @@ impl LinearClient {
             .collect())
     }
 
-    async fn list_issue_nodes(&self, query: &str, project_id: &str) -> PmResult<Vec<IssueNode>> {
+    async fn list_issue_nodes(&self, project_id: &str) -> PmResult<Vec<IssueNode>> {
         let mut after = None;
         let mut issues = Vec::new();
 
         loop {
             let response: ProjectIssuesData = self
                 .graphql(
-                    query,
+                    LIST_ITEMS_QUERY,
                     json!({
                         "projectId": project_id,
                         "after": after,
@@ -997,7 +997,6 @@ mod tests {
                                     "prioritySortOrder": 10.0,
                                     "sortOrder": 10.0,
                                     "assignee": { "id": "user-1" },
-                                    "labels": { "nodes": [{ "name": "kr" }] },
                                     "state": { "type": "unstarted" }
                                 },
                                 {
@@ -1006,7 +1005,6 @@ mod tests {
                                     "description": "two",
                                     "prioritySortOrder": 0.0,
                                     "sortOrder": 0.0,
-                                    "labels": { "nodes": [] },
                                     "state": { "type": "completed" }
                                 }
                             ],

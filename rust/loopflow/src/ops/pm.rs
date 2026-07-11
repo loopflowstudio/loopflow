@@ -98,7 +98,6 @@ pub struct PmStatusOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmWaveStatus {
     pub wave: String,
-    pub provider: PmProviderKind,
     pub initiative: String,
     pub initiative_name: String,
     pub open: usize,
@@ -549,6 +548,14 @@ async fn read_pm_snapshot(repo: &Path, wave: &str) -> OpsResult<PmSnapshotRow> {
         .ok_or_else(|| missing_snapshot_error(wave))
 }
 
+fn decode_snapshot(wave: &str, payload: &str) -> OpsResult<PmSnapshot> {
+    serde_json::from_str(payload).map_err(|err| {
+        OpsError::Message(format!(
+            "invalid PM snapshot for wave/{wave}; run `lf pm sync`: {err}"
+        ))
+    })
+}
+
 /// Refresh from Linear, bounded by `PM_REFRESH_TIMEOUT`. A timeout, an auth
 /// failure, or any network error surfaces as `Err` so callers can fall back to
 /// the cache.
@@ -803,11 +810,7 @@ async fn pm_show_async(
 ) -> OpsResult<PmShowResult> {
     let wave = resolve_wave(repo, options.wave.as_deref())?;
     let row = load_show_snapshot(repo, &wave, options.refresh, progress).await?;
-    let snapshot: PmSnapshot = serde_json::from_str(&row.payload).map_err(|err| {
-        OpsError::Message(format!(
-            "invalid PM snapshot for wave/{wave}; run `lf pm sync`: {err}"
-        ))
-    })?;
+    let snapshot = decode_snapshot(&wave, &row.payload)?;
     let projects = match options.project.as_deref() {
         Some(slug) => vec![find_project(&snapshot.projects, &wave, slug)?.clone()],
         None => snapshot.projects,
@@ -998,9 +1001,7 @@ async fn pm_status_async(
     let mut results = Vec::new();
     for wave in waves {
         let row = read_pm_snapshot(repo, &wave).await?;
-        let snapshot: PmSnapshot = serde_json::from_str(&row.payload).map_err(|err| {
-            OpsError::Message(format!("invalid PM snapshot for wave/{wave}: {err}"))
-        })?;
+        let snapshot = decode_snapshot(&wave, &row.payload)?;
         let total = snapshot.items.len();
         let open = snapshot.items.iter().filter(|item| !item.completed).count();
         let mut open_by_project = BTreeMap::new();
@@ -1017,7 +1018,6 @@ async fn pm_status_async(
         results.push(PmWaveStatus {
             initiative_name: title_case(&wave),
             wave,
-            provider: row.provider.parse().map_err(pm_to_ops)?,
             initiative: row.initiative,
             open,
             total,

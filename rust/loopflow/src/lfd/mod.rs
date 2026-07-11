@@ -1,7 +1,6 @@
 pub mod attention;
 pub mod auth;
 pub mod config;
-pub mod executor;
 pub mod github;
 pub mod http;
 pub(crate) mod http_client;
@@ -14,6 +13,8 @@ pub(crate) mod redaction;
 pub mod security;
 pub mod service;
 pub(crate) mod session_token;
+pub(crate) mod session_support;
+pub mod session_supervisor;
 pub mod triggers;
 pub mod types;
 

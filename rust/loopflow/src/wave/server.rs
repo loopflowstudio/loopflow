@@ -84,11 +84,6 @@
 //!   outcome.
 //! - `POST /stop` → 202 and requests graceful listener shutdown. The listener
 //!   remains the sole owner of resident, registry, and discovery-file cleanup.
-//! - `POST /channels {name, run_id}` → `{turn}` — the dispatch notification
-//!   door: placed `lf` minted a work-line worktree, and knocks here so the
-//!   PARENT channel's thread shows "work line <name> opened" (journaled as
-//!   `ChannelOpened`, idempotent on `run_id` — a repeated knock returns
-//!   `{turn: null}`). 404 outside the family.
 //! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
 //!   origin repo. Wave-level only: memory is wave identity, channels don't
 //!   have it.
@@ -287,21 +282,6 @@ struct PostMessage {
     from: Option<String>,
 }
 
-/// `POST /channels` request body — the dispatch notification (see module
-/// doc). Both fields required.
-#[derive(Debug, Deserialize)]
-struct PostChannel {
-    name: String,
-    run_id: String,
-}
-
-/// `POST /channels` response: the thread-visible opening turn, or null when
-/// the run's opening was already journaled (idempotent knock).
-#[derive(Debug, Serialize)]
-struct PostChannelResponse {
-    turn: Option<ChatTurn>,
-}
-
 /// `GET /events` query. `inbox` is explicitly Optional: `true` adds the
 /// resident's `inbox` frames (pending replay + live ops) to the subscription;
 /// absent/false leaves the wire byte-identical to the pre-resident stream.
@@ -400,7 +380,6 @@ pub fn router(
         .route("/playhead/skip", post(playhead_skip_handler))
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
-        .route("/channels", post(channels_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
         .route("/memory/log", get(memory_log_handler))
         .route("/resident/attach", post(resident_attach_handler))
@@ -619,30 +598,6 @@ async fn messages_handler(
         turn,
         state: state.runtime.loop_state().name().to_string(),
     }))
-}
-
-/// The dispatch notification door: journal `ChannelOpened` on the primary
-/// channel (idempotent on run id) so the wave's thread shows the work line
-/// opening. The child channel itself needs no materializing — it is a name on
-/// the bus, and speaking it into existence is the whole of its creation.
-async fn channels_handler(
-    State(state): State<ServerState>,
-    Json(body): Json<PostChannel>,
-) -> Result<Json<PostChannelResponse>, (StatusCode, String)> {
-    if state.runtime.is_primary(&body.name) || !state.runtime.in_family(&body.name) {
-        return Err((
-            StatusCode::NOT_FOUND,
-            format!(
-                "'{}' is not a child channel of wave '{}'",
-                body.name,
-                state.runtime.name()
-            ),
-        ));
-    }
-    let turn = state
-        .runtime
-        .journal_channel_opened(&body.name, &body.run_id);
-    Ok(Json(PostChannelResponse { turn }))
 }
 
 async fn memory_handler(State(state): State<ServerState>) -> Json<MemoryBody> {

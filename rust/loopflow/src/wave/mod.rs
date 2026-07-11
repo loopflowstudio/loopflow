@@ -5,7 +5,7 @@
 //!
 //! - holds the mind's one journal pen;
 //! - serves the doors: `/messages`, `/events`, `/memory`, `/health`,
-//!   `/channels`, and the token-gated resident door ([`server`]);
+//!   and the token-gated resident door ([`server`]);
 //! - folds the store's worker facts ([`registry::StoreObserver`]) and its
 //!   hands' broadcasts off the shared-store bus ([`bus::BusListener`]);
 //! - keeps the registry seat and the discovery pointer;
@@ -1371,46 +1371,6 @@ mod tests {
             1,
             "one copy, in the wave's journal",
         );
-    }
-
-    /// `POST /channels` (the dispatch knock): the wave's thread shows the
-    /// opening, idempotent on run id; foreign names 404.
-    #[tokio::test]
-    async fn channels_door_journals_the_opening_once() {
-        let (base, runtime, _tmp) = boot_family().await;
-        let client = reqwest::Client::new();
-
-        let body: serde_json::Value = client
-            .post(format!("{base}/channels"))
-            .json(&serde_json::json!({ "name": "ship.148e", "run_id": "run-1" }))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        assert_eq!(body["turn"]["text"], "work line ship.148e opened");
-        assert_eq!(body["turn"]["from"], "dispatch");
-
-        let again: serde_json::Value = client
-            .post(format!("{base}/channels"))
-            .json(&serde_json::json!({ "name": "ship.148e", "run_id": "run-1" }))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        assert!(again["turn"].is_null(), "repeated knock appends nothing");
-        assert_eq!(runtime.thread_snapshot().len(), 1);
-
-        let foreign = client
-            .post(format!("{base}/channels"))
-            .json(&serde_json::json!({ "name": "concerto.x", "run_id": "run-2" }))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(foreign.status(), reqwest::StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

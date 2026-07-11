@@ -5,14 +5,14 @@
 //! survives a sleeping wave. Durable Task Sessions own delivery state.
 //!
 //! - **check_run failure** → `lf radio pub --channel <wave> --from github
-//!   "CI failed: …"` — the wave's loop decides whether and how to dispatch.
+//!   "CI failed: …"` — the wave's loop decides how to respond.
 //! - **PR merged** → complete the Task Session that owns that PR.
 //! - **push to main** → the same, `"main moved: …"`, for every wave in the
 //!   repo — the loop decides to rebase/integrate with judgment.
 //!
-//! Execs are spawned detached. Publishing is a store INSERT, so the only
+//! Radio commands run asynchronously. Publishing is a store INSERT, so the only
 //! bounce left is a machine with no registry db (exit 0, dropped with a
-//! note); the CI dedupe key is recorded only after the exec exits 0, so a
+//! note); the CI dedupe key is recorded only after the command exits 0, so a
 //! spawn failure replays on the next delivery. No wave resolved →
 //! log-and-drop.
 
@@ -33,7 +33,7 @@ use crate::engine::git::{
     delete_local_branch, get_default_branch, is_clean_ignoring_scratch, worktree_remove,
 };
 use crate::engine::worktrees::{list_porcelain, main_repo_root};
-use crate::lfd::executor::resolve_lf_binary;
+use crate::engine::process::resolve_lf_binary;
 use crate::lfd::github::{
     github_repo_from_local, verify_webhook_signature, GitHubCheckRunEvent, GitHubDeleteEvent,
     GitHubPullRequestEvent, GitHubPushEvent,
@@ -51,7 +51,7 @@ struct WaveCiTarget {
     pr_number: u32,
 }
 
-// -- Planned lf execs ------------------------------------------------------
+// -- Planned radio commands ------------------------------------------------
 
 /// One `lf` invocation the gatekeeper will spawn — argv after the binary.
 /// Planners return these so tests assert on the exact command line without
@@ -59,12 +59,12 @@ struct WaveCiTarget {
 /// recorded in the shared cache only after the exec exits 0 — a failed exec
 /// leaves the key absent so the wave+sha can replay.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LfExec {
+pub struct RadioCommand {
     pub args: Vec<String>,
     pub dedupe_key: Option<String>,
 }
 
-impl LfExec {
+impl RadioCommand {
     /// A webhook fact is machine speech: it rides the bus with a byline, so
     /// it survives a sleeping wave and folds into the thread attributed when
     /// the listener next sweeps (`wave::bus`). Chat is the human's verb.
@@ -90,13 +90,13 @@ impl LfExec {
 }
 
 /// Spawn each exec detached — the webhook response never waits on `lf`.
-fn spawn_lf_execs(cache: &Arc<Mutex<HashSet<String>>>, execs: Vec<LfExec>) {
+fn spawn_radio_commands(cache: &Arc<Mutex<HashSet<String>>>, commands: Vec<RadioCommand>) {
     let lf = resolve_lf_binary();
-    for exec in execs {
+    for command in commands {
         let lf = lf.clone();
         let cache = cache.clone();
         tokio::spawn(async move {
-            settle_exec(&lf, exec, &cache).await;
+            settle_radio_command(&lf, command, &cache).await;
         });
     }
 }
@@ -104,9 +104,13 @@ fn spawn_lf_execs(cache: &Arc<Mutex<HashSet<String>>>, execs: Vec<LfExec>) {
 /// Run one exec to completion and settle its dedupe key: exit 0 records the
 /// key (the bus accepted the frame); a nonzero exit or spawn failure records
 /// nothing, so the next webhook for the same wave+sha replays.
-async fn settle_exec(lf: &std::path::Path, exec: LfExec, cache: &Arc<Mutex<HashSet<String>>>) {
+async fn settle_radio_command(
+    lf: &std::path::Path,
+    command: RadioCommand,
+    cache: &Arc<Mutex<HashSet<String>>>,
+) {
     let result = tokio::process::Command::new(lf)
-        .args(&exec.args)
+        .args(&command.args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -114,21 +118,21 @@ async fn settle_exec(lf: &std::path::Path, exec: LfExec, cache: &Arc<Mutex<HashS
         .await;
     match result {
         Ok(status) if status.success() => {
-            if let Some(key) = exec.dedupe_key {
+            if let Some(key) = command.dedupe_key {
                 cache.lock().await.insert(key);
             }
         }
         Ok(status) => tracing::warn!(
-            args = ?exec.args,
-            dedupe_key = ?exec.dedupe_key,
+            args = ?command.args,
+            dedupe_key = ?command.dedupe_key,
             code = ?status.code(),
-            "lf radio pub exec failed; will replay on next delivery"
+            "lf radio publish failed; will replay on next delivery"
         ),
         Err(err) => tracing::warn!(
-            args = ?exec.args,
-            dedupe_key = ?exec.dedupe_key,
+            args = ?command.args,
+            dedupe_key = ?command.dedupe_key,
             error = %err,
-            "lf exec failed to spawn"
+            "lf radio command failed to start"
         ),
     }
 }
@@ -141,7 +145,7 @@ async fn plan_push_notifications(
     git_ref: &str,
     before: &str,
     after: &str,
-) -> Result<Vec<LfExec>, String> {
+) -> Result<Vec<RadioCommand>, String> {
     if !is_main_ref(Some(git_ref)) {
         return Ok(Vec::new());
     }
@@ -153,7 +157,7 @@ async fn plan_push_notifications(
     Ok(waves
         .iter()
         .filter(|wave| wave_in_github_repo(wave, repo_full_name))
-        .map(|wave| LfExec::radio(wave.name(), text.clone(), "github"))
+        .map(|wave| RadioCommand::radio(wave.name(), text.clone(), "github"))
         .collect())
 }
 
@@ -168,13 +172,13 @@ fn main_moved_text(before: &str, after: &str) -> String {
 /// Failed check_run → an attributed notification to each wave owning an open
 /// PR the check ran against. Deduped per wave+commit through the shared
 /// CI-failure cache so a red matrix reports once — but the key is only RECORDED once the spawned
-/// exec exits 0 (see [`settle_exec`]); planning just reads the cache, so a
+/// command exits 0 (see [`settle_radio_command`]); planning just reads the cache, so a
 /// failed publish replays. No wave resolved → empty (the caller drops).
 async fn plan_check_run_notifications(
     store: &SharedStore,
     cache: &Arc<Mutex<HashSet<String>>>,
     event: &GitHubCheckRunEvent,
-) -> Result<Vec<LfExec>, String> {
+) -> Result<Vec<RadioCommand>, String> {
     let mut execs = Vec::new();
     let mut planned: HashSet<String> = HashSet::new();
     for pr in &event.check_run.pull_requests {
@@ -198,7 +202,7 @@ async fn plan_check_run_notifications(
                 continue;
             };
             execs.push(
-                LfExec::radio(
+                RadioCommand::radio(
                     wave.name(),
                     format!(
                         "CI failed: {} on PR #{} — {}",
@@ -218,7 +222,7 @@ async fn complete_merged_task_sessions(
     store: &SharedStore,
     repo_full_name: &str,
     pr_number: u32,
-) -> Result<(u32, Vec<LfExec>), String> {
+) -> Result<(u32, Vec<RadioCommand>), String> {
     let mut processed = 0;
     let execs = Vec::new();
     for mut session in store
@@ -430,7 +434,7 @@ pub async fn github_webhook_handler(
                     "push webhook matched no waves; dropped"
                 );
             }
-            spawn_lf_execs(&state.ci_failure_cache, execs);
+            spawn_radio_commands(&state.ci_failure_cache, execs);
             Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
         }
         "check_run" => {
@@ -476,7 +480,7 @@ pub async fn github_webhook_handler(
                     "CI failure notification delivered to waves via lf chat"
                 );
             }
-            spawn_lf_execs(&state.ci_failure_cache, execs);
+            spawn_radio_commands(&state.ci_failure_cache, execs);
             Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
         }
         "pull_request" => {
@@ -503,7 +507,7 @@ pub async fn github_webhook_handler(
                     ApiMessage::Untrusted(err),
                 )
             })?;
-            spawn_lf_execs(&state.ci_failure_cache, execs);
+            spawn_radio_commands(&state.ci_failure_cache, execs);
             Ok(Json(
                 serde_json::json!({ "ok": true, "processed": processed }),
             ))
@@ -896,7 +900,7 @@ mod tests {
         let expected_key = format!("{}:abc123", wave.id());
         assert_eq!(
             execs,
-            vec![LfExec::radio(
+            vec![RadioCommand::radio(
                 "ship",
                 "CI failed: test-check on PR #1 — https://example.test/logs".to_string(),
                 "ci",
@@ -938,7 +942,7 @@ mod tests {
             .await
             .expect("plan");
         assert_eq!(execs.len(), 1);
-        settle_exec(
+        settle_radio_command(
             std::path::Path::new("/usr/bin/false"),
             execs[0].clone(),
             &cache,
@@ -953,7 +957,7 @@ mod tests {
         assert_eq!(replay.len(), 1, "bounced wave+sha replays");
 
         // …and this time delivery succeeds, so the key settles.
-        settle_exec(
+        settle_radio_command(
             std::path::Path::new("/usr/bin/true"),
             replay[0].clone(),
             &cache,
@@ -1016,10 +1020,10 @@ mod tests {
     /// so a stale verb (`op queue reconcile`) parses fine and then fails at
     /// exec time as a silent no-op. Assert we landed on a known command.
     #[test]
-    fn planned_execs_resolve_to_known_lf_commands() {
+    fn planned_radio_commands_resolve_to_known_lf_commands() {
         use clap::Parser;
 
-        let exec = LfExec::radio("ship", "main moved".to_string(), "github");
+        let exec = RadioCommand::radio("ship", "main moved".to_string(), "github");
         let argv = std::iter::once("lf".to_string()).chain(exec.args.iter().cloned());
         let cli = crate::lf::Cli::try_parse_from(argv)
             .unwrap_or_else(|err| panic!("{:?} must parse: {err}", exec.args));

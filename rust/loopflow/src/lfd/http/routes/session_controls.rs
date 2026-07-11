@@ -50,7 +50,7 @@ pub async fn create_session_handler(
 ) -> ApiResult<CreateSessionResponseDto> {
     let wave_id = parse_lfd_id(&payload.wave_id, "invalid wave id")?;
     let session = state
-        .executor
+        .session_supervisor
         .launch_palette_session(&wave_id, &payload.flow, &payload.worktree, &payload.agent)
         .await
         .map_err(|err| {

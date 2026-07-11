@@ -8,8 +8,8 @@ use crate::engine::worktrees::{
     create_from_placement_plan, main_repo_root, plan_placement, PlacementRequest,
     PlacementStrategy, WorktreeSegment,
 };
-use crate::lfd::executor::helpers::{
-    resolve_lf_binary, spawn_detached_lf_with_env, tmux_session_exists, tmux_session_slug,
+use crate::engine::process::{
+    resolve_lf_binary, start_lf_session_with_env, tmux_session_exists, tmux_session_slug,
 };
 use crate::lfd::id::LfdId;
 use crate::lfdb::{open_existing_store, SharedStore, StoreError};
@@ -345,7 +345,7 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
         ("LF_TASK_GENERATION", generation_text.as_str()),
     ];
     if let Err(error) =
-        spawn_detached_lf_with_env(&tmux_name, &session.worktree, &argv, &environment).await
+        start_lf_session_with_env(&tmux_name, &session.worktree, &argv, &environment).await
     {
         session.set_status(
             TaskSessionStatus::Failed,

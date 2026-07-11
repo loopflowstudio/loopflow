@@ -1,17 +1,9 @@
 use std::path::Path;
-use std::path::PathBuf;
+use anyhow::Result;
 
-use crate::engine::worktrees::ensure_wave_worktree as ensure_wave_worktree_lease;
-use anyhow::{anyhow, Result};
-
+use crate::engine::process::{resolve_lf_binary, shell_escape, start_tmux_session};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{RunStatus, Session};
-
-/// Create a worktree for this wave, or reuse the existing one.
-pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result<(String, String)> {
-    let lease = ensure_wave_worktree_lease(main_repo, wave_name)?;
-    Ok((lease.path.to_string_lossy().to_string(), lease.branch))
-}
 
 pub(crate) fn is_active_run_status(status: RunStatus) -> bool {
     matches!(
@@ -30,7 +22,7 @@ pub(crate) fn is_ephemeral_worktree_path(path: &str) -> bool {
         || has_run_id_segment(worktree_name)
 }
 
-/// `<repo>.<wave>.<short-run-id>` — a wave-dispatched worker worktree.
+/// `<repo>.<wave>.<short-run-id>` — a Task Session worktree.
 ///
 /// Three or more dot segments ending in exactly 8 hex chars. Two-segment
 /// `<repo>.<name>` human/wave worktrees and preserved `<name>.<timestamp>`
@@ -56,40 +48,6 @@ fn has_run_suffix(path_component: &str) -> bool {
     !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
-pub(crate) fn resolve_lf_binary() -> PathBuf {
-    if let Ok(path) = std::env::var("LF_BIN") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
-
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_lf") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
-
-    if let Ok(current) = std::env::current_exe() {
-        if current
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "lf")
-        {
-            return current;
-        }
-        if let Some(parent) = current.parent() {
-            let sibling = parent.join("lf");
-            if sibling.exists() {
-                return sibling;
-            }
-        }
-    }
-
-    PathBuf::from("lf")
-}
-
 pub(crate) fn build_lf_skill_command(
     skill_name: &str,
     batch: bool,
@@ -105,26 +63,8 @@ pub(crate) fn build_lf_skill_command(
     cmd
 }
 
-/// Shell-quote one argv element for the tmux launch line.
-pub(crate) fn shell_escape(value: &str) -> String {
-    let escaped = value.replace('\'', "'\\''");
-    format!("'{escaped}'")
-}
-
-/// Whether a tmux session with this name exists (`tmux has-session` probe).
-/// Shared by the executor's session reconciliation and the wave registry's
-/// worker-liveness observer.
-pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
-    let status = tokio::process::Command::new("tmux")
-        .args(["has-session", "-t", session_name])
-        .status()
-        .await
-        .map_err(|err| anyhow!("tmux session probe failed: {err}"))?;
-    Ok(status.success())
-}
-
 /// Where a tmux-wrapped session records its exit code (read by whoever
-/// reconciles the session — the lfd executor's watcher today).
+/// reconciles the session — the session supervisor today).
 pub(crate) fn tmux_exit_file(cwd: &Path, session_id: &LfdId) -> PathBuf {
     cwd.join(".lf/tmp/sessions")
         .join(format!("{session_id}.exit"))
@@ -174,89 +114,7 @@ pub(crate) fn tmux_shell_command(session: &Session, tail: &str) -> String {
 /// Callers own the session row's lifecycle (start on `Ok`, fail on `Err`).
 pub(crate) async fn launch_session_in_tmux(session: &Session, tail: &str) -> Result<()> {
     let shell_command = tmux_shell_command(session, tail);
-    spawn_tmux_session(&session.tmux_name, &session.cwd, &shell_command).await
-}
-
-/// Launch an `lf` argv detached in its own tmux session, inspectable with
-/// `tmux attach -r`. Shares [`tmux_shell_command`]'s `unset
-/// LFD_SESSION_INHERITED` invariant: a fresh tmux server inherits the
-/// launcher's env, and a registered launcher would leak its session identity
-/// into the child's login shell.
-pub(crate) async fn spawn_detached_lf(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    spawn_detached_lf_with_env(session, cwd, argv, &[]).await
-}
-
-/// Launch a detached `lf` with explicit inherited identity. Environment
-/// pairs are applied to the `lf` process itself, so its nested operational
-/// children inherit them normally.
-pub(crate) async fn spawn_detached_lf_with_env(
-    session: &str,
-    cwd: &Path,
-    argv: &[String],
-    env: &[(&str, &str)],
-) -> Result<()> {
-    let shell_command = detached_lf_shell_command(argv, env);
-    spawn_tmux_session(session, &cwd.display().to_string(), &shell_command).await
-}
-
-pub(crate) fn detached_lf_shell_command(argv: &[String], env: &[(&str, &str)]) -> String {
-    let command = argv
-        .iter()
-        .map(|arg| shell_escape(arg))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let env = env
-        .iter()
-        .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if env.is_empty() {
-        format!("unset LFD_SESSION_INHERITED; exec {command}")
-    } else {
-        format!("unset LFD_SESSION_INHERITED; exec env {env} {command}")
-    }
-}
-
-/// Start a detached tmux session running `shell_command`, with mouse mode on
-/// so scroll events reach tmux rather than the inner shell.
-async fn spawn_tmux_session(session: &str, cwd: &str, shell_command: &str) -> Result<()> {
-    let status = tokio::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            session,
-            "-c",
-            cwd,
-            "/bin/zsh",
-            "-lc",
-            shell_command,
-        ])
-        .status()
-        .await
-        .map_err(|err| anyhow!("tmux failed to spawn: {err}"))?;
-    if !status.success() {
-        return Err(anyhow!("tmux failed to launch session '{session}'"));
-    }
-    let _ = tokio::process::Command::new("tmux")
-        .args(["set-option", "-t", session, "mouse", "on"])
-        .status()
-        .await;
-    Ok(())
-}
-
-/// tmux forbids `.` and `:` in session names; keep the conservative safe set.
-pub(crate) fn tmux_session_slug(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect()
+    start_tmux_session(&session.tmux_name, &session.cwd, &shell_command).await
 }
 
 fn append_lf_run_options(
@@ -292,8 +150,9 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        ensure_wave_worktree, is_ephemeral_worktree_path, tmux_shell_command, TMUX_EXIT_TAIL,
+        is_ephemeral_worktree_path, tmux_shell_command, TMUX_EXIT_TAIL,
     };
+    use crate::engine::workspace::ensure_wave_worktree;
     use crate::engine::worktrees::worktree_path as wave_worktree_path;
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{Session, SessionStatus, SessionUse, TMUX_TERMINAL_SOURCE};
@@ -351,7 +210,7 @@ mod tests {
 
     /// The exit-file wire contract, pinned. Tmux sessions run through this
     /// one wrapper: it clears the inherited-session marker the tmux server
-    /// leaks from the dispatcher's environment, exports the session env
+    /// leaks from the parent's environment, exports the session env
     /// inline, and records the exit code in the session's exit file.
     #[test]
     fn tmux_shell_command_unsets_inherited_marker_and_wires_exit_file() {
@@ -362,7 +221,7 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::Worker,
-            skill: "dispatch:implement".to_string(),
+            skill: "implement".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.wave.a1b2c3d4".to_string(),
             argv: vec![
@@ -389,7 +248,7 @@ mod tests {
         assert!(
             wrapper.starts_with("unset LFD_SESSION_INHERITED; "),
             "the wrapper must clear the marker a fresh tmux server inherits \
-             from the dispatcher, or workers register duplicate rows: {wrapper}"
+             from the parent, or workers register duplicate rows: {wrapper}"
         );
         assert!(
             wrapper.contains(&format!("LFD_SESSION_ID='{session_id}' ")),
@@ -427,7 +286,7 @@ mod tests {
 
     #[test]
     fn is_ephemeral_worktree_path_detects_run_id_segment() {
-        // <repo>.<wave>.<short-run-id> — a wave-dispatched worker worktree.
+        // <repo>.<wave>.<short-run-id> — a Task Session worktree.
         assert!(is_ephemeral_worktree_path("/tmp/repo.wave.a1b2c3d4"));
         // Two segments = human or wave worktree.
         assert!(!is_ephemeral_worktree_path("/tmp/repo.wave"));

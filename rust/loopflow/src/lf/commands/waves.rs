@@ -243,7 +243,7 @@ async fn snapshot_task(
 ) -> Result<TaskSnapshot> {
     let process_alive = if task.status.is_process_active() {
         match task.process.as_ref() {
-            Some(process) => crate::lfd::executor::helpers::tmux_session_exists(&process.tmux_name)
+            Some(process) => crate::engine::process::tmux_session_exists(&process.tmux_name)
                 .await
                 .unwrap_or(false),
             None => false,

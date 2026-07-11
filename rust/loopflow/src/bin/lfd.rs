@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use loopflow::lfd::config::LfdConfig;
-use loopflow::lfd::executor::WaveExecutor;
+use loopflow::lfd::session_supervisor::SessionSupervisor;
 use loopflow::lfd::http::HttpState;
 use loopflow::lfd::security::path_within_root_planned;
 use loopflow::lfdb::{migrate_store, open_store, SharedStore, StorageConfig};
@@ -126,7 +126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let ci_failure_cache = Arc::new(Mutex::new(std::collections::HashSet::new()));
-    let executor = WaveExecutor::new(store.clone());
+    let session_supervisor = SessionSupervisor::new(store.clone());
 
     // Boot registry hygiene: runs left mid-flight by a dead daemon are
     // failed, and terminal sessions whose tmux sessions exited while lfd was
@@ -139,7 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => tracing::warn!(error = %err, "orphaned run cleanup failed"),
     }
 
-    match executor.reconcile_sessions().await {
+    match session_supervisor.reconcile_sessions().await {
         Ok(completed) if completed > 0 => {
             tracing::info!(
                 count = completed,
@@ -167,7 +167,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .into_iter()
             .map(|wave| PathBuf::from(wave.repo()))
             .collect::<Vec<_>>();
-        match executor.run_worktree_janitor(&repo_roots).await {
+        match session_supervisor.run_worktree_janitor(&repo_roots).await {
             Ok(report) => {
                 if report.removed > 0 || report.errors > 0 {
                     tracing::info!(
@@ -184,7 +184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let http_state = HttpState {
         store: store.clone(),
-        executor: Arc::new(executor),
+        session_supervisor: Arc::new(session_supervisor),
         provider_auth: ProviderAuthService::new(store.clone()),
         auth: auth_provider,
         started_at: time::OffsetDateTime::now_utc(),

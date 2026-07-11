@@ -1,6 +1,6 @@
 use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
 use crate::lfd::config::{GitHubConfig, HttpSecurityConfig};
-use crate::lfd::executor::WaveExecutor;
+use crate::lfd::session_supervisor::SessionSupervisor;
 use crate::lfd::http::state::HttpState;
 use crate::lfdb::{open_store, StorageConfig};
 use crate::provider_auth::ProviderAuthService;
@@ -19,11 +19,11 @@ pub async fn test_http_state() -> HttpState {
             .await
             .expect("open sqlite store"),
     );
-    let executor = Arc::new(WaveExecutor::new(store.clone()));
+    let session_supervisor = Arc::new(SessionSupervisor::new(store.clone()));
 
     HttpState {
         store: store.clone(),
-        executor,
+        session_supervisor,
         provider_auth: ProviderAuthService::new(store),
         auth: AuthProvider::Bearer {
             session_token: secrecy::SecretString::from("test-token".to_string()),

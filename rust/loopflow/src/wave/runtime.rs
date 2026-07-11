@@ -22,7 +22,7 @@
 //! and broadcasts. This module is vendor-free: the harness lives with the
 //! resident process, never here.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -35,7 +35,7 @@ use crate::engine::wave_config::read_wave_config;
 use crate::lfd::security::sanitize_fs_component;
 use crate::wave::channel::matches_prefix;
 use crate::wave::journal::{
-    channel_opened_turn, fold_thread, fold_workers, journal_path, restore_pending,
+    fold_thread, fold_workers, journal_path, restore_pending,
     run_completed_turn, EventKind, Journal, MessageId, MessageOp, PendingMessage, Usage,
     WorkerOutcome, WorkerRecord,
 };
@@ -207,9 +207,8 @@ struct Inner {
     /// send (the thread's *last* turn at that point is usually the steer's
     /// own user turn, which must never be named as a consumer).
     last_assistant_turn_id: Option<String>,
-    /// Dispatched workers, folded from `RunObserved`/`RunCompleted`
-    /// observations (the lfd tail). Keyed on run id — the idempotence guard:
-    /// a run dispatches once and finishes once, however many times the
+    /// Workers folded from `RunObserved`/`RunCompleted` observations. Keyed
+    /// on run id — a worker starts once and finishes once, however many times the
     /// observer sees it (live event + reconnect snapshot).
     workers: Vec<WorkerRecord>,
     /// Durable scheduler queue folded from the journal on boot.
@@ -217,9 +216,6 @@ struct Inner {
     /// Every journaled user message by id — requeues restore pending entries
     /// from it (an id alone can't rebuild the text/op/from).
     messages: HashMap<MessageId, PendingMessage>,
-    /// Run ids whose `ChannelOpened` is already journaled — the dispatch
-    /// notification door's idempotence guard, folded from the journal.
-    opened_channel_runs: HashSet<String>,
     /// Memory facts added since the last externalization. The compiled
     /// checkpoint lives in MEMORY.md; this is the replayable delta after it.
     memory_adds: Vec<String>,
@@ -369,7 +365,6 @@ impl WaveRuntime {
                 workers,
                 pending_messages: fold.pending_messages,
                 messages: fold.messages,
-                opened_channel_runs: fold.opened_channel_runs,
                 memory_adds: fold.memory_adds,
             }),
             turn_tx,
@@ -743,7 +738,7 @@ impl WaveRuntime {
         self.inner().workers.iter().any(|w| w.run_id == run_id)
     }
 
-    /// Workers dispatched and not yet finished — folded into the loop's
+    /// Workers started and not yet finished — folded into the loop's
     /// heartbeat seed as the `<in_flight>` section.
     pub fn in_flight_workers(&self) -> Vec<WorkerRecord> {
         self.inner()
@@ -771,23 +766,6 @@ impl WaveRuntime {
     /// sanitized spelling).
     pub fn is_primary(&self, channel: &str) -> bool {
         channel_role(&self.name, channel) == Some(ChannelRole::Primary)
-    }
-
-    /// Journal a `ChannelOpened` fact on the PRIMARY channel (the dispatch
-    /// notification door) and commit its thread-visible turn. Idempotent on
-    /// `run_id`: a repeated knock returns `None` and appends nothing.
-    pub fn journal_channel_opened(&self, name: &str, run_id: &str) -> Option<ChatTurn> {
-        let mut inner = self.inner();
-        if inner.opened_channel_runs.contains(run_id) {
-            return None;
-        }
-        inner.opened_channel_runs.insert(run_id.to_string());
-        let event = inner.journal.append(|_| EventKind::ChannelOpened {
-            name: name.to_string(),
-            run_id: run_id.to_string(),
-        });
-        let turn = channel_opened_turn(&event, name);
-        Some(self.commit_locked(&mut inner, turn))
     }
 
     // -- Memory (the server holds MEMORY.md's pen) --
@@ -2447,36 +2425,6 @@ mod tests {
         let texts: Vec<_> = pending.iter().map(|m| m.text.as_str()).collect();
         assert_eq!(texts.len(), 2);
         assert!(texts.contains(&"to the wave") && texts.contains(&"to a"));
-    }
-
-    /// `ChannelOpened` (the dispatch notification): the thread shows the
-    /// opening, once per run id, and the guard survives restart.
-    #[test]
-    fn journal_channel_opened_is_idempotent_and_thread_visible() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let rt = open_runtime(tmp.path());
-        let turn = rt
-            .journal_channel_opened("ship.148e0e02", "run-1")
-            .expect("first knock journals");
-        assert_eq!(turn.text, "work line ship.148e0e02 opened");
-        assert_eq!(turn.from.as_deref(), Some("dispatch"));
-        assert!(
-            rt.journal_channel_opened("ship.148e0e02", "run-1")
-                .is_none(),
-            "second knock for the same run appends nothing"
-        );
-        assert_eq!(rt.thread_snapshot().len(), 1);
-
-        // Restart: the guard folds back out of the journal.
-        let rt2 = open_runtime(tmp.path());
-        assert!(rt2
-            .journal_channel_opened("ship.148e0e02", "run-1")
-            .is_none());
-        assert_eq!(rt2.thread_snapshot().len(), 1);
-        assert_eq!(
-            rt2.thread_snapshot()[0].text,
-            "work line ship.148e0e02 opened"
-        );
     }
 
     /// A subscription's snapshot carries the pending queue (the resident's

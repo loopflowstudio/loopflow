@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use crate::lfd::executor::helpers::{resolve_lf_binary, spawn_detached_lf, tmux_session_slug};
+use crate::engine::process::{resolve_lf_binary, start_lf_session, tmux_session_slug};
 use crate::lfd::id::LfdId;
 use crate::lfd::types::Wave;
 use crate::lfdb::{open_existing_store, Store};
@@ -134,7 +134,7 @@ fn residency_argv(executable: &Path, wave: &str) -> Vec<String> {
 
 async fn launch_residency(repo: &Path, wave: &str) -> OpsResult<()> {
     let argv = residency_argv(&resolve_lf_binary(), wave);
-    spawn_detached_lf(&promotion_session_name(repo, wave), repo, &argv)
+    start_lf_session(&promotion_session_name(repo, wave), repo, &argv)
         .await
         .map_err(|err| OpsError::Message(format!("failed to start child wave residency: {err}")))
 }

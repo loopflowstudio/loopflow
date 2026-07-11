@@ -14,7 +14,7 @@ use crate::engine::{
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
-use crate::lfd::executor::{
+use crate::engine::workspace::{
     cleanup_workspace_worktree, remove_workspace_file, write_workspace_file,
 };
 use crate::ops::{commit_workflow, CommitOptions, NullProgress};

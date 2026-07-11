@@ -97,7 +97,7 @@ impl Usage {
     }
 }
 
-/// How a dispatched worker ended, as lfd reported it.
+/// How an observed worker ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerOutcome {
@@ -114,7 +114,7 @@ impl WorkerOutcome {
     }
 }
 
-/// One dispatched worker, folded from `RunObserved`/`RunCompleted` rows.
+/// One worker, folded from `RunObserved`/`RunCompleted` rows.
 /// `finished` is `None` while the worker is in flight.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkerRecord {
@@ -235,13 +235,9 @@ pub enum EventKind {
         outcome: WorkerOutcome,
         summary: String,
     },
-    // -- channels --
-    /// A work-line channel opened under this wave (dispatch minted the
-    /// worktree and its bus address; see placed `lf` runs). Journaled on the
-    /// PARENT channel — the fold materializes a thread-visible turn
-    /// ([`channel_opened_turn`]) so the wave's thread shows the opening.
-    /// `run_id` is the idempotence key: one dispatch, one opening, however
-    /// often the door is knocked.
+    // -- legacy channels --
+    /// A work-line channel opened under this wave. No current code produces
+    /// this event; retaining the variant lets existing journals replay.
     ChannelOpened {
         /// The child channel's name — exactly the worktree basename minus
         /// the repo prefix (`goals.148e0e02`).
@@ -486,7 +482,7 @@ impl Narrator {
             EventKind::RunObserved {
                 run_id, flow, task, ..
             } => info(format!(
-                "observed run {} flow={flow} dispatched · {}",
+                "observed worker {} flow={flow} started · {}",
                 short_id(run_id),
                 ellipsize(task, 60)
             )),
@@ -739,25 +735,19 @@ pub struct ThreadFold {
     /// log — the crash tail's consumption. The boot janitor requeues these
     /// when it finalizes the crashed turns as `Failed`.
     pub open_claims: Vec<MessageId>,
-    /// Run ids of `ChannelOpened` events — the idempotence guard for the
-    /// dispatch-notification door (one dispatch, one opening).
-    pub opened_channel_runs: HashSet<String>,
     /// Memory facts added this server life — the replayable stream a fresh
     /// subscriber gets before going live. Rebuilt from the journal on restart.
     pub memory_adds: Vec<String>,
 }
 
-/// The thread-visible turn a `ChannelOpened` event materializes: a bylined
-/// statement, never queued for the loop (only `UserMessage` rows feed the
-/// pending queue). Shared by the fold and the live append so replay and the
-/// live thread agree byte for byte.
-pub fn channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
+/// Materialize a historical `ChannelOpened` event during journal replay.
+fn legacy_channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
     let mut turn = ChatTurn::user(
         format!("turn-{}", event.seq),
         format!("work line {name} opened"),
     );
     turn.created_at = event.at_rfc3339();
-    turn.from = Some("dispatch".to_string());
+    turn.from = Some("worker".to_string());
     turn
 }
 
@@ -826,7 +816,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     // Claims (`answers`) per still-open turn — the crash tail's consumption,
     // exported so the boot janitor can requeue it.
     let mut claims_by_open_turn: HashMap<String, Vec<MessageId>> = HashMap::new();
-    let mut opened_channel_runs: HashSet<String> = HashSet::new();
     let mut memory_adds: Vec<String> = Vec::new();
 
     for event in events {
@@ -933,9 +922,8 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             EventKind::MessagesRequeued { ids } => {
                 restore_pending(&mut pending_messages, &messages, ids);
             }
-            EventKind::ChannelOpened { name, run_id } => {
-                opened_channel_runs.insert(run_id.clone());
-                turns.push(channel_opened_turn(event, name));
+            EventKind::ChannelOpened { name, .. } => {
+                turns.push(legacy_channel_opened_turn(event, name));
             }
             EventKind::RunCompleted {
                 run_id,
@@ -969,7 +957,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         pending_messages,
         messages,
         open_claims,
-        opened_channel_runs,
         memory_adds,
     }
 }
@@ -988,10 +975,9 @@ fn mark_consumed(
     pending_messages.retain(|message| !consumed_messages.contains(&message.id));
 }
 
-/// Fold the worker observations: one record per dispatched run, in dispatch
-/// order, finished stamped when its `RunCompleted` arrives. The map keyed
-/// on `run_id` is the idempotence guard's ground truth — a run dispatches
-/// exactly once, whatever the observer saw.
+/// Fold worker observations: one record per run in start order, with
+/// `finished` stamped when its `RunCompleted` arrives. The run id is the
+/// idempotence key, whatever the observer saw.
 pub fn fold_workers(events: &[Event]) -> Vec<WorkerRecord> {
     let mut workers: Vec<WorkerRecord> = Vec::new();
     for event in events {

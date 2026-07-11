@@ -1,7 +1,4 @@
-//! The surviving executor surface: palette terminal sessions, boot session
-//! reconciliation, and the worktree janitor. Run dispatch left this process
-//! — placed `lf` runs launch workers and every flow run registers
-//! its own session row; this module only observes and tidies.
+//! Reconcile terminal sessions and remove abandoned ephemeral worktrees.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -20,11 +17,11 @@ use crate::lfd::types::{
 };
 use crate::lfdb::SharedStore;
 
-use super::helpers::{
+use super::session_support::{
     build_lf_skill_command, is_active_run_status, is_ephemeral_worktree_path,
-    launch_session_in_tmux, tmux_exit_file, tmux_session_exists, TMUX_EXIT_TAIL,
+    launch_session_in_tmux, tmux_exit_file, TMUX_EXIT_TAIL,
 };
-use super::JanitorReport;
+use crate::engine::process::tmux_session_exists;
 use crate::wave::registry::process_alive;
 
 fn tmux_available() -> bool {
@@ -65,18 +62,25 @@ fn infer_branch_name(worktree: &str) -> Option<String> {
         .filter(|branch| !branch.is_empty())
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct JanitorReport {
+    pub removed: u32,
+    pub active: u32,
+    pub errors: u32,
+}
+
 #[derive(Clone)]
-pub struct WaveExecutor {
+pub struct SessionSupervisor {
     store: SharedStore,
 }
 
-impl std::fmt::Debug for WaveExecutor {
+impl std::fmt::Debug for SessionSupervisor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WaveExecutor").finish()
+        f.debug_struct("SessionSupervisor").finish()
     }
 }
 
-impl WaveExecutor {
+impl SessionSupervisor {
     pub fn new(store: SharedStore) -> Self {
         Self { store }
     }
@@ -248,8 +252,7 @@ impl WaveExecutor {
 
     async fn launch_tmux_session(&self, session: Session) -> Result<Session> {
         // The wrapper (exit-file contract, inherited-marker unset) has one
-        // authoring site: helpers::tmux_shell_command. Only the tail is the
-        // executor's choice.
+        // authoring site. Only the session kind chooses the tail.
         launch_session_in_tmux(&session, session_tail(&session)).await?;
 
         let mut running = session;
@@ -259,9 +262,9 @@ impl WaveExecutor {
     }
 
     fn spawn_palette_completion_watcher(&self, session: Session) {
-        let executor = self.clone();
+        let supervisor = self.clone();
         tokio::spawn(async move {
-            if let Err(err) = executor.wait_for_palette_session_completion(&session).await {
+            if let Err(err) = supervisor.wait_for_palette_session_completion(&session).await {
                 warn!(session_id = %session.id, error = %err, "palette terminal completion watcher failed");
             }
         });
@@ -301,19 +304,19 @@ mod tests {
     use super::*;
     use crate::lfd::types::TMUX_TERMINAL_SOURCE;
 
-    /// The executor's tmux launch rides the shared wrapper: exit-code tail
+    /// Session supervision rides the shared wrapper: exit-code tail
     /// for run sessions, shell tail for palette panes, and the inherited
     /// marker cleared in both — a fresh tmux server inherits the
-    /// dispatcher's env, and a leaked marker makes workers double-register.
+    /// parent's env, and a leaked marker makes workers double-register.
     #[test]
-    fn executor_tmux_wrapper_unsets_inherited_marker_for_both_tails() {
+    fn session_wrapper_unsets_inherited_marker_for_both_tails() {
         let mut session = Session {
             id: LfdId::new(),
             wave_id: LfdId::new(),
             run_id: None,
             parent_session_id: None,
             session_use: SessionUse::Worker,
-            skill: "dispatch:implement".to_string(),
+            skill: "implement".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.wave".to_string(),
             argv: vec!["lf".to_string(), "implement".to_string()],
@@ -328,12 +331,12 @@ mod tests {
             completion_token: None,
         };
 
-        let wrapper = super::super::helpers::tmux_shell_command(&session, session_tail(&session));
+        let wrapper = super::super::session_support::tmux_shell_command(&session, session_tail(&session));
         assert!(wrapper.starts_with("unset LFD_SESSION_INHERITED; "));
         assert!(wrapper.ends_with(TMUX_EXIT_TAIL));
 
         session.source = PALETTE_TERMINAL_SOURCE.to_string();
-        let wrapper = super::super::helpers::tmux_shell_command(&session, session_tail(&session));
+        let wrapper = super::super::session_support::tmux_shell_command(&session, session_tail(&session));
         assert!(wrapper.starts_with("unset LFD_SESSION_INHERITED; "));
         assert!(wrapper.ends_with(r#"exec "${SHELL:-/bin/zsh}""#));
     }

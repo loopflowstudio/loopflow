@@ -888,7 +888,7 @@ pub fn pm_show(
     block_on_pm(pm_show_async(repo, options, progress))
 }
 
-async fn pm_show_async(
+pub(crate) async fn pm_show_async(
     repo: &Path,
     options: &PmShowOptions,
     progress: &impl Progress,
@@ -1022,7 +1022,7 @@ async fn pm_create_task_idempotent_async(
     }
 }
 
-async fn pm_update_async(
+pub(crate) async fn pm_update_async(
     repo: &Path,
     options: &PmUpdateOptions,
     progress: &impl Progress,

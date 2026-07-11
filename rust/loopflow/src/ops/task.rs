@@ -202,7 +202,11 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
             },
             wave_id: wave.id().clone(),
             pm_snapshot_synced_at: resolved.snapshot.synced_at,
-            pm_snapshot_warning: resolved.snapshot.refresh_warning.clone(),
+            // TODO(product-pm): main's `load_show_snapshot` logs a soft-stale
+            // fallback to progress but does not return it on `PmShowResult`, so
+            // there is no warning to capture at launch yet. Restore this once the
+            // PM read surfaces the stale-cache warning on its result.
+            pm_snapshot_warning: None,
             pm_writeback: PmWritebackState::Current,
             wave: resolved.snapshot.wave.clone(),
             status: TaskSessionStatus::Created,

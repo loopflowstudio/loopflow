@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::lfd::pm::{PmItem, PmProject};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::pm::{PmRefresh, PmShowOptions, PmShowResult, PmSnapshotWrite, PmUpdateOptions};
+use crate::ops::pm::{PmRefresh, PmShowOptions, PmShowResult, PmUpdateOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTask {
@@ -143,6 +143,11 @@ pub fn create_and_load_task(
     title: &str,
     marker: &str,
 ) -> OpsResult<ResolvedTask> {
+    // TODO(product-pm): main's `pm_create_task_idempotent` refreshes the snapshot
+    // internally and returns `Err` if that refresh fails, so it cannot yet report
+    // "issue committed, refresh pending" as a recoverable outcome. When the PM
+    // mutation API surfaces that distinction, restore the committed-but-pending
+    // branch that reports the created id without failing the whole call.
     let result = crate::ops::pm::pm_create_task_idempotent(
         repo,
         wave,
@@ -151,17 +156,14 @@ pub fn create_and_load_task(
         marker,
         &crate::ops::NullProgress,
     )?;
-    if let PmSnapshotWrite::Pending { error } = result.snapshot {
-        return Err(OpsError::Message(format!(
-            "Linear task {} was committed, but its PM snapshot refresh failed: {error}. No Task Session was created; run `lf pm sync --wave {wave}` and retry.",
-            result.id
-        )));
-    }
     resolve_task(repo, &result.id, PmRefresh::Never)
 }
 
 pub async fn complete_task(repo: &Path, wave: &str, item_id: &str, pr: &str) -> OpsResult<()> {
-    let result = crate::ops::pm::pm_update_async(
+    // main's `pm_update_async` completes the Linear mutation and refreshes the
+    // snapshot in one call, returning `Err` if either step fails; a successful
+    // return means the write-back is reconciled.
+    crate::ops::pm::pm_update_async(
         repo,
         &PmUpdateOptions {
             wave: Some(wave.to_string()),
@@ -175,10 +177,7 @@ pub async fn complete_task(repo: &Path, wave: &str, item_id: &str, pr: &str) -> 
         &crate::ops::NullProgress,
     )
     .await?;
-    match result.snapshot {
-        PmSnapshotWrite::Refreshed { .. } => Ok(()),
-        PmSnapshotWrite::Pending { error } => Err(OpsError::Message(error)),
-    }
+    Ok(())
 }
 
 pub async fn retry_complete_task(

@@ -72,17 +72,19 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Filed PM tasks for one wave. Active runs remain a separate registry
-    /// query; callers subtract running task ids/titles to render backlog.
+    /// query; callers subtract running task ids/titles to render backlog. App
+    /// reads stay cache-only so a stale snapshot cannot put Linear on the UI
+    /// refresh path.
     public func backlog(wave: String, cwd: String?) async throws -> [BacklogItem] {
-        let stdout = try await run(["pm", "show", "--wave", wave, "--json"], cwd)
+        let stdout = try await run(["pm", "show", "--wave", wave, "--json", "--no-sync"], cwd)
         let snapshot = try Self.decode(PmShowSnapshot.self, from: stdout)
         return snapshot.items.filter { !$0.completed }
     }
 
-    /// A wave's measured bets from the local PM snapshot. `lf pm show` reads
-    /// SQLite, so rendering the plan never waits on Linear.
+    /// A wave's measured bets from the local PM snapshot. Cache-only reads keep
+    /// rendering off the network; explicit and scheduled syncs refresh SQLite.
     public func plan(wave: String, objective: String, cwd: String?) async throws -> WavePlan {
-        let stdout = try await run(["pm", "show", "--wave", wave, "--json"], cwd)
+        let stdout = try await run(["pm", "show", "--wave", wave, "--json", "--no-sync"], cwd)
         let snapshot = try Self.decode(PmShowSnapshot.self, from: stdout)
         return WavePlan(
             objective: objective,

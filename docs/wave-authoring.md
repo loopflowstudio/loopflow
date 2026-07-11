@@ -181,7 +181,8 @@ Then read and edit tasks:
 lf pm init --wave infra                                             # connect the Linear Initiative
 lf pm sync --wave infra                                             # refresh SQLite
 lf pm status                                                        # show linked waves and task counts
-lf pm show --wave infra                                             # read the local snapshot
+lf pm show --wave infra                                             # read; refresh when stale
+lf pm show --wave infra --no-sync                                   # deterministic cache-only read
 lf pm show --wave infra --project stability                         # filter to one Project
 lf pm task create --wave infra --project stability --title "Daemon data integrity"
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
@@ -289,7 +290,7 @@ Migration shim     → Legacy API compatibility layer
 Cleanup            → Remove old billing code
 ```
 
-The wave agent reads tasks with `lf pm show`, picks the highest-priority move,
+The wave agent reads tasks with `lf pm show --no-sync`, picks the highest-priority move,
 and resolves its local blocker inline. It creates a child loop only when an
 independent task earns its own lifecycle or useful parallelism, then folds each
 shipped PR into memory and closes the task with `lf pm task done`.

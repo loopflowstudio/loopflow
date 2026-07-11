@@ -110,7 +110,9 @@ the local SQLite read model used by every other read surface.
 ```bash
 lf pm status                                                     # show linked waves and task counts
 lf pm sync --wave designer                                       # refresh SQLite from Linear
-lf pm show --wave designer                                       # read projects and tasks locally
+lf pm show --wave designer                                       # read; refresh when stale
+lf pm show --wave designer --no-sync                             # cache-only agent/app read
+lf pm show --wave designer --sync                                # force a refresh first
 lf pm show --wave designer --project ui                          # filter to one project
 lf pm project update --wave designer --project ui --definition "..." --kr "..."
 lf pm project archive --wave designer --project retired-bet
@@ -125,7 +127,7 @@ lf pm init --wave designer                                       # connect the I
 | Command | What it does |
 |---------|--------------|
 | `status` | Show linked waves, backing Linear Initiative names, and task counts by Project |
-| `show` | Export the SQLite Project/task snapshot; `--project` filters it |
+| `show` | Export the SQLite Project/task snapshot; refresh stale data when possible |
 | `project create/update/archive` | Write or retire Linear Projects, then refresh SQLite |
 | `task create` | Create a Linear task attached to a Project |
 | `task update` | Edit an existing Linear task |
@@ -140,6 +142,8 @@ lf pm init --wave designer                                       # connect the I
 |------|-------------|
 | `--wave NAME` | Target wave (defaults to the current branch's wave) |
 | `--project SLUG` | Linear Project slug from the synced snapshot |
+| `--sync` | Refresh from Linear before reading |
+| `--no-sync` | Read SQLite only; never contact Linear |
 | `--id TASK-ID` | Existing Linear issue to update or close |
 | `--title` | Task title (required when creating) |
 | `--notes` | Task notes/description |
@@ -157,6 +161,11 @@ pm:
 When the id is absent, init derives the Initiative title from the wave name.
 It links one exact match, creates one when none exists, and fails when the title
 is ambiguous. Later commands use the persisted id, never the mutable title.
+
+By default, `show` serves snapshots younger than one hour without a network
+request. Older snapshots get one five-second refresh attempt; failures fall
+back to cache until the snapshot is a week old. Use `--no-sync` in agents and
+UI paths so rendering never waits on Linear.
 
 ---
 

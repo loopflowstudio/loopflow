@@ -126,7 +126,7 @@ and folds into its thread attributed on the next sweep.
 
 ```bash
 lf debug -c    # paste an error, watch it fix
-lf pm show --wave designer   # print the wave's live Linear tasks
+lf pm show --wave designer   # print tasks; refresh a stale snapshot when possible
 lf design      # interactive design session
 lf gstack/office-hours   # run a built-in gstack skill
 lf office-hours          # same thing — bare name works when unambiguous
@@ -396,7 +396,9 @@ later reads stable across title changes and machines.
 ```bash
 lf pm init --wave designer                # connect the wave to its Initiative
 lf pm sync --wave designer                # refresh the local SQLite snapshot
-lf pm show --wave designer                # read projects and tasks locally
+lf pm show --wave designer                # read; refresh when the snapshot is stale
+lf pm show --wave designer --no-sync      # cache-only read for agents and apps
+lf pm show --wave designer --sync         # force a Linear refresh first
 lf pm show --wave designer --project ui   # filter to one Linear Project
 lf pm project update --wave designer --project ui --definition "..." --kr "..."
 lf pm project archive --wave designer --project retired-bet
@@ -409,7 +411,10 @@ lf pm status                              # show linked waves and task counts
 `lf pm` maps wave → Initiative, project → Project, and task → Issue. Linear owns
 project definitions and KRs in Project content. `lf pm sync` stores one local
 SQLite snapshot for fast CLI, agent, and app reads; it does not write planning
-files into the repo. Issue descriptions and comments are Markdown, which Linear
+files into the repo. `lf pm show` serves snapshots younger than one hour, tries
+a five-second refresh for older snapshots, and refuses to silently serve one
+older than a week when Linear is unreachable. Use `--no-sync` for deterministic
+cache-only reads. Issue descriptions and comments are Markdown, which Linear
 renders natively.
 
 The `loopflow` Python package is a library only (wire models).

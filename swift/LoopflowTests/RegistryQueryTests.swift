@@ -167,7 +167,7 @@ struct RegistryQueryTests {
         ]}
         """
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["pm", "show", "--wave", "goals", "--json"])
+            #expect(args == ["pm", "show", "--wave", "goals", "--json", "--no-sync"])
             #expect(cwd == "/tmp/repo")
             return json
         }
@@ -184,7 +184,11 @@ struct RegistryQueryTests {
           {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","krs":[{"text":"Survives restart","holds":true}],"initiative_ids":["init-1"]}
         ],"items":[]}
         """
-        let query = RegistryQuery { _, _ in json }
+        let query = RegistryQuery { args, cwd in
+            #expect(args == ["pm", "show", "--wave", "goals", "--json", "--no-sync"])
+            #expect(cwd == "/tmp/repo")
+            return json
+        }
 
         let plan = try await query.plan(wave: "goals", objective: "Ship it.", cwd: "/tmp/repo")
         #expect(plan.objective == "Ship it.")

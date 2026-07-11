@@ -12,7 +12,7 @@ Before starting, orient yourself in this branch:
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
 - If a `wave/<name>/` directory matches this work, skim its `GOAL.md`/`MEMORY.md`,
-  PM snapshot, and live tasks (`lf pm show --wave <name>`).
+  PM snapshot, and live tasks (`lf pm show --wave <name> --no-sync`).
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -34,7 +34,7 @@ Linear tasks move as-is — each one lands in exactly one child. But `GOAL.md` n
 
 1. Read the parent wave
    - Use the wave passed by argument, or ask which `wave/<name>/` to split
-   - Read `GOAL.md`, `MEMORY.md`, and the PM snapshot (`lf pm show --wave <parent> --json`)
+   - Read `GOAL.md`, `MEMORY.md`, and the PM snapshot (`lf pm show --wave <parent> --json --no-sync`)
 
 2. Find split boundaries
    - Look for thematic clusters, dependency chains, or independent workstreams

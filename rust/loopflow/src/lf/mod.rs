@@ -947,7 +947,7 @@ mod tests {
     }
 
     #[test]
-    fn pm_show_accepts_wave_flag() {
+    fn pm_show_parses_refresh_modes() {
         let cli = Cli::try_parse_from(["lf", "pm", "show", "--wave", "goals"]).expect("parse");
         let Some(Commands::Pm {
             cmd:
@@ -955,7 +955,8 @@ mod tests {
                     wave,
                     project,
                     json,
-                    ..
+                    sync,
+                    no_sync,
                 },
         }) = cli.command
         else {
@@ -964,6 +965,30 @@ mod tests {
         assert_eq!(wave.as_deref(), Some("goals"));
         assert_eq!(project, None);
         assert!(!json);
+        assert!(!sync);
+        assert!(!no_sync);
+
+        let cli = Cli::try_parse_from(["lf", "pm", "show", "--sync"]).expect("force sync");
+        let Some(Commands::Pm {
+            cmd: PmCommand::Show { sync, no_sync, .. },
+        }) = cli.command
+        else {
+            panic!("expected pm show command");
+        };
+        assert!(sync);
+        assert!(!no_sync);
+
+        let cli = Cli::try_parse_from(["lf", "pm", "show", "--no-sync"]).expect("cache-only read");
+        let Some(Commands::Pm {
+            cmd: PmCommand::Show { sync, no_sync, .. },
+        }) = cli.command
+        else {
+            panic!("expected pm show command");
+        };
+        assert!(!sync);
+        assert!(no_sync);
+
+        assert!(Cli::try_parse_from(["lf", "pm", "show", "--sync", "--no-sync"]).is_err());
     }
 
     #[test]

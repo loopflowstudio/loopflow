@@ -42,7 +42,7 @@ PRs opened or merged, or Linear tasks completed.
 Gather:
 - `git log main --since="2 weeks ago"` filtered to each wave's area paths
 - Open and recently merged PRs touching wave areas
-- Open and completed task counts from `lf pm show --wave <wave> --json`
+- Open and completed task counts from `lf pm show --wave <wave> --json --no-sync`
 - PM snapshot `synced_at`; stale planning data is its own warning
 
 Interpret:
@@ -142,7 +142,7 @@ Are the projects and tasks in a wave pulling in the same direction, or has the w
 become a dumping ground?
 
 Gather:
-- Read every Project and task in `lf pm show --wave <wave> --json`
+- Read every Project and task in `lf pm show --wave <wave> --json --no-sync`
 - Read the wave `GOAL.md` and `MEMORY.md`
 - Check code-area overlap between open tasks within the same wave
 
@@ -161,7 +161,7 @@ Interpret:
 ## Workflow
 
 1. **Enumerate waves.** Read `wave/*/` directories. For each, load `GOAL.md`,
-   `MEMORY.md`, and `lf pm show --wave <wave> --json`. Skip `wave/old/`.
+   `MEMORY.md`, and `lf pm show --wave <wave> --json --no-sync`. Skip `wave/old/`.
 
 2. **Gather signals.** For each of the five signal types, run the
    gathering steps described above. Use git, gh, and file reads.

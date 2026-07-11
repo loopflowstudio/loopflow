@@ -27,9 +27,12 @@ Exercise the Linear-backed read model without writing Linear or SQLite:
 
 ```bash
 cargo run -q -p loopflow --bin lf -- pm sync --wave product --plan
-cargo run -q -p loopflow --bin lf -- pm show --wave product --json \
+cargo run -q -p loopflow --bin lf -- pm show --wave product --json --no-sync \
   | jq '{wave, synced_at, projects: [.projects[] | {slug, definition, krs}], items}'
 ```
+
+Drop `--no-sync` to use the bounded freshness policy, or pass `--sync` to force
+a Linear refresh before reading.
 
 Run the complete repository gate:
 
@@ -39,8 +42,7 @@ uv run python scripts/test.py --all
 
 All six suites pass: 53 Python tests; Rust format and clippy; 59 website tests
 with 3 skips; 301 Swift tests plus boundary checks; CLI e2e smoke; and signed
-macOS `build-for-testing`. The final changed-aware rerun passed all 1,338 Rust
-tests plus the website and Swift suites after Project archival was added.
+macOS `build-for-testing`. The final full run passed all 1,339 Rust tests.
 
 ## Intent
 
@@ -56,12 +58,15 @@ surface on the same typed export.
   CLI and config compatibility is not preserved without an explicit migration.
 - Linear Project content can hold the full definition and KR markdown, while
   its description remains a short summary.
-- Planning reads may be stale between explicit syncs. They must never call
-  Linear implicitly.
+- Human `pm show` reads may make one five-second Linear refresh attempt when a
+  snapshot is over an hour old. Builtin agents and the Mac use `--no-sync`, so
+  their reads never reach the network.
 - Linear's current GraphQL schema uses `String!` for the Initiative, Project,
   Issue, workflow-state, and team identifiers used here.
 - Resident cron expressions use UTC; product's daily wave flow runs at 08:00
   UTC.
+- Product and intelligence currently carry distinct migrations both numbered
+  `061`; their string ids remain unique, but integration order needs attention.
 
 ## Key decisions
 
@@ -70,6 +75,8 @@ surface on the same typed export.
   second planning database or regenerating markdown.
 - Serialize `PmShowResult` directly so Rust operations, CLI JSON, and Swift
   decode one shape.
+- Keep human reads reasonably fresh while making agent and app reads explicitly
+  cache-only; scheduled sync owns cross-machine freshness.
 - Refresh the affected snapshot after every PM mutation.
 - Archive promoted or retired Projects through Linear before refreshing the
   source wave snapshot.
@@ -81,5 +88,5 @@ surface on the same typed export.
 - Compatibility aliases or migration shims for the retired radio and project
   file surfaces.
 - Changes to bus delivery semantics or `lf chat`.
-- Background Linear refresh, remote Mac plan queries, task-history trends, or
-  timezone-aware scheduling.
+- Background Linear refresh beyond the resident cron, remote Mac plan queries,
+  task-history trends, or timezone-aware scheduling.

@@ -34,8 +34,8 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 1. **Read wave configs.** For each member wave directory in the area:
    - `GOAL.md` — intent, measures, process judgment, and the Linear handle
    - `MEMORY.md` — what the wave has learned and decided
-   - `lf pm show --wave <wave> --json` — measured bets, KRs, and tasks from SQLite
-   - Live tasks — `lf pm show --wave <wave-name>` (Linear is the source of truth; there are no local task lists)
+   - `lf pm show --wave <wave> --json --no-sync` — measured bets, KRs, and tasks from SQLite
+   - Live tasks — `lf pm show --wave <wave-name> --no-sync` (Linear is the source of truth; there are no local task lists)
 
 2. **Read runtime state.** For each member wave:
    - `wave/<wave-name>/.wave-endpoint` — a live wave server publishes its

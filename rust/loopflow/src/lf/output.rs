@@ -176,7 +176,6 @@ pub fn format_reproducible_command(
         parts.push("--no-loopflow".to_string());
     }
     if let Some(m) = model {
-        // Only include if not the default
         parts.push(format!("-m {}", m));
     }
     parts.join(" ")

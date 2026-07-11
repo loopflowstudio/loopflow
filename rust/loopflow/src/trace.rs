@@ -1161,18 +1161,23 @@ impl TraceCapture {
         Ok(())
     }
 
-    fn finish_current_turn(&mut self, status: &str, ended_at: i64) -> StoreResult<()> {
-        if self.turn.status != "running" {
-            return Ok(());
-        }
-        self.turn.ended_at = Some(ended_at);
-        self.turn.status = status.to_string();
+    /// Copy the accumulated turn usage onto the turn row before persisting it.
+    fn apply_usage_to_turn(&mut self) {
         self.turn.provider_input_tokens = Some(self.usage.input_tokens as i64);
         self.turn.provider_output_tokens = Some(self.usage.output_tokens as i64);
         self.turn.reasoning_tokens = self.usage.reasoning_tokens.map(|value| value as i64);
         self.turn.cache_read_tokens = self.usage.cache_read_tokens.map(|value| value as i64);
         self.turn.cache_write_tokens = self.usage.cache_write_tokens.map(|value| value as i64);
         self.turn.cost_usd = self.usage.cost_usd;
+    }
+
+    fn finish_current_turn(&mut self, status: &str, ended_at: i64) -> StoreResult<()> {
+        if self.turn.status != "running" {
+            return Ok(());
+        }
+        self.turn.ended_at = Some(ended_at);
+        self.turn.status = status.to_string();
+        self.apply_usage_to_turn();
         crate::journal::open_ledger()?.finish_agent_turn_capture(&self.turn)
     }
 
@@ -1293,12 +1298,7 @@ impl TraceCapture {
             }
             .to_string()
         };
-        self.turn.provider_input_tokens = Some(self.usage.input_tokens as i64);
-        self.turn.provider_output_tokens = Some(self.usage.output_tokens as i64);
-        self.turn.reasoning_tokens = self.usage.reasoning_tokens.map(|value| value as i64);
-        self.turn.cache_read_tokens = self.usage.cache_read_tokens.map(|value| value as i64);
-        self.turn.cache_write_tokens = self.usage.cache_write_tokens.map(|value| value as i64);
-        self.turn.cost_usd = self.usage.cost_usd;
+        self.apply_usage_to_turn();
         crate::journal::open_ledger()?.finish_trace_capture(&self.launch, &self.turn)
     }
 }
@@ -1468,10 +1468,6 @@ pub struct ConversationRead {
     pub incomplete_tail: bool,
 }
 
-pub fn read_conversation(path: &Path) -> StoreResult<Vec<RecordedConversationEvent>> {
-    Ok(read_conversation_status(path)?.events)
-}
-
 pub fn read_conversation_status(path: &Path) -> StoreResult<ConversationRead> {
     let file = fs::File::open(path)
         .map_err(|error| StoreError::InvalidData(format!("open {}: {error}", path.display())))?;
@@ -1507,7 +1503,8 @@ pub fn read_conversation_status(path: &Path) -> StoreResult<ConversationRead> {
 #[cfg(test)]
 mod tests {
     use super::{
-        provider_session_id, read_conversation, resolve_artifact, CaptureHandle, ContextAssetKind,
+        provider_session_id, read_conversation_status, resolve_artifact, CaptureHandle,
+        ContextAssetKind,
         ContextAssetSpec, ContextChannel, ContextScope, PreparedTurnContext, TraceCaptureContext,
     };
     use crate::lfd::id::LfdId;
@@ -1543,7 +1540,7 @@ mod tests {
             "{\"schema_version\":1,\"seq\":0,\"ts\":\"2026-07-10T00:00:00Z\",\"turn_id\":null,\"payload\":{\"type\":\"capture_error\",\"message\":\"x\"}}\n{\"schema_version\":",
         )
         .unwrap();
-        assert_eq!(read_conversation(&path).unwrap().len(), 1);
+        assert_eq!(read_conversation_status(&path).unwrap().events.len(), 1);
     }
 
     #[test]

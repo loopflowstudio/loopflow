@@ -235,6 +235,13 @@ Migrate existing `task_commands` rows into this representation. Keep Task and
 Project CLI nouns explicit; only their durable delivery machinery is shared.
 Do not create a public generic session or loop command.
 
+The database migration adds `project_sessions`, `project_events`, shared
+`child_commands`, and `observation_outbox`; it adds required supervisor kind/id
+columns to `task_sessions`. Existing Task commands retain ids, state, effect,
+generation, timestamps, and errors. Existing Tasks point to their Wave. DTO
+fixtures add every required field in Rust and Swift; no wire default hides an
+old row or stale client.
+
 ### 2. Typed child observations
 
 Replace prose calls to `post_to_named_wave("Task …")` and the current prose
@@ -433,6 +440,29 @@ shape rather than inventing another receipt model.
 
 ## The demo
 
+Progressive disclosure keeps the hello-world path small: a Wave may still
+create and run one Task directly. A measured multi-Task bet uses the Project
+Session automatically; the human does not choose process topology.
+
+Project-sized path:
+
+```text
+Human: Make first-run CLI onboarding self-explanatory.
+
+Wave:
+  creates/selects Linear Project "First-run onboarding"
+  starts Project Session ps_01 and remains available
+
+Project ps_01:
+  clarifies proof-shaped KRs
+  creates Task INF-123 for the command and INF-124 for docs/tests
+  starts both Task Sessions, then sleeps
+  wakes on their typed PR/decision events
+  verifies the KRs after merge and reports completion to the Wave
+```
+
+Small direct path:
+
 From Wave Chat:
 
 ```text
@@ -462,9 +492,14 @@ The human issues no branch, worktree, placement, tmux, Linear, or PM command.
 The Wave never changes cwd or branch. The Task Session is independently
 inspectable and controllable throughout.
 
-The equivalent formal CLI path is:
+The equivalent formal CLI paths are:
 
 ```text
+lf project run <linear-project-id>
+lf project steer <linear-project-id> "prioritize the CLI path"
+lf project wait <linear-project-id>
+
+# Direct one-Task fast path
 lf task run INF-123
 lf task steer INF-123 "also name the flag --hello"
 lf task wait INF-123
@@ -910,6 +945,18 @@ commits, branches, PRs, and tests belong inside a Task Session. This is a
 prompted trust boundary, not a sandbox; the conformance test proves the normal
 Project workflow creates no Project worktree or branch.
 
+The built-in skills reflect the ownership boundary:
+
+- `wave_pursue` selects Projects, starts/steers Project Sessions, handles
+  escalated decisions, and may run a small Task directly.
+- `project_clarify` reads/writes the exact Linear Project named by its session;
+  it never uses `scratch/<branch>.md` as the KR source.
+- `project_pursue` creates/selects Tasks and supervises their Task Sessions; it
+  never starts another Project or edits repository files.
+- `project_mutate` evaluates evidence and reports its judgment; the runner,
+  not an LM-authored loop bit, owns repeat/wait/block/complete mechanics.
+- `task_*` skills remain focused on one issue, one worktree, and one PR.
+
 ## Task runner
 
 Replace the generic headless pass loop with one inbox-aware task runner using
@@ -1339,6 +1386,10 @@ control, and wait. Swift invokes those commands and reads the shared registry.
 
 Required surface behavior:
 
+- `lf status --json` exposes Project Sessions and their supervisor/child links
+  alongside Task Sessions.
+- Swift DTOs decode the required Project Session fields and may render a
+  passive active-session row; this slice adds no Project control surface.
 - Wave detail shows active Task Sessions and their Linear ids/status.
 - Opening a Task shows its worktree, PR, latest event, and attach action.
 - Existing Wave Chat continues to steer the Wave, which may control children.
@@ -1675,10 +1726,10 @@ Efficiency with the outage evidence.
 - CLI text and JSON expose Project/issue id, Project/Task Session id, supervisor,
   state reason, provider, process liveness, latest event, and—only for Tasks—
   worktree and PR.
-- The Mac Wave detail may continue showing only the existing active-Task
-  projection in this infrastructure PR. The later UI reads Project Sessions
-  and typed observations from these same `lf --json` shapes; it owns no
-  duplicate lifecycle state.
+- The Mac Wave detail passively lists active Project Sessions alongside the
+  existing Task projection. Rich Project/Task controls and observation
+  rendering remain the later UI; it reads these same `lf --json` shapes and
+  owns no duplicate lifecycle state.
 - Every visible `Failed`, `Blocked`, `Waiting`, `Submitted`, and terminal state
   includes a reason and timestamp.
 - Wave event → Project Session → Task Session → raw transcript/worktree/PR is

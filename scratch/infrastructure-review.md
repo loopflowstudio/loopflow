@@ -78,8 +78,8 @@ independent merge/cleanup path.
   headless gate because it creates external records, worktrees, provider spend,
   and a PR. The deterministic store, migration, parser, PM, and lifecycle tests
   pass.
-- The diff is intentionally broad: 171 files, about 6.4k non-scratch additions
-  and 9.3k deletions. Review state ownership and failure paths before UI polish.
+- The diff is intentionally broad: 173 files, 7,444 non-scratch additions and
+  9,347 deletions. Review state ownership and failure paths before UI polish.
 
 ## What's not included
 
@@ -93,16 +93,15 @@ independent merge/cleanup path.
 
 ## Validation
 
-- `uv run python scripts/test.py --all` plus the final Rust rerun — all six
-  suites pass: 53 Python tests; Rust format/clippy plus 1,284 nextest tests
-  (3 intentional skips);
-  59 website tests (3 intentional skips); 303 Swift tests plus the
+- `uv run python scripts/test.py --all` — all six suites pass: 53 Python tests;
+  Rust format/clippy plus 1,284 nextest passes (3 intentional skips);
+  59 website tests (3 intentional skips); 298 Swift tests plus the
   multiplatform boundary check; CLI/API e2e smoke; signed macOS
   `build-for-testing`.
-- Final Rust rerun — `cargo fmt --all -- --check`,
-  `cargo clippy --all-targets -- -D warnings`, and all 1,284 nextest tests pass.
+- The focused migration 066 repair test passes after removing the trailing
+  whitespace caught by `git diff --check`.
 - Focused regressions prove atomic resume capacity, forward repair of the
   dogfood Task Session and command schemas, receipt/supersession persistence,
   parser separation, and cross-Wave command refusal.
 - `bash -n scripts/demo_wave.sh` and `git diff --check` pass.
-- The final branch is net-negative outside `scratch/`: about 2.9k fewer lines.
+- The final branch is net-negative outside `scratch/`: 1,903 fewer lines.

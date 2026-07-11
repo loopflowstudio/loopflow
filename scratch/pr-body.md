@@ -30,7 +30,7 @@ uv run python scripts/test.py --all
 ```
 
 All six suites pass. The implementation diff is net-negative outside
-`scratch/`: roughly 6.4k additions and 9.3k deletions.
+`scratch/`: 7,444 additions and 9,347 deletions.
 
 ## Intent
 

@@ -101,31 +101,19 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
     let (mut first_input, mut first_command) =
         take_first_input(task_seed_input.clone(), resuming, &mut pending);
     if let Some((command_id, _)) = &first_command {
-        let current = store
-            .get_task_command(command_id)
-            .await?
-            .is_some_and(|command| command.state == TaskCommandState::Claimed);
-        if !current {
+        if !command_is_claimed(&store, command_id).await? {
             first_input = task_seed_input;
             first_command = None;
         }
     }
-    if let Err(error) = harness.send_input(&first_input).await {
-        if let Some((command_id, effect)) = first_command.clone() {
-            record_command_failed(
-                &store,
-                &session,
-                command_id,
-                Some(effect),
-                &error.to_string(),
-            )
-            .await?;
-        }
-        return Err(error);
-    }
-    if let Some((command_id, effect)) = first_command {
-        record_command_accepted(&store, &session, command_id, Some(effect)).await?;
-    }
+    apply_input(
+        &store,
+        &session,
+        harness.as_mut(),
+        &first_input,
+        first_command,
+    )
+    .await?;
 
     let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
     std::thread::spawn(move || {
@@ -199,26 +187,8 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 if !pending_input_is_current(&store, &input).await? {
                                     continue;
                                 }
-                                if let Err(error) = harness.send_input(&input.text).await {
-                                    if let Some(command_id) = input.command_id {
-                                        record_command_failed(
-                                            &store,
-                                            &session,
-                                            command_id,
-                                            Some(input.effect),
-                                            &error.to_string(),
-                                        ).await?;
-                                    }
-                                    return Err(error);
-                                }
-                                if let Some(command_id) = input.command_id {
-                                    record_command_accepted(
-                                        &store,
-                                        &session,
-                                        command_id,
-                                        Some(input.effect),
-                                    ).await?;
-                                }
+                                let command = input.command_id.map(|id| (id, input.effect));
+                                apply_input(&store, &session, harness.as_mut(), &input.text, command).await?;
                                 continue 'runner;
                             }
                             let boundary_commands = claim_commands(
@@ -358,13 +328,10 @@ fn take_first_input(
 }
 
 async fn pending_input_is_current(store: &SharedStore, input: &PendingInput) -> Result<bool> {
-    let Some(command_id) = &input.command_id else {
-        return Ok(true);
-    };
-    Ok(store
-        .get_task_command(command_id)
-        .await?
-        .is_some_and(|command| command.state == TaskCommandState::Claimed))
+    match &input.command_id {
+        Some(command_id) => command_is_claimed(store, command_id).await,
+        None => Ok(true),
+    }
 }
 
 async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: String) -> Result<()> {
@@ -453,11 +420,7 @@ async fn absorb_commands(
     pending: &mut VecDeque<PendingInput>,
 ) -> Result<Option<String>> {
     for command in commands {
-        let is_current = store
-            .get_task_command(&command.id)
-            .await?
-            .is_some_and(|stored| stored.state == TaskCommandState::Claimed);
-        if !is_current {
+        if !command_is_claimed(store, &command.id).await? {
             continue;
         }
         match command.kind {
@@ -470,22 +433,12 @@ async fn absorb_commands(
             }
             TaskCommandKind::Steer { text } => {
                 if turn_active && harness.capabilities().supports_steer {
-                    if let Err(error) = harness.send_input(&text).await {
-                        record_command_failed(
-                            store,
-                            session,
-                            command.id,
-                            Some(TaskCommandEffect::LiveSteer),
-                            &error.to_string(),
-                        )
-                        .await?;
-                        return Err(error);
-                    }
-                    record_command_accepted(
+                    apply_input(
                         store,
                         session,
-                        command.id,
-                        Some(TaskCommandEffect::LiveSteer),
+                        harness,
+                        &text,
+                        Some((command.id, TaskCommandEffect::LiveSteer)),
                     )
                     .await?;
                 } else {
@@ -703,6 +656,36 @@ async fn record_command_accepted(
         )
         .await?;
     Ok(())
+}
+
+/// Send `text` to the harness and record the driving command's fate: accepted on
+/// success, failed (with the error propagated) otherwise. `command` is `None`
+/// for the task seed, which has no command to reconcile.
+async fn apply_input(
+    store: &SharedStore,
+    session: &TaskSession,
+    harness: &mut dyn Harness,
+    text: &str,
+    command: Option<(TaskCommandId, TaskCommandEffect)>,
+) -> Result<()> {
+    if let Err(error) = harness.send_input(text).await {
+        if let Some((command_id, effect)) = command {
+            record_command_failed(store, session, command_id, Some(effect), &error.to_string())
+                .await?;
+        }
+        return Err(error);
+    }
+    if let Some((command_id, effect)) = command {
+        record_command_accepted(store, session, command_id, Some(effect)).await?;
+    }
+    Ok(())
+}
+
+async fn command_is_claimed(store: &SharedStore, command_id: &TaskCommandId) -> Result<bool> {
+    Ok(store
+        .get_task_command(command_id)
+        .await?
+        .is_some_and(|command| command.state == TaskCommandState::Claimed))
 }
 
 async fn finish_failed(

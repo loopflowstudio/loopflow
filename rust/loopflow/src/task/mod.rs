@@ -72,53 +72,39 @@ pub enum TaskDataError {
 string_id!(TaskSessionId, "ts_");
 string_id!(TaskCommandId, "tc_");
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct LinearIssueId(String);
+/// Opaque Linear identifier: non-empty, provider-assigned (no prefix grammar of
+/// our own, so distinct from `string_id!`).
+macro_rules! validated_string_id {
+    ($name:ident, $label:literal) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[serde(transparent)]
+        pub struct $name(String);
 
-impl LinearIssueId {
-    pub fn new(value: impl Into<String>) -> Result<Self, TaskDataError> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            return Err(TaskDataError::InvalidId(
-                "Linear issue id cannot be empty".to_string(),
-            ));
+        impl $name {
+            pub fn new(value: impl Into<String>) -> Result<Self, TaskDataError> {
+                let value = value.into();
+                if value.trim().is_empty() {
+                    return Err(TaskDataError::InvalidId(format!(
+                        "{} cannot be empty",
+                        $label
+                    )));
+                }
+                Ok(Self(value))
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+
+            pub(crate) fn from_raw(value: impl Into<String>) -> Self {
+                Self(value.into())
+            }
         }
-        Ok(Self(value))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
+    };
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct LinearProjectId(String);
-
-impl LinearProjectId {
-    pub fn new(value: impl Into<String>) -> Result<Self, TaskDataError> {
-        let value = value.into();
-        if value.trim().is_empty() {
-            return Err(TaskDataError::InvalidId(
-                "Linear project id cannot be empty".to_string(),
-            ));
-        }
-        Ok(Self(value))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-}
+validated_string_id!(LinearIssueId, "Linear issue id");
+validated_string_id!(LinearProjectId, "Linear project id");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinearIssueRef {

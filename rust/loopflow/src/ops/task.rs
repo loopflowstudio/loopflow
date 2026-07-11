@@ -830,16 +830,7 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                     .await
                     .map_err(|error| task_error(error.to_string()))?;
                 let receipt = wait_for_command_receipt(&store, &command.id).await?;
-                return Ok(TaskControlResult {
-                    issue_id: session.issue.identifier,
-                    session_id: session.id.to_string(),
-                    command_id: command.id.to_string(),
-                    state: receipt.state,
-                    effect: receipt.effect,
-                    generation: receipt.claimed_by_generation,
-                    accepted_at: receipt.accepted_at,
-                    error: receipt.error,
-                });
+                return Ok(control_result(&session, &command, receipt));
             }
         }
         if !session.status.is_process_active() {
@@ -852,11 +843,7 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                 })?;
             launch_task_process(&store, &mut session, Some(wave.workers.max(1))).await?;
         }
-        let mut receipt = if wait_for_resolution {
-            wait_for_command_receipt(&store, &command.id).await?
-        } else {
-            read_command_receipt(&store, &command.id).await?
-        };
+        let mut receipt = resolve_receipt(&store, &command.id, wait_for_resolution).await?;
         if matches!(
             receipt.state,
             TaskCommandState::Persisted | TaskCommandState::Claimed
@@ -876,24 +863,40 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                         task_error(format!("owning wave/{} is not registered", session.wave))
                     })?;
                 launch_task_process(&store, &mut session, Some(wave.workers.max(1))).await?;
-                receipt = if wait_for_resolution {
-                    wait_for_command_receipt(&store, &command.id).await?
-                } else {
-                    read_command_receipt(&store, &command.id).await?
-                };
+                receipt = resolve_receipt(&store, &command.id, wait_for_resolution).await?;
             }
         }
-        Ok(TaskControlResult {
-            issue_id: session.issue.identifier,
-            session_id: session.id.to_string(),
-            command_id: command.id.to_string(),
-            state: receipt.state,
-            effect: receipt.effect,
-            generation: receipt.claimed_by_generation,
-            accepted_at: receipt.accepted_at,
-            error: receipt.error,
-        })
+        Ok(control_result(&session, &command, receipt))
     })
+}
+
+fn control_result(
+    session: &TaskSession,
+    command: &TaskCommand,
+    receipt: TaskCommand,
+) -> TaskControlResult {
+    TaskControlResult {
+        issue_id: session.issue.identifier.clone(),
+        session_id: session.id.to_string(),
+        command_id: command.id.to_string(),
+        state: receipt.state,
+        effect: receipt.effect,
+        generation: receipt.claimed_by_generation,
+        accepted_at: receipt.accepted_at,
+        error: receipt.error,
+    }
+}
+
+async fn resolve_receipt(
+    store: &SharedStore,
+    command_id: &crate::task::TaskCommandId,
+    wait: bool,
+) -> OpsResult<TaskCommand> {
+    if wait {
+        wait_for_command_receipt(store, command_id).await
+    } else {
+        read_command_receipt(store, command_id).await
+    }
 }
 
 async fn wait_for_command_receipt(

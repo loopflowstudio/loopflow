@@ -1433,10 +1433,11 @@ identity, placement, or delivery model:
    review, then perform the explicit live two-Task Project dogfood and record
    its evidence.
 
-This is infrastructure-only. Swift continues to display the existing Task
-Session projection; its richer Task inspector and event rendering follow after
-the terminal contract is proven. No new server, task-specific HTTP service,
-remote transport, placement option, or delivery mode belongs in this slice.
+This is infrastructure-first. Swift receives only the DTO update and passive
+Project Session projection needed to keep `lf status --json` honest; its richer
+Project/Task inspector and event rendering follow after the terminal contract
+is proven. No new server, child-specific HTTP service, remote transport,
+placement option, or delivery mode belongs in this slice.
 
 ## Code removed or simplified
 

@@ -35,44 +35,9 @@ lf radio pub -c product --from demo "button audit finished"
 The subscriber prints `[product] demo: button audit finished`. `lf radio`
 shows `pub` and `sub`; `lf sub` and `lf radio "text"` fail at parsing.
 
-## Data structures
-
-```rust
-enum Commands {
-    Radio {
-        #[command(subcommand)]
-        command: RadioCommand,
-    },
-}
-
-enum RadioCommand {
-    Pub {
-        text: Vec<String>,
-        channel: Option<String>,
-        parent: bool,
-        from: Option<String>,
-    },
-    Sub {
-        channel: Option<String>,
-        json: bool,
-    },
-}
-```
-
-The store bus, channel-prefix matching, cursor behavior, byline rules, and
-publish/subscribe implementations do not change. This is command ownership,
-not a transport rewrite.
-
-## Key functions
-
-```rust
-radio::run_pub(text, channel, parent, from) -> Result<()>
-sub::run(channel, json) -> Result<()>
-```
-
-Dispatch through `Commands::Radio { command }`. The wave exec door continues
-to authorize radio as one capability; both operations are bus-only and never
-gain access to chat, listener lifecycle, or arbitrary execution.
+(Shipped. The `RadioCommand` enum, dispatch, and `run_pub`/`sub::run` live in
+`lf/commands/`; the store bus, prefix matching, cursor, and byline behavior were
+unchanged — command ownership only.)
 
 ## Constraints
 

@@ -82,9 +82,7 @@ long form and dies at land; this is what survives.
   on the wave's thread. On a store bus the fast path is a poll cursor in the
   driver's pass boundary — cheap to build, or to skip deliberately. Open fork.
 - **Mid-turn steer is Codex-only.** Claude and OpenCode queue to the next body.
-  Vendor-gated; the product question lives in `projects/wave-chat.md`.
-- **`lf chat` and `lf wavechat` overlap.** `wavechat` (picked up in the rebase) is
-  `chat` + `sub` fused — the exact fusion this design splits. One should go.
+  Vendor-gated; the product question lives in the wave-chat Linear Project.
 - **Composite flow nodes** (`and`/`or`/`xor`/`loop`) still run through the
   internal headless `__flow-step` fallback rather than first-class playhead
   frames. Do it when the Mac's breadcrumb starts lying about nested flows.
@@ -119,16 +117,27 @@ long form and dies at land; this is what survives.
   wave's snapshot; ordinary reads (`lf pm show`, project selection, agent
   context, the Mac) read the snapshot, never Linear. `lf pm init` links/creates
   Initiatives and writes the binding; `lf pm project create/update` and the
-  `lf pm task ...` mutations write Linear then refresh SQLite. Design in
-  `scratch/pm-linear-source.md`. KRs still read as proof, not backlog bullets.
-- **Not fully wired (open, filed under loopflow-api
-  `8e77a60f-71e7-4e73-8471-2a1d9c2deb58`):** `lf pm show --json` emits
-  `{initiative, items, project, provider, wave}` — item fields (`description`,
-  `rank`, `project`, `assignee`) are present, but there is **no `projects` array
-  or `synced_at`**. This branch's Swift `PmShowSnapshot`/`RegistryQuery.plan()`
-  require both as non-optional Codable, so the Mac plan decode throws and renders
-  objective-only. And `lf pm sync` still writes `projects/*.md` markdown that the
-  new model says shouldn't exist. Pick one source before trusting the plan render.
+  `lf pm task ...` mutations write Linear then refresh SQLite. KRs still read as
+  proof, not backlog bullets.
+- **Plan is fully wired end to end (this branch, closed loopflow-api task
+  `8e77a60f`).** `PmShowResult` (`ops/pm.rs`) *is* the `--json` wire shape:
+  `{wave, provider, initiative, project, synced_at, projects, items}`. Swift
+  `PmShowSnapshot`/`RegistryQuery.plan()` decode `synced_at`+`projects` and map
+  each Project's definition + KR proof into `WavePlan`; `WaveDetailPane` renders
+  them. No `projects/*.md` is written anywhere — sync only ever touches `GOAL.md`
+  frontmatter. The earlier "pick one source" blocker is gone: `PmShowResult` is
+  the single envelope, so there is no second shape that can omit fields Swift
+  needs.
+- **`lf pm show` freshness policy (this branch, `--sync`/`--no-sync`).** Auto
+  mode reads the SQLite snapshot through a staleness gate keyed on `synced_at`:
+  **fresh <1h** serves cache, no network; **soft-stale 1h–1wk** tries one bounded
+  refresh (5s cap) and falls back to cache on any failure, saying so;
+  **hard-stale >1wk** refreshes or errors (too stale to serve silently). `--sync`
+  forces a refresh; `--no-sync` is cache-only. Because every mutation refreshes
+  the acting machine's snapshot, single-machine reads run *ahead* of the last
+  explicit sync and `--no-sync` is fully current without a network call. Agents
+  tolerate failure — drop the PM section rather than block. The scheduled
+  `lf pm sync` cron keeps the snapshot warm for cross-machine readers.
 - **task = one Linear issue** under a Project. Linear is the only roadmap.
 - The seven live bets (Linear Projects under the product Initiative): loopflow-api,
   wave-chat, mac-surface-ux, ios-surface-ux, distributed-computing,
@@ -146,9 +155,12 @@ long form and dies at land; this is what survives.
   local, and streams new runs. It is NOT how things execute, NOT a parallel impl.
   Concerto's bundled lfd earns its keep solely as the pubsub pipe feeding the ledger.
 - **Superseded on the agent side:** `lf radio sub` no longer opens a socket — it
-  polls the store bus by channel prefix. Its SSE follower moved verbatim to
-  `lf/commands/thread.rs` and backs `lf wavechat`. HTTP/SSE remains the *thread's*
-  transport (`lf chat`, the Mac); the bus never had a server in its path.
+  polls the store bus by channel prefix. Its SSE follower lives in
+  `lf/commands/thread.rs` and backs `lf chat --follow` — the sole human-thread
+  surface now that `lf wavechat` is removed (asserted absent in `lf/mod.rs`; the
+  old `chat`+`sub` fusion this design split is gone, no alias). HTTP/SSE remains
+  the *thread's* transport (`lf chat`, the Mac); the bus never had a server in
+  its path.
 - **The agent bus is one explicit namespace (this branch, `lf radio: make agent
   bus operations explicit`).** `lf radio pub [TEXT] [-c NAME | --parent] [--from
   NAME]` and `lf radio sub [CHANNEL] [--json]`; bare `lf radio` prints subcommand
@@ -182,9 +194,10 @@ long form and dies at land; this is what survives.
 - **Vocabulary locked:** *Run* = ledger entry (reuses lfd's existing `Run` DTO);
   *session* = a live run's attachable tmux (`/attach`, `TerminalSession`); *exec*
   retired from the frontend (stays loop's word for how a run is born).
-- **Plan render is blocked until the `--json` contract carries projects** — see
-  the loopflow-api task above; `RegistryQuery.plan`'s `PmShowSnapshot` decode
-  throws today because the CLI omits `projects`/`synced_at`.
+- **Plan render works end to end now** — `PmShowResult` carries `projects` +
+  `synced_at`, `RegistryQuery.plan`'s `PmShowSnapshot` decodes them, and
+  `WaveDetailPane` shows each Project + KR proof. The old decode-throws blocker is
+  closed (see the charter section).
 - Not yet built: runs ledger renderer, live pubsub wiring, remote/`lf loop show`
   plan query (slices 2–4).
 
@@ -351,3 +364,17 @@ here on top of PR #849's signed-test/release hardening.
   `LF_RUN_ID`; Rust tests asserting generated journal ids / branch-derived ingest
   must clear it or full `cargo test -p loopflow` fails only under agent runs.
 - Kickoff line numbers drift fast — re-verify before citing in a design.
+- **Migration numbers collide across branches — shared `lfd.db` is the blast
+  radius.** Product and intelligence both minted `061` (`061_pm_snapshots` vs
+  `061_trace_capture`); distinct version strings apply but inter-order is
+  undefined. Worse, editing a historical migration CREATE in place (product added
+  `run_events.context` to `057`) means DBs created before the edit never get the
+  column, and `057` won't re-run — so `validate_run_events_schema` selecting
+  `context` takes down *every* command sharing `lfd.db` (that was the `pm show`
+  break; worked around by hand-adding the column). Fix is intelligence's, one
+  line: `061_trace_capture`'s unguarded `ALTER TABLE run_events DROP COLUMN
+  context` fails `no such column` on pre-context DBs and isn't in the convergence
+  path — tolerate it (or rebuild). Product must NOT add a forward `ADD COLUMN
+  context`; it would fight the drop. Wants a real convention: per-wave migration
+  ranges, or Jack's idea — a separate dev lfdb via `LF_HOME=~/.lf-dev` (honored at
+  `lfd/mod.rs:66`) so in-flight schema can't corrupt the real ledger.

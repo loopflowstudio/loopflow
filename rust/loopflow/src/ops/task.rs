@@ -271,37 +271,13 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
         }
 
         if let Err(error) = create_from_placement_plan(&main_repo, &plan) {
-            let from = session.status;
-            session.set_status(
-                TaskSessionStatus::Failed,
+            record_task_failure(
+                &store,
+                &mut session,
                 format!("worktree creation failed: {error}"),
-            );
-            store.update_task_session(&session).await.map_err(|store_error| {
-                task_error(format!(
-                    "worktree creation failed ({error}); recording failure also failed: {store_error}"
-                ))
-            })?;
-            store
-                .append_task_event(
-                    &session.id,
-                    &TaskEventKind::StatusChanged {
-                        from,
-                        to: TaskSessionStatus::Failed,
-                        reason: session.status_reason.clone(),
-                    },
-                )
-                .await
-                .map_err(|store_error| task_error(store_error.to_string()))?;
-            store
-                .append_task_event(
-                    &session.id,
-                    &TaskEventKind::Failed {
-                        error: error.to_string(),
-                        resumable: true,
-                    },
-                )
-                .await
-                .map_err(|store_error| task_error(store_error.to_string()))?;
+                error.to_string(),
+            )
+            .await?;
             return Err(task_error(format!(
                 "failed to create task worktree: {error}"
             )));
@@ -367,6 +343,59 @@ pub fn project_run(repo: &Path, project_id: &str) -> OpsResult<ProjectRunResult>
 pub fn project_start(repo: &Path, title: &str, wave: Option<&str>) -> OpsResult<ProjectRunResult> {
     let project = crate::ops::pm::pm_create_project(repo, wave, title)?;
     project_run(repo, &project.project.id)
+}
+
+/// Record a Task Session's transition into `Failed`: set the status, persist it,
+/// and append the paired `StatusChanged` + `Failed` events. Callers keep their
+/// own return value; this only writes the durable failure record.
+async fn record_task_failure(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    reason: impl Into<String>,
+    error: String,
+) -> OpsResult<()> {
+    let from = session.status;
+    session.set_status(TaskSessionStatus::Failed, reason);
+    store
+        .update_task_session(session)
+        .await
+        .map_err(|store_error| task_error(store_error.to_string()))?;
+    store
+        .append_task_event(
+            &session.id,
+            &TaskEventKind::StatusChanged {
+                from,
+                to: TaskSessionStatus::Failed,
+                reason: session.status_reason.clone(),
+            },
+        )
+        .await
+        .map_err(|store_error| task_error(store_error.to_string()))?;
+    store
+        .append_task_event(
+            &session.id,
+            &TaskEventKind::Failed {
+                error,
+                resumable: true,
+            },
+        )
+        .await
+        .map_err(|store_error| task_error(store_error.to_string()))?;
+    Ok(())
+}
+
+/// Reserve capacity from the owning Wave and start a fresh generation for a
+/// session whose process is no longer active.
+async fn relaunch_inactive_process(
+    store: &SharedStore,
+    session: &mut TaskSession,
+) -> OpsResult<()> {
+    let wave = store
+        .get_wave(&session.wave_id)
+        .await
+        .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
+        .ok_or_else(|| task_error(format!("owning wave/{} is not registered", session.wave)))?;
+    launch_task_process(store, session, Some(wave.workers.max(1))).await
 }
 
 async fn launch_task_process(
@@ -452,36 +481,13 @@ async fn launch_task_process(
     if let Err(error) =
         start_lf_session_with_env(&tmux_name, &session.worktree, &argv, &environment).await
     {
-        let from = session.status;
-        session.set_status(
-            TaskSessionStatus::Failed,
+        record_task_failure(
+            store,
+            session,
             format!("task process launch failed: {error}"),
-        );
-        store
-            .update_task_session(session)
-            .await
-            .map_err(|store_error| task_error(store_error.to_string()))?;
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::StatusChanged {
-                    from,
-                    to: TaskSessionStatus::Failed,
-                    reason: session.status_reason.clone(),
-                },
-            )
-            .await
-            .map_err(|store_error| task_error(store_error.to_string()))?;
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::Failed {
-                    error: error.to_string(),
-                    resumable: true,
-                },
-            )
-            .await
-            .map_err(|store_error| task_error(store_error.to_string()))?;
+            error.to_string(),
+        )
+        .await?;
         return Err(task_error(format!(
             "failed to launch task process: {error}"
         )));
@@ -536,37 +542,8 @@ async fn reconcile_process_liveness(
     if alive {
         return Ok(());
     }
-    let from = session.status;
-    session.set_status(
-        TaskSessionStatus::Failed,
-        "task process is missing; resume the same Task Session with `lf task resume`",
-    );
-    store
-        .update_task_session(session)
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    store
-        .append_task_event(
-            &session.id,
-            &TaskEventKind::StatusChanged {
-                from,
-                to: TaskSessionStatus::Failed,
-                reason: session.status_reason.clone(),
-            },
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    store
-        .append_task_event(
-            &session.id,
-            &TaskEventKind::Failed {
-                error: session.status_reason.clone(),
-                resumable: true,
-            },
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    Ok(())
+    let reason = "task process is missing; resume the same Task Session with `lf task resume`";
+    record_task_failure(store, session, reason, reason.to_string()).await
 }
 
 pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
@@ -646,44 +623,44 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
     })
 }
 
-pub(crate) async fn reconcile_pm_writeback(session: &mut TaskSession) {
-    let Some(pull_request) = session.pull_request.as_ref() else {
-        return;
-    };
-    session.pm_writeback = match crate::ops::task_pm::complete_task(
-        &session.worktree,
-        &session.wave,
-        session.issue.id.as_str(),
-        &pull_request.url,
-    )
-    .await
-    {
+fn writeback_state(result: OpsResult<()>) -> PmWritebackState {
+    match result {
         Ok(()) => PmWritebackState::Current,
         Err(error) => PmWritebackState::Pending {
             operation: PmWritebackOperation::CompleteTask,
             error: error.to_string(),
         },
+    }
+}
+
+pub(crate) async fn reconcile_pm_writeback(session: &mut TaskSession) {
+    let Some(pull_request) = session.pull_request.as_ref() else {
+        return;
     };
+    session.pm_writeback = writeback_state(
+        crate::ops::task_pm::complete_task(
+            &session.worktree,
+            &session.wave,
+            session.issue.id.as_str(),
+            &pull_request.url,
+        )
+        .await,
+    );
 }
 
 async fn retry_pm_writeback(session: &mut TaskSession) {
     let Some(pull_request) = session.pull_request.as_ref() else {
         return;
     };
-    session.pm_writeback = match crate::ops::task_pm::retry_complete_task(
-        &session.worktree,
-        &session.wave,
-        session.issue.id.as_str(),
-        &pull_request.url,
-    )
-    .await
-    {
-        Ok(()) => PmWritebackState::Current,
-        Err(error) => PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
-            error: error.to_string(),
-        },
-    };
+    session.pm_writeback = writeback_state(
+        crate::ops::task_pm::retry_complete_task(
+            &session.worktree,
+            &session.wave,
+            session.issue.id.as_str(),
+            &pull_request.url,
+        )
+        .await,
+    );
     session.updated_at = time::OffsetDateTime::now_utc();
 }
 
@@ -783,14 +760,7 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
             };
         if !created {
             if !command.state.is_terminal() && !session.status.is_process_active() {
-                let wave = store
-                    .get_wave(&session.wave_id)
-                    .await
-                    .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
-                    .ok_or_else(|| {
-                        task_error(format!("owning wave/{} is not registered", session.wave))
-                    })?;
-                launch_task_process(&store, &mut session, Some(wave.workers.max(1))).await?;
+                relaunch_inactive_process(&store, &mut session).await?;
             }
             let receipt = resolve_receipt(&store, &command.id, wait_for_resolution).await?;
             return Ok(control_result(&session, &command, receipt));
@@ -852,14 +822,7 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
             }
         }
         if !session.status.is_process_active() {
-            let wave = store
-                .get_wave(&session.wave_id)
-                .await
-                .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
-                .ok_or_else(|| {
-                    task_error(format!("owning wave/{} is not registered", session.wave))
-                })?;
-            launch_task_process(&store, &mut session, Some(wave.workers.max(1))).await?;
+            relaunch_inactive_process(&store, &mut session).await?;
         }
         let mut receipt = resolve_receipt(&store, &command.id, wait_for_resolution).await?;
         if matches!(
@@ -873,14 +836,7 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                 .ok_or_else(|| task_error("Task Session disappeared after command persistence"))?;
             if !current.status.is_process_active() && !current.status.is_terminal() {
                 session = current;
-                let wave = store
-                    .get_wave(&session.wave_id)
-                    .await
-                    .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
-                    .ok_or_else(|| {
-                        task_error(format!("owning wave/{} is not registered", session.wave))
-                    })?;
-                launch_task_process(&store, &mut session, Some(wave.workers.max(1))).await?;
+                relaunch_inactive_process(&store, &mut session).await?;
                 receipt = resolve_receipt(&store, &command.id, wait_for_resolution).await?;
             }
         }

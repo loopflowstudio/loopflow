@@ -57,19 +57,13 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
     if let Some(process) = &mut session.process {
         process.pid = Some(std::process::id());
     }
-    let from = session.status;
-    session.set_status(TaskSessionStatus::Running, "provider turn is active");
-    store.update_task_session(&session).await?;
-    store
-        .append_task_event(
-            &session.id,
-            &TaskEventKind::StatusChanged {
-                from,
-                to: TaskSessionStatus::Running,
-                reason: session.status_reason.clone(),
-            },
-        )
-        .await?;
+    set_and_record_status(
+        &store,
+        &mut session,
+        TaskSessionStatus::Running,
+        "provider turn is active",
+    )
+    .await?;
     store
         .append_task_event(&session.id, &TaskEventKind::Started)
         .await?;
@@ -793,6 +787,30 @@ async fn command_is_claimed(store: &SharedStore, command_id: &TaskCommandId) -> 
         .is_some_and(|command| command.state == TaskCommandState::Claimed))
 }
 
+/// Apply a status transition and persist it: set the status, update the row, and
+/// append the paired `StatusChanged` event.
+async fn set_and_record_status(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    status: TaskSessionStatus,
+    reason: impl Into<String>,
+) -> Result<()> {
+    let from = session.status;
+    session.set_status(status, reason);
+    store.update_task_session(session).await?;
+    store
+        .append_task_event(
+            &session.id,
+            &TaskEventKind::StatusChanged {
+                from,
+                to: status,
+                reason: session.status_reason.clone(),
+            },
+        )
+        .await?;
+    Ok(())
+}
+
 async fn finish_failed(
     store: &SharedStore,
     session: &mut TaskSession,
@@ -800,19 +818,7 @@ async fn finish_failed(
     error: &str,
 ) -> Result<()> {
     let _ = harness.stop().await;
-    let from = session.status;
-    session.set_status(TaskSessionStatus::Failed, error);
-    store.update_task_session(session).await?;
-    store
-        .append_task_event(
-            &session.id,
-            &TaskEventKind::StatusChanged {
-                from,
-                to: TaskSessionStatus::Failed,
-                reason: session.status_reason.clone(),
-            },
-        )
-        .await?;
+    set_and_record_status(store, session, TaskSessionStatus::Failed, error).await?;
     store
         .append_task_event(
             &session.id,
@@ -833,23 +839,13 @@ async fn finish_abandoned(
 ) -> Result<()> {
     let _ = harness.interrupt().await;
     let _ = harness.stop().await;
-    let from = session.status;
-    session.set_status(
+    set_and_record_status(
+        store,
+        session,
         TaskSessionStatus::Abandoned,
         format!("Task Session explicitly abandoned: {reason}"),
-    );
-    store.update_task_session(session).await?;
-    store
-        .append_task_event(
-            &session.id,
-            &TaskEventKind::StatusChanged {
-                from,
-                to: TaskSessionStatus::Abandoned,
-                reason: session.status_reason.clone(),
-            },
-        )
-        .await?;
-    Ok(())
+    )
+    .await
 }
 
 fn task_seed(session: &TaskSession) -> String {

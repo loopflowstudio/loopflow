@@ -1,6 +1,6 @@
 //! The mind's ear on the agent bus.
 //!
-//! The bus lives in the shared store, not in this process: `lf radio` INSERTs
+//! The bus lives in the shared store, not in this process: `lf radio pub` INSERTs
 //! a row and exits. A served mind is therefore just another subscriber. It
 //! polls forward from a durable cursor, records the reports addressed to its
 //! family in its own journal, and wakes its loop with them — the same fold as

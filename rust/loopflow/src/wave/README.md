@@ -25,7 +25,7 @@
   bootstraps and enters the wave's `<repo>.<wave>` sibling worktree — passes
   never run in the main checkout. Its input is its own wave's
   `/events?inbox=true` subscription — the SSE thread stream `lf chat --follow`
-  follows, plus the inbox scope, and nothing to do with `lf sub`, which polls
+  follows, plus the inbox scope, and nothing to do with `lf radio sub`, which polls
   the bus table and never opens a socket. Its
   output is ordered turn deltas through the token-gated resident door. It
   never touches a journal file — the single writer stays with the listener.
@@ -147,18 +147,18 @@ don't consume this wire):
 ## Two wires: the bus and the thread
 
 **The bus** is the `bus_messages` table in the shared store — nothing else.
-`lf radio` publishes with an INSERT; every subscriber polls forward from an id
+`lf radio pub` publishes with an INSERT; every subscriber polls forward from an id
 cursor. No server is in the path, so publishing works with zero loopflow
 processes running and two detached hands hear each other with no wave awake. A
 sweeper drops rows past a one-hour wall-clock window — on every publish, and on
 every read, so a bus that went quiet still forgets on schedule: the bus is a
 wire, not a log. Channel names are addresses (`goals`, `goals.148e0e02`), dots
-are the tree, and subscription is by prefix. `lf sub [CHANNEL] [--json]` tunes
+are the tree, and subscription is by prefix. `lf radio sub [CHANNEL] [--json]` tunes
 in — you hear what is said while you listen, and nothing published before you
 tuned in replays.
 
 The byline is testimony and the channel is evidence. With no server in the
-path, client-submitted attribution is the only kind possible: `lf radio`
+path, client-submitted attribution is the only kind possible: `lf radio pub`
 derives its byline from the ambient identity it already resolves for routing
 (`LFD_CHANNEL`, else `LFD_WAVE_ID`, else the worktree name), `--from` overrides
 it, and the row carries both. A forged byline is not prevented — it shows up as
@@ -214,7 +214,7 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 | `GET /health`             | `{status, loop_state, wave, turns, workers, paused, uptime_seconds}`; `status` is channel liveness; `loop_state` is `idle \| turning \| interrupting \| failed`; `workers` counts observed in-flight worker runs |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread; `?limit=N` tails the last N turns (open turn included) |
 | `GET /events`             | SSE, the served mind's thread. No channel scoping — agent broadcast is the bus, not this door. Event names: `state` (loop-state name), `playhead` (durable cursor snapshot), `turn` (replay then live; repeated ids replace), `op` (live worker motion), `memory-add` (replay then live), `memory` (live curation summaries), and — only with `?inbox=true` — `inbox` (pending replay + live controls). |
-| `POST /messages {op, text}` | Human thread input. `op` required: `message` (next body), `steer` (inject into the active steer-capable harness, otherwise queue), or `interrupt` (stop the active body; non-empty text queues for the retry). `say` and bylines are rejected; machine speech uses `lf radio`. Returns `{turn, state}`. |
+| `POST /messages {op, text}` | Human thread input. `op` required: `message` (next body), `steer` (inject into the active steer-capable harness, otherwise queue), or `interrupt` (stop the active body; non-empty text queues for the retry). `say` and bylines are rejected; machine speech uses `lf radio pub`. Returns `{turn, state}`. |
 | `GET /playhead`           | Durable invocation stack, active body, `now`, `next`, local queue, and return target. |
 | `POST /playhead/enqueue {flow}` | Enqueue a flow FIFO at the innermost invocation and return the updated playhead. |
 | `POST /playhead/skip`     | Stop and skip the current body, or advance a failed idle step, without destroying its route. |
@@ -245,7 +245,7 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 order (`ConversationItem` — see `chat/types.rs`). User turns
 carry empty `items`. Turn `id`s are a single monotonic `turn-<n>` sequence
 across all sources. `from` is the speaker byline of an attributed emission
-(`lf radio`); null for the loop's own turns and plain user turns.
+(`lf radio pub`); null for the loop's own turns and plain user turns.
 
 ## Demo
 

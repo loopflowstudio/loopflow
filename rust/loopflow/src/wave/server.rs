@@ -76,7 +76,7 @@
 //!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
 //!   a no-op success). `text` may be empty only for `interrupt` (400
 //!   otherwise). The thread is human and unattributed: `say` and `from` are
-//!   rejected. Machine speech uses `lf radio`, an INSERT on the bus that this
+//!   rejected. Machine speech uses `lf radio pub`, an INSERT on the bus that this
 //!   server later reads back. `turn` is the appended user `Turn`,
 //!   or null for a bare interrupt (nothing was said); `state` is the
 //!   loop-state name when the request was accepted — ops are applied by the
@@ -766,11 +766,11 @@ fn wave_exec_verdict(argv: &[String]) -> ExecVerdict {
         | Some(Commands::Ls { .. })
         | Some(Commands::Status { .. })
         | Some(Commands::Runs { .. })
-        | Some(Commands::Sub { .. })
         | Some(Commands::Trace { .. })
         | Some(Commands::Usage { .. })
         | Some(Commands::Tokens { .. })
         | Some(Commands::Doctor { .. }) => ExecVerdict::Allow,
+        Some(Commands::RetiredSub { .. }) => ExecVerdict::Deny("sub".to_string()),
         // A seedless loop can no longer be spelled: `seed` is required, so the
         // "detach with nothing to run" case the door used to police is gone.
         Some(Commands::Loop { detach: true, .. }) => ExecVerdict::Allow,
@@ -945,19 +945,20 @@ async fn messages_handler(
 ) -> Result<Json<PostMessageResponse>, (StatusCode, String)> {
     // The thread door is the human's: unattributed message/steer/interrupt.
     // `say` is the journal's vocabulary for folded bus reports — nothing
-    // posts it; agents publish with `lf radio` and the listener's bus sweep
+    // posts it; agents publish with `lf radio pub` and the listener's bus sweep
     // records the attributed copy. Rejecting both here is what makes "agents
     // don't use chat" a wire property instead of doctrine.
     if matches!(body.op, MessageOp::Say) {
         return Err((
             StatusCode::BAD_REQUEST,
-            "`say` is not a wire op: machine speech rides the bus (`lf radio`)".to_string(),
+            "`say` is not a wire op: machine speech rides the bus (`lf radio pub`)".to_string(),
         ));
     }
     if body.from.is_some() {
         return Err((
             StatusCode::BAD_REQUEST,
-            "the thread is unattributed: bylines belong to the bus (`lf radio --from`)".to_string(),
+            "the thread is unattributed: bylines belong to the bus (`lf radio pub --from`)"
+                .to_string(),
         ));
     }
     if body.text.trim().is_empty() && !matches!(body.op, MessageOp::Interrupt) {
@@ -1526,12 +1527,12 @@ mod tests {
             argv(&["commit", "-m", "wip"]),
             argv(&["pr", "land", "--strict"]),
             argv(&["pr", "open"]),
-            argv(&["radio", "worker done"]),
+            argv(&["radio", "pub", "worker done"]),
             argv(&["memory", "add", "learned a thing"]),
             argv(&["ls"]),
             argv(&["status"]),
             argv(&["runs"]),
-            argv(&["sub"]),
+            argv(&["radio", "sub"]),
             argv(&["trace", "deadbeef"]),
             argv(&["loop", "task", "ship it", "--detach"]),
             argv(&["loop", "review", "audit the diff", "--detach"]),

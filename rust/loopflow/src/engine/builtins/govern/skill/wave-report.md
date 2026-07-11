@@ -36,18 +36,19 @@ hour. Not a status update — a triage.
 
 ### 1. Staleness
 
-Time since the wave last moved. Movement means commits landing on main
-in the wave's area, PRs opened or merged, or items completed.
+Time since the wave last moved. Movement means commits landing on main,
+PRs opened or merged, or Linear tasks completed.
 
 Gather:
 - `git log main --since="2 weeks ago"` filtered to each wave's area paths
 - Open and recently merged PRs touching wave areas
-- Age of the most recent item status change
+- Open and completed task counts from `lf pm show --wave <wave> --json --no-sync`
+- PM snapshot `synced_at`; stale planning data is its own warning
 
 Interpret:
-- Silence in a dormant wave (`mode: manual`, no active items) is healthy.
+- Silence in a wave with no open tasks or PRs is healthy.
   Note it and move on.
-- Silence in a wave with active items or open PRs is a stall signal.
+- Silence in a wave with open tasks or PRs is a stall signal.
   How long has it been quiet? What was the last thing that happened?
 - Recent activity that suddenly stops is sharper than chronic inactivity.
   A wave that shipped 5 PRs last week and nothing this week is different
@@ -57,16 +58,14 @@ Interpret:
 
 Which waves are load-bearing? Which are leaves?
 
-Each wave item can declare what it's waiting on:
+Each Linear task can declare what it is waiting on in its description:
 
 ```markdown
-# 4: Calibration View
-
-**Needs:** model/3-wave-modes, model/4-letta-integration
+**Needs:** model/TASK-123, product/TASK-456
 ```
 
-`needs:` is item-to-item. "macos is blocked on model" is shorthand for
-specific items in macos needing specific items in model. The wave-level
+`Needs:` is task-to-task. "macos is blocked on model" is shorthand for
+specific tasks in macos needing specific tasks in model. The wave-level
 roll-up is useful for the report, but the actual dependency lives
 between items.
 
@@ -76,16 +75,16 @@ Three sources write `needs:`:
 - The garden, when it keeps rediscovering the same blocking pattern
 
 Gather:
-- `**Needs:**` declarations on wave items — the primary signal
+- `**Needs:**` declarations in task descriptions — the primary signal
 - Trigger declarations: `signal: wave, source_wave_id: X` means X is
   upstream of the declaring wave
 - Area overlap: waves whose area paths intersect have implicit coupling
-- Item text that references other waves by name
+- Task text that references other waves by name
 
 Interpret:
-- For each item with `needs:`, check whether the needed item has
-  shipped. If not, the item is blocked. Roll up: how many items across
-  all waves are blocked on items in *this* wave? That's the pressure
+- For each task with `Needs:`, check whether the needed task has
+  shipped. If not, the task is blocked. Roll up: how many tasks across
+  all waves are blocked on tasks in *this* wave? That's the pressure
   score.
 - A wave where 6 items across 3 other waves need its deliverables is
   under more pressure than one with zero downstream blockers.
@@ -103,9 +102,7 @@ Gather:
 - Closed PRs without merge (abandoned work)
 - Branches ahead of main with no open PR (started but not finished)
 - `scratch/` artifacts that reference descoped or abandoned approaches
-- Wave items whose descriptions have been significantly rewritten
-  (check git log on the item files)
-- Items that were moved between priority tiers (1→2, 2→3)
+- Repeated replacement tasks or abandoned implementations around the same KR
 
 Interpret:
 - One abandoned PR is normal iteration. Three abandoned PRs on the same
@@ -114,7 +111,7 @@ Interpret:
 - Descoped designs (a rich plan replaced by a smaller one) can be
   healthy simplification or a sign of retreat. Look at whether the
   replacement shipped or also stalled.
-- Items that keep getting rewritten without shipping are the strongest
+- Tasks that keep getting replaced without shipping are the strongest
   signal. The wave doesn't know what it wants.
 
 ### 4. Velocity mismatch
@@ -124,8 +121,7 @@ is converging or thrashing.
 
 Gather:
 - Commit count in wave area over last 2 weeks
-- Number of items at each priority tier (1=now through 4=later)
-- Items completed (moved to shipped/done) in the same period
+- Open and completed task counts in the current PM snapshot
 - PR cycle time: opened → merged duration
 
 Interpret:
@@ -142,30 +138,30 @@ Interpret:
 
 ### 5. Coherence
 
-Are the items in a wave pulling in the same direction, or has the wave
+Are the projects and tasks in a wave pulling in the same direction, or has the wave
 become a dumping ground?
 
 Gather:
-- Read all project docs in the wave
+- Read every Project and task in `lf pm show --wave <wave> --json --no-sync`
 - Read the wave `GOAL.md` and `MEMORY.md`
-- Check area overlap between projects within the same wave
+- Check code-area overlap between open tasks within the same wave
 
 Interpret:
 - Projects and tasks should serve the wave's stated objective. A task in the `pm` wave
   that's really about Loopflow UI belongs in `macos`.
-- Projects at the same priority tier should be independent enough to work
-  in parallel. If item 2a blocks item 2b, that's a sequencing issue the
+- Projects should be independent enough to work in parallel. If one task
+  blocks another, that's a sequencing issue the
   report should surface.
 - A wave with items spanning 4 different subsystems may need to be split.
   One wave = one coherent concern.
-- Items that have been in the wave since before the last major redesign
+- Tasks that predate the last major redesign
   may be stale. Check whether the finish line still makes sense given
   what's shipped since.
 
 ## Workflow
 
-1. **Enumerate waves.** Read `wave/*/` directories. For each, load the
-   YAML config, README, and all item files. Skip `wave/old/`.
+1. **Enumerate waves.** Read `wave/*/` directories. For each, load `GOAL.md`,
+   `MEMORY.md`, and `lf pm show --wave <wave> --json --no-sync`. Skip `wave/old/`.
 
 2. **Gather signals.** For each of the five signal types, run the
    gathering steps described above. Use git, gh, and file reads.

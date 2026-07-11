@@ -1,10 +1,10 @@
 ---
 crons:
-  - flow: telemetry-daily
-    schedule: '0 0 8 * * * *'
+- flow: telemetry-daily
+  schedule: 0 0 8 * * * *
 pm:
   provider: linear
-  linear_project: '0e2c75ee-a287-467b-988c-2c83f0f3cbba'
+  linear_initiative: 1e3d8674-6fbf-4aa8-9bee-1da0fa70d1b7
 ---
 
 ## Objective
@@ -18,8 +18,8 @@ telemetry, a vector backend, or a hidden knowledge store.
 
 ## Projects
 
-Projects live in `projects/`, one measured bet per file. Tasks live in Linear.
-Projects do not own memory, cadence, child projects, or task lists.
+Projects and tasks live in Linear and sync into the local SQLite registry.
+Projects do not own memory, cadence, or child projects.
 
 ## Bounds
 

@@ -161,7 +161,7 @@ lf serve shipper
 The wave agent resolves the next local blocker inline. It detaches an already
 justified child loop only when another useful move can run in parallel
 (`lf --wave shipper loop build "…" --detach`), then folds each shipped PR into
-memory. CI failures and pushes to main ride the bus with `lf radio`, then land
+memory. CI failures and pushes to main ride the bus with `lf radio pub`, then land
 in the wave's thread as attributed notifications.
 
 **Loopflow** (macOS) is the native wave experience — monitor progress, browse flows, review PRs. Requires `lfd`.

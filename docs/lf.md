@@ -190,22 +190,22 @@ Both default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktre
 ## The Agent Bus
 
 ```bash
-lf radio "landed PR #91, tests green"        # report on your own channel
-lf radio -c infra.148e "rebase and retry"    # steer a specific hand
-lf radio --parent "blocked on schema change" # escalate to the parent's channel
-lf sub                                       # hear your channel and its hands
-lf sub infra.148e --json                     # one hand's traffic as NDJSON
+lf radio pub "landed PR #91, tests green"       # report on your own channel
+lf radio pub -c infra.148e "rebase and retry"   # steer a specific hand
+lf radio pub --parent "blocked on schema change" # escalate to the parent's channel
+lf radio sub                                      # hear your channel and its hands
+lf radio sub infra.148e --json                    # one hand's traffic as NDJSON
 ```
 
 Channels are a dot tree: `infra` is the wave, `infra.148e` is one of its hands.
-A subscription is a prefix, so `lf sub infra` hears the whole family.
+A subscription is a prefix, so `lf radio sub infra` hears the whole family.
 
 | Command | What it does |
 |---------|--------------|
-| `lf radio [TEXT]` | Broadcast one frame on a channel. An INSERT into the shared store, so it works with no wave running; reads stdin when TEXT is omitted. No channel resolves, or no store on this machine — the broadcast drops with exit 0 |
-| `lf sub [CHANNEL] [--json]` | Tune in to a channel and its descendants until killed. Never opens a socket — the served mind need not exist |
+| `lf radio pub [TEXT]` | Broadcast one frame on a channel. An INSERT into the shared store, so it works with no wave running; reads stdin when TEXT is omitted. No channel resolves, or no store on this machine — the broadcast drops with exit 0 |
+| `lf radio sub [CHANNEL] [--json]` | Tune in to a channel and its descendants until killed. Never opens a socket — the served mind need not exist |
 
-Broadcast, not delivery. `lf sub` tunes in at the head and hears only what is
+Broadcast, not delivery. `lf radio sub` tunes in at the head and hears only what is
 said while it listens: nothing is replayed, and a frame published to a channel
 nobody was on is gone. A frame survives one hour, then the sweeper takes it —
 the bus is a wire, and `lf runs` plus the merged PR are the records of record. A
@@ -215,8 +215,8 @@ woke, the miss is announced in its thread rather than passed over in silence.
 
 | Flag | Description |
 |------|-------------|
-| `-c, --channel NAME` | Broadcast on any channel (`lf radio`) |
-| `--parent` | Broadcast on the parent wave's channel (`lf radio`) |
+| `-c, --channel NAME` | Broadcast on any channel (`lf radio pub`) |
+| `--parent` | Broadcast on the parent wave's channel (`lf radio pub`) |
 | `--from LABEL` | Byline for machine speech (`--from ci`). Testimony, not proof: the row records it beside the channel the frame arrived on |
 
 ## Reading the Local Ledger

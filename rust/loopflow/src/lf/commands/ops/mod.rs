@@ -15,7 +15,9 @@ use crate::engine::{
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_skill;
 use crate::lf::output::{column_width, Colors};
-use crate::lf::{CronCommand, PmCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand};
+use crate::lf::{
+    CronCommand, PmCommand, PmProjectCommand, PmTaskCommand, PrCommand, ReleaseCommand, WtCommand,
+};
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, current_pr, land, plan_rebase,
@@ -392,59 +394,27 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             wave,
             project,
             json,
+            sync,
+            no_sync,
         } => {
-            let result = crate::ops::pm::pm_show(
-                &repo_root,
-                &crate::ops::pm::PmShowOptions {
-                    wave: wave.clone(),
-                    project: project.clone(),
-                },
-                progress,
-            )?;
+            let refresh = if *sync {
+                crate::ops::pm::PmRefresh::Force
+            } else if *no_sync {
+                crate::ops::pm::PmRefresh::Never
+            } else {
+                crate::ops::pm::PmRefresh::Auto
+            };
+            let options = crate::ops::pm::PmShowOptions {
+                wave: wave.clone(),
+                project: project.clone(),
+                refresh,
+            };
+            let result = crate::ops::pm::pm_show(&repo_root, &options, progress)?;
             if *json {
-                println!(
-                    "{}",
-                    serde_json::to_string(&serde_json::json!({
-                        "wave": result.wave,
-                        "provider": result.provider,
-                        "initiative": result.initiative,
-                        "project": result.project,
-                        "items": result.items,
-                    }))?
-                );
+                println!("{}", serde_json::to_string(&result)?);
             } else {
                 print_pm_show_result(&result);
             }
-        }
-        PmCommand::Update {
-            wave,
-            project,
-            id,
-            title,
-            notes,
-            status,
-            pr,
-        } => {
-            let result = crate::ops::pm::pm_update(
-                &repo_root,
-                &crate::ops::pm::PmUpdateOptions {
-                    wave: wave.clone(),
-                    project: project.clone(),
-                    id: id.clone(),
-                    title: title.clone(),
-                    notes: notes.clone(),
-                    status: status.clone(),
-                    pr: pr.clone(),
-                },
-                progress,
-            )?;
-            let verb = if result.created { "created" } else { "updated" };
-            let closed = if result.completed { ", closed" } else { "" };
-            let linked = match result.linked_pr {
-                Some(pr) => format!(", linked {pr}"),
-                None => String::new(),
-            };
-            println!("{}: {verb} task {}{closed}{linked}", result.wave, result.id);
         }
         PmCommand::Status { wave } => {
             let result = crate::ops::pm::pm_status(
@@ -456,21 +426,14 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 println!("no PM-linked waves");
             } else {
                 for wave in result.waves {
-                    let linear_initiative = wave.initiative_name.as_deref().unwrap_or("-");
                     println!(
-                        "{}: Linear Initiative `{linear_initiative}` ({}) — {} open / {} total",
-                        wave.wave, wave.initiative, wave.open, wave.total
+                        "{}: Linear Initiative `{}` ({}) — {} open / {} total",
+                        wave.wave, wave.initiative_name, wave.initiative, wave.open, wave.total
                     );
                     for (project, open) in wave.open_by_project {
                         println!("  {project:<28} {open} open");
                     }
                 }
-            }
-            for initiative in result.stranded_waves {
-                println!(
-                    "stranded: Linear Initiative `{}` ({}) — no local wave points here",
-                    initiative.name, initiative.id
-                );
             }
         }
         PmCommand::Rename { wave, title } => {
@@ -570,18 +533,84 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 );
             }
         },
+        PmCommand::Project { cmd } => {
+            let (wave, project, title, definition, krs) = match cmd {
+                PmProjectCommand::Create {
+                    wave,
+                    title,
+                    definition,
+                    krs,
+                } => (
+                    wave.clone(),
+                    None,
+                    Some(title.clone()),
+                    definition.clone(),
+                    krs.clone(),
+                ),
+                PmProjectCommand::Update {
+                    wave,
+                    project,
+                    title,
+                    definition,
+                    krs,
+                } => (
+                    wave.clone(),
+                    Some(project.clone()),
+                    title.clone(),
+                    definition.clone(),
+                    krs.clone(),
+                ),
+                PmProjectCommand::Archive { wave, project } => {
+                    let result = crate::ops::pm::pm_project_archive(
+                        &repo_root,
+                        &crate::ops::pm::PmProjectArchiveOptions {
+                            wave: wave.clone(),
+                            project: project.clone(),
+                        },
+                        progress,
+                    )?;
+                    println!(
+                        "{}: archived project:{} ({})",
+                        result.wave, result.slug, result.id
+                    );
+                    return Ok(());
+                }
+            };
+            let result = crate::ops::pm::pm_project_write(
+                &repo_root,
+                &crate::ops::pm::PmProjectWriteOptions {
+                    wave,
+                    project,
+                    title,
+                    definition,
+                    krs,
+                },
+                progress,
+            )?;
+            let verb = if result.created { "created" } else { "updated" };
+            println!(
+                "{}: {verb} project:{} ({})",
+                result.wave, result.slug, result.id
+            );
+        }
         PmCommand::Doctor => {
             let result = crate::ops::pm::pm_sync(
                 &repo_root,
-                &crate::ops::pm::PmSyncOptions { plan: true },
+                &crate::ops::pm::PmSyncOptions {
+                    wave: None,
+                    plan: true,
+                },
                 progress,
             )?;
             print_pm_sync_result(&result);
         }
-        PmCommand::Sync { plan } => {
+        PmCommand::Sync { wave, plan } => {
             let result = crate::ops::pm::pm_sync(
                 &repo_root,
-                &crate::ops::pm::PmSyncOptions { plan: *plan },
+                &crate::ops::pm::PmSyncOptions {
+                    wave: wave.clone(),
+                    plan: *plan,
+                },
                 progress,
             )?;
             print_pm_sync_result(&result);
@@ -598,6 +627,7 @@ fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {
             .map(|project| format!(" project:{project}"))
             .unwrap_or_default();
         println!("{}{}: no Linear tasks", result.wave, suffix);
+        print_pm_snapshot_age(result);
         return;
     }
 
@@ -609,6 +639,18 @@ fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {
             println!("{line}");
         }
     }
+    print_pm_snapshot_age(result);
+}
+
+fn print_pm_snapshot_age(result: &crate::ops::pm::PmShowResult) {
+    let age = time::OffsetDateTime::now_utc().unix_timestamp() - result.synced_at;
+    let colors = Colors::default();
+    let phrase = if age < 60 {
+        "just now".to_string()
+    } else {
+        format!("{} ago", crate::ops::pm::format_age(age))
+    };
+    println!("{}snapshot synced {}{}", colors.dim, phrase, colors.reset);
 }
 
 #[derive(Debug)]

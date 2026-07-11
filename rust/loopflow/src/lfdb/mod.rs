@@ -102,6 +102,18 @@ pub struct BusMessage {
     pub at: i64,
 }
 
+/// One wave's locally readable PM projection. Linear owns the payload; sync
+/// replaces this row atomically so readers never observe a partial refresh.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmSnapshotRow {
+    pub repo: String,
+    pub wave: String,
+    pub provider: String,
+    pub initiative: String,
+    pub synced_at: i64,
+    pub payload: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("sqlite error: {0}")]
@@ -162,6 +174,18 @@ impl Store {
 
     pub fn admin(&self) -> &dyn StoreAdmin {
         self
+    }
+
+    pub async fn put_pm_snapshot(&self, snapshot: PmSnapshotRow) -> StoreResult<()> {
+        run_sqlite(&self.sqlite, move |store| store.put_pm_snapshot(&snapshot)).await
+    }
+
+    pub async fn pm_snapshot(
+        &self,
+        repo: String,
+        wave: String,
+    ) -> StoreResult<Option<PmSnapshotRow>> {
+        run_sqlite(&self.sqlite, move |store| store.pm_snapshot(&repo, &wave)).await
     }
 
     // The agent bus: publish is an INSERT, subscribe is a forward poll from an
@@ -1358,7 +1382,10 @@ pub type SharedStore = Arc<Store>;
 #[cfg(test)]
 mod tests {
     use super::sqlite::SqliteStore;
-    use super::{ExecutionStore, ForkRun, ForkRunStatus, RunEventRow, StorageConfig};
+    use super::{
+        open_store, ExecutionStore, ForkRun, ForkRunStatus, PmSnapshotRow, RunEventRow,
+        StorageConfig,
+    };
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         ChatMemoryBlock, LivePrState, LivePullRequestState, PullRequest, QueueBlock,
@@ -1766,6 +1793,41 @@ mod tests {
             provider: None,
             model: None,
         }
+    }
+
+    #[tokio::test]
+    async fn pm_snapshot_replacement_is_atomic_per_wave() {
+        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let store = open_store(&StorageConfig::sqlite(db_path.clone()))
+            .await
+            .expect("store should open");
+        let mut snapshot = PmSnapshotRow {
+            repo: "/repo".to_string(),
+            wave: "product".to_string(),
+            provider: "linear".to_string(),
+            initiative: "initiative-1".to_string(),
+            synced_at: 1,
+            payload: "{\"version\":1}".to_string(),
+        };
+        store
+            .put_pm_snapshot(snapshot.clone())
+            .await
+            .expect("write snapshot");
+        snapshot.synced_at = 2;
+        snapshot.payload = "{\"version\":2}".to_string();
+        store
+            .put_pm_snapshot(snapshot.clone())
+            .await
+            .expect("replace snapshot");
+
+        assert_eq!(
+            store
+                .pm_snapshot("/repo".to_string(), "product".to_string())
+                .await
+                .expect("read snapshot"),
+            Some(snapshot)
+        );
+        let _ = std::fs::remove_file(db_path);
     }
 
     #[test]

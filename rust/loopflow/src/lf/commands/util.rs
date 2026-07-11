@@ -10,7 +10,7 @@ pub fn find_repo_root() -> Result<PathBuf> {
 }
 
 /// Message text from the args (joined) or stdin (heredoc-friendly). The
-/// speech verbs — `lf chat`, `lf radio` — take their text the same way.
+/// speech verbs — `lf chat`, `lf radio pub` — take their text the same way.
 pub(crate) fn message_text(args: &[String], mut stdin: impl Read) -> Result<String> {
     let joined = args.join(" ").trim().to_string();
     if !joined.is_empty() {

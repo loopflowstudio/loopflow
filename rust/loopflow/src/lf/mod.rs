@@ -318,8 +318,8 @@ pub enum Commands {
         json: bool,
     },
     /// Converse with a served mind's thread (humans); --follow replays it and
-    /// --steer reaches the live body. Agents use `lf radio` for agent-to-agent
-    /// comms, not this.
+    /// --steer reaches the live body. Agents use `lf radio pub` for
+    /// agent-to-agent comms, not this.
     Chat {
         /// Message text (reads stdin when omitted unless --follow)
         #[arg(trailing_var_arg = true)]
@@ -333,37 +333,24 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
-    /// Broadcast on the agent bus (agents): report up when you finish, fail,
-    /// or get stuck. Broadcast, not delivery — whoever is tuned in hears it,
-    /// nobody guarantees receipt. Not a log, not the human surface. Publishing
-    /// is a write to the shared store, so no wave need be running. Bare, it
-    /// publishes on your own channel, which a served wave records as one
-    /// attributed report. Tune in with `lf sub`.
+    /// Publish to or subscribe to the ephemeral agent bus.
+    #[command(subcommand_required = true, arg_required_else_help = true)]
     Radio {
-        /// Message text (reads stdin when omitted — heredoc-friendly)
-        #[arg(trailing_var_arg = true)]
-        text: Vec<String>,
-        /// Broadcast on another channel (a hand's `goals.<run>`) instead of
-        /// your own.
-        #[arg(short = 'c', long = "channel", conflicts_with = "parent")]
-        channel: Option<String>,
-        /// Broadcast to the parent wave's channel (escalation up the tree).
-        #[arg(long)]
-        parent: bool,
-        /// Byline for machine speech (e.g. --from ci). Testimony, not proof:
-        /// the row records it beside the channel it arrived on.
-        #[arg(long)]
-        from: Option<String>,
+        #[command(subcommand)]
+        command: RadioCommand,
     },
-    /// Tune in to the agent bus: hear what is broadcast on a channel and its
-    /// descendants while you listen. Defaults to the invoking context's
-    /// channel; exits 0 with a note when none resolves.
-    Sub {
-        /// Channel prefix (default: the ambient channel — env, else worktree)
-        channel: Option<String>,
-        /// Emit heard frames as NDJSON instead of human lines
-        #[arg(long)]
-        json: bool,
+    // Reserve the retired spelling so the external-subcommand fallback cannot
+    // reinterpret the retired top-level spelling as a skill. This variant can
+    // never parse.
+    #[command(
+        name = "sub",
+        hide = true,
+        about = "Removed; use `lf radio sub`",
+        arg_required_else_help = true
+    )]
+    RetiredSub {
+        #[arg(required = true, value_parser = reject_retired_sub)]
+        removed: String,
     },
     /// Read or curate a wave's MEMORY.md (server-owned; bare `lf memory` = show)
     Memory {
@@ -418,6 +405,39 @@ pub enum Commands {
     External(Vec<String>),
 }
 
+#[derive(Subcommand, Debug)]
+pub enum RadioCommand {
+    /// Broadcast on the agent bus. Reads stdin when TEXT is omitted.
+    Pub {
+        /// Message text (reads stdin when omitted — heredoc-friendly)
+        #[arg(trailing_var_arg = true)]
+        text: Vec<String>,
+        /// Broadcast on another channel (a hand's `goals.<run>`) instead of
+        /// your own.
+        #[arg(short = 'c', long = "channel", conflicts_with = "parent")]
+        channel: Option<String>,
+        /// Broadcast to the parent wave's channel (escalation up the tree).
+        #[arg(long)]
+        parent: bool,
+        /// Byline for machine speech (e.g. --from ci). Testimony, not proof:
+        /// the row records it beside the channel it arrived on.
+        #[arg(long)]
+        from: Option<String>,
+    },
+    /// Hear broadcasts on a channel and its descendants while listening.
+    Sub {
+        /// Channel prefix (default: the ambient channel — env, else worktree)
+        channel: Option<String>,
+        /// Emit heard frames as NDJSON instead of human lines
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+fn reject_retired_sub(_: &str) -> Result<String, String> {
+    Err("the top-level subscription command was removed; use `lf radio sub`".to_string())
+}
+
 /// Wave targeting shared by `lf chat` and `lf memory`: default is the
 /// invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
 #[derive(Args, Debug, Clone, Default)]
@@ -463,7 +483,7 @@ pub enum MemoryCommand {
 pub enum ProjectCommand {
     /// Promote a project into a resident child wave through the authored flow
     Promote {
-        /// Project slug under wave/<parent>/projects/
+        /// Linear Project slug under the parent wave
         slug: String,
         /// Parent wave (default: ambient wave)
         #[arg(short = 'w', long = "wave")]
@@ -555,7 +575,7 @@ pub enum CronCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PmCommand {
-    /// Connect a wave to a Linear Initiative and migrate its projects and tasks
+    /// Connect a wave to a Linear Initiative
     Init {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
@@ -566,7 +586,7 @@ pub enum PmCommand {
         #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
         all: bool,
     },
-    /// Print the wave's live Linear tasks
+    /// Read the wave's local Project and task snapshot
     Show {
         /// Wave name (auto-detected if omitted)
         #[arg(short = 'w', long = "wave")]
@@ -577,42 +597,27 @@ pub enum PmCommand {
         /// Emit the task snapshot as JSON
         #[arg(long)]
         json: bool,
+        /// Force a refresh from Linear before reading
+        #[arg(long = "sync", conflicts_with = "no_sync")]
+        sync: bool,
+        /// Read the local cache only; never contact Linear
+        #[arg(long = "no-sync")]
+        no_sync: bool,
     },
-    /// Create, edit, or close a Linear task
-    Update {
-        /// Wave name (auto-detected if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Linear Project slug
-        #[arg(short = 'p', long = "project")]
-        project: Option<String>,
-        /// Existing task id to edit or close; omit to create a new task
-        #[arg(long = "id")]
-        id: Option<String>,
-        /// Task title
-        #[arg(long = "title")]
-        title: Option<String>,
-        /// Task notes/description
-        #[arg(long = "notes")]
-        notes: Option<String>,
-        /// Set to `done` to close the task
-        #[arg(long = "status")]
-        status: Option<String>,
-        /// PR URL to attach as a comment (the loop's write-back link)
-        #[arg(long = "pr")]
-        pr: Option<String>,
-    },
-    /// Show PM task status for linked waves
+    /// Show local PM status for linked waves
     Status {
         /// Wave name (all PM-enabled waves if omitted)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
     },
-    /// Diagnose wave/project/task drift
+    /// Compare Linear with local wave bindings
     Doctor,
-    /// Reconcile low-risk PM drift
+    /// Refresh the local PM snapshot from Linear
     Sync {
-        /// Print the planned changes without applying them
+        /// Wave name (all linked waves if omitted)
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Compare without writing the SQLite snapshot
         #[arg(long = "plan")]
         plan: bool,
     },
@@ -629,6 +634,48 @@ pub enum PmCommand {
     Task {
         #[command(subcommand)]
         cmd: PmTaskCommand,
+    },
+    /// Linear Project operations
+    Project {
+        #[command(subcommand)]
+        cmd: PmProjectCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PmProjectCommand {
+    /// Create a Linear Project in the wave's Initiative
+    Create {
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        #[arg(long = "title")]
+        title: String,
+        #[arg(long = "definition")]
+        definition: String,
+        /// Key result; repeat for each KR. Prefix with `[x] ` when it holds.
+        #[arg(long = "kr", required = true)]
+        krs: Vec<String>,
+    },
+    /// Replace a Linear Project's definition and KRs
+    Update {
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        #[arg(short = 'p', long = "project")]
+        project: String,
+        #[arg(long = "title")]
+        title: Option<String>,
+        #[arg(long = "definition")]
+        definition: String,
+        /// Key result; repeat for each KR. Prefix with `[x] ` when it holds.
+        #[arg(long = "kr", required = true)]
+        krs: Vec<String>,
+    },
+    /// Archive a Linear Project and refresh the wave snapshot
+    Archive {
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        #[arg(short = 'p', long = "project")]
+        project: String,
     },
 }
 
@@ -873,7 +920,34 @@ mod tests {
     }
 
     #[test]
-    fn pm_show_accepts_wave_flag() {
+    fn pm_project_archive_accepts_wave_and_project() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "pm",
+            "project",
+            "archive",
+            "--wave",
+            "product",
+            "--project",
+            "wave-chat",
+        ])
+        .expect("parse");
+        let Some(Commands::Pm {
+            cmd:
+                PmCommand::Project {
+                    cmd: PmProjectCommand::Archive { wave, project },
+                },
+        }) = cli.command
+        else {
+            panic!("expected pm project archive command");
+        };
+
+        assert_eq!(wave.as_deref(), Some("product"));
+        assert_eq!(project, "wave-chat");
+    }
+
+    #[test]
+    fn pm_show_parses_refresh_modes() {
         let cli = Cli::try_parse_from(["lf", "pm", "show", "--wave", "goals"]).expect("parse");
         let Some(Commands::Pm {
             cmd:
@@ -881,6 +955,8 @@ mod tests {
                     wave,
                     project,
                     json,
+                    sync,
+                    no_sync,
                 },
         }) = cli.command
         else {
@@ -889,66 +965,30 @@ mod tests {
         assert_eq!(wave.as_deref(), Some("goals"));
         assert_eq!(project, None);
         assert!(!json);
-    }
+        assert!(!sync);
+        assert!(!no_sync);
 
-    #[test]
-    fn pm_update_parses_create_and_close() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "pm",
-            "update",
-            "--project",
-            "wave-chat",
-            "--title",
-            "Ship it",
-            "--notes",
-            "details",
-        ])
-        .expect("parse");
+        let cli = Cli::try_parse_from(["lf", "pm", "show", "--sync"]).expect("force sync");
         let Some(Commands::Pm {
-            cmd:
-                PmCommand::Update {
-                    wave,
-                    project,
-                    id,
-                    title,
-                    notes,
-                    status,
-                    pr,
-                },
+            cmd: PmCommand::Show { sync, no_sync, .. },
         }) = cli.command
         else {
-            panic!("expected pm update command");
+            panic!("expected pm show command");
         };
-        assert_eq!(wave, None);
-        assert_eq!(project.as_deref(), Some("wave-chat"));
-        assert_eq!(id, None);
-        assert_eq!(title.as_deref(), Some("Ship it"));
-        assert_eq!(notes.as_deref(), Some("details"));
-        assert_eq!(status, None);
-        assert_eq!(pr, None);
+        assert!(sync);
+        assert!(!no_sync);
 
-        let cli = Cli::try_parse_from([
-            "lf",
-            "pm",
-            "update",
-            "--id",
-            "123",
-            "--status",
-            "done",
-            "--pr",
-            "https://github.com/acme/repo/pull/7",
-        ])
-        .expect("parse");
+        let cli = Cli::try_parse_from(["lf", "pm", "show", "--no-sync"]).expect("cache-only read");
         let Some(Commands::Pm {
-            cmd: PmCommand::Update { id, status, pr, .. },
+            cmd: PmCommand::Show { sync, no_sync, .. },
         }) = cli.command
         else {
-            panic!("expected pm update command");
+            panic!("expected pm show command");
         };
-        assert_eq!(id.as_deref(), Some("123"));
-        assert_eq!(status.as_deref(), Some("done"));
-        assert_eq!(pr.as_deref(), Some("https://github.com/acme/repo/pull/7"));
+        assert!(!sync);
+        assert!(no_sync);
+
+        assert!(Cli::try_parse_from(["lf", "pm", "show", "--sync", "--no-sync"]).is_err());
     }
 
     #[test]
@@ -985,7 +1025,7 @@ mod tests {
         assert_eq!(target.wave.as_deref(), Some("goals"));
 
         // Machine speech does not ride this verb: bylines belong to the bus
-        // (`lf radio --from`), and chat refuses the flag at parse.
+        // (`lf radio pub --from`), and chat refuses the flag at parse.
         assert!(Cli::try_parse_from([
             "lf",
             "chat",
@@ -1035,18 +1075,21 @@ mod tests {
     }
 
     #[test]
-    fn radio_parses_channel_parent_and_byline() {
+    fn radio_pub_parses_channel_parent_and_byline() {
         // `-c`/`--channel` addresses a hand's channel; text trails.
-        let cli =
-            Cli::try_parse_from(["lf", "radio", "-c", "goals.148e", "landed PR"]).expect("parse");
+        let cli = Cli::try_parse_from(["lf", "radio", "pub", "-c", "goals.148e", "landed PR"])
+            .expect("parse");
         let Some(Commands::Radio {
-            text,
-            channel,
-            parent,
-            from,
+            command:
+                RadioCommand::Pub {
+                    text,
+                    channel,
+                    parent,
+                    from,
+                },
         }) = cli.command
         else {
-            panic!("expected radio command");
+            panic!("expected radio pub command");
         };
         assert_eq!(text, vec!["landed PR"]);
         assert_eq!(channel.as_deref(), Some("goals.148e"));
@@ -1054,16 +1097,47 @@ mod tests {
         assert_eq!(from, None);
 
         // Escalation up the tree.
-        let cli =
-            Cli::try_parse_from(["lf", "radio", "--parent", "blocked"]).expect("parse parent");
-        let Some(Commands::Radio { parent, .. }) = cli.command else {
-            panic!("expected radio command");
+        let cli = Cli::try_parse_from(["lf", "radio", "pub", "--parent", "blocked"])
+            .expect("parse parent");
+        let Some(Commands::Radio {
+            command: RadioCommand::Pub { parent, .. },
+        }) = cli.command
+        else {
+            panic!("expected radio pub command");
         };
         assert!(parent);
 
         // A channel and the parent are mutually exclusive — a report goes to
         // one place.
-        assert!(Cli::try_parse_from(["lf", "radio", "-c", "goals.148e", "--parent", "x"]).is_err());
+        assert!(
+            Cli::try_parse_from(["lf", "radio", "pub", "-c", "goals.148e", "--parent", "x"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn radio_sub_parses_channel_and_json() {
+        let cli = Cli::try_parse_from(["lf", "radio", "sub", "goals", "--json"]).expect("parse");
+        let Some(Commands::Radio {
+            command: RadioCommand::Sub { channel, json },
+        }) = cli.command
+        else {
+            panic!("expected radio sub command");
+        };
+        assert_eq!(channel.as_deref(), Some("goals"));
+        assert!(json);
+    }
+
+    #[test]
+    fn radio_requires_an_explicit_operation_and_rejects_old_forms() {
+        let error = Cli::try_parse_from(["lf", "radio"]).expect_err("bare radio shows help");
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        );
+        assert!(Cli::try_parse_from(["lf", "radio", "worker done"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "sub"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "sub", "goals"]).is_err());
     }
 
     /// Steer is a thread op, and the thread is not the bus. The shared
@@ -1071,7 +1145,7 @@ mod tests {
     /// transports make it unspellable.
     #[test]
     fn radio_has_no_steer_flag() {
-        assert!(Cli::try_parse_from(["lf", "radio", "--steer", "gate it"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "radio", "pub", "--steer", "gate it"]).is_err());
     }
 
     #[test]

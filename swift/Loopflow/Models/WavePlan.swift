@@ -20,13 +20,13 @@ public struct WaveKeyResult: Sendable, Identifiable, Hashable {
 public struct WaveProject: Sendable, Identifiable, Hashable {
     public let id: String
     public var title: String
-    public var summary: String?
+    public var definition: String?
     public var krs: [WaveKeyResult]
 
-    public init(id: String, title: String, summary: String? = nil, krs: [WaveKeyResult] = []) {
+    public init(id: String, title: String, definition: String? = nil, krs: [WaveKeyResult] = []) {
         self.id = id
         self.title = title
-        self.summary = summary
+        self.definition = definition
         self.krs = krs
     }
 }

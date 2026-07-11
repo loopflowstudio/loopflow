@@ -1,7 +1,7 @@
-//! `lf radio` — broadcast on the agent bus.
+//! `lf radio pub` — broadcast on the agent bus.
 //!
 //! The bus is a table in the shared store, so publishing is an INSERT and
-//! nothing else: no endpoint, no HTTP, no served wave. `lf radio` works with
+//! nothing else: no endpoint, no HTTP, no served wave. `lf radio pub` works with
 //! zero loopflow processes running, and two detached hands hear each other
 //! with no mind awake between them.
 //!
@@ -33,7 +33,7 @@ use crate::lfdb::SharedStore;
 use crate::wave::channel::family_head;
 use crate::wave::runtime::wave_channel_name;
 
-pub fn run(
+pub fn run_pub(
     text_args: &[String],
     channel: Option<&str>,
     parent: bool,

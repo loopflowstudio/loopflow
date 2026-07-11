@@ -696,7 +696,7 @@ mod tests {
             assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
             let text = response.text().await.unwrap();
             assert!(
-                text.contains("lf radio"),
+                text.contains("lf radio pub"),
                 "the refusal names the bus: {text}"
             );
         }

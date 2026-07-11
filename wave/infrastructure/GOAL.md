@@ -2,7 +2,7 @@
 crons: []
 pm:
   provider: linear
-  linear_project: '7cf1518e-340e-4cfa-8426-63f06b7a5e1c'
+  linear_initiative: 218967b6-a760-4b7c-9a46-11d9d61a42c2
 ---
 
 ## Objective
@@ -17,8 +17,8 @@ turns repeated friction and operational risk into system capability.
 
 ## Projects
 
-Projects live in `projects/`, one measured bet per file. Tasks live in Linear.
-Projects do not own memory, cadence, child projects, or task lists.
+Projects and tasks live in Linear and sync into the local SQLite registry.
+Projects do not own memory, cadence, or child projects.
 
 ## Bounds
 

@@ -880,20 +880,23 @@ fn main() -> anyhow::Result<()> {
                 steer,
                 target,
             }) => loopflow::lf::commands::chat::run(text, *follow, *steer, target),
-            Some(Commands::Radio {
-                text,
-                channel,
-                parent,
-                from,
-            }) => loopflow::lf::commands::radio::run(
-                text,
-                channel.as_deref(),
-                *parent,
-                from.as_deref(),
-            ),
-            Some(Commands::Sub { channel, json }) => {
-                loopflow::lf::commands::sub::run(channel.as_deref(), *json)
-            }
+            Some(Commands::Radio { command }) => match command {
+                loopflow::lf::RadioCommand::Pub {
+                    text,
+                    channel,
+                    parent,
+                    from,
+                } => loopflow::lf::commands::radio::run_pub(
+                    text,
+                    channel.as_deref(),
+                    *parent,
+                    from.as_deref(),
+                ),
+                loopflow::lf::RadioCommand::Sub { channel, json } => {
+                    loopflow::lf::commands::sub::run(channel.as_deref(), *json)
+                }
+            },
+            Some(Commands::RetiredSub { .. }) => unreachable!("retired sub cannot parse"),
             Some(Commands::Memory { cmd, target }) => {
                 loopflow::lf::commands::memory::run(cmd.as_ref(), target)
             }
@@ -981,7 +984,7 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Trace { .. })
         | Some(Commands::Chat { .. })
         | Some(Commands::Radio { .. })
-        | Some(Commands::Sub { .. })
+        | Some(Commands::RetiredSub { .. })
         | Some(Commands::Memory { .. })
         | Some(Commands::Ssh { .. }) => None,
         Some(Commands::Project { .. }) => Some("project-promote".to_string()),

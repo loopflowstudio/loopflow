@@ -18,7 +18,7 @@ PM or auth.
 The project may read and file its own tasks:
 
 ```bash
-lf pm show --wave <exact-wave> --project <project>
+lf pm show --wave <exact-wave> --project <project> --no-sync
 lf pm task create --project <project> --title "..." --notes "..."
 ```
 

@@ -17,7 +17,9 @@ use crate::lfdb::rows::{
     serialize_pr,
 };
 use crate::lfdb::token_crypto;
-use crate::lfdb::{BusMessage, ForkRun, ForkRunStatus, RunEventRow, StoreError, StoreResult};
+use crate::lfdb::{
+    BusMessage, ForkRun, ForkRunStatus, PmSnapshotRow, RunEventRow, StoreError, StoreResult,
+};
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
@@ -180,6 +182,49 @@ impl SqliteStore {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    pub fn put_pm_snapshot(&self, snapshot: &PmSnapshotRow) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO pm_snapshots (repo, wave, provider, initiative, synced_at, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(repo, wave) DO UPDATE SET
+               provider = excluded.provider,
+               initiative = excluded.initiative,
+               synced_at = excluded.synced_at,
+               payload = excluded.payload",
+            params![
+                snapshot.repo,
+                snapshot.wave,
+                snapshot.provider,
+                snapshot.initiative,
+                snapshot.synced_at,
+                snapshot.payload
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn pm_snapshot(&self, repo: &str, wave: &str) -> StoreResult<Option<PmSnapshotRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT repo, wave, provider, initiative, synced_at, payload
+             FROM pm_snapshots WHERE repo = ?1 AND wave = ?2",
+            params![repo, wave],
+            |row| {
+                Ok(PmSnapshotRow {
+                    repo: row.get(0)?,
+                    wave: row.get(1)?,
+                    provider: row.get(2)?,
+                    initiative: row.get(3)?,
+                    synced_at: row.get(4)?,
+                    payload: row.get(5)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(StoreError::from)
     }
 
     fn read_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
@@ -1365,7 +1410,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    // The agent bus (`bus_messages`): `lf radio` publishes, every subscriber
+    // The agent bus (`bus_messages`): `lf radio pub` publishes, every subscriber
     // polls forward from an id cursor. No process is in the path.
 
     /// Publish one frame and sweep whatever aged out of the window. The sweep

@@ -625,30 +625,39 @@ struct WavesView: View {
 
     private func buildWavePlanCache(registryWaves: [Wave]) async -> [String: WavePlan] {
         let authored = authoredWavesByRepo
-        return await Task.detached {
-            var targets: [(repoPath: String, waveName: String)] = []
-            for wave in registryWaves {
-                targets.append((wave.repo, wave.name))
+        var targets: [String: (repoPath: String, waveName: String)] = [:]
+        for wave in registryWaves {
+            let key = Self.wavePlanKey(repoPath: wave.repo, waveName: wave.name)
+            targets[key] = (wave.repo, wave.name)
+        }
+        for (repoPath, snapshots) in authored {
+            for snapshot in snapshots {
+                let key = Self.wavePlanKey(repoPath: repoPath, waveName: snapshot.name)
+                targets[key] = (repoPath, snapshot.name)
             }
-            for (repoPath, snapshots) in authored {
-                for snapshot in snapshots {
-                    targets.append((repoPath, snapshot.name))
-                }
-            }
+        }
 
-            var plans: [String: WavePlan] = [:]
-            for target in targets {
-                let key = Self.wavePlanKey(repoPath: target.repoPath, waveName: target.waveName)
-                guard plans[key] == nil else { continue }
-                if let plan = WavePlanParser.parse(
-                    repoRoot: URL(fileURLWithPath: target.repoPath),
-                    waveName: target.waveName
-                ) {
-                    plans[key] = plan
+        return await withTaskGroup(of: (String, WavePlan?).self) { group in
+            for (key, target) in targets {
+                group.addTask {
+                    let objective = WavePlanParser.objective(
+                        repoRoot: URL(fileURLWithPath: target.repoPath),
+                        waveName: target.waveName
+                    ) ?? ""
+                    let plan = try? await RegistryQueryLocal.shared.plan(
+                        wave: target.waveName,
+                        objective: objective,
+                        cwd: target.repoPath
+                    )
+                    return (key, plan ?? (objective.isEmpty ? nil : WavePlan(objective: objective)))
                 }
+            }
+            var plans: [String: WavePlan] = [:]
+            for await (key, plan) in group {
+                plans[key] = plan
             }
             return plans
-        }.value
+        }
     }
 
     private func restoreStickyRepoSelectionIfNeeded() {

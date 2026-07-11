@@ -249,7 +249,7 @@ fn orchestration_discipline(wave: &str) -> String {
          - Inhabit with `lf --wave {wave} loop <flow> \"<whole handoff>\"`. \
          Add `--detach` only when the wave has another useful move while that \
          child runs; if the result gates the next move, keep it foreground. \
-         Never use a one-pass loop. Detached hands report with `lf radio`, \
+         Never use a one-pass loop. Detached hands report with `lf radio pub`, \
          publish durable learnings with `lf memory add`, and leave done as a PR.\n\
          - Keep turns centered on selection, direct progress, sequencing, and \
          authored reports.\n\

@@ -14,9 +14,9 @@ You author wave files under `wave/<name>/`:
 |------|-------|
 | **`GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
 | **`MEMORY.md`** | What the wave remembers between loops — written by the wave agent |
-| **`projects/*.md`** | One measured bet per file, with KRs and closure criteria |
 
-Tasks live in Linear. Run the agent and it works a loop: read its projects,
+Projects and tasks live in Linear and sync into the local SQLite registry. Run
+`lf pm sync`, then run the agent: it reads its projects,
 tasks, and memory; pick the next move; execute it inline or place a justified
 child loop; watch the PR; and fold what changed back into memory.
 
@@ -50,7 +50,7 @@ returns immediately. It requires an already-running server and is useful only
 when the parent has another move; otherwise keep the loop foreground.
 
 Waves are independent by default. Humans steer a served mind with `lf chat`;
-agents report on its bus with `lf radio --channel <name> "…"`, even while the
+agents report on its bus with `lf radio pub --channel <name> "…"`, even while the
 wave sleeps.
 
 ## Crons

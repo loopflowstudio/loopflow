@@ -323,9 +323,9 @@ mod tests {
         assert_eq!(
             renderer.lines_for(&Frame {
                 event: "memory-add".into(),
-                data: "workers report via lf radio with full detail".into()
+                data: "workers report via lf radio pub with full detail".into()
             }),
-            vec!["memory added: workers report via lf radio with full detail"]
+            vec!["memory added: workers report via lf radio pub with full detail"]
         );
         let user = turn_json("turn-1", "user", "how goes it?", "completed", "[]");
         assert_eq!(
@@ -415,7 +415,7 @@ mod tests {
             .deliver(crate::wave::journal::MessageOp::Message, "replayed".into())
             .expect("user turn");
         runtime
-            .append_memory("workers report via lf radio with full useful detail")
+            .append_memory("workers report via lf radio pub with full useful detail")
             .unwrap();
 
         let seen: Arc<Mutex<Vec<Frame>>> = Arc::new(Mutex::new(Vec::new()));
@@ -460,7 +460,7 @@ mod tests {
         assert!(
             frames.iter().any(|f| {
                 f.event == "memory-add"
-                    && f.data == "workers report via lf radio with full useful detail"
+                    && f.data == "workers report via lf radio pub with full useful detail"
             }),
             "replayed memory-add frame arrives with the full fact: {frames:?}"
         );

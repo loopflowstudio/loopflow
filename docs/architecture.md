@@ -116,7 +116,7 @@ Important paths:
 ## Wave Loop
 
 ```text
-1. Read GOAL.md, MEMORY.md, project docs, live Linear tasks, and relevant docs.
+1. Read GOAL.md, MEMORY.md, the local PM snapshot, and relevant docs.
 2. Assess current wave state and messages in the thread.
 3. Pick one move: study, ingest, dispatch, unblock, review, or wait.
 4. Run a skill or flow, often by dispatching a worker.

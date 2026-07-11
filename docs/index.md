@@ -75,15 +75,15 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 | **Flow** | Chains skills together | `.lf/flows/*.yaml` |
 | **Wave** | Durable operating context with memory, cadence, chat, and project selection | `wave/<name>/` |
 | **Goal** | A wave's intent and loop prompt | `wave/<name>/GOAL.md` |
-| **Project** | Measured bet inside exactly one wave | `wave/<name>/projects/*.md` |
+| **Project** | Measured bet inside exactly one wave | Linear Project via `lf pm` |
 | **Task** | Concrete work that advances a project | Linear via `lf pm` |
 | **Memory** | What a wave remembers between loops | `wave/<name>/MEMORY.md` |
 | **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
 | **Cron** | Scheduled supplementary flow | goal frontmatter |
 
 A wave is a named agent with a goal. Everything that defines its durable
-operating context — goal, memory, projects, routing judgment, crons — is
-authored in the repo. Concrete tasks live in Linear. Crons live in `GOAL.md`
+operating context — goal, memory, routing judgment, crons — is authored in the
+repo. Projects and concrete tasks live in Linear. Crons live in `GOAL.md`
 frontmatter and are fired by the wave's resident loop. lfd serves wave
 status and live sessions to clients.
 

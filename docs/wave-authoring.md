@@ -63,13 +63,11 @@ Wave content lives in `wave/<name>/` at the root of your repo:
 ```
 wave/infra/
 ├── GOAL.md               # The wave's intent and loop prompt
-├── MEMORY.md             # What the agent remembers between loops
-└── projects/
-    └── stability.md      # One measured bet and its KRs
+└── MEMORY.md             # What the agent remembers between loops
 ```
 
-`GOAL.md`, `MEMORY.md`, and project docs are the authored wave surface. Task
-tracking lives in Linear, not in the repo — read and edit tasks with `lf pm`
+`GOAL.md` and `MEMORY.md` are the authored wave surface. Projects, KRs, and
+tasks live in Linear and sync into SQLite — read and edit them with `lf pm`
 (see [Linear Tasks](#linear-tasks)).
 
 ### The Goal
@@ -111,22 +109,15 @@ lf serve s3           # the s3 (control) charter
 
 ### Projects
 
-A project is a measured bet inside a wave. Write one file per live project under
-`wave/<wave>/projects/`. The file holds the project definition and its KRs. It
-does not hold a task list, status table, or independent memory.
+A project is a measured bet inside a wave. Store its definition and KRs in
+Linear Project content. It does not own a task list, status table, independent
+memory, or a repo file.
 
-```markdown
-# Technical Architecture
-
-Loopflow's architecture is legible from the top down: the key data structures
-and APIs explain the system, the implementation follows that map, and obsolete
-pre-loop concepts do not linger as alternate design.
-
-## KRs
-
-- Top-down architecture documentation is complete, published, and centered on the key data structures and public APIs.
-- Every data structure and API in the architecture is ratified as minimally simple for its purpose.
-- The codebase, prompts, docs, and UI contain no stale pre-loop technical design language.
+```bash
+lf pm project create --wave infra --title "Technical Architecture" \
+  --definition "Loopflow's architecture is legible from the top down." \
+  --kr "Top-down architecture documentation is complete and published." \
+  --kr "Every public API is ratified as minimally simple for its purpose."
 ```
 
 KRs should read as proof under duration: observable end states that show the
@@ -165,25 +156,34 @@ concrete work in tasks.
 
 ### Linear Tasks
 
-Tasks live in Linear. There are no local task lists. `lf pm` reads and edits
-the wave's Linear project directly, while local projects stay in
-`wave/<wave>/projects/`.
+Tasks live in Linear. There are no local task lists. A wave maps to a Linear
+Initiative, each project maps to a Linear Project, and each task maps to an
+Issue. `lf pm sync` refreshes a machine-local SQLite snapshot; no Project files
+are generated in the repository.
 
-Connect a wave to Linear once. `lf pm init` creates (or links) the project and writes its id into `GOAL.md` frontmatter:
+Connect a wave to Linear once. `lf pm init` links or creates the Initiative,
+then writes its id into `GOAL.md` frontmatter:
 
 ```yaml
 # wave/infra/GOAL.md frontmatter
 pm:
-  linear_project: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
+  provider: linear
+  linear_initiative: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
 ```
+
+Do not look up or paste this id by hand. With no pinned id, `lf pm init` links
+one exact Initiative-title match or creates it when absent, then persists the
+id. Duplicate titles fail loudly.
 
 Then read and edit tasks:
 
 ```bash
-lf pm init --wave infra                                             # connect/create the Linear project
+lf pm init --wave infra                                             # connect the Linear Initiative
+lf pm sync --wave infra                                             # refresh SQLite
 lf pm status                                                        # show linked waves and task counts
-lf pm show --wave infra                                             # group tasks by local project
-lf pm show --wave infra --project stability                         # filter to one local project
+lf pm show --wave infra                                             # read; refresh when stale
+lf pm show --wave infra --no-sync                                   # deterministic cache-only read
+lf pm show --wave infra --project stability                         # filter to one Project
 lf pm task create --wave infra --project stability --title "Daemon data integrity"
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 ```
@@ -199,7 +199,7 @@ project it advances so a worker knows when to stop.
 | `workers` | Parallelism for dispatched work. `0` means "don't auto-dispatch" |
 | `agent` | Preferred agent harness/model |
 | `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident loop |
-| `pm.linear_project` | Linear project id backing the wave's tasks (written by `lf pm init`) |
+| `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf pm init`) |
 
 The resident loop reads `crons:` directly from this frontmatter and opens a system pass when a schedule comes due; edits land without a restart. See [Crons](waves.md#crons).
 
@@ -290,7 +290,7 @@ Migration shim     → Legacy API compatibility layer
 Cleanup            → Remove old billing code
 ```
 
-The wave agent reads tasks with `lf pm show`, picks the highest-priority move,
+The wave agent reads tasks with `lf pm show --no-sync`, picks the highest-priority move,
 and resolves its local blocker inline. It creates a child loop only when an
 independent task earns its own lifecycle or useful parallelism, then folds each
 shipped PR into memory and closes the task with `lf pm task done`.

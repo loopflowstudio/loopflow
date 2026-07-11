@@ -52,7 +52,7 @@ wave's journal and endpoint live at the origin); its playhead enters the wave's
 worktree and gives each flow step a live harness session. Progress and chat are
 a single conversation: `lf chat --steer` reaches the body now playing (and
 queues when it cannot). Truth is an append-only journal, so a restart keeps the
-whole thread. Humans use `lf chat`; agents broadcast with `lf radio`; `lf
+whole thread. Humans use `lf chat`; agents broadcast with `lf radio pub`; `lf
 memory` curates retained facts. A served wave folds family reports into its
 thread with attribution. Outside any wave a publish prints a short drop note
 and exits 0, so the verbs are safe in every prompt. See
@@ -118,15 +118,15 @@ and folds into its thread attributed on the next sweep.
 
 | Event | What lfd runs |
 |-------|---------------|
-| CI fails on a wave's PR | `lf radio --channel <name> --from ci "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
+| CI fails on a wave's PR | `lf radio pub --channel <name> --from ci "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
 | PR merged | queue state reconciles in-process |
-| Push to main | `lf radio --channel <name> --from github "main moved: …"` — the loop decides whether to rebase or integrate |
+| Push to main | `lf radio pub --channel <name> --from github "main moved: …"` — the loop decides whether to rebase or integrate |
 
 ## Skills
 
 ```bash
 lf debug -c    # paste an error, watch it fix
-lf pm show --wave designer   # print the wave's live Linear tasks
+lf pm show --wave designer   # print tasks; refresh a stale snapshot when possible
 lf design      # interactive design session
 lf gstack/office-hours   # run a built-in gstack skill
 lf office-hours          # same thing — bare name works when unambiguous
@@ -389,21 +389,33 @@ pm:
   linear_initiative: 8c4ba3f9-cf23-4136-87ed-37847aa7dc82
 ```
 
+When no id is pinned, `lf pm init` links one exact Initiative-title match,
+creates one when none exists, and fails on duplicates. The persisted id keeps
+later reads stable across title changes and machines.
+
 ```bash
-lf pm init --wave designer                # create the Initiative and migrate projects/tasks
-lf pm show --wave designer                # print an aligned live-task table
+lf pm init --wave designer                # connect the wave to its Initiative
+lf pm sync --wave designer                # refresh the local SQLite snapshot
+lf pm show --wave designer                # read; refresh when the snapshot is stale
+lf pm show --wave designer --no-sync      # cache-only read for agents and apps
+lf pm show --wave designer --sync         # force a Linear refresh first
 lf pm show --wave designer --project ui   # filter to one Linear Project
+lf pm project update --wave designer --project ui --definition "..." --kr "..."
+lf pm project archive --wave designer --project retired-bet
 lf pm task create --wave designer --project ui --title "Add dark mode" --notes "..."
 lf pm task done --id 1207... --pr "..."   # close a shipped task
-lf pm sync --plan                         # show Linear/cache drift
+lf pm sync --plan                         # compare without writing SQLite
 lf pm status                              # show linked waves and task counts
 ```
 
 `lf pm` maps wave → Initiative, project → Project, and task → Issue. Linear owns
-project definitions and KRs in Project content. `wave/<wave>/projects/` is an
-offline cache refreshed by `lf pm sync` and a migration seed for `lf pm init`;
-do not edit both copies. Issue descriptions and comments are Markdown, which
-Linear renders natively.
+project definitions and KRs in Project content. `lf pm sync` stores one local
+SQLite snapshot for fast CLI, agent, and app reads; it does not write planning
+files into the repo. `lf pm show` serves snapshots younger than one hour, tries
+a five-second refresh for older snapshots, and refuses to silently serve one
+older than a week when Linear is unreachable. Use `--no-sync` for deterministic
+cache-only reads. Issue descriptions and comments are Markdown, which Linear
+renders natively.
 
 The `loopflow` Python package is a library only (wire models).
 Use the install script or cargo to install `lf` and `lfd`.

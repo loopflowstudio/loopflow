@@ -66,7 +66,7 @@ at least two passes; never use `lf loop --max-passes 1`.
 
 ## Speak
 
-Answer a human message in your turn text. Use `lf radio` for proactive progress,
+Answer a human message in your turn text. Use `lf radio pub` for proactive progress,
 completion, or failure reports only when the prompt establishes an exact wave or
 channel, or when the active skill requires it. Never guess a channel.
 
@@ -74,7 +74,7 @@ channel, or when the active skill requires it. Never guess a channel.
 one and a live wave is available. A stopped server must not block the assigned
 work. `wave/<name>/MEMORY.md` is server-owned; never edit it directly.
 
-`lf chat` is the human surface. Agents use `lf radio`.
+`lf chat` is the human surface. Agents use `lf radio pub`.
 
 ## Where To Write
 

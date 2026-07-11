@@ -215,7 +215,7 @@ private struct WavePlanView: View {
                     operationalRow(
                         icon: "tray",
                         title: item.name,
-                        detail: item.labels.filter { $0.hasPrefix("project:") }.joined(separator: " · ")
+                        detail: item.project.map { "project:\($0)" } ?? ""
                     )
                 }
             }
@@ -324,8 +324,8 @@ private struct WaveProjectView: View {
                 .font(Typography.sectionTitle(17))
                 .foregroundStyle(palette.text)
 
-            if let summary = project.summary {
-                Text(summary)
+            if let definition = project.definition {
+                Text(definition)
                     .font(Typography.body(13))
                     .foregroundStyle(palette.textSecondary)
                     .lineSpacing(2)

@@ -1,4 +1,4 @@
-//! `lf sub` — tune in to the agent bus.
+//! `lf radio sub` — tune in to the agent bus.
 //!
 //! The bus is a table in the shared store, so subscribing is a forward poll
 //! from an id cursor: you hear what is said while you listen, from where you
@@ -6,8 +6,8 @@
 //! to a channel nobody was listening on is gone. No HTTP is in the path — the
 //! served mind need not exist.
 //!
-//! Scope is a prefix: `lf sub goals` hears the whole family (the wave's own
-//! channel plus every hand's `goals.<run>`), `lf sub goals.148e` hears exactly
+//! Scope is a prefix: `lf radio sub goals` hears the whole family (the wave's own
+//! channel plus every hand's `goals.<run>`), `lf radio sub goals.148e` hears exactly
 //! that channel and its descendants. Bare, it hears the ambient channel — the
 //! family at the wave home, the work line's own channel inside its worktree.
 //!
@@ -15,7 +15,7 @@
 //! a durable cursor — at-least-once across a crash, and nothing replayed on a
 //! clean restart. The mind's THREAD — durable, replayed, human — is the other
 //! wire: [`super::thread`], still SSE on the listener, and what `lf chat --follow`
-//! follows. `lf sub` never touches it.
+//! follows. `lf radio sub` never touches it.
 
 use anyhow::Result;
 
@@ -38,7 +38,7 @@ pub fn run(channel: Option<&str>, json: bool) -> Result<()> {
 
 /// Poll the bus until the process is killed. Resolution failure is the
 /// publish-to-no-subscriber case mirrored: exit 0 with one stderr note, so
-/// `lf sub` is safe in every prompt unconditionally.
+/// `lf radio sub` is safe in every prompt unconditionally.
 async fn follow(channel: Option<&str>, json: bool) -> Result<()> {
     let context = CliContext::detect().await;
     let Some(store) = context.store.clone() else {

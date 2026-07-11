@@ -250,6 +250,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "060_provider_token_oauth_client_id",
         sql: include_str!("migrations/060_provider_token_oauth_client_id.sql"),
     },
+    Migration {
+        version: "061_pm_snapshots",
+        sql: include_str!("migrations/061_pm_snapshots.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the

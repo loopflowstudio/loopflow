@@ -1,4 +1,4 @@
--- The db IS the bus. `lf radio` is an INSERT here; every subscriber polls
+-- The db IS the bus. `lf radio pub` is an INSERT here; every subscriber polls
 -- forward from an id cursor. No server sits in the path, so publishing works
 -- with zero loopflow processes running and two detached hands hear each other
 -- with no served wave.

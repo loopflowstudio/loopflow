@@ -1,6 +1,6 @@
 ---
 requires: scratch/garden-assessment.md or scratch/vsm-*-assessment.md
-produces: wave/ (updated configs and items), scratch/wave-mutate.md
+produces: wave/ config, Linear planning state, scratch/wave-mutate.md
 ---
 Compose and play the chord in one pass.
 
@@ -45,15 +45,16 @@ of what changed and why. This step is both composer and performer.
 
 3. **Compose the chord.** For each change you will make, specify:
    - target wave
-   - lever (`direction`, `area`, `flow`, `items`, `agent`, `step_agents`,
-     `triggers`, `lifecycle`)
+   - lever (`objective`, `flow`, `project`, `task`, `agent`, `triggers`,
+     `lifecycle`)
    - before / after
    - rationale
    - risk
 
-4. **Play it immediately.** Apply the mutations on disk:
+4. **Play it immediately.** Apply each mutation through its owner:
    - edit wave YAML for config changes
-   - create, update, reorder, or delete wave items
+   - create or update Projects and tasks with `lf pm`; never write a local
+     planning mirror
    - create or remove wave directories only when lifecycle pressure requires it
 
 5. **Sync runtime state.** For changes that affect registered wave config,
@@ -81,7 +82,7 @@ Write `scratch/wave-mutate.md`:
 ## Mutations
 ### 1. <title>
 **Wave**: <name>
-**Lever**: <direction | area | flow | items | agent | step_agents | triggers | lifecycle>
+**Lever**: <objective | flow | project | task | agent | triggers | lifecycle>
 **Before**: <state before>
 **After**: <state after>
 **Rationale**: <why this change now>

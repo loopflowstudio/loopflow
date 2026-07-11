@@ -61,3 +61,15 @@
   and migration-test edits during the pass. Those edits were preserved and
   reconciled; no git or rebase operation ran while the tree had multiple
   writers.
+
+# Steering completion pass (2026-07-10)
+
+- The live Linear → provider → PR → merge dogfood remains the design's explicit
+  side-effecting manual gate. This headless pass did not create a Linear issue,
+  spend provider tokens, open a PR, or merge external state.
+- Deterministic coverage now pins the production adapter trace mappings, the
+  three Harness capability profiles, atomic boundary settlement, generation
+  recovery, ownership, decision idempotency, typed Wave replay, and lifecycle
+  state. A single 10-scenario × 3-adapter scripted-peer matrix is still broader
+  than the added Harness-boundary profile test; keep the PR draft until that
+  matrix or the live dogfood supplies the remaining parity evidence.

@@ -27,7 +27,7 @@ macro_rules! string_id {
                     .ok_or_else(|| TaskDataError::InvalidId(format!("expected {} id", $prefix)))?;
                 Uuid::parse_str(suffix)
                     .map_err(|error| TaskDataError::InvalidId(error.to_string()))?;
-                Ok(Self(value.to_string()))
+                Ok(Self::from_raw(value.to_string()))
             }
 
             pub fn as_str(&self) -> &str {
@@ -71,6 +71,7 @@ pub enum TaskDataError {
 
 string_id!(TaskSessionId, "ts_");
 string_id!(TaskCommandId, "tc_");
+string_id!(TaskDecisionId, "td_");
 
 /// Opaque Linear identifier: non-empty, provider-assigned (no prefix grammar of
 /// our own, so distinct from `string_id!`).
@@ -266,11 +267,26 @@ impl TaskSession {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskCommandKind {
-    FollowUp { text: String },
-    Steer { text: String },
-    Interrupt { replacement: Option<String> },
-    Resume { message: Option<String> },
-    Abandon { reason: String },
+    FollowUp {
+        text: String,
+    },
+    Steer {
+        text: String,
+    },
+    Interrupt {
+        replacement: Option<String>,
+    },
+    Resume {
+        message: Option<String>,
+    },
+    Decide {
+        decision_id: TaskDecisionId,
+        choice: String,
+        message: Option<String>,
+    },
+    Abandon {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -294,6 +310,10 @@ impl TaskCommandState {
             Self::Superseded => "superseded",
         }
     }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Accepted | Self::Failed | Self::Superseded)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -303,6 +323,7 @@ pub enum TaskCommandEffect {
     LiveSteer,
     NextTurn,
     Replacement,
+    Decision,
 }
 
 impl TaskCommandEffect {
@@ -311,6 +332,7 @@ impl TaskCommandEffect {
             Self::LiveSteer => "live_steer",
             Self::NextTurn => "next_turn",
             Self::Replacement => "replacement",
+            Self::Decision => "decision",
         }
     }
 }
@@ -338,6 +360,12 @@ pub struct TaskCommand {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoundaryResult {
+    Commands(Vec<TaskCommand>),
+    Stopped(Box<TaskSession>),
+}
+
 impl TaskCommand {
     pub fn new(
         session_id: TaskSessionId,
@@ -351,6 +379,7 @@ impl TaskCommand {
             TaskCommandKind::Interrupt {
                 replacement: Some(_),
             } => Some(TaskCommandEffect::Replacement),
+            TaskCommandKind::Decide { .. } => Some(TaskCommandEffect::Decision),
             TaskCommandKind::Steer { .. }
             | TaskCommandKind::Interrupt { replacement: None }
             | TaskCommandKind::Resume { message: None }
@@ -386,6 +415,16 @@ pub enum TaskEventKind {
         effect: Option<TaskCommandEffect>,
         error: Option<String>,
     },
+    DecisionRequested {
+        decision_id: TaskDecisionId,
+        prompt: String,
+        options: Vec<String>,
+    },
+    DecisionResolved {
+        decision_id: TaskDecisionId,
+        choice: String,
+        message: Option<String>,
+    },
     Progress {
         summary: String,
     },
@@ -403,6 +442,12 @@ pub enum TaskEventKind {
     },
 }
 
+impl TaskEventKind {
+    pub fn is_wave_observable(&self) -> bool {
+        !matches!(self, Self::Started | Self::Progress { .. })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskEvent {
     pub id: i64,
@@ -411,19 +456,62 @@ pub struct TaskEvent {
     pub created_at: OffsetDateTime,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskObservation {
+    pub session_id: TaskSessionId,
+    pub issue_identifier: String,
+    pub event_id: i64,
+    pub event: TaskEventKind,
+}
+
+impl TaskObservation {
+    pub fn inbox_id(&self) -> String {
+        format!("task-{}-{}", self.session_id, self.event_id)
+    }
+
+    pub fn prompt(&self) -> String {
+        let event = serde_json::to_string(&self.event)
+            .expect("TaskEventKind always serializes to structured JSON");
+        format!(
+            "<task_observation session_id=\"{}\" issue=\"{}\" event_id=\"{}\">\n{}\n</task_observation>",
+            self.session_id, self.issue_identifier, self.event_id, event
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        PmWritebackOperation, PmWritebackState, TaskCommandId, TaskSessionId, TaskSessionStatus,
+        PmWritebackOperation, PmWritebackState, TaskCommandId, TaskDecisionId, TaskObservation,
+        TaskSessionId, TaskSessionStatus,
     };
 
     #[test]
     fn task_ids_are_prefixed_and_round_trip() {
         let session = TaskSessionId::new();
         let command = TaskCommandId::new();
+        let decision = TaskDecisionId::new();
 
         assert_eq!(TaskSessionId::parse(session.as_str()).unwrap(), session);
         assert_eq!(TaskCommandId::parse(command.as_str()).unwrap(), command);
+        assert_eq!(TaskDecisionId::parse(decision.as_str()).unwrap(), decision);
+    }
+
+    #[test]
+    fn task_observation_has_a_stable_structured_inbox_identity() {
+        let observation = TaskObservation {
+            session_id: TaskSessionId::from_raw("ts_example"),
+            issue_identifier: "INF-123".to_string(),
+            event_id: 42,
+            event: super::TaskEventKind::Failed {
+                error: "provider stopped".to_string(),
+                resumable: true,
+            },
+        };
+
+        assert_eq!(observation.inbox_id(), "task-ts_example-42");
+        assert!(observation.prompt().contains("<task_observation"));
+        assert!(observation.prompt().contains("\"kind\":\"failed\""));
     }
 
     #[test]

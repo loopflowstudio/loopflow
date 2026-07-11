@@ -71,6 +71,8 @@ The wave agent coordinates concrete work through Linear-backed Task Sessions:
 ```bash
 lf task start "unify button variants" --project <linear-project-id>
 lf task steer INF-123 "also audit the settings panes"
+lf task receipt COMMAND_ID --wait --timeout 30s --json
+lf task decide INF-123 DECISION_ID revise --message "cover the boundary race"
 lf task wait INF-123
 ```
 
@@ -79,8 +81,9 @@ that immutable sibling worktree and provider history through review, CI repair,
 and merge. Every Task PR targets `main`.
 
 Workers inherit the Wave objective, curated memory, Project definition, and KRs.
-Structured commands and events keep the Wave informed without copying raw tool
-chatter into its thread.
+Typed, idempotent Task observations keep the Wave informed without copying raw
+tool chatter into its thread. Tasks can pause on a durable decision request;
+the owning Wave answers it in the same Task Session and provider transcript.
 
 Run an existing Linear task or queue a Project for its owning Wave:
 

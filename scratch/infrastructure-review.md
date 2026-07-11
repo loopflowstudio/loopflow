@@ -70,10 +70,11 @@ independent merge/cleanup path.
   `failed` receipt before the Task Session fails.
 - Boundary recovery exists, but crash stages and live redirect/replacement
   behavior have not passed the planned Codex/Claude/OpenCode black-box suite.
-- Task-to-Wave decision requests and the three-provider conformance scenarios
-  are designed but not implemented. The branch is mechanically green, but the
-  steering-parity product gate remains open; keep the PR draft until that
-  contract is either implemented or explicitly split into a following PR.
+- Typed Task observations, Task-to-Wave decisions, atomic boundary settlement,
+  waitable receipts, and the three provider capability profiles are now
+  implemented. The complete 10-scenario × 3-adapter scripted-peer matrix and
+  live Linear/provider/PR dogfood remain parity evidence; keep the PR draft
+  until one of those gates closes the black-box coverage gap.
 - Live Linear/provider create→run→steer→merge was not executed during this
   headless gate because it creates external records, worktrees, provider spend,
   and a PR. The deterministic store, migration, parser, PM, and lifecycle tests
@@ -88,8 +89,8 @@ independent merge/cleanup path.
 - Rich direct Task transcript/steering UI; the Mac projects Task Sessions into
   its existing run surface.
 - Automatic cleanup for failed/blocked sessions.
-- Typed Task-event delivery into the Wave inbox, Task decisions, and the
-  provider-conformance suite named above.
+- The side-effecting live lifecycle dogfood and the complete scripted-peer
+  conformance matrix named above.
 
 ## Validation
 

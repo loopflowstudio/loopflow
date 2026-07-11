@@ -54,8 +54,8 @@
 //!   - `memory-add`: data is the full added fact. Replays on connect for the
 //!     facts since the last curation, then streams live. Primary channel only.
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
-//!     is an [`InboxFrame`] — a resident-directed op. The pending queue
-//!     (journaled messages not yet named in any `answers`) replays on
+//!     is an [`InboxFrame`] — a resident-directed message, typed Task
+//!     observation, or control op. The pending queue (journaled inputs not yet named in any `answers`) replays on
 //!     connect, then live ops stream; a bare interrupt rides live-only with
 //!     `id: null` (nothing journaled). Primary channel only. The default
 //!     stream is byte-identical to the pre-resident wire.
@@ -82,6 +82,10 @@
 //!   loop-state name when the request was accepted — ops are applied by the
 //!   loop asynchronously, so watch the stream's `state` events for the
 //!   outcome.
+//! - `POST /tasks/observe {session_id, event_id}` resolves an authoritative
+//!   Task ledger event through the store observer, journals it idempotently,
+//!   and wakes or queues the resident as a typed inbox item. Loopback-only
+//!   internal door; Tasks never write the Wave journal.
 //! - `POST /stop` → 202 and requests graceful listener shutdown. The listener
 //!   remains the sole owner of resident, registry, and discovery-file cleanup.
 //! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
@@ -123,8 +127,9 @@ use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::state::LoopState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
-    AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, OpFrame,
-    PostDeltasRequest, PostDeltasResponse, RESIDENT_TOKEN_FILE, RESIDENT_TOKEN_HEADER,
+    AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, ObserveTaskRequest,
+    ObserveTaskResponse, OpFrame, PostDeltasRequest, PostDeltasResponse, RESIDENT_TOKEN_FILE,
+    RESIDENT_TOKEN_HEADER,
 };
 
 /// Basename of the discovery pointer under `wave/<name>/`.
@@ -379,6 +384,7 @@ pub fn router(
         .route("/playhead/skip", post(playhead_skip_handler))
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
+        .route("/tasks/observe", post(task_observe_handler))
         .route("/memory", get(memory_handler).post(memory_write_handler))
         .route("/memory/log", get(memory_log_handler))
         .route("/resident/attach", post(resident_attach_handler))
@@ -386,6 +392,23 @@ pub fn router(
         .route("/resident/context", get(resident_context_handler))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
+}
+
+async fn task_observe_handler(
+    State(state): State<ServerState>,
+    Json(request): Json<ObserveTaskRequest>,
+) -> Result<Json<ObserveTaskResponse>, (StatusCode, String)> {
+    let observer = state.observer.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Task observation requires the shared Loopflow registry".to_string(),
+        )
+    })?;
+    let observed = observer
+        .observe_task_event(&request.session_id, request.event_id)
+        .await
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
+    Ok(Json(ObserveTaskResponse { observed }))
 }
 
 async fn stop_handler(State(state): State<ServerState>) -> StatusCode {
@@ -674,7 +697,15 @@ async fn events_handler(
     let inbox_replay: Vec<Result<Event, Infallible>> = if include_inbox {
         sub.pending
             .iter()
-            .map(|message| Ok(inbox_event(&pending_inbox_frame(message))))
+            .map(|message| {
+                let frame = sub.tasks.get(&message.id).map_or_else(
+                    || pending_inbox_frame(message),
+                    |observation| InboxFrame::Task {
+                        observation: observation.clone(),
+                    },
+                );
+                Ok(inbox_event(&frame))
+            })
             .collect()
     } else {
         Vec::new()
@@ -790,6 +821,9 @@ fn pending_inbox_frame(message: &PendingMessage) -> InboxFrame {
 fn inbox_item_frame(item: &InboxItem) -> InboxFrame {
     match item {
         InboxItem::Message(message) => pending_inbox_frame(message),
+        InboxItem::Task(observation) => InboxFrame::Task {
+            observation: observation.clone(),
+        },
         InboxItem::Interrupt => InboxFrame::Interrupt,
         InboxItem::Skip => InboxFrame::Skip,
     }

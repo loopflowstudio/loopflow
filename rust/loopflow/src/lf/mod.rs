@@ -553,6 +553,39 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Read or wait for one durable command receipt
+    Receipt {
+        command_id: String,
+        #[arg(long)]
+        wait: bool,
+        #[arg(long, default_value = "30s")]
+        timeout: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resolve a durable Task decision request
+    Decide {
+        issue: String,
+        decision_id: String,
+        choice: String,
+        #[arg(long)]
+        message: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ask the owning Wave to choose while preserving this Task Session
+    RequestDecision {
+        issue: String,
+        prompt: String,
+        #[arg(long = "option", required = true)]
+        options: Vec<String>,
+        #[arg(long)]
+        wait: bool,
+        #[arg(long, default_value = "30m")]
+        timeout: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Wait without polling an LM
     Wait {
         issue: String,
@@ -1016,6 +1049,56 @@ mod tests {
         assert_eq!(issue, "INF-123");
         assert_eq!(message.as_deref(), Some("take the smaller approach"));
         assert!(!json);
+    }
+
+    #[test]
+    fn task_receipt_and_decision_commands_parse_the_durable_ids() {
+        let receipt = Cli::try_parse_from([
+            "lf",
+            "task",
+            "receipt",
+            "tc_00000000000000000000000000000000",
+            "--wait",
+            "--timeout",
+            "30s",
+            "--json",
+        ])
+        .expect("parse task receipt");
+        assert!(matches!(
+            receipt.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Receipt {
+                    wait: true,
+                    timeout,
+                    json: true,
+                    ..
+                }
+            }) if timeout == "30s"
+        ));
+
+        let decide = Cli::try_parse_from([
+            "lf",
+            "task",
+            "decide",
+            "INF-123",
+            "td_00000000000000000000000000000000",
+            "revise",
+            "--message",
+            "cover the race",
+            "--json",
+        ])
+        .expect("parse task decide");
+        assert!(matches!(
+            decide.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Decide {
+                    issue,
+                    choice,
+                    json: true,
+                    ..
+                }
+            }) if issue == "INF-123" && choice == "revise"
+        ));
     }
 
     #[test]

@@ -43,11 +43,14 @@ PR:
 ```bash
 lf task status INF-123
 lf task interrupt INF-123 --message "take the smaller approach"
+lf task receipt COMMAND_ID --wait --timeout 30s --json
+lf task decide INF-123 DECISION_ID approve
 lf task wait INF-123
 ```
 
-The Wave stays directly steerable while several independent tasks run. Review
-feedback and CI repair resume the same Task Session and provider history.
+The Wave stays directly steerable while several independent tasks run. Task
+events enter its inbox as typed observations and wake it once. Decision answers,
+review feedback, and CI repair resume the same Task Session and provider history.
 
 Waves are independent by default. Humans steer a served mind with `lf chat`;
 agents report on its bus with `lf radio pub --channel <name> "…"`, even while the

@@ -16,8 +16,9 @@ use crate::lfdb::{open_existing_store, SharedStore, StoreError};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::task::{
     LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
-    PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandKind, TaskCommandSource,
-    TaskCommandState, TaskEventKind, TaskSession, TaskSessionStatus,
+    PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandId, TaskCommandKind,
+    TaskCommandSource, TaskCommandState, TaskDecisionId, TaskEventKind, TaskSession,
+    TaskSessionStatus,
 };
 use sha2::{Digest, Sha256};
 
@@ -37,6 +38,22 @@ pub struct TaskControlResult {
     pub generation: Option<u32>,
     pub accepted_at: Option<time::OffsetDateTime>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskReceiptRead {
+    pub receipt: TaskControlResult,
+    pub timed_out: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TaskDecisionResult {
+    pub issue_id: String,
+    pub session_id: String,
+    pub decision_id: String,
+    pub resolved: bool,
+    pub choice: Option<String>,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -549,15 +566,6 @@ async fn reconcile_process_liveness(
         )
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    crate::lf::commands::chat::post_to_named_wave(
-        &session.wave,
-        &format!(
-            "Task {} → failed: {}",
-            session.issue.identifier, session.status_reason
-        ),
-    )
-    .await
-    .map_err(|error| task_error(format!("failed to mirror task failure to Wave: {error}")))?;
     Ok(())
 }
 
@@ -631,17 +639,6 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
                         .append_task_event(&session.id, &event)
                         .await
                         .map_err(|error| task_error(error.to_string()))?;
-                    crate::lf::commands::chat::post_to_named_wave(
-                        &session.wave,
-                        &format!(
-                            "Task {} → {}: {}",
-                            session.issue.identifier,
-                            session.status.as_str(),
-                            session.status_reason
-                        ),
-                    )
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
                 }
             }
         }
@@ -761,15 +758,43 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
         }
         let command = TaskCommand::new(session.id.clone(), command_source(&session)?, kind);
         let wait_for_resolution = !matches!(&command.kind, TaskCommandKind::FollowUp { .. });
-        let superseded = if matches!(&command.kind, TaskCommandKind::Interrupt { .. }) {
-            store.supersede_and_create_task_command(&command).await
-        } else {
-            store
-                .create_task_command(&command)
-                .await
-                .map(|()| Vec::new())
+        let (command, created, superseded) =
+            if matches!(&command.kind, TaskCommandKind::Decide { .. }) {
+                let (command, created) = store
+                    .ensure_task_decision_command(&command)
+                    .await
+                    .map_err(|error| {
+                        task_error(format!("failed to persist task decision: {error}"))
+                    })?;
+                (command, created, Vec::new())
+            } else if matches!(&command.kind, TaskCommandKind::Interrupt { .. }) {
+                let superseded = store
+                    .supersede_and_create_task_command(&command)
+                    .await
+                    .map_err(|error| {
+                        task_error(format!("failed to persist task command: {error}"))
+                    })?;
+                (command, true, superseded)
+            } else {
+                store.create_task_command(&command).await.map_err(|error| {
+                    task_error(format!("failed to persist task command: {error}"))
+                })?;
+                (command, true, Vec::new())
+            };
+        if !created {
+            if !command.state.is_terminal() && !session.status.is_process_active() {
+                let wave = store
+                    .get_wave(&session.wave_id)
+                    .await
+                    .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
+                    .ok_or_else(|| {
+                        task_error(format!("owning wave/{} is not registered", session.wave))
+                    })?;
+                launch_task_process(&store, &mut session, Some(wave.workers.max(1))).await?;
+            }
+            let receipt = resolve_receipt(&store, &command.id, wait_for_resolution).await?;
+            return Ok(control_result(&session, &command, receipt));
         }
-        .map_err(|error| task_error(format!("failed to persist task command: {error}")))?;
         for command_id in superseded {
             append_command_event(
                 &store,
@@ -788,17 +813,6 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
             command.effect,
         )
         .await?;
-        crate::lf::commands::chat::post_to_named_wave(
-            &session.wave,
-            &format!(
-                "Task command {} → {} ({})",
-                command.id,
-                session.issue.identifier,
-                command_kind_name(&command.kind)
-            ),
-        )
-        .await
-        .map_err(|error| task_error(format!("failed to mirror task command to Wave: {error}")))?;
         if let TaskCommandKind::Abandon { reason } = &command.kind {
             if !session.status.is_process_active() {
                 let from = session.status;
@@ -907,15 +921,26 @@ async fn wait_for_command_receipt(
     store: &SharedStore,
     command_id: &crate::task::TaskCommandId,
 ) -> OpsResult<TaskCommand> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    Ok(
+        wait_for_command_receipt_until(store, command_id, Duration::from_secs(2))
+            .await?
+            .0,
+    )
+}
+
+async fn wait_for_command_receipt_until(
+    store: &SharedStore,
+    command_id: &crate::task::TaskCommandId,
+    timeout: Duration,
+) -> OpsResult<(TaskCommand, bool)> {
+    let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let command = read_command_receipt(store, command_id).await?;
-        if matches!(
-            command.state,
-            TaskCommandState::Accepted | TaskCommandState::Failed | TaskCommandState::Superseded
-        ) || tokio::time::Instant::now() >= deadline
-        {
-            return Ok(command);
+        if command.state.is_terminal() {
+            return Ok((command, false));
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Ok((command, true));
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -954,16 +979,6 @@ async fn append_command_event(
     Ok(())
 }
 
-fn command_kind_name(kind: &TaskCommandKind) -> &'static str {
-    match kind {
-        TaskCommandKind::FollowUp { .. } => "follow_up",
-        TaskCommandKind::Steer { .. } => "steer",
-        TaskCommandKind::Interrupt { .. } => "interrupt",
-        TaskCommandKind::Resume { .. } => "resume",
-        TaskCommandKind::Abandon { .. } => "abandon",
-    }
-}
-
 pub fn task_follow_up(issue: &str, message: String) -> OpsResult<TaskControlResult> {
     queue_command(issue, TaskCommandKind::FollowUp { text: message })
 }
@@ -978,6 +993,167 @@ pub fn task_interrupt(issue: &str, replacement: Option<String>) -> OpsResult<Tas
 
 pub fn task_resume(issue: &str, message: Option<String>) -> OpsResult<TaskControlResult> {
     queue_command(issue, TaskCommandKind::Resume { message })
+}
+
+pub fn task_receipt(command_id: &str, wait: bool, timeout: Duration) -> OpsResult<TaskReceiptRead> {
+    let command_id =
+        TaskCommandId::parse(command_id).map_err(|error| task_error(error.to_string()))?;
+    block_on_task(async move {
+        let store = task_store().await?;
+        let (command, timed_out) = if wait {
+            wait_for_command_receipt_until(&store, &command_id, timeout).await?
+        } else {
+            (read_command_receipt(&store, &command_id).await?, false)
+        };
+        let session = store
+            .get_task_session(&command.session_id)
+            .await
+            .map_err(|error| task_error(format!("failed to read Task Session: {error}")))?
+            .ok_or_else(|| {
+                task_error(format!("Task Session {} disappeared", command.session_id))
+            })?;
+        Ok(TaskReceiptRead {
+            receipt: control_result(&session, &command, command.clone()),
+            timed_out,
+        })
+    })
+}
+
+pub fn task_decide(
+    issue: &str,
+    decision_id: &str,
+    choice: String,
+    message: Option<String>,
+) -> OpsResult<TaskControlResult> {
+    let decision_id =
+        TaskDecisionId::parse(decision_id).map_err(|error| task_error(error.to_string()))?;
+    let choice = choice.trim().to_string();
+    if choice.is_empty() {
+        return Err(task_error("decision choice cannot be empty"));
+    }
+    let decision = block_on_task(async {
+        let store = task_store().await?;
+        let session = store
+            .get_task_session_by_issue(issue)
+            .await
+            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+        let events = store
+            .task_events_after(&session.id, 0)
+            .await
+            .map_err(|error| task_error(format!("failed to read task decisions: {error}")))?;
+        events
+            .into_iter()
+            .find_map(|event| match event.kind {
+                TaskEventKind::DecisionRequested {
+                    decision_id: requested_id,
+                    options,
+                    ..
+                } if requested_id == decision_id => Some(options),
+                _ => None,
+            })
+            .ok_or_else(|| task_error(format!("decision {decision_id} was not requested")))
+    })?;
+    if !decision.iter().any(|option| option == &choice) {
+        return Err(task_error(format!(
+            "choice {choice:?} is not one of: {}",
+            decision.join(", ")
+        )));
+    }
+    queue_command(
+        issue,
+        TaskCommandKind::Decide {
+            decision_id,
+            choice,
+            message,
+        },
+    )
+}
+
+pub fn task_request_decision(
+    issue: &str,
+    prompt: String,
+    options: Vec<String>,
+    wait: bool,
+    timeout: Duration,
+) -> OpsResult<TaskDecisionResult> {
+    let prompt = prompt.trim().to_string();
+    let options: Vec<String> = options
+        .into_iter()
+        .map(|option| option.trim().to_string())
+        .filter(|option| !option.is_empty())
+        .collect();
+    if prompt.is_empty() || options.len() < 2 {
+        return Err(task_error(
+            "a decision requires a non-empty prompt and at least two options",
+        ));
+    }
+    block_on_task(async move {
+        let store = task_store().await?;
+        let session = store
+            .get_task_session_by_issue(issue)
+            .await
+            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+        let ambient = std::env::var("LF_TASK_SESSION_ID")
+            .map_err(|_| task_error("decision requests must run inside the owning Task Session"))?;
+        if ambient != session.id.as_str() {
+            return Err(task_error(format!(
+                "Task Session {ambient} cannot request a decision for {}",
+                session.id
+            )));
+        }
+        let decision_id = TaskDecisionId::new();
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::DecisionRequested {
+                    decision_id: decision_id.clone(),
+                    prompt,
+                    options,
+                },
+            )
+            .await
+            .map_err(|error| task_error(format!("failed to persist decision request: {error}")))?;
+
+        let deadline = Instant::now() + timeout;
+        loop {
+            let events = store
+                .task_events_after(&session.id, 0)
+                .await
+                .map_err(|error| {
+                    task_error(format!("failed to read decision response: {error}"))
+                })?;
+            if let Some((choice, message)) = events.into_iter().find_map(|event| match event.kind {
+                TaskEventKind::DecisionResolved {
+                    decision_id: resolved_id,
+                    choice,
+                    message,
+                } if resolved_id == decision_id => Some((choice, message)),
+                _ => None,
+            }) {
+                return Ok(TaskDecisionResult {
+                    issue_id: session.issue.identifier.clone(),
+                    session_id: session.id.to_string(),
+                    decision_id: decision_id.to_string(),
+                    resolved: true,
+                    choice: Some(choice),
+                    message,
+                });
+            }
+            if !wait || Instant::now() >= deadline {
+                return Ok(TaskDecisionResult {
+                    issue_id: session.issue.identifier.clone(),
+                    session_id: session.id.to_string(),
+                    decision_id: decision_id.to_string(),
+                    resolved: false,
+                    choice: None,
+                    message: None,
+                });
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
 }
 
 pub fn task_abandon(issue: &str, reason: String) -> OpsResult<TaskControlResult> {

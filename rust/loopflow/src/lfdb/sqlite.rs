@@ -24,9 +24,10 @@ use crate::trace::{
     ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
 };
 use crate::task::{
-    LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PullRequestRef, TaskCommand,
-    TaskCommandEffect, TaskCommandId, TaskCommandKind, TaskCommandSource, TaskCommandState,
-    TaskEvent, TaskEventKind, TaskProcess, TaskSession, TaskSessionId, TaskSessionStatus,
+    BoundaryResult, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
+    PullRequestRef, TaskCommand, TaskCommandEffect, TaskCommandId, TaskCommandKind,
+    TaskCommandSource, TaskCommandState, TaskEvent, TaskEventKind, TaskProcess, TaskSession,
+    TaskSessionId, TaskSessionStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -1666,6 +1667,49 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn ensure_task_decision_command(
+        &self,
+        command: &TaskCommand,
+    ) -> StoreResult<(TaskCommand, bool)> {
+        let TaskCommandKind::Decide { decision_id, .. } = &command.kind else {
+            return Err(StoreError::InvalidData(
+                "decision command required".to_string(),
+            ));
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let existing = {
+            let mut statement = transaction.prepare(
+                "SELECT id, session_id, source_json, kind_json, created_at,
+                        claimed_by_generation, accepted_at, state, effect, error
+                 FROM task_commands WHERE session_id = ?1 ORDER BY created_at, id",
+            )?;
+            let rows =
+                statement.query_map(params![command.session_id.as_str()], map_task_command_row)?;
+            let mut existing = None;
+            for row in rows {
+                let candidate = row?;
+                if matches!(
+                    &candidate.kind,
+                    TaskCommandKind::Decide {
+                        decision_id: candidate_id,
+                        ..
+                    } if candidate_id == decision_id
+                ) {
+                    existing = Some(candidate);
+                    break;
+                }
+            }
+            existing
+        };
+        if let Some(existing) = existing {
+            return Ok((existing, false));
+        }
+        insert_task_command(&transaction, command)?;
+        transaction.commit()?;
+        Ok((command.clone(), true))
+    }
+
     pub fn supersede_and_insert_task_command(
         &self,
         command: &TaskCommand,
@@ -1709,6 +1753,21 @@ impl SqliteStore {
         .map_err(StoreError::from)
     }
 
+    pub fn task_commands(&self, session_id: &TaskSessionId) -> StoreResult<Vec<TaskCommand>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT id, session_id, source_json, kind_json, created_at,
+                    claimed_by_generation, accepted_at, state, effect, error
+             FROM task_commands WHERE session_id = ?1 ORDER BY created_at, id",
+        )?;
+        let rows = statement.query_map(params![session_id.as_str()], map_task_command_row)?;
+        let mut commands = Vec::new();
+        for row in rows {
+            commands.push(row?);
+        }
+        Ok(commands)
+    }
+
     pub fn claim_task_commands(
         &self,
         session_id: &TaskSessionId,
@@ -1742,6 +1801,74 @@ impl SqliteStore {
         drop(statement);
         transaction.commit()?;
         Ok(commands)
+    }
+
+    pub fn claim_task_commands_or_stop(
+        &self,
+        session_id: &TaskSessionId,
+        generation: u32,
+        stopped_status: TaskSessionStatus,
+        reason: &str,
+    ) -> StoreResult<BoundaryResult> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let mut session = transaction
+            .query_row(
+                TASK_SESSION_SELECT,
+                params![session_id.as_str()],
+                map_task_session_row,
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        if session.process.as_ref().map(|process| process.generation) != Some(generation)
+            || !session.status.is_process_active()
+        {
+            return Err(StoreError::InvalidData(format!(
+                "Task Session {session_id} generation {generation} is not active"
+            )));
+        }
+        transaction.execute(
+            "UPDATE task_commands
+             SET claimed_by_generation = ?1, state = 'claimed'
+             WHERE session_id = ?2 AND state IN ('persisted', 'claimed')
+               AND (claimed_by_generation IS NULL OR claimed_by_generation <> ?1)",
+            params![i64::from(generation), session_id.as_str()],
+        )?;
+        let commands = {
+            let mut statement = transaction.prepare(
+                "SELECT id, session_id, source_json, kind_json, created_at,
+                        claimed_by_generation, accepted_at, state, effect, error
+                 FROM task_commands
+                 WHERE session_id = ?1 AND claimed_by_generation = ?2
+                   AND state = 'claimed'
+                 ORDER BY created_at, id",
+            )?;
+            let rows = statement.query_map(
+                params![session_id.as_str(), i64::from(generation)],
+                map_task_command_row,
+            )?;
+            let mut commands = Vec::new();
+            for row in rows {
+                commands.push(row?);
+            }
+            commands
+        };
+        if !commands.is_empty() {
+            transaction.commit()?;
+            return Ok(BoundaryResult::Commands(commands));
+        }
+
+        session.set_status(stopped_status, reason);
+        let parameters = task_session_params(&session);
+        let changed = transaction.execute(
+            TASK_SESSION_UPDATE,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        transaction.commit()?;
+        Ok(BoundaryResult::Stopped(Box::new(session)))
     }
 
     pub fn accept_task_command(
@@ -1860,6 +1987,22 @@ impl SqliteStore {
             events.push(row?);
         }
         Ok(events)
+    }
+
+    pub fn task_event(
+        &self,
+        session_id: &TaskSessionId,
+        event_id: i64,
+    ) -> StoreResult<Option<TaskEvent>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT id, session_id, kind_json, created_at
+             FROM task_events WHERE session_id = ?1 AND id = ?2",
+            params![session_id.as_str(), event_id],
+            map_task_event_row,
+        )
+        .optional()
+        .map_err(StoreError::from)
     }
 
     // Run ledger (`run_events`): the machine-grain, append-only record of
@@ -2743,6 +2886,7 @@ fn map_task_command_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskCommand
         Some("live_steer") => Some(TaskCommandEffect::LiveSteer),
         Some("next_turn") => Some(TaskCommandEffect::NextTurn),
         Some("replacement") => Some(TaskCommandEffect::Replacement),
+        Some("decision") => Some(TaskCommandEffect::Decision),
         Some(value) => {
             return Err(invalid_column(
                 8,

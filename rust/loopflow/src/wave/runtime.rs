@@ -33,10 +33,12 @@ use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
 use crate::lfd::security::sanitize_fs_component;
+use crate::task::TaskObservation;
 use crate::wave::channel::matches_prefix;
 use crate::wave::journal::{
-    fold_thread, fold_workers, journal_path, restore_pending, run_completed_turn, EventKind,
-    Journal, MessageId, MessageOp, PendingMessage, Usage, WorkerOutcome, WorkerRecord,
+    fold_thread, fold_workers, journal_path, restore_pending, run_completed_turn,
+    task_observation_message, EventKind, Journal, MessageId, MessageOp, PendingMessage, Usage,
+    WorkerOutcome, WorkerRecord,
 };
 use crate::wave::memory::Memory;
 use crate::wave::playhead::{
@@ -129,6 +131,9 @@ pub enum InboxItem {
     /// carrying text — "interrupt & send"), awaiting consumption (named in a
     /// `TurnStarted.answers` or `TurnSteered.answers`).
     Message(PendingMessage),
+    /// A typed Task ledger observation awaiting the same durable turn
+    /// consumption acknowledgement as a queued message.
+    Task(TaskObservation),
     /// A bare interrupt (no text): cancel the open turn. Nothing is journaled
     /// for it — the `LoopState` transition records the interrupt itself.
     Interrupt,
@@ -161,6 +166,7 @@ pub struct Subscription {
     /// The pending queue as of the snapshot: journaled user messages not yet
     /// named in any `answers` — the resident's boot replay.
     pub pending: Vec<PendingMessage>,
+    pub tasks: HashMap<MessageId, TaskObservation>,
     /// Live resident-directed ops sent after the snapshot.
     pub inbox_rx: broadcast::Receiver<InboxItem>,
     /// Live worker-run motion (`op` frames) sent after the snapshot. Live-only
@@ -215,6 +221,7 @@ struct Inner {
     /// Every journaled user message by id — requeues restore pending entries
     /// from it (an id alone can't rebuild the text/op/from).
     messages: HashMap<MessageId, PendingMessage>,
+    tasks: HashMap<MessageId, TaskObservation>,
     /// Memory facts added since the last externalization. The compiled
     /// checkpoint lives in MEMORY.md; this is the replayable delta after it.
     memory_adds: Vec<String>,
@@ -364,6 +371,7 @@ impl WaveRuntime {
                 workers,
                 pending_messages: fold.pending_messages,
                 messages: fold.messages,
+                tasks: fold.tasks,
                 memory_adds: fold.memory_adds,
             }),
             turn_tx,
@@ -838,6 +846,7 @@ impl WaveRuntime {
             memory_adds: inner.memory_adds.clone(),
             memory_add_rx: self.memory_add_tx.subscribe(),
             pending: inner.pending_messages.clone(),
+            tasks: inner.tasks.clone(),
             inbox_rx: self.inbox_tx.subscribe(),
             op_rx: self.op_tx.subscribe(),
         }
@@ -1019,6 +1028,23 @@ impl WaveRuntime {
 
     pub fn deliver_skip(&self) {
         let _ = self.inbox_tx.send(InboxItem::Skip);
+    }
+
+    /// Journal and queue a typed Task observation exactly once.
+    pub fn deliver_task_observation(&self, observation: TaskObservation) -> bool {
+        let mut inner = self.inner();
+        let pending = task_observation_message(&observation);
+        if inner.tasks.contains_key(&pending.id) {
+            return false;
+        }
+        inner.journal.append(|_| EventKind::TaskObserved {
+            observation: observation.clone(),
+        });
+        inner.messages.insert(pending.id.clone(), pending.clone());
+        inner.tasks.insert(pending.id.clone(), observation.clone());
+        inner.pending_messages.push(pending);
+        let _ = self.inbox_tx.send(InboxItem::Task(observation));
+        true
     }
 
     /// Record an already-finalized turn as its full event triple
@@ -1533,6 +1559,44 @@ mod tests {
         assert_eq!(msg.id, MessageId(msg_id(&turn)));
         // And the durable queue has it immediately — no reboot needed.
         assert_eq!(rt.pending_messages().len(), 1);
+    }
+
+    #[test]
+    fn task_observation_is_typed_idempotent_and_replayable() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let mut rx = rt.subscribe_inbox();
+        let observation = crate::task::TaskObservation {
+            session_id: crate::task::TaskSessionId::from_raw("ts_example"),
+            issue_identifier: "INF-123".to_string(),
+            event_id: 7,
+            event: crate::task::TaskEventKind::DecisionRequested {
+                decision_id: crate::task::TaskDecisionId::new(),
+                prompt: "Approve the plan?".to_string(),
+                options: vec!["approve".to_string(), "revise".to_string()],
+            },
+        };
+
+        assert!(rt.deliver_task_observation(observation.clone()));
+        assert!(!rt.deliver_task_observation(observation.clone()));
+        assert!(matches!(
+            rx.try_recv().expect("live Task observation"),
+            InboxItem::Task(ref received) if received == &observation
+        ));
+        let sub = rt.subscribe_with_snapshot();
+        assert_eq!(sub.pending.len(), 1);
+        assert_eq!(
+            sub.tasks.get(&MessageId(observation.inbox_id())),
+            Some(&observation)
+        );
+
+        drop(rt);
+        let replayed = open_runtime(tmp.path()).subscribe_with_snapshot();
+        assert_eq!(replayed.pending.len(), 1);
+        assert_eq!(
+            replayed.tasks.get(&MessageId(observation.inbox_id())),
+            Some(&observation)
+        );
     }
 
     #[test]

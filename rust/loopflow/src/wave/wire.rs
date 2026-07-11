@@ -15,8 +15,8 @@
 //!   with the listener: the resident never touches journal files.
 //! - **Listener → resident**: the resident consumes its own wave's `/events`
 //!   subscription with `?inbox=true` — `inbox` SSE frames ([`InboxFrame`])
-//!   carry queued messages / steer / interrupt ops (replayed pending queue on
-//!   connect, then live).
+//!   carry queued messages, typed Task observations, steer, and interrupt ops
+//!   (replayed pending queue on connect, then live).
 //!
 //! DTO discipline: every field is required or explicitly `Option` — no serde
 //! defaults anywhere. The round-trip fixture lives at
@@ -37,6 +37,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::task::{TaskObservation, TaskSessionId};
 use crate::wave::journal::MessageOp;
 use crate::wave::playhead::{BodyProvenance, PlayheadView, StepOutcome};
 
@@ -188,8 +189,22 @@ pub enum InboxFrame {
         text: String,
         from: Option<String>,
     },
+    Task {
+        observation: TaskObservation,
+    },
     Interrupt,
     Skip,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObserveTaskRequest {
+    pub session_id: TaskSessionId,
+    pub event_id: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObserveTaskResponse {
+    pub observed: bool,
 }
 
 /// One `op` SSE frame on `/events` — this wave's operational motion: a worker

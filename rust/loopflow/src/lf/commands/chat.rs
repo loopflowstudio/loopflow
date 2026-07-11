@@ -256,6 +256,39 @@ pub(crate) async fn post_to_named_wave(wave: &str, text: &str) -> Result<bool> {
     Ok(false)
 }
 
+/// Nudge a live Wave server to fold one authoritative Task ledger event. A
+/// stopped Wave needs no direct journal writer: its store observer catches up
+/// from the durable Task ledger on the next serve.
+pub(crate) async fn post_task_observation_to_named_wave(
+    wave: &str,
+    session_id: &crate::task::TaskSessionId,
+    event_id: i64,
+) -> Result<bool> {
+    let context = CliContext::detect().await;
+    let target = WaveTargetArgs {
+        wave: Some(wave.to_string()),
+        parent: false,
+    };
+    let resolved = resolve_target(
+        &target,
+        context.store.as_ref(),
+        context.repo.as_deref(),
+        context.env_wave_id.as_deref(),
+        context.env_channel.as_deref(),
+    )
+    .await?
+    .ok_or_else(|| anyhow!("wave {wave:?} cannot be resolved"))?;
+    let Some(endpoint) = resolved.endpoint else {
+        return Ok(false);
+    };
+    let body = crate::wave::wire::ObserveTaskRequest {
+        session_id: session_id.clone(),
+        event_id,
+    };
+    post_json(&endpoint, "/tasks/observe", &serde_json::to_value(body)?).await?;
+    Ok(true)
+}
+
 /// Record one Task lifecycle fact in the owning Wave's durable conversation.
 /// A live Wave receives the normal message request so it wakes once; a stopped
 /// Wave receives the same journal row directly and replays it on next serve.

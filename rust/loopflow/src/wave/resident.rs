@@ -194,6 +194,7 @@ fn inbox_item(frame: InboxFrame) -> InboxItem {
             text,
             from,
         }),
+        InboxFrame::Task { observation } => InboxItem::Task(observation),
         InboxFrame::Interrupt => InboxItem::Interrupt,
         InboxFrame::Skip => InboxItem::Skip,
     }

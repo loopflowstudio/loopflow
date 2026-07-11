@@ -47,6 +47,7 @@ use crate::lfd::types::{
     WAVE_SERVER_ENDPOINT_ENV, WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
 };
 use crate::lfdb::{SharedStore, StoreResult};
+use crate::task::{TaskObservation, TaskSessionId};
 use crate::wave::journal::WorkerOutcome;
 use crate::wave::runtime::WaveRuntime;
 
@@ -447,6 +448,7 @@ impl StoreObserver {
     /// journal new starts and fresh finishes. Store errors are logged
     /// and skipped — the next poll retries.
     pub async fn poll_once(&self) {
+        self.poll_task_events().await;
         let poll_started = OffsetDateTime::now_utc();
         let cutoff = *self
             .terminal_cutoff
@@ -600,6 +602,69 @@ impl StoreObserver {
             // then reset the wave's repo status if no active runs remain.
             self.close_run_and_maybe_idle_wave(&runs, &run_id, outcome)
                 .await;
+        }
+    }
+
+    /// Resolve a narrow `(session_id, event_id)` door request against the Task
+    /// ledger, enforce Wave ownership, and journal it idempotently.
+    pub async fn observe_task_event(
+        &self,
+        session_id: &TaskSessionId,
+        event_id: i64,
+    ) -> StoreResult<bool> {
+        let session = self
+            .store
+            .get_task_session(session_id)
+            .await?
+            .ok_or(crate::lfdb::StoreError::NotFound)?;
+        if session.wave_id != self.wave_id {
+            return Err(crate::lfdb::StoreError::InvalidData(format!(
+                "Task Session {session_id} belongs to a different Wave"
+            )));
+        }
+        let event = self
+            .store
+            .get_task_event(session_id, event_id)
+            .await?
+            .ok_or(crate::lfdb::StoreError::NotFound)?;
+        if !event.kind.is_wave_observable() {
+            return Ok(false);
+        }
+        Ok(self.runtime.deliver_task_observation(TaskObservation {
+            session_id: session.id,
+            issue_identifier: session.issue.identifier,
+            event_id: event.id,
+            event: event.kind,
+        }))
+    }
+
+    async fn poll_task_events(&self) {
+        let sessions = match self.store.list_task_sessions(Some(&self.wave_id)).await {
+            Ok(sessions) => sessions,
+            Err(error) => {
+                tracing::debug!(%error, "wave observer Task Session read failed");
+                return;
+            }
+        };
+        for session in sessions {
+            let events = match self.store.task_events_after(&session.id, 0).await {
+                Ok(events) => events,
+                Err(error) => {
+                    tracing::debug!(%error, session_id = %session.id, "wave observer Task event read failed");
+                    continue;
+                }
+            };
+            for event in events {
+                if !event.kind.is_wave_observable() {
+                    continue;
+                }
+                self.runtime.deliver_task_observation(TaskObservation {
+                    session_id: session.id.clone(),
+                    issue_identifier: session.issue.identifier.clone(),
+                    event_id: event.id,
+                    event: event.kind,
+                });
+            }
         }
     }
 

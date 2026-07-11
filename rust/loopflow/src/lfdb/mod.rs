@@ -16,8 +16,8 @@ use crate::lfd::types::{
     LivePullRequestState, Repo, RepoEdge, RepoId, Run, Session, SessionStatus, Summary, Wave,
 };
 use crate::task::{
-    TaskCommand, TaskCommandId, TaskEvent, TaskEventKind, TaskSession, TaskSessionId,
-    TaskSessionStatus,
+    BoundaryResult, TaskCommand, TaskCommandId, TaskEvent, TaskEventKind, TaskSession,
+    TaskSessionId, TaskSessionStatus,
 };
 
 pub mod catalog;
@@ -338,6 +338,17 @@ impl Store {
         .await
     }
 
+    pub async fn ensure_task_decision_command(
+        &self,
+        command: &TaskCommand,
+    ) -> StoreResult<(TaskCommand, bool)> {
+        let command = command.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.ensure_task_decision_command(&command)
+        })
+        .await
+    }
+
     pub async fn supersede_and_create_task_command(
         &self,
         command: &TaskCommand,
@@ -357,6 +368,14 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.task_command(&command_id)).await
     }
 
+    pub async fn list_task_commands(
+        &self,
+        session_id: &TaskSessionId,
+    ) -> StoreResult<Vec<TaskCommand>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_commands(&session_id)).await
+    }
+
     pub async fn claim_task_commands(
         &self,
         session_id: &TaskSessionId,
@@ -365,6 +384,21 @@ impl Store {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.claim_task_commands(&session_id, generation)
+        })
+        .await
+    }
+
+    pub async fn claim_task_commands_or_stop(
+        &self,
+        session_id: &TaskSessionId,
+        generation: u32,
+        stopped_status: TaskSessionStatus,
+        reason: &str,
+    ) -> StoreResult<BoundaryResult> {
+        let session_id = session_id.clone();
+        let reason = reason.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_task_commands_or_stop(&session_id, generation, stopped_status, &reason)
         })
         .await
     }
@@ -413,10 +447,31 @@ impl Store {
     ) -> StoreResult<TaskEvent> {
         let session_id = session_id.clone();
         let kind = kind.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.append_task_event(&session_id, &kind)
+        let write_session_id = session_id.clone();
+        let write_kind = kind.clone();
+        let event = run_sqlite(&self.sqlite, move |store| {
+            store.append_task_event(&write_session_id, &write_kind)
         })
-        .await
+        .await?;
+        if kind.is_wave_observable() {
+            if let Some(session) = self.get_task_session(&session_id).await? {
+                if let Err(error) = crate::lf::commands::chat::post_task_observation_to_named_wave(
+                    &session.wave,
+                    &session_id,
+                    event.id,
+                )
+                .await
+                {
+                    tracing::debug!(
+                        %error,
+                        %session_id,
+                        event_id = event.id,
+                        "live Task observation delivery failed; Wave observer will retry"
+                    );
+                }
+            }
+        }
+        Ok(event)
     }
 
     pub async fn task_events_after(
@@ -427,6 +482,18 @@ impl Store {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.task_events_after(&session_id, cursor)
+        })
+        .await
+    }
+
+    pub async fn get_task_event(
+        &self,
+        session_id: &TaskSessionId,
+        event_id: i64,
+    ) -> StoreResult<Option<TaskEvent>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.task_event(&session_id, event_id)
         })
         .await
     }
@@ -1461,9 +1528,10 @@ mod tests {
         DEFAULT_WAVE_FLOW,
     };
     use crate::task::{
-        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
-        PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandKind, TaskCommandSource,
-        TaskCommandState, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+        BoundaryResult, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
+        PmWritebackOperation, PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandKind,
+        TaskCommandSource, TaskCommandState, TaskDecisionId, TaskEventKind, TaskSession,
+        TaskSessionId, TaskSessionStatus,
     };
     use std::env;
     use std::path::PathBuf;
@@ -1705,6 +1773,121 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn task_boundary_atomically_claims_work_or_stops_the_generation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+
+        let mut with_command = make_task_session(&wave);
+        with_command.begin_generation("task-a".to_string());
+        with_command.set_status(TaskSessionStatus::Running, "provider active");
+        store.create_task_session(&with_command).await.unwrap();
+        let command = TaskCommand::new(
+            with_command.id.clone(),
+            TaskCommandSource::Human,
+            TaskCommandKind::FollowUp {
+                text: "arrived at the boundary".to_string(),
+            },
+        );
+        store.create_task_command(&command).await.unwrap();
+
+        let claimed = store
+            .claim_task_commands_or_stop(
+                &with_command.id,
+                1,
+                TaskSessionStatus::Waiting,
+                "turn complete",
+            )
+            .await
+            .unwrap();
+        let BoundaryResult::Commands(commands) = claimed else {
+            panic!("boundary stopped despite a persisted command");
+        };
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].id, command.id);
+        assert_eq!(
+            store
+                .get_task_session(&with_command.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskSessionStatus::Running
+        );
+
+        let mut without_command = make_task_session(&wave);
+        without_command.issue.id = LinearIssueId::new("other-issue").unwrap();
+        without_command.issue.identifier = "INF-124".to_string();
+        without_command.worktree = PathBuf::from("/repo.inf-124");
+        without_command.branch = "jack/inf-124".to_string();
+        without_command.begin_generation("task-b".to_string());
+        without_command.set_status(TaskSessionStatus::Running, "provider active");
+        store.create_task_session(&without_command).await.unwrap();
+        let stopped = store
+            .claim_task_commands_or_stop(
+                &without_command.id,
+                1,
+                TaskSessionStatus::Waiting,
+                "turn complete",
+            )
+            .await
+            .unwrap();
+        let BoundaryResult::Stopped(stopped) = stopped else {
+            panic!("empty boundary did not stop");
+        };
+        assert_eq!(stopped.status, TaskSessionStatus::Waiting);
+        assert_eq!(stopped.status_reason, "turn complete");
+    }
+
+    #[tokio::test]
+    async fn duplicate_task_decision_reuses_one_durable_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let session = make_task_session(&wave);
+        store.create_task_session(&session).await.unwrap();
+        let decision_id = TaskDecisionId::new();
+        let first = TaskCommand::new(
+            session.id.clone(),
+            TaskCommandSource::Human,
+            TaskCommandKind::Decide {
+                decision_id: decision_id.clone(),
+                choice: "revise".to_string(),
+                message: Some("cover the boundary".to_string()),
+            },
+        );
+        let duplicate = TaskCommand::new(
+            session.id.clone(),
+            TaskCommandSource::Human,
+            TaskCommandKind::Decide {
+                decision_id,
+                choice: "approve".to_string(),
+                message: None,
+            },
+        );
+
+        let (stored, created) = store.ensure_task_decision_command(&first).await.unwrap();
+        assert!(created);
+        assert_eq!(stored.id, first.id);
+        let (stored, created) = store
+            .ensure_task_decision_command(&duplicate)
+            .await
+            .unwrap();
+        assert!(!created);
+        assert_eq!(stored.id, first.id);
+        assert_eq!(
+            store.list_task_commands(&session.id).await.unwrap().len(),
+            1
+        );
     }
 
     #[tokio::test]

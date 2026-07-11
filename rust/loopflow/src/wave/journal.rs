@@ -34,6 +34,7 @@ use time::OffsetDateTime;
 
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::task::TaskObservation;
 use crate::wave::playhead::{BodyProvenance, Playhead, PlayheadEvent};
 use crate::wave::state::LoopState;
 
@@ -203,7 +204,9 @@ pub enum EventKind {
     /// force-finalized, failed, or the resident reported the vendor never
     /// received them). The fold returns them to the pending queue, so a
     /// resident replay re-delivers them instead of losing them forever.
-    MessagesRequeued { ids: Vec<MessageId> },
+    MessagesRequeued {
+        ids: Vec<MessageId>,
+    },
     TurnFinished {
         turn_id: String,
         status: Lifecycle,
@@ -235,6 +238,9 @@ pub enum EventKind {
         outcome: WorkerOutcome,
         summary: String,
     },
+    TaskObserved {
+        observation: TaskObservation,
+    },
     // -- legacy channels --
     /// A work-line channel opened under this wave. No current code produces
     /// this event; retaining the variant lets existing journals replay.
@@ -247,14 +253,21 @@ pub enum EventKind {
     // -- memory --
     /// A compiled memory checkpoint was written to `MEMORY.md`. Clears the
     /// replayable add delta because the checkpoint is now the seed.
-    MemoryUpdated { summary: String },
+    MemoryUpdated {
+        summary: String,
+    },
     /// A fact published to the stream (`lf memory add`). Accumulates into the
     /// replayable delta until the next `MemoryUpdated`.
-    MemoryAdded { fact: String },
+    MemoryAdded {
+        fact: String,
+    },
     // -- server lifecycle --
     /// One boot of the wave server, appended after replay. Folds ignore it;
     /// it exists so restarts are visible in the forensic record.
-    ServerStarted { pid: u32, endpoint: String },
+    ServerStarted {
+        pid: u32,
+        endpoint: String,
+    },
 }
 
 /// Path of a wave's journal: `.lf/journal/waves/<wave>/journal.jsonl` under
@@ -496,6 +509,12 @@ impl Narrator {
                 outcome.name(),
                 ellipsize(summary, 60)
             )),
+            EventKind::TaskObserved { observation } => info(format!(
+                "observed task {} event {} · {}",
+                observation.issue_identifier,
+                observation.event_id,
+                ellipsize(&observation.prompt(), 70)
+            )),
             EventKind::ChannelOpened { name, run_id } => {
                 info(format!("channel {name} opened · run {}", short_id(run_id)))
             }
@@ -731,6 +750,8 @@ pub struct ThreadFold {
     /// Every journaled user message by id — `MessagesRequeued` restores
     /// pending entries from it (an id alone can't rebuild the text/op/from).
     pub messages: HashMap<MessageId, PendingMessage>,
+    /// Typed Task observations indexed by their synthetic consumption id.
+    pub tasks: HashMap<MessageId, TaskObservation>,
     /// Message ids claimed (`answers`) by turns still open at the end of the
     /// log — the crash tail's consumption. The boot janitor requeues these
     /// when it finalizes the crashed turns as `Failed`.
@@ -812,6 +833,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut playhead: Option<Playhead> = None;
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
     let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
+    let mut tasks: HashMap<MessageId, TaskObservation> = HashMap::new();
     let mut consumed_messages: HashSet<MessageId> = HashSet::new();
     // Claims (`answers`) per still-open turn — the crash tail's consumption,
     // exported so the boot janitor can requeue it.
@@ -835,6 +857,14 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     pending_messages.push(message.clone());
                 }
                 messages.insert(id.clone(), message);
+            }
+            EventKind::TaskObserved { observation } => {
+                let message = task_observation_message(observation);
+                if !consumed_messages.contains(&message.id) {
+                    pending_messages.push(message.clone());
+                }
+                tasks.insert(message.id.clone(), observation.clone());
+                messages.insert(message.id.clone(), message);
             }
             EventKind::TurnStarted {
                 turn_id,
@@ -956,8 +986,18 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         playhead,
         pending_messages,
         messages,
+        tasks,
         open_claims,
         memory_adds,
+    }
+}
+
+pub fn task_observation_message(observation: &TaskObservation) -> PendingMessage {
+    PendingMessage {
+        id: MessageId(observation.inbox_id()),
+        op: MessageOp::Message,
+        text: observation.prompt(),
+        from: Some("task".to_string()),
     }
 }
 
@@ -1030,6 +1070,18 @@ mod tests {
             op: MessageOp::Message,
             text: text.to_string(),
             from: None,
+        }
+    }
+
+    fn task_observation() -> crate::task::TaskObservation {
+        crate::task::TaskObservation {
+            session_id: crate::task::TaskSessionId::from_raw("ts_example"),
+            issue_identifier: "INF-123".to_string(),
+            event_id: 42,
+            event: crate::task::TaskEventKind::Failed {
+                error: "provider stopped".to_string(),
+                resumable: true,
+            },
         }
     }
 
@@ -1164,6 +1216,9 @@ mod tests {
                 outcome: WorkerOutcome::Completed,
                 summary: "landed".into(),
             },
+            EventKind::TaskObserved {
+                observation: task_observation(),
+            },
             EventKind::ChannelOpened {
                 name: "ship.148e0e02".into(),
                 run_id: "run-1".into(),
@@ -1297,6 +1352,9 @@ mod tests {
                 outcome: WorkerOutcome::Completed,
                 summary: "landed".into(),
             },
+            EventKind::TaskObserved {
+                observation: task_observation(),
+            },
             EventKind::ChannelOpened {
                 name: "ship.148e0e02".into(),
                 run_id: "run-1".into(),
@@ -1311,6 +1369,39 @@ mod tests {
             let narration = narrator.render(kind);
             assert!(!narration.line.is_empty(), "silent narration for {kind:?}");
         }
+    }
+
+    #[test]
+    fn typed_task_observation_uses_the_existing_durable_consumption_fold() {
+        let observation = task_observation();
+        let observation_id = MessageId(observation.inbox_id());
+        let observed = Event {
+            v: FORMAT_VERSION,
+            seq: 1,
+            at: OffsetDateTime::now_utc(),
+            kind: EventKind::TaskObserved {
+                observation: observation.clone(),
+            },
+        };
+        let pending = fold_thread(std::slice::from_ref(&observed));
+        assert_eq!(pending.pending_messages.len(), 1);
+        assert_eq!(pending.tasks.get(&observation_id), Some(&observation));
+        assert!(pending.turns.is_empty(), "Task facts are not user speech");
+
+        let consumed = fold_thread(&[
+            observed,
+            Event {
+                v: FORMAT_VERSION,
+                seq: 2,
+                at: OffsetDateTime::now_utc(),
+                kind: EventKind::TurnStarted {
+                    turn_id: "turn-2".to_string(),
+                    answers: vec![observation_id],
+                    body: None,
+                },
+            },
+        ]);
+        assert!(consumed.pending_messages.is_empty());
     }
 
     /// A fixed event sequence renders the console a human would want to read:

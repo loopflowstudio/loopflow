@@ -470,6 +470,12 @@ impl WaveLoop {
                     self.queue.push(message);
                 }
             }
+            InboxItem::Task(observation) => {
+                let message = crate::wave::journal::task_observation_message(&observation);
+                if self.seen.insert(message.id.clone()) {
+                    self.queue.push(message);
+                }
+            }
             InboxItem::Interrupt | InboxItem::Skip => {}
         }
     }
@@ -1011,6 +1017,9 @@ impl WaveLoop {
                 }
                 InboxAction::Interrupt { skip: false }
             }
+            Some(InboxItem::Task(observation)) => InboxAction::Deliver(InboxItem::Message(
+                crate::wave::journal::task_observation_message(&observation),
+            )),
             Some(item) => InboxAction::Deliver(item),
             None => {
                 self.end = Some(LoopEnd::ListenerGone);

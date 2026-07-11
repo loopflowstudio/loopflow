@@ -32,6 +32,10 @@ lf pm task update --id <task-id> --title "..."
 - Supervise active work with `lf task status`, `lf task steer`, `lf task
   interrupt`, `lf task wait`, and `lf task resume`. A second task may run in
   parallel when capacity permits; never create a second session for one issue.
+- A linked `decision_requested` event is a question from the Task, not human
+  speech. Answer it once with `lf task decide <issue> <decision-id> <choice>
+  [--message "feedback"]`. Inspect delayed command acceptance with `lf task
+  receipt <command-id> --wait --timeout 30s --json`.
 - Use `lf project run <linear-project-id>` to queue a Project directive for its
   owning Wave. Projects never own worktrees or child minds.
 - Trust linked Task events and summaries. Drill into the Task Session only when

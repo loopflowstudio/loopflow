@@ -71,6 +71,8 @@ starts and who owns it through review and merge.
 
 - Multi-task integration PRs, task dependency edges, or remote execution.
 - Rich Task transcript and direct steering UI.
-- The remaining steering-parity contract: typed Task events in the Wave inbox,
-  Task decision requests, and the three-provider conformance suite. Keep this
-  PR draft until that gate is implemented or explicitly split.
+- The side-effecting live Linear/provider/PR dogfood and the complete
+  10-scenario × 3-adapter scripted-peer matrix. Typed Task observations,
+  decisions, atomic turn settlement, waitable receipts, and provider capability
+  profiles are implemented and pass the normal Rust gate; keep the PR draft
+  until the remaining parity evidence is captured.

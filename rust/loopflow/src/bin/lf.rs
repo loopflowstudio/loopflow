@@ -657,6 +657,63 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             let result = loopflow::ops::task::task_interrupt(issue, message.clone())?;
             print_task_control(&result, *json)
         }
+        TaskCommand::Receipt {
+            command_id,
+            wait,
+            timeout,
+            json,
+        } => {
+            let timeout = parse_duration(timeout)?;
+            let read = loopflow::ops::task::task_receipt(command_id, *wait, timeout)?;
+            print_task_control(&read.receipt, *json)?;
+            if read.timed_out {
+                std::process::exit(124);
+            }
+            Ok(())
+        }
+        TaskCommand::Decide {
+            issue,
+            decision_id,
+            choice,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_decide(
+                issue,
+                decision_id,
+                choice.clone(),
+                message.clone(),
+            )?;
+            print_task_control(&result, *json)
+        }
+        TaskCommand::RequestDecision {
+            issue,
+            prompt,
+            options,
+            wait,
+            timeout,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_request_decision(
+                issue,
+                prompt.clone(),
+                options.clone(),
+                *wait,
+                parse_duration(timeout)?,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else if result.resolved {
+                println!(
+                    "{} → {}",
+                    result.decision_id,
+                    result.choice.as_deref().unwrap_or("resolved")
+                );
+            } else {
+                println!("{} → pending", result.decision_id);
+            }
+            Ok(())
+        }
         TaskCommand::Wait {
             issue,
             until,

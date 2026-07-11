@@ -112,10 +112,27 @@ fn check_capture(
         .iter()
         .map(|launch| launch.process_id.as_str())
         .collect();
-    let missing_launches: HashSet<&str> = events
+    let process_started_at = events
+        .iter()
+        .filter(|event| event.node == "run" && event.event == "started")
+        .fold(HashMap::new(), |mut starts, event| {
+            starts
+                .entry(event.process_id.as_str())
+                .and_modify(|started_at: &mut i64| *started_at = (*started_at).min(event.ts))
+                .or_insert(event.ts);
+            starts
+        });
+    let uncaptured_spend: BTreeSet<&str> = events
         .iter()
         .filter(|event| {
-            event.ts >= required_after && (event.provider.is_some() || event.node == "skill")
+            process_started_at
+                .get(event.process_id.as_str())
+                .copied()
+                .unwrap_or(event.ts)
+                >= required_after
+                && event.node == "run"
+                && event.event != "started"
+                && reports_provider_spend(event)
         })
         .map(|event| event.process_id.as_str())
         .filter(|process| !launch_processes.contains(process))
@@ -281,10 +298,9 @@ fn check_capture(
         }
     }
 
-    if !missing_launches.is_empty() {
+    for process_id in uncaptured_spend {
         failures.push(format!(
-            "{} agent-bearing process(es) have no launch",
-            missing_launches.len()
+            "process {process_id} reports provider spend but has no launch"
         ));
     }
     if !failures.is_empty() {
@@ -326,6 +342,13 @@ fn check_capture(
                 .sum::<i64>()
         ),
     ))
+}
+
+fn reports_provider_spend(event: &RunEventRow) -> bool {
+    event.input_tokens.is_some()
+        || event.output_tokens.is_some()
+        || event.cache_read_tokens.is_some()
+        || event.cost_usd.is_some()
 }
 
 pub fn audit(events: &[RunEventRow]) -> Vec<Check> {
@@ -602,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_check_rejects_a_post_epoch_agent_without_a_launch() {
+    fn capture_check_rejects_post_epoch_provider_spend_without_a_launch() {
         let _guard = crate::journal::test_env_lock();
         let previous = std::env::var_os("LF_HOME");
         let home = tempfile::tempdir().unwrap();
@@ -615,10 +638,59 @@ mod tests {
             "completed",
         );
         event.provider = Some("codex".to_string());
+        event.input_tokens = Some(10);
 
         let check = check_capture(&store, &[event]).unwrap();
         assert_eq!(check.status, Status::Fail);
-        assert!(check.detail.contains("have no launch"), "{}", check.detail);
+        assert!(
+            check
+                .detail
+                .contains("process missing-capture reports provider spend but has no launch"),
+            "{}",
+            check.detail
+        );
+
+        match previous {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
+        }
+    }
+
+    #[test]
+    fn capture_check_ignores_ungated_orchestrators_and_external_hosts() {
+        let _guard = crate::journal::test_env_lock();
+        let previous = std::env::var_os("LF_HOME");
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let store = crate::journal::open_ledger().unwrap();
+        let required_after = store.trace_capture_required_after().unwrap();
+        let orchestrator = row("orchestrator", required_after, "skill", "completed");
+        let mut external_host = row("external", required_after, "run", "completed");
+        external_host.provider = Some("codex".to_string());
+
+        let check = check_capture(&store, &[orchestrator, external_host]).unwrap();
+        assert_eq!(check.status, Status::Ok, "{}", check.detail);
+
+        match previous {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
+        }
+    }
+
+    #[test]
+    fn capture_check_ignores_a_pre_epoch_process_that_finishes_after_activation() {
+        let _guard = crate::journal::test_env_lock();
+        let previous = std::env::var_os("LF_HOME");
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let store = crate::journal::open_ledger().unwrap();
+        let required_after = store.trace_capture_required_after().unwrap();
+        let started = row("old-process", required_after - 1, "run", "started");
+        let mut completed = row("old-process", required_after + 1, "run", "completed");
+        completed.input_tokens = Some(10);
+
+        let check = check_capture(&store, &[started, completed]).unwrap();
+        assert_eq!(check.status, Status::Ok, "{}", check.detail);
 
         match previous {
             Some(value) => std::env::set_var("LF_HOME", value),

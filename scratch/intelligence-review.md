@@ -38,7 +38,7 @@ Prompt assembly produces an exact `PreparedTurnContext`. The launch gate atomica
 - Exact capture can contain pasted secrets and tool output. Files are mode 0600 and directories 0700, but there is intentionally no retention or redaction policy in this branch.
 - SQLite and the filesystem cannot share a transaction. The two-phase publish can leave a pre-launch orphan after process death; doctor names it.
 - The cl100k regex is duplicated from pinned `tiktoken-rs` to avoid repeated full-prefix encoding. Runtime boundary validation preserves correctness if that implementation drifts, at the cost of falling back to slower accounting.
-- The long-lived ledger still has three historical lineage failures predating this work, so `lf doctor` correctly remains non-zero for lineage. Migration 066 starts capture coverage after the mixed-version development interval; release-profile probes from this branch capture completely.
+- The long-lived ledger still has three historical lineage failures predating this work, so `lf doctor` correctly remains non-zero for lineage. Migration 067 starts capture coverage after the final audit contract and mixed-version development interval; release-profile probes from this branch capture completely.
 - Interactive TUI/IDE handoff is deliberately prompt-only. Loopflow does not claim a complete transcript after control passes to the vendor.
 
 ## What's not included

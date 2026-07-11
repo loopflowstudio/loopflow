@@ -282,6 +282,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "066_trace_capture_ship_epoch",
         sql: include_str!("migrations/066_trace_capture_ship_epoch.sql"),
     },
+    Migration {
+        version: "067_trace_capture_audit_epoch",
+        sql: include_str!("migrations/067_trace_capture_audit_epoch.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the

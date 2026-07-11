@@ -91,6 +91,15 @@ const HEARTBEAT_PROMPT: &str = "Heartbeat: re-read your goal and memory, then ta
 /// enough to recognize the dispatch, token-lean by design.
 const IN_FLIGHT_TASK_CHARS: usize = 80;
 
+fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) {
+    let Some(capture) = capture else {
+        return;
+    };
+    if let Err(error) = capture.finish(outcome, false) {
+        tracing::warn!(%error, %outcome, "failed to finalize trace capture");
+    }
+}
+
 /// The heartbeat nudge, plus a compact `<in_flight>` section when workers are
 /// grinding: one line per dispatched-not-finished worker, from the listener's
 /// `GET /resident/context` — the loop's orchestration turns see their workers
@@ -699,9 +708,7 @@ impl WaveLoop {
         let mut harness = match harness {
             Ok(harness) => harness,
             Err(err) => {
-                if let Some(capture) = &capture {
-                    let _ = capture.finish("failed", false);
-                }
+                finish_capture(capture.as_ref(), "failed");
                 let body_id = body.body_id.clone();
                 self.open_body(body, answers).await;
                 self.finish_failed_pass(
@@ -716,9 +723,7 @@ impl WaveLoop {
             harness.set_raw_provider_sender(Some(raw_tx));
         }
         if let Err(err) = harness.start(&prepared.config).await {
-            if let Some(capture) = &capture {
-                let _ = capture.finish("failed", false);
-            }
+            finish_capture(capture.as_ref(), "failed");
             let body_id = body.body_id.clone();
             self.open_body(body, answers).await;
             self.finish_failed_pass(
@@ -737,16 +742,12 @@ impl WaveLoop {
         self.open_body(body, answers).await;
         if self.end.is_some() {
             let _ = harness.stop().await;
-            if let Some(capture) = &capture {
-                let _ = capture.finish("interrupted", false);
-            }
+            finish_capture(capture.as_ref(), "interrupted");
             return;
         }
         if let Err(err) = harness.send_input(&prepared.input).await {
             let _ = harness.stop().await;
-            if let Some(capture) = &capture {
-                let _ = capture.finish("failed", false);
-            }
+            finish_capture(capture.as_ref(), "failed");
             self.finish_failed_pass(
                 &body_id,
                 &format!(
@@ -770,9 +771,7 @@ impl WaveLoop {
                     match self.inbox_action(item) {
                         InboxAction::Interrupt { skip } => {
                             self.interrupt_harness(&body_id, harness.as_mut(), skip).await;
-                            if let Some(capture) = &capture {
-                                let _ = capture.finish("interrupted", false);
-                            }
+                            finish_capture(capture.as_ref(), "interrupted");
                             return;
                         }
                         InboxAction::Deliver(InboxItem::Message(message))
@@ -788,9 +787,7 @@ impl WaveLoop {
                         InboxAction::Deliver(item) => self.on_inbox(item).await,
                         InboxAction::ListenerGone => {
                             let _ = harness.stop().await;
-                            if let Some(capture) = &capture {
-                                let _ = capture.finish("interrupted", false);
-                            }
+                            finish_capture(capture.as_ref(), "interrupted");
                             return;
                         }
                     }
@@ -804,9 +801,7 @@ impl WaveLoop {
                     let Some(event) = event else {
                         let _ = harness.stop().await;
                         self.finish_failed_pass(&body_id, "harness event stream closed").await;
-                        if let Some(capture) = &capture {
-                            let _ = capture.finish("failed", false);
-                        }
+                        finish_capture(capture.as_ref(), "failed");
                         return;
                     };
                     if let Some(capture) = &capture {
@@ -855,9 +850,7 @@ impl WaveLoop {
                                     usage.cost_usd,
                                     harness.as_mut(),
                                 ).await;
-                                if let Some(capture) = &capture {
-                                    let _ = capture.finish(outcome, false);
-                                }
+                                finish_capture(capture.as_ref(), outcome);
                                 return;
                             }
                         }
@@ -873,9 +866,7 @@ impl WaveLoop {
                                 &body_id,
                                 &format!("{code}: {message}"),
                             ).await;
-                            if let Some(capture) = &capture {
-                                let _ = capture.finish("failed", false);
-                            }
+                            finish_capture(capture.as_ref(), "failed");
                             return;
                         }
                         ConversationEvent::TurnStarted { .. }
@@ -888,9 +879,7 @@ impl WaveLoop {
                     }
                     if self.end.is_some() {
                         let _ = harness.stop().await;
-                        if let Some(capture) = &capture {
-                            let _ = capture.finish("interrupted", false);
-                        }
+                        finish_capture(capture.as_ref(), "interrupted");
                         return;
                     }
                 }
@@ -910,18 +899,14 @@ impl WaveLoop {
                         usage.cost_usd,
                         harness.as_mut(),
                     ).await;
-                    if let Some(capture) = &capture {
-                        let _ = capture.finish(outcome, false);
-                    }
+                    finish_capture(capture.as_ref(), outcome);
                     return;
                 }
                 _ = &mut timeout => {
                     match self.timeout_action().await {
                         TimeoutAction::End => {
                             let _ = harness.stop().await;
-                            if let Some(capture) = &capture {
-                                let _ = capture.finish("interrupted", false);
-                            }
+                            finish_capture(capture.as_ref(), "interrupted");
                             return;
                         }
                         TimeoutAction::Renew => {
@@ -932,9 +917,7 @@ impl WaveLoop {
                             let _ = harness.interrupt().await;
                             let _ = harness.stop().await;
                             self.finish_timed_out_pass(&body_id).await;
-                            if let Some(capture) = &capture {
-                                let _ = capture.finish("interrupted", false);
-                            }
+                            finish_capture(capture.as_ref(), "interrupted");
                             return;
                         }
                     }

@@ -13,6 +13,7 @@ The unused output-log path and `run_events.context` field were removed. README a
 - `run_id` remains the trace and `process_id` remains the process span; launches and turns have their own identities. One process may launch several agents and one launch may contain several turns.
 - SQLite owns searchable metadata. Exact prompts and JSONL bodies remain private local files with relative, traversal-safe paths.
 - Capture is fail-closed before provider launch and fail-open-but-visible after launch: mid-run append failure marks the launch partial and makes doctor red without killing the provider.
+- Resident harness finalization errors are warned on every exit path. They can no longer leave a launch stuck in `capturing` without a runtime signal.
 - Context kind and origin scope are separate axes. Exact prompt byte ranges, SHA-256, isolated tokens, and prefix-attributed tokens let readers explain both inclusion and assembly overhead.
 - Exact token accounting shares one cl100k encoding across totals, prefix boundaries, and isolated ranges. The copied cl100k regex is checked against actual token boundaries at runtime; any mismatch falls back to the slower direct calculation.
 - Migration 063 repairs the partially applied 062 contract because migration ids are immutable once observed by the long-lived ledger. The repair preserves captured rows and process evidence.
@@ -24,17 +25,17 @@ Prompt assembly produces an exact `PreparedTurnContext`. The launch gate atomica
 
 ## Validation and measures
 
-- Full CI matrix: Python 53 passed; website 59 passed with 3 intentional skips; Swift 302 passed; E2E smoke passed; Loopflow macOS test build passed.
-- Final Rust checks after gate fixes: `cargo fmt --all -- --check`, focused trace/prefix/migration tests, clippy with warnings denied, and 1,351/1,351 nextest cases passed with 3 intentional skips.
+- Full CI matrix: Python 53 passed; website 59 passed with 3 intentional skips; Swift 306 passed; E2E smoke passed; Loopflow macOS test build passed.
+- Final Rust checks after gate fixes: `cargo fmt --all -- --check`, focused trace/journal/migration/conformance tests, clippy with warnings denied, and 1,352/1,352 nextest cases passed with 3 intentional skips.
 - Provider conformance fixtures cover Claude, Codex, and OpenCode.
 - A production-path `lf code` regression runs implement/compress/lint/gate through
   the real CLI with an isolated ledger and fake provider. It proves four distinct
   launches and turns share one trace/process, `lf trace --json` preserves their
   execution order, and the capture doctor remains green.
-- Long-lived ledger after release-profile probes: 100% of captured headless launches are complete; all assembled turns reconcile asset tokens exactly; normalized event files are parseable.
+- Long-lived ledger after final gate: capture is green at 9 launches, 9 turns, 117 assets, and 724,352 normalized-event bytes. All captured headless launches are complete; assembled turns reconcile asset tokens exactly; normalized event files are parseable.
 - A release-profile 18,868-token probe recorded 13 ms gather, 39 ms exact render, and 64 ms durable persistence. Exact render is below the 100 ms target. The pre-polish debug path measured 439 ms and also rebuilt the context twice before launch.
 - `lf context --json` over 30 days and full local history takes about 10 ms warm and does not open prompt or transcript bodies.
-- `lf trace --events` begins streaming the largest current capture in about 10 ms.
+- `lf trace --events` rendered the largest current capture (77,876 bytes) in about 10 ms.
 - Current trace storage is under 1 MiB. Captured normalized conversations are about 80 KiB each for the exercised runs.
 
 ## Risks and bottlenecks

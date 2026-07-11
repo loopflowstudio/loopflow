@@ -820,15 +820,6 @@ impl CaptureHandle {
         self.with_capture(|capture| capture.record_conversation(event));
     }
 
-    pub fn record_user_input(&self, op: &str, text: &str) {
-        self.with_capture(|capture| {
-            capture.append_payload(RecordedConversationPayload::UserInput {
-                op: op.to_string(),
-                text: text.to_string(),
-            })
-        });
-    }
-
     pub fn begin_turn(&self, input_op: &str, text: &str) -> StoreResult<()> {
         let mut capture = self.0.lock().expect("trace capture mutex poisoned");
         if let Some(message) = &capture.failed {

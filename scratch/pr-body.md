@@ -15,7 +15,7 @@ lf doctor --json
 
 On a release-profile 18,868-token probe, context gathering took 13 ms, exact attribution took 39 ms, and durable pre-launch persistence took 64 ms. Warm `lf context --json` queries over both 30 days and full local history took about 10 ms.
 
-On the current long-lived ledger, doctor's new capture check is green (`9 launches, 9 turns, 117 assets`). The command still exits non-zero because it also exposes three historical lineage failures that predate this branch.
+On the current long-lived ledger, doctor's new capture check is green (`9 launches, 9 turns, 117 assets, 724,352 bytes`). The command still exits non-zero because it also exposes three historical lineage failures that predate this branch.
 
 ## Intent
 
@@ -33,6 +33,7 @@ Make context quality inspectable from Loopflow's own durable evidence. Every new
 
 - Keep large bodies as private files below `~/.lf/traces`; keep searchable relationships and aggregates in SQLite.
 - Fail before provider spend if core capture cannot be established. Mark mid-run loss partial and make doctor red without terminating the provider.
+- Warn if a resident harness cannot finalize capture on any completion, failure, interruption, or timeout path; finalization failure is never silent.
 - Model traces, processes, launches, turns, assets, and decisions separately instead of overloading `process_id`.
 - Store relative traversal-safe artifact paths and use a two-phase filesystem publish before the SQLite transaction.
 - Share one exact token-accounting pass across totals, prefix attribution, and isolated asset counts; fall back to direct calculation if tokenizer-boundary validation ever disagrees.

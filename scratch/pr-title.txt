@@ -1,0 +1,1 @@
+trace: capture complete local agent records

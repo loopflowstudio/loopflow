@@ -3,7 +3,7 @@
 //! This module handles gathering all context components (docs, diff, clipboard, etc.)
 //! and assembling them into a formatted prompt.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -61,6 +61,13 @@ pub enum DiffTier {
 }
 
 const MAX_EXPLICIT_DOC_FILES: usize = 100;
+static BPE: Lazy<Option<CoreBPE>> = Lazy::new(|| tiktoken_rs::cl100k_base().ok());
+static CL100K_PIECES: Lazy<Option<fancy_regex::Regex>> = Lazy::new(|| {
+    fancy_regex::Regex::new(
+        r"'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}++|\p{N}{1,3}+| ?[^\s\p{L}\p{N}]++[\r\n]*+|\s++$|\s*[\r\n]|\s+(?!\S)|\s",
+    )
+    .ok()
+});
 
 /// Specification for document targets to gather.
 #[derive(Debug, Clone, Default)]
@@ -247,12 +254,114 @@ impl std::fmt::Display for RenderedPrompt {
 /// Count tokens using tiktoken (cl100k_base encoding).
 /// Falls back to byte length / 3 if tiktoken fails.
 pub fn count_tokens(text: &str) -> usize {
-    static BPE: Lazy<Option<CoreBPE>> = Lazy::new(|| tiktoken_rs::cl100k_base().ok());
     if let Some(bpe) = BPE.as_ref() {
         return std::cmp::max(bpe.encode_ordinary(text).len(), 1);
     }
     // Fallback: rough estimate
     std::cmp::max(text.len() / 3, 1)
+}
+
+/// Return cumulative byte ends for the tokens in one exact encoding.
+pub(crate) fn token_byte_ends(text: &str) -> Option<Vec<usize>> {
+    let bpe = BPE.as_ref()?;
+    let tokens = bpe.encode_ordinary(text);
+    let mut byte_lengths = HashMap::new();
+    let mut byte_end = 0;
+    Some(
+        tokens
+            .into_iter()
+            .map(|token| {
+                let byte_length = *byte_lengths.entry(token).or_insert_with(|| {
+                    bpe.decode_bytes(&[token])
+                        .expect("an encoded token must decode")
+                        .len()
+                });
+                byte_end += byte_length;
+                byte_end
+            })
+            .collect(),
+    )
+}
+
+#[derive(Debug)]
+pub(crate) struct PromptTokenAccounting {
+    pub total: usize,
+    pub prefixes: Vec<usize>,
+    pub isolated: Vec<usize>,
+}
+
+/// Account for exact prefixes and isolated ranges from one full encoding.
+pub(crate) fn account_prompt_tokens(
+    text: &str,
+    prefix_ends: &[usize],
+    ranges: &[(usize, usize)],
+) -> Option<PromptTokenAccounting> {
+    let bpe = BPE.as_ref()?;
+    let regex = CL100K_PIECES.as_ref()?;
+    let token_ends = token_byte_ends(text)?;
+    let pieces = regex.find_iter(text).collect::<Result<Vec<_>, _>>().ok()?;
+    let token_boundaries = token_ends
+        .iter()
+        .copied()
+        .chain([0, text.len()])
+        .collect::<HashSet<_>>();
+    let pieces_cover_text = pieces.first().is_none_or(|piece| piece.start() == 0)
+        && pieces.last().is_none_or(|piece| piece.end() == text.len())
+        && pieces
+            .windows(2)
+            .all(|pair| pair[0].end() == pair[1].start());
+    if !pieces_cover_text
+        || pieces.iter().any(|piece| {
+            !token_boundaries.contains(&piece.start()) || !token_boundaries.contains(&piece.end())
+        })
+    {
+        return None;
+    }
+    let prefix_count = |end: usize| {
+        if end == text.len() {
+            return Some(token_ends.len());
+        }
+        let piece_index = pieces.partition_point(|piece| piece.end() < end);
+        let piece = pieces.get(piece_index)?;
+        if end < piece.start() || end > piece.end() {
+            return None;
+        }
+        let complete_tokens = token_ends.partition_point(|token_end| *token_end <= piece.start());
+        let partial_tokens = if end == piece.start() {
+            0
+        } else {
+            bpe.encode_ordinary(&text[piece.start()..end]).len()
+        };
+        Some(complete_tokens + partial_tokens)
+    };
+    let prefixes = prefix_ends
+        .iter()
+        .map(|end| prefix_count(*end))
+        .collect::<Option<Vec<_>>>()?;
+    let isolated = ranges
+        .iter()
+        .map(|(start, end)| {
+            if pieces
+                .binary_search_by_key(start, |piece| piece.start())
+                .is_ok()
+                && (*end == text.len()
+                    || pieces
+                        .binary_search_by_key(end, |piece| piece.start())
+                        .is_ok())
+            {
+                let start_tokens = token_ends.partition_point(|token_end| *token_end <= *start);
+                let end_tokens = token_ends.partition_point(|token_end| *token_end <= *end);
+                end_tokens - start_tokens
+            } else {
+                bpe.encode_ordinary(&text[*start..*end]).len()
+            }
+        })
+        .collect();
+    Some(PromptTokenAccounting {
+        total: token_ends.len(),
+        prefixes,
+        isolated,
+    })
 }
 
 /// Gather all prompt components.
@@ -1854,6 +1963,50 @@ mod tests {
     fn count_tokens_empty() {
         // Empty string should return 1 (minimum)
         assert_eq!(count_tokens(""), 1);
+    }
+
+    #[test]
+    fn full_encoding_boundaries_are_exact_prefix_counts() {
+        let text =
+            "<lf:file path=\"guide.md\">\nContext quality matters.\n</lf:file>\nUnicode: café.";
+        let ends = token_byte_ends(text).expect("cl100k tokenizer");
+        for (index, end) in ends.into_iter().enumerate() {
+            if text.is_char_boundary(end) {
+                assert_eq!(count_tokens(&text[..end]), index + 1);
+            }
+        }
+    }
+
+    #[test]
+    fn optimized_prefix_counts_match_direct_encoding() {
+        let text =
+            "<lf:file path=\"guide.md\">\nContext quality matters.\n</lf:file>\nUnicode: café.";
+        let ends = text
+            .char_indices()
+            .map(|(index, character)| index + character.len_utf8())
+            .collect::<Vec<_>>();
+        let optimized = account_prompt_tokens(text, &ends, &[])
+            .expect("cl100k prefix counts")
+            .prefixes;
+        let direct = ends
+            .iter()
+            .map(|end| count_tokens(&text[..*end]))
+            .collect::<Vec<_>>();
+        assert_eq!(optimized, direct);
+    }
+
+    #[test]
+    fn optimized_isolated_counts_match_direct_encoding() {
+        let text = "<tag>Context quality matters.</tag>\nUnicode: café.";
+        let ranges = vec![(0, 5), (5, 29), (29, text.len())];
+        let optimized = account_prompt_tokens(text, &[], &ranges)
+            .expect("cl100k range counts")
+            .isolated;
+        let direct = ranges
+            .iter()
+            .map(|(start, end)| count_tokens(&text[*start..*end]))
+            .collect::<Vec<_>>();
+        assert_eq!(optimized, direct);
     }
 
     #[test]

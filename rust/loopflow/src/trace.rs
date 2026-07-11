@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use crate::chat::types::{ConversationEvent, TurnUsage};
-use crate::engine::prompt::count_tokens;
+use crate::engine::prompt::{account_prompt_tokens, count_tokens};
 use crate::engine::stream::{ResultSubtype, StreamEvent};
 use crate::lfd::id::LfdId;
 use crate::lfdb::{StoreError, StoreResult};
@@ -538,13 +538,35 @@ fn render_attributed_channel(
         segments.push((cursor, text.len(), assembly_spec(&text[cursor..])));
     }
 
-    let total_tokens = token_count(text);
     let prefix_ends = segments
         .iter()
         .take(segments.len().saturating_sub(1))
         .map(|(_, end, _)| *end)
         .collect::<Vec<_>>();
-    let prefix_tokens = count_prefix_tokens(text, &prefix_ends);
+    let ranges = segments
+        .iter()
+        .map(|(start, end, _)| (*start, *end))
+        .collect::<Vec<_>>();
+    let accounting = account_prompt_tokens(text, &prefix_ends, &ranges);
+    let total_tokens = accounting
+        .as_ref()
+        .map_or_else(|| token_count(text), |accounting| accounting.total as u64);
+    let prefix_tokens = accounting.as_ref().map_or_else(
+        || {
+            prefix_ends
+                .iter()
+                .map(|end| token_count(&text[..*end]))
+                .collect::<Vec<_>>()
+        },
+        |accounting| {
+            accounting
+                .prefixes
+                .iter()
+                .map(|count| *count as u64)
+                .collect()
+        },
+    );
+    let isolated_tokens = accounting.map(|accounting| accounting.isolated);
     let mut previous_tokens = 0_u64;
     let segment_count = segments.len();
     let mut assets = Vec::with_capacity(segment_count);
@@ -569,7 +591,9 @@ fn render_attributed_channel(
             byte_start: start as u64,
             byte_end: end as u64,
             bytes: (end - start) as u64,
-            isolated_tokens: token_count(slice),
+            isolated_tokens: isolated_tokens
+                .as_ref()
+                .map_or_else(|| token_count(slice), |counts| counts[index] as u64),
             attributed_tokens,
         });
         *position += 1;
@@ -579,34 +603,6 @@ fn render_attributed_channel(
         tokens: total_tokens,
         assets,
     }
-}
-
-fn count_prefix_tokens(text: &str, ends: &[usize]) -> Vec<u64> {
-    if ends.len() < 2 {
-        return ends.iter().map(|end| token_count(&text[..*end])).collect();
-    }
-    let workers = std::thread::available_parallelism()
-        .map_or(1, usize::from)
-        .min(ends.len());
-    std::thread::scope(|scope| {
-        let handles = (0..workers)
-            .map(|worker| {
-                scope.spawn(move || {
-                    (worker..ends.len())
-                        .step_by(workers)
-                        .map(|index| (index, token_count(&text[..ends[index]])))
-                        .collect::<Vec<_>>()
-                })
-            })
-            .collect::<Vec<_>>();
-        let mut counts = vec![0; ends.len()];
-        for handle in handles {
-            for (index, count) in handle.join().expect("prefix token worker panicked") {
-                counts[index] = count;
-            }
-        }
-        counts
-    })
 }
 
 fn prompt_channel(
@@ -886,6 +882,7 @@ struct TraceCapture {
     event_seq: u64,
     provider_seq: u64,
     usage: TurnUsage,
+    usage_observed: bool,
     failed: Option<String>,
 }
 
@@ -1057,6 +1054,7 @@ impl TraceCapture {
             event_seq: 1,
             provider_seq: 0,
             usage: TurnUsage::default(),
+            usage_observed: false,
             failed: None,
         })
     }
@@ -1152,6 +1150,7 @@ impl TraceCapture {
 
         self.turn = turn.clone();
         self.usage = TurnUsage::default();
+        self.usage_observed = false;
         self.append_payload(RecordedConversationPayload::UserInput {
             op: input_op.to_string(),
             text: prepared.task.text,
@@ -1163,11 +1162,13 @@ impl TraceCapture {
 
     /// Copy the accumulated turn usage onto the turn row before persisting it.
     fn apply_usage_to_turn(&mut self) {
-        self.turn.provider_input_tokens = Some(self.usage.input_tokens as i64);
-        self.turn.provider_output_tokens = Some(self.usage.output_tokens as i64);
-        self.turn.reasoning_tokens = self.usage.reasoning_tokens.map(|value| value as i64);
-        self.turn.cache_read_tokens = self.usage.cache_read_tokens.map(|value| value as i64);
-        self.turn.cache_write_tokens = self.usage.cache_write_tokens.map(|value| value as i64);
+        if self.usage_observed {
+            self.turn.provider_input_tokens = Some(self.usage.input_tokens as i64);
+            self.turn.provider_output_tokens = Some(self.usage.output_tokens as i64);
+            self.turn.reasoning_tokens = self.usage.reasoning_tokens.map(|value| value as i64);
+            self.turn.cache_read_tokens = self.usage.cache_read_tokens.map(|value| value as i64);
+            self.turn.cache_write_tokens = self.usage.cache_write_tokens.map(|value| value as i64);
+        }
         self.turn.cost_usd = self.usage.cost_usd;
     }
 
@@ -1218,6 +1219,7 @@ impl TraceCapture {
                 output_tokens,
                 cache_read_tokens,
             } => {
+                self.usage_observed = true;
                 self.usage.input_tokens += input_tokens.unwrap_or(0);
                 self.usage.output_tokens += output_tokens.unwrap_or(0);
                 self.usage.cache_read_tokens = Some(
@@ -1253,6 +1255,7 @@ impl TraceCapture {
                 self.turn.provider_turn_id = Some(turn_id.clone());
             }
             ConversationEvent::TurnUsage { usage, .. } => {
+                self.usage_observed = true;
                 self.usage = usage.clone();
             }
             _ => {}
@@ -1679,6 +1682,7 @@ mod tests {
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].status, "partial");
         assert_eq!(turns[1].context_coverage, "provider_total_only");
+        assert_eq!(turns[1].provider_input_tokens, None);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

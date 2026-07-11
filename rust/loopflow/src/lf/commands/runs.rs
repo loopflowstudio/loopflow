@@ -102,7 +102,7 @@ pub fn trace(
     }
 
     let spans = trace_spans(&events);
-    let launches = store.agent_launches_matching(run_id)?;
+    let launches = store.agent_launches_matching(&events[0].run_id)?;
     let launch_ids = launches
         .iter()
         .map(|launch| launch.id.clone())

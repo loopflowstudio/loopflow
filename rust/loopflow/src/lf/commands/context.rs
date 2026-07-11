@@ -206,8 +206,8 @@ fn print_human(dataset: &ContextDatasetDto) {
 }
 
 fn percentile(sorted: &[i64], percent: usize) -> i64 {
-    let index = (sorted.len().saturating_sub(1) * percent).div_ceil(100);
-    sorted[index]
+    let rank = (sorted.len() * percent).div_ceil(100).max(1);
+    sorted[rank - 1]
 }
 
 #[cfg(test)]
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn percentiles_count_each_turn_once() {
-        assert_eq!(percentile(&[10, 20, 30, 40], 50), 30);
+        assert_eq!(percentile(&[10, 20, 30, 40], 50), 20);
         assert_eq!(percentile(&[10, 20, 30, 40], 95), 40);
     }
 }

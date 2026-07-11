@@ -404,12 +404,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     if forced_target.is_some() || !built.process.auto {
         info!("launching interactive vendor session");
-        let capture = begin_capture(
-            built,
-            &built.prompt,
-            "",
-            if cli.ide { "ide" } else { "tui" },
-        )?;
+        let capture = begin_capture(built, if cli.ide { "ide" } else { "tui" })?;
         let result = launch_session(
             forced_target.unwrap_or(built.config.session.launch),
             &built.harness,
@@ -442,12 +437,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
 
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config);
-    let capture = begin_capture(
-        built,
-        &built.agent_config.task_prompt,
-        &effective_system,
-        "headless",
-    )?;
+    let capture = begin_capture(built, "headless")?;
 
     // Skill-launched skills clear the system prompt (the seed carries everything
     // in the task prompt). Don't write or pass a context file in that case: codex
@@ -520,24 +510,13 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     }
 }
 
-fn begin_capture(
-    built: &PromptBuild,
-    task_prompt: &str,
-    system_prompt: &str,
-    surface: &str,
-) -> Result<crate::trace::CaptureHandle> {
+fn begin_capture(built: &PromptBuild, surface: &str) -> Result<crate::trace::CaptureHandle> {
     let context =
         crate::journal::trace_capture_context(&built.repo_root, None, built.skill_name.clone())
             .ok_or_else(|| anyhow!("trace capture identity is unavailable before agent launch"))?;
-    let prepared = attributed_context(
-        &built.components,
-        system_prompt,
-        task_prompt,
-        &built.deduplicated_docs,
-    );
     crate::trace::CaptureHandle::begin(
         context,
-        prepared,
+        built.context.clone(),
         crate::trace::CaptureStart {
             provider: built.harness.clone(),
             model: built.model.clone(),

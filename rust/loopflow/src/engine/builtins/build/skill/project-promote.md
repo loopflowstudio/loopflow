@@ -14,7 +14,7 @@ child's work.
 
 ## Work
 
-1. Read the source with `lf pm show --wave <parent> --project <slug> --json`,
+1. Read the source with `lf pm show --wave <parent> --project <slug> --json --no-sync`,
    plus the parent's `GOAL.md` and current memory. Refuse a missing Project or
    an existing `wave/<slug>/GOAL.md`.
 2. Create `wave/<slug>/GOAL.md`. Preserve the Project definition as the child

@@ -7,7 +7,7 @@ Mutate the wave.
 
 ## Orientation
 
-Read GOAL/MEMORY, `lf pm show --wave <wave> --json`, recent chat, and the live tasks. The wave never
+Read GOAL/MEMORY, `lf pm show --wave <wave> --json --no-sync`, recent chat, and the live tasks. The wave never
 terminates; it changes shape.
 
 ## Work

@@ -9,7 +9,7 @@ Clarify the Linear Project's KR set.
 
 The project seed is in `<lf:message>`. A project is a measured bet inside one
 wave; it owns KRs and closure criteria, not memory, cadence, or child projects.
-Read the seed, `lf pm show --wave <wave> --project <project> --json`, and the
+Read the seed, `lf pm show --wave <wave> --project <project> --json --no-sync`, and the
 wave's GOAL.md and MEMORY.md.
 
 Linear Project content is authoritative. Update it with `lf pm project update`;

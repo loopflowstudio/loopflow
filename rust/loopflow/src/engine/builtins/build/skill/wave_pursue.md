@@ -17,7 +17,7 @@ do not reread worker transcripts.
 Planning commands belong at this tier:
 
 ```bash
-lf pm show --wave <exact-wave>
+lf pm show --wave <exact-wave> --no-sync
 lf pm task create --project <project> --title "..." --notes "..."
 lf pm task update --id <task-id> --title "..."
 ```

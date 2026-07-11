@@ -9,7 +9,7 @@ Mutate the project honestly. The loop's termination mechanics are in the
 ## Orientation
 
 Read the authoritative KR set with `lf pm show --wave <wave> --project
-<project> --json`; check filed tasks in that snapshot, running tasks with `lf
+<project> --json --no-sync`; check filed tasks in that snapshot, running tasks with `lf
 runs`, and merged PRs with `gh`.
 
 ## Work

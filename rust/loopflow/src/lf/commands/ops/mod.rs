@@ -394,10 +394,20 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             wave,
             project,
             json,
+            sync,
+            no_sync,
         } => {
+            let refresh = if *sync {
+                crate::ops::pm::PmRefresh::Force
+            } else if *no_sync {
+                crate::ops::pm::PmRefresh::Never
+            } else {
+                crate::ops::pm::PmRefresh::Auto
+            };
             let options = crate::ops::pm::PmShowOptions {
                 wave: wave.clone(),
                 project: project.clone(),
+                refresh,
             };
             let result = crate::ops::pm::pm_show(&repo_root, &options, progress)?;
             if *json {
@@ -617,6 +627,7 @@ fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {
             .map(|project| format!(" project:{project}"))
             .unwrap_or_default();
         println!("{}{}: no Linear tasks", result.wave, suffix);
+        print_pm_snapshot_age(result);
         return;
     }
 
@@ -628,6 +639,18 @@ fn print_pm_show_result(result: &crate::ops::pm::PmShowResult) {
             println!("{line}");
         }
     }
+    print_pm_snapshot_age(result);
+}
+
+fn print_pm_snapshot_age(result: &crate::ops::pm::PmShowResult) {
+    let age = time::OffsetDateTime::now_utc().unix_timestamp() - result.synced_at;
+    let colors = Colors::default();
+    let phrase = if age < 60 {
+        "just now".to_string()
+    } else {
+        format!("{} ago", crate::ops::pm::format_age(age))
+    };
+    println!("{}snapshot synced {}{}", colors.dim, phrase, colors.reset);
 }
 
 #[derive(Debug)]

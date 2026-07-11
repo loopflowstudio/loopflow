@@ -1,8 +1,9 @@
 //! `lf pm` — read and write a wave's PM tasks directly in a provider.
 //!
 //! Linear is authoritative for the wave's project inventory, project specs, and
-//! tasks. `lf pm sync` projects that state into SQLite; ordinary reads never
-//! require a network request.
+//! tasks. `lf pm sync` projects that state into SQLite; reads serve that
+//! snapshot and only reach Linear through a bounded staleness policy (see
+//! `load_show_snapshot`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -42,6 +43,19 @@ pub struct PmInitResult {
 pub struct PmShowOptions {
     pub wave: Option<String>,
     pub project: Option<String>,
+    pub refresh: PmRefresh,
+}
+
+/// How `pm show` reconciles the local snapshot with Linear before reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PmRefresh {
+    /// Refresh only when the snapshot is stale (the default TTL policy).
+    #[default]
+    Auto,
+    /// Always refresh before reading (`--sync`).
+    Force,
+    /// Never touch the network; serve the cache as-is (`--no-sync`).
+    Never,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -493,17 +507,147 @@ async fn pm_store() -> OpsResult<Store> {
         .map_err(|err| OpsError::Message(format!("failed to open PM snapshot store: {err}")))
 }
 
-async fn read_pm_snapshot(repo: &Path, wave: &str) -> OpsResult<PmSnapshotRow> {
+// ── snapshot freshness policy ────────────────────────────────────────
+
+/// Past this age an Auto read opportunistically refreshes before serving.
+const PM_SOFT_STALE_SECS: i64 = 60 * 60; // 1 hour
+/// Past this age a failed refresh is an error, not a silent cache fallback.
+const PM_HARD_STALE_SECS: i64 = 7 * 24 * 60 * 60; // 1 week
+/// Ceiling on an opportunistic refresh; exceeding it counts as a failure.
+const PM_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn missing_snapshot_error(wave: &str) -> OpsError {
+    OpsError::Message(format!(
+        "wave/{wave} has no local PM snapshot. Run `lf pm sync --wave {wave}`."
+    ))
+}
+
+pub(crate) fn format_age(secs: i64) -> String {
+    let secs = secs.max(0);
+    if secs < 60 {
+        "just now".to_string()
+    } else if secs < 60 * 60 {
+        format!("{}m", secs / 60)
+    } else if secs < 24 * 60 * 60 {
+        format!("{}h", secs / (60 * 60))
+    } else {
+        format!("{}d", secs / (24 * 60 * 60))
+    }
+}
+
+async fn snapshot_row(repo: &Path, wave: &str) -> OpsResult<Option<PmSnapshotRow>> {
     pm_store()
         .await?
         .pm_snapshot(pm_repo_key(repo), wave.to_string())
         .await
-        .map_err(|err| OpsError::Message(format!("failed to read PM snapshot: {err}")))?
-        .ok_or_else(|| {
-            OpsError::Message(format!(
-                "wave/{wave} has no local PM snapshot. Run `lf pm sync --wave {wave}`."
-            ))
-        })
+        .map_err(|err| OpsError::Message(format!("failed to read PM snapshot: {err}")))
+}
+
+async fn read_pm_snapshot(repo: &Path, wave: &str) -> OpsResult<PmSnapshotRow> {
+    snapshot_row(repo, wave)
+        .await?
+        .ok_or_else(|| missing_snapshot_error(wave))
+}
+
+/// Refresh from Linear, bounded by `PM_REFRESH_TIMEOUT`. A timeout, an auth
+/// failure, or any network error surfaces as `Err` so callers can fall back to
+/// the cache.
+async fn try_timed_refresh(repo: &Path, wave: &str) -> OpsResult<PmSnapshotRow> {
+    let work = async {
+        let ctx = resolve_context(repo, wave).await?;
+        refresh_pm_snapshot(repo, wave, &ctx).await?;
+        read_pm_snapshot(repo, wave).await
+    };
+    match tokio::time::timeout(PM_REFRESH_TIMEOUT, work).await {
+        Ok(result) => result,
+        Err(_) => Err(OpsError::Message(format!(
+            "Linear did not respond within {}s",
+            PM_REFRESH_TIMEOUT.as_secs()
+        ))),
+    }
+}
+
+/// How a read reconciles a cached snapshot of a given age, independent of I/O.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SnapshotPlan {
+    /// Serve the cache without touching the network.
+    ServeCache,
+    /// Refresh first. `hard` means a failed refresh is an error, not a fallback.
+    Refresh { hard: bool },
+}
+
+/// The freshness decision. `age` is `None` when no snapshot exists yet.
+fn plan_snapshot_read(mode: PmRefresh, age: Option<i64>) -> SnapshotPlan {
+    match mode {
+        PmRefresh::Never => SnapshotPlan::ServeCache,
+        PmRefresh::Force => SnapshotPlan::Refresh { hard: true },
+        PmRefresh::Auto => match age {
+            Some(age) if age < PM_SOFT_STALE_SECS => SnapshotPlan::ServeCache,
+            Some(age) => SnapshotPlan::Refresh {
+                hard: age >= PM_HARD_STALE_SECS,
+            },
+            None => SnapshotPlan::Refresh { hard: true },
+        },
+    }
+}
+
+/// Resolve the snapshot to serve, applying the requested refresh mode.
+///
+/// `Never` serves the cache untouched. `Force` always refreshes and errors if it
+/// cannot. `Auto` serves a fresh (<1h) cache without touching the network,
+/// refreshes past that, and on failure falls back to the cache — except a
+/// hard-stale (>1w) snapshot that cannot refresh is an error, since serving a
+/// week-old snapshot silently would mislead.
+async fn load_show_snapshot(
+    repo: &Path,
+    wave: &str,
+    mode: PmRefresh,
+    progress: &impl Progress,
+) -> OpsResult<PmSnapshotRow> {
+    let existing = snapshot_row(repo, wave).await?;
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let age = existing.as_ref().map(|row| now - row.synced_at);
+
+    let hard = match plan_snapshot_read(mode, age) {
+        SnapshotPlan::ServeCache => return existing.ok_or_else(|| missing_snapshot_error(wave)),
+        SnapshotPlan::Refresh { hard } => hard,
+    };
+
+    match age {
+        Some(age) => progress.status(&format!(
+            "wave/{wave} PM snapshot is {} stale; refreshing from Linear",
+            format_age(age)
+        )),
+        None => progress.status(&format!(
+            "wave/{wave} has no local PM snapshot; fetching from Linear"
+        )),
+    }
+
+    match try_timed_refresh(repo, wave).await {
+        Ok(row) => Ok(row),
+        Err(err) => match existing {
+            Some(row) if !hard => {
+                progress.status(&format!(
+                    "Linear unreachable ({err}); showing cached snapshot from {} ago",
+                    format_age(now - row.synced_at)
+                ));
+                Ok(row)
+            }
+            Some(_) => {
+                let reason = if mode == PmRefresh::Force {
+                    format!("could not refresh wave/{wave} from Linear: {err}")
+                } else {
+                    format!(
+                        "wave/{wave} PM snapshot is over a week stale and Linear is unreachable: {err}"
+                    )
+                };
+                Err(OpsError::Message(format!(
+                    "{reason}. Reconnect or run `lf pm sync --wave {wave}`."
+                )))
+            }
+            None => Err(missing_snapshot_error(wave)),
+        },
+    }
 }
 
 async fn fetch_pm_snapshot(wave: &str, ctx: &PmContext) -> OpsResult<PmSnapshot> {
@@ -655,10 +799,10 @@ pub fn pm_show(
 async fn pm_show_async(
     repo: &Path,
     options: &PmShowOptions,
-    _progress: &impl Progress,
+    progress: &impl Progress,
 ) -> OpsResult<PmShowResult> {
     let wave = resolve_wave(repo, options.wave.as_deref())?;
-    let row = read_pm_snapshot(repo, &wave).await?;
+    let row = load_show_snapshot(repo, &wave, options.refresh, progress).await?;
     let snapshot: PmSnapshot = serde_json::from_str(&row.payload).map_err(|err| {
         OpsError::Message(format!(
             "invalid PM snapshot for wave/{wave}; run `lf pm sync`: {err}"
@@ -1163,6 +1307,8 @@ async fn pm_rename_async(
         .rename_wave(&ctx.initiative, &options.title)
         .await
         .map_err(pm_to_ops)?;
+    progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
+    refresh_pm_snapshot(repo, &wave, &ctx).await?;
     Ok(PmRenameResult {
         wave,
         initiative: ctx.initiative,
@@ -1886,5 +2032,107 @@ mod tests {
 
         std::env::remove_var(FORWARDED_PM_TOKEN_ENV);
         std::env::remove_var(FORWARDED_PM_PROVIDER_ENV);
+    }
+
+    #[test]
+    fn plan_snapshot_read_covers_every_band() {
+        use PmRefresh::{Auto, Force, Never};
+        use SnapshotPlan::{Refresh, ServeCache};
+
+        // Never never touches the network, at any age or with no snapshot.
+        assert_eq!(plan_snapshot_read(Never, None), ServeCache);
+        assert_eq!(
+            plan_snapshot_read(Never, Some(10 * PM_HARD_STALE_SECS)),
+            ServeCache
+        );
+        // Force always refreshes, and a failure is hard.
+        assert_eq!(plan_snapshot_read(Force, Some(0)), Refresh { hard: true });
+        assert_eq!(plan_snapshot_read(Force, None), Refresh { hard: true });
+        // Auto: fresh serves cache; soft-stale refreshes with fallback; hard-stale
+        // and a missing snapshot refresh hard.
+        assert_eq!(plan_snapshot_read(Auto, Some(0)), ServeCache);
+        assert_eq!(
+            plan_snapshot_read(Auto, Some(PM_SOFT_STALE_SECS - 1)),
+            ServeCache
+        );
+        assert_eq!(
+            plan_snapshot_read(Auto, Some(PM_SOFT_STALE_SECS)),
+            Refresh { hard: false }
+        );
+        assert_eq!(
+            plan_snapshot_read(Auto, Some(PM_HARD_STALE_SECS - 1)),
+            Refresh { hard: false }
+        );
+        assert_eq!(
+            plan_snapshot_read(Auto, Some(PM_HARD_STALE_SECS)),
+            Refresh { hard: true }
+        );
+        assert_eq!(plan_snapshot_read(Auto, None), Refresh { hard: true });
+    }
+
+    #[tokio::test]
+    async fn local_mutations_keep_no_sync_read_current() {
+        // Every PM mutation refreshes the acting machine's snapshot, so a
+        // `--no-sync` read there reflects all local changes without ever calling
+        // Linear. This exercises the storage layer each mutation's refresh writes
+        // through and the exact (de)serialization `pm show` reads back.
+        let db_path =
+            std::env::temp_dir().join(format!("lf-pm-cache-{}.db", crate::lfd::id::LfdId::new()));
+        let store = open_store(&crate::lfdb::StorageConfig::sqlite(db_path))
+            .await
+            .expect("open store");
+
+        let project = PmProject {
+            id: "proj-core".to_string(),
+            slug: "core".to_string(),
+            name: "Core".to_string(),
+            summary: String::new(),
+            definition: String::new(),
+            krs: vec![],
+            initiative_ids: vec!["init-1".to_string()],
+        };
+
+        // Three successive local mutations; each mutation's refresh stores a
+        // fuller snapshot (one more task folded in), with no explicit sync.
+        let mut items = Vec::new();
+        for n in 1..=3 {
+            items.push(PmItem {
+                id: format!("task-{n}"),
+                name: format!("Task {n}"),
+                description: String::new(),
+                rank: n as u32,
+                completed: false,
+                project: Some("core".to_string()),
+                assignee: None,
+            });
+            let payload = serde_json::to_string(&PmSnapshot {
+                projects: vec![project.clone()],
+                items: items.clone(),
+            })
+            .expect("serialize snapshot");
+            store
+                .put_pm_snapshot(PmSnapshotRow {
+                    repo: "/repo".to_string(),
+                    wave: "product".to_string(),
+                    provider: "linear".to_string(),
+                    initiative: "init-1".to_string(),
+                    synced_at: 1000 * n as i64,
+                    payload,
+                })
+                .await
+                .expect("store snapshot");
+        }
+
+        // A cache-only read returns the latest snapshot: all three local changes.
+        let row = store
+            .pm_snapshot("/repo".to_string(), "product".to_string())
+            .await
+            .expect("read snapshot")
+            .expect("snapshot present");
+        let snapshot: PmSnapshot =
+            serde_json::from_str(&row.payload).expect("deserialize snapshot");
+        let ids: Vec<_> = snapshot.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["task-1", "task-2", "task-3"]);
+        assert_eq!(row.synced_at, 3000);
     }
 }

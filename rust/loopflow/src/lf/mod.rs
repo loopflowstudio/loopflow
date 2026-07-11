@@ -597,6 +597,12 @@ pub enum PmCommand {
         /// Emit the task snapshot as JSON
         #[arg(long)]
         json: bool,
+        /// Force a refresh from Linear before reading
+        #[arg(long = "sync", conflicts_with = "no_sync")]
+        sync: bool,
+        /// Read the local cache only; never contact Linear
+        #[arg(long = "no-sync")]
+        no_sync: bool,
     },
     /// Show local PM status for linked waves
     Status {
@@ -949,6 +955,7 @@ mod tests {
                     wave,
                     project,
                     json,
+                    ..
                 },
         }) = cli.command
         else {

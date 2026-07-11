@@ -27,6 +27,10 @@ Prompt assembly produces an exact `PreparedTurnContext`. The launch gate atomica
 - Full CI matrix: Python 53 passed; website 59 passed with 3 intentional skips; Swift 302 passed; E2E smoke passed; Loopflow macOS test build passed.
 - Final Rust checks after gate fixes: `cargo fmt --all -- --check`, focused trace/prefix/migration tests, clippy with warnings denied, and 1,351/1,351 nextest cases passed with 3 intentional skips.
 - Provider conformance fixtures cover Claude, Codex, and OpenCode.
+- A production-path `lf code` regression runs implement/compress/lint/gate through
+  the real CLI with an isolated ledger and fake provider. It proves four distinct
+  launches and turns share one trace/process, `lf trace --json` preserves their
+  execution order, and the capture doctor remains green.
 - Long-lived ledger after release-profile probes: 100% of captured headless launches are complete; all assembled turns reconcile asset tokens exactly; normalized event files are parseable.
 - A release-profile 18,868-token probe recorded 13 ms gather, 39 ms exact render, and 64 ms durable persistence. Exact render is below the 100 ms target. The pre-polish debug path measured 439 ms and also rebuilt the context twice before launch.
 - `lf context --json` over 30 days and full local history takes about 10 ms warm and does not open prompt or transcript bodies.

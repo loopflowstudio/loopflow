@@ -1768,12 +1768,14 @@ impl SqliteStore {
 
     pub fn agent_launches_matching(&self, run_id: &str) -> StoreResult<Vec<AgentLaunchRow>> {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
+        // Launch timestamps use ledger-second precision. rowid preserves the
+        // append order when a fast flow starts several agents in one second.
         self.query_agent_launches(
             "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
                     skill, provider, model, surface, capture_status, incomplete_reason, outcome,
                     artifact_dir, conversation_path, provider_events_path, provider_session_id,
                     provider_session_path, conversation_event_count, conversation_bytes
-             FROM agent_launches WHERE run_id LIKE ?1 ORDER BY started_at, id",
+             FROM agent_launches WHERE run_id LIKE ?1 ORDER BY started_at, rowid",
             params![prefix],
         )
     }
@@ -1784,7 +1786,7 @@ impl SqliteStore {
                     skill, provider, model, surface, capture_status, incomplete_reason, outcome,
                     artifact_dir, conversation_path, provider_events_path, provider_session_id,
                     provider_session_path, conversation_event_count, conversation_bytes
-             FROM agent_launches WHERE started_at >= ?1 ORDER BY started_at, id",
+             FROM agent_launches WHERE started_at >= ?1 ORDER BY started_at, rowid",
             params![since],
         )
     }
@@ -1848,7 +1850,7 @@ impl SqliteStore {
                     cost_usd, context_gather_ms, context_render_ms, context_persist_ms,
                     first_event_seq, last_event_seq
              FROM agent_turns WHERE launch_id IN ({placeholders})
-             ORDER BY started_at, ordinal"
+             ORDER BY started_at, rowid, ordinal"
             );
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(rusqlite::params_from_iter(launch_ids), map_agent_turn)?;

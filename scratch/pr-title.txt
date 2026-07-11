@@ -1,1 +1,0 @@
-lf: make radio and Linear planning explicit

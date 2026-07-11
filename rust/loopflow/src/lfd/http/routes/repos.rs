@@ -406,8 +406,8 @@ mod tests {
     use super::*;
     use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
     use crate::lfd::config::{GitHubConfig, HttpSecurityConfig};
-    use crate::lfd::session_supervisor::SessionSupervisor;
     use crate::lfd::id::LfdId;
+    use crate::lfd::session_supervisor::SessionSupervisor;
     use crate::lfd::types::{RepoId, WaveStatus};
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use crate::provider_auth::ProviderAuthService;

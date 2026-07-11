@@ -22,9 +22,9 @@ pub mod stream;
 pub mod structured_reply;
 pub mod wave_config;
 pub mod wave_context;
+pub mod workspace;
 pub mod worktree;
 pub mod worktrees;
-pub mod workspace;
 
 pub use agent::{
     build_agent_command, build_claude_command, build_codex_command, build_gemini_command,

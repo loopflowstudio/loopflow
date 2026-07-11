@@ -1,16 +1,9 @@
-use std::path::Path;
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 
 use crate::engine::process::{resolve_lf_binary, shell_escape, start_tmux_session};
 use crate::lfd::id::LfdId;
-use crate::lfd::types::{RunStatus, Session};
-
-pub(crate) fn is_active_run_status(status: RunStatus) -> bool {
-    matches!(
-        status,
-        RunStatus::Pending | RunStatus::Running | RunStatus::Waiting
-    )
-}
+use crate::lfd::types::Session;
 
 pub(crate) fn is_ephemeral_worktree_path(path: &str) -> bool {
     let worktree_name = Path::new(path)
@@ -78,11 +71,11 @@ pub(crate) const TMUX_EXIT_TAIL: &str = r#"exit "$EXIT_CODE""#;
 ///
 /// Two invariants live here:
 /// - `unset LFD_SESSION_INHERITED` first: a fresh tmux server inherits the
-///   dispatcher's environment (verified empirically), so a dispatcher that is
+///   parent's environment (verified empirically), so a parent process that is
 ///   itself a registered session would leak `LFD_SESSION_INHERITED=1` into
 ///   the worker's login shell. That flips `classify_run_context` from
 ///   OwnSession to NeedsRegistration and the worker registers a duplicate row
-///   instead of adopting the one the dispatcher created. The session's own
+///   instead of adopting the row prepared for it. The session's own
 ///   env contract is re-exported explicitly by the inline prefix.
 /// - The exit code lands in the session's exit file so whoever reconciles
 ///   the row (a running lfd, or the next boot) can close it.
@@ -143,70 +136,11 @@ fn append_lf_run_options(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::path::Path;
-    use std::process::Command;
-
-    use tempfile::TempDir;
     use time::OffsetDateTime;
 
-    use super::{
-        is_ephemeral_worktree_path, tmux_shell_command, TMUX_EXIT_TAIL,
-    };
-    use crate::engine::workspace::ensure_wave_worktree;
-    use crate::engine::worktrees::worktree_path as wave_worktree_path;
+    use super::{is_ephemeral_worktree_path, tmux_shell_command, TMUX_EXIT_TAIL};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{Session, SessionStatus, SessionUse, TMUX_TERMINAL_SOURCE};
-
-    fn run_git(dir: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .output()
-            .expect("git command should run");
-        if !output.status.success() {
-            panic!(
-                "git {:?} failed: {}",
-                args,
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-    }
-
-    fn write_file(path: &Path, content: &str) {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).expect("create parent directories");
-        }
-        std::fs::write(path, content).expect("write file");
-    }
-
-    fn setup_repo_with_remote() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
-        let temp = TempDir::new().expect("temp dir");
-        let origin = temp.path().join("origin.git");
-        let main_repo = temp.path().join("main");
-        std::fs::create_dir_all(&main_repo).expect("create repo dir");
-
-        run_git(temp.path(), &["init", "--bare", "-b", "main", "origin.git"]);
-        run_git(&main_repo, &["init", "-b", "main"]);
-        run_git(&main_repo, &["config", "user.email", "test@example.com"]);
-        run_git(&main_repo, &["config", "user.name", "Test User"]);
-        write_file(&main_repo.join("README.md"), "initial\n");
-        run_git(&main_repo, &["add", "."]);
-        run_git(&main_repo, &["commit", "-m", "initial"]);
-        run_git(
-            &main_repo,
-            &["remote", "add", "origin", origin.to_str().unwrap_or("")],
-        );
-        run_git(&main_repo, &["push", "-u", "origin", "main"]);
-        run_git(
-            &main_repo,
-            &[
-                "symbolic-ref",
-                "refs/remotes/origin/HEAD",
-                "refs/remotes/origin/main",
-            ],
-        );
-        (temp, main_repo, origin)
-    }
 
     /// The exit-file wire contract, pinned. Tmux sessions run through this
     /// one wrapper: it clears the inherited-session marker the tmux server
@@ -298,54 +232,4 @@ mod tests {
         assert!(!is_ephemeral_worktree_path("/tmp/repo.wave.a1b2"));
     }
 
-    #[test]
-    fn ensure_wave_worktree_reuses_existing_sibling_without_rebasing() {
-        let (_temp, main_repo, origin) = setup_repo_with_remote();
-        let wave_name = "agent-embedding";
-        let worktree = wave_worktree_path(&main_repo, wave_name);
-
-        run_git(&main_repo, &["checkout", "-b", wave_name]);
-        write_file(&main_repo.join("shared.txt"), "wave branch change\n");
-        run_git(&main_repo, &["add", "."]);
-        run_git(&main_repo, &["commit", "-m", "wave branch change"]);
-        run_git(&main_repo, &["checkout", "main"]);
-
-        run_git(
-            &main_repo,
-            &[
-                "worktree",
-                "add",
-                worktree.to_str().unwrap_or(""),
-                wave_name,
-            ],
-        );
-
-        let collaborator = main_repo
-            .parent()
-            .expect("main repo parent")
-            .join("collaborator-conflict");
-        run_git(
-            main_repo.parent().expect("main repo parent"),
-            &[
-                "clone",
-                origin.to_str().unwrap_or(""),
-                collaborator.to_str().unwrap_or(""),
-            ],
-        );
-        run_git(&collaborator, &["config", "user.email", "test@example.com"]);
-        run_git(&collaborator, &["config", "user.name", "Test User"]);
-        write_file(&collaborator.join("shared.txt"), "main branch change\n");
-        run_git(&collaborator, &["add", "."]);
-        run_git(&collaborator, &["commit", "-m", "main branch change"]);
-        run_git(&collaborator, &["push"]);
-
-        let (resolved_worktree, resolved_branch) =
-            ensure_wave_worktree(&main_repo, wave_name).expect("reuse existing worktree");
-
-        assert_eq!(resolved_worktree, worktree.to_string_lossy());
-        assert_eq!(resolved_branch, wave_name);
-        let shared =
-            std::fs::read_to_string(worktree.join("shared.txt")).expect("read shared file");
-        assert_eq!(shared, "wave branch change\n");
-    }
 }

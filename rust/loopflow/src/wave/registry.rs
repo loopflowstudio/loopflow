@@ -22,7 +22,7 @@
 //!   `RunObserved` when a worker session+run appears, `RunCompleted`
 //!   when the session goes terminal (summary = what the registry knows:
 //!   session exit status, run error, PR url). These are OBSERVATIONS — the
-//!   server is never in the dispatch path. The runtime's run-id guard keeps
+//!   server is never in the worker start path. The runtime's run-id guard keeps
 //!   every fact journaled exactly once, however polls and restarts overlap.
 //!
 //! **The no-store story, honestly:** a machine without the registry db gets
@@ -49,22 +49,6 @@ use crate::lfd::types::{
 use crate::lfdb::{SharedStore, StoreResult};
 use crate::wave::journal::WorkerOutcome;
 use crate::wave::runtime::WaveRuntime;
-
-fn is_active_run_status(status: RunStatus) -> bool {
-    matches!(
-        status,
-        RunStatus::Pending | RunStatus::Running | RunStatus::Waiting
-    )
-}
-
-async fn tmux_session_exists(session_name: &str) -> anyhow::Result<bool> {
-    let status = Command::new("tmux")
-        .args(["has-session", "-t", session_name])
-        .status()
-        .await
-        .map_err(|err| anyhow::anyhow!("tmux session probe failed: {err}"))?;
-    Ok(status.success())
-}
 
 /// How often the observer re-reads the store between turns. Modest by
 /// design: the loop also refreshes right before every turn it takes.
@@ -256,7 +240,7 @@ pub async fn register(config: &RegistryConfig, endpoint: &str) -> StoreResult<Re
 /// `wave_server` row whose recorded pid is dead is a server that crashed
 /// without deregistering — closed here so one-brain enforcement never keys
 /// on a ghost. lfd-launched WaveAgent sessions (tmux-backed) are the
-/// executor's to supervise and count as live.
+/// session supervisor's to observe and count as live.
 pub async fn live_brain_after_probe(
     store: &SharedStore,
     wave_id: &LfdId,
@@ -363,7 +347,7 @@ pub struct StoreObserver {
     /// Unix-seconds cutoff for the recently-terminal session query; `None`
     /// until the first (full-history, catch-up) poll succeeds.
     terminal_cutoff: std::sync::Mutex<Option<i64>>,
-    /// Run ids already journaled as dispatched — a local snapshot so
+    /// Run ids already journaled as started — a local snapshot so
     /// steady-state polls don't take the runtime lock per session.
     seen: std::sync::Mutex<HashSet<String>>,
     #[cfg(test)]
@@ -444,7 +428,7 @@ impl StoreObserver {
         {
             return probe(session);
         }
-        tmux_session_exists(&session.tmux_name)
+        crate::engine::process::tmux_session_exists(&session.tmux_name)
             .await
             .unwrap_or(false)
     }
@@ -460,7 +444,7 @@ impl StoreObserver {
     /// One reconciliation pass: read this wave's worker sessions (live plus
     /// recently-terminal — the first poll scans full history to catch up on
     /// anything that happened with no server watching), close dead workers,
-    /// journal new dispatches and fresh finishes. Store errors are logged
+    /// journal new starts and fresh finishes. Store errors are logged
     /// and skipped — the next poll retries.
     pub async fn poll_once(&self) {
         let poll_started = OffsetDateTime::now_utc();
@@ -534,7 +518,7 @@ impl StoreObserver {
             gone.insert(run_id.clone());
         }
 
-        // Runs carry the flow/task for a dispatch and the PR/error for a
+        // Runs carry the flow/task for a start and the PR/error for a
         // finish summary; fetch them only when this pass will journal.
         let in_flight: HashSet<String> = self
             .runtime
@@ -576,7 +560,7 @@ impl StoreObserver {
                         run_id,
                         session_id = %session.id,
                         flow = run.flow,
-                        "worker dispatched"
+                        "worker started"
                     );
                 }
                 self.mark_seen(&run_id);
@@ -633,7 +617,7 @@ impl StoreObserver {
         let Some(run) = runs.get(run_id) else {
             return;
         };
-        if is_active_run_status(run.status) {
+        if run.status.is_active() {
             let mut run = run.clone();
             run.status = match outcome {
                 WorkerOutcome::Completed => RunStatus::Completed,
@@ -646,7 +630,7 @@ impl StoreObserver {
             }
         }
         // No active runs → the wave is idle again. Reset it if still stamped
-        // Running (the status create_run_for_placement set on dispatch); leave
+        // Running (the status create_run_for_placement set at start); leave
         // Paused and already-Idle waves alone.
         match self.store.count_active_runs(&self.wave_id).await {
             Ok(0) => self.reset_wave_to_idle().await,
@@ -756,7 +740,7 @@ mod tests {
             run_id: Some(run_id.clone()),
             parent_session_id: None,
             session_use: SessionUse::Worker,
-            skill: "dispatch:implement".to_string(),
+            skill: "implement".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo.ship".to_string(),
             argv: Vec::new(),
@@ -1023,7 +1007,7 @@ mod tests {
         // pin them alive so the liveness probe stays out of the way.
         observer.set_liveness_probe(|_| true);
 
-        // Poll 1: one running worker → one dispatch.
+        // Poll 1: one running worker → one start observation.
         let run_1 = make_run(&wave, "implement", "wire the tail");
         store.create_run(&run_1).await.expect("run-1");
         let mut sess_1 = worker_session(&wave, &run_1.id);
@@ -1033,7 +1017,7 @@ mod tests {
         assert!(runtime.worker_known(run_1.id.as_str()));
         assert_eq!(runtime.in_flight_workers().len(), 1);
 
-        // Between polls: a second dispatch appears, and run-1 finishes with
+        // Between polls: a second worker appears, and run-1 finishes with
         // a PR — the terminal fact and the late-run fact land in one gap.
         let run_2 = make_run(&wave, "design", "sketch the next item");
         store.create_run(&run_2).await.expect("run-2");
@@ -1060,7 +1044,7 @@ mod tests {
         observer.poll_once().await; // and once more
 
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-        let dispatched: Vec<String> = events
+        let started: Vec<String> = events
             .iter()
             .filter_map(|event| match &event.kind {
                 EventKind::RunObserved {
@@ -1069,14 +1053,14 @@ mod tests {
                 _ => None,
             })
             .collect();
-        let mut sorted = dispatched.clone();
+        let mut sorted = started.clone();
         sorted.sort();
         let mut expected = vec![
             format!("{}/implement/wire the tail", run_1.id),
             format!("{}/design/sketch the next item", run_2.id),
         ];
         expected.sort();
-        assert_eq!(sorted, expected, "each dispatch journaled exactly once");
+        assert_eq!(sorted, expected, "each start journaled exactly once");
 
         let finished: Vec<(String, String)> = events
             .iter()
@@ -1196,7 +1180,7 @@ mod tests {
         assert_eq!(
             stored.status,
             SessionStatus::Pending,
-            "a Pending row is the dispatcher's to launch, not the probe's to close"
+            "a Pending row belongs to its launcher, not the probe"
         );
     }
 }

@@ -584,8 +584,7 @@ mod tests {
     async fn resolve_target_falls_back_to_worktree_name_and_endpoint_file() {
         let repo = loopflow_test_support::TestRepo::new();
         let (worktree, _branch) =
-            crate::engine::workspace::ensure_wave_worktree(repo.path(), "ship")
-                .expect("worktree");
+            crate::engine::workspace::ensure_wave_worktree(repo.path(), "ship").expect("worktree");
         let addr: std::net::SocketAddr = "127.0.0.1:50505".parse().unwrap();
         server::write_endpoint(repo.path(), "ship", addr).expect("pointer");
 

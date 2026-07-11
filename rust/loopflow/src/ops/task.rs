@@ -4,12 +4,12 @@ use std::time::{Duration, Instant};
 
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{get_default_branch, rev_parse};
+use crate::engine::process::{
+    resolve_lf_binary, start_lf_session_with_env, tmux_session_exists, tmux_session_slug,
+};
 use crate::engine::worktrees::{
     create_from_placement_plan, main_repo_root, plan_placement, PlacementRequest,
     PlacementStrategy, WorktreeSegment,
-};
-use crate::engine::process::{
-    resolve_lf_binary, start_lf_session_with_env, tmux_session_exists, tmux_session_slug,
 };
 use crate::lfd::id::LfdId;
 use crate::lfdb::{open_existing_store, SharedStore, StoreError};

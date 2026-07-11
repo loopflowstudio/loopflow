@@ -167,7 +167,7 @@ pub struct ContextResponse {
     pub playhead: PlayheadView,
 }
 
-/// One dispatched-not-finished worker, for the heartbeat's `<in_flight>`
+/// One started-but-not-finished worker, for the heartbeat's `<in_flight>`
 /// section.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InFlightWorker {

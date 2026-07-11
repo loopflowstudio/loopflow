@@ -1,7 +1,7 @@
 //! Self-registration of bare `lf` runs in the shared session registry.
 //!
-//! Managed sessions get `LFD_WAVE_ID`/`LFD_SESSION_ID` from the lfd executor,
-//! and dispatches chain wave/parent attribution off that env. A bare
+//! Managed sessions get `LFD_WAVE_ID`/`LFD_SESSION_ID` from their launcher,
+//! and children chain wave/parent attribution off that env. A bare
 //! `lf design` typed inside such a session used to be invisible — no Session
 //! row, no wave attribution. This module closes the gap: when an
 //! agent-launching `lf` command starts inside a wave context — the shared
@@ -11,21 +11,21 @@
 //! in the path) and marks itself terminal when the run ends. A run whose row
 //! placement already created
 //! registers nothing but still completes that existing row at run end —
-//! daemonless dispatches have no other process to close them. No wave
+//! managed sessions have no other process to close them. No wave
 //! context or no store on this machine → exactly the old behavior, silently.
 //!
 //! # Env contract
 //!
-//! - `LFD_WAVE_ID` — wave attribution. Set by the lfd executor, inherited down
+//! - `LFD_WAVE_ID` — wave attribution. Set by the session launcher, inherited down
 //!   the process tree. Absent → fall back to the run's wave worktree; outside
 //!   any wave context, never register.
-//! - `LFD_SESSION_ID` — the nearest enclosing session. The executor sets it on
+//! - `LFD_SESSION_ID` — the nearest enclosing session. The launcher sets it on
 //!   the process it launches, pointing at that process's *own* session row. A
 //!   self-registered `lf` overwrites it for its descendants with the id of the
 //!   session it just registered, so grandchildren chain parentage correctly.
-//! - `LFD_SESSION_INHERITED` — whose session `LFD_SESSION_ID` is. The executor
+//! - `LFD_SESSION_INHERITED` — whose session `LFD_SESSION_ID` is. The launcher
 //!   never sets it, so `LFD_SESSION_ID` without the marker means "this very
-//!   process already has a session row" (executor-launched) — registering
+//!   process already has a session row" (launcher-owned) — registering
 //!   again would double-count the run. Every `lf` exports
 //!   `LFD_SESSION_INHERITED=1` before spawning anything, flipping the meaning
 //!   for descendants to "an ancestor's session — register your own row with it
@@ -45,7 +45,7 @@ use crate::lfd::types::{Session, SessionStatus, SessionUse, Wave, LF_CLI_SOURCE}
 use crate::lfdb::{open_existing_store, SharedStore};
 
 pub const WAVE_ID_ENV: &str = "LFD_WAVE_ID";
-/// The channel a dispatched process speaks on by default — the work line's
+/// The channel a managed process speaks on by default — the work line's
 /// ownership name (`goals.148e0e02`), set by placed `lf` runs. A bare run
 /// without it falls back to the worktree name, which is the same channel
 /// name by construction (see `engine::wave_context::resolve_ambient_channel`).
@@ -59,7 +59,7 @@ pub enum RunContext {
     /// No ambient wave (no env, not a wave worktree): leave everything
     /// untouched.
     Outside,
-    /// Dispatcher-launched: placement already created this process's session row and set
+    /// Launcher-owned: placement already created this process's session row and set
     /// `LFD_SESSION_ID` to it. Registering again would double-count, but the
     /// run still completes its own existing row at exit — with no daemon
     /// guaranteed to be running, nothing else may ever mark it terminal.
@@ -72,7 +72,7 @@ pub enum RunContext {
 }
 
 /// The double-registration rule, in one place: `LFD_SESSION_ID` without
-/// `LFD_SESSION_INHERITED` is *this process's* session (the dispatcher made
+/// `LFD_SESSION_INHERITED` is *this process's* session (the launcher made
 /// the row); with the marker it is an ancestor's session and this run
 /// registers its own row underneath it. The wave itself comes from the
 /// shared ambient rule ([`resolve_ambient_wave`]) — a bare run inside a wave
@@ -96,7 +96,7 @@ pub fn classify_run_context(
 }
 
 /// Register this `lf` invocation as a session if it runs inside a wave
-/// context, or adopt the row a dispatcher already created for it. Returns a
+/// context, or adopt the row a launcher already created for it. Returns a
 /// guard to complete with the run's exit code; dropping it unfinished (panic,
 /// early error) records a failure, and Ctrl+C reports via the interrupt-hook
 /// machinery. Returns `None` — with zero noise — outside wave contexts and
@@ -147,7 +147,7 @@ fn register_run_in(
         .or_else(|| resolve_ambient_wave(env_var(WAVE_ID_ENV).as_deref(), repo_root));
     let session_id = env_var(SESSION_ID_ENV);
     let inherited = env_var(SESSION_INHERITED_ENV).is_some();
-    // An executor-owned row may describe the ambient wave the process was
+    // A launcher-owned row may describe the ambient wave the process was
     // launched from. Explicit --wave still wins: only adopt that row when it
     // belongs to the selected wave; otherwise register a new root in the
     // explicit wave (register_session drops the cross-wave parent).
@@ -205,7 +205,7 @@ fn session_belongs_to_wave(session_id: &str, wave_id: &LfdId) -> bool {
     .unwrap_or(false)
 }
 
-/// Adopt the session row a dispatcher created for this process — placement
+/// Adopt the session row a launcher created for this process — placement
 /// points `LFD_SESSION_ID` at a row the
 /// child owns. If no daemon ever runs, nothing else marks the row terminal,
 /// so the run completes it at exit through the same guard machinery as a
@@ -237,7 +237,7 @@ fn adopt_own_session() -> Option<RunSession> {
 /// Flip `LFD_SESSION_ID`'s meaning for everything this process spawns: the
 /// row belongs to an ancestor, not to the spawned process. Called by every
 /// `lf` command — including non-registering ones like `lf pr`/`lf serve`,
-/// which may themselves be the executor-launched session owner.
+/// which may themselves own the launched session.
 pub fn mark_child_sessions_inherited() {
     if env_var(SESSION_ID_ENV).is_some() {
         std::env::set_var(SESSION_INHERITED_ENV, "1");
@@ -447,9 +447,9 @@ mod tests {
     }
 
     #[test]
-    fn executor_launched_runs_do_not_register_again() {
+    fn launcher_owned_runs_do_not_register_again() {
         // LFD_SESSION_ID without LFD_SESSION_INHERITED is this very process's
-        // session row: the executor created it. Registering would double-count.
+        // session row: the launcher created it. Registering would double-count.
         assert_eq!(
             classify_run_context(env_wave("wave-1"), Some("sess-1"), false),
             RunContext::OwnSession
@@ -537,7 +537,7 @@ mod tests {
         std::env::set_var("LFD_DB_PATH", path);
     }
 
-    /// Seed a live session row (a dispatcher the run would chain off).
+    /// Seed a live session row (a parent the run would chain off).
     fn seed_parent_session(path: &Path, wave: &Wave) -> LfdId {
         let now = OffsetDateTime::now_utc();
         let parent = Session {
@@ -574,7 +574,7 @@ mod tests {
         id
     }
 
-    /// Seed the row a dispatcher creates for this very process — the
+    /// Seed the row a launcher creates for this very process — the
     /// Placed run shape: worker-owned row already running.
     fn seed_own_session(path: &Path, wave: &Wave) -> Session {
         let now = OffsetDateTime::now_utc();
@@ -584,7 +584,7 @@ mod tests {
             run_id: None,
             parent_session_id: None,
             session_use: crate::lfd::types::SessionUse::Worker,
-            skill: "dispatch:implement".to_string(),
+            skill: "implement".to_string(),
             agent: "lf".to_string(),
             cwd: "/tmp/repo".to_string(),
             argv: Vec::new(),
@@ -721,7 +721,7 @@ mod tests {
         let parent = seed_parent_session(&db, &ambient);
         std::env::set_var(super::WAVE_ID_ENV, ambient.id().to_string());
         std::env::set_var(super::SESSION_ID_ENV, parent.to_string());
-        // The ambient executor says this row belongs to the current process,
+        // The ambient launcher says this row belongs to the current process,
         // not an ancestor. Explicit context must still refuse to adopt it.
         std::env::remove_var(super::SESSION_INHERITED_ENV);
 
@@ -751,7 +751,7 @@ mod tests {
     }
 
     #[test]
-    fn executor_launched_run_marks_children_without_registering() {
+    fn launcher_owned_run_marks_children_without_registering() {
         let _guard = super::test_env_lock();
         clear_session_env();
         std::env::set_var(super::WAVE_ID_ENV, "wave-1");
@@ -765,7 +765,7 @@ mod tests {
             std::env::var(super::SESSION_INHERITED_ENV).as_deref(),
             Ok("1")
         );
-        // The executor's own value is untouched.
+        // The launcher's own value is untouched.
         assert_eq!(
             std::env::var(super::SESSION_ID_ENV).as_deref(),
             Ok("sess-1")
@@ -859,7 +859,7 @@ mod tests {
         clear_session_env();
     }
 
-    // ── OwnSession: complete the dispatcher-created row, never make one ──
+    // ── OwnSession: complete the launcher-created row, never make one ──
 
     #[test]
     fn own_session_run_completes_its_existing_row_by_exit_code() {

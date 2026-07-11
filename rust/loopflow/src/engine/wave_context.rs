@@ -10,7 +10,7 @@
 //! Resolution: explicit `--wave` (the caller passes it) >
 //! [`resolve_ambient_wave`] — THE ambient rule, shared with `lf chat`
 //! targeting and run registration: `LFD_WAVE_ID` env first (managed sessions
-//! and dispatched workers), else worktree-root-guarded worktree/branch name
+//! and Task Sessions), else worktree-root-guarded worktree/branch name
 //! resolution (`ops::util::resolve_wave_name`).
 //!
 //! Read path — reads only, the wave server stays the single writer:
@@ -57,7 +57,7 @@ pub enum AmbientWaveRef {
 /// memory` targeting, and run self-registration all resolve through it so a
 /// run that is context-visible is also registration-visible.
 ///
-/// `LFD_WAVE_ID` (set by dispatchers on every managed session; trimmed) wins;
+/// `LFD_WAVE_ID` (set on every managed session; trimmed) wins;
 /// a bare run falls back to the worktree/branch resolution every workflow op
 /// uses — but only when `repo_root` really is the working-tree root. A nested
 /// directory handed in as a "repo" (fixture trees, subdir invocations) must
@@ -76,7 +76,7 @@ pub fn resolve_ambient_wave(
     crate::ops::util::resolve_wave_name(repo_root, None).map(AmbientWaveRef::Name)
 }
 
-/// THE ambient-CHANNEL rule: `LFD_CHANNEL` (set by dispatch on every worker)
+/// THE ambient-CHANNEL rule: `LFD_CHANNEL` (set on every worker)
 /// wins; else the ambient-wave rule — whose worktree-name arm already yields
 /// the channel name, because the ownership naming makes the worktree basename
 /// minus the repo prefix THE channel name (`repo.goals` → `goals`,
@@ -118,7 +118,7 @@ pub fn placed_channel_name(wave_name: &str, run_id: &crate::lfd::id::LfdId) -> S
     )
 }
 
-/// The wave a run is attributed to. A dispatcher or explicit `--wave` owns
+/// The wave a run is attributed to. A managed session or explicit `--wave` owns
 /// attribution through `LFD_WAVE_ID`; a bare run may use a recognized sibling
 /// wave worktree. Branch-name inference is intentionally excluded: the main
 /// checkout's ordinary branch is not a wave identity.

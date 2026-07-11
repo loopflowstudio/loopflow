@@ -245,8 +245,7 @@ struct HealthBody {
     loop_state: Option<String>,
     wave: String,
     turns: usize,
-    /// Workers observed in flight for this wave (dispatch is daemonless —
-    /// placed `lf` — so the store fold, not a task registry, is truth).
+    /// Workers observed in flight for this wave. The store fold is truth.
     workers: usize,
     /// Whether the wave is paused (GOAL.md `paused: true`): the listener
     /// refuses to start turns while set, though it keeps serving and queueing.
@@ -979,7 +978,7 @@ mod tests {
         server.abort();
     }
 
-    /// A worker dispatched while a client is subscribed to `/events` surfaces
+    /// A worker started while a client is subscribed to `/events` surfaces
     /// as a live `op` frame carrying the ledger-vocabulary `kind`. This is the
     /// wave's operational channel riding the same stream as `state`/`turn`.
     #[tokio::test]

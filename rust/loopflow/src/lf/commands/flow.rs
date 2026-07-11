@@ -5,6 +5,9 @@ use crate::engine::fork::{
     FORK_MANIFEST_RELATIVE_PATH, FORK_SYNTHESIZE_STEP,
 };
 use crate::engine::git::current_branch;
+use crate::engine::workspace::{
+    cleanup_workspace_worktree, remove_workspace_file, write_workspace_file,
+};
 use crate::engine::worktree::create_worktree;
 use crate::engine::{
     expand_flow, xor_verdict_path, ConcreteAnd, ConcreteLoop, ConcreteStep, ConcreteXor,
@@ -14,9 +17,6 @@ use crate::engine::{
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
-use crate::engine::workspace::{
-    cleanup_workspace_worktree, remove_workspace_file, write_workspace_file,
-};
 use crate::ops::{commit_workflow, CommitOptions, NullProgress};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;

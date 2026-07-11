@@ -56,8 +56,8 @@ sessions and keep running.
   `wave` flow advances continuously and wraps to its next iteration.
 - **Crons are the third deadline.** `crons: [{flow, schedule}]` in the
   wave's `GOAL.md` frontmatter (re-read live, no restart); a due schedule
-  while idle opens a system pass — "cron due: <flow> — dispatch it" — and
-  the loop dispatches with judgment. Mid-pass due dates fire at the
+  while idle opens a system pass — "cron due: <flow> — run it" — and
+  the loop responds with judgment. Mid-pass due dates fire at the
   boundary; occurrences older than 24h are missed, not replayed. The
   daemon's cron poller and `wave_crons` table died in the collapse.
 - **The Wave coordinates; Task Sessions ship.** Each pass's seed is the rendered
@@ -189,8 +189,8 @@ bounces, it doesn't vanish).
 
 `lf chat --follow` reads that stream and writes into it from one pane. The
 resident is the subscription's second customer — same machinery, plus the inbox scope.
-Placed `lf` runs carry `LFD_CHANNEL` in the worker's env and knock once on
-`POST /channels` so the wave's thread shows "work line <name> opened".
+Task Sessions carry the owning Wave identity explicitly and report structured
+progress through their Task event stream.
 
 The context flows back out the same way: every `lf` run born inside a wave
 inherits ambient context by CHANNEL in its assembled prompt —
@@ -216,7 +216,6 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 | `GET /playhead`           | Durable invocation stack, active body, `now`, `next`, local queue, and return target. |
 | `POST /playhead/enqueue {flow}` | Enqueue a flow FIFO at the innermost invocation and return the updated playhead. |
 | `POST /playhead/skip`     | Stop and skip the current body, or advance a failed idle step, without destroying its route. |
-| `POST /channels {name, run_id}` | The dispatch knock: journals `ChannelOpened` on the wave channel. Idempotent on `run_id`; 404 outside the family. Returns `{turn}`. |
 | `GET /memory`             | `{content}` — the wave's MEMORY.md (origin repo). |
 | `GET /memory/log`         | `{facts}` — add-stream facts since the last curation, oldest first. |
 | `POST /memory {op, content, summary}` | `op`: `update` replaces `MEMORY.md`; `add` publishes one replayable fact. `summary` null → first non-empty content line. Returns `{summary}`. |
@@ -260,7 +259,7 @@ curl -N 127.0.0.1:52306/events
 lf stop demo
 ```
 
-The full guided walk — chat, steer, interrupt, worker dispatch, attributed
+The full guided walk — chat, steer, interrupt, Task Sessions, attributed
 reports, restart, teardown — is `scripts/demo_wave.sh` (`--smoke` for a
 zero-model-turn sanity pass). The two-process topology has its own ignored
 live test, `cargo test -p loopflow --test wave_live_smoke -- --ignored`.

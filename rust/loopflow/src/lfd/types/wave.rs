@@ -91,6 +91,11 @@ impl RunStatus {
     pub fn as_i32(&self) -> i32 {
         *self as i32
     }
+
+    /// A run still in flight — dispatched but not yet Completed or Failed.
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Pending | Self::Running | Self::Waiting)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -289,7 +294,7 @@ pub struct Run {
     pub execution_cursor: Option<String>,
     pub parent_run_id: Option<LfdId>,
     /// When set, this run is a repair attempt for the referenced failed run.
-    /// Written by dispatchers that retry failed work; nothing acts on it
+    /// Written by callers that retry failed work; nothing acts on it
     /// automatically since the repair chain died with the daemon's organs.
     pub repair_of: Option<LfdId>,
     /// The pull request created or associated with this run.

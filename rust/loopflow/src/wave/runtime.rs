@@ -35,9 +35,8 @@ use crate::engine::wave_config::read_wave_config;
 use crate::lfd::security::sanitize_fs_component;
 use crate::wave::channel::matches_prefix;
 use crate::wave::journal::{
-    fold_thread, fold_workers, journal_path, restore_pending,
-    run_completed_turn, EventKind, Journal, MessageId, MessageOp, PendingMessage, Usage,
-    WorkerOutcome, WorkerRecord,
+    fold_thread, fold_workers, journal_path, restore_pending, run_completed_turn, EventKind,
+    Journal, MessageId, MessageOp, PendingMessage, Usage, WorkerOutcome, WorkerRecord,
 };
 use crate::wave::memory::Memory;
 use crate::wave::playhead::{
@@ -682,7 +681,7 @@ impl WaveRuntime {
     /// turn on the PRIMARY channel ("run <id> completed/failed · <summary>",
     /// broadcast live) — a worker that died without reporting still ends
     /// visibly, failure summary on the wire. Returns false (and appends
-    /// nothing) when the run was never dispatched or already finished.
+    /// nothing) when the run was never observed or already finished.
     pub fn journal_run_completed(
         &self,
         run_id: &str,
@@ -2052,7 +2051,7 @@ mod tests {
         assert_eq!(completed.len(), 1);
     }
 
-    /// Worker motion rides the live `op` stream: a dispatch emits
+    /// Worker motion rides the live `op` stream: a start emits
     /// `run.started` (flow + task), a finish emits the ledger-matching
     /// terminal kind (`run.errored` on failure) with the registry summary.
     /// Op frames are live-only — a subscriber that connects after the fact
@@ -2238,7 +2237,7 @@ mod tests {
             // Same run seen again (reconnect snapshot): guarded, not journaled.
             assert!(!rt.journal_run_observed("run-1", "sess-1", "implement", "wire it"));
             assert_eq!(rt.in_flight_workers().len(), 1);
-            // A finish for a run never dispatched is refused.
+            // A finish for a run never observed is refused.
             assert!(!rt.journal_run_completed("run-9", WorkerOutcome::Failed, "?"));
             assert!(rt.journal_run_completed("run-1", WorkerOutcome::Completed, "pr landed"));
             assert!(!rt.journal_run_completed(
@@ -2250,7 +2249,7 @@ mod tests {
         }
 
         // A restarted runtime folds the same guard state back out of the log:
-        // the finished run stays finished, a new run dispatches normally.
+        // the finished run stays finished, and a new run starts normally.
         let rt = open_runtime(tmp.path());
         assert!(!rt.journal_run_observed("run-1", "sess-1", "implement", "wire it"));
         assert!(rt.journal_run_observed("run-2", "sess-2", "design", "sketch it"));
@@ -2259,14 +2258,14 @@ mod tests {
 
         // Exactly one RunObserved per run in the journal itself.
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-        let dispatched: Vec<&str> = events
+        let started: Vec<&str> = events
             .iter()
             .filter_map(|e| match &e.kind {
                 EventKind::RunObserved { run_id, .. } => Some(run_id.as_str()),
                 _ => None,
             })
             .collect();
-        assert_eq!(dispatched, vec!["run-1", "run-2"]);
+        assert_eq!(started, vec!["run-1", "run-2"]);
         let finished: Vec<&str> = events
             .iter()
             .filter_map(|e| match &e.kind {

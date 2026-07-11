@@ -17,7 +17,7 @@
 //! log-and-drop.
 
 // TODO(M1/M3): preserve these ingress reliability mechanisms under the
-// gatekeeper/argv owner: signature verification, plan-then-exec tests,
+// gatekeeper/argv owner: signature verification, plan-then-run tests,
 // failed-publish replay, and CI dedupe only after delivery succeeds.
 use std::collections::HashSet;
 use std::path::Path;
@@ -32,8 +32,8 @@ use tokio::sync::Mutex;
 use crate::engine::git::{
     delete_local_branch, get_default_branch, is_clean_ignoring_scratch, worktree_remove,
 };
-use crate::engine::worktrees::{list_porcelain, main_repo_root};
 use crate::engine::process::resolve_lf_binary;
+use crate::engine::worktrees::{list_porcelain, main_repo_root};
 use crate::lfd::github::{
     github_repo_from_local, verify_webhook_signature, GitHubCheckRunEvent, GitHubDeleteEvent,
     GitHubPullRequestEvent, GitHubPushEvent,
@@ -56,7 +56,7 @@ struct WaveCiTarget {
 /// One `lf` invocation the gatekeeper will spawn — argv after the binary.
 /// Planners return these so tests assert on the exact command line without
 /// spawning anything. `dedupe_key` (CI failures: `<wave_id>:<sha>`) is
-/// recorded in the shared cache only after the exec exits 0 — a failed exec
+/// recorded in the shared cache only after the command exits 0 — a failed command
 /// leaves the key absent so the wave+sha can replay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RadioCommand {
@@ -89,7 +89,7 @@ impl RadioCommand {
     }
 }
 
-/// Spawn each exec detached — the webhook response never waits on `lf`.
+/// Start each command asynchronously — the webhook response never waits on `lf`.
 fn spawn_radio_commands(cache: &Arc<Mutex<HashSet<String>>>, commands: Vec<RadioCommand>) {
     let lf = resolve_lf_binary();
     for command in commands {
@@ -101,8 +101,8 @@ fn spawn_radio_commands(cache: &Arc<Mutex<HashSet<String>>>, commands: Vec<Radio
     }
 }
 
-/// Run one exec to completion and settle its dedupe key: exit 0 records the
-/// key (the bus accepted the frame); a nonzero exit or spawn failure records
+/// Run one command to completion and settle its dedupe key: exit 0 records the
+/// key (the bus accepted the frame); a nonzero exit or start failure records
 /// nothing, so the next webhook for the same wave+sha replays.
 async fn settle_radio_command(
     lf: &std::path::Path,
@@ -179,7 +179,7 @@ async fn plan_check_run_notifications(
     cache: &Arc<Mutex<HashSet<String>>>,
     event: &GitHubCheckRunEvent,
 ) -> Result<Vec<RadioCommand>, String> {
-    let mut execs = Vec::new();
+    let mut commands = Vec::new();
     let mut planned: HashSet<String> = HashSet::new();
     for pr in &event.check_run.pull_requests {
         let targets = find_wave_ci_targets(
@@ -201,7 +201,7 @@ async fn plan_check_run_notifications(
             else {
                 continue;
             };
-            execs.push(
+            commands.push(
                 RadioCommand::radio(
                     wave.name(),
                     format!(
@@ -214,7 +214,7 @@ async fn plan_check_run_notifications(
             );
         }
     }
-    Ok(execs)
+    Ok(commands)
 }
 
 /// PR merged → complete each durable Task Session that owns that PR.
@@ -222,9 +222,8 @@ async fn complete_merged_task_sessions(
     store: &SharedStore,
     repo_full_name: &str,
     pr_number: u32,
-) -> Result<(u32, Vec<RadioCommand>), String> {
+) -> Result<u32, String> {
     let mut processed = 0;
-    let execs = Vec::new();
     for mut session in store
         .list_task_sessions(None)
         .await
@@ -295,12 +294,12 @@ async fn complete_merged_task_sessions(
         .map_err(|error| error.to_string())?;
         processed += 1;
     }
-    Ok((processed, execs))
+    Ok(processed)
 }
 
 /// A deleted branch → remove the local worktree that was on it. GitHub deletes
 /// the head branch on merge (when the repo setting is on), so a merged PR's
-/// worktree self-cleans. This is a direct local git op, not an `lf` exec —
+/// worktree self-cleans. This is a direct local git operation, not an `lf` command —
 /// worktree lifecycle is lfd-owned infrastructure, like the resident's bootstrap.
 ///
 /// Skips the default branch, the main checkout, and any tree with uncommitted
@@ -412,7 +411,7 @@ pub async fn github_webhook_handler(
                 )
             })?;
 
-            let execs = plan_push_notifications(
+            let commands = plan_push_notifications(
                 &state.store,
                 &event.repository.full_name,
                 &event.git_ref,
@@ -426,7 +425,7 @@ pub async fn github_webhook_handler(
                     ApiMessage::Untrusted(err),
                 )
             })?;
-            let matched = execs.len() as u32;
+            let matched = commands.len() as u32;
             if matched == 0 {
                 tracing::debug!(
                     repo = %event.repository.full_name,
@@ -434,7 +433,7 @@ pub async fn github_webhook_handler(
                     "push webhook matched no waves; dropped"
                 );
             }
-            spawn_radio_commands(&state.ci_failure_cache, execs);
+            spawn_radio_commands(&state.ci_failure_cache, commands);
             Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
         }
         "check_run" => {
@@ -456,15 +455,16 @@ pub async fn github_webhook_handler(
                 ));
             }
 
-            let execs = plan_check_run_notifications(&state.store, &state.ci_failure_cache, &event)
-                .await
-                .map_err(|err| {
-                    api_error(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        ApiMessage::Untrusted(err),
-                    )
-                })?;
-            let matched = execs.len() as u32;
+            let commands =
+                plan_check_run_notifications(&state.store, &state.ci_failure_cache, &event)
+                    .await
+                    .map_err(|err| {
+                        api_error(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            ApiMessage::Untrusted(err),
+                        )
+                    })?;
+            let matched = commands.len() as u32;
             if matched == 0 {
                 tracing::debug!(
                     repo = %event.repository.full_name,
@@ -480,7 +480,7 @@ pub async fn github_webhook_handler(
                     "CI failure notification delivered to waves via lf chat"
                 );
             }
-            spawn_radio_commands(&state.ci_failure_cache, execs);
+            spawn_radio_commands(&state.ci_failure_cache, commands);
             Ok(Json(serde_json::json!({ "ok": true, "matched": matched })))
         }
         "pull_request" => {
@@ -495,7 +495,7 @@ pub async fn github_webhook_handler(
                     serde_json::json!({ "ok": true, "processed": 0, "skipped": true }),
                 ));
             }
-            let (processed, execs) = complete_merged_task_sessions(
+            let processed = complete_merged_task_sessions(
                 &state.store,
                 &event.repository.full_name,
                 event.pull_request.number,
@@ -507,7 +507,6 @@ pub async fn github_webhook_handler(
                     ApiMessage::Untrusted(err),
                 )
             })?;
-            spawn_radio_commands(&state.ci_failure_cache, execs);
             Ok(Json(
                 serde_json::json!({ "ok": true, "processed": processed }),
             ))
@@ -818,7 +817,7 @@ mod tests {
             .await
             .expect("wave elsewhere");
 
-        let execs = plan_push_notifications(
+        let commands = plan_push_notifications(
             &store,
             "loopflowstudio/loopflow",
             "refs/heads/main",
@@ -828,7 +827,8 @@ mod tests {
         .await
         .expect("plan");
 
-        let mut argvs: Vec<Vec<String>> = execs.into_iter().map(|exec| exec.args).collect();
+        let mut argvs: Vec<Vec<String>> =
+            commands.into_iter().map(|command| command.args).collect();
         argvs.sort();
         assert_eq!(
             argvs,
@@ -865,7 +865,7 @@ mod tests {
             .await
             .expect("wave");
 
-        let execs = plan_push_notifications(
+        let commands = plan_push_notifications(
             &store,
             "loopflowstudio/loopflow",
             "refs/heads/feature",
@@ -874,10 +874,10 @@ mod tests {
         )
         .await
         .expect("plan");
-        assert!(execs.is_empty());
+        assert!(commands.is_empty());
     }
 
-    /// CI failure resolves the owning wave and plans the chat exec carrying
+    /// CI failure resolves the owning wave and plans the radio command carrying
     /// the wave+sha dedupe key; an unknown repo drops.
     #[tokio::test]
     async fn check_run_failure_plans_attributed_chat_with_dedupe_key() {
@@ -894,12 +894,12 @@ mod tests {
         let cache = Arc::new(Mutex::new(HashSet::new()));
         let event = check_run_event("loopflowstudio/loopflow", "feature", 1);
 
-        let execs = plan_check_run_notifications(&store, &cache, &event)
+        let commands = plan_check_run_notifications(&store, &cache, &event)
             .await
             .expect("plan");
         let expected_key = format!("{}:abc123", wave.id());
         assert_eq!(
-            execs,
+            commands,
             vec![RadioCommand::radio(
                 "ship",
                 "CI failed: test-check on PR #1 — https://example.test/logs".to_string(),
@@ -908,7 +908,7 @@ mod tests {
             .with_dedupe_key(expected_key.clone())]
         );
 
-        // Planning must NOT record the key — only a delivered exec does.
+        // Planning must NOT record the key — only a delivered command does.
         assert!(!cache.lock().await.contains(&expected_key));
 
         // Unknown repo: no wave resolves, dropped.
@@ -919,11 +919,11 @@ mod tests {
         assert!(dropped.is_empty(), "no wave resolved → drop");
     }
 
-    /// The bounce contract: a failed exec leaves the dedupe key absent so
-    /// the same wave+sha replays; a delivered exec records it so the replay
+    /// The bounce contract: a failed command leaves the dedupe key absent so
+    /// the same wave+sha replays; a delivered command records it so the replay
     /// dedupes to nothing.
     #[tokio::test]
-    async fn bounced_ci_exec_leaves_key_absent_so_replay_succeeds() {
+    async fn bounced_ci_publish_leaves_key_absent_so_replay_succeeds() {
         let tmp = tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let repo = github_backed_repo(tmp.path(), "loopflowstudio/loopflow");
@@ -938,13 +938,13 @@ mod tests {
         let event = check_run_event("loopflowstudio/loopflow", "feature", 1);
 
         // First delivery bounces (wave server down → exit ≠ 0).
-        let execs = plan_check_run_notifications(&store, &cache, &event)
+        let commands = plan_check_run_notifications(&store, &cache, &event)
             .await
             .expect("plan");
-        assert_eq!(execs.len(), 1);
+        assert_eq!(commands.len(), 1);
         settle_radio_command(
             std::path::Path::new("/usr/bin/false"),
-            execs[0].clone(),
+            commands[0].clone(),
             &cache,
         )
         .await;
@@ -979,12 +979,10 @@ mod tests {
         let task = task_with_open_pr(&wave, 7);
         store.create_task_session(&task).await.expect("task");
 
-        let (processed, execs) =
-            complete_merged_task_sessions(&store, "loopflowstudio/loopflow", 7)
-                .await
-                .expect("complete task");
+        let processed = complete_merged_task_sessions(&store, "loopflowstudio/loopflow", 7)
+            .await
+            .expect("complete task");
         assert_eq!(processed, 1);
-        assert!(execs.is_empty());
         let merged = store
             .get_task_session(&task.id)
             .await
@@ -1007,30 +1005,28 @@ mod tests {
                 if text.contains("Task INF-123 → merged")
         )));
 
-        let (processed_again, execs_again) =
-            complete_merged_task_sessions(&store, "loopflowstudio/loopflow", 7)
-                .await
-                .expect("idempotent completion");
+        let processed_again = complete_merged_task_sessions(&store, "loopflowstudio/loopflow", 7)
+            .await
+            .expect("idempotent completion");
         assert_eq!(processed_again, 0);
-        assert!(execs_again.is_empty());
     }
 
     /// Every planned argv must resolve to a real `lf` subcommand. Bare
     /// `Cli::try_parse_from` is not enough: `lf` accepts external subcommands,
     /// so a stale verb (`op queue reconcile`) parses fine and then fails at
-    /// exec time as a silent no-op. Assert we landed on a known command.
+    /// runtime as a silent no-op. Assert we landed on a known command.
     #[test]
     fn planned_radio_commands_resolve_to_known_lf_commands() {
         use clap::Parser;
 
-        let exec = RadioCommand::radio("ship", "main moved".to_string(), "github");
-        let argv = std::iter::once("lf".to_string()).chain(exec.args.iter().cloned());
+        let command = RadioCommand::radio("ship", "main moved".to_string(), "github");
+        let argv = std::iter::once("lf".to_string()).chain(command.args.iter().cloned());
         let cli = crate::lf::Cli::try_parse_from(argv)
-            .unwrap_or_else(|err| panic!("{:?} must parse: {err}", exec.args));
+            .unwrap_or_else(|err| panic!("{:?} must parse: {err}", command.args));
         assert!(
             !matches!(cli.command, Some(crate::lf::Commands::External(_))),
             "{:?} fell through to an external subcommand — stale verb",
-            exec.args
+            command.args
         );
     }
 

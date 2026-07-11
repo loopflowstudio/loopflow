@@ -1,7 +1,7 @@
 use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
 use crate::lfd::config::{GitHubConfig, HttpSecurityConfig};
-use crate::lfd::session_supervisor::SessionSupervisor;
 use crate::lfd::http::state::HttpState;
+use crate::lfd::session_supervisor::SessionSupervisor;
 use crate::lfdb::{open_store, StorageConfig};
 use crate::provider_auth::ProviderAuthService;
 use std::path::Path;

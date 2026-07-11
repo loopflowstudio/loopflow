@@ -18,8 +18,8 @@ use crate::lfd::types::{
 use crate::lfdb::SharedStore;
 
 use super::session_support::{
-    build_lf_skill_command, is_active_run_status, is_ephemeral_worktree_path,
-    launch_session_in_tmux, tmux_exit_file, TMUX_EXIT_TAIL,
+    build_lf_skill_command, is_ephemeral_worktree_path, launch_session_in_tmux, tmux_exit_file,
+    TMUX_EXIT_TAIL,
 };
 use crate::engine::process::tmux_session_exists;
 use crate::wave::registry::process_alive;
@@ -198,7 +198,7 @@ impl SessionSupervisor {
         let mut active_paths = HashSet::new();
         let runs = self.store.list_runs(None, None).await?;
         for run in runs {
-            if is_active_run_status(run.status) {
+            if run.status.is_active() {
                 active_paths.insert(run.worktree);
             }
         }
@@ -264,7 +264,10 @@ impl SessionSupervisor {
     fn spawn_palette_completion_watcher(&self, session: Session) {
         let supervisor = self.clone();
         tokio::spawn(async move {
-            if let Err(err) = supervisor.wait_for_palette_session_completion(&session).await {
+            if let Err(err) = supervisor
+                .wait_for_palette_session_completion(&session)
+                .await
+            {
                 warn!(session_id = %session.id, error = %err, "palette terminal completion watcher failed");
             }
         });
@@ -331,12 +334,14 @@ mod tests {
             completion_token: None,
         };
 
-        let wrapper = super::super::session_support::tmux_shell_command(&session, session_tail(&session));
+        let wrapper =
+            super::super::session_support::tmux_shell_command(&session, session_tail(&session));
         assert!(wrapper.starts_with("unset LFD_SESSION_INHERITED; "));
         assert!(wrapper.ends_with(TMUX_EXIT_TAIL));
 
         session.source = PALETTE_TERMINAL_SOURCE.to_string();
-        let wrapper = super::super::session_support::tmux_shell_command(&session, session_tail(&session));
+        let wrapper =
+            super::super::session_support::tmux_shell_command(&session, session_tail(&session));
         assert!(wrapper.starts_with("unset LFD_SESSION_INHERITED; "));
         assert!(wrapper.ends_with(r#"exec "${SHELL:-/bin/zsh}""#));
     }

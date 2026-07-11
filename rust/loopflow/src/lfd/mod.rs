@@ -12,9 +12,9 @@ pub mod providers;
 pub(crate) mod redaction;
 pub mod security;
 pub mod service;
-pub(crate) mod session_token;
-pub(crate) mod session_support;
 pub mod session_supervisor;
+pub(crate) mod session_support;
+pub(crate) mod session_token;
 pub mod triggers;
 pub mod types;
 

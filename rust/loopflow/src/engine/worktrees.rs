@@ -183,7 +183,7 @@ pub fn short_run_id(run_id: &str) -> String {
     }
 }
 
-/// The identity of a wave-dispatched worker: the wave, plus the short run id as
+/// The identity of a Wave-owned Task Session: the wave, plus the short run id as
 /// its chain segment and a fresh worker stamp. `bugs` + run `a1b2…` →
 /// `bugs.a1b2c3d4.<ts>` on disk, `<user>/bugs.a1b2c3d4.<ts>` on the remote.
 pub fn worker_id(repo: &Path, wave_name: &str, run_id: &str) -> Result<WaveId, GitError> {

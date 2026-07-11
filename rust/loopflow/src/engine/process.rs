@@ -50,11 +50,7 @@ pub(crate) async fn tmux_session_exists(session_name: &str) -> Result<bool> {
     Ok(status.success())
 }
 
-pub(crate) async fn start_lf_session(
-    session: &str,
-    cwd: &Path,
-    argv: &[String],
-) -> Result<()> {
+pub(crate) async fn start_lf_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
     start_lf_session_with_env(session, cwd, argv, &[]).await
 }
 

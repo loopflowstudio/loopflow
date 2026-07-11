@@ -1414,7 +1414,7 @@ mod tests {
             turn_id: "turn-4".into(),
             item: ConversationItem::Message {
                 id: "text-1".into(),
-                text: "The build worker is still grinding; I'll dispatch the doc pass.".into(),
+                text: "The build worker is still grinding; I'll start the doc pass.".into(),
                 phase: None,
             },
         });
@@ -1458,7 +1458,7 @@ mod tests {
         });
         assert_eq!(
             n.line,
-            "observed run run-8c1d flow=build dispatched · wire the narration tap into the journal"
+            "observed worker run-8c1d flow=build started · wire the narration tap into the journal"
         );
 
         let n = render(EventKind::RunCompleted {
@@ -1500,10 +1500,9 @@ mod tests {
         assert_eq!(n.line, "channel ship.148e0e02 opened · run run-8c1d");
     }
 
-    /// `ChannelOpened` folds into a thread-visible bylined turn (never queued
-    /// for the loop) and its run id lands in the idempotence guard.
+    /// Historical `ChannelOpened` rows still fold into a thread-visible turn.
     #[test]
-    fn fold_materializes_channel_opened_as_a_dispatch_turn() {
+    fn fold_materializes_legacy_channel_opened_as_a_worker_turn() {
         let events = vec![Event {
             v: FORMAT_VERSION,
             seq: 1,
@@ -1516,13 +1515,12 @@ mod tests {
         let fold = fold_thread(&events);
         assert_eq!(fold.turns.len(), 1);
         assert_eq!(fold.turns[0].text, "work line ship.148e0e02 opened");
-        assert_eq!(fold.turns[0].from.as_deref(), Some("dispatch"));
+        assert_eq!(fold.turns[0].from.as_deref(), Some("worker"));
         assert_eq!(fold.turns[0].id, "turn-1");
         assert!(
             fold.pending_messages.is_empty(),
             "a channel opening never queues for the loop"
         );
-        assert!(fold.opened_channel_runs.contains("run-7"));
     }
 
     /// Long text is flattened and cut; a fresh turn resets the prose gist.
@@ -1676,20 +1674,20 @@ mod tests {
     }
 
     #[test]
-    fn fold_workers_tracks_dispatch_and_finish_once_per_run() {
+    fn fold_workers_tracks_start_and_finish_once_per_run() {
         let (_tmp, path) = open_tmp();
         let (mut journal, _) = Journal::open(&path).expect("open");
-        let dispatch = |run: &str| EventKind::RunObserved {
+        let started = |run: &str| EventKind::RunObserved {
             run_id: run.to_string(),
             session_id: format!("sess-{run}"),
             flow: "implement".to_string(),
             task: "build the thing".to_string(),
         };
         let events = vec![
-            journal.append(|_| dispatch("run-1")),
-            journal.append(|_| dispatch("run-2")),
-            // Duplicate dispatch rows are tolerated by the fold (first wins).
-            journal.append(|_| dispatch("run-1")),
+            journal.append(|_| started("run-1")),
+            journal.append(|_| started("run-2")),
+            // Duplicate observations are tolerated by the fold (first wins).
+            journal.append(|_| started("run-1")),
             journal.append(|_| EventKind::RunCompleted {
                 run_id: "run-1".to_string(),
                 outcome: WorkerOutcome::Completed,

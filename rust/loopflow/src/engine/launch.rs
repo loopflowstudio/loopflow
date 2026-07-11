@@ -49,6 +49,7 @@ pub struct LaunchPromptInput {
 pub struct PreparedLaunchPrompt {
     pub config: AgentConfig,
     pub components: PromptComponents,
+    pub deduplicated_docs: Vec<Document>,
     pub prompt: String,
 }
 
@@ -119,7 +120,7 @@ pub fn prepare_launch_prompt(
     if let Some(skill) = resolved_skill {
         gathered.components_mut().skill = Some(skill);
     }
-    drop_native_instruction_docs(gathered.components_mut(), &repo_root);
+    let deduplicated_docs = drop_native_instruction_docs(gathered.components_mut(), &repo_root);
 
     if let Some(summary) = summary {
         gathered.components_mut().summaries.push(Document {
@@ -172,6 +173,7 @@ pub fn prepare_launch_prompt(
     Ok(PreparedLaunchPrompt {
         config: launch,
         components,
+        deduplicated_docs,
         prompt,
     })
 }

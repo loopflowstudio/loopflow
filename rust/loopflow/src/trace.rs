@@ -41,6 +41,12 @@ impl std::fmt::Display for AgentLaunchId {
     }
 }
 
+impl Default for AgentLaunchId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
 pub struct AgentTurnId(String);
@@ -58,6 +64,12 @@ impl AgentTurnId {
 impl std::fmt::Display for AgentTurnId {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(formatter)
+    }
+}
+
+impl Default for AgentTurnId {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -429,6 +441,37 @@ impl PreparedTurnContext {
         }
     }
 
+    pub fn provider_total_only(task: &str) -> Self {
+        let mut task = prompt_channel(
+            task,
+            ContextChannel::Task,
+            ContextScope::User,
+            "user message",
+            0,
+        );
+        task.assets[0].kind = ContextAssetKind::UserMessage;
+        task.assets[0].included_by = "provider_session_input".to_string();
+        let asset = &task.assets[0];
+        Self {
+            system: None,
+            decisions: vec![ContextDecision {
+                position: 0,
+                kind: asset.kind,
+                scope: asset.scope,
+                label: asset.label.clone(),
+                source_path: None,
+                decision: ContextDecisionKind::Included,
+                reason: "sent as a follow-up provider-session input".to_string(),
+                original_bytes: Some(asset.bytes),
+                original_tokens: Some(asset.isolated_tokens),
+                asset_position: Some(asset.position),
+            }],
+            task,
+            coverage: ContextCoverage::ProviderTotalOnly,
+            tokenizer: TOKENIZER,
+        }
+    }
+
     pub fn total_tokens(&self) -> u64 {
         self.system.as_ref().map_or(0, |channel| channel.tokens) + self.task.tokens
     }
@@ -496,6 +539,12 @@ fn render_attributed_channel(
     }
 
     let total_tokens = token_count(text);
+    let prefix_ends = segments
+        .iter()
+        .take(segments.len().saturating_sub(1))
+        .map(|(_, end, _)| *end)
+        .collect::<Vec<_>>();
+    let prefix_tokens = count_prefix_tokens(text, &prefix_ends);
     let mut previous_tokens = 0_u64;
     let segment_count = segments.len();
     let mut assets = Vec::with_capacity(segment_count);
@@ -503,7 +552,7 @@ fn render_attributed_channel(
         let prefix_tokens = if index + 1 == segment_count {
             total_tokens
         } else {
-            token_count(&text[..end])
+            prefix_tokens[index]
         };
         let attributed_tokens = prefix_tokens.saturating_sub(previous_tokens);
         previous_tokens = prefix_tokens;
@@ -530,6 +579,34 @@ fn render_attributed_channel(
         tokens: total_tokens,
         assets,
     }
+}
+
+fn count_prefix_tokens(text: &str, ends: &[usize]) -> Vec<u64> {
+    if ends.len() < 2 {
+        return ends.iter().map(|end| token_count(&text[..*end])).collect();
+    }
+    let workers = std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min(ends.len());
+    std::thread::scope(|scope| {
+        let handles = (0..workers)
+            .map(|worker| {
+                scope.spawn(move || {
+                    (worker..ends.len())
+                        .step_by(workers)
+                        .map(|index| (index, token_count(&text[..ends[index]])))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut counts = vec![0; ends.len()];
+        for handle in handles {
+            for (index, count) in handle.join().expect("prefix token worker panicked") {
+                counts[index] = count;
+            }
+        }
+        counts
+    })
 }
 
 fn prompt_channel(
@@ -756,12 +833,25 @@ impl CaptureHandle {
         });
     }
 
+    pub fn begin_turn(&self, input_op: &str, text: &str) -> StoreResult<()> {
+        let mut capture = self.0.lock().expect("trace capture mutex poisoned");
+        if let Some(message) = &capture.failed {
+            return Err(StoreError::InvalidData(format!(
+                "trace capture is already partial: {message}"
+            )));
+        }
+        let result = capture.begin_turn(input_op, PreparedTurnContext::provider_total_only(text));
+        if let Err(error) = &result {
+            capture.failed = Some(error.to_string());
+        }
+        result
+    }
+
     pub fn set_provider_session_id(&self, session_id: Option<String>) {
-        self.0
-            .lock()
-            .expect("trace capture mutex poisoned")
-            .launch
-            .provider_session_id = session_id;
+        self.with_capture(|capture| {
+            capture.launch.provider_session_id = session_id;
+            crate::journal::open_ledger()?.update_agent_launch_receipt(&capture.launch)
+        });
     }
 
     pub fn finish(&self, outcome: &str, prompt_only: bool) -> StoreResult<()> {
@@ -952,8 +1042,8 @@ impl TraceCapture {
                 decision,
             })
             .collect::<Vec<_>>();
-        if let Err(error) = crate::journal::open_ledger()?
-            .insert_trace_capture(&launch, &turn, &assets, &decisions)
+        if let Err(error) =
+            crate::journal::open_ledger()?.insert_trace_capture(&launch, &turn, &assets, &decisions)
         {
             let _ = fs::remove_dir_all(&artifact_dir);
             return Err(error);
@@ -987,6 +1077,105 @@ impl TraceCapture {
         Ok(())
     }
 
+    fn begin_turn(&mut self, input_op: &str, prepared: PreparedTurnContext) -> StoreResult<()> {
+        validate_input_op(input_op)?;
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        self.finish_current_turn("partial", now)?;
+
+        let persist_start = Instant::now();
+        let ordinal = self.turn.ordinal + 1;
+        let turn_id = AgentTurnId::new();
+        let provider_turn_id = self.turn.provider_turn_id.clone();
+        let artifact_dir = resolve_artifact(&self.launch.artifact_dir)?;
+        let turns_dir = artifact_dir.join("turns");
+        let task_path = turns_dir.join(format!("{ordinal:04}-task.md"));
+        let staging_path = turns_dir.join(format!(".{ordinal:04}-task.md.staging"));
+        write_private(&staging_path, prepared.task.text.as_bytes())?;
+        fs::rename(&staging_path, &task_path).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "publish follow-up prompt {}: {error}",
+                task_path.display()
+            ))
+        })?;
+
+        let task_tokens = prepared.task.tokens as i64;
+        let mut turn = AgentTurnRow {
+            id: turn_id.to_string(),
+            launch_id: self.launch.id.clone(),
+            ordinal,
+            provider_turn_id,
+            started_at: now,
+            ended_at: None,
+            status: "running".to_string(),
+            input_op: input_op.to_string(),
+            context_coverage: prepared.coverage.as_str().to_string(),
+            tokenizer: prepared.tokenizer.to_string(),
+            system_prompt_path: None,
+            task_prompt_path: artifact_relative(&trace_root(), &task_path)?,
+            system_tokens: 0,
+            task_tokens,
+            supplied_context_tokens: task_tokens,
+            provider_input_tokens: None,
+            provider_output_tokens: None,
+            reasoning_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            cost_usd: None,
+            context_gather_ms: 0,
+            context_render_ms: 0,
+            context_persist_ms: persist_start.elapsed().as_millis() as i64,
+            first_event_seq: Some(self.event_seq as i64),
+            last_event_seq: None,
+        };
+        let assets = prepared
+            .assets()
+            .cloned()
+            .map(|asset| ContextAssetRow {
+                turn_id: turn.id.clone(),
+                asset,
+            })
+            .collect::<Vec<_>>();
+        let decisions = prepared
+            .decisions
+            .into_iter()
+            .map(|decision| ContextDecisionRow {
+                turn_id: turn.id.clone(),
+                decision,
+            })
+            .collect::<Vec<_>>();
+        if let Err(error) =
+            crate::journal::open_ledger()?.insert_agent_turn_capture(&turn, &assets, &decisions)
+        {
+            let _ = fs::remove_file(&task_path);
+            return Err(error);
+        }
+
+        self.turn = turn.clone();
+        self.usage = TurnUsage::default();
+        self.append_payload(RecordedConversationPayload::UserInput {
+            op: input_op.to_string(),
+            text: prepared.task.text,
+        })?;
+        turn.last_event_seq = self.turn.last_event_seq;
+        self.turn = turn;
+        Ok(())
+    }
+
+    fn finish_current_turn(&mut self, status: &str, ended_at: i64) -> StoreResult<()> {
+        if self.turn.status != "running" {
+            return Ok(());
+        }
+        self.turn.ended_at = Some(ended_at);
+        self.turn.status = status.to_string();
+        self.turn.provider_input_tokens = Some(self.usage.input_tokens as i64);
+        self.turn.provider_output_tokens = Some(self.usage.output_tokens as i64);
+        self.turn.reasoning_tokens = self.usage.reasoning_tokens.map(|value| value as i64);
+        self.turn.cache_read_tokens = self.usage.cache_read_tokens.map(|value| value as i64);
+        self.turn.cache_write_tokens = self.usage.cache_write_tokens.map(|value| value as i64);
+        self.turn.cost_usd = self.usage.cost_usd;
+        crate::journal::open_ledger()?.finish_agent_turn_capture(&self.turn)
+    }
+
     fn record_raw(&mut self, stream: &str, line: &str) -> StoreResult<()> {
         let Some(provider_path) = self.provider_path.as_ref() else {
             return Ok(());
@@ -1000,6 +1189,12 @@ impl TraceCapture {
         };
         append_json_line(provider_path, &record)?;
         self.provider_seq += 1;
+        if self.launch.provider_session_id.is_none() {
+            if let Some(session_id) = provider_session_id(line) {
+                self.launch.provider_session_id = Some(session_id);
+                crate::journal::open_ledger()?.update_agent_launch_receipt(&self.launch)?;
+            }
+        }
         Ok(())
     }
 
@@ -1061,20 +1256,31 @@ impl TraceCapture {
     }
 
     fn finish(&mut self, outcome: &str, prompt_only: bool) -> StoreResult<()> {
+        if !matches!(outcome, "completed" | "failed" | "interrupted") {
+            return Err(StoreError::InvalidData(format!(
+                "invalid agent launch outcome: {outcome}"
+            )));
+        }
         let now = OffsetDateTime::now_utc().unix_timestamp();
         self.launch.ended_at = Some(now);
         self.launch.outcome = outcome.to_string();
-        self.launch.capture_status = if prompt_only {
-            "prompt_only".to_string()
-        } else if self.failed.is_some() {
+        let sync_error = sync_file(&self.conversation_path)
+            .and_then(|_| self.provider_path.as_deref().map_or(Ok(()), sync_file))
+            .err();
+        if let Some(error) = sync_error {
+            self.failed.get_or_insert_with(|| error.to_string());
+        }
+        self.launch.capture_status = if self.failed.is_some() {
             "partial".to_string()
+        } else if prompt_only {
+            "prompt_only".to_string()
         } else {
             "complete".to_string()
         };
-        self.launch.incomplete_reason = if prompt_only {
-            Some("provider conversation not captured by Loopflow".to_string())
-        } else {
-            self.failed.clone()
+        self.launch.incomplete_reason = match (&self.failed, prompt_only) {
+            (Some(error), _) => Some(error.clone()),
+            (None, true) => Some("provider conversation not captured by Loopflow".to_string()),
+            (None, false) => None,
         };
         self.turn.ended_at = Some(now);
         self.turn.status = if self.failed.is_some() {
@@ -1133,12 +1339,48 @@ pub fn resolve_artifact(relative: &str) -> StoreResult<PathBuf> {
     Ok(trace_root().join(relative))
 }
 
+pub fn list_launch_artifact_dirs() -> StoreResult<Vec<String>> {
+    let root = trace_root();
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut directories = Vec::new();
+    for run in read_dirs(&root)? {
+        if !run.is_dir() {
+            continue;
+        }
+        for process in read_dirs(&run)? {
+            if !process.is_dir() {
+                continue;
+            }
+            for launch in read_dirs(&process)? {
+                if launch.is_dir() {
+                    directories.push(artifact_relative(&root, &launch)?);
+                }
+            }
+        }
+    }
+    directories.sort();
+    Ok(directories)
+}
+
+fn read_dirs(path: &Path) -> StoreResult<Vec<PathBuf>> {
+    fs::read_dir(path)
+        .map_err(|error| StoreError::InvalidData(format!("read {}: {error}", path.display())))?
+        .map(|entry| {
+            entry.map(|entry| entry.path()).map_err(|error| {
+                StoreError::InvalidData(format!("read {}: {error}", path.display()))
+            })
+        })
+        .collect()
+}
+
 fn validate_artifact_path(path: &Path) -> StoreResult<()> {
     if path.as_os_str().is_empty()
         || path.is_absolute()
-        || path.components().any(|component| {
-            !matches!(component, std::path::Component::Normal(_))
-        })
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
     {
         return Err(StoreError::InvalidData(format!(
             "unsafe trace artifact path: {}",
@@ -1195,10 +1437,46 @@ fn append_json_line<T: Serialize>(path: &Path, value: &T) -> StoreResult<usize> 
     Ok(bytes.len())
 }
 
+fn provider_session_id(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let session_id = [
+        value.get("session_id"),
+        value.get("sessionId"),
+        value.get("thread_id"),
+        value.pointer("/stream_event/event/session_id"),
+        value.pointer("/params/thread/id"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|value| value.as_str().filter(|value| !value.is_empty()))
+    .map(str::to_string);
+    session_id
+}
+
+fn sync_file(path: &Path) -> StoreResult<()> {
+    let file = OpenOptions::new()
+        .read(true)
+        .open(path)
+        .map_err(|error| StoreError::InvalidData(format!("open {}: {error}", path.display())))?;
+    file.sync_data()
+        .map_err(|error| StoreError::InvalidData(format!("sync {}: {error}", path.display())))
+}
+
+#[derive(Debug)]
+pub struct ConversationRead {
+    pub events: Vec<RecordedConversationEvent>,
+    pub incomplete_tail: bool,
+}
+
 pub fn read_conversation(path: &Path) -> StoreResult<Vec<RecordedConversationEvent>> {
+    Ok(read_conversation_status(path)?.events)
+}
+
+pub fn read_conversation_status(path: &Path) -> StoreResult<ConversationRead> {
     let file = fs::File::open(path)
         .map_err(|error| StoreError::InvalidData(format!("open {}: {error}", path.display())))?;
     let mut events = Vec::new();
+    let mut incomplete_tail = false;
     let mut reader = BufReader::new(file);
     loop {
         let mut line = String::new();
@@ -1213,18 +1491,24 @@ pub fn read_conversation(path: &Path) -> StoreResult<Vec<RecordedConversationEve
         }
         match serde_json::from_str(&line) {
             Ok(event) => events.push(event),
-            Err(_) if !line.ends_with('\n') => break,
+            Err(_) if !line.ends_with('\n') => {
+                incomplete_tail = true;
+                break;
+            }
             Err(error) => return Err(error.into()),
         }
     }
-    Ok(events)
+    Ok(ConversationRead {
+        events,
+        incomplete_tail,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        read_conversation, CaptureHandle, ContextAssetKind, ContextAssetSpec, ContextChannel,
-        ContextScope, PreparedTurnContext, TraceCaptureContext,
+        provider_session_id, read_conversation, resolve_artifact, CaptureHandle, ContextAssetKind,
+        ContextAssetSpec, ContextChannel, ContextScope, PreparedTurnContext, TraceCaptureContext,
     };
     use crate::lfd::id::LfdId;
 
@@ -1260,6 +1544,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(read_conversation(&path).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn provider_receipt_reads_session_ids_from_observed_frames() {
+        assert_eq!(
+            provider_session_id(r#"{"type":"system","session_id":"claude-1"}"#).as_deref(),
+            Some("claude-1")
+        );
+        assert_eq!(
+            provider_session_id(r#"{"params":{"thread":{"id":"codex-1"}}}"#).as_deref(),
+            Some("codex-1")
+        );
+        assert_eq!(provider_session_id(r#"{"id":"message-1"}"#), None);
     }
 
     #[test]
@@ -1301,6 +1598,45 @@ mod tests {
     }
 
     #[test]
+    fn large_prompt_attribution_remains_exact() {
+        let sections = (0..12)
+            .map(|index| {
+                format!(
+                    "<section-{index}>{}</section-{index}>",
+                    "context ".repeat(750)
+                )
+            })
+            .collect::<Vec<_>>();
+        let prompt = sections.join("\n");
+        let specs = sections
+            .into_iter()
+            .enumerate()
+            .map(|(index, content)| ContextAssetSpec {
+                channel: ContextChannel::Task,
+                kind: ContextAssetKind::Document,
+                scope: ContextScope::Task,
+                label: format!("section {index}"),
+                source_path: None,
+                included_by: "test".to_string(),
+                content,
+            })
+            .collect();
+
+        let prepared = PreparedTurnContext::from_attributed_prompts("", &prompt, specs, Vec::new());
+        assert_eq!(
+            prepared.total_tokens(),
+            prepared
+                .assets()
+                .map(|asset| asset.attributed_tokens)
+                .sum::<u64>()
+        );
+        assert_eq!(
+            prepared.task.assets.last().unwrap().byte_end,
+            prompt.len() as u64
+        );
+    }
+
+    #[test]
     fn capture_persists_private_artifacts_and_queryable_rows() {
         let _guard = crate::journal::test_env_lock();
         let previous = std::env::var_os("LF_HOME");
@@ -1330,14 +1666,22 @@ mod tests {
             },
         )
         .unwrap();
+        capture.begin_turn("message", "follow up").unwrap();
         capture.finish("completed", false).unwrap();
 
         let store = crate::journal::open_ledger().unwrap();
         let launches = store.agent_launches_matching(run_id.as_str()).unwrap();
         assert_eq!(launches.len(), 1);
         assert_eq!(launches[0].capture_status, "complete");
+        assert!(!std::path::Path::new(&launches[0].artifact_dir).is_absolute());
         let conversation = super::resolve_artifact(&launches[0].conversation_path).unwrap();
         assert!(conversation.is_file());
+        let turns = store
+            .agent_turns_for_launches(&[launches[0].id.clone()])
+            .unwrap();
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].status, "partial");
+        assert_eq!(turns[1].context_coverage, "provider_total_only");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1353,5 +1697,12 @@ mod tests {
             Some(value) => std::env::set_var("LF_HOME", value),
             None => std::env::remove_var("LF_HOME"),
         }
+    }
+
+    #[test]
+    fn artifact_paths_cannot_escape_the_trace_root() {
+        assert!(resolve_artifact("run/process/launch/conversation.jsonl").is_ok());
+        assert!(resolve_artifact("../outside").is_err());
+        assert!(resolve_artifact("/absolute").is_err());
     }
 }

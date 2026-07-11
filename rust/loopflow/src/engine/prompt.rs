@@ -183,6 +183,9 @@ pub struct PromptComponents {
     pub operate: bool,
     /// User message (positional args after skill/flow name)
     pub message: Option<String>,
+    /// Semantic attribution for generated intent carried in `message`.
+    /// Ordinary CLI speech leaves this absent and is attributed to the user.
+    pub message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
     /// How diff context was tiered
     pub diff_tier: DiffTier,
     /// Number of files changed on branch (for display)
@@ -385,6 +388,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         wave_chat,
         operate: opts.operate,
         message: opts.message.clone(),
+        message_context: None,
         diff_tier,
         diff_file_count,
     }))
@@ -1317,13 +1321,17 @@ const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md", "GEMINI.md"];
 ///
 /// Skips all known native files (CLAUDE.md, AGENTS.md, GEMINI.md) and any
 /// files they symlink to (e.g. CLAUDE.md -> STYLE.md also drops STYLE.md).
-pub fn drop_native_instruction_docs(components: &mut PromptComponents, repo_root: &Path) {
+pub fn drop_native_instruction_docs(
+    components: &mut PromptComponents,
+    repo_root: &Path,
+) -> Vec<Document> {
     // Collect canonical paths of all native files (resolves symlinks)
     let canonical_paths: Vec<_> = AGENT_NATIVE_FILES
         .iter()
         .filter_map(|f| fs::canonicalize(repo_root.join(f)).ok())
         .collect();
 
+    let mut removed = Vec::new();
     components.docs.retain(|doc| {
         let name = Path::new(&doc.path)
             .file_name()
@@ -1332,6 +1340,7 @@ pub fn drop_native_instruction_docs(components: &mut PromptComponents, repo_root
 
         // Drop the native files themselves
         if AGENT_NATIVE_FILES.contains(&name) {
+            removed.push(doc.clone());
             return false;
         }
 
@@ -1339,12 +1348,14 @@ pub fn drop_native_instruction_docs(components: &mut PromptComponents, repo_root
         let doc_path = repo_root.join(&doc.path);
         if let Ok(doc_canon) = fs::canonicalize(&doc_path) {
             if canonical_paths.contains(&doc_canon) {
+                removed.push(doc.clone());
                 return false;
             }
         }
 
         true
     });
+    removed
 }
 
 fn read_text_file(path: &Path) -> Option<String> {
@@ -1558,6 +1569,37 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
         parts.push(format_files(&reference_docs));
     }
 
+    if !components.summaries.is_empty() {
+        let summary_parts: Vec<String> = components
+            .summaries
+            .iter()
+            .map(|summary| {
+                format!(
+                    "<lf:summary path=\"{}\">\n{}\n</lf:summary>",
+                    summary.path, summary.content
+                )
+            })
+            .collect();
+        parts.push(format!(
+            "Pre-generated codebase summaries.\n\n<lf:summaries>\n{}\n</lf:summaries>",
+            summary_parts.join("\n\n")
+        ));
+    }
+
+    if components.diff.is_some() || !components.diff_files.is_empty() {
+        let mut diff_parts = Vec::new();
+        if let Some(ref diff) = components.diff {
+            diff_parts.push(format!("<lf:diff>\n{diff}\n</lf:diff>"));
+        }
+        if !components.diff_files.is_empty() {
+            diff_parts.push(format_files(&components.diff_files));
+        }
+        parts.push(format!(
+            "Changes on this branch (diff against main).\n\n{}",
+            diff_parts.join("\n\n")
+        ));
+    }
+
     parts
 }
 
@@ -1577,46 +1619,6 @@ fn format_skill_tag(skill: &Skill) -> String {
 fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = format_system_sections(components);
     parts.extend(format_content_sections(components));
-
-    // Summaries (included in full prompt log but not in task prompt)
-    if !components.summaries.is_empty() {
-        let summary_parts: Vec<String> = components
-            .summaries
-            .iter()
-            .map(|s| {
-                format!(
-                    "<lf:summary path=\"{}\">\n{}\n</lf:summary>",
-                    s.path, s.content
-                )
-            })
-            .collect();
-        let summaries_body = summary_parts.join("\n\n");
-        parts.push(format!(
-            "Pre-generated codebase summaries.\n\n\
-             <lf:summaries>\n{}\n</lf:summaries>",
-            summaries_body
-        ));
-    }
-
-    // Diff (included in full prompt log but not in task prompt)
-    if components.diff.is_some() || !components.diff_files.is_empty() {
-        let mut diff_parts = Vec::new();
-
-        if let Some(ref diff) = components.diff {
-            diff_parts.push(format!("<lf:diff>\n{}\n</lf:diff>", diff));
-        }
-
-        if !components.diff_files.is_empty() {
-            let files_content = format_files(&components.diff_files);
-            diff_parts.push(files_content);
-        }
-
-        parts.push(format!(
-            "Changes on this branch (diff against main).\n\n{}",
-            diff_parts.join("\n\n")
-        ));
-    }
-
     parts
 }
 

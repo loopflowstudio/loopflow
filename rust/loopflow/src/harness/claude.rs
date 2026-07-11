@@ -13,10 +13,11 @@ use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
 use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
 use crate::harness::claude_mapping::ReaderState;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::harness::{claude_mapping, Capabilities, Harness, HarnessError};
+use crate::harness::{claude_mapping, Capabilities, Harness, HarnessError, RawProviderEvent};
 
 pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
+    raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     config: Option<AgentConfig>,
     should_seed_task_prompt: bool,
     /// Vendor session id captured from the first turn's `system` event;
@@ -40,6 +41,7 @@ impl ClaudeHarness {
     pub fn new(events: mpsc::UnboundedSender<ConversationEvent>) -> Self {
         Self {
             events,
+            raw_provider: None,
             config: None,
             should_seed_task_prompt: true,
             provider_session_id: Arc::new(Mutex::new(None)),
@@ -79,6 +81,13 @@ impl ClaudeHarness {
 
 #[async_trait]
 impl Harness for ClaudeHarness {
+    fn set_raw_provider_sender(
+        &mut self,
+        raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
+    ) {
+        self.raw_provider = raw_provider;
+    }
+
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
         // Validate claude binary on PATH.
         let output = Command::new("claude").arg("--version").output().await;
@@ -178,6 +187,7 @@ impl Harness for ClaudeHarness {
 
         // Spawn reader task for NDJSON stdout.
         let events = self.events.clone();
+        let raw_provider = self.raw_provider.clone();
         let turn_in_progress = self.turn_in_progress.clone();
         let shutdown = self.shutdown_requested.clone();
         let interrupted = self.interrupt_requested.clone();
@@ -190,6 +200,12 @@ impl Harness for ClaudeHarness {
             let mut saw_turn_completed = false;
 
             while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(raw_provider) = &raw_provider {
+                    let _ = raw_provider.send(RawProviderEvent {
+                        stream: "stdout",
+                        line: line.clone(),
+                    });
+                }
                 if shutdown.load(Ordering::Relaxed) {
                     break;
                 }

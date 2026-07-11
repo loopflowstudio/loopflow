@@ -65,6 +65,7 @@ struct PromptBuild {
     process: ProcessConfig,
     capabilities: AgentCapabilities,
     components: PromptComponents,
+    deduplicated_docs: Vec<crate::engine::Document>,
     context: crate::trace::PreparedTurnContext,
     prompt: String,
     harness: String,
@@ -104,10 +105,19 @@ pub(crate) fn prepare_harness_turn(
         ..Cli::default()
     };
     let mut built = build_prompt(Some(skill), Some(message), &cli)?;
+    built.components.message_context = Some((
+        crate::trace::ContextAssetKind::Goal,
+        crate::trace::ContextScope::Step,
+    ));
     let input = std::mem::take(&mut built.agent_config.task_prompt);
     let system_prompt =
         crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config);
-    let context = attributed_context(&built.components, &system_prompt, &input);
+    let context = attributed_context(
+        &built.components,
+        &system_prompt,
+        &input,
+        &built.deduplicated_docs,
+    );
     Ok(PreparedHarnessTurn {
         config: built.agent_config,
         input,
@@ -225,12 +235,11 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
     let fast_path = discovered_skill.as_ref().and_then(|s| s.fast_path.clone());
     let mut agent_config = prepared.config;
     let mut prompt = prepared.prompt;
-    // Both headless and interactive runs hand off via the vendor skill seed —
-    // skills fire under `claude -p` / `codex exec`, verified on-machine. The seed
-    // carries the surface run-mode preamble (`surface.instructions()`), so the
-    // headless warning ("no user present, decide and keep moving") still lands.
+    // Interactive handoffs use the vendor skill sigil because the vendor owns
+    // the session from that point. Headless launches keep the fully assembled
+    // prompt so every context source remains explicit and attributable.
     if let Some(skill_name) = skill_name.as_deref() {
-        if should_launch_via_skill(skill_name) {
+        if is_interactive && should_launch_via_skill(skill_name) {
             let sync_start = Instant::now();
             crate::engine::sync_skills(&SkillSyncOptions::default())?;
             debug!(
@@ -247,7 +256,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
             );
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
-        } else {
+        } else if is_interactive {
             warn!(
                 skill = skill_name,
                 "external skill skill uses assembled prompt fallback"
@@ -256,10 +265,16 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
     }
 
     let components = prepared.components;
+    let deduplicated_docs = prepared.deduplicated_docs;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
     let render_start = Instant::now();
-    let context = attributed_context(&components, &effective_system, &agent_config.task_prompt);
+    let context = attributed_context(
+        &components,
+        &effective_system,
+        &agent_config.task_prompt,
+        &deduplicated_docs,
+    );
     let context_render_ms = render_start.elapsed().as_millis() as u64;
     Ok(PromptBuild {
         repo_root,
@@ -268,6 +283,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         process,
         capabilities,
         components,
+        deduplicated_docs,
         context,
         prompt,
         harness,
@@ -513,7 +529,12 @@ fn begin_capture(
     let context =
         crate::journal::trace_capture_context(&built.repo_root, None, built.skill_name.clone())
             .ok_or_else(|| anyhow!("trace capture identity is unavailable before agent launch"))?;
-    let prepared = attributed_context(&built.components, system_prompt, task_prompt);
+    let prepared = attributed_context(
+        &built.components,
+        system_prompt,
+        task_prompt,
+        &built.deduplicated_docs,
+    );
     crate::trace::CaptureHandle::begin(
         context,
         prepared,
@@ -530,10 +551,11 @@ fn begin_capture(
     .map_err(|error| anyhow!("failed to establish trace capture before agent launch: {error}"))
 }
 
-fn attributed_context(
+pub(crate) fn attributed_context(
     components: &PromptComponents,
     system_prompt: &str,
     task_prompt: &str,
+    deduplicated_docs: &[crate::engine::Document],
 ) -> crate::trace::PreparedTurnContext {
     use crate::engine::prompt::{DiffTier, DocumentSource};
     use crate::trace::{
@@ -578,6 +600,20 @@ fn attributed_context(
             "operate",
         );
     }
+    if let Some(guidance) = tagged_block(
+        system_prompt,
+        "<lf:structured_replies>",
+        "</lf:structured_replies>",
+    ) {
+        push(
+            guidance,
+            Kind::ProviderInstructions,
+            Scope::Provider,
+            "structured reply contract".to_string(),
+            None,
+            "provider_invocation",
+        );
+    }
     push(
         components.surface.instructions(),
         Kind::SurfaceInstructions,
@@ -597,8 +633,10 @@ fn attributed_context(
         );
     }
     if let Some(wave) = &components.wave {
+        let open = format!("<lf:wave name=\"{wave}\">");
+        let goal = tagged_block(task_prompt, &open, "</lf:wave>").unwrap_or(open.as_str());
         push(
-            &format!("<lf:wave name=\"{wave}\">"),
+            goal,
             Kind::Goal,
             Scope::Wave,
             wave.clone(),
@@ -705,20 +743,42 @@ fn attributed_context(
         }
     }
     if let Some(message) = &components.message {
+        let (kind, scope) = components
+            .message_context
+            .unwrap_or((Kind::UserMessage, Scope::User));
         push(
             message,
-            Kind::UserMessage,
-            Scope::User,
-            "user message".to_string(),
+            kind,
+            scope,
+            if kind == Kind::UserMessage {
+                "user message".to_string()
+            } else {
+                "inherited launch goal".to_string()
+            },
             None,
             "message",
         );
     }
 
     let mut decisions = Vec::new();
+    for (position, document) in deduplicated_docs.iter().enumerate() {
+        decisions.push(ContextDecision {
+            position: position as u32,
+            kind: Kind::RepoInstructions,
+            scope: Scope::Repo,
+            label: document.path.clone(),
+            source_path: Some(document.path.clone()),
+            decision: ContextDecisionKind::Deduplicated,
+            reason: "provider-native instruction discovery owns this file or its symlink target"
+                .to_string(),
+            original_bytes: Some(document.content.len() as u64),
+            original_tokens: Some(crate::engine::prompt::count_tokens(&document.content) as u64),
+            asset_position: None,
+        });
+    }
     if components.diff_tier == DiffTier::StatOnly {
         decisions.push(ContextDecision {
-            position: 0,
+            position: decisions.len() as u32,
             kind: Kind::Diff,
             scope: Scope::Repo,
             label: "branch diff".to_string(),
@@ -737,6 +797,12 @@ fn attributed_context(
         specs,
         decisions,
     )
+}
+
+fn tagged_block<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let start = text.find(open)?;
+    let end = text[start..].find(close)? + start + close.len();
+    Some(&text[start..end])
 }
 
 /// Forward safe shell directives from the agent's relay file to the real

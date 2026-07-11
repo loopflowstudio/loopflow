@@ -32,7 +32,7 @@ use crate::engine::agent::{
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::lf_tag::LfTagParser;
-use crate::harness::{codex_mapping, ApprovalPolicy, Capabilities, Harness};
+use crate::harness::{codex_mapping, ApprovalPolicy, Capabilities, Harness, RawProviderEvent};
 
 /// SIGKILL an entire process group. Killing only the direct child orphans
 /// the real app-server when `codex` on PATH is an npm shim that spawns it as
@@ -295,6 +295,7 @@ pub(super) fn process_rpc_error(error: &Value, events: &mpsc::UnboundedSender<Co
 
 pub struct CodexHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
+    raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     approval: ApprovalPolicy,
     child: Option<Child>,
     outbound_tx: Option<mpsc::Sender<OutboundRpc>>,
@@ -335,6 +336,7 @@ impl CodexHarness {
     pub fn new(events: mpsc::UnboundedSender<ConversationEvent>, approval: ApprovalPolicy) -> Self {
         Self {
             events,
+            raw_provider: None,
             approval,
             child: None,
             outbound_tx: None,
@@ -422,6 +424,13 @@ impl CodexHarness {
 
 #[async_trait]
 impl Harness for CodexHarness {
+    fn set_raw_provider_sender(
+        &mut self,
+        raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
+    ) {
+        self.raw_provider = raw_provider;
+    }
+
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
         if self.child.is_some() {
             return Ok(());
@@ -648,6 +657,7 @@ impl CodexHarness {
         let turn_in_progress = self.turn_in_progress.clone();
         let shutdown_requested = self.shutdown_requested.clone();
         let event_tx = self.events.clone();
+        let raw_provider = self.raw_provider.clone();
         let approval_tx = outbound_tx.clone();
         let approval = self.approval;
         let provider_session_id = self.provider_session_id.clone();
@@ -665,6 +675,12 @@ impl CodexHarness {
             );
 
             while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(raw_provider) = &raw_provider {
+                    let _ = raw_provider.send(RawProviderEvent {
+                        stream: "notification",
+                        line: line.clone(),
+                    });
+                }
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };

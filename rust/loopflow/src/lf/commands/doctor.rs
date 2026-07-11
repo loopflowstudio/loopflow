@@ -99,7 +99,7 @@ fn check_capture(
     events: &[RunEventRow],
 ) -> Result<Check> {
     let required_after = store.trace_capture_required_after()?;
-    let launches = store.agent_launches_since(required_after)?;
+    let launches = store.agent_launches_since(0)?;
     let launch_ids = launches
         .iter()
         .map(|launch| launch.id.clone())
@@ -114,7 +114,9 @@ fn check_capture(
         .collect();
     let missing_launches: HashSet<&str> = events
         .iter()
-        .filter(|event| event.ts >= required_after && event.provider.is_some())
+        .filter(|event| {
+            event.ts >= required_after && (event.provider.is_some() || event.node == "skill")
+        })
         .map(|event| event.process_id.as_str())
         .filter(|process| !launch_processes.contains(process))
         .collect();
@@ -124,6 +126,10 @@ fn check_capture(
     for launch in &launches {
         if crate::trace::resolve_artifact(&launch.artifact_dir).is_err()
             || crate::trace::resolve_artifact(&launch.conversation_path).is_err()
+            || launch
+                .provider_events_path
+                .as_deref()
+                .is_some_and(|path| crate::trace::resolve_artifact(path).is_err())
         {
             failures.push(format!("{} has an unsafe artifact path", launch.id));
         }
@@ -146,18 +152,37 @@ fn check_capture(
             ));
         }
         if launch.capture_status == "complete" {
-            match crate::trace::resolve_artifact(&launch.conversation_path)
-                .and_then(|path| crate::trace::read_conversation(&path))
-            {
-                Ok(records) => {
-                    if records
+            let conversation_path = crate::trace::resolve_artifact(&launch.conversation_path);
+            let conversation_read = match &conversation_path {
+                Ok(path) => {
+                    crate::trace::read_conversation_status(path).map_err(|error| error.to_string())
+                }
+                Err(error) => Err(error.to_string()),
+            };
+            match conversation_read {
+                Ok(read) => {
+                    if read.incomplete_tail {
+                        failures.push(format!("{} has an unterminated event tail", launch.id));
+                    }
+                    if read
+                        .events
                         .windows(2)
                         .any(|pair| pair[1].seq != pair[0].seq + 1)
                     {
                         failures.push(format!("{} has non-monotonic events", launch.id));
                     }
+                    if read.events.len() as i64 != launch.conversation_event_count {
+                        failures.push(format!("{} has a stale event count", launch.id));
+                    }
                 }
                 Err(error) => failures.push(format!("{}: {error}", launch.id)),
+            }
+            if let Ok(path) = conversation_path {
+                if std::fs::metadata(path)
+                    .is_ok_and(|metadata| metadata.len() as i64 != launch.conversation_bytes)
+                {
+                    failures.push(format!("{} has a stale byte count", launch.id));
+                }
             }
             if !turns.iter().any(|turn| {
                 turn.launch_id == launch.id
@@ -165,6 +190,15 @@ fn check_capture(
             }) {
                 failures.push(format!("{} has no terminal turn", launch.id));
             }
+        }
+    }
+    let known_artifacts: HashSet<&str> = launches
+        .iter()
+        .map(|launch| launch.artifact_dir.as_str())
+        .collect();
+    for artifact in crate::trace::list_launch_artifact_dirs()? {
+        if !known_artifacts.contains(artifact.as_str()) {
+            failures.push(format!("orphan trace artifact {artifact}"));
         }
     }
 
@@ -175,20 +209,16 @@ fn check_capture(
             .or_default()
             .push(asset);
     }
-    for turn in turns
-        .iter()
-        .filter(|turn| turn.context_coverage == "assembled")
-    {
-        if !crate::trace::resolve_artifact(&turn.task_prompt_path)
-            .is_ok_and(|path| path.is_file())
-            || turn
-                .system_prompt_path
-                .as_deref()
-                .is_some_and(|path| {
-                    !crate::trace::resolve_artifact(path).is_ok_and(|path| path.is_file())
-                })
+    for turn in &turns {
+        if !crate::trace::resolve_artifact(&turn.task_prompt_path).is_ok_and(|path| path.is_file())
+            || turn.system_prompt_path.as_deref().is_some_and(|path| {
+                !crate::trace::resolve_artifact(path).is_ok_and(|path| path.is_file())
+            })
         {
             failures.push(format!("{} is missing a prompt artifact", turn.id));
+        }
+        if turn.context_coverage == "unknown" {
+            continue;
         }
         let Some(turn_assets) = assets_by_turn.get(turn.id.as_str()) else {
             failures.push(format!("{} has no context assets", turn.id));
@@ -539,7 +569,7 @@ fn print_checks(checks: &[Check], rows: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{audit, check_continuity, Status};
+    use super::{audit, check_capture, check_continuity, Status};
     use crate::lfdb::RunEventRow;
 
     const DAY: i64 = 86_400;
@@ -568,6 +598,31 @@ mod tests {
             duration_secs: None,
             provider: None,
             model: None,
+        }
+    }
+
+    #[test]
+    fn capture_check_rejects_a_post_epoch_agent_without_a_launch() {
+        let _guard = crate::journal::test_env_lock();
+        let previous = std::env::var_os("LF_HOME");
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let store = crate::journal::open_ledger().unwrap();
+        let mut event = row(
+            "missing-capture",
+            store.trace_capture_required_after().unwrap(),
+            "run",
+            "completed",
+        );
+        event.provider = Some("codex".to_string());
+
+        let check = check_capture(&store, &[event]).unwrap();
+        assert_eq!(check.status, Status::Fail);
+        assert!(check.detail.contains("have no launch"), "{}", check.detail);
+
+        match previous {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
         }
     }
 

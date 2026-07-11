@@ -1595,16 +1595,50 @@ fn launch_skill_agent(repo_root: &Path, skill_name: &str, context: Option<&str>)
         },
     )?;
 
+    let effective_system =
+        crate::engine::agent::system_prompt_with_structured_replies(&prepared.config);
+    let context = crate::lf::commands::run::attributed_context(
+        &prepared.components,
+        &effective_system,
+        &prepared.config.task_prompt,
+        &prepared.deduplicated_docs,
+    );
+    let agent = prepared.config.agent.as_deref().unwrap_or("claude:opus");
+    let (provider, model) = crate::engine::parse_agent(agent);
+    let capture_context =
+        crate::journal::trace_capture_context(repo_root, None, Some(skill_name.to_string()))
+            .ok_or_else(|| anyhow!("trace capture identity is unavailable before agent launch"))?;
+    let capture = crate::trace::CaptureHandle::begin(
+        capture_context,
+        context,
+        crate::trace::CaptureStart {
+            provider,
+            model,
+            surface: "headless".to_string(),
+            input_op: "initial".to_string(),
+            gather_ms: 0,
+            render_ms: 0,
+            raw_provider: true,
+        },
+    )?;
+
     let process = ProcessConfig {
         auto: true,
         stream: true,
+        capture: Some(capture.clone()),
         ..Default::default()
     };
     let capabilities = AgentCapabilities {
         chrome: config.chrome,
     };
 
-    let result = launch_agent(&prepared.config, &process, &capabilities)?;
+    let result = launch_agent(&prepared.config, &process, &capabilities);
+    let outcome = match &result {
+        Ok(result) if result.exit_code == 0 => "completed",
+        Ok(_) | Err(_) => "failed",
+    };
+    capture.finish(outcome, false)?;
+    let result = result?;
     if result.exit_code != 0 {
         return Err(anyhow!(
             "agent exited with code {} while resolving {}",

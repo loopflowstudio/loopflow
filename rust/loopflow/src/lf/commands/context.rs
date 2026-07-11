@@ -1,6 +1,6 @@
 //! `lf context` — query supplied-context evidence without opening prompt bodies.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{anyhow, Result};
 use serde::Serialize;
@@ -141,15 +141,15 @@ fn print_human(dataset: &ContextDatasetDto) {
         let average = sum / values.len() as i64;
         let complete = turns
             .iter()
-            .filter(|turn| turn.capture_status == "complete")
+            .filter(|turn| turn.ordinal == 1 && turn.capture_status == "complete")
             .count();
         let partial = turns
             .iter()
-            .filter(|turn| turn.capture_status == "partial")
+            .filter(|turn| turn.ordinal == 1 && turn.capture_status == "partial")
             .count();
         let prompt_only = turns
             .iter()
-            .filter(|turn| turn.capture_status == "prompt_only")
+            .filter(|turn| turn.ordinal == 1 && turn.capture_status == "prompt_only")
             .count();
         let provider_inputs = turns
             .iter()
@@ -170,8 +170,18 @@ fn print_human(dataset: &ContextDatasetDto) {
     }
 
     println!("\nASSET CONTRIBUTIONS");
+    let initial_turns: HashSet<&str> = dataset
+        .turns
+        .iter()
+        .filter(|turn| turn.ordinal == 1 && turn.coverage == "assembled")
+        .map(|turn| turn.turn_id.as_str())
+        .collect();
     let mut kinds: BTreeMap<String, (u64, usize)> = BTreeMap::new();
-    for row in &dataset.assets {
+    for row in dataset
+        .assets
+        .iter()
+        .filter(|row| initial_turns.contains(row.turn_id.as_str()))
+    {
         let entry = kinds
             .entry(row.asset.kind.as_str().to_string())
             .or_default();
@@ -185,6 +195,14 @@ fn print_human(dataset: &ContextDatasetDto) {
             tokens / count as u64,
         );
     }
+    let follow_up_tokens: i64 = dataset
+        .turns
+        .iter()
+        .filter(|turn| turn.ordinal > 1)
+        .map(|turn| turn.supplied_context_tokens)
+        .sum();
+    let follow_up_turns = dataset.turns.iter().filter(|turn| turn.ordinal > 1).count();
+    println!("\nFOLLOW-UP INPUT  {follow_up_tokens:>10} tokens  {follow_up_turns:>5} turns");
 }
 
 fn percentile(sorted: &[i64], percent: usize) -> i64 {

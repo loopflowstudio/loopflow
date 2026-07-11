@@ -662,7 +662,7 @@ impl WaveLoop {
                     input_op: "initial".to_string(),
                     gather_ms: prepared.context_gather_ms,
                     render_ms: prepared.context_render_ms,
-                    raw_provider: false,
+                    raw_provider: true,
                 },
             ) {
                 Ok(capture) => Some(capture),
@@ -688,6 +688,7 @@ impl WaveLoop {
         };
 
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (raw_tx, mut raw_rx) = mpsc::unbounded_channel();
         let harness = match &self.backend {
             BodyBackend::Harness { create, .. } => {
                 create(&prepared.harness, ApprovalPolicy::AutoApprove, event_tx)
@@ -711,6 +712,9 @@ impl WaveLoop {
                 return;
             }
         };
+        if capture.is_some() {
+            harness.set_raw_provider_sender(Some(raw_tx));
+        }
         if let Err(err) = harness.start(&prepared.config).await {
             if let Some(capture) = &capture {
                 let _ = capture.finish("failed", false);
@@ -774,7 +778,10 @@ impl WaveLoop {
                         InboxAction::Deliver(InboxItem::Message(message))
                             if message.op == MessageOp::Steer && supports_steer =>
                         {
-                            if self.steer_harness(message, harness.as_mut()).await {
+                            if self
+                                .steer_harness(message, harness.as_mut(), capture.as_ref())
+                                .await
+                            {
                                 timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
                             }
                         }
@@ -786,6 +793,11 @@ impl WaveLoop {
                             }
                             return;
                         }
+                    }
+                }
+                raw = raw_rx.recv(), if capture.is_some() => {
+                    if let (Some(raw), Some(capture)) = (raw, capture.as_ref()) {
+                        capture.record_raw(raw.stream, &raw.line);
                     }
                 }
                 event = event_rx.recv() => {
@@ -939,7 +951,12 @@ impl WaveLoop {
         .await;
     }
 
-    async fn steer_harness(&mut self, message: PendingMessage, harness: &mut dyn Harness) -> bool {
+    async fn steer_harness(
+        &mut self,
+        message: PendingMessage,
+        harness: &mut dyn Harness,
+        capture: Option<&crate::trace::CaptureHandle>,
+    ) -> bool {
         if !self.seen.insert(message.id.clone()) {
             return false;
         }
@@ -955,6 +972,15 @@ impl WaveLoop {
             Some(from) => format!("[{from}] {}", message.text),
             None => message.text.clone(),
         };
+        if let Some(capture) = capture {
+            if let Err(err) = capture.begin_turn("steer", &text) {
+                tracing::warn!(error = %err, "trace capture refused live steering; requeueing message");
+                self.send(vec![ResidentDelta::MessagesRequeued { ids: vec![id] }])
+                    .await;
+                self.queue.push(message);
+                return false;
+            }
+        }
         if let Err(err) = harness.send_input(&text).await {
             tracing::warn!(error = %err, "live steering failed; requeueing message");
             self.send(vec![ResidentDelta::MessagesRequeued { ids: vec![id] }])

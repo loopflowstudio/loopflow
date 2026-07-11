@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let mut gathered = gather_context(&opts)?;
-    drop_native_instruction_docs(gathered.components_mut(), &args.repo);
+    let _ = drop_native_instruction_docs(gathered.components_mut(), &args.repo);
     let prompt = format_prompt(PromptFormatMode::Full, gathered.components());
     println!("{prompt}");
 

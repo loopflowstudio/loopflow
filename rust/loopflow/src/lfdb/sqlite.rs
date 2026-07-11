@@ -1687,54 +1687,43 @@ impl SqliteStore {
             ],
         )?;
         insert_agent_turn(&tx, turn)?;
-        for row in assets {
-            let asset = &row.asset;
-            tx.execute(
-                "INSERT INTO context_assets (
-                    turn_id, position, channel, kind, scope, label, source_path, included_by,
-                    content_sha256, byte_start, byte_end, bytes, isolated_tokens, attributed_tokens
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-                params![
-                    row.turn_id,
-                    i64::from(asset.position),
-                    asset.channel.as_str(),
-                    asset.kind.as_str(),
-                    asset.scope.as_str(),
-                    asset.label,
-                    asset.source_path,
-                    asset.included_by,
-                    asset.content_sha256,
-                    asset.byte_start as i64,
-                    asset.byte_end as i64,
-                    asset.bytes as i64,
-                    asset.isolated_tokens as i64,
-                    asset.attributed_tokens as i64,
-                ],
-            )?;
-        }
-        for row in decisions {
-            let decision = &row.decision;
-            tx.execute(
-                "INSERT INTO context_decisions (
-                    turn_id, position, kind, scope, label, source_path, decision, reason,
-                    original_bytes, original_tokens, asset_position
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                params![
-                    row.turn_id,
-                    i64::from(decision.position),
-                    decision.kind.as_str(),
-                    decision.scope.as_str(),
-                    decision.label,
-                    decision.source_path,
-                    decision.decision.as_str(),
-                    decision.reason,
-                    decision.original_bytes.map(|value| value as i64),
-                    decision.original_tokens.map(|value| value as i64),
-                    decision.asset_position.map(i64::from),
-                ],
-            )?;
-        }
+        insert_context_rows(&tx, assets, decisions)?;
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn insert_agent_turn_capture(
+        &self,
+        turn: &AgentTurnRow,
+        assets: &[ContextAssetRow],
+        decisions: &[ContextDecisionRow],
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        insert_agent_turn(&tx, turn)?;
+        insert_context_rows(&tx, assets, decisions)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn finish_agent_turn_capture(&self, turn: &AgentTurnRow) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        update_agent_turn(&conn, turn)?;
+        Ok(())
+    }
+
+    pub fn update_agent_launch_receipt(&self, launch: &AgentLaunchRow) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE agent_launches
+             SET provider_session_id = ?2, provider_session_path = ?3
+             WHERE id = ?1",
+            params![
+                launch.id,
+                launch.provider_session_id,
+                launch.provider_session_path,
+            ],
+        )?;
         Ok(())
     }
 
@@ -1763,28 +1752,7 @@ impl SqliteStore {
                 launch.provider_session_path,
             ],
         )?;
-        tx.execute(
-            "UPDATE agent_turns SET
-                provider_turn_id = ?2, ended_at = ?3, status = ?4,
-                provider_input_tokens = ?5, provider_output_tokens = ?6, reasoning_tokens = ?7,
-                cache_read_tokens = ?8, cache_write_tokens = ?9, cost_usd = ?10,
-                first_event_seq = ?11, last_event_seq = ?12
-             WHERE id = ?1",
-            params![
-                turn.id,
-                turn.provider_turn_id,
-                turn.ended_at,
-                turn.status,
-                turn.provider_input_tokens,
-                turn.provider_output_tokens,
-                turn.reasoning_tokens,
-                turn.cache_read_tokens,
-                turn.cache_write_tokens,
-                turn.cost_usd,
-                turn.first_event_seq,
-                turn.last_event_seq,
-            ],
-        )?;
+        update_agent_turn(&tx, turn)?;
         tx.commit()?;
         Ok(())
     }
@@ -1867,25 +1835,26 @@ impl SqliteStore {
             return Ok(Vec::new());
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, launch_id, ordinal, provider_turn_id, started_at, ended_at, status,
+        let mut turns = Vec::new();
+        for launch_ids in launch_ids.chunks(500) {
+            let placeholders = std::iter::repeat_n("?", launch_ids.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT id, launch_id, ordinal, provider_turn_id, started_at, ended_at, status,
                     input_op, context_coverage, tokenizer, system_prompt_path, task_prompt_path,
                     system_tokens, task_tokens, supplied_context_tokens, provider_input_tokens,
                     provider_output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
                     cost_usd, context_gather_ms, context_render_ms, context_persist_ms,
                     first_event_seq, last_event_seq
-             FROM agent_turns ORDER BY started_at, ordinal",
-        )?;
-        let rows = stmt.query_map([], map_agent_turn)?;
-        let wanted: std::collections::HashSet<&str> =
-            launch_ids.iter().map(String::as_str).collect();
-        let mut turns = Vec::new();
-        for row in rows {
-            let turn = row?;
-            if wanted.contains(turn.launch_id.as_str()) {
-                turns.push(turn);
-            }
+             FROM agent_turns WHERE launch_id IN ({placeholders})
+             ORDER BY started_at, ordinal"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(launch_ids), map_agent_turn)?;
+            turns.extend(rows.collect::<Result<Vec<_>, _>>()?);
         }
+        turns.sort_by_key(|turn| (turn.started_at, turn.ordinal));
         Ok(turns)
     }
 
@@ -1897,73 +1866,76 @@ impl SqliteStore {
             return Ok(Vec::new());
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT turn_id, position, channel, kind, scope, label, source_path, included_by,
-                    content_sha256, byte_start, byte_end, bytes, isolated_tokens, attributed_tokens
-             FROM context_assets ORDER BY turn_id, position",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, Option<String>>(6)?,
-                row.get::<_, String>(7)?,
-                row.get::<_, String>(8)?,
-                row.get::<_, i64>(9)?,
-                row.get::<_, i64>(10)?,
-                row.get::<_, i64>(11)?,
-                row.get::<_, i64>(12)?,
-                row.get::<_, i64>(13)?,
-            ))
-        })?;
-        let wanted: std::collections::HashSet<&str> = turn_ids.iter().map(String::as_str).collect();
         let mut assets = Vec::new();
-        for row in rows {
-            let (
-                turn_id,
-                position,
-                channel,
-                kind,
-                scope,
-                label,
-                source_path,
-                included_by,
-                content_sha256,
-                byte_start,
-                byte_end,
-                bytes,
-                isolated_tokens,
-                attributed_tokens,
-            ) = row?;
-            if !wanted.contains(turn_id.as_str()) {
-                continue;
-            }
-            assets.push(ContextAssetRow {
-                turn_id,
-                asset: ContextAsset {
-                    position: position as u32,
-                    channel: ContextChannel::parse(&channel)?,
-                    kind: ContextAssetKind::parse(&kind)?,
-                    scope: ContextScope::parse(&scope)?,
+        for turn_ids in turn_ids.chunks(500) {
+            let placeholders = std::iter::repeat_n("?", turn_ids.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT turn_id, position, channel, kind, scope, label, source_path, included_by,
+                    content_sha256, byte_start, byte_end, bytes, isolated_tokens, attributed_tokens
+             FROM context_assets WHERE turn_id IN ({placeholders})
+             ORDER BY turn_id, position"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(turn_ids), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, i64>(9)?,
+                    row.get::<_, i64>(10)?,
+                    row.get::<_, i64>(11)?,
+                    row.get::<_, i64>(12)?,
+                    row.get::<_, i64>(13)?,
+                ))
+            })?;
+            for row in rows {
+                let (
+                    turn_id,
+                    position,
+                    channel,
+                    kind,
+                    scope,
                     label,
                     source_path,
                     included_by,
                     content_sha256,
-                    byte_start: byte_start as u64,
-                    byte_end: byte_end as u64,
-                    bytes: bytes as u64,
-                    isolated_tokens: isolated_tokens as u64,
-                    attributed_tokens: attributed_tokens as u64,
-                },
-            });
+                    byte_start,
+                    byte_end,
+                    bytes,
+                    isolated_tokens,
+                    attributed_tokens,
+                ) = row?;
+                assets.push(ContextAssetRow {
+                    turn_id,
+                    asset: ContextAsset {
+                        position: position as u32,
+                        channel: ContextChannel::parse(&channel)?,
+                        kind: ContextAssetKind::parse(&kind)?,
+                        scope: ContextScope::parse(&scope)?,
+                        label,
+                        source_path,
+                        included_by,
+                        content_sha256,
+                        byte_start: byte_start as u64,
+                        byte_end: byte_end as u64,
+                        bytes: bytes as u64,
+                        isolated_tokens: isolated_tokens as u64,
+                        attributed_tokens: attributed_tokens as u64,
+                    },
+                });
+            }
         }
+        assets.sort_by_key(|row| (row.turn_id.clone(), row.asset.position));
         Ok(assets)
     }
-
     pub fn context_decisions_for_turns(
         &self,
         turn_ids: &[String],
@@ -1972,61 +1944,65 @@ impl SqliteStore {
             return Ok(Vec::new());
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT turn_id, position, kind, scope, label, source_path, decision, reason,
-                    original_bytes, original_tokens, asset_position
-             FROM context_decisions ORDER BY turn_id, position",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, String>(7)?,
-                row.get::<_, Option<i64>>(8)?,
-                row.get::<_, Option<i64>>(9)?,
-                row.get::<_, Option<i64>>(10)?,
-            ))
-        })?;
-        let wanted: std::collections::HashSet<&str> = turn_ids.iter().map(String::as_str).collect();
         let mut decisions = Vec::new();
-        for row in rows {
-            let (
-                turn_id,
-                position,
-                kind,
-                scope,
-                label,
-                source_path,
-                decision,
-                reason,
-                original_bytes,
-                original_tokens,
-                asset_position,
-            ) = row?;
-            if !wanted.contains(turn_id.as_str()) {
-                continue;
-            }
-            decisions.push(ContextDecisionRow {
-                turn_id,
-                decision: ContextDecision {
-                    position: position as u32,
-                    kind: ContextAssetKind::parse(&kind)?,
-                    scope: ContextScope::parse(&scope)?,
+        for turn_ids in turn_ids.chunks(500) {
+            let placeholders = std::iter::repeat_n("?", turn_ids.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT turn_id, position, kind, scope, label, source_path, decision, reason,
+                    original_bytes, original_tokens, asset_position
+             FROM context_decisions WHERE turn_id IN ({placeholders})
+             ORDER BY turn_id, position"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(turn_ids), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<i64>>(9)?,
+                    row.get::<_, Option<i64>>(10)?,
+                ))
+            })?;
+            for row in rows {
+                let (
+                    turn_id,
+                    position,
+                    kind,
+                    scope,
                     label,
                     source_path,
-                    decision: ContextDecisionKind::parse(&decision)?,
+                    decision,
                     reason,
-                    original_bytes: original_bytes.map(|value| value as u64),
-                    original_tokens: original_tokens.map(|value| value as u64),
-                    asset_position: asset_position.map(|value| value as u32),
-                },
-            });
+                    original_bytes,
+                    original_tokens,
+                    asset_position,
+                ) = row?;
+                decisions.push(ContextDecisionRow {
+                    turn_id,
+                    decision: ContextDecision {
+                        position: position as u32,
+                        kind: ContextAssetKind::parse(&kind)?,
+                        scope: ContextScope::parse(&scope)?,
+                        label,
+                        source_path,
+                        decision: ContextDecisionKind::parse(&decision)?,
+                        reason,
+                        original_bytes: original_bytes.map(|value| value as u64),
+                        original_tokens: original_tokens.map(|value| value as u64),
+                        asset_position: asset_position.map(|value| value as u32),
+                    },
+                });
+            }
         }
+        decisions.sort_by_key(|row| (row.turn_id.clone(), row.decision.position));
         Ok(decisions)
     }
 }
@@ -2067,6 +2043,87 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             turn.context_gather_ms,
             turn.context_render_ms,
             turn.context_persist_ms,
+            turn.first_event_seq,
+            turn.last_event_seq,
+        ],
+    )?;
+    Ok(())
+}
+
+fn insert_context_rows(
+    tx: &rusqlite::Transaction<'_>,
+    assets: &[ContextAssetRow],
+    decisions: &[ContextDecisionRow],
+) -> StoreResult<()> {
+    for row in assets {
+        let asset = &row.asset;
+        tx.execute(
+            "INSERT INTO context_assets (
+                turn_id, position, channel, kind, scope, label, source_path, included_by,
+                content_sha256, byte_start, byte_end, bytes, isolated_tokens, attributed_tokens
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![
+                row.turn_id,
+                i64::from(asset.position),
+                asset.channel.as_str(),
+                asset.kind.as_str(),
+                asset.scope.as_str(),
+                asset.label,
+                asset.source_path,
+                asset.included_by,
+                asset.content_sha256,
+                asset.byte_start as i64,
+                asset.byte_end as i64,
+                asset.bytes as i64,
+                asset.isolated_tokens as i64,
+                asset.attributed_tokens as i64,
+            ],
+        )?;
+    }
+    for row in decisions {
+        let decision = &row.decision;
+        tx.execute(
+            "INSERT INTO context_decisions (
+                turn_id, position, kind, scope, label, source_path, decision, reason,
+                original_bytes, original_tokens, asset_position
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                row.turn_id,
+                i64::from(decision.position),
+                decision.kind.as_str(),
+                decision.scope.as_str(),
+                decision.label,
+                decision.source_path,
+                decision.decision.as_str(),
+                decision.reason,
+                decision.original_bytes.map(|value| value as i64),
+                decision.original_tokens.map(|value| value as i64),
+                decision.asset_position.map(i64::from),
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE agent_turns SET
+            provider_turn_id = ?2, ended_at = ?3, status = ?4,
+            provider_input_tokens = ?5, provider_output_tokens = ?6, reasoning_tokens = ?7,
+            cache_read_tokens = ?8, cache_write_tokens = ?9, cost_usd = ?10,
+            first_event_seq = ?11, last_event_seq = ?12
+         WHERE id = ?1",
+        params![
+            turn.id,
+            turn.provider_turn_id,
+            turn.ended_at,
+            turn.status,
+            turn.provider_input_tokens,
+            turn.provider_output_tokens,
+            turn.reasoning_tokens,
+            turn.cache_read_tokens,
+            turn.cache_write_tokens,
+            turn.cost_usd,
             turn.first_event_seq,
             turn.last_event_seq,
         ],

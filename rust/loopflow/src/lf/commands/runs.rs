@@ -185,6 +185,17 @@ pub fn trace(
         if let Some(reason) = &launch.incomplete_reason {
             println!("    incomplete  {reason}");
         }
+        if let Some(session_id) = &launch.provider_session_id {
+            println!("    session     {session_id}");
+        }
+        if let Some(session_path) = &launch.provider_session_path {
+            let availability = if std::path::Path::new(session_path).exists() {
+                "available"
+            } else {
+                "expired"
+            };
+            println!("    vendor      {session_path} ({availability})");
+        }
         println!(
             "    events      {}",
             crate::trace::resolve_artifact(&launch.conversation_path)?.display()

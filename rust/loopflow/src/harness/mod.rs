@@ -17,6 +17,12 @@ use tokio::sync::mpsc;
 use crate::chat::types::ConversationEvent;
 use crate::engine::agent::AgentConfig;
 
+#[derive(Debug, Clone)]
+pub struct RawProviderEvent {
+    pub stream: &'static str,
+    pub line: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum HarnessError {
     #[error("turn already in progress")]
@@ -75,6 +81,14 @@ pub trait Harness: Send + Sync {
     /// opencode announce it by the time `start` returns; claude announces it
     /// on the first turn's stream. Callers persist this before driving turns.
     fn provider_session_id(&self) -> Option<String>;
+    /// Tee provider-native frames already visible to the adapter. The sender
+    /// is optional because conformance tests and callers below the production
+    /// launch gate do not own a trace capture.
+    fn set_raw_provider_sender(
+        &mut self,
+        _raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
+    ) {
+    }
     /// Seed a previously persisted vendor session id so the next turn resumes
     /// it. Drivers that take resume state at `start` instead ignore this.
     fn set_provider_session_id(&mut self, _provider_session_id: Option<String>) {}

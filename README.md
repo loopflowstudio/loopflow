@@ -101,13 +101,16 @@ Inspect exactly what an agent received and what Loopflow observed:
 lf runs
 lf trace <run-id>
 lf trace <run-id> --events
+lf trace <run-id> --events --jsonl --launch <launch-id-prefix>
 lf context --days 14 --wave intelligence
 ```
 
 `lf trace` keeps prompt and normalized conversation artifacts below
 `~/.lf/traces`; it prints paths and metadata by default, never prompt or event
 bodies. `--events` explicitly reads the recorded exchange. `lf context --json`
-emits turn, asset, and inclusion-decision rows for local analysis.
+emits turn, asset, and inclusion-decision rows for local analysis. Human
+context summaries keep initial assembled context separate from follow-up input
+and provider-reported history.
 
 ### Crons
 

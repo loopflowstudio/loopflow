@@ -332,8 +332,10 @@ of new turn usage with the terminal cumulative boundary instead of allowing two
 independent interpretations.
 
 `required_after` prevents pre-migration history from making capture coverage
-permanently red. New agent-bearing processes after that timestamp must have a
-launch row.
+permanently red. New processes that *enter the launch gate* after that timestamp
+must have a launch row. Gate entry, not the `skill` node, is the test — see
+“Capture scope: what is owed a launch” for why orchestrators and
+externally-hosted skills are out of scope rather than failures.
 
 ## Rust data structures
 
@@ -780,7 +782,11 @@ duplicating token rules.
 
 Add a `capture` check after lineage:
 
-- every agent-bearing process after `required_after` has an agent launch;
+- every process that entered the launch gate after `required_after` has an agent
+  launch, and every process whose terminal `run_events` row reports provider
+  spend has one; orchestrators and externally-hosted skills that never entered
+  the gate are out of scope, not failures (see “Capture scope: what is owed a
+  launch”);
 - every assembled turn has prompt files and at least one context asset;
 - asset attributed tokens reconcile exactly to system/task totals;
 - complete launches have parseable, monotonically sequenced conversation
@@ -797,6 +803,55 @@ Add a `capture` check after lineage:
 
 Include capture rows and bytes in the detail. Do not warn about total size yet;
 there is no retention policy in this branch.
+
+## Capture scope: what is owed a launch
+
+The first cut of the capture check went red under normal use. Its definition of
+“agent-bearing” — any post-`required_after` process with `node = 'skill'` or a
+provider value — conflates three different things:
+
+1. **In-process launches.** A headless `lf -b :` both runs a skill and invokes a
+   provider in the same process. It is owed a launch, and it has one.
+2. **Orchestrators and dispatchers.** `lf code`, `lf queue`, and `wave_pursue`
+   emit a `skill` event but spend no provider tokens themselves; their provider
+   work happens in child processes. They are *not* owed a launch of their own.
+3. **Externally-hosted providers.** `lf -m codex …` shells out to an external
+   CLI; a Claude-Code-hosted skill (e.g. `lf demo`) runs the provider outside
+   Loopflow’s gate entirely. Loopflow never reaches `begin_agent_capture`, so
+   there is nothing to capture in-process.
+
+Keying “owed a launch” off `node = 'skill'` flags (2) and (3) as failures even
+though every real in-process launch was captured. That is why the demo ledger
+was green only across a pristine window of hand-run probes and red the moment a
+wave did real work — while every one of the nine captured launches was still a
+direct `lf -b :` probe, and no `lf code` run produced any child launch at all.
+
+Redefine the check around the gate, not the skill vocabulary:
+
+- **Owed set = processes that entered the launch gate.** The two-phase publish
+  already stages a capture directory before the SQLite commit. A process is owed
+  a launch iff it has a staged or committed capture. A committed launch satisfies
+  it; a staged-but-uncommitted directory is the existing pre-launch orphan,
+  reported as before. Drop the `node = 'skill'` inference; it is a proxy for the
+  wrong thing.
+- **Keep a positive leak check.** Independently, any process whose terminal
+  `run_events` row reports provider spend but has no launch is a hard failure and
+  names that exact process. This is what actually catches a gated path that
+  regresses and skips capture — without flagging a dispatcher that spent nothing.
+- **Classify externally-hosted providers explicitly.** A codex dispatch or a
+  host-run skill either enters the gate as an `external`/prompt-only receipt
+  (prompts and any vendor receipt durable, no fabricated transcript) or is marked
+  out of capture scope. It never reads as an agent-bearing process missing a
+  launch, and its spend is never silently dropped: if Loopflow can see the
+  provider total it records a receipt; if it cannot, the launch says so.
+
+Then confirm the dispatch path actually reaches the gate. `lf code`’s children
+are separate `lf` processes that invoke Claude; each must call
+`begin_agent_capture` and produce its own launch. On the demo ledger no `lf code`
+run produced any child launch — proof #6 has zero live evidence. Before tuning
+the check, verify a real `lf code` on a small fixture writes child launches; if
+it does not, the gap is an ungated child path, and closing it is the
+higher-priority fix over the doctor heuristic.
 
 ## Degradation and deletion
 
@@ -1006,6 +1061,30 @@ workflows hold:
     the long-lived migrated ledger. All readers succeed and the new run is
     capture-complete.
 
+19. **Stay green under real wave operation.** Run `lf code`, `lf queue`, and a
+    `-m codex` dispatch in a live wave, then `lf doctor`. Capture is green or a
+    warning, never a failure, as long as every process that entered the launch
+    gate has a launch. Orchestrator and externally-hosted processes that never
+    entered the gate are not counted as missing launches. (First cut regressed
+    here: capture flipped red the moment any orchestrator ran, and the green
+    claim held only on a ledger of hand-run `lf -b :` probes. See “Capture scope:
+    what is owed a launch.”)
+
+20. **Prove multi-launch on the live ledger, not just in prose.** A real
+    `lf code` on a small fixture writes child launches for its
+    implement/compress/lint/gate turns into the ledger, and `lf trace` on that
+    run shows them as separate launches. Proof #6 is satisfied by captured rows
+    on the long-lived ledger, not only by fixture tests. If no child launch
+    appears, the gap is an ungated child path, not a doctor heuristic.
+
+21. **Name external provider spend honestly.** A `-m codex` run or a
+    Claude-Code-hosted skill either records a launch (when it enters the gate) or
+    is classified as an externally-hosted provider with a receipt. It is never
+    reported as an agent-bearing process missing a launch and never fabricated as
+    a complete in-process transcript. A gated path that spends provider tokens
+    without a launch is still a hard `lf doctor` failure naming that exact
+    process.
+
 ## Verification commands
 
 ```bash
@@ -1032,7 +1111,9 @@ fixture id into the real-ledger check.
 
 Record before/after values in the PR notes:
 
-- percentage of post-migration agent-bearing processes with a launch record;
+- percentage of post-migration gate-entering processes with a launch record
+  (measured by gate entry, not the `skill` node, which includes ungated
+  orchestrators and externally-hosted skills);
 - percentage of headless launches capture-complete;
 - percentage of assembled turns whose asset tokens reconcile exactly;
 - provider coverage across Claude, Codex, and OpenCode fixtures;
@@ -1044,7 +1125,9 @@ Record before/after values in the PR notes:
 
 Acceptance targets:
 
-- 100% launch coverage after `required_after` for supported headless paths.
+- 100% launch coverage after `required_after` for every process that enters the
+  launch gate; orchestrator and externally-hosted processes are out of scope by
+  definition, not by exception.
 - 100% exact token reconciliation for assembled turns.
 - 100% parseable normalized event files after clean completion.
 - No more than 100 ms additional warm prompt-preparation latency for a typical

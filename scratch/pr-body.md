@@ -30,7 +30,7 @@ uv run python scripts/test.py --all
 ```
 
 All six suites pass. The implementation diff is net-negative outside
-`scratch/`: 7,444 additions and 9,347 deletions.
+`scratch/`: 7,454 additions and 7,676 deletions.
 
 ## Intent
 
@@ -63,6 +63,10 @@ starts and who owns it through review and merge.
   reconcile before retrying completion so ambiguous writes do not duplicate
   tasks or PR comments.
 - Use Harness capabilities for live input and queue unsupported input honestly.
+- Settle provider turn boundaries transactionally: either claim queued input or
+  make the Task Session inactive, never both.
+- Deliver consequential Task events to the Wave as typed, idempotent journal
+  observations; keep raw provider chatter in the Task transcript.
 - Feed Swift from `lf --json` and the shared PM snapshot instead of adding a
   second lifecycle API.
 - Delete the old public lifecycle in the same change; no compatibility aliases.
@@ -71,6 +75,10 @@ starts and who owns it through review and merge.
 
 - Multi-task integration PRs, task dependency edges, or remote execution.
 - Rich Task transcript and direct steering UI.
+- Durable Project Sessions and Task→Project supervision. `lf project run`
+  remains a Wave directive in this PR.
+- A durable observation outbox/cursor. The interim Wave observer is correct by
+  journal idempotency but rescans Task event history every 10 seconds.
 - The side-effecting live Linear/provider/PR dogfood and the complete
   10-scenario × 3-adapter scripted-peer matrix. Typed Task observations,
   decisions, atomic turn settlement, waitable receipts, and provider capability

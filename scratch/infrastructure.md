@@ -1,4 +1,4 @@
-# Linear-backed, steerable task sessions
+# Linear-backed, steerable Project and Task Sessions
 
 ## What to build
 
@@ -67,6 +67,14 @@ Preserve this working implementation rather than redesigning it again:
 The focused `cargo test -p loopflow task_` suite currently passes 20 tests.
 Those tests prove persistence and local state transitions, not the seven
 remaining product behaviors below.
+
+| Layer | Already implemented | This slice adds |
+|---|---|---|
+| Wave | Permanent home, server, human thread, continuous resident, PM/project selection, direct Task control | Typed Project observations, Project control/decision commands, root-owner override |
+| Project | Linear definition/KRs/tasks, `start/run` CLI, one bounded authored flow pass | Durable Project Session, repeated event-driven pursuit, provider/process recovery, Task supervision |
+| Task | Durable session/worktree/provider/PR, steering verbs, receipts, process generations, PM writeback | Immediate supervisor link, shared child commands, atomic boundary settlement, decisions and typed outbox |
+| Delivery | Independent Task PRs target `main`; stacks/queues/rotation are removed | No change |
+| Client | CLI/JSON Task lifecycle and passive Swift Task rows | Project Session JSON/DTO and passive row; rich UI remains deferred |
 
 ## How Project Sessions fit
 
@@ -186,8 +194,11 @@ iteration. After each iteration the runner reads the authoritative PM snapshot
 and child Task state:
 
 - every KR holds → `Completed`, emit one completion, stop;
-- relevant Tasks are active → `Waiting`, stop the process without losing the
+- supervised Tasks are `Starting`, `Running`, or `Submitted` and no immediate
+  decision is required → `Waiting`, stop the process without losing the
   provider session;
+- a Task is `Waiting`, `Blocked`, or resumably `Failed` → keep the Project
+  iteration actionable so it can steer, resume, abandon, or escalate;
 - a decision is outstanding → `Blocked`, wait for the answer;
 - open KRs remain and observable PM/Task state changed → begin another
   iteration;
@@ -200,11 +211,17 @@ it. Waiting consumes no provider turns. Repeated wakeups coalesce before launch.
 Standing frontier Projects may remain `Waiting` indefinitely; they complete
 only when their current proof-shaped KRs all hold.
 
+`Completed` closes the pursuit runtime; it does not silently archive or delete
+the Linear Project. `project_mutate` persists KR evidence through `lf pm`; an
+explicit PM policy may archive a completed bet later.
+
 The second real child-session consumer justifies one shared control primitive.
 Refactor Task command persistence into a child-session command envelope rather
 than cloning the state machine:
 
 ```rust
+string_id!(ChildCommandId, "cc_");
+
 pub enum ChildSessionRef {
     Project(ProjectSessionId),
     Task(TaskSessionId),
@@ -237,10 +254,11 @@ Do not create a public generic session or loop command.
 
 The database migration adds `project_sessions`, `project_events`, shared
 `child_commands`, and `observation_outbox`; it adds required supervisor kind/id
-columns to `task_sessions`. Existing Task commands retain ids, state, effect,
-generation, timestamps, and errors. Existing Tasks point to their Wave. DTO
-fixtures add every required field in Rust and Swift; no wire default hides an
-old row or stale client.
+columns to `task_sessions`. Existing Task-command rows retain state, effect,
+generation, timestamps, and errors; their ids and linked event references are
+rewritten atomically from `tc_` to the shared `cc_` namespace. Existing Tasks
+point to their Wave. DTO fixtures add every required field in Rust and Swift;
+no wire default hides an old row or stale client.
 
 ### 2. Typed child observations
 
@@ -294,6 +312,15 @@ observations into its own event ledger before acknowledging them. The Wave
 server is still the sole Wave-journal writer; it appends Project observations
 and directly supervised Task observations before acknowledging their outbox
 rows. Restart or retry cannot duplicate them.
+
+No daemon is required for wakeup. After commit, the event producer makes one
+best-effort delivery: a Project supervisor is transactionally reserved and
+launched when inactive; a live Wave server is notified through its narrow
+local door. Failure leaves the outbox row pending. The next publish for that
+supervisor and mutating `project run/resume` or Wave `serve` sweep pending
+rows. Read-only status reports pending observations but never launches a
+process. The next ordinary lifecycle touch repairs delivery without inventing
+`lfd` execution.
 
 The supervisor receives a typed inbox item, renders a compact structured
 prompt, and either wakes once while idle or queues behind the active turn. It
@@ -704,26 +731,32 @@ enum PmRefresh {
 }
 ```
 
-The product checkout is currently mid-transition. Before implementing this
-design, rebase onto its landed PM contract and verify four integration points:
+The product PM contract is now integrated on this branch. Preserve the verified
+integration points:
 
 1. `PmShowOptions.refresh` is honored by `pm_show`, not merely declared.
 2. CLI `--sync` and `--no-sync` map to `Force` and `Never`.
 3. `PmItem` includes Linear's human identifier (`INF-123`) as well as its UUID.
-4. `pm init` leaves a readable snapshot, or the lifecycle owns one temporary
-   post-init sync.
+4. `pm init` and explicit sync leave one readable atomic snapshot.
 5. A PM mutation preserves its committed provider result when the following
    snapshot refresh fails. The current `write Linear; refresh?; return result`
    shape must not collapse “issue created, cache refresh failed” into an error
    that discards the created UUID.
 
-Use one narrow function module while those APIs settle; do not introduce a PM
-provider trait or compatibility model:
+Keep the existing narrow `task_pm` composition seam; extend it for Project
+Session resolution rather than introducing a PM provider trait or compatibility
+model:
 
 ```rust
 mod task_pm {
     pub fn load_wave(repo: &Path, wave: &str, refresh: PmRefresh)
         -> OpsResult<PmShowResult>;
+
+    pub fn resolve_project(
+        repo: &Path,
+        project: &str,
+        refresh: PmRefresh,
+    ) -> OpsResult<(PmShowResult, PmProject)>;
 
     pub fn create_and_load_task(
         repo: &Path,
@@ -742,15 +775,9 @@ mod task_pm {
 }
 ```
 
-`create_and_load_task` may temporarily call `pm_update`, then load
-`PmShowResult` with `Never` and find the returned UUID because the incoming
-mutation result returns only an id. Mark that bridge
-`TODO(product-pm): return the refreshed PmItem from task creation`, and remove
-it once the PM mutation API returns the created item. If `pm init` lands
-without snapshot seeding, a single `ensure_snapshot_after_init` bridge may call
-`pm sync`; mark it for removal when init owns that invariant. These shims adapt
-an in-flight internal API only—there is no compatibility path for project
-files or old PM commands.
+Add only the Project lookup needed to return `(PmShowResult, PmProject)` by
+canonical id/unique slug. No shim may read Project markdown, support the old PM
+schema, or perform a second provider query.
 
 Do not shim an ambiguous committed mutation by matching title or creating
 again. The PM API must return either a refreshed item or a structured committed
@@ -833,7 +860,8 @@ lf task start "add a hello-world command" --project <linear-project-id>
 
 `start` means create the Linear record, then invoke the formal `run` path with
 the returned id. It is not an overloaded identifier parser. If record creation
-fails, no Task Session, worktree, branch, or provider process is created.
+fails, no Project/Task Session, worktree, branch, or provider process is
+created.
 
 If Linear creation commits but snapshot refresh fails, the PM result retains
 the UUID and a durable PM mutation receipt. `start` creates no worktree or
@@ -857,6 +885,22 @@ receives its id before starting execution.
 
 ```json
 {
+  "project_id": "8ab…",
+  "project_slug": "work-isolation",
+  "session_id": "ps_01J…",
+  "wave": "infrastructure",
+  "status": "waiting",
+  "status_reason": "two supervised Tasks are running",
+  "iteration": 2,
+  "provider": "codex",
+  "provider_session_id": "thread_…",
+  "process_alive": false,
+  "task_event_cursor": 41
+}
+```
+
+```json
+{
   "issue_id": "5ed…",
   "issue_identifier": "INF-123",
   "project_id": "8ab…",
@@ -864,6 +908,7 @@ receives its id before starting execution.
   "pm_snapshot_synced_at": 1783728000,
   "pm_writeback": { "state": "current" },
   "session_id": "ts_01J...",
+  "supervisor": { "kind": "project", "session_id": "ps_01J…" },
   "wave": "infrastructure",
   "status": "running",
   "worktree": "/Users/jack/src/loopflow.inf-123",
@@ -878,6 +923,15 @@ mutations through `lfd` HTTP.
 ## Lifecycle
 
 ```text
+Linear Project
+  → Created
+  → Starting
+  → Running            one clarify/pursue/mutate iteration
+  ↔ Waiting            no process; wake on child event or command
+  ↔ Blocked/Failed     same session may resume
+  → Completed          all current KRs observably hold
+  → Abandoned          terminal only through explicit command
+
 Linear issue
   → Created
   → Starting          reservation + worktree + process launch
@@ -889,7 +943,7 @@ Linear issue
   → Abandoned         terminal only through explicit command
 ```
 
-Starting is transactional in intent:
+Task starting remains transactional in intent:
 
 1. Load the owning Wave's `PmShowResult` through the selected freshness mode.
 2. Resolve exactly one open `PmItem`, its `PmProject`, and owning Wave from that
@@ -959,8 +1013,9 @@ The built-in skills reflect the ownership boundary:
 
 ## Task runner
 
-Replace the generic headless pass loop with one inbox-aware task runner using
-the existing Harness contract.
+Preserve the implemented inbox-aware Task runner and move only its generic
+command claiming, receipt, steering, and boundary settlement into the shared
+child control core.
 
 ```rust
 pub async fn run_task_session(
@@ -971,7 +1026,7 @@ pub async fn run_task_session(
 struct TaskRunner {
     session: TaskSession,
     harness: Box<dyn Harness>,
-    controls: TaskControlReceiver,
+    commands: ChildCommandReceiver,
     events: TaskEventWriter,
 }
 ```
@@ -985,11 +1040,11 @@ The runner evaluates the configured Task flow. Flows remain customizable step
 policy; they cannot redefine Task identity, worktree ownership, control,
 delivery, or completion.
 
-The current `flowloop/wave.rs` contains the honest control behavior worth
-sharing: provider event handling, live-steer capability checks, queued
-next-turn input, interruption, timeout, and usage. Extract the smallest common
-runner core or call common functions directly. Do not create a factory trait or
-a generic orchestration framework solely to make tests easier.
+Share provider event handling, live-steer capability checks, queued next-turn
+input, interruption, timeout, receipt transitions, and usage with the Project
+runner. Keep convergence, worktree, PR, and PM-writeback policy in the Task
+domain. Do not create a factory trait or generic orchestration framework solely
+to make tests easier.
 
 ## Child commands and domain events
 
@@ -1119,9 +1174,10 @@ The three instruction verbs have provider-independent intent:
   instruction, and makes the replacement next. A bare interrupt stops and
   leaves the Task waiting.
 
-The runner performs one final durable command claim before ending a turn. A
-command racing the boundary is either accepted before exit or automatically
-resumes the same Task Session; it cannot remain stranded in a waiting Task.
+The shared boundary transaction claims commands or marks the generation
+inactive atomically. A command racing the boundary is therefore accepted by
+the current generation or reserves/resumes the next one; it cannot remain
+stranded in a waiting Project or Task.
 
 Provider behavior:
 
@@ -1134,8 +1190,9 @@ Provider behavior:
 
 This is the minimum parity floor established in the dated capability matrix
 and black-box scenarios in `scratch/research.md`. Loopflow deliberately omits
-peer-to-peer teammate chat and nested teams; neither is necessary for a Wave to
-control a Task. It must match the stronger parent controls: Codex’s addressed
+peer-to-peer teammate chat and nested teams; neither is necessary for a
+supervisor to control a child. It must match the stronger parent controls:
+Codex’s addressed
 interrupt-plus-input and structured submission receipt, OpenCode’s serialized
 extensions/wait/cancel, and Claude’s lead-owned plan decision and automatic
 updates.
@@ -1265,22 +1322,16 @@ lf project run <linear-project-id>
 ```
 
 This loads `PmShowResult` in `Auto`, resolves the Project by canonical id (or
-its unique snapshot slug), appends its snapshot-backed definition/KRs and a
-durable project directive to the owning Wave's inbox, and wakes the Wave when
-its server is live. If the Wave is stopped, the command reports `queued` and
-the next `lf serve` consumes it. It does not read a project file, spawn a
-Project Worker, or create a project worktree.
+its unique snapshot slug), reserves its one Project Session, and launches or
+resumes `lf __project`. If the owning Wave is stopped, the Project Session may
+still coordinate its Tasks; typed Project observations remain in the outbox
+until the Wave serves again. It never reads a Project file or creates a Project
+worktree.
 
-The Wave may then:
-
-1. decide an existing task is next and call `lf task run <id>`;
-2. create a new Linear task and run it;
-3. steer or interrupt active task sessions;
-4. wait when evidence is external;
-5. close or renew KRs once task results arrive.
-
-A Project can therefore advance many tasks without becoming a branch or a
-second durable mind.
+The Project Session creates/runs Tasks, controls their sessions, sleeps while
+their outcomes are external, wakes on their events, updates KR evidence through
+`lf pm`, and completes when the current KRs hold. It is a bounded child mind,
+not a branch, server, or permanent operating context.
 
 ## Worktrees and delivery
 
@@ -1363,8 +1414,9 @@ slot, including startup failure, interrupt, provider crash, and forced stop.
 Project and Task workers may run in named tmux sessions. Tmux owns process
 lifetime and a human-facing terminal; it does not own agent semantics.
 
-`lf task attach INF-123` attaches read-write. The task runner exposes a tiny
-control prompt whose input calls the same durable Task command functions:
+`lf task attach INF-123` and `lf project attach <id>` attach read-write. Each
+runner exposes a tiny control prompt whose input calls the same durable child
+command functions:
 
 ```text
 task INF-123> focus on the parser
@@ -1406,8 +1458,8 @@ worktrees. Provider sandboxing stays disabled. The worktree boundary prevents
 concurrent writers; it is not a security sandbox.
 
 Standard execution enters through `lf`. There is no `lfq`, generic `/v0/exec`,
-or task execution API in machine `lfd`. Remote execution may later transport
-the same typed Task controls over SSH or a narrow receiver, but local MVP does
+or child execution API in machine `lfd`. Remote execution may later transport
+the same typed child controls over SSH or a narrow receiver, but local MVP does
 not keep a speculative proxy.
 
 ## Remaining implementation order
@@ -1458,7 +1510,7 @@ The remaining slice should delete or reduce:
   concept;
 - provider-name branches in conformance behavior, if any appear—the Harness
   capability contract owns the difference;
-- any decision-specific approval path that duplicates the Task command/event
+- any decision-specific approval path that duplicates the child command/event
   state machine;
 - test-only production abstractions added to script providers; protocol peers
   belong under test configuration instead.
@@ -1482,9 +1534,9 @@ The remaining slice should delete or reduce:
 - One PR target: `main`.
 - One source of roadmap identity: Linear.
 
-The `task_pm` module is a composition seam, not a second PM layer. TODO shims
-must name the exact incoming API gap and be deleted when that gap closes; no
-shim may read project markdown or support the superseded PM schema.
+The `task_pm` module is a composition seam, not a second PM layer. Extend its
+typed Project resolver; add no compatibility shims, Project markdown reads, or
+support for the superseded PM schema.
 
 Manual `lf wt create` may remain as a diagnostic escape hatch only in sibling
 mode. It is never how roadmap work starts.
@@ -1547,7 +1599,7 @@ Efficiency with the outage evidence.
 - Every planning read comes from the canonical-repo `PmShowResult`; a task
   worktree never creates its own PM snapshot namespace.
 - Every planning mutation goes through `lf pm` semantics and refreshes the
-  affected snapshot; Task lifecycle code never writes planning state locally.
+  affected snapshot; child lifecycle code never writes planning state locally.
 - No repository Project mirror or `wave/*/projects/` compatibility reader is
   introduced.
 - Every independent task produces zero or one PR, always targeting `main`.
@@ -1669,15 +1721,17 @@ Efficiency with the outage evidence.
   than raw provider stdin.
 - `/interrupt`, `/status`, and `/detach` work from the attached prompt without
   corrupting the provider protocol.
-- Killing the tmux session changes a supposedly running task to a resumable
-  failed state with an actionable reason on the next status check.
+- Killing either tmux session changes a supposedly running Project/Task to a
+  resumable failed state with an actionable reason on the next status check.
 - `lf task resume INF-123` reuses the same Task Session, worktree, branch, and
   provider history; `lf project resume <id>` reuses the same Project Session,
   event cursor, and provider history when supported.
 - Unacknowledged commands owned by a dead process generation are reclaimed;
   acknowledged commands are not silently lost.
-- Starting/resuming beyond the Wave's configured concurrency fails before
-  process launch and leaks no reservation.
+- Starting/resuming Tasks beyond the Wave's configured worker capacity fails
+  before process launch and leaks no reservation. Project coordination does
+  not consume a Task worker slot, but generation reservation still prevents
+  duplicate Project processes.
 - Every startup, interrupt, provider crash, timeout, merge, and abandonment
   path releases process capacity.
 
@@ -1735,7 +1789,8 @@ Efficiency with the outage evidence.
   includes a reason and timestamp.
 - Wave event → Project Session → Task Session → raw transcript/worktree/PR is
   traceable from ids.
-- Provider usage and cost attach to the Task Session and roll up to the Wave.
+- Provider usage and cost attach to Project/Task Sessions and roll up to the
+  Wave without double-counting child usage.
 
 ## Done when: deletion and simplification
 
@@ -1744,13 +1799,14 @@ Efficiency with the outage evidence.
   stack queue, or `combine_prs` product surface.
 - The active `Run`/Task model has no stack position/group/status, parent PR,
   lineage inference, or arbitrary target branch fields.
-- Rust has one steerable provider-loop implementation used by Task Sessions;
-  the old blocking pass loop is deleted.
+- Rust has one child control/receipt core used by Project and Task runners; the
+  domain policies differ without duplicating provider steering mechanics.
 - Swift has no execution/placement/session lifecycle that competes with `lf`.
-- Built-in skills and docs name only Wave, Project, Task, Task Session, and
-  provider harness where those concepts are exercised.
-- The final diff is within the roughly 5,000-line implementation budget and
-  shows substantial deletion of the old lifecycle.
+- Built-in skills and docs name only Wave, Project, Project Session, Task, Task
+  Session, and provider harness where those concepts are exercised.
+- The remaining implementation stays within roughly 5,000 added or
+  substantially rewritten lines, excluding migrations/fixtures, and does not
+  restore any deleted generic lifecycle.
 
 ## Verification
 
@@ -1759,14 +1815,17 @@ cargo fmt --check
 cargo test -p loopflow
 cargo clippy -p loopflow --all-targets -- -D warnings
 swift test --package-path swift
-scripts/test.py --rust --python --swift
+uv run python scripts/test.py --rust --python --swift
 ```
 
-Add focused end-to-end tests for create/run, concurrent reservation, live and
-queued steer, interrupt-and-message, crash/resume, submitted-review-resume,
-merge cleanup, PM create-refresh-run composition, identifier/UUID resolution,
-fresh/soft-stale/hard-stale snapshot behavior, post-merge PM writeback retry,
-Wave journal folding, JSON round trips, and stale-symbol deletion.
+Add focused end-to-end tests for Project create/run/idempotence, iteration
+convergence, no-progress blocking, zero-token wait/wake, Task supervision,
+Task→Project→Wave outbox recovery, decisions, concurrent reservation, live and
+queued steer, interrupt-and-message, command boundary races, receipt waiting,
+crash/resume, submitted-review-resume, merge cleanup, PM create-refresh-run
+composition, identifier/UUID resolution, fresh/soft-stale/hard-stale snapshot
+behavior, post-merge PM writeback retry, Wave journal folding, JSON round trips,
+and stale-symbol deletion.
 
 The known headless Loopflow UI runner hang remains “unproven,” not a regression
 signal. Perform the required simulated operational review before handoff:

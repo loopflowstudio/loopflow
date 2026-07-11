@@ -33,6 +33,11 @@ accepted, failed, or superseded state plus their actual effect; interrupt with
 a replacement supersedes older input transactionally; and unresolved commands
 relaunch an inactive nonterminal session after a turn-boundary race.
 
+The final Task slice adds explicit receipt reads/waits, typed decision
+requests and responses, and idempotent Task observations in the Wave journal.
+Turn-boundary settlement now atomically chooses between claiming queued input
+and stopping the process, so an instruction cannot land in the inactive gap.
+
 Migrations 065–066 repair dogfood databases that recorded the Task Session
 migration before the `agent` column or command receipts joined the schema.
 Migration 066 also converts already-accepted commands and legacy events so an
@@ -50,8 +55,9 @@ same migration chain.
   multi-task integration modes do not appear as speculative enum variants.
 - Commands are durable and generation-claimed so an unacknowledged command is
   reclaimed after process death.
-- The Wave remains the human-facing mind. Task commands and terminal results
-  mirror into its journal without copying raw child tool chatter.
+- The Wave remains the human-facing mind. Consequential Task events enter its
+  journal as typed, idempotent observations without copying raw child tool
+  chatter.
 - Swift consumes `lf --json` and the shared PM snapshot rather than owning a
   second mutation or lifecycle model.
 
@@ -75,12 +81,16 @@ independent merge/cleanup path.
   implemented. The complete 10-scenario × 3-adapter scripted-peer matrix and
   live Linear/provider/PR dogfood remain parity evidence; keep the PR draft
   until one of those gates closes the black-box coverage gap.
+- The interim Wave observer scans each Task event ledger from its beginning on
+  every 10-second reconciliation pass. Journal idempotency keeps the result
+  correct, but the read cost grows with Task history; the planned durable
+  observation outbox/cursor belongs to the Project Session slice.
 - Live Linear/provider create→run→steer→merge was not executed during this
   headless gate because it creates external records, worktrees, provider spend,
   and a PR. The deterministic store, migration, parser, PM, and lifecycle tests
   pass.
-- The diff is intentionally broad: 173 files, 7,444 non-scratch additions and
-  9,347 deletions. Review state ownership and failure paths before UI polish.
+- The diff is intentionally broad: 129 non-scratch files, 7,454 additions and
+  7,676 deletions. Review state ownership and failure paths before UI polish.
 
 ## What's not included
 
@@ -89,15 +99,17 @@ independent merge/cleanup path.
 - Rich direct Task transcript/steering UI; the Mac projects Task Sessions into
   its existing run surface.
 - Automatic cleanup for failed/blocked sessions.
+- Durable Project Sessions, shared child-command storage, and Task→Project→Wave
+  observation delivery. `lf project run` still asks the Wave to pursue a
+  Project; it does not create a Project process in this PR.
 - The side-effecting live lifecycle dogfood and the complete scripted-peer
   conformance matrix named above.
 
 ## Validation
 
 - `uv run python scripts/test.py --all` — all six suites pass: 53 Python tests;
-  Rust format/clippy plus 1,284 nextest passes (3 intentional skips);
-  59 website tests (3 intentional skips); 298 Swift tests plus the
-  multiplatform boundary check; CLI/API e2e smoke; signed macOS
+  Rust format/clippy/nextest; 59 website tests (3 intentional skips); Swift
+  tests plus the multiplatform boundary check; CLI/API e2e smoke; signed macOS
   `build-for-testing`.
 - The focused migration 066 repair test passes after removing the trailing
   whitespace caught by `git diff --check`.
@@ -105,4 +117,4 @@ independent merge/cleanup path.
   dogfood Task Session and command schemas, receipt/supersession persistence,
   parser separation, and cross-Wave command refusal.
 - `bash -n scripts/demo_wave.sh` and `git diff --check` pass.
-- The final branch is net-negative outside `scratch/`: 1,903 fewer lines.
+- The final branch is net-negative outside `scratch/`: 222 fewer lines.

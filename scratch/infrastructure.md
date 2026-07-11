@@ -8,11 +8,13 @@ worktrees, resumable provider sessions, durable commands/events, and one PR to
 `main`; the competing generic-loop, rotation, stacking, queue, sandbox, and
 `lfd` exec paths are gone.
 
-This remaining slice has six jobs: deliver typed Task observations to the Wave,
-add Task-to-Wave decisions, prove provider behavior with one conformance suite,
-dogfood the complete lifecycle, close the turn-boundary command race, and make
-durable receipts explicitly waitable. Do not reopen placement, delivery,
-remote execution, or Swift UI design while completing this slice.
+The Task runtime exposed one missing layer: Projects still need a process that
+pursues their KRs across many Tasks. The remaining slice therefore has seven
+jobs: add durable Project Sessions; deliver typed child observations; add
+child-to-supervisor decisions; prove provider behavior with one conformance
+suite; dogfood the complete hierarchy; close the turn-boundary command race;
+and make durable receipts explicitly waitable. Do not reopen placement,
+delivery, remote execution, or Swift UI design while completing this slice.
 
 > “The standard way to execute a task should basically be to create the Linear
 > task and then just pass the Linear ID to the task.”
@@ -63,97 +65,288 @@ Preserve this working implementation rather than redesigning it again:
   stacks, queues, and project markdown mirrors are removed.
 
 The focused `cargo test -p loopflow task_` suite currently passes 20 tests.
-Those tests prove persistence and local state transitions, not the six product
-behaviors below.
+Those tests prove persistence and local state transitions, not the seven
+remaining product behaviors below.
 
-## Remaining MVP slice
+## How Project Sessions fit
 
-### 1. Typed Task observations in the Wave
+The old generic loop mixed two different jobs:
 
-Replace prose calls to `post_to_named_wave("Task …")` with one typed,
-idempotent observation path. The Task ledger remains authoritative; the Wave
-journal records the observation needed to preserve its conversation and wake
-its resident.
+1. isolate code-writing execution in a worktree;
+2. repeat judgment until an outcome holds.
+
+Task Sessions now own the first job. Removing generic `lf loop` also removed
+the second job for Projects. The current `project` flow is only one bounded
+`project_clarify → project_pursue → project_mutate` pass, and `lf project run`
+only posts a prose directive to the Wave. It does not durably bind a Project to
+a provider session, repeat until its KRs hold, wait without spending tokens, or
+resume when a Task changes.
+
+Add a domain-specific Project Session rather than restoring a generic loop:
+
+```text
+Human
+└── Wave                         permanent mind, chat, memory, cadence
+    └── Project Session         bounded KR-pursuit loop, no worktree or PR
+        ├── Task Session        implementation worktree + provider + PR
+        └── Task Session        implementation worktree + provider + PR
+```
+
+The normal control path is `Human → Wave → Project Session → Task Session`.
+The Wave remains authorized to inspect or control any descendant Task directly.
+A Task launched directly by the Wave simply names the Wave as its supervisor.
+
+A Linear Project remains planning data: definition, KRs, and task membership.
+The Project Session is its temporary runtime. Like a Task Session, it may have
+a resumable provider transcript and many process generations without giving
+the Project Wave semantics. It owns no human chat, permanent memory, cadence,
+server, worktree, branch, or PR. A Project requiring those things is promoted
+to a Wave.
+
+## Remaining infrastructure slice
+
+### 1. Durable Project Sessions
+
+`lf project start` creates a Linear Project and then starts its one Project
+Session. `lf project run <linear-project-id>` starts or returns that same
+session. It no longer posts a prose instruction and hopes a later Wave turn
+remembers it.
+
+```rust
+string_id!(ProjectSessionId, "ps_");
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectSession {
+    pub id: ProjectSessionId,
+    pub project_id: LinearProjectId,
+    pub project_slug: String,
+    pub project_name: String,
+    pub wave_id: LfdId,
+    pub wave: String,
+    pub pm_snapshot_synced_at: i64,
+    pub status: ProjectSessionStatus,
+    pub status_reason: String,
+    pub iteration: u32,
+    pub task_event_cursor: i64,
+    pub agent: String,
+    pub provider: String,
+    pub provider_session_id: Option<String>,
+    pub process: Option<SessionProcess>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProjectSessionStatus {
+    Created,
+    Starting,
+    Running,
+    Waiting,
+    Blocked,
+    Failed,
+    Completed,
+    Abandoned,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SessionSupervisor {
+    Wave(LfdId),
+    Project(ProjectSessionId),
+}
+```
+
+Add `supervisor: SessionSupervisor` to `TaskSession`. Existing Task Sessions
+migrate to their owning Wave. A Task started from a Project Session captures
+that Project Session as its immediate supervisor. Root ownership remains the
+Wave, so the Wave may always override the Project Session and steer the Task.
+A foreign Wave or unrelated Project Session is refused before persistence.
+
+The Project Session runs as `lf __project <session-id> <generation>` in a named
+tmux session using the existing process launcher. It runs from the permanent
+Wave home only to read repository and PM context; it must not edit files.
+Every concrete file mutation is delegated to a Linear Task and Task Session.
+No Project worktree or branch is created.
+
+Public control mirrors the proven Task vocabulary:
+
+```text
+lf project run <project-id>
+lf project status <project-id>
+lf project follow-up <project-id> "..."
+lf project steer <project-id> "..."
+lf project interrupt <project-id> [--message "..."]
+lf project wait <project-id>
+lf project resume <project-id> [message]
+lf project attach <project-id>
+lf project abandon <project-id> --reason "..."
+```
+
+`project_clarify → project_pursue → project_mutate` becomes one Project
+iteration. After each iteration the runner reads the authoritative PM snapshot
+and child Task state:
+
+- every KR holds → `Completed`, emit one completion, stop;
+- relevant Tasks are active → `Waiting`, stop the process without losing the
+  provider session;
+- a decision is outstanding → `Blocked`, wait for the answer;
+- open KRs remain and observable PM/Task state changed → begin another
+  iteration;
+- open KRs remain and the state fingerprint did not change → `Blocked`, report
+  the lack of progress to the Wave instead of spinning.
+
+When a supervised Task changes, its typed event advances the Project Session's
+event cursor and relaunches the same Project Session if the event can unblock
+it. Waiting consumes no provider turns. Repeated wakeups coalesce before launch.
+Standing frontier Projects may remain `Waiting` indefinitely; they complete
+only when their current proof-shaped KRs all hold.
+
+The second real child-session consumer justifies one shared control primitive.
+Refactor Task command persistence into a child-session command envelope rather
+than cloning the state machine:
+
+```rust
+pub enum ChildSessionRef {
+    Project(ProjectSessionId),
+    Task(TaskSessionId),
+}
+
+pub enum ChildCommandSource {
+    Wave(LfdId),
+    Project(ProjectSessionId),
+    Human,
+    Attachment,
+    System,
+}
+
+pub struct ChildCommand {
+    pub id: ChildCommandId,
+    pub target: ChildSessionRef,
+    pub source: ChildCommandSource,
+    pub kind: ChildCommandKind,
+    pub state: ChildCommandState,
+    pub effect: Option<ChildCommandEffect>,
+    pub claimed_by_generation: Option<u32>,
+    pub accepted_at: Option<OffsetDateTime>,
+    pub error: Option<String>,
+}
+```
+
+Migrate existing `task_commands` rows into this representation. Keep Task and
+Project CLI nouns explicit; only their durable delivery machinery is shared.
+Do not create a public generic session or loop command.
+
+### 2. Typed child observations
+
+Replace prose calls to `post_to_named_wave("Task …")` and the current prose
+Project directive with one typed, idempotent observation path. Task and Project
+event ledgers remain authoritative; supervisors receive durable linked
+observations.
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TaskObservation {
-    pub session_id: TaskSessionId,
-    pub issue_identifier: String,
+pub struct ChildObservation {
+    pub source: ChildSessionRef,
+    pub label: String,
     pub event_id: i64,
-    pub event: TaskEventKind,
+    pub event: ChildEventPayload,
+}
+
+pub enum ChildEventPayload {
+    Project(ProjectEventKind),
+    Task(TaskEventKind),
 }
 
 pub enum wave::journal::EventKind {
     // existing variants
-    TaskObserved { observation: TaskObservation },
+    ChildObserved { observation: ChildObservation },
 }
 
 pub enum InboxItem {
     Message(PendingMessage),
-    Task(TaskObservation),
+    Child(ChildObservation),
     Interrupt,
     Skip,
 }
 ```
 
-The Wave server is the sole journal writer. A Task publishes an observation
-through a narrow local command/door carrying `(session_id, event_id)`; replay
-or retry deduplicates on that pair. The resident receives the typed inbox item,
-renders a compact structured prompt, and either wakes once while idle or queues
-behind the active Wave turn. It does not masquerade as human speech and does
-not copy raw tool chatter.
+Use a SQLite outbox so delivery survives a stopped supervisor:
+
+```rust
+pub struct ObservationOutboxRow {
+    pub supervisor: SessionSupervisor,
+    pub source: ChildSessionRef,
+    pub event_id: i64,
+    pub payload: ChildEventPayload,
+    pub delivered_at: Option<OffsetDateTime>,
+}
+```
+
+Appending a child event and its outbox row is one transaction, unique on
+`(supervisor, source, event_id)`. A Project Session consumes supervised Task
+observations into its own event ledger before acknowledging them. The Wave
+server is still the sole Wave-journal writer; it appends Project observations
+and directly supervised Task observations before acknowledging their outbox
+rows. Restart or retry cannot duplicate them.
+
+The supervisor receives a typed inbox item, renders a compact structured
+prompt, and either wakes once while idle or queues behind the active turn. It
+does not masquerade as human speech and does not copy raw tool chatter.
 
 Project these events: command state changes, decision requests/resolutions,
-status changes, PR opened, completed, and failed. Progress remains in the Task
-ledger unless explicitly requested by the Wave.
+status changes, Tasks started, PR opened, completed, and failed. Fine-grained
+progress remains in the child ledger unless explicitly requested by its
+supervisor.
 
-### 2. Task-to-Wave decisions
+### 3. Child-to-supervisor decisions
 
 Add one decision protocol instead of a second approval framework. The first
 use is Task plan approval.
 
 ```rust
-string_id!(TaskDecisionId, "td_");
+string_id!(ChildDecisionId, "cd_");
 
-pub enum TaskEventKind {
-    // existing variants
-    DecisionRequested {
-        decision_id: TaskDecisionId,
-        prompt: String,
-        options: Vec<String>,
-    },
-    DecisionResolved {
-        decision_id: TaskDecisionId,
-        choice: String,
-        message: Option<String>,
-    },
+pub struct DecisionRequested {
+    pub decision_id: ChildDecisionId,
+    pub prompt: String,
+    pub options: Vec<String>,
 }
 
-pub enum TaskCommandKind {
+pub struct DecisionResolved {
+    pub decision_id: ChildDecisionId,
+    pub choice: String,
+    pub message: Option<String>,
+}
+
+// TaskEventKind and ProjectEventKind each carry these two payloads.
+pub enum ChildCommandKind {
     // existing variants
     Decide {
-        decision_id: TaskDecisionId,
+        decision_id: ChildDecisionId,
         choice: String,
         message: Option<String>,
     },
 }
 ```
 
-A request is durable before the Task stops advancing. The owning Wave receives
-it as a typed observation and answers with `lf task decide`; foreign Waves are
-refused by the existing ownership rule. The runner accepts exactly one answer,
-continues the same Task Session/provider transcript, and records a linked
+A request is durable before the child stops advancing. A Task sends it to its
+Project Session when one supervises it, otherwise to the Wave. A Project
+Session answers routine Task questions itself; when it needs Wave judgment it
+emits its own linked decision request and resumes the Task after the Wave
+answers. `lf task decide` and `lf project decide` use the same command receipt
+machinery. Foreign supervisors are refused. The runner accepts exactly one
+answer, continues the same child/provider transcript, and records a linked
 resolution. A duplicate answer returns the existing resolution rather than
 starting another provider turn. Human intervention remains possible through
 the same explicit unattributed escape hatch.
 
-### 3. Provider conformance suite
+### 4. Provider conformance suite
 
 Build one parameterized suite at the `Harness` boundary. Exercise Codex,
 Claude, and OpenCode through their real adapters with scripted protocol peers;
-do not fork the Task runner or encode provider names in orchestration logic.
+do not fork provider-control behavior between Project and Task runners or
+encode provider names in orchestration logic.
 
+Run the same scenarios for both Project and Task runners where applicable.
 Every adapter must pass:
 
 1. live redirect;
@@ -171,27 +364,29 @@ Codex should report `live_steer`; Claude and OpenCode should report
 `replacement`. Provider-specific live smoke tests may remain opt-in, but the
 deterministic conformance suite must run in the normal Rust gate.
 
-### 4. End-to-end dogfood
+### 5. End-to-end dogfood
 
 Exercise the real path once with a deliberately small Linear task:
 
 ```text
-Wave creates/selects Linear issue
-→ lf task run <issue>
-→ Wave sends follow-up and steer
-→ Task requests and receives one decision
-→ Task opens a PR to main
-→ review feedback resumes the same Task Session
-→ PR merges
-→ Linear completion reconciles
-→ Wave receives one typed completion
+Wave creates/selects Linear Project
+→ lf project run <project>
+→ Project Session creates/selects two Linear Tasks
+→ Project Session starts and supervises both Task Sessions
+→ one Task requests a decision from Project; Project escalates once to Wave
+→ Wave steers the Project while the Tasks run
+→ Project sleeps until typed Task events wake it
+→ Tasks open PRs to main and resume through review
+→ both PRs merge and Linear completion reconciles
+→ Project verifies the KRs, completes, and emits one typed completion to Wave
 ```
 
-Capture the issue identifier, Task Session id, command ids/effects, provider
-session id before and after resume, PR, and final Wave journal event in the PR
-notes. This is an explicit side-effecting manual gate, not an automated test.
+Capture the Project and Task identifiers, Project/Task Session ids, command
+ids/effects, provider session ids before and after resume, PRs, decision chain,
+sleep/wake evidence, and final Wave journal event in the PR notes. This is an
+explicit side-effecting manual gate, not an automated test.
 
-### 5. Atomic turn-boundary delivery
+### 6. Atomic turn-boundary delivery
 
 Remove the correctness dependency on a 200 ms poll and a two-second client
 wait. The runner must atomically choose between claiming work and becoming
@@ -199,12 +394,12 @@ inactive.
 
 ```rust
 pub enum BoundaryResult {
-    Commands(Vec<TaskCommand>),
-    Stopped(TaskSession),
+    Commands(Vec<ChildCommand>),
+    Stopped(ChildSessionRef),
 }
 
 async fn claim_commands_or_stop(
-    session_id: &TaskSessionId,
+    session: &ChildSessionRef,
     generation: u32,
     stopped_status: TaskSessionStatus,
     reason: &str,
@@ -218,14 +413,15 @@ generation that cannot stop without seeing the command or an inactive session
 that it must reserve and relaunch. `follow-up` receives the same guarantee as
 `steer`; no caller-side sleep is part of correctness.
 
-### 6. Explicitly waitable receipts
+### 7. Explicitly waitable receipts
 
 Keep command submission and command resolution separate. Submission always
 returns the current durable receipt. Add a read/wait API keyed by command id:
 
 ```text
-lf task receipt tc_123 --json
-lf task receipt tc_123 --wait --timeout 30s --json
+lf task receipt cc_123 --json
+lf task receipt cc_123 --wait --timeout 30s --json
+lf project receipt cc_456 --wait --timeout 30s --json
 ```
 
 `--wait` returns on `accepted`, `failed`, or `superseded`; timeout returns the
@@ -282,9 +478,9 @@ A Wave owns one durable human conversation, memory, cadence, budget, project
 selection, and supervision. Its server and worktree path are permanent. Its
 home is a control-plane checkout, never a shipping branch or PR.
 
-The Wave may manage zero, one, or several Task Sessions. It stays directly
-steerable while they run. Talking to the Wave never silently retargets the
-human to a child transcript.
+The Wave may manage zero, one, or several Project and Task Sessions. It stays
+directly steerable while they run. Talking to the Wave never silently
+retargets the human to a child transcript.
 
 ### Project
 
@@ -292,9 +488,19 @@ A Project is one Linear Project inside exactly one Wave/Linear Initiative. It
 owns a definition and proof-shaped KRs. It has no permanent worktree, branch,
 server, memory, or child project.
 
-Running a Project means asking its Wave to evaluate the KRs and select or create
-concrete Linear tasks. All file-writing work then happens through Task
-Sessions.
+Running a Project creates or resumes its Project Session. That bounded child
+repeatedly evaluates the KRs and selects, creates, and supervises concrete
+Linear Tasks. All file-writing work happens through Task Sessions.
+
+### Project Session
+
+A Project Session is the durable runtime for pursuing one Linear Project until
+its KRs hold or pursuit is explicitly abandoned. It owns a resumable provider
+transcript, process generations, commands, child-event cursor, and iteration
+state. It owns no worktree, branch, PR, server, chat address, memory, or cadence.
+
+Waiting is a persisted state, not a running process. A Task observation wakes
+the same Project Session when new judgment is possible.
 
 ### Task
 
@@ -313,9 +519,9 @@ A Task Session owns:
 
 ### Task Session
 
-The Task Session is the missing runtime concept. It is durable state, not the
-tmux process and not the provider's session id. Killing a process does not
-delete the Task Session. Resuming does not create a second task.
+The Task Session is durable state, not the tmux process and not the provider's
+session id. Killing a process does not delete the Task Session. Resuming does
+not create a second task.
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -326,6 +532,7 @@ pub struct TaskSession {
     pub project_id: String,       // PmProject.id
     pub project_slug: String,     // PmProject.slug
     pub wave_id: WaveId,
+    pub supervisor: SessionSupervisor,
     pub pm_snapshot_synced_at: i64,
     pub pm_writeback: PmWritebackState,
     pub status: TaskSessionStatus,
@@ -386,9 +593,9 @@ status subscription, resume, and completion notification. Its shape is the
 model, adapted rather than copied:
 
 ```rust
-async fn send_input(session_id: TaskSessionId, input: TaskInput) -> Result<SubmissionId>;
-async fn interrupt(session_id: TaskSessionId) -> Result<SubmissionId>;
-async fn subscribe_status(session_id: TaskSessionId) -> Result<StatusReceiver>;
+async fn send_input(session: ChildSessionRef, input: ChildInput) -> Result<SubmissionId>;
+async fn interrupt(session: ChildSessionRef) -> Result<SubmissionId>;
+async fn subscribe_status(session: ChildSessionRef) -> Result<StatusReceiver>;
 ```
 
 See Codex's
@@ -418,9 +625,10 @@ not the messaging protocol. See
 [Agent Teams](https://code.claude.com/docs/en/agent-teams).
 
 Loopflow should not delegate its lifecycle to any provider's subagent feature.
-It launches a normal provider harness inside a Loopflow Task Session so Linear
-identity, worktree isolation, control, audit, and recovery behave the same on
-Codex, Claude, and OpenCode.
+It launches normal provider harnesses inside Loopflow Project and Task Sessions
+so Linear identity, supervision, control, audit, and recovery behave the same
+on Codex, Claude, and OpenCode. Only Task Sessions add worktree isolation and
+delivery.
 
 ## Incoming PM API contract
 
@@ -447,9 +655,9 @@ The product worktree changes the PM boundary this design builds on:
 | Callers may perform provider reads during their own workflow | CLI, Wave, Task lifecycle, and Swift consume the snapshot |
 | A mutation and local read state can drift independently | Every successful PM mutation refreshes the affected snapshot before returning |
 
-Task lifecycle code composes this API; it never constructs a `LinearClient`,
-queries Linear directly, parses project files, or writes planning rows into
-SQLite.
+Project and Task lifecycle code compose this API; they never construct a
+`LinearClient`, query Linear directly, parse project files, or write planning
+rows into SQLite.
 
 The intended read modes are:
 
@@ -535,15 +743,27 @@ for that same item. It never issues a second create.
 
 ```text
 lf project run <linear-project-id>
+lf project status <linear-project-id> [--json]
+lf project follow-up <linear-project-id> <message>
+lf project steer <linear-project-id> <message>
+lf project interrupt <linear-project-id> [--message <message>]
+lf project decide <linear-project-id> <decision-id> <choice> [--message <message>]
+lf project wait <linear-project-id> [--until waiting|terminal] [--timeout <duration>]
+lf project resume <linear-project-id> [<message>]
+lf project attach <linear-project-id>
+lf project receipt <command-id> [--wait] [--timeout <duration>]
+lf project abandon <linear-project-id> --reason <text>
 
 lf task run <linear-issue-id>
 lf task status <linear-issue-id> [--json]
 lf task follow-up <linear-issue-id> <message>
 lf task steer <linear-issue-id> <message>
 lf task interrupt <linear-issue-id> [--message <message>]
+lf task decide <linear-issue-id> <decision-id> <choice> [--message <message>]
 lf task wait <linear-issue-id> [--until submitted|terminal] [--timeout <duration>]
 lf task resume <linear-issue-id> [<message>]
 lf task attach <linear-issue-id>
+lf task receipt <command-id> [--wait] [--timeout <duration>]
 lf task abandon <linear-issue-id> --reason <text>
 ```
 
@@ -554,10 +774,12 @@ Resolution fails loudly if there is none or if corrupted data contains more
 than one. The Task Session id appears in JSON, logs, and audit drill-down, but
 normal commands do not require it.
 
-`lf task run` returns after the session is durably registered and its worker
-has started. It never blocks until completion; `wait` is the explicit blocking
-verb. There is no `dispatch` mode because every task is a managed child
-session. Parallelism is simply several running tasks.
+`lf project run` and `lf task run` return after their session is durably
+registered and its process has started. Neither blocks until completion;
+`wait` is the explicit blocking verb. There is no `dispatch` mode because both
+are managed child sessions. Parallel implementation is several Task Sessions;
+Project Sessions coordinate them and sleep when only child progress can change
+the answer.
 
 For a task with no existing session, `task run` loads the owning Wave's
 `PmShowResult` in `Auto` mode, resolves one open `PmItem` and its `PmProject`,
@@ -649,6 +871,45 @@ Failure unwinds only resources created by this attempt. The durable record says
 which step failed. No second caller can race through the reservation and create
 a second worktree.
 
+## Project runner
+
+The Project runner owns repeated judgment, not file-writing execution.
+
+```rust
+pub async fn run_project_session(
+    store: SharedStore,
+    session_id: ProjectSessionId,
+    generation: u32,
+) -> Result<()>;
+
+struct ProjectRunner {
+    session: ProjectSession,
+    harness: Box<dyn Harness>,
+    commands: ChildCommandReceiver,
+    observations: ChildObservationReceiver,
+    events: ProjectEventWriter,
+}
+```
+
+The runner resumes the same provider session across process generations. One
+iteration executes the authored `project` flow's clarify, pursue, and mutate
+steps against one captured Project id. The Project seed carries the current PM
+definition/KRs, supervised Task summaries, pending decisions, and Wave context.
+It never relies on `scratch/<branch>.md` for Project identity or KRs.
+
+After the iteration, deterministic state inspection—not an LM-written loop
+bit—chooses `Completed`, `Waiting`, `Blocked`, or another iteration. A state
+fingerprint covers Project definition/KRs, filed Task ids/states, supervised
+Task Session statuses, decisions, and the last consumed child event. Repeating
+without a changed fingerprint blocks and reports; it never spins provider
+turns merely because a KR remains open.
+
+The Project runner may invoke only coordination lifecycle operations as part
+of normal work: PM reads/writes and Project/Task commands. Repository edits,
+commits, branches, PRs, and tests belong inside a Task Session. This is a
+prompted trust boundary, not a sandbox; the conformance test proves the normal
+Project workflow creates no Project worktree or branch.
+
 ## Task runner
 
 Replace the generic headless pass loop with one inbox-aware task runner using
@@ -683,23 +944,25 @@ next-turn input, interruption, timeout, and usage. Extract the smallest common
 runner core or call common functions directly. Do not create a factory trait or
 a generic orchestration framework solely to make tests easier.
 
-## Commands and events
+## Child commands and domain events
 
-Task control is structured and durable. Tmux is not the machine protocol.
+Project and Task control share one structured, durable command state machine.
+Tmux is not the machine protocol. Domain events stay distinct because a
+Project pursuing KRs and a Task shipping a PR are different things.
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TaskCommandKind {
+pub enum ChildCommandKind {
     FollowUp { text: String },
     Steer { text: String },
     Interrupt { replacement: Option<String> },
     Resume { message: Option<String> },
-    Decide { decision_id: TaskDecisionId, choice: String, message: Option<String> },
+    Decide { decision_id: ChildDecisionId, choice: String, message: Option<String> },
     Abandon { reason: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TaskCommandState {
+pub enum ChildCommandState {
     Persisted,
     Claimed,
     Accepted,
@@ -708,7 +971,7 @@ pub enum TaskCommandState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TaskCommandEffect {
+pub enum ChildCommandEffect {
     LiveSteer,
     NextTurn,
     Replacement,
@@ -716,13 +979,13 @@ pub enum TaskCommandEffect {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskCommand {
-    pub id: TaskCommandId,
-    pub session_id: TaskSessionId,
-    pub source: TaskCommandSource,
-    pub kind: TaskCommandKind,
-    pub state: TaskCommandState,
-    pub effect: Option<TaskCommandEffect>,
+pub struct ChildCommand {
+    pub id: ChildCommandId,
+    pub target: ChildSessionRef,
+    pub source: ChildCommandSource,
+    pub kind: ChildCommandKind,
+    pub state: ChildCommandState,
+    pub effect: Option<ChildCommandEffect>,
     pub created_at: OffsetDateTime,
     pub claimed_by_generation: Option<ProcessGeneration>,
     pub accepted_at: Option<OffsetDateTime>,
@@ -730,8 +993,9 @@ pub struct TaskCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TaskCommandSource {
+pub enum ChildCommandSource {
     Wave(WaveId),
+    Project(ProjectSessionId),
     Human,
     Attachment,
     System,
@@ -742,19 +1006,54 @@ pub enum TaskEventKind {
     Started,
     StatusChanged { from: TaskSessionStatus, to: TaskSessionStatus, reason: String },
     CommandChanged {
-        command_id: TaskCommandId,
-        state: TaskCommandState,
-        effect: Option<TaskCommandEffect>,
+        command_id: ChildCommandId,
+        state: ChildCommandState,
+        effect: Option<ChildCommandEffect>,
         error: Option<String>,
     },
     DecisionRequested {
-        decision_id: TaskDecisionId,
+        decision_id: ChildDecisionId,
         prompt: String,
         options: Vec<String>,
     },
     Progress { summary: String },
     PullRequestOpened { number: u32, url: String },
     Completed { pull_request: PullRequestRef, summary: String },
+    Failed { error: String, resumable: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectEventKind {
+    Started,
+    StatusChanged {
+        from: ProjectSessionStatus,
+        to: ProjectSessionStatus,
+        reason: String,
+    },
+    CommandChanged {
+        command_id: ChildCommandId,
+        state: ChildCommandState,
+        effect: Option<ChildCommandEffect>,
+        error: Option<String>,
+    },
+    TaskObserved {
+        task_session_id: TaskSessionId,
+        task_event_id: i64,
+        event: Box<TaskEventKind>,
+    },
+    TaskStarted { task: TaskSessionId, issue_identifier: String },
+    DecisionRequested {
+        decision_id: ChildDecisionId,
+        prompt: String,
+        options: Vec<String>,
+    },
+    DecisionResolved {
+        decision_id: ChildDecisionId,
+        choice: String,
+        message: Option<String>,
+    },
+    IterationCompleted { iteration: u32, summary: String },
+    Completed { summary: String },
     Failed { error: String, resumable: bool },
 }
 ```
@@ -794,54 +1093,68 @@ interrupt-plus-input and structured submission receipt, OpenCode’s serialized
 extensions/wait/cancel, and Claude’s lead-owned plan decision and automatic
 updates.
 
-Task judgment is part of steering. A Task may publish `DecisionRequested` and
-wait without losing its worktree or provider transcript. The owning Wave
-answers with `Decide`; the Task continues in the same session. Plan approval is
-the first use. Provider permission prompts may map into the same protocol later
-only when the Wave has enough context to decide safely; the MVP must not build
-a second generic approvals system.
+Child judgment is part of steering. A Task or Project may publish
+`DecisionRequested` and wait without losing its provider transcript. The
+immediate supervisor answers with `Decide`; the child continues in the same
+session. Plan approval is the first use. Provider permission prompts may map
+into the same protocol later only when the supervisor has enough context to
+decide safely; the MVP must not build a second generic approvals system.
 
-## Wave supervision and conversation ownership
+## Supervision and conversation ownership
 
-The Wave and Task transcripts remain separate.
+Wave, Project, and Task transcripts remain separate.
 
 The Wave journal contains:
 
-- the human's request to the Wave;
-- creation of the Linear Project/Task;
-- start/status events for the Task Session;
-- every Wave→Task command, with task and command ids;
-- progress reports the task explicitly sends to the Wave;
-- PR, failure, merge, and abandonment events.
+- the human conversation;
+- creation and control of Project Sessions;
+- linked Project decisions, status, blockers, and completion;
+- linked events from Tasks the Wave started directly;
+- explicit Wave overrides of descendant Tasks.
 
-The Task transcript contains:
+The Project event ledger and transcript contain:
 
-- the focused task directive and assembled context;
-- all provider turns, reasoning summaries, tool calls, outputs, and controls;
-- review-feedback turns and resumed work.
+- the captured Linear Project definition and KRs;
+- Project iterations and the commands they issued;
+- linked observations from supervised Tasks;
+- decisions made locally or escalated to the Wave;
+- the evidence used to declare KRs held or remain blocked.
 
-Raw task tool chatter is not copied into the Wave thread. The Wave can drill
-into it when needed, but its normal context uses linked control and result
-events. This satisfies the Context project's “act on child reports without
-opening the child transcript” proof while preserving auditability.
+The Task event ledger and transcript contain the focused implementation
+directive, provider turns, tool activity, review revisions, commands, PR, and
+completion evidence.
 
-The primary control path is Wave→Task. A human speaks to the Wave, and the Wave
-uses the typed Task API. Direct human Task control remains an explicit escape
-hatch; it is marked `Human` and enters the same typed event history. A process
-carrying a different `LFD_WAVE_ID` is not human—it is a foreign Wave and must be
-refused before command persistence.
+Raw child tool chatter is never copied upward. Each supervisor receives linked
+typed state changes and summaries and can drill into the child transcript when
+needed. The Wave can still answer which Projects and Tasks it started, what
+they are doing, what they need, and what completed without loading every child
+turn.
 
-Task completion queues one structured Wave event. If the Wave is idle, that
-event wakes pursuit once. If a Wave turn is active, it is delivered at the next
-turn boundary. It never starts a second concurrent Wave turn.
+The primary path is Wave→Project→Task. Wave→Task remains valid for small direct
+work and for root-owner override. Direct human Project/Task control is an
+explicit escape hatch marked `Human`. A process carrying another
+`LFD_WAVE_ID`, or a Project Session unrelated to the target Task, is refused
+before command persistence.
 
-The Wave server tails durable Task events for its Wave with a stored cursor,
-folding each event before advancing the cursor. A stopped Wave misses nothing:
-events are session history, not the one-hour agent bus. The existing bus stays
-appropriate for ephemeral prose reports; Task commands and lifecycle events do
-not inherit its retention window.
+Child completion queues one structured observation to its immediate
+supervisor. If the supervisor is inactive, the durable observation relaunches
+it once. If its turn is active, delivery waits for the next boundary. It never
+starts a second concurrent turn for the same session. Project completion then
+queues one structured observation to the Wave.
+
+The SQLite observation outbox bridges durable child ledgers to supervisors. A
+stopped Project or Wave misses nothing. The agent bus remains appropriate for
+ephemeral prose; lifecycle commands, decisions, and observations do not inherit
+its retention window.
 
 ## Context inheritance
+
+New Project Sessions start from the owning Wave's objective and curated memory,
+the authoritative Linear Project definition/KRs, filed Task state, and the
+Wave's explicit pursuit directive. They do not copy the full human transcript.
+Their provider session persists the Project's bounded working conversation
+until completion or abandonment; it is not promoted into Wave memory
+automatically.
 
 New Task Sessions start focused, not as copies of the whole Wave transcript.
 The initial task prompt contains:
@@ -852,10 +1165,12 @@ The initial task prompt contains:
 - the Wave objective and curated memory;
 - repository instructions and the selected Task flow/skills;
 - the immutable worktree, base commit, delivery target, and completion rules;
-- the Wave's explicit delegation message.
+- the immediate supervisor's explicit delegation message.
 
 Provider/model, permission mode, reasoning settings, and budgets snapshot from
-the Wave at launch. Cwd never inherits: it is always the task worktree.
+the launching supervisor. A Task cwd never inherits: it is always the task
+worktree. A Project Session runs in the Wave home but has no file-writing
+mission.
 
 These planning fields come from one `PmShowResult` read. Prompt assembly does
 not issue per-Project or per-Task Linear calls. Resuming an existing Task
@@ -975,7 +1290,8 @@ until `pm_writeback` returns to `Current`.
 
 ## Crash recovery
 
-The Task Session is recoverable from sqlite plus git plus provider transcript:
+Both child-session kinds recover from SQLite plus provider transcript; Tasks
+also recover from git:
 
 1. `lf task status` compares durable status with the recorded process/tmux.
 2. A missing process while `Starting` or `Running` becomes `Failed` with a
@@ -984,7 +1300,12 @@ The Task Session is recoverable from sqlite plus git plus provider transcript:
    ownership, increments the process generation, and launches the runner.
 4. Pending controls are reclaimed from the dead generation.
 5. Provider history resumes by provider session id when possible.
-6. The Wave receives one failure/recovery event, not a synthetic completion.
+6. The immediate supervisor receives one failure/recovery event, not a
+   synthetic completion.
+
+Project recovery performs the same generation checks without git/worktree
+validation, then resumes from its PM snapshot, child-event cursor, and state
+fingerprint.
 
 Starting and resuming reserve concurrency before spawning, following Codex's
 reservation-before-launch pattern. Every terminal process path releases the
@@ -992,8 +1313,8 @@ slot, including startup failure, interrupt, provider crash, and forced stop.
 
 ## Tmux and direct attachment
 
-Task workers may run in named tmux sessions. Tmux owns process lifetime and a
-human-facing terminal; it does not own agent semantics.
+Project and Task workers may run in named tmux sessions. Tmux owns process
+lifetime and a human-facing terminal; it does not own agent semantics.
 
 `lf task attach INF-123` attaches read-write. The task runner exposes a tiny
 control prompt whose input calls the same durable Task command functions:
@@ -1007,9 +1328,9 @@ task INF-123> /detach
 
 Text is never written directly into a provider's stdin. Codex owns a JSON-RPC
 pipe, OpenCode uses HTTP, and Claude runs with null stdin in Loopflow. Mapping
-the TTY back through Task commands keeps attachment auditable and provider
-neutral. `tmux send-keys` remains an emergency mechanism, not an API used by
-the Wave LM.
+the TTY back through child commands keeps Project and Task attachment auditable
+and provider neutral. `tmux send-keys` remains an emergency mechanism, not an
+API used by a supervisor.
 
 ## Swift and other clients
 
@@ -1040,19 +1361,26 @@ not keep a speculative proxy.
 
 ## Remaining implementation order
 
-Complete the six remaining behaviors without reopening the shipped lifecycle:
+Complete the seven remaining behaviors without reopening the shipped Task
+identity, placement, or delivery model:
 
-1. Make boundary settlement atomic and add receipt read/wait. These establish
-   the command-delivery primitive every later test relies on.
-2. Add typed Task observations to the Wave journal/inbox and replace every
-   prose Task notification producer.
-3. Add decision request/response on that typed path.
-4. Build the provider-neutral conformance suite and fix adapters until all ten
-   scenarios pass for Codex, Claude, and OpenCode.
-5. Run the full repository gate and Mitchell Hashimoto-style ownership/failure
-   review. Delete any compatibility or provider-special-case code the slice
-   made unnecessary.
-6. Perform the explicit live dogfood lifecycle and record its evidence.
+1. Introduce `ProjectSession`, its event ledger/process generations, and
+   `TaskSession.supervisor`; migrate existing Tasks to Wave supervision.
+2. Refactor Task commands into the shared child-command envelope. In the same
+   migration, make boundary settlement atomic and add receipt read/wait so both
+   runners inherit one delivery guarantee.
+3. Implement the Project runner and replace prose `project run` delivery with
+   idempotent Project Session start/resume. Prove waiting stops the process and
+   preserves the provider session.
+4. Add the typed observation outbox and supervisor inbox path. Replace every
+   prose Task notification and carry Task→Project→Wave completion without loss
+   or duplication.
+5. Add decision request/response at both supervision edges.
+6. Build the provider-neutral conformance suite and fix adapters until all ten
+   scenarios pass for Project and Task runners on Codex, Claude, and OpenCode.
+7. Run the full repository gate and Mitchell Hashimoto-style ownership/failure
+   review, then perform the explicit live two-Task Project dogfood and record
+   its evidence.
 
 This is infrastructure-only. Swift continues to display the existing Task
 Session projection; its richer Task inspector and event rendering follow after
@@ -1070,8 +1398,12 @@ The remaining slice should delete or reduce:
 
 - every prose `post_to_named_wave("Task …")` notification once typed Task
   observations own delivery;
+- the prose-only `project run` directive once Project Session creation owns the
+  lifecycle;
 - the two-second command-resolution wait as a correctness mechanism;
 - duplicated boundary checks split between runner and control caller;
+- Task-only command storage after Project proves the shared child-command
+  concept;
 - provider-name branches in conformance behavior, if any appear—the Harness
   capability contract owns the difference;
 - any decision-specific approval path that duplicates the Task command/event
@@ -1087,10 +1419,14 @@ The remaining slice should delete or reduce:
   query DTO or normalized planning tables.
 - One planning mutation owner: `lf pm`; Task lifecycle never instantiates a
   `LinearClient` or edits PM snapshots.
-- One task process launcher: Task Session → tmux runner.
-- One provider control loop behind `Harness`.
-- One Task command/event store used by CLI, Wave, tmux attachment, and Swift.
-- One completion definition: merged or explicitly abandoned.
+- One child process launcher used by Project and Task Sessions.
+- One provider control loop behind `Harness`, parameterized by domain policy
+  rather than provider name.
+- One child command/receipt store; separate Project and Task event vocabularies.
+- One durable observation outbox used at Task→Project, Task→Wave, and
+  Project→Wave boundaries.
+- One Task completion definition: merged or explicitly abandoned; one Project
+  completion definition: every current KR observably holds.
 - One PR target: `main`.
 - One source of roadmap identity: Linear.
 
@@ -1103,19 +1439,18 @@ mode. It is never how roadmap work starts.
 
 ## Explicit deferrals and roadmap owners
 
-These are not compatibility gaps in the MVP. They are extensions to one
-settled Task Session model.
+These are not compatibility gaps in the MVP. They are extensions to the
+settled Wave→Project Session→Task Session hierarchy.
 
 | Deferred capability | Roadmap owner | Opening task when pursued |
 |---|---|---|
 | Several isolated tasks contribute to one PR (`--into`) | Infrastructure / Work Isolation and Integration | Add a durable integration session that applies named task commits serially and resolves conflicts |
 | Work begins on an unfinished future base (`--after`) | Infrastructure / Work Isolation and Integration | Add one dependency edge, retain the Task Session while waiting, and resume it to rebase/resolve after the dependency merges |
 | Full deletion/drift check for retired vocabulary after the migration | Infrastructure / Technical Architecture | Make architecture docs and a stale-symbol check describe only Wave/Project/Task Sessions |
-| Rich direct Task transcript and steer UI | Product / Wave Chat + Auditability | Drill Wave event → Task Session → transcript and send typed Task controls |
+| Rich child transcript and steer UI | Product / Wave Chat + Auditability | Drill Wave event → Project Session → Task Session → transcript and send typed controls |
 | Task list, attach, and status polish in the Mac app | Product / Mac Surface UX | Drive a week without terminal fallback for task supervision |
 | Remote Task Sessions and transport | Product / Distributed Computing | Carry the same identity/control/event contract across SSH before adding a proxy |
 | Evidence-based focused-context vs history-fork tuning | Intelligence / Context | Compare real Task streaks and token cost before adding a context-fork mode |
-| Multiple-task project autonomy and budget scheduling | Product / Loopflow API | Run a Project through several Task Sessions with caps and no escaped work |
 
 This table is a design routing map, not a repository roadmap mirror. After the
 product PM change lands, create/update these Projects and Tasks through `lf pm`
@@ -1128,10 +1463,11 @@ Efficiency with the outage evidence.
 
 ## Resolutions to the architectural review
 
-1. **Mid-task conversation** — Task turns live in the Task transcript. Human
-   messages to the Wave remain in the Wave thread; every Wave→Task or direct
-   human→Task command is mirrored there as a linked event. The Wave remembers
-   the negotiation without ingesting raw child tool chatter.
+1. **Child conversation** — Project and Task turns live in their own
+   transcripts. Human messages remain in the Wave thread; every Wave→Project,
+   Project→Task, Wave override, or direct human command is linked through typed
+   events. Supervisors remember the negotiation without ingesting raw child
+   tool chatter.
 2. **Linear in the hot path** — identity is fail-closed, network access is not.
    Creation uses the PM mutation API and must reach Linear; an existing task
    may launch from the bounded-freshness SQLite snapshot. Missing/unknown or
@@ -1164,13 +1500,16 @@ Efficiency with the outage evidence.
   introduced.
 - Every independent task produces zero or one PR, always targeting `main`.
 - Projects own no worktree or branch.
-- No task-specific server is created.
-- Task controls are structured and persisted; terminal bytes are not the
+- One Linear Project resolves to at most one non-abandoned Project Session.
+- No Project- or Task-specific server is created.
+- Child controls are structured and persisted; terminal bytes are not the
   machine API.
-- The Wave remains available while tasks run.
+- The Wave remains available while Project and Task Sessions run.
 - Provider-specific features stay behind Harness capabilities.
 - No compatibility aliases preserve rotation, stack, queue, generic loop, or
   sandbox-worker APIs.
+- Project pursuit is the only new loop; it is a domain lifecycle, not a public
+  generic runner or user-authored process primitive.
 - No generic multi-product execution platform is extracted.
 
 ## Done when: hello world and record identity
@@ -1204,7 +1543,37 @@ Efficiency with the outage evidence.
 - A second simultaneous `task run INF-123` receives the existing session or a
   clear already-running result; it never creates a second writer.
 
-## Done when: steering and conversation
+## Done when: Project pursuit
+
+- `lf project run <id> --json` creates one `ps_…` record, starts one Project
+  process, returns the Linear Project/Wave ids, and creates no branch, worktree,
+  server, PR, or child Wave.
+- Repeating `project run` returns or resumes the same Project Session; two
+  concurrent calls never create two Project processes or provider sessions.
+- One Project iteration runs clarify, pursue, and mutate against the exact
+  captured Linear Project. KRs and tasks come from the PM snapshot, never a
+  local Project markdown file or ambient guess.
+- The Project Session creates or selects concrete Linear Tasks and starts every
+  file-writing change through `lf task run`; the Project process leaves the
+  repository tree clean.
+- When its Tasks are active, the Project Session becomes `Waiting`, exits its
+  process, and consumes zero provider turns. A relevant Task event relaunches
+  the same session/provider transcript exactly once.
+- When open KRs remain but one complete iteration changes no PM, Task,
+  decision, or observation state, the Project becomes `Blocked` and reports
+  why instead of spinning.
+- When all KRs observably hold, the Project becomes `Completed`, emits one
+  completion to the Wave, and does not relaunch on duplicate Task events.
+- `project resume` after process death keeps the Project Session id, Project
+  id, event cursor, iteration, and provider session when the adapter supports
+  resume. Unacknowledged commands and observations are reclaimed.
+- A Task started by a Project records that Project Session as supervisor. The
+  owning Wave can override it; another Wave or Project cannot.
+- Promoting a Project remains a separate authored migration into a Wave. A
+  normal Project Session gains no chat address, memory, cadence, or permanent
+  home.
+
+## Done when: steering, observations, and decisions
 
 - In a deterministic race test, command insertion pauses after the runner's
   last ordinary poll. Boundary settlement then either claims that command in
@@ -1214,41 +1583,45 @@ Efficiency with the outage evidence.
 - Killing a runner after persistence and after claim lets the next generation
   reclaim the command. Killing it after provider acceptance never replays the
   accepted command.
-- `lf task receipt <id> --wait --timeout 30s --json` returns the same command
+- `lf task receipt <id> --wait --timeout 30s --json` and `lf project receipt`
+  return the same command
   id, state, effect, generation, accepted timestamp, and error stored in SQLite.
   A timeout is distinguishable from failure and can be resumed by running the
   same command again.
-- Every consequential Task event appears once in both `task_events` and the
-  owning Wave journal with the same `(session_id, event_id)`. Restarting either
-  side and retrying delivery creates no duplicate Wave observation.
-- An idle Wave wakes once for a Task observation. An active Wave completes its
-  current turn before consuming it. No observation starts concurrent Wave
-  turns, and no raw Task tool event enters the Wave conversation.
-- A Task requests plan approval, receives a Wave rejection with feedback,
-  submits a revision, and receives approval while retaining the same Task
-  Session and provider session. Duplicate and foreign-Wave answers are refused
-  or idempotently return the existing resolution.
+- Every consequential child event appears once in its source ledger and once
+  in its immediate supervisor with the same `(source, event_id)`. Restarting a
+  Task, Project, or Wave and retrying delivery creates no duplicate observation.
+- An idle supervisor wakes once for a child observation. An active supervisor
+  completes its current turn before consuming it. No observation starts
+  concurrent turns, and no raw child tool event enters a parent conversation.
+- A Task requests plan approval from its Project. The Project rejects with
+  feedback, receives a revision, escalates one linked decision to the Wave, and
+  then approves the Task while both provider transcripts remain continuous.
+  Duplicate and foreign-supervisor answers are refused or idempotently return
+  the existing resolution.
 - The normal Rust gate runs all ten conformance scenarios against Codex,
   Claude, and OpenCode adapters. Codex proves `live_steer`; Claude/OpenCode prove
   interrupt-and-resume `replacement`; every provider proves FIFO follow-up,
   replacement supersession, recovery, ownership, decisions, observations,
   targeting, and lifecycle distinction.
-- One live Linear-backed dogfood Task runs from creation through steering,
-  decision, PR review/resume, merge, PM reconciliation, and one typed Wave
-  completion. The PR notes contain the linked ids and receipts needed to audit
-  the path.
+- One live Linear-backed Project Session supervises two Task Sessions from
+  creation through steering, decision, sleep/wake, PR review/resume, merge, PM
+  reconciliation, KR verification, and one typed Project completion in the
+  Wave. The PR notes contain the linked ids and receipts needed to audit the
+  hierarchy.
 
 ## Done when: process, attachment, and recovery
 
-- `lf task attach INF-123` opens the writable tmux session and text entered at
-  the task prompt becomes an audited Task command rather than raw provider
-  stdin.
+- `lf task attach INF-123` and `lf project attach <id>` open their writable
+  tmux control session; entered text becomes an audited child command rather
+  than raw provider stdin.
 - `/interrupt`, `/status`, and `/detach` work from the attached prompt without
   corrupting the provider protocol.
 - Killing the tmux session changes a supposedly running task to a resumable
   failed state with an actionable reason on the next status check.
 - `lf task resume INF-123` reuses the same Task Session, worktree, branch, and
-  provider history when supported.
+  provider history; `lf project resume <id>` reuses the same Project Session,
+  event cursor, and provider history when supported.
 - Unacknowledged commands owned by a dead process generation are reclaimed;
   acknowledged commands are not silently lost.
 - Starting/resuming beyond the Wave's configured concurrency fails before
@@ -1282,26 +1655,34 @@ Efficiency with the outage evidence.
 
 ## Done when: project and parallel workflows
 
-- `lf project run <id>` wakes the owning Wave with the correct Project/KRs and
-  creates no project branch, worktree, server, or child Wave.
-- The Wave can create and start Task A, then create and start independent Task
-  B without waiting for A.
+- `lf project run <id>` starts the Project Session under the owning Wave with
+  the correct Project/KRs and creates no project branch, worktree, server, or
+  child Wave.
+- The Project Session can create and start Task A, then create and start
+  independent Task B without waiting for A.
 - Both tasks write only in their own worktrees and open independent PRs to
   `main`.
 - `lf task wait INF-123` blocks without polling an LM and returns the terminal
   status; timeout returns current status without changing the task.
-- A Project result can be evaluated from its Linear tasks and Wave events; no
-  recursive project or local roadmap item is introduced.
+- `lf project wait <id>` blocks without polling an LM and returns waiting,
+  blocked, failed, completed, or abandoned state as requested.
+- A Project result is evaluated from its Linear KRs, supervised Task events,
+  and merged PR evidence; no recursive Project or local roadmap item is
+  introduced.
 
 ## Done when: clients and observability
 
-- CLI text and JSON expose issue id, Task Session id, state reason, worktree,
-  provider, process liveness, PR, and latest event.
-- The Mac Wave detail shows the same active-task state by invoking `lf --json`;
-  it owns no duplicate lifecycle state.
+- CLI text and JSON expose Project/issue id, Project/Task Session id, supervisor,
+  state reason, provider, process liveness, latest event, and—only for Tasks—
+  worktree and PR.
+- The Mac Wave detail may continue showing only the existing active-Task
+  projection in this infrastructure PR. The later UI reads Project Sessions
+  and typed observations from these same `lf --json` shapes; it owns no
+  duplicate lifecycle state.
 - Every visible `Failed`, `Blocked`, `Waiting`, `Submitted`, and terminal state
   includes a reason and timestamp.
-- Wave event → Task Session → raw transcript/worktree/PR is traceable from ids.
+- Wave event → Project Session → Task Session → raw transcript/worktree/PR is
+  traceable from ids.
 - Provider usage and cost attach to the Task Session and roll up to the Wave.
 
 ## Done when: deletion and simplification

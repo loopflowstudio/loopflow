@@ -1,1 +1,1 @@
-lf radio: make agent bus operations explicit
+lf task: replace detached loops with durable Linear sessions

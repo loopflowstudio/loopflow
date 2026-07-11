@@ -16,8 +16,8 @@ use crate::lfdb::{open_existing_store, SharedStore, StoreError};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::task::{
     LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
-    PmWritebackState, TaskCommand, TaskCommandKind, TaskCommandSource, TaskEventKind, TaskSession,
-    TaskSessionStatus,
+    PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandKind, TaskCommandSource,
+    TaskCommandState, TaskEventKind, TaskSession, TaskSessionStatus,
 };
 use sha2::{Digest, Sha256};
 
@@ -32,7 +32,11 @@ pub struct TaskControlResult {
     pub issue_id: String,
     pub session_id: String,
     pub command_id: String,
-    pub delivery: String,
+    pub state: TaskCommandState,
+    pub effect: Option<TaskCommandEffect>,
+    pub generation: Option<u32>,
+    pub accepted_at: Option<time::OffsetDateTime>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -94,13 +98,38 @@ async fn task_store() -> OpsResult<SharedStore> {
     })
 }
 
-fn command_source(session: &TaskSession) -> TaskCommandSource {
-    std::env::var(crate::lf::session::WAVE_ID_ENV)
-        .ok()
-        .and_then(|value| LfdId::parse(&value).ok())
-        .filter(|wave_id| wave_id == &session.wave_id)
-        .map(TaskCommandSource::Wave)
-        .unwrap_or(TaskCommandSource::Human)
+fn command_source(session: &TaskSession) -> OpsResult<TaskCommandSource> {
+    let ambient = match std::env::var(crate::lf::session::WAVE_ID_ENV) {
+        Ok(value) => Some(
+            LfdId::parse(&value)
+                .map_err(|error| task_error(format!("invalid ambient Wave id: {error}")))?,
+        ),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(task_error("ambient Wave id is not valid UTF-8"))
+        }
+    };
+    command_source_for_wave(
+        ambient,
+        &session.wave_id,
+        &session.issue.identifier,
+        &session.wave,
+    )
+}
+
+fn command_source_for_wave(
+    ambient: Option<LfdId>,
+    owning_wave_id: &LfdId,
+    issue_identifier: &str,
+    owning_wave: &str,
+) -> OpsResult<TaskCommandSource> {
+    match ambient {
+        Some(wave_id) if &wave_id == owning_wave_id => Ok(TaskCommandSource::Wave(wave_id)),
+        Some(wave_id) => Err(task_error(format!(
+            "Wave {wave_id} cannot control Task {issue_identifier} owned by wave/{owning_wave}"
+        ))),
+        None => Ok(TaskCommandSource::Human),
+    }
 }
 
 pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
@@ -470,6 +499,64 @@ async fn wait_until_running(
     }
 }
 
+async fn reconcile_process_liveness(
+    store: &SharedStore,
+    session: &mut TaskSession,
+) -> OpsResult<()> {
+    if !session.status.is_process_active() {
+        return Ok(());
+    }
+    let alive = match session.process.as_ref() {
+        Some(process) => tmux_session_exists(&process.tmux_name)
+            .await
+            .map_err(|error| task_error(error.to_string()))?,
+        None => false,
+    };
+    if alive {
+        return Ok(());
+    }
+    let from = session.status;
+    session.set_status(
+        TaskSessionStatus::Failed,
+        "task process is missing; resume the same Task Session with `lf task resume`",
+    );
+    store
+        .update_task_session(session)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    store
+        .append_task_event(
+            &session.id,
+            &TaskEventKind::StatusChanged {
+                from,
+                to: TaskSessionStatus::Failed,
+                reason: session.status_reason.clone(),
+            },
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    store
+        .append_task_event(
+            &session.id,
+            &TaskEventKind::Failed {
+                error: session.status_reason.clone(),
+                resumable: true,
+            },
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    crate::lf::commands::chat::post_to_named_wave(
+        &session.wave,
+        &format!(
+            "Task {} → failed: {}",
+            session.issue.identifier, session.status_reason
+        ),
+    )
+    .await
+    .map_err(|error| task_error(format!("failed to mirror task failure to Wave: {error}")))?;
+    Ok(())
+}
+
 pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
     block_on_task(async move {
         let store = task_store().await?;
@@ -478,57 +565,9 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
             .await
             .map_err(|error| task_error(format!("failed to read task status: {error}")))?
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-        if session.status.is_process_active() {
-            let alive = match session.process.as_ref() {
-                Some(process) => tmux_session_exists(&process.tmux_name)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?,
-                None => false,
-            };
-            if !alive {
-                let from = session.status;
-                session.set_status(
-                    TaskSessionStatus::Failed,
-                    "task process is missing; resume the same Task Session with `lf task resume`",
-                );
-                store
-                    .update_task_session(&session)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                store
-                    .append_task_event(
-                        &session.id,
-                        &TaskEventKind::StatusChanged {
-                            from,
-                            to: TaskSessionStatus::Failed,
-                            reason: session.status_reason.clone(),
-                        },
-                    )
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                store
-                    .append_task_event(
-                        &session.id,
-                        &TaskEventKind::Failed {
-                            error: session.status_reason.clone(),
-                            resumable: true,
-                        },
-                    )
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                crate::lf::commands::chat::post_to_named_wave(
-                    &session.wave,
-                    &format!(
-                        "Task {} → failed: {}",
-                        session.issue.identifier, session.status_reason
-                    ),
-                )
-                .await
-                .map_err(|error| {
-                    task_error(format!("failed to mirror task failure to Wave: {error}"))
-                })?;
-                return Ok(session);
-            }
+        reconcile_process_liveness(&store, &mut session).await?;
+        if session.status == TaskSessionStatus::Failed {
+            return Ok(session);
         }
         if session.status == TaskSessionStatus::Merged
             && matches!(session.pm_writeback, PmWritebackState::Pending { .. })
@@ -708,6 +747,7 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
             .await
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+        reconcile_process_liveness(&store, &mut session).await?;
         if session.status.is_terminal() {
             return Err(task_error(format!(
                 "task {} is {}; terminal Task Sessions cannot accept commands",
@@ -715,11 +755,35 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                 session.status.as_str()
             )));
         }
-        let command = TaskCommand::new(session.id.clone(), command_source(&session), kind);
-        store
-            .create_task_command(&command)
-            .await
-            .map_err(|error| task_error(format!("failed to persist task command: {error}")))?;
+        let command = TaskCommand::new(session.id.clone(), command_source(&session)?, kind);
+        let wait_for_resolution = !matches!(&command.kind, TaskCommandKind::FollowUp { .. });
+        let superseded = if matches!(&command.kind, TaskCommandKind::Interrupt { .. }) {
+            store.supersede_and_create_task_command(&command).await
+        } else {
+            store
+                .create_task_command(&command)
+                .await
+                .map(|()| Vec::new())
+        }
+        .map_err(|error| task_error(format!("failed to persist task command: {error}")))?;
+        for command_id in superseded {
+            append_command_event(
+                &store,
+                &session,
+                command_id,
+                TaskCommandState::Superseded,
+                None,
+            )
+            .await?;
+        }
+        append_command_event(
+            &store,
+            &session,
+            command.id.clone(),
+            TaskCommandState::Persisted,
+            command.effect,
+        )
+        .await?;
         crate::lf::commands::chat::post_to_named_wave(
             &session.wave,
             &format!(
@@ -735,18 +799,17 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
             if !session.status.is_process_active() {
                 let from = session.status;
                 store
-                    .acknowledge_task_command(&command.id)
+                    .accept_task_command(&command.id, None)
                     .await
                     .map_err(|error| task_error(error.to_string()))?;
-                store
-                    .append_task_event(
-                        &session.id,
-                        &TaskEventKind::CommandAccepted {
-                            command_id: command.id.clone(),
-                        },
-                    )
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
+                append_command_event(
+                    &store,
+                    &session,
+                    command.id.clone(),
+                    TaskCommandState::Accepted,
+                    None,
+                )
+                .await?;
                 session.set_status(
                     TaskSessionStatus::Abandoned,
                     format!("Task Session explicitly abandoned: {reason}"),
@@ -766,21 +829,20 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                     )
                     .await
                     .map_err(|error| task_error(error.to_string()))?;
+                let receipt = wait_for_command_receipt(&store, &command.id).await?;
                 return Ok(TaskControlResult {
                     issue_id: session.issue.identifier,
                     session_id: session.id.to_string(),
                     command_id: command.id.to_string(),
-                    delivery: "accepted".to_string(),
+                    state: receipt.state,
+                    effect: receipt.effect,
+                    generation: receipt.claimed_by_generation,
+                    accepted_at: receipt.accepted_at,
+                    error: receipt.error,
                 });
             }
         }
-        let delivery = if session.status.is_process_active() {
-            if session.status == TaskSessionStatus::Running && session.provider == "codex" {
-                "live"
-            } else {
-                "queued"
-            }
-        } else {
+        if !session.status.is_process_active() {
             let wave = store
                 .get_wave(&session.wave_id)
                 .await
@@ -789,32 +851,122 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                     task_error(format!("owning wave/{} is not registered", session.wave))
                 })?;
             launch_task_process(&store, &mut session, Some(wave.workers.max(1))).await?;
-            "queued"
+        }
+        let mut receipt = if wait_for_resolution {
+            wait_for_command_receipt(&store, &command.id).await?
+        } else {
+            read_command_receipt(&store, &command.id).await?
         };
+        if matches!(
+            receipt.state,
+            TaskCommandState::Persisted | TaskCommandState::Claimed
+        ) {
+            let current = store
+                .get_task_session(&session.id)
+                .await
+                .map_err(|error| task_error(format!("failed to reread Task Session: {error}")))?
+                .ok_or_else(|| task_error("Task Session disappeared after command persistence"))?;
+            if !current.status.is_process_active() && !current.status.is_terminal() {
+                session = current;
+                let wave = store
+                    .get_wave(&session.wave_id)
+                    .await
+                    .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
+                    .ok_or_else(|| {
+                        task_error(format!("owning wave/{} is not registered", session.wave))
+                    })?;
+                launch_task_process(&store, &mut session, Some(wave.workers.max(1))).await?;
+                receipt = if wait_for_resolution {
+                    wait_for_command_receipt(&store, &command.id).await?
+                } else {
+                    read_command_receipt(&store, &command.id).await?
+                };
+            }
+        }
         Ok(TaskControlResult {
             issue_id: session.issue.identifier,
             session_id: session.id.to_string(),
             command_id: command.id.to_string(),
-            delivery: delivery.to_string(),
+            state: receipt.state,
+            effect: receipt.effect,
+            generation: receipt.claimed_by_generation,
+            accepted_at: receipt.accepted_at,
+            error: receipt.error,
         })
     })
 }
 
+async fn wait_for_command_receipt(
+    store: &SharedStore,
+    command_id: &crate::task::TaskCommandId,
+) -> OpsResult<TaskCommand> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let command = read_command_receipt(store, command_id).await?;
+        if matches!(
+            command.state,
+            TaskCommandState::Accepted | TaskCommandState::Failed | TaskCommandState::Superseded
+        ) || tokio::time::Instant::now() >= deadline
+        {
+            return Ok(command);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn read_command_receipt(
+    store: &SharedStore,
+    command_id: &crate::task::TaskCommandId,
+) -> OpsResult<TaskCommand> {
+    store
+        .get_task_command(command_id)
+        .await
+        .map_err(|error| task_error(format!("failed to read task command receipt: {error}")))?
+        .ok_or_else(|| task_error(format!("task command {command_id} disappeared")))
+}
+
+async fn append_command_event(
+    store: &SharedStore,
+    session: &TaskSession,
+    command_id: crate::task::TaskCommandId,
+    state: TaskCommandState,
+    effect: Option<TaskCommandEffect>,
+) -> OpsResult<()> {
+    store
+        .append_task_event(
+            &session.id,
+            &TaskEventKind::CommandChanged {
+                command_id,
+                state,
+                effect,
+                error: None,
+            },
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    Ok(())
+}
+
 fn command_kind_name(kind: &TaskCommandKind) -> &'static str {
     match kind {
-        TaskCommandKind::Message { .. } => "message",
+        TaskCommandKind::FollowUp { .. } => "follow_up",
+        TaskCommandKind::Steer { .. } => "steer",
         TaskCommandKind::Interrupt { .. } => "interrupt",
         TaskCommandKind::Resume { .. } => "resume",
         TaskCommandKind::Abandon { .. } => "abandon",
     }
 }
 
-pub fn task_send(issue: &str, message: String) -> OpsResult<TaskControlResult> {
-    queue_command(issue, TaskCommandKind::Message { text: message })
+pub fn task_follow_up(issue: &str, message: String) -> OpsResult<TaskControlResult> {
+    queue_command(issue, TaskCommandKind::FollowUp { text: message })
 }
 
-pub fn task_interrupt(issue: &str, next_message: Option<String>) -> OpsResult<TaskControlResult> {
-    queue_command(issue, TaskCommandKind::Interrupt { next_message })
+pub fn task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult> {
+    queue_command(issue, TaskCommandKind::Steer { text: message })
+}
+
+pub fn task_interrupt(issue: &str, replacement: Option<String>) -> OpsResult<TaskControlResult> {
+    queue_command(issue, TaskCommandKind::Interrupt { replacement })
 }
 
 pub fn task_resume(issue: &str, message: Option<String>) -> OpsResult<TaskControlResult> {
@@ -883,8 +1035,9 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::project_context;
+    use super::{command_source_for_wave, project_context, TaskControlResult};
     use crate::lfd::pm::{PmKr, PmProject};
+    use crate::task::TaskCommandSource;
 
     #[test]
     fn task_context_captures_project_definition_and_kr_state() {
@@ -910,6 +1063,56 @@ mod tests {
         assert_eq!(
             project_context(&project),
             "Definition:\nEvery task has one durable session.\n\nKRs:\n- [x] Review resumes the same session\n- [ ] Merge wakes the Wave"
+        );
+    }
+
+    #[test]
+    fn foreign_wave_cannot_be_reclassified_as_a_human_command() {
+        let wave_id = crate::lfd::id::LfdId::new();
+
+        assert!(matches!(
+            command_source_for_wave(Some(wave_id.clone()), &wave_id, "INF-123", "infrastructure")
+                .unwrap(),
+            TaskCommandSource::Wave(_)
+        ));
+        assert!(command_source_for_wave(
+            Some(crate::lfd::id::LfdId::new()),
+            &wave_id,
+            "INF-123",
+            "infrastructure"
+        )
+        .is_err());
+        assert_eq!(
+            command_source_for_wave(None, &wave_id, "INF-123", "infrastructure").unwrap(),
+            TaskCommandSource::Human
+        );
+    }
+
+    #[test]
+    fn task_control_json_reports_durable_state_and_effect() {
+        let result = TaskControlResult {
+            issue_id: "INF-123".to_string(),
+            session_id: "ts_example".to_string(),
+            command_id: "tc_example".to_string(),
+            state: crate::task::TaskCommandState::Accepted,
+            effect: Some(crate::task::TaskCommandEffect::LiveSteer),
+            generation: Some(2),
+            accepted_at: None,
+            error: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            serde_json::json!({
+                "issue_id": "INF-123",
+                "session_id": "ts_example",
+                "command_id": "tc_example",
+                "state": "accepted",
+                "effect": "live_steer",
+                "generation": 2,
+                "accepted_at": null,
+                "error": null,
+            })
         );
     }
 }

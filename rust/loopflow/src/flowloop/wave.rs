@@ -254,8 +254,8 @@ fn orchestration_discipline(wave: &str) -> String {
          - Create or select a Linear Project and Linear task before delegating \
          file-writing work. Start it with `lf task run <issue-id>`. Never \
          delegate anonymous work or the whole wave objective.\n\
-         - Supervise durable Task Sessions with `lf task status`, `send`, \
-         `interrupt`, `wait`, and `resume`. Each task owns one immutable \
+         - Supervise durable Task Sessions with `lf task status`, `follow-up`, \
+         `steer`, `interrupt`, `wait`, and `resume`. Each task owns one immutable \
          worktree and one PR to main; keep the Wave home free of shipping edits.\n\
          - Keep turns centered on selection, direct progress, sequencing, and \
          authored reports.\n\

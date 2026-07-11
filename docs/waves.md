@@ -30,7 +30,7 @@ Every concrete file-writing change begins with a Linear task:
 ```bash
 lf task start "add retry to token refresh" --project <linear-project-id>
 lf task run INF-123
-lf task send INF-123 "also audit retry callers"
+lf task follow-up INF-123 "also audit retry callers"
 ```
 
 A Task Session runs in one immutable worktree, opens one PR to `main`, and

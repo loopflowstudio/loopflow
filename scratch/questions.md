@@ -18,3 +18,11 @@
   `RunStatus::is_active()` and routed `wave::registry`'s private tmux probe to
   the canonical `engine::process::tmux_session_exists`. Lib (1059) + bin tests
   green, clippy clean.
+
+# Implement-pass concurrency (2026-07-10)
+
+- Two pre-existing Codex processes had this worktree as their cwd while the
+  steering slice was implemented. They contributed compatible review, docs,
+  and migration-test edits during the pass. Those edits were preserved and
+  reconciled; no git or rebase operation ran while the tree had multiple
+  writers.

@@ -531,13 +531,27 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Send an audited instruction to the Task Session
-    Send { issue: String, message: String },
+    /// Queue an audited instruction for exactly the next provider turn
+    FollowUp {
+        issue: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Redirect the active provider turn, interrupting when live steer is unavailable
+    Steer {
+        issue: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Interrupt the active provider turn and optionally replace its next instruction
     Interrupt {
         issue: String,
         #[arg(long = "message")]
         message: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Wait without polling an LM
     Wait {
@@ -553,6 +567,8 @@ pub enum TaskCommand {
     Resume {
         issue: String,
         message: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Attach read-write to the Task Session control terminal
     Attach { issue: String },
@@ -561,6 +577,8 @@ pub enum TaskCommand {
         issue: String,
         #[arg(long)]
         reason: String,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -985,13 +1003,69 @@ mod tests {
         ])
         .expect("parse task interrupt");
         let Some(Commands::Task {
-            cmd: TaskCommand::Interrupt { issue, message },
+            cmd:
+                TaskCommand::Interrupt {
+                    issue,
+                    message,
+                    json,
+                },
         }) = cli.command
         else {
             panic!("expected task interrupt command");
         };
         assert_eq!(issue, "INF-123");
         assert_eq!(message.as_deref(), Some("take the smaller approach"));
+        assert!(!json);
+    }
+
+    #[test]
+    fn task_steering_verbs_are_distinct_and_support_json_receipts() {
+        let follow_up = Cli::try_parse_from([
+            "lf",
+            "task",
+            "follow-up",
+            "INF-123",
+            "audit retry callers",
+            "--json",
+        ])
+        .expect("parse task follow-up");
+        let Some(Commands::Task {
+            cmd:
+                TaskCommand::FollowUp {
+                    issue,
+                    message,
+                    json,
+                },
+        }) = follow_up.command
+        else {
+            panic!("expected task follow-up command");
+        };
+        assert_eq!(issue, "INF-123");
+        assert_eq!(message, "audit retry callers");
+        assert!(json);
+
+        let steer = Cli::try_parse_from([
+            "lf",
+            "task",
+            "steer",
+            "INF-123",
+            "take the smaller approach",
+        ])
+        .expect("parse task steer");
+        let Some(Commands::Task {
+            cmd:
+                TaskCommand::Steer {
+                    issue,
+                    message,
+                    json,
+                },
+        }) = steer.command
+        else {
+            panic!("expected task steer command");
+        };
+        assert_eq!(issue, "INF-123");
+        assert_eq!(message, "take the smaller approach");
+        assert!(!json);
     }
 
     #[test]

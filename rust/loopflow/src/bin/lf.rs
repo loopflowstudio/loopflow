@@ -593,6 +593,28 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
     Ok(())
 }
 
+fn print_task_control(
+    result: &loopflow::ops::task::TaskControlResult,
+    json: bool,
+) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(result)?);
+    } else {
+        let effect = result
+            .effect
+            .map(|effect| effect.as_str())
+            .unwrap_or("none");
+        println!(
+            "{} → {} (state={}, effect={})",
+            result.command_id,
+            result.issue_id,
+            result.state.as_str(),
+            effect
+        );
+    }
+    Ok(())
+}
+
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Run { issue, json } => {
@@ -611,21 +633,29 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             let session = loopflow::ops::task::task_status(issue)?;
             print_task_session(&session, *json)
         }
-        TaskCommand::Send { issue, message } => {
-            let result = loopflow::ops::task::task_send(issue, message.clone())?;
-            println!(
-                "{} → {} ({})",
-                result.command_id, result.issue_id, result.delivery
-            );
-            Ok(())
+        TaskCommand::FollowUp {
+            issue,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_follow_up(issue, message.clone())?;
+            print_task_control(&result, *json)
         }
-        TaskCommand::Interrupt { issue, message } => {
+        TaskCommand::Steer {
+            issue,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_steer(issue, message.clone())?;
+            print_task_control(&result, *json)
+        }
+        TaskCommand::Interrupt {
+            issue,
+            message,
+            json,
+        } => {
             let result = loopflow::ops::task::task_interrupt(issue, message.clone())?;
-            println!(
-                "{} → {} ({})",
-                result.command_id, result.issue_id, result.delivery
-            );
-            Ok(())
+            print_task_control(&result, *json)
         }
         TaskCommand::Wait {
             issue,
@@ -642,24 +672,24 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             let session = loopflow::ops::task::task_wait(issue, until, timeout)?;
             print_task_session(&session, *json)
         }
-        TaskCommand::Resume { issue, message } => {
+        TaskCommand::Resume {
+            issue,
+            message,
+            json,
+        } => {
             let result = loopflow::ops::task::task_resume(issue, message.clone())?;
-            println!(
-                "{} → {} ({})",
-                result.command_id, result.issue_id, result.delivery
-            );
-            Ok(())
+            print_task_control(&result, *json)
         }
         TaskCommand::Attach { issue } => {
             loopflow::ops::task::task_attach(issue).map_err(Into::into)
         }
-        TaskCommand::Abandon { issue, reason } => {
+        TaskCommand::Abandon {
+            issue,
+            reason,
+            json,
+        } => {
             let result = loopflow::ops::task::task_abandon(issue, reason.clone())?;
-            println!(
-                "{} → {} ({})",
-                result.command_id, result.issue_id, result.delivery
-            );
-            Ok(())
+            print_task_control(&result, *json)
         }
     }
 }

@@ -70,7 +70,7 @@ The wave agent coordinates concrete work through Linear-backed Task Sessions:
 
 ```bash
 lf task start "unify button variants" --project <linear-project-id>
-lf task send INF-123 "also audit the settings panes"
+lf task steer INF-123 "also audit the settings panes"
 lf task wait INF-123
 ```
 

@@ -338,6 +338,25 @@ impl Store {
         .await
     }
 
+    pub async fn supersede_and_create_task_command(
+        &self,
+        command: &TaskCommand,
+    ) -> StoreResult<Vec<TaskCommandId>> {
+        let command = command.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.supersede_and_insert_task_command(&command)
+        })
+        .await
+    }
+
+    pub async fn get_task_command(
+        &self,
+        command_id: &TaskCommandId,
+    ) -> StoreResult<Option<TaskCommand>> {
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_command(&command_id)).await
+    }
+
     pub async fn claim_task_commands(
         &self,
         session_id: &TaskSessionId,
@@ -350,10 +369,39 @@ impl Store {
         .await
     }
 
-    pub async fn acknowledge_task_command(&self, command_id: &TaskCommandId) -> StoreResult<()> {
+    pub async fn accept_task_command(
+        &self,
+        command_id: &TaskCommandId,
+        effect: Option<crate::task::TaskCommandEffect>,
+    ) -> StoreResult<()> {
         let command_id = command_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.acknowledge_task_command(&command_id)
+            store.accept_task_command(&command_id, effect)
+        })
+        .await
+    }
+
+    pub async fn set_task_command_effect(
+        &self,
+        command_id: &TaskCommandId,
+        effect: crate::task::TaskCommandEffect,
+    ) -> StoreResult<()> {
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.set_task_command_effect(&command_id, effect)
+        })
+        .await
+    }
+
+    pub async fn fail_task_command(
+        &self,
+        command_id: &TaskCommandId,
+        effect: Option<crate::task::TaskCommandEffect>,
+        error: String,
+    ) -> StoreResult<()> {
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.fail_task_command(&command_id, effect, &error)
         })
         .await
     }
@@ -1414,8 +1462,8 @@ mod tests {
     };
     use crate::task::{
         LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
-        PmWritebackState, TaskCommand, TaskCommandKind, TaskCommandSource, TaskEventKind,
-        TaskSession, TaskSessionId, TaskSessionStatus,
+        PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandKind, TaskCommandSource,
+        TaskCommandState, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use std::env;
     use std::path::PathBuf;
@@ -1532,7 +1580,7 @@ mod tests {
         let command = TaskCommand::new(
             session.id.clone(),
             TaskCommandSource::Human,
-            TaskCommandKind::Message {
+            TaskCommandKind::Steer {
                 text: "rename the flag".to_string(),
             },
         );
@@ -1541,14 +1589,93 @@ mod tests {
         assert_eq!(first_claim.len(), 1);
         assert_eq!(first_claim[0].id, command.id);
         assert_eq!(first_claim[0].kind, command.kind);
+        assert_eq!(first_claim[0].state, TaskCommandState::Claimed);
         assert_eq!(first_claim[0].claimed_by_generation, Some(1));
         assert_eq!(
             store.claim_task_commands(&session.id, 2).await.unwrap()[0].claimed_by_generation,
             Some(2)
         );
-        store.acknowledge_task_command(&command.id).await.unwrap();
+        store
+            .accept_task_command(&command.id, Some(TaskCommandEffect::LiveSteer))
+            .await
+            .unwrap();
+        let accepted = store.get_task_command(&command.id).await.unwrap().unwrap();
+        assert_eq!(accepted.state, TaskCommandState::Accepted);
+        assert_eq!(accepted.effect, Some(TaskCommandEffect::LiveSteer));
         assert!(store
             .claim_task_commands(&session.id, 3)
+            .await
+            .unwrap()
+            .is_empty());
+
+        let follow_up_a = TaskCommand::new(
+            session.id.clone(),
+            TaskCommandSource::Human,
+            TaskCommandKind::FollowUp {
+                text: "A".to_string(),
+            },
+        );
+        let follow_up_b = TaskCommand::new(
+            session.id.clone(),
+            TaskCommandSource::Human,
+            TaskCommandKind::FollowUp {
+                text: "B".to_string(),
+            },
+        );
+        store.create_task_command(&follow_up_a).await.unwrap();
+        store.create_task_command(&follow_up_b).await.unwrap();
+        let interrupt = TaskCommand::new(
+            session.id.clone(),
+            TaskCommandSource::Human,
+            TaskCommandKind::Interrupt {
+                replacement: Some("C".to_string()),
+            },
+        );
+        let superseded = store
+            .supersede_and_create_task_command(&interrupt)
+            .await
+            .unwrap();
+        assert_eq!(
+            superseded,
+            vec![follow_up_a.id.clone(), follow_up_b.id.clone()]
+        );
+        assert_eq!(
+            store
+                .get_task_command(&follow_up_a.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            TaskCommandState::Superseded
+        );
+        assert_eq!(
+            store
+                .claim_task_commands(&session.id, 3)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|command| command.id)
+                .collect::<Vec<_>>(),
+            vec![interrupt.id.clone()]
+        );
+        store
+            .fail_task_command(
+                &interrupt.id,
+                Some(TaskCommandEffect::Replacement),
+                "provider control failed".to_string(),
+            )
+            .await
+            .unwrap();
+        let failed = store
+            .get_task_command(&interrupt.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(failed.state, TaskCommandState::Failed);
+        assert_eq!(failed.effect, Some(TaskCommandEffect::Replacement));
+        assert_eq!(failed.error.as_deref(), Some("provider control failed"));
+        assert!(store
+            .claim_task_commands(&session.id, 4)
             .await
             .unwrap()
             .is_empty());

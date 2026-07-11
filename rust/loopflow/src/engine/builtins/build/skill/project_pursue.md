@@ -29,7 +29,7 @@ lf pm task create --project <project> --title "..." --notes "..."
 - Every file-writing task must already have a Linear identity. Start it with
   `lf task run <issue-id>` and supervise the same Task Session through review
   and merge.
-- Use `lf task send`, `interrupt`, `wait`, and `resume` for follow-up. Do not
+- Use `lf task follow-up`, `steer`, `interrupt`, `wait`, and `resume`. Do not
   create another worktree or session for review feedback or CI repair.
 - Never start another Project or Wave from Project pursuit, and never collapse
   the remaining Project into one anonymous task.

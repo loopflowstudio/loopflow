@@ -280,10 +280,53 @@ impl TaskSession {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskCommandKind {
-    Message { text: String },
-    Interrupt { next_message: Option<String> },
+    FollowUp { text: String },
+    Steer { text: String },
+    Interrupt { replacement: Option<String> },
     Resume { message: Option<String> },
     Abandon { reason: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TaskCommandState {
+    Persisted,
+    Claimed,
+    Accepted,
+    Failed,
+    Superseded,
+}
+
+impl TaskCommandState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Persisted => "persisted",
+            Self::Claimed => "claimed",
+            Self::Accepted => "accepted",
+            Self::Failed => "failed",
+            Self::Superseded => "superseded",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TaskCommandEffect {
+    LiveSteer,
+    NextTurn,
+    Replacement,
+}
+
+impl TaskCommandEffect {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LiveSteer => "live_steer",
+            Self::NextTurn => "next_turn",
+            Self::Replacement => "replacement",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -301,9 +344,12 @@ pub struct TaskCommand {
     pub session_id: TaskSessionId,
     pub source: TaskCommandSource,
     pub kind: TaskCommandKind,
+    pub state: TaskCommandState,
+    pub effect: Option<TaskCommandEffect>,
     pub created_at: OffsetDateTime,
     pub claimed_by_generation: Option<u32>,
-    pub acknowledged_at: Option<OffsetDateTime>,
+    pub accepted_at: Option<OffsetDateTime>,
+    pub error: Option<String>,
 }
 
 impl TaskCommand {
@@ -312,14 +358,29 @@ impl TaskCommand {
         source: TaskCommandSource,
         kind: TaskCommandKind,
     ) -> Self {
+        let effect = match &kind {
+            TaskCommandKind::FollowUp { .. } | TaskCommandKind::Resume { message: Some(_) } => {
+                Some(TaskCommandEffect::NextTurn)
+            }
+            TaskCommandKind::Interrupt {
+                replacement: Some(_),
+            } => Some(TaskCommandEffect::Replacement),
+            TaskCommandKind::Steer { .. }
+            | TaskCommandKind::Interrupt { replacement: None }
+            | TaskCommandKind::Resume { message: None }
+            | TaskCommandKind::Abandon { .. } => None,
+        };
         Self {
             id: TaskCommandId::new(),
             session_id,
             source,
             kind,
+            state: TaskCommandState::Persisted,
+            effect,
             created_at: OffsetDateTime::now_utc(),
             claimed_by_generation: None,
-            acknowledged_at: None,
+            accepted_at: None,
+            error: None,
         }
     }
 }
@@ -333,8 +394,11 @@ pub enum TaskEventKind {
         to: TaskSessionStatus,
         reason: String,
     },
-    CommandAccepted {
+    CommandChanged {
         command_id: TaskCommandId,
+        state: TaskCommandState,
+        effect: Option<TaskCommandEffect>,
+        error: Option<String>,
     },
     Progress {
         summary: String,

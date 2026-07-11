@@ -29,7 +29,7 @@ lf pm task update --id <task-id> --title "..."
   file-writing change begins as a Linear task under exactly one Project.
 - Start the task with `lf task run <issue-id>`. The resulting Task Session owns
   one immutable worktree, provider transcript, and pull request to main.
-- Supervise active work with `lf task status`, `lf task send`, `lf task
+- Supervise active work with `lf task status`, `lf task steer`, `lf task
   interrupt`, `lf task wait`, and `lf task resume`. A second task may run in
   parallel when capacity permits; never create a second session for one issue.
 - Use `lf project run <linear-project-id>` to queue a Project directive for its

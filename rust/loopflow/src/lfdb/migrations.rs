@@ -305,6 +305,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "065_task_agent",
         sql: include_str!("migrations/065_task_agent.sql"),
     },
+    Migration {
+        version: "066_task_command_receipts",
+        sql: include_str!("migrations/066_task_command_receipts.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the
@@ -494,6 +498,73 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         let applied_again = applied_versions_sqlite(&conn).unwrap();
         assert_eq!(applied, applied_again);
+    }
+
+    #[test]
+    fn task_command_receipts_migrate_existing_commands_and_events() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE task_commands (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                source_json TEXT NOT NULL,
+                kind_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                claimed_by_generation INTEGER,
+                acknowledged_at INTEGER
+            );
+            CREATE INDEX idx_task_commands_pending
+            ON task_commands(session_id, acknowledged_at, created_at, id);
+            CREATE TABLE task_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                kind_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            INSERT INTO task_commands VALUES (
+                'command-1', 'session-1', '{\"kind\":\"human\"}',
+                '{\"kind\":\"message\",\"text\":\"audit retries\"}',
+                7, 2, 9
+            );
+            INSERT INTO task_events (session_id, kind_json, created_at) VALUES (
+                'session-1',
+                '{\"kind\":\"command_accepted\",\"command_id\":\"command-1\"}',
+                10
+            );",
+        )
+        .unwrap();
+
+        conn.execute_batch(include_str!("migrations/066_task_command_receipts.sql"))
+            .unwrap();
+
+        let command: (String, String, i64, i64) = conn
+            .query_row(
+                "SELECT state, kind_json, created_at, accepted_at FROM task_commands",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(command.0, "accepted");
+        assert_eq!(
+            command.1,
+            "{\"kind\":\"follow_up\",\"text\":\"audit retries\"}"
+        );
+        assert_eq!(command.2, 7_000_000_000);
+        assert_eq!(command.3, 9_000_000_000);
+
+        let event: String = conn
+            .query_row("SELECT kind_json FROM task_events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&event).unwrap(),
+            serde_json::json!({
+                "kind": "command_changed",
+                "command_id": "command-1",
+                "state": "accepted",
+                "effect": null,
+                "error": null,
+            })
+        );
     }
 
     #[test]

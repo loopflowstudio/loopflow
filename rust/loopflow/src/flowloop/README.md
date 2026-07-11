@@ -9,7 +9,7 @@ Session:
 
 ```bash
 lf task run INF-123
-lf task send INF-123 "also rename the flag"
+lf task steer INF-123 "also rename the flag"
 lf task wait INF-123
 ```
 

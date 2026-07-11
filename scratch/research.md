@@ -148,10 +148,10 @@ Primary references:
 | Parent-control capability | Codex | Claude Code | OpenCode | Loopflow now | Required Loopflow floor |
 |---|---|---|---|---|---|
 | Stable child address | Thread/agent path and id | Named teammate or stable subagent id | `task_id` / session id | Linear issue or Task Session id | Keep; reject cross-Wave control rather than relabeling it human |
-| Follow-up while busy | Addressed `send_input` | Mailbox / `SendMessage` | Serialized `extend` | Durable FIFO command | Keep, but name it follow-up and guarantee it survives the turn boundary |
-| Immediate redirect | `send_input(interrupt: true)` atomically interrupts then submits | Direct message plus interactive interrupt; not documented as one atomic operation | Separate abort and async prompt | `send` is live only for Codex; other providers queue | Add provider-neutral `steer`: live injection or interrupt-and-resume |
-| Replacement semantics | Interrupt flag makes intent explicit | Lead can reject a plan with replacement feedback | Cancel then prompt can be composed | Interrupt replacement sits behind older queued inputs | Supersede all unaccepted input when replacing current work |
-| Submission receipt | `submission_id`, target status, structured collaboration item | Task/message state and automatic delivery | Job id, boolean extend result, wait result | Command id plus inferred `live/queued` string | Return persisted → claimed → accepted/failed and the actual effect |
+| Follow-up while busy | Addressed `send_input` | Mailbox / `SendMessage` | Serialized `extend` | Durable `follow-up` FIFO command | Keep; prove it survives the turn boundary on every provider |
+| Immediate redirect | `send_input(interrupt: true)` atomically interrupts then submits | Direct message plus interactive interrupt; not documented as one atomic operation | Separate abort and async prompt | `steer`: live injection or interrupt-and-resume | Keep; prove the adapter contract on every provider |
+| Replacement semantics | Interrupt flag makes intent explicit | Lead can reject a plan with replacement feedback | Cancel then prompt can be composed | Interrupt transactionally supersedes unaccepted input | Keep; add black-box replacement coverage |
+| Submission receipt | `submission_id`, target status, structured collaboration item | Task/message state and automatic delivery | Job id, boolean extend result, wait result | Persisted/claimed/accepted/failed/superseded state plus actual effect | Expose receipt waiting as a first-class operation |
 | Status and wait | Status subscription and bounded wait across targets | Shared task list, idle notifications | list/get/wait with timeout | Task status/wait | Keep; make command acceptance waitable, not only Task completion |
 | Completion reaches parent | Automatic structured completion notification | Automatic report/idle notification | Synthetic result injected into parent | Prose Wave message | Fold typed Task events into the Wave inbox with a durable cursor |
 | Stop and lifecycle end | Interrupt and close agent | Interrupt, graceful shutdown request, cleanup | Abort/cancel | Interrupt and abandon | Keep both cancel-current-turn and end-Task semantics distinct |
@@ -162,23 +162,13 @@ Primary references:
 
 ### Where the current implementation is below the floor
 
-1. `lf task send` has capability-dependent meaning. During a Codex turn it is
-   live steering; during Claude/OpenCode it is a later follow-up. The Wave
-   cannot express “change direction now” independently of provider.
-2. `delivery: live` is inferred from Task status and provider before the runner
-   claims the command. It is not an acceptance receipt.
-3. `interrupt --message` appends the replacement behind previously queued
-   messages. Obsolete guidance can run before the correction.
-4. A command can arrive after the runner’s last poll but before turn teardown.
-   The Task becomes waiting while the durable command remains unclaimed until
-   some later command happens to restart it.
-5. `CommandAccepted` stays only in Task history. Command and completion notices
+1. Boundary recovery rereads the durable receipt and resumes an inactive
+   session, but the race and crash stages do not yet have black-box adapter
+   conformance coverage.
+2. `CommandChanged` stays only in Task history. Command and completion notices
    are copied into the Wave journal as unattributed prose `UserMessage` rows,
    which can wake an unnecessary Wave turn and cannot be correlated safely.
-6. A foreign Wave process can name another Wave’s issue. Because a mismatched
-   `LFD_WAVE_ID` falls back to `TaskCommandSource::Human`, the command is
-   accepted rather than refused.
-7. Every provider harness uses `ApprovalPolicy::AutoApprove`. A Task cannot
+3. Every provider harness uses `ApprovalPolicy::AutoApprove`. A Task cannot
    pause on a plan, ambiguity, or consequential choice and ask its owning Wave
    to decide.
 

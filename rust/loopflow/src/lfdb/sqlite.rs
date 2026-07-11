@@ -25,8 +25,8 @@ use crate::trace::{
 };
 use crate::task::{
     LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PullRequestRef, TaskCommand,
-    TaskCommandId, TaskCommandKind, TaskCommandSource, TaskEvent, TaskEventKind, TaskProcess,
-    TaskSession, TaskSessionId, TaskSessionStatus,
+    TaskCommandEffect, TaskCommandId, TaskCommandKind, TaskCommandSource, TaskCommandState,
+    TaskEvent, TaskEventKind, TaskProcess, TaskSession, TaskSessionId, TaskSessionStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -1662,22 +1662,51 @@ impl SqliteStore {
 
     pub fn insert_task_command(&self, command: &TaskCommand) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO task_commands (
-                id, session_id, source_json, kind_json, created_at,
-                claimed_by_generation, acknowledged_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                command.id.as_str(),
-                command.session_id.as_str(),
-                serde_json::to_string(&command.source)?,
-                serde_json::to_string(&command.kind)?,
-                command.created_at.unix_timestamp(),
-                command.claimed_by_generation.map(i64::from),
-                command.acknowledged_at.map(|at| at.unix_timestamp()),
-            ],
-        )?;
+        insert_task_command(&conn, command)?;
         Ok(())
+    }
+
+    pub fn supersede_and_insert_task_command(
+        &self,
+        command: &TaskCommand,
+    ) -> StoreResult<Vec<TaskCommandId>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let superseded = {
+            let mut statement = transaction.prepare(
+                "SELECT id FROM task_commands
+                 WHERE session_id = ?1 AND state IN ('persisted', 'claimed')
+                 ORDER BY created_at, id",
+            )?;
+            let rows = statement.query_map(params![command.session_id.as_str()], |row| {
+                Ok(TaskCommandId::from_raw(row.get::<_, String>(0)?))
+            })?;
+            let mut ids = Vec::new();
+            for row in rows {
+                ids.push(row?);
+            }
+            ids
+        };
+        transaction.execute(
+            "UPDATE task_commands
+             SET state = 'superseded', effect = NULL, error = NULL
+             WHERE session_id = ?1 AND state IN ('persisted', 'claimed')",
+            params![command.session_id.as_str()],
+        )?;
+        insert_task_command(&transaction, command)?;
+        transaction.commit()?;
+        Ok(superseded)
+    }
+
+    pub fn task_command(&self, command_id: &TaskCommandId) -> StoreResult<Option<TaskCommand>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            TASK_COMMAND_SELECT,
+            params![command_id.as_str()],
+            map_task_command_row,
+        )
+        .optional()
+        .map_err(StoreError::from)
     }
 
     pub fn claim_task_commands(
@@ -1689,17 +1718,17 @@ impl SqliteStore {
         let transaction = conn.transaction()?;
         transaction.execute(
             "UPDATE task_commands
-             SET claimed_by_generation = ?1
-             WHERE session_id = ?2 AND acknowledged_at IS NULL
+             SET claimed_by_generation = ?1, state = 'claimed'
+             WHERE session_id = ?2 AND state IN ('persisted', 'claimed')
                AND (claimed_by_generation IS NULL OR claimed_by_generation <> ?1)",
             params![i64::from(generation), session_id.as_str()],
         )?;
         let mut statement = transaction.prepare(
             "SELECT id, session_id, source_json, kind_json, created_at,
-                    claimed_by_generation, acknowledged_at
+                    claimed_by_generation, accepted_at, state, effect, error
              FROM task_commands
              WHERE session_id = ?1 AND claimed_by_generation = ?2
-               AND acknowledged_at IS NULL
+               AND state = 'claimed'
              ORDER BY created_at, id",
         )?;
         let rows = statement.query_map(
@@ -1715,14 +1744,79 @@ impl SqliteStore {
         Ok(commands)
     }
 
-    pub fn acknowledge_task_command(&self, command_id: &TaskCommandId) -> StoreResult<()> {
+    pub fn accept_task_command(
+        &self,
+        command_id: &TaskCommandId,
+        effect: Option<TaskCommandEffect>,
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
-            "UPDATE task_commands SET acknowledged_at = ?1 WHERE id = ?2",
-            params![now_unix(), command_id.as_str()],
+            "UPDATE task_commands
+             SET state = 'accepted', effect = ?1, accepted_at = ?2, error = NULL
+             WHERE id = ?3 AND state IN ('persisted', 'claimed')",
+            params![
+                effect.map(TaskCommandEffect::as_str),
+                time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64,
+                command_id.as_str()
+            ],
         )?;
         if changed == 0 {
-            return Err(StoreError::NotFound);
+            let exists: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM task_commands WHERE id = ?1)",
+                params![command_id.as_str()],
+                |row| row.get(0),
+            )?;
+            return if exists {
+                Err(StoreError::InvalidData(format!(
+                    "task command {command_id} is already resolved"
+                )))
+            } else {
+                Err(StoreError::NotFound)
+            };
+        }
+        Ok(())
+    }
+
+    pub fn set_task_command_effect(
+        &self,
+        command_id: &TaskCommandId,
+        effect: TaskCommandEffect,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE task_commands SET effect = ?1
+             WHERE id = ?2 AND state = 'claimed'",
+            params![effect.as_str(), command_id.as_str()],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::InvalidData(format!(
+                "task command {command_id} is not claimed"
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn fail_task_command(
+        &self,
+        command_id: &TaskCommandId,
+        effect: Option<TaskCommandEffect>,
+        error: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE task_commands
+             SET state = 'failed', effect = COALESCE(?1, effect), error = ?2
+             WHERE id = ?3 AND state IN ('persisted', 'claimed')",
+            params![
+                effect.map(TaskCommandEffect::as_str),
+                error,
+                command_id.as_str()
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::InvalidData(format!(
+                "task command {command_id} is already resolved"
+            )));
         }
         Ok(())
     }
@@ -2450,6 +2544,34 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     pm_snapshot_synced_at=?29, pm_snapshot_warning=?30,
     pm_writeback_json=?31
     WHERE id=?1";
+const TASK_COMMAND_SELECT: &str = "SELECT
+    id, session_id, source_json, kind_json, created_at,
+    claimed_by_generation, accepted_at, state, effect, error
+    FROM task_commands WHERE id = ?1";
+
+fn insert_task_command(conn: &Connection, command: &TaskCommand) -> StoreResult<()> {
+    conn.execute(
+        "INSERT INTO task_commands (
+            id, session_id, source_json, kind_json, created_at,
+            claimed_by_generation, accepted_at, state, effect, error
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            command.id.as_str(),
+            command.session_id.as_str(),
+            serde_json::to_string(&command.source)?,
+            serde_json::to_string(&command.kind)?,
+            command.created_at.unix_timestamp_nanos() as i64,
+            command.claimed_by_generation.map(i64::from),
+            command
+                .accepted_at
+                .map(|at| at.unix_timestamp_nanos() as i64),
+            command.state.as_str(),
+            command.effect.map(TaskCommandEffect::as_str),
+            command.error.as_deref(),
+        ],
+    )?;
+    Ok(())
+}
 
 fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
     vec![
@@ -2527,6 +2649,11 @@ fn invalid_column(
     rusqlite::Error::FromSqlConversionFailure(index, rusqlite::types::Type::Text, Box::new(error))
 }
 
+fn task_command_datetime(index: usize, value: i64) -> rusqlite::Result<time::OffsetDateTime> {
+    time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(value))
+        .map_err(|error| invalid_column(index, error))
+}
+
 fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession> {
     let status_text: String = row.get(11)?;
     let status = status_text
@@ -2595,16 +2722,51 @@ fn map_task_command_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskCommand
         serde_json::from_str(&source_json).map_err(|error| invalid_column(2, error))?;
     let kind: TaskCommandKind =
         serde_json::from_str(&kind_json).map_err(|error| invalid_column(3, error))?;
+    let state = match row.get::<_, String>(7)?.as_str() {
+        "persisted" => TaskCommandState::Persisted,
+        "claimed" => TaskCommandState::Claimed,
+        "accepted" => TaskCommandState::Accepted,
+        "failed" => TaskCommandState::Failed,
+        "superseded" => TaskCommandState::Superseded,
+        value => {
+            return Err(invalid_column(
+                7,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown task command state {value:?}"),
+                ),
+            ))
+        }
+    };
+    let effect = match row.get::<_, Option<String>>(8)?.as_deref() {
+        None => None,
+        Some("live_steer") => Some(TaskCommandEffect::LiveSteer),
+        Some("next_turn") => Some(TaskCommandEffect::NextTurn),
+        Some("replacement") => Some(TaskCommandEffect::Replacement),
+        Some(value) => {
+            return Err(invalid_column(
+                8,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown task command effect {value:?}"),
+                ),
+            ))
+        }
+    };
     Ok(TaskCommand {
         id: TaskCommandId::from_raw(row.get::<_, String>(0)?),
         session_id: TaskSessionId::from_raw(row.get::<_, String>(1)?),
         source,
         kind,
-        created_at: crate::lfdb::rows::unix_to_datetime(row.get(4)?),
+        state,
+        effect,
+        created_at: task_command_datetime(4, row.get(4)?)?,
         claimed_by_generation: row.get::<_, Option<i64>>(5)?.map(|value| value as u32),
-        acknowledged_at: row
+        accepted_at: row
             .get::<_, Option<i64>>(6)?
-            .map(crate::lfdb::rows::unix_to_datetime),
+            .map(|value| task_command_datetime(6, value))
+            .transpose()?,
+        error: row.get(9)?,
     })
 }
 

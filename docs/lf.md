@@ -142,7 +142,7 @@ lf serve designer                                  # start the named mind
 lf stop designer                                   # stop its listener and resident
 lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
 lf task run DES-123
-lf task send DES-123 "rename the flag"
+lf task steer DES-123 "rename the flag"
 lf task interrupt DES-123 --message "take the smaller approach"
 lf task wait DES-123
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree

@@ -254,6 +254,38 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "061_pm_snapshots",
         sql: include_str!("migrations/061_pm_snapshots.sql"),
     },
+    // 061_pm_snapshots and 061_trace_capture share the 061_ numeric prefix but
+    // stored as distinct full version strings, like the 016_ pair above. Both
+    // are already applied to the long-lived ledger; renumbering either would
+    // re-run its CREATEs and strand a phantom schema_migrations row.
+    Migration {
+        version: "061_trace_capture",
+        sql: include_str!("migrations/061_trace_capture.sql"),
+    },
+    Migration {
+        version: "062_trace_capture_contract",
+        sql: include_str!("migrations/062_trace_capture_contract.sql"),
+    },
+    Migration {
+        version: "063_trace_capture_repair",
+        sql: include_str!("migrations/063_trace_capture_repair.sql"),
+    },
+    Migration {
+        version: "064_trace_capture_epoch",
+        sql: include_str!("migrations/064_trace_capture_epoch.sql"),
+    },
+    Migration {
+        version: "065_trace_capture_activation",
+        sql: include_str!("migrations/065_trace_capture_activation.sql"),
+    },
+    Migration {
+        version: "066_trace_capture_ship_epoch",
+        sql: include_str!("migrations/066_trace_capture_ship_epoch.sql"),
+    },
+    Migration {
+        version: "067_trace_capture_audit_epoch",
+        sql: include_str!("migrations/067_trace_capture_audit_epoch.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the
@@ -272,7 +304,10 @@ const RENAME_CONVERGENCE_MIGRATIONS: &[&str] = &[
 /// record the migration as applied and converge instead of crashing.
 fn is_tolerated_migration_error(version: &str, message: &str) -> bool {
     // Additive ADD COLUMN re-runs after a version-id rename.
-    if message.contains("duplicate column name") || message.contains("already exists") {
+    if message.contains("duplicate column name") {
+        return true;
+    }
+    if version == "062_trace_capture_contract" && message.contains("already exists") {
         return true;
     }
     RENAME_CONVERGENCE_MIGRATIONS.contains(&version)
@@ -474,6 +509,108 @@ mod tests {
 #[cfg(test)]
 mod drift_tests {
     use super::*;
+
+    #[test]
+    fn trace_contract_migration_preserves_capture_and_run_evidence() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE run_events (
+                run_id TEXT NOT NULL, process_id TEXT NOT NULL, seq BIGINT NOT NULL,
+                ts BIGINT NOT NULL, node TEXT NOT NULL, event TEXT NOT NULL,
+                input_tokens BIGINT, output_tokens BIGINT, cache_read_tokens BIGINT,
+                context TEXT
+             );
+             CREATE INDEX idx_run_events_run ON run_events(run_id, ts);
+             CREATE INDEX idx_run_events_process ON run_events(process_id, seq);
+             CREATE INDEX idx_run_events_time ON run_events(ts);
+             INSERT INTO run_events VALUES
+                ('run', 'process', 1, 1, 'run', 'completed', 10, 4, 3, NULL);",
+        )
+        .unwrap();
+        conn.execute_batch(include_str!("migrations/061_trace_capture.sql"))
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO agent_launches VALUES (
+                'launch', 'run', 'process', 1, 2, '/repo', '/worktree',
+                'intelligence', 'code', 'implement', 'codex', 'gpt-5',
+                'headless', 'complete', NULL, 'completed',
+                '/home/me/.lf/traces/run/process/launch',
+                '/home/me/.lf/traces/run/process/launch/conversation.jsonl',
+                NULL, 'vendor', NULL, 11, 12, 13, 1, 120
+             );
+             INSERT INTO agent_turns VALUES (
+                'turn', 'launch', 1, 'vendor-turn', 1, 2, 'completed',
+                'initial', 'assembled', 'cl100k_base', NULL,
+                '/home/me/.lf/traces/run/process/launch/turns/0001-task.md',
+                0, 8, 8, 10, 4, NULL, 3, NULL, 0.1, 0, 1
+             );
+             INSERT INTO context_assets VALUES (
+                'turn', 0, 'task', 'loopflow', 'system', 'guide', NULL,
+                'operate', 'abc', 0, 5, 5, 2, 2
+             );
+             INSERT INTO context_decisions VALUES (
+                'turn', 0, 'loopflow', 'guide', NULL, 'included',
+                'included by operate', 5, 2, 0
+             );",
+        )
+        .unwrap();
+
+        let error = conn
+            .execute_batch(include_str!("migrations/062_trace_capture_contract.sql"))
+            .expect_err("062 stops after its applied index-name collision");
+        assert!(error.to_string().contains("already exists"));
+        conn.execute_batch(include_str!("migrations/063_trace_capture_repair.sql"))
+            .unwrap();
+
+        let run_totals: (i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), SUM(input_tokens + output_tokens + cache_read_tokens)
+                 FROM run_events",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(run_totals, (1, 17));
+        let indexes: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type='index' AND name IN (
+                    'idx_run_events_run', 'idx_run_events_process', 'idx_run_events_time'
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexes, 3);
+
+        let launch_path: String = conn
+            .query_row("SELECT artifact_dir FROM agent_launches", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(launch_path, "run/process/launch");
+        let turn: (i64, i64, i64) = conn
+            .query_row(
+                "SELECT context_gather_ms, context_render_ms, context_persist_ms
+                 FROM agent_turns",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(turn, (11, 12, 13));
+        let asset: (String, String) = conn
+            .query_row("SELECT kind, scope FROM context_assets", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(asset, ("operating_instructions".into(), "global".into()));
+        let decision: (String, String) = conn
+            .query_row("SELECT kind, scope FROM context_decisions", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(decision, ("operating_instructions".into(), "global".into()));
+    }
 
     #[test]
     fn rename_migration_converges_an_old_schema_db() {

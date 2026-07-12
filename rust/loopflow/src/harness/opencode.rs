@@ -16,12 +16,14 @@ use crate::engine::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{
     opencode_mapping, opencode_runtime, ApprovalPolicy, Capabilities, Harness, HarnessError,
+    RawProviderEvent,
 };
 
 const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
 pub struct OpenCodeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
+    raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     client: reqwest::Client,
     approval: ApprovalPolicy,
     config: Option<AgentConfig>,
@@ -46,6 +48,7 @@ impl OpenCodeHarness {
     pub fn new(events: mpsc::UnboundedSender<ConversationEvent>, approval: ApprovalPolicy) -> Self {
         Self {
             events,
+            raw_provider: None,
             client: reqwest::Client::new(),
             approval,
             config: None,
@@ -98,6 +101,7 @@ impl OpenCodeHarness {
         };
 
         let event_tx = self.events.clone();
+        let raw_provider = self.raw_provider.clone();
         let client = self.client.clone();
         let shutdown_requested = self.shutdown_requested.clone();
         let turn_in_progress = self.turn_in_progress.clone();
@@ -153,6 +157,12 @@ impl OpenCodeHarness {
                 for payload in parser.push(&chunk) {
                     if payload.trim().is_empty() || payload.trim() == "[DONE]" {
                         continue;
+                    }
+                    if let Some(raw_provider) = &raw_provider {
+                        let _ = raw_provider.send(RawProviderEvent {
+                            stream: "sse",
+                            line: payload.clone(),
+                        });
                     }
 
                     let parsed = serde_json::from_str::<Value>(&payload);
@@ -244,6 +254,13 @@ impl OpenCodeHarness {
 
 #[async_trait]
 impl Harness for OpenCodeHarness {
+    fn set_raw_provider_sender(
+        &mut self,
+        raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
+    ) {
+        self.raw_provider = raw_provider;
+    }
+
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
         if self.child.is_some() {
             return Ok(());

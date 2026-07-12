@@ -44,25 +44,22 @@ impl Default for Colors {
     }
 }
 
-use crate::engine::prompt::{ContextBreakdown, DiffTier, DocumentSource};
+use crate::engine::prompt::PromptComponents;
+use crate::trace::PreparedTurnContext;
 
 /// Format the context header table for stderr output.
-pub fn format_context_header(breakdown: &ContextBreakdown) -> String {
-    let mut lines = Vec::new();
-    let skill_tokens = breakdown.source_tokens(DocumentSource::Skill);
-    let direction_tokens = breakdown.source_tokens(DocumentSource::Direction);
-    let scratch_tokens = breakdown.source_tokens(DocumentSource::Scratch);
-    let wave_tokens = breakdown.source_tokens(DocumentSource::Wave)
-        + breakdown.source_tokens(DocumentSource::Summary);
-    let wave_file_count = breakdown.source_count(DocumentSource::Wave)
-        + breakdown.source_count(DocumentSource::Summary);
-    let diff_tokens = breakdown.source_tokens(DocumentSource::Diff);
-    let docs_tokens = breakdown.source_tokens(DocumentSource::Docs);
-    let wave_memory_tokens = breakdown.source_tokens(DocumentSource::WaveMemory);
-    let clipboard_tokens = breakdown.source_tokens(DocumentSource::Clipboard);
+pub fn format_context_header(
+    context: &PreparedTurnContext,
+    components: &PromptComponents,
+) -> String {
+    use std::collections::BTreeMap;
 
-    // Skill name as prominent header
-    let title = breakdown.skill_name.as_deref().unwrap_or("context");
+    let mut lines = Vec::new();
+    let title = components
+        .skill
+        .as_ref()
+        .map(|skill| skill.name.as_str())
+        .unwrap_or("context");
     let bar_len = 45usize.saturating_sub(title.len() + 4);
     lines.push(format!(
         "\u{2500}\u{2500} {} {}",
@@ -70,71 +67,29 @@ pub fn format_context_header(breakdown: &ContextBreakdown) -> String {
         "\u{2500}".repeat(bar_len)
     ));
 
-    if skill_tokens > 0 {
-        lines.push(format_row("skill", skill_tokens, ""));
+    let mut kinds: BTreeMap<&str, (u64, usize)> = BTreeMap::new();
+    for asset in context.assets() {
+        let entry = kinds.entry(asset.kind.as_str()).or_default();
+        entry.0 += asset.attributed_tokens;
+        entry.1 += 1;
+    }
+    for (kind, (tokens, count)) in kinds {
+        if tokens > 0 {
+            lines.push(format_row(
+                kind,
+                tokens as usize,
+                &format!("{count} assets"),
+            ));
+        }
     }
 
-    if direction_tokens > 0 {
-        let dir_detail = if breakdown.direction_names.is_empty() {
-            "\u{2014}".to_string()
-        } else {
-            breakdown.direction_names.join(", ")
-        };
-        lines.push(format_row("direction", direction_tokens, &dir_detail));
-    }
-
-    if breakdown.system_tokens > 0 {
-        lines.push(format_row("system", breakdown.system_tokens, "loopflow"));
-    }
-
-    if scratch_tokens > 0 {
-        lines.push(format_row(
-            "scratch",
-            scratch_tokens,
-            &format!("{} files", breakdown.source_count(DocumentSource::Scratch)),
-        ));
-    }
-
-    if wave_tokens > 0 {
-        lines.push(format_row(
-            "wave",
-            wave_tokens,
-            &format!("{} files", wave_file_count),
-        ));
-    }
-
-    if diff_tokens > 0 {
-        let diff_detail = match breakdown.diff_tier {
-            DiffTier::UnifiedDiff => format!("unified ({} files)", breakdown.diff_file_count),
-            DiffTier::StatOnly => format!("stat ({} files)", breakdown.diff_file_count),
-            DiffTier::None => "\u{2014}".to_string(),
-        };
-        lines.push(format_row("diff", diff_tokens, &diff_detail));
-    }
-
-    if docs_tokens > 0 {
-        let docs_detail = format!("{} files", breakdown.source_count(DocumentSource::Docs));
-        lines.push(format_row("docs", docs_tokens, &docs_detail));
-    }
-
-    if wave_memory_tokens > 0 {
-        lines.push(format_row("memory", wave_memory_tokens, "wave"));
-    }
-
-    // Wave
-    if let Some(ref wave) = breakdown.wave_name {
+    if let Some(ref wave) = components.wave {
         lines.push(format_row("scope", 0, wave));
-    }
-
-    // Clipboard
-    if breakdown.has_clipboard && clipboard_tokens > 0 {
-        lines.push(format_row("clipboard", clipboard_tokens, ""));
     }
 
     // Separator + total
     lines.push(format!("  {}", "\u{2500}".repeat(35)));
-    let total = breakdown.total();
-    lines.push(format_row("total", total, ""));
+    lines.push(format_row("total", context.total_tokens() as usize, ""));
 
     lines.join("\n")
 }
@@ -221,7 +176,6 @@ pub fn format_reproducible_command(
         parts.push("--no-loopflow".to_string());
     }
     if let Some(m) = model {
-        // Only include if not the default
         parts.push(format!("-m {}", m));
     }
     parts.join(" ")
@@ -265,8 +219,8 @@ mod tests {
 
     #[test]
     fn format_context_header_empty() {
-        let breakdown = ContextBreakdown::default();
-        let header = format_context_header(&breakdown);
+        let context = crate::trace::PreparedTurnContext::from_prompts("", "");
+        let header = format_context_header(&context, &PromptComponents::default());
         assert!(header.contains("\u{2500}\u{2500} context \u{2500}"));
         assert!(header.contains("total"));
         assert!(header.contains("0"));
@@ -274,53 +228,23 @@ mod tests {
 
     #[test]
     fn format_context_header_with_content() {
-        let breakdown = ContextBreakdown {
-            source_tokens: std::collections::HashMap::from([
-                (DocumentSource::Skill, 1000),
-                (DocumentSource::Direction, 500),
-                (DocumentSource::Diff, 5000),
-                (DocumentSource::Docs, 2000),
-            ]),
-            system_tokens: 3000,
-            skill_name: Some("implement".to_string()),
-            direction_names: vec!["security".to_string()],
-            diff_tier: DiffTier::UnifiedDiff,
-            diff_file_count: 8,
-            source_counts: std::collections::HashMap::from([(DocumentSource::Docs, 1)]),
+        let context = crate::trace::PreparedTurnContext::from_prompts("system", "task");
+        let components = PromptComponents {
+            skill: Some(crate::engine::Skill::named("implement")),
+            wave: Some("intelligence".to_string()),
             ..Default::default()
         };
-        let header = format_context_header(&breakdown);
+        let header = format_context_header(&context, &components);
         assert!(header.contains("\u{2500}\u{2500} implement \u{2500}"));
-        assert!(header.contains("security"));
-        assert!(header.contains("unified (8 files)"));
-        assert!(header.contains("1 files"));
-        assert!(header.contains("11,500"));
+        assert!(header.contains("assembly"));
+        assert!(header.contains("intelligence"));
     }
 
     #[test]
-    fn format_context_header_splits_docs_rows() {
-        let breakdown = ContextBreakdown {
-            source_tokens: std::collections::HashMap::from([
-                (DocumentSource::Scratch, 600),
-                (DocumentSource::Wave, 700),
-                (DocumentSource::Summary, 100),
-                (DocumentSource::Docs, 500),
-            ]),
-            source_counts: std::collections::HashMap::from([
-                (DocumentSource::Scratch, 2),
-                (DocumentSource::Wave, 3),
-                (DocumentSource::Docs, 1),
-            ]),
-            ..Default::default()
-        };
-
-        let header = format_context_header(&breakdown);
-        assert!(header.contains("scratch"));
-        assert!(header.contains("wave"));
-        assert!(header.contains("docs"));
-        assert!(header.contains("2 files"));
-        assert!(header.contains("3 files"));
-        assert!(header.contains("1 files"));
+    fn format_context_header_total_comes_from_exact_manifest() {
+        let context = crate::trace::PreparedTurnContext::from_prompts("one", "two");
+        let header = format_context_header(&context, &PromptComponents::default());
+        assert!(header.contains(&format_int(context.total_tokens())));
     }
 
     #[test]

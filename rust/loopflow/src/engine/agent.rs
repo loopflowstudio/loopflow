@@ -161,6 +161,8 @@ pub struct ProcessConfig {
     pub stream_format: StreamFormat,
     /// Optional timeout for the subprocess.
     pub timeout: Option<Duration>,
+    /// Durable local capture for this provider invocation.
+    pub capture: Option<crate::trace::CaptureHandle>,
 }
 
 /// Agent capability flags.
@@ -924,19 +926,73 @@ pub fn launch_agent(
         crate::harness::HarnessKind::parse(&harness).map(crate::harness::HarnessKind::as_str);
     crate::journal::record_agent(provider, model.as_deref());
 
-    if process.auto && process.stream {
+    // Callers that already assembled semantic assets supply a capture handle.
+    // Small internal agent launches (PR copy, commit copy, ops fallback) still
+    // get an exact assembly manifest when they run inside a journaled `lf`.
+    let implicit_capture = if process.capture.is_none() {
+        launch.cwd.as_deref().and_then(|cwd| {
+            crate::journal::trace_capture_context(cwd, None, None).map(|context| {
+                let system_prompt = process
+                    .context_file
+                    .as_deref()
+                    .and_then(|path| fs::read_to_string(path).ok())
+                    .unwrap_or_else(|| system_prompt_with_structured_replies(launch));
+                crate::trace::CaptureHandle::begin(
+                    context,
+                    crate::trace::PreparedTurnContext::from_prompts(
+                        &system_prompt,
+                        &launch.task_prompt,
+                    ),
+                    crate::trace::CaptureStart {
+                        provider: harness.clone(),
+                        model: model.clone(),
+                        surface: if process.auto { "headless" } else { "tui" }.to_string(),
+                        input_op: "initial".to_string(),
+                        gather_ms: 0,
+                        render_ms: 0,
+                        raw_provider: process.auto,
+                    },
+                )
+            })
+        })
+    } else {
+        None
+    }
+    .transpose()
+    .map_err(|error| {
+        CoreError::ExecutionFailed(format!(
+            "failed to establish trace capture before agent launch: {error}"
+        ))
+    })?;
+    let capture = process.capture.as_ref().or(implicit_capture.as_ref());
+
+    let result = if process.auto && process.stream {
         // Stream mode: capture stdout line by line
-        launch_streaming(&mut cmd, process.stream_format, process.timeout)
+        launch_streaming(&mut cmd, process.stream_format, process.timeout, capture)
     } else if process.auto {
         // Batch mode: capture all output
-        launch_batch(&mut cmd, process.timeout)
+        launch_batch(&mut cmd, process.timeout, capture)
     } else {
         // Interactive mode: inherit stdio
         launch_interactive(&mut cmd, process.timeout)
+    };
+    if let Some(capture) = implicit_capture {
+        let outcome = match &result {
+            Ok(result) if result.exit_code == 0 => "completed",
+            Ok(_) | Err(_) => "failed",
+        };
+        capture
+            .finish(outcome, !process.auto)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
+    result
 }
 
-fn launch_batch(cmd: &mut Command, timeout: Option<Duration>) -> Result<LaunchResult, CoreError> {
+fn launch_batch(
+    cmd: &mut Command,
+    timeout: Option<Duration>,
+    capture: Option<&crate::trace::CaptureHandle>,
+) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
@@ -980,6 +1036,22 @@ fn launch_batch(cmd: &mut Command, timeout: Option<Duration>) -> Result<LaunchRe
         .join()
         .map_err(|_| CoreError::ExecutionFailed("stderr reader thread panicked".to_string()))?
         .map_err(|err| CoreError::ExecutionFailed(err.to_string()))?;
+
+    if let Some(capture) = capture {
+        let mut parser = StreamParser::new();
+        for line in String::from_utf8_lossy(&stdout_bytes).lines() {
+            capture.record_raw("stdout", line);
+            if let ParseResult::Events(events) = parser.feed_line(line) {
+                for event in &events {
+                    record_stream_usage(event);
+                    capture.record_stream_event(event);
+                }
+            }
+        }
+        for line in String::from_utf8_lossy(&stderr_bytes).lines() {
+            capture.record_raw("stderr", line);
+        }
+    }
 
     if timed_out {
         return Err(CoreError::ExecutionFailed(format!(
@@ -1045,6 +1117,7 @@ fn launch_streaming(
     cmd: &mut Command,
     stream_format: StreamFormat,
     timeout: Option<Duration>,
+    capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<LaunchResult, CoreError> {
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
@@ -1113,11 +1186,17 @@ fn launch_streaming(
                 }
                 match stream {
                     StreamKind::Stdout => {
+                        if let Some(capture) = capture {
+                            capture.record_raw("stdout", &line);
+                        }
                         if let Some(color) = use_color {
                             match parser.feed_line(&line) {
                                 ParseResult::Events(events) => {
                                     for event in &events {
                                         record_stream_usage(event);
+                                        if let Some(capture) = capture {
+                                            capture.record_stream_event(event);
+                                        }
                                         format_event(event, color);
                                     }
                                 }
@@ -1125,12 +1204,23 @@ fn launch_streaming(
                                 ParseResult::Passthrough => println!("{line}"),
                             }
                         } else {
+                            if let ParseResult::Events(events) = parser.feed_line(&line) {
+                                for event in &events {
+                                    record_stream_usage(event);
+                                    if let Some(capture) = capture {
+                                        capture.record_stream_event(event);
+                                    }
+                                }
+                            }
                             println!("{line}");
                         }
                         stdout_content.push_str(&line);
                         stdout_content.push('\n');
                     }
                     StreamKind::Stderr => {
+                        if let Some(capture) = capture {
+                            capture.record_raw("stderr", &line);
+                        }
                         if use_color.is_some() {
                             // In Human mode, Claude --verbose duplicates stream-json
                             // on stderr. Parse it and skip recognized events to avoid

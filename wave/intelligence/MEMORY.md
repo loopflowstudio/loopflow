@@ -1,8 +1,9 @@
 # intelligence wave memory
 
 Renamed from `memory` in the 2026-07-08 wave/project/task restructure. Intelligence
-owns context, trace, and evals — there is no standalone Memory project, in the local
-project files or in the Linear task grouping.
+owns Context and Trace — there is no standalone Memory or Evals project. Context is
+the operating contract a process receives; Trace is the monitoring layer over that
+context, its launch situation, execution, and outcome.
 
 ## The ledger contract (post-057, the branch that made `run_events` an API)
 
@@ -86,7 +87,36 @@ project files or in the Linear task grouping.
 - Measured: loopflow is 184,313 lines / 1,802,919 tokens; `rust/` is 57%. By
   extension, `.lock` is the third most expensive thing a model can read here.
 
-## Evals — designed, not started
+## Complete local run records — persist first, optimize later
+
+- **The scope is Jack's own machine.** This is not a multi-tenant telemetry
+  service and does not need cloud-scale retention policy. If the record fits on
+  the personal machine, keep it; compression and rotation can arrive when
+  measured disk pressure makes them necessary.
+- **Measured 2026-07-10:** Codex sessions are 2.09 GB, Claude project data is
+  865 MB, and together they compress from 2.98 GB to 998 MB. The 30-day rate
+  projects to roughly 16 GB/year raw or 5 GB/year compressed; even the unusually
+  active last week projects to 45 GB/year raw or 15 GB/year compressed, against
+  201 GiB free. Storage is not the near-term constraint.
+- **Persist more now.** The durable core is the exact provider-facing prompts,
+  component manifest and token weights, normalized user/assistant/tool events,
+  usage, lifecycle, and artifact identities. Large records live on disk with
+  pointers and summary dimensions in `run_events`, not transcript blobs in
+  SQLite.
+- **Vendor records are useful but not the contract.** Keep pointers to raw
+  Codex/Claude sessions and degrade honestly if they disappear. Loopflow's own
+  normalized record should remain. Deduplication, compression, and raw-artifact
+  rotation are later optimizations, not blockers to complete capture.
+
+## Evals retired as a project; controlled harness design parked
+
+- On 2026-07-10 Jack retired Evals as an active project. Daily multi-repo use is
+  the feedback source; the wave's weekly cadence reviews one smooth, one costly,
+  and one failed or heavily steered run, then files the first Context or Trace
+  failure. This is cadence, not a third project.
+- The controlled-harness design below remains useful if delivery, intervention,
+  complete context, and transcript evidence eventually justify reviving it as a
+  measured bet. It is not current work.
 
 - **Don't build a judge. Borrow the one that already exists.** For a commit `C`
   with parent `P`: split the diff into test files and code files, check out `P`,
@@ -236,7 +266,6 @@ wave's next loop must run `lf auth linear` and file these before anything else:
 - **An `escalated` event that fires.** `LfEventType::Escalated` is defined and
   emitted zero times, so human-intervention counts and first-pass completion have
   no source. Needs an event, not a query.
-- **The evals harvester** (slice 1, cadenza first). Zero LLM spend.
 - **Steering verbs for `lf wavechat`.** `/status` is the only non-speech verb, so
   a bad run can be watched and talked to but not stopped. The wave-chat KR
   promises interruption: add `/pause`, `/resume`, `/interrupt` against the wave's
@@ -247,6 +276,10 @@ wave's next loop must run `lf auth linear` and file these before anything else:
   answers are defensible.
 
 ## Someday (explicitly not now — Jack: "maybe someday")
+
+- **The controlled eval harvester** (cadenza first). The design above remains
+  parked until Trace has delivery, intervention, complete context, and transcript
+  evidence and the wave deliberately reopens Evals as a project.
 
 - **Memory export is a reader-optimized summary, not context compaction.** Claude's
   context compaction is writer-optimized (preserve working state so the *same*

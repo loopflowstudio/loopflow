@@ -95,6 +95,23 @@ thread, a playhead — something you can chat with while it works. `lf loop task
 "fix it"` runs a bounded child loop in batch: no chat surface, reports at its
 boundaries. Serving is for waves; looping is for the work a wave hands off.
 
+Inspect exactly what an agent received and what Loopflow observed:
+
+```bash
+lf runs
+lf trace <run-id>
+lf trace <run-id> --events
+lf trace <run-id> --events --jsonl --launch <launch-id-prefix>
+lf context --days 14 --wave intelligence
+```
+
+`lf trace` keeps prompt and normalized conversation artifacts below
+`~/.lf/traces`; it prints paths and metadata by default, never prompt or event
+bodies. `--events` explicitly reads the recorded exchange. `lf context --json`
+emits turn, asset, and inclusion-decision rows for local analysis. Human
+context summaries keep initial assembled context separate from follow-up input
+and provider-reported history.
+
 ### Crons
 
 Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. They live in `GOAL.md` frontmatter; the wave's resident loop fires each due schedule as a system pass. `workers: 0` is valid for a cron-only wave.

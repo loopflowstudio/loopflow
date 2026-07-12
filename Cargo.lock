@@ -1319,6 +1319,7 @@ dependencies = [
  "cron",
  "ctrlc",
  "dirs",
+ "fancy-regex",
  "futures-util",
  "gethostname",
  "hex",

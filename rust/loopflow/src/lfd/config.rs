@@ -27,23 +27,11 @@ pub struct AuthConfig {
     pub token: Option<SecretString>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LfdConfig {
     pub auth: AuthConfig,
     pub github: GitHubConfig,
     pub http_security: HttpSecurityConfig,
-    pub output_log_retention_days: u32,
-}
-
-impl Default for LfdConfig {
-    fn default() -> Self {
-        Self {
-            auth: AuthConfig::default(),
-            github: GitHubConfig::default(),
-            http_security: HttpSecurityConfig::default(),
-            output_log_retention_days: DEFAULT_OUTPUT_LOG_RETENTION_DAYS,
-        }
-    }
 }
 
 impl LfdConfig {
@@ -68,8 +56,6 @@ impl LfdConfig {
     }
 }
 
-const DEFAULT_OUTPUT_LOG_RETENTION_DAYS: u32 = 7;
-
 /// Unknown keys are ignored, not rejected. A key we removed still sits in
 /// config files on machines that predate the removal, and `mode: native` —
 /// dropped with the postgres backend in 944909ae — was enough to make `lfd`
@@ -82,12 +68,6 @@ struct RawLfdConfig {
     github: GitHubConfig,
     #[serde(default)]
     http_security: RawHttpSecurityConfig,
-    #[serde(default = "default_output_log_retention_days")]
-    output_log_retention_days: u32,
-}
-
-fn default_output_log_retention_days() -> u32 {
-    DEFAULT_OUTPUT_LOG_RETENTION_DAYS
 }
 
 fn reject_removed_env(name: &str, replacement: &str) -> Result<()> {
@@ -216,7 +196,6 @@ impl RawLfdConfig {
             auth: self.auth,
             github: self.github,
             http_security: self.http_security.resolve()?,
-            output_log_retention_days: self.output_log_retention_days,
         })
     }
 }
@@ -459,7 +438,6 @@ output_log_retention_days: 3
             .resolve()
             .expect("resolves");
 
-        assert_eq!(config.output_log_retention_days, 3);
         assert!(config.auth.token.is_none());
     }
 

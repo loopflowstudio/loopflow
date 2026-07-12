@@ -1,8 +1,10 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use loopflow::engine::flow::{ConcreteStep, Skill, Step};
 use loopflow::engine::{expand_flow, load_flow};
+use loopflow::lfdb::sqlite::SqliteStore;
 use tempfile::TempDir;
 
 fn write_skill(repo: &Path, name: &str, content: &str) {
@@ -34,6 +36,42 @@ fn assert_skill_sequence(items: &[ConcreteStep], expected: &[&str]) {
     for (item, skill_name) in items.iter().zip(expected) {
         assert_skill_name(item, skill_name);
     }
+}
+
+fn run_git(repo: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(repo)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?} failed");
+}
+
+fn write_executable(path: &Path, content: &str) {
+    fs::write(path, content).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+}
+
+fn run_lf(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> std::process::Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    command
+        .args(args)
+        .current_dir(repo)
+        .env("HOME", home)
+        .env("LF_HOME", home)
+        .env("NO_COLOR", "1")
+        .env_remove("LF_RUN_ID")
+        .env_remove("LF_PROCESS_ID");
+    if let Some(path) = path {
+        command.env("PATH", path);
+    }
+    command.output().unwrap()
 }
 
 #[test]
@@ -81,6 +119,116 @@ fn flow_parsing_parity() {
             fast_path: None,
         })
     );
+}
+
+#[test]
+fn code_flow_records_each_agent_launch_in_one_trace() {
+    let repo = TempDir::new().unwrap();
+    run_git(repo.path(), &["init", "-b", "main"]);
+    run_git(repo.path(), &["config", "user.email", "test@example.com"]);
+    run_git(repo.path(), &["config", "user.name", "Test"]);
+    for skill in ["implement", "compress", "lint", "gate"] {
+        write_skill(repo.path(), skill, &format!("Run the {skill} step."));
+    }
+    run_git(repo.path(), &["add", "."]);
+    run_git(repo.path(), &["commit", "-m", "fixture"]);
+
+    let home = TempDir::new().unwrap();
+    let bin = TempDir::new().unwrap();
+    write_executable(&bin.path().join("claude"), "#!/bin/sh\nexit 0\n");
+    let path = std::env::var("PATH")
+        .map(|path| format!("{}:{path}", bin.path().display()))
+        .unwrap_or_else(|_| bin.path().display().to_string());
+
+    let output = run_lf(
+        repo.path(),
+        home.path(),
+        &["code", "-b", "--no-loopflow"],
+        Some(&path),
+    );
+    assert!(
+        output.status.success(),
+        "lf code failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let store = SqliteStore::new(&home.path().join("lfd.db")).unwrap();
+    let events = store.list_run_events_since(0).unwrap();
+    let run_id = events
+        .iter()
+        .find(|event| event.node == "run" && event.event == "started")
+        .map(|event| event.run_id.as_str())
+        .expect("flow run event");
+    let launches = store.agent_launches_matching(run_id).unwrap();
+
+    assert_eq!(launches.len(), 4);
+    assert!(launches.iter().all(|launch| launch.run_id == run_id));
+    assert!(launches
+        .iter()
+        .all(|launch| launch.process_id == launches[0].process_id));
+    assert!(launches
+        .iter()
+        .all(|launch| launch.capture_status == "complete"));
+    assert_eq!(
+        launches
+            .iter()
+            .map(|launch| launch.skill.as_deref().unwrap())
+            .collect::<Vec<_>>(),
+        ["implement", "compress", "lint", "gate"]
+    );
+    assert_eq!(
+        launches
+            .iter()
+            .map(|launch| launch.id.as_str())
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        4
+    );
+    assert_eq!(
+        store
+            .agent_turns_for_launches(
+                &launches
+                    .iter()
+                    .map(|launch| launch.id.clone())
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap()
+            .len(),
+        4
+    );
+
+    let trace = run_lf(repo.path(), home.path(), &["trace", run_id, "--json"], None);
+    assert!(
+        trace.status.success(),
+        "lf trace failed: {}",
+        String::from_utf8_lossy(&trace.stderr)
+    );
+    let trace: serde_json::Value = serde_json::from_slice(&trace.stdout).unwrap();
+    assert_eq!(
+        trace["launches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|launch| launch["skill"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["implement", "compress", "lint", "gate"]
+    );
+
+    let doctor = run_lf(repo.path(), home.path(), &["doctor", "--json"], None);
+    assert!(
+        doctor.status.success(),
+        "lf doctor failed: {}",
+        String::from_utf8_lossy(&doctor.stderr)
+    );
+    let doctor: serde_json::Value = serde_json::from_slice(&doctor.stdout).unwrap();
+    let capture = doctor["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["name"] == "capture")
+        .expect("capture check");
+    assert_eq!(capture["status"], "ok");
 }
 
 #[test]

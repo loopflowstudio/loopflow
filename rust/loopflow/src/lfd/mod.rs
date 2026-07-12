@@ -9,7 +9,6 @@ pub mod id;
 pub mod lf_exec;
 pub mod live_pr;
 pub mod obs;
-pub mod output;
 pub mod pm;
 pub mod providers;
 pub mod queue;
@@ -110,10 +109,6 @@ pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
     };
 
     Ok(StorageConfig::sqlite(db_path))
-}
-
-pub fn default_output_dir() -> PathBuf {
-    lf_home_dir().join("output")
 }
 
 #[cfg(test)]

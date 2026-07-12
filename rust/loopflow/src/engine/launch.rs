@@ -7,8 +7,8 @@ use crate::engine::flow::Skill;
 use crate::engine::fork::merge_directions;
 use crate::engine::prompt::{
     drop_native_instruction_docs, format_claude_system_prompt, format_claude_task_prompt,
-    format_prompt, gather_context, measure_context, ContextBreakdown, Document, DocumentSource,
-    GatherContextOpts, PromptComponents, PromptFormatMode, RelatedRepoContext, Surface,
+    format_prompt, gather_context, Document, DocumentSource, GatherContextOpts, PromptComponents,
+    PromptFormatMode, RelatedRepoContext, Surface,
 };
 use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
 
@@ -49,7 +49,7 @@ pub struct LaunchPromptInput {
 pub struct PreparedLaunchPrompt {
     pub config: AgentConfig,
     pub components: PromptComponents,
-    pub breakdown: ContextBreakdown,
+    pub deduplicated_docs: Vec<Document>,
     pub prompt: String,
 }
 
@@ -120,7 +120,7 @@ pub fn prepare_launch_prompt(
     if let Some(skill) = resolved_skill {
         gathered.components_mut().skill = Some(skill);
     }
-    drop_native_instruction_docs(gathered.components_mut(), &repo_root);
+    let deduplicated_docs = drop_native_instruction_docs(gathered.components_mut(), &repo_root);
 
     if let Some(summary) = summary {
         gathered.components_mut().summaries.push(Document {
@@ -130,7 +130,6 @@ pub fn prepare_launch_prompt(
         });
     }
 
-    let breakdown = measure_context(gathered.components());
     let prompt = format_prompt(PromptFormatMode::Full, gathered.components()).into_string();
 
     let agent = agent
@@ -174,7 +173,7 @@ pub fn prepare_launch_prompt(
     Ok(PreparedLaunchPrompt {
         config: launch,
         components,
-        breakdown,
+        deduplicated_docs,
         prompt,
     })
 }

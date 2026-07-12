@@ -91,6 +91,15 @@ const HEARTBEAT_PROMPT: &str = "Heartbeat: re-read your goal and memory, then ta
 /// enough to recognize the dispatch, token-lean by design.
 const IN_FLIGHT_TASK_CHARS: usize = 80;
 
+fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) {
+    let Some(capture) = capture else {
+        return;
+    };
+    if let Err(error) = capture.finish(outcome, false) {
+        tracing::warn!(%error, %outcome, "failed to finalize trace capture");
+    }
+}
+
 /// The heartbeat nudge, plus a compact `<in_flight>` section when workers are
 /// grinding: one line per dispatched-not-finished worker, from the listener's
 /// `GET /resident/context` — the loop's orchestration turns see their workers
@@ -647,7 +656,48 @@ impl WaveLoop {
         body.harness = Some(prepared.harness.clone());
         body.model = prepared.model.clone();
 
+        let capture = match crate::journal::trace_capture_context(
+            &self.cwd,
+            Some(step.flow.clone()),
+            Some(step.step.clone()),
+        ) {
+            Some(context) => match crate::trace::CaptureHandle::begin(
+                context,
+                prepared.context.clone(),
+                crate::trace::CaptureStart {
+                    provider: prepared.harness.clone(),
+                    model: prepared.model.clone(),
+                    surface: "headless".to_string(),
+                    input_op: "initial".to_string(),
+                    gather_ms: prepared.context_gather_ms,
+                    render_ms: prepared.context_render_ms,
+                    raw_provider: true,
+                },
+            ) {
+                Ok(capture) => Some(capture),
+                Err(err) => {
+                    let body_id = body.body_id.clone();
+                    self.open_body(body, answers).await;
+                    self.finish_failed_pass(
+                        &body_id,
+                        &format!("failed to establish trace capture: {err}"),
+                    )
+                    .await;
+                    return;
+                }
+            },
+            None if cfg!(test) => None,
+            None => {
+                let body_id = body.body_id.clone();
+                self.open_body(body, answers).await;
+                self.finish_failed_pass(&body_id, "trace capture identity is unavailable")
+                    .await;
+                return;
+            }
+        };
+
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (raw_tx, mut raw_rx) = mpsc::unbounded_channel();
         let harness = match &self.backend {
             BodyBackend::Harness { create, .. } => {
                 create(&prepared.harness, ApprovalPolicy::AutoApprove, event_tx)
@@ -658,6 +708,7 @@ impl WaveLoop {
         let mut harness = match harness {
             Ok(harness) => harness,
             Err(err) => {
+                finish_capture(capture.as_ref(), "failed");
                 let body_id = body.body_id.clone();
                 self.open_body(body, answers).await;
                 self.finish_failed_pass(
@@ -668,7 +719,11 @@ impl WaveLoop {
                 return;
             }
         };
+        if capture.is_some() {
+            harness.set_raw_provider_sender(Some(raw_tx));
+        }
         if let Err(err) = harness.start(&prepared.config).await {
+            finish_capture(capture.as_ref(), "failed");
             let body_id = body.body_id.clone();
             self.open_body(body, answers).await;
             self.finish_failed_pass(
@@ -679,15 +734,20 @@ impl WaveLoop {
             return;
         }
         body.session_id = harness.provider_session_id();
+        if let Some(capture) = &capture {
+            capture.set_provider_session_id(body.session_id.clone());
+        }
         let mut body_session_id = body.session_id.clone();
         let body_id = body.body_id.clone();
         self.open_body(body, answers).await;
         if self.end.is_some() {
             let _ = harness.stop().await;
+            finish_capture(capture.as_ref(), "interrupted");
             return;
         }
         if let Err(err) = harness.send_input(&prepared.input).await {
             let _ = harness.stop().await;
+            finish_capture(capture.as_ref(), "failed");
             self.finish_failed_pass(
                 &body_id,
                 &format!(
@@ -711,32 +771,49 @@ impl WaveLoop {
                     match self.inbox_action(item) {
                         InboxAction::Interrupt { skip } => {
                             self.interrupt_harness(&body_id, harness.as_mut(), skip).await;
+                            finish_capture(capture.as_ref(), "interrupted");
                             return;
                         }
                         InboxAction::Deliver(InboxItem::Message(message))
                             if message.op == MessageOp::Steer && supports_steer =>
                         {
-                            if self.steer_harness(message, harness.as_mut()).await {
+                            if self
+                                .steer_harness(message, harness.as_mut(), capture.as_ref())
+                                .await
+                            {
                                 timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
                             }
                         }
                         InboxAction::Deliver(item) => self.on_inbox(item).await,
                         InboxAction::ListenerGone => {
                             let _ = harness.stop().await;
+                            finish_capture(capture.as_ref(), "interrupted");
                             return;
                         }
+                    }
+                }
+                raw = raw_rx.recv(), if capture.is_some() => {
+                    if let (Some(raw), Some(capture)) = (raw, capture.as_ref()) {
+                        capture.record_raw(raw.stream, &raw.line);
                     }
                 }
                 event = event_rx.recv() => {
                     let Some(event) = event else {
                         let _ = harness.stop().await;
                         self.finish_failed_pass(&body_id, "harness event stream closed").await;
+                        finish_capture(capture.as_ref(), "failed");
                         return;
                     };
+                    if let Some(capture) = &capture {
+                        capture.record_conversation(event.clone());
+                    }
                     if body_session_id.is_none() {
                         tokio::task::yield_now().await;
                         if let Some(session_id) = harness.provider_session_id() {
                             body_session_id = Some(session_id.clone());
+                            if let Some(capture) = &capture {
+                                capture.set_provider_session_id(Some(session_id.clone()));
+                            }
                             self.send(vec![ResidentDelta::BodySessionUpdated {
                                 body_id: body_id.clone(),
                                 session_id,
@@ -758,13 +835,22 @@ impl WaveLoop {
                                 cache_read_tokens: usage.cache_read_tokens,
                             }]).await;
                             if terminal_status.is_some() {
+                                let status = terminal_status.take().expect("checked");
+                                let outcome = if status == Lifecycle::Completed {
+                                    "completed"
+                                } else if status == Lifecycle::Interrupted {
+                                    "interrupted"
+                                } else {
+                                    "failed"
+                                };
                                 self.finish_harness_pass(
                                     &body_id,
                                     &step,
-                                    terminal_status.take().expect("checked"),
+                                    status,
                                     usage.cost_usd,
                                     harness.as_mut(),
                                 ).await;
+                                finish_capture(capture.as_ref(), outcome);
                                 return;
                             }
                         }
@@ -780,6 +866,7 @@ impl WaveLoop {
                                 &body_id,
                                 &format!("{code}: {message}"),
                             ).await;
+                            finish_capture(capture.as_ref(), "failed");
                             return;
                         }
                         ConversationEvent::TurnStarted { .. }
@@ -792,23 +879,34 @@ impl WaveLoop {
                     }
                     if self.end.is_some() {
                         let _ = harness.stop().await;
+                        finish_capture(capture.as_ref(), "interrupted");
                         return;
                     }
                 }
                 _ = &mut terminal_wait, if terminal_status.is_some() => {
+                    let status = terminal_status.take().expect("checked");
+                    let outcome = if status == Lifecycle::Completed {
+                        "completed"
+                    } else if status == Lifecycle::Interrupted {
+                        "interrupted"
+                    } else {
+                        "failed"
+                    };
                     self.finish_harness_pass(
                         &body_id,
                         &step,
-                        terminal_status.take().expect("checked"),
+                        status,
                         usage.cost_usd,
                         harness.as_mut(),
                     ).await;
+                    finish_capture(capture.as_ref(), outcome);
                     return;
                 }
                 _ = &mut timeout => {
                     match self.timeout_action().await {
                         TimeoutAction::End => {
                             let _ = harness.stop().await;
+                            finish_capture(capture.as_ref(), "interrupted");
                             return;
                         }
                         TimeoutAction::Renew => {
@@ -819,6 +917,7 @@ impl WaveLoop {
                             let _ = harness.interrupt().await;
                             let _ = harness.stop().await;
                             self.finish_timed_out_pass(&body_id).await;
+                            finish_capture(capture.as_ref(), "interrupted");
                             return;
                         }
                     }
@@ -835,7 +934,12 @@ impl WaveLoop {
         .await;
     }
 
-    async fn steer_harness(&mut self, message: PendingMessage, harness: &mut dyn Harness) -> bool {
+    async fn steer_harness(
+        &mut self,
+        message: PendingMessage,
+        harness: &mut dyn Harness,
+        capture: Option<&crate::trace::CaptureHandle>,
+    ) -> bool {
         if !self.seen.insert(message.id.clone()) {
             return false;
         }
@@ -851,6 +955,15 @@ impl WaveLoop {
             Some(from) => format!("[{from}] {}", message.text),
             None => message.text.clone(),
         };
+        if let Some(capture) = capture {
+            if let Err(err) = capture.begin_turn("steer", &text) {
+                tracing::warn!(error = %err, "trace capture refused live steering; requeueing message");
+                self.send(vec![ResidentDelta::MessagesRequeued { ids: vec![id] }])
+                    .await;
+                self.queue.push(message);
+                return false;
+            }
+        }
         if let Err(err) = harness.send_input(&text).await {
             tracing::warn!(error = %err, "live steering failed; requeueing message");
             self.send(vec![ResidentDelta::MessagesRequeued { ids: vec![id] }])
@@ -1430,8 +1543,14 @@ mod tests {
                         ..crate::engine::AgentConfig::default()
                     },
                     input: format!("{skill}\n{seed}"),
+                    context: crate::trace::PreparedTurnContext::from_prompts(
+                        "",
+                        &format!("{skill}\n{seed}"),
+                    ),
                     harness: "fake".to_string(),
                     model: None,
+                    context_gather_ms: 0,
+                    context_render_ms: 0,
                 })
             }),
             create: Box::new(move |_name, _approval, events| {

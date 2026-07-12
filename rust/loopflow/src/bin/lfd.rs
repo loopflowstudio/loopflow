@@ -125,10 +125,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    let output_dir = loopflow::lfd::default_output_dir();
-    let max_age =
-        std::time::Duration::from_secs(u64::from(lfd_config.output_log_retention_days) * 86400);
-    loopflow::lfd::output::prune_output_logs(&output_dir, max_age);
     let ci_failure_cache = Arc::new(Mutex::new(std::collections::HashSet::new()));
     let executor = WaveExecutor::new(store.clone());
 
@@ -160,24 +156,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // the wave's loop.
     let token_refresh_handle =
         loopflow::lfd::triggers::spawn_token_refresh(store.clone(), cancel.clone());
-
-    // Hourly output log pruning.
-    {
-        let prune_dir = output_dir;
-        let prune_cancel = cancel.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
-            interval.tick().await; // skip immediate tick (startup prune already ran)
-            loop {
-                tokio::select! {
-                    _ = prune_cancel.cancelled() => break,
-                    _ = interval.tick() => {
-                        loopflow::lfd::output::prune_output_logs(&prune_dir, max_age);
-                    }
-                }
-            }
-        });
-    }
 
     if env_flag("LFD_DISABLE_WORKTREE_JANITOR") {
         tracing::info!("startup worktree janitor disabled by LFD_DISABLE_WORKTREE_JANITOR");

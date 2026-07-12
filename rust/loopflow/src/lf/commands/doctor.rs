@@ -72,8 +72,10 @@ struct DoctorReport<'a> {
 }
 
 pub fn run(json: bool) -> Result<()> {
-    let events = open_ledger()?.list_run_events_since(0)?;
-    let checks = audit(&events);
+    let store = open_ledger()?;
+    let events = store.list_run_events_since(0)?;
+    let mut checks = audit(&events);
+    checks.push(check_capture(&store, &events)?);
     if json {
         println!(
             "{}",
@@ -90,6 +92,263 @@ pub fn run(json: bool) -> Result<()> {
         return Err(anyhow!("run ledger audit failed"));
     }
     Ok(())
+}
+
+fn check_capture(
+    store: &crate::lfdb::sqlite::SqliteStore,
+    events: &[RunEventRow],
+) -> Result<Check> {
+    let required_after = store.trace_capture_required_after()?;
+    let launches = store.agent_launches_since(0)?;
+    let launch_ids = launches
+        .iter()
+        .map(|launch| launch.id.clone())
+        .collect::<Vec<_>>();
+    let turns = store.agent_turns_for_launches(&launch_ids)?;
+    let turn_ids = turns.iter().map(|turn| turn.id.clone()).collect::<Vec<_>>();
+    let assets = store.context_assets_for_turns(&turn_ids)?;
+
+    let launch_processes: HashSet<&str> = launches
+        .iter()
+        .map(|launch| launch.process_id.as_str())
+        .collect();
+    let process_started_at = events
+        .iter()
+        .filter(|event| event.node == "run" && event.event == "started")
+        .fold(HashMap::new(), |mut starts, event| {
+            starts
+                .entry(event.process_id.as_str())
+                .and_modify(|started_at: &mut i64| *started_at = (*started_at).min(event.ts))
+                .or_insert(event.ts);
+            starts
+        });
+    let uncaptured_spend: BTreeSet<&str> = events
+        .iter()
+        .filter(|event| {
+            process_started_at
+                .get(event.process_id.as_str())
+                .copied()
+                .unwrap_or(event.ts)
+                >= required_after
+                && event.node == "run"
+                && event.event != "started"
+                && reports_provider_spend(event)
+        })
+        .map(|event| event.process_id.as_str())
+        .filter(|process| !launch_processes.contains(process))
+        .collect();
+
+    let mut failures = Vec::new();
+    let mut prompt_only = 0;
+    for launch in &launches {
+        if crate::trace::resolve_artifact(&launch.artifact_dir).is_err()
+            || crate::trace::resolve_artifact(&launch.conversation_path).is_err()
+            || launch
+                .provider_events_path
+                .as_deref()
+                .is_some_and(|path| crate::trace::resolve_artifact(path).is_err())
+        {
+            failures.push(format!("{} has an unsafe artifact path", launch.id));
+        }
+        if launch.capture_status == "prompt_only" {
+            prompt_only += 1;
+        }
+        if launch.capture_status == "partial" {
+            failures.push(format!("{} is partial", launch.id));
+        }
+        if launch.capture_status == "capturing"
+            && events.iter().any(|event| {
+                event.process_id == launch.process_id
+                    && event.node == "run"
+                    && event.event != "started"
+            })
+        {
+            failures.push(format!(
+                "{} stayed capturing after its process ended",
+                launch.id
+            ));
+        }
+        if launch.capture_status == "complete" {
+            let conversation_path = crate::trace::resolve_artifact(&launch.conversation_path);
+            let conversation_read = match &conversation_path {
+                Ok(path) => {
+                    crate::trace::read_conversation_status(path).map_err(|error| error.to_string())
+                }
+                Err(error) => Err(error.to_string()),
+            };
+            match conversation_read {
+                Ok(read) => {
+                    if read.incomplete_tail {
+                        failures.push(format!("{} has an unterminated event tail", launch.id));
+                    }
+                    if read
+                        .events
+                        .windows(2)
+                        .any(|pair| pair[1].seq != pair[0].seq + 1)
+                    {
+                        failures.push(format!("{} has non-monotonic events", launch.id));
+                    }
+                    if read.events.len() as i64 != launch.conversation_event_count {
+                        failures.push(format!("{} has a stale event count", launch.id));
+                    }
+                }
+                Err(error) => failures.push(format!("{}: {error}", launch.id)),
+            }
+            if let Ok(path) = conversation_path {
+                if std::fs::metadata(path)
+                    .is_ok_and(|metadata| metadata.len() as i64 != launch.conversation_bytes)
+                {
+                    failures.push(format!("{} has a stale byte count", launch.id));
+                }
+            }
+            if !turns.iter().any(|turn| {
+                turn.launch_id == launch.id
+                    && matches!(turn.status.as_str(), "completed" | "failed" | "interrupted")
+            }) {
+                failures.push(format!("{} has no terminal turn", launch.id));
+            }
+        }
+    }
+    let known_artifacts: HashSet<&str> = launches
+        .iter()
+        .map(|launch| launch.artifact_dir.as_str())
+        .collect();
+    for artifact in crate::trace::list_launch_artifact_dirs()? {
+        if !known_artifacts.contains(artifact.as_str()) {
+            failures.push(format!("orphan trace artifact {artifact}"));
+        }
+    }
+
+    let mut assets_by_turn: HashMap<&str, Vec<&crate::trace::ContextAssetRow>> = HashMap::new();
+    for asset in &assets {
+        assets_by_turn
+            .entry(asset.turn_id.as_str())
+            .or_default()
+            .push(asset);
+    }
+    for turn in &turns {
+        if !crate::trace::resolve_artifact(&turn.task_prompt_path).is_ok_and(|path| path.is_file())
+            || turn.system_prompt_path.as_deref().is_some_and(|path| {
+                !crate::trace::resolve_artifact(path).is_ok_and(|path| path.is_file())
+            })
+        {
+            failures.push(format!("{} is missing a prompt artifact", turn.id));
+        }
+        if turn.context_coverage == "unknown" {
+            continue;
+        }
+        let Some(turn_assets) = assets_by_turn.get(turn.id.as_str()) else {
+            failures.push(format!("{} has no context assets", turn.id));
+            continue;
+        };
+        let system: u64 = turn_assets
+            .iter()
+            .filter(|row| row.asset.channel == crate::trace::ContextChannel::System)
+            .map(|row| row.asset.attributed_tokens)
+            .sum();
+        let task: u64 = turn_assets
+            .iter()
+            .filter(|row| row.asset.channel == crate::trace::ContextChannel::Task)
+            .map(|row| row.asset.attributed_tokens)
+            .sum();
+        if system as i64 != turn.system_tokens || task as i64 != turn.task_tokens {
+            failures.push(format!("{} has mismatched asset tokens", turn.id));
+        }
+    }
+
+    for process_id in launch_processes {
+        let terminal = events
+            .iter()
+            .filter(|event| event.process_id == process_id)
+            .filter(|event| event.node == "run" && event.event != "started")
+            .max_by_key(|event| event.seq);
+        let Some(terminal) = terminal else {
+            continue;
+        };
+        let process_launches: HashSet<&str> = launches
+            .iter()
+            .filter(|launch| launch.process_id == process_id)
+            .map(|launch| launch.id.as_str())
+            .collect();
+        let process_turns = turns
+            .iter()
+            .filter(|turn| process_launches.contains(turn.launch_id.as_str()))
+            .collect::<Vec<_>>();
+        let input: i64 = process_turns
+            .iter()
+            .filter_map(|turn| turn.provider_input_tokens)
+            .sum();
+        let output: i64 = process_turns
+            .iter()
+            .filter_map(|turn| turn.provider_output_tokens)
+            .sum();
+        let cache: i64 = process_turns
+            .iter()
+            .filter_map(|turn| turn.cache_read_tokens)
+            .sum();
+        if terminal.input_tokens.is_some_and(|value| value != input)
+            || terminal.output_tokens.is_some_and(|value| value != output)
+            || terminal
+                .cache_read_tokens
+                .is_some_and(|value| value != cache)
+        {
+            failures.push(format!(
+                "{process_id} turn usage disagrees with its terminal row"
+            ));
+        }
+    }
+
+    for process_id in uncaptured_spend {
+        failures.push(format!(
+            "process {process_id} reports provider spend but has no launch"
+        ));
+    }
+    if !failures.is_empty() {
+        return Ok(Check::fail(
+            "capture",
+            format!(
+                "{} failure(s); {} launches, {} turns, {} bytes: {}",
+                failures.len(),
+                launches.len(),
+                turns.len(),
+                launches
+                    .iter()
+                    .map(|launch| launch.conversation_bytes)
+                    .sum::<i64>(),
+                failures.into_iter().take(4).collect::<Vec<_>>().join("; ")
+            ),
+        ));
+    }
+    if prompt_only > 0 {
+        return Ok(Check::warn(
+            "capture",
+            format!(
+                "{} launches and {} turns are consistent; {prompt_only} interactive launch(es) are prompt-only",
+                launches.len(),
+                turns.len()
+            ),
+        ));
+    }
+    Ok(Check::ok(
+        "capture",
+        format!(
+            "{} launches, {} turns, {} assets, {} bytes",
+            launches.len(),
+            turns.len(),
+            assets.len(),
+            launches
+                .iter()
+                .map(|launch| launch.conversation_bytes)
+                .sum::<i64>()
+        ),
+    ))
+}
+
+fn reports_provider_spend(event: &RunEventRow) -> bool {
+    event.input_tokens.is_some()
+        || event.output_tokens.is_some()
+        || event.cache_read_tokens.is_some()
+        || event.cost_usd.is_some()
 }
 
 pub fn audit(events: &[RunEventRow]) -> Vec<Check> {
@@ -333,7 +592,7 @@ fn print_checks(checks: &[Check], rows: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{audit, check_continuity, Status};
+    use super::{audit, check_capture, check_continuity, Status};
     use crate::lfdb::RunEventRow;
 
     const DAY: i64 = 86_400;
@@ -362,6 +621,80 @@ mod tests {
             duration_secs: None,
             provider: None,
             model: None,
+        }
+    }
+
+    #[test]
+    fn capture_check_rejects_post_epoch_provider_spend_without_a_launch() {
+        let _guard = crate::journal::test_env_lock();
+        let previous = std::env::var_os("LF_HOME");
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let store = crate::journal::open_ledger().unwrap();
+        let mut event = row(
+            "missing-capture",
+            store.trace_capture_required_after().unwrap(),
+            "run",
+            "completed",
+        );
+        event.provider = Some("codex".to_string());
+        event.input_tokens = Some(10);
+
+        let check = check_capture(&store, &[event]).unwrap();
+        assert_eq!(check.status, Status::Fail);
+        assert!(
+            check
+                .detail
+                .contains("process missing-capture reports provider spend but has no launch"),
+            "{}",
+            check.detail
+        );
+
+        match previous {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
+        }
+    }
+
+    #[test]
+    fn capture_check_ignores_ungated_orchestrators_and_external_hosts() {
+        let _guard = crate::journal::test_env_lock();
+        let previous = std::env::var_os("LF_HOME");
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let store = crate::journal::open_ledger().unwrap();
+        let required_after = store.trace_capture_required_after().unwrap();
+        let orchestrator = row("orchestrator", required_after, "skill", "completed");
+        let mut external_host = row("external", required_after, "run", "completed");
+        external_host.provider = Some("codex".to_string());
+
+        let check = check_capture(&store, &[orchestrator, external_host]).unwrap();
+        assert_eq!(check.status, Status::Ok, "{}", check.detail);
+
+        match previous {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
+        }
+    }
+
+    #[test]
+    fn capture_check_ignores_a_pre_epoch_process_that_finishes_after_activation() {
+        let _guard = crate::journal::test_env_lock();
+        let previous = std::env::var_os("LF_HOME");
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let store = crate::journal::open_ledger().unwrap();
+        let required_after = store.trace_capture_required_after().unwrap();
+        let started = row("old-process", required_after - 1, "run", "started");
+        let mut completed = row("old-process", required_after + 1, "run", "completed");
+        completed.input_tokens = Some(10);
+
+        let check = check_capture(&store, &[started, completed]).unwrap();
+        assert_eq!(check.status, Status::Ok, "{}", check.detail);
+
+        match previous {
+            Some(value) => std::env::set_var("LF_HOME", value),
+            None => std::env::remove_var("LF_HOME"),
         }
     }
 

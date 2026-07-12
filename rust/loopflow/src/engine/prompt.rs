@@ -12,7 +12,6 @@ use std::time::Instant;
 
 use crate::engine::error::CoreError;
 use crate::engine::flow::{expand_direction_names, load_direction, load_skill, Direction, Skill};
-use crate::engine::worktrees::{main_repo_root, wave_name_from_worktree_and_main};
 use crate::lfd::types::RepoId;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -49,14 +48,6 @@ pub struct Document {
     pub source: DocumentSource,
 }
 
-/// Per-document token usage entry for context breakdown drill-down.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DocumentEntry {
-    pub path: String,
-    pub source: DocumentSource,
-    pub tokens: usize,
-}
-
 /// How diff context is represented after tiering.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum DiffTier {
@@ -69,80 +60,14 @@ pub enum DiffTier {
     None,
 }
 
-/// Per-source token counts for the assembled context.
-#[derive(Debug, Clone, Default)]
-pub struct ContextBreakdown {
-    pub source_tokens: HashMap<DocumentSource, usize>,
-    pub source_counts: HashMap<DocumentSource, usize>,
-    pub documents: Vec<DocumentEntry>,
-    pub system_tokens: usize,
-    /// Display metadata
-    pub skill_name: Option<String>,
-    pub direction_names: Vec<String>,
-    pub diff_tier: DiffTier,
-    pub diff_file_count: usize,
-    pub has_clipboard: bool,
-    pub wave_name: Option<String>,
-}
-
-impl ContextBreakdown {
-    pub fn total(&self) -> usize {
-        self.system_tokens + self.source_tokens.values().sum::<usize>()
-    }
-
-    pub fn source_tokens(&self, source: DocumentSource) -> usize {
-        self.source_tokens.get(&source).copied().unwrap_or(0)
-    }
-
-    pub fn source_count(&self, source: DocumentSource) -> usize {
-        self.source_counts.get(&source).copied().unwrap_or(0)
-    }
-
-    fn add_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
-        *self.source_tokens.entry(source).or_insert(0) += tokens;
-    }
-
-    fn set_source_tokens(&mut self, source: DocumentSource, tokens: usize) {
-        self.source_tokens.insert(source, tokens);
-    }
-}
-
-fn push_doc_entries(entries: &mut Vec<DocumentEntry>, docs: &[Document], tokens: &[usize]) {
-    for (doc, &t) in docs.iter().zip(tokens) {
-        entries.push(DocumentEntry {
-            path: doc.path.clone(),
-            source: doc.source,
-            tokens: t,
-        });
-    }
-}
-
-fn build_document_entries(
-    components: &PromptComponents,
-    diff_file_tokens: &[usize],
-    summary_tokens: &[usize],
-    wave_memory_tokens: Option<usize>,
-    doc_tokens: &[usize],
-) -> Vec<DocumentEntry> {
-    let mut entries = Vec::new();
-
-    push_doc_entries(&mut entries, &components.diff_files, diff_file_tokens);
-    push_doc_entries(&mut entries, &components.summaries, summary_tokens);
-
-    if let (Some(doc), Some(tokens)) = (&components.wave_memory, wave_memory_tokens) {
-        entries.push(DocumentEntry {
-            path: doc.path.clone(),
-            source: doc.source,
-            tokens,
-        });
-    }
-
-    push_doc_entries(&mut entries, &components.docs, doc_tokens);
-
-    entries
-}
-
 const MAX_EXPLICIT_DOC_FILES: usize = 100;
+static BPE: Lazy<Option<CoreBPE>> = Lazy::new(|| tiktoken_rs::cl100k_base().ok());
+static CL100K_PIECES: Lazy<Option<fancy_regex::Regex>> = Lazy::new(|| {
+    fancy_regex::Regex::new(
+        r"'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}++|\p{N}{1,3}+| ?[^\s\p{L}\p{N}]++[\r\n]*+|\s++$|\s*[\r\n]|\s+(?!\S)|\s",
+    )
+    .ok()
+});
 
 /// Specification for document targets to gather.
 #[derive(Debug, Clone, Default)]
@@ -265,6 +190,9 @@ pub struct PromptComponents {
     pub operate: bool,
     /// User message (positional args after skill/flow name)
     pub message: Option<String>,
+    /// Semantic attribution for generated intent carried in `message`.
+    /// Ordinary CLI speech leaves this absent and is attributed to the user.
+    pub message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
     /// How diff context was tiered
     pub diff_tier: DiffTier,
     /// Number of files changed on branch (for display)
@@ -323,17 +251,9 @@ impl std::fmt::Display for RenderedPrompt {
     }
 }
 
-#[derive(Debug, Clone)]
-struct TokenCacheEntry {
-    mtime_secs: u64,
-    size: u64,
-    tokens: usize,
-}
-
 /// Count tokens using tiktoken (cl100k_base encoding).
 /// Falls back to byte length / 3 if tiktoken fails.
 pub fn count_tokens(text: &str) -> usize {
-    static BPE: Lazy<Option<CoreBPE>> = Lazy::new(|| tiktoken_rs::cl100k_base().ok());
     if let Some(bpe) = BPE.as_ref() {
         return std::cmp::max(bpe.encode_ordinary(text).len(), 1);
     }
@@ -341,147 +261,107 @@ pub fn count_tokens(text: &str) -> usize {
     std::cmp::max(text.len() / 3, 1)
 }
 
-fn cached_doc_tokens(
-    doc: &Document,
-    repo_root: &Path,
-    cache: &mut HashMap<String, TokenCacheEntry>,
-) -> usize {
-    let abs_path = repo_root.join(&doc.path);
-    let key = abs_path.to_string_lossy().to_string();
-    let Ok(metadata) = fs::metadata(&abs_path) else {
-        return count_tokens(&doc.content);
-    };
-    let size = metadata.len();
-    let mtime_secs = metadata
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    if let Some(entry) = cache.get(&key) {
-        if entry.size == size && entry.mtime_secs == mtime_secs {
-            return entry.tokens;
-        }
-    }
-    let tokens = count_tokens(&doc.content);
-    cache.insert(
-        key,
-        TokenCacheEntry {
-            mtime_secs,
-            size,
-            tokens,
-        },
-    );
-    tokens
+/// Return cumulative byte ends for the tokens in one exact encoding.
+pub(crate) fn token_byte_ends(text: &str) -> Option<Vec<usize>> {
+    let bpe = BPE.as_ref()?;
+    let tokens = bpe.encode_ordinary(text);
+    let mut byte_lengths = HashMap::new();
+    let mut byte_end = 0;
+    Some(
+        tokens
+            .into_iter()
+            .map(|token| {
+                let byte_length = *byte_lengths.entry(token).or_insert_with(|| {
+                    bpe.decode_bytes(&[token])
+                        .expect("an encoded token must decode")
+                        .len()
+                });
+                byte_end += byte_length;
+                byte_end
+            })
+            .collect(),
+    )
 }
 
-/// Measure context and return token breakdown without mutating gathered content.
-pub fn measure_context(components: &PromptComponents) -> ContextBreakdown {
-    let repo_root = PathBuf::from(&components.repo_root);
-    static TOKEN_CACHE: Lazy<std::sync::Mutex<HashMap<String, TokenCacheEntry>>> =
-        Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
-    let mut cache = TOKEN_CACHE
-        .lock()
-        .map(|guard| guard.clone())
-        .unwrap_or_default();
+#[derive(Debug)]
+pub(crate) struct PromptTokenAccounting {
+    pub total: usize,
+    pub prefixes: Vec<usize>,
+    pub isolated: Vec<usize>,
+}
 
-    let mut breakdown = ContextBreakdown {
-        system_tokens: count_tokens(&format_system_sections(components).join("\n\n")),
-        ..Default::default()
-    };
-
-    if let Some(ref skill) = components.skill {
-        if let Some(ref content) = skill.content {
-            breakdown.add_source_tokens(DocumentSource::Skill, count_tokens(content));
+/// Account for exact prefixes and isolated ranges from one full encoding.
+pub(crate) fn account_prompt_tokens(
+    text: &str,
+    prefix_ends: &[usize],
+    ranges: &[(usize, usize)],
+) -> Option<PromptTokenAccounting> {
+    let bpe = BPE.as_ref()?;
+    let regex = CL100K_PIECES.as_ref()?;
+    let token_ends = token_byte_ends(text)?;
+    let pieces = regex.find_iter(text).collect::<Result<Vec<_>, _>>().ok()?;
+    let token_boundaries = token_ends
+        .iter()
+        .copied()
+        .chain([0, text.len()])
+        .collect::<HashSet<_>>();
+    let pieces_cover_text = pieces.first().is_none_or(|piece| piece.start() == 0)
+        && pieces.last().is_none_or(|piece| piece.end() == text.len())
+        && pieces
+            .windows(2)
+            .all(|pair| pair[0].end() == pair[1].start());
+    if !pieces_cover_text
+        || pieces.iter().any(|piece| {
+            !token_boundaries.contains(&piece.start()) || !token_boundaries.contains(&piece.end())
+        })
+    {
+        return None;
+    }
+    let prefix_count = |end: usize| {
+        if end == text.len() {
+            return Some(token_ends.len());
         }
-        breakdown.skill_name = Some(skill.name.clone());
-    }
-
-    for dir in &components.directions {
-        breakdown.add_source_tokens(DocumentSource::Direction, count_tokens(&dir.content));
-        breakdown.direction_names.push(dir.name.clone());
-    }
-
-    if let Some(ref diff) = components.diff {
-        let tokens = count_tokens(diff);
-        breakdown.add_source_tokens(DocumentSource::Diff, tokens);
-    }
-
-    let diff_file_tokens: Vec<usize> = components
-        .diff_files
+        let piece_index = pieces.partition_point(|piece| piece.end() < end);
+        let piece = pieces.get(piece_index)?;
+        if end < piece.start() || end > piece.end() {
+            return None;
+        }
+        let complete_tokens = token_ends.partition_point(|token_end| *token_end <= piece.start());
+        let partial_tokens = if end == piece.start() {
+            0
+        } else {
+            bpe.encode_ordinary(&text[piece.start()..end]).len()
+        };
+        Some(complete_tokens + partial_tokens)
+    };
+    let prefixes = prefix_ends
         .iter()
-        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
-        .collect();
-    breakdown.add_source_tokens(DocumentSource::Diff, diff_file_tokens.iter().sum::<usize>());
-    breakdown.diff_file_count = components.diff_file_count;
-    breakdown.diff_tier = components.diff_tier.clone();
-
-    let summary_tokens: Vec<usize> = components
-        .summaries
+        .map(|end| prefix_count(*end))
+        .collect::<Option<Vec<_>>>()?;
+    let isolated = ranges
         .iter()
-        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
+        .map(|(start, end)| {
+            if pieces
+                .binary_search_by_key(start, |piece| piece.start())
+                .is_ok()
+                && (*end == text.len()
+                    || pieces
+                        .binary_search_by_key(end, |piece| piece.start())
+                        .is_ok())
+            {
+                let start_tokens = token_ends.partition_point(|token_end| *token_end <= *start);
+                let end_tokens = token_ends.partition_point(|token_end| *token_end <= *end);
+                end_tokens - start_tokens
+            } else {
+                bpe.encode_ordinary(&text[*start..*end]).len()
+            }
+        })
         .collect();
-    let wave_memory_tokens = components
-        .wave_memory
-        .as_ref()
-        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache));
-    let doc_tokens: Vec<usize> = components
-        .docs
-        .iter()
-        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
-        .collect();
-    breakdown.add_source_tokens(
-        DocumentSource::Summary,
-        summary_tokens.iter().sum::<usize>(),
-    );
-    if let Some(tokens) = wave_memory_tokens {
-        breakdown.add_source_tokens(DocumentSource::WaveMemory, tokens);
-    }
-    if let Some(ref chat) = components.wave_chat {
-        breakdown.add_source_tokens(DocumentSource::Wave, count_tokens(chat));
-    }
-    for (doc, tokens) in components.docs.iter().zip(doc_tokens.iter().copied()) {
-        breakdown.add_source_tokens(doc.source, tokens);
-    }
-
-    if let Some(ref clip) = components.clipboard {
-        breakdown.set_source_tokens(DocumentSource::Clipboard, count_tokens(clip));
-    }
-    breakdown.has_clipboard = components.clipboard.is_some();
-    breakdown.wave_name = components.wave.clone();
-
-    breakdown.documents = build_document_entries(
-        components,
-        &diff_file_tokens,
-        &summary_tokens,
-        wave_memory_tokens,
-        &doc_tokens,
-    );
-
-    // Derive source counts from document entries.
-    let mut source_counts: HashMap<DocumentSource, usize> = HashMap::new();
-    for entry in &breakdown.documents {
-        *source_counts.entry(entry.source).or_insert(0) += 1;
-    }
-    // Diff count may include files not loaded as document entries.
-    let has_diff = components.diff.is_some() || !components.diff_files.is_empty();
-    if has_diff && breakdown.diff_file_count > 0 {
-        source_counts.insert(DocumentSource::Diff, breakdown.diff_file_count);
-    }
-    breakdown.source_counts = source_counts;
-
-    if breakdown.documents.len() > 100 {
-        warn!(
-            document_count = breakdown.documents.len(),
-            "context breakdown has more than 100 documents; consider narrowing docs or diff scope"
-        );
-    }
-
-    if let Ok(mut guard) = TOKEN_CACHE.lock() {
-        *guard = cache;
-    }
-
-    breakdown
+    Some(PromptTokenAccounting {
+        total: token_ends.len(),
+        prefixes,
+        isolated,
+    })
 }
 
 /// Gather all prompt components.
@@ -617,6 +497,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         wave_chat,
         operate: opts.operate,
         message: opts.message.clone(),
+        message_context: None,
         diff_tier,
         diff_file_count,
     }))
@@ -1549,13 +1430,17 @@ const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md", "GEMINI.md"];
 ///
 /// Skips all known native files (CLAUDE.md, AGENTS.md, GEMINI.md) and any
 /// files they symlink to (e.g. CLAUDE.md -> STYLE.md also drops STYLE.md).
-pub fn drop_native_instruction_docs(components: &mut PromptComponents, repo_root: &Path) {
+pub fn drop_native_instruction_docs(
+    components: &mut PromptComponents,
+    repo_root: &Path,
+) -> Vec<Document> {
     // Collect canonical paths of all native files (resolves symlinks)
     let canonical_paths: Vec<_> = AGENT_NATIVE_FILES
         .iter()
         .filter_map(|f| fs::canonicalize(repo_root.join(f)).ok())
         .collect();
 
+    let mut removed = Vec::new();
     components.docs.retain(|doc| {
         let name = Path::new(&doc.path)
             .file_name()
@@ -1564,6 +1449,7 @@ pub fn drop_native_instruction_docs(components: &mut PromptComponents, repo_root
 
         // Drop the native files themselves
         if AGENT_NATIVE_FILES.contains(&name) {
+            removed.push(doc.clone());
             return false;
         }
 
@@ -1571,12 +1457,14 @@ pub fn drop_native_instruction_docs(components: &mut PromptComponents, repo_root
         let doc_path = repo_root.join(&doc.path);
         if let Ok(doc_canon) = fs::canonicalize(&doc_path) {
             if canonical_paths.contains(&doc_canon) {
+                removed.push(doc.clone());
                 return false;
             }
         }
 
         true
     });
+    removed
 }
 
 fn read_text_file(path: &Path) -> Option<String> {
@@ -1790,6 +1678,37 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
         parts.push(format_files(&reference_docs));
     }
 
+    if !components.summaries.is_empty() {
+        let summary_parts: Vec<String> = components
+            .summaries
+            .iter()
+            .map(|summary| {
+                format!(
+                    "<lf:summary path=\"{}\">\n{}\n</lf:summary>",
+                    summary.path, summary.content
+                )
+            })
+            .collect();
+        parts.push(format!(
+            "Pre-generated codebase summaries.\n\n<lf:summaries>\n{}\n</lf:summaries>",
+            summary_parts.join("\n\n")
+        ));
+    }
+
+    if components.diff.is_some() || !components.diff_files.is_empty() {
+        let mut diff_parts = Vec::new();
+        if let Some(ref diff) = components.diff {
+            diff_parts.push(format!("<lf:diff>\n{diff}\n</lf:diff>"));
+        }
+        if !components.diff_files.is_empty() {
+            diff_parts.push(format_files(&components.diff_files));
+        }
+        parts.push(format!(
+            "Changes on this branch (diff against main).\n\n{}",
+            diff_parts.join("\n\n")
+        ));
+    }
+
     parts
 }
 
@@ -1809,46 +1728,6 @@ fn format_skill_tag(skill: &Skill) -> String {
 fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = format_system_sections(components);
     parts.extend(format_content_sections(components));
-
-    // Summaries (included in full prompt log but not in task prompt)
-    if !components.summaries.is_empty() {
-        let summary_parts: Vec<String> = components
-            .summaries
-            .iter()
-            .map(|s| {
-                format!(
-                    "<lf:summary path=\"{}\">\n{}\n</lf:summary>",
-                    s.path, s.content
-                )
-            })
-            .collect();
-        let summaries_body = summary_parts.join("\n\n");
-        parts.push(format!(
-            "Pre-generated codebase summaries.\n\n\
-             <lf:summaries>\n{}\n</lf:summaries>",
-            summaries_body
-        ));
-    }
-
-    // Diff (included in full prompt log but not in task prompt)
-    if components.diff.is_some() || !components.diff_files.is_empty() {
-        let mut diff_parts = Vec::new();
-
-        if let Some(ref diff) = components.diff {
-            diff_parts.push(format!("<lf:diff>\n{}\n</lf:diff>", diff));
-        }
-
-        if !components.diff_files.is_empty() {
-            let files_content = format_files(&components.diff_files);
-            diff_parts.push(files_content);
-        }
-
-        parts.push(format!(
-            "Changes on this branch (diff against main).\n\n{}",
-            diff_parts.join("\n\n")
-        ));
-    }
-
     parts
 }
 
@@ -1977,11 +1856,9 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
     parts.join("\n\n")
 }
 
-/// Write prompt to both in-repo and durable locations, return the in-repo path.
+/// Write a runtime prompt file and return its path.
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
-/// Durable: `~/.lf/logs/<repo>/<worktree>/<file>` — survives worktree deletion.
-///
 /// File format: `{timestamp}-{run_id}-{flow_parents}.{skill}.md`, with the
 /// `{run_id}` segment present only when `LF_RUN_ID` is set (daemon-dispatched
 /// runs) — it joins the log to the run's journal and token-usage records.
@@ -2018,34 +1895,7 @@ pub fn write_prompt_log(
 
     fs::write(&path, prompt)?;
 
-    // Best-effort durable copy
-    if let Some(durable_dir) = durable_log_dir(repo_root) {
-        let _ = fs::create_dir_all(&durable_dir);
-        let _ = fs::write(durable_dir.join(&filename), prompt);
-    }
-
     Ok(path)
-}
-
-/// Resolve the durable log directory: `~/.lf/logs/<repo>/<worktree>/`.
-///
-/// `<repo>` is the main repo directory name. `<worktree>` is the wave name
-/// if in a worktree, or `"main"` otherwise.
-pub fn durable_log_dir(repo_root: &Path) -> Option<PathBuf> {
-    let home = dirs::home_dir()?;
-    let (repo_name, worktree_name) = match main_repo_root(repo_root) {
-        Ok(main_root) => {
-            let main_name = main_root.file_name()?.to_str()?.to_string();
-            let wt_name = wave_name_from_worktree_and_main(repo_root, &main_root)
-                .unwrap_or_else(|| "main".to_string());
-            (main_name, wt_name)
-        }
-        Err(_) => {
-            let name = repo_root.file_name()?.to_str()?.to_string();
-            (name, "main".to_string())
-        }
-    };
-    Some(home.join(".lf/logs").join(repo_name).join(worktree_name))
 }
 
 /// Format file documents for inclusion in prompt.
@@ -2116,67 +1966,47 @@ mod tests {
     }
 
     #[test]
-    fn measure_context_includes_documents_and_source_counts() {
-        let components = PromptComponents {
-            docs: vec![
-                Document {
-                    path: "README.md".to_string(),
-                    content: "Repo docs".to_string(),
-                    source: DocumentSource::Docs,
-                },
-                Document {
-                    path: "scratch/plan.md".to_string(),
-                    content: "Scratch plan".to_string(),
-                    source: DocumentSource::Scratch,
-                },
-            ],
-            summaries: vec![Document {
-                path: "wave-summary.md".to_string(),
-                content: "Summary".to_string(),
-                source: DocumentSource::Summary,
-            }],
-            wave_memory: Some(Document {
-                path: "wave/dev/MEMORY.md".to_string(),
-                content: "Memory".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
-            diff: Some("diff --git a/src/a.rs b/src/a.rs".to_string()),
-            diff_files: vec![Document {
-                path: "src/a.rs".to_string(),
-                content: "fn main() {}".to_string(),
-                source: DocumentSource::Diff,
-            }],
-            diff_file_count: 3,
-            ..Default::default()
-        };
+    fn full_encoding_boundaries_are_exact_prefix_counts() {
+        let text =
+            "<lf:file path=\"guide.md\">\nContext quality matters.\n</lf:file>\nUnicode: café.";
+        let ends = token_byte_ends(text).expect("cl100k tokenizer");
+        for (index, end) in ends.into_iter().enumerate() {
+            if text.is_char_boundary(end) {
+                assert_eq!(count_tokens(&text[..end]), index + 1);
+            }
+        }
+    }
 
-        let breakdown = measure_context(&components);
+    #[test]
+    fn optimized_prefix_counts_match_direct_encoding() {
+        let text =
+            "<lf:file path=\"guide.md\">\nContext quality matters.\n</lf:file>\nUnicode: café.";
+        let ends = text
+            .char_indices()
+            .map(|(index, character)| index + character.len_utf8())
+            .collect::<Vec<_>>();
+        let optimized = account_prompt_tokens(text, &ends, &[])
+            .expect("cl100k prefix counts")
+            .prefixes;
+        let direct = ends
+            .iter()
+            .map(|end| count_tokens(&text[..*end]))
+            .collect::<Vec<_>>();
+        assert_eq!(optimized, direct);
+    }
 
-        assert_eq!(breakdown.source_count(DocumentSource::Docs), 1);
-        assert_eq!(breakdown.source_count(DocumentSource::Scratch), 1);
-        assert_eq!(breakdown.source_count(DocumentSource::Summary), 1);
-        assert_eq!(breakdown.source_count(DocumentSource::WaveMemory), 1);
-        assert_eq!(breakdown.source_count(DocumentSource::Diff), 3);
-        assert!(breakdown
-            .documents
+    #[test]
+    fn optimized_isolated_counts_match_direct_encoding() {
+        let text = "<tag>Context quality matters.</tag>\nUnicode: café.";
+        let ranges = vec![(0, 5), (5, 29), (29, text.len())];
+        let optimized = account_prompt_tokens(text, &[], &ranges)
+            .expect("cl100k range counts")
+            .isolated;
+        let direct = ranges
             .iter()
-            .any(|entry| entry.path == "README.md"));
-        assert!(breakdown
-            .documents
-            .iter()
-            .any(|entry| entry.path == "scratch/plan.md"));
-        assert!(breakdown
-            .documents
-            .iter()
-            .any(|entry| entry.path == "wave-summary.md"));
-        assert!(breakdown
-            .documents
-            .iter()
-            .any(|entry| entry.path == "wave/dev/MEMORY.md"));
-        assert!(breakdown
-            .documents
-            .iter()
-            .any(|entry| entry.path == "src/a.rs"));
+            .map(|(start, end)| count_tokens(&text[*start..*end]))
+            .collect::<Vec<_>>();
+        assert_eq!(optimized, direct);
     }
 
     #[test]

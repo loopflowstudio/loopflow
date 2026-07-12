@@ -5,7 +5,7 @@
 //! disk. Local-only: nothing is fetched from anywhere.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::io::{BufRead, BufReader};
 
 use anyhow::{anyhow, Result};
 
@@ -77,7 +77,13 @@ pub fn list(json: bool) -> Result<()> {
 }
 
 /// `lf trace <run-id>`: reconstruct one run (id may be a unique prefix).
-pub fn trace(run_id: &str, json: bool) -> Result<()> {
+pub fn trace(
+    run_id: &str,
+    json: bool,
+    events_mode: bool,
+    jsonl: bool,
+    launch_prefix: Option<&str>,
+) -> Result<()> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let events = store
         .run_events_matching(run_id)
@@ -96,8 +102,28 @@ pub fn trace(run_id: &str, json: bool) -> Result<()> {
     }
 
     let spans = trace_spans(&events);
+    let launches = store.agent_launches_matching(&events[0].run_id)?;
+    if events_mode {
+        return trace_events(&launches, launch_prefix, jsonl);
+    }
+    let launch_ids = launches
+        .iter()
+        .map(|launch| launch.id.clone())
+        .collect::<Vec<_>>();
+    let turns = store.agent_turns_for_launches(&launch_ids)?;
     if json {
-        println!("{}", serde_json::to_string(&spans)?);
+        let turn_ids = turns.iter().map(|turn| turn.id.clone()).collect::<Vec<_>>();
+        println!(
+            "{}",
+            serde_json::to_string(&TraceDto {
+                run_id: events[0].run_id.clone(),
+                spans,
+                launches,
+                turns,
+                assets: store.context_assets_for_turns(&turn_ids)?,
+                decisions: store.context_decisions_for_turns(&turn_ids)?,
+            })?
+        );
         return Ok(());
     }
 
@@ -141,14 +167,163 @@ pub fn trace(run_id: &str, json: bool) -> Result<()> {
         format_cost(total_cost)
     );
 
-    for path in prompt_logs(&full_id) {
-        println!("  prompt    {}", path.display());
-    }
-    if let Some(output) = output_log(&full_id) {
-        println!("  output    {}", output.display());
+    for launch in &launches {
+        println!(
+            "\n  launch    {}  {}{}  {} / {}",
+            short_id(&launch.id),
+            launch.provider,
+            launch
+                .model
+                .as_deref()
+                .map(|model| format!(":{model}"))
+                .unwrap_or_default(),
+            launch.capture_status,
+            launch.outcome,
+        );
+        if let Some(reason) = &launch.incomplete_reason {
+            println!("    incomplete  {reason}");
+        }
+        if let Some(session_id) = &launch.provider_session_id {
+            println!("    session     {session_id}");
+        }
+        if let Some(session_path) = &launch.provider_session_path {
+            let availability = if std::path::Path::new(session_path).exists() {
+                "available"
+            } else {
+                "expired"
+            };
+            println!("    vendor      {session_path} ({availability})");
+        }
+        println!(
+            "    events      {}",
+            crate::trace::resolve_artifact(&launch.conversation_path)?.display()
+        );
+        for turn in turns.iter().filter(|turn| turn.launch_id == launch.id) {
+            println!(
+                "    turn {}  {} tokens  provider input {}  {}",
+                turn.ordinal,
+                turn.supplied_context_tokens,
+                turn.provider_input_tokens
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                turn.status,
+            );
+            if let Some(system) = &turn.system_prompt_path {
+                println!(
+                    "      system  {}",
+                    crate::trace::resolve_artifact(system)?.display()
+                );
+            }
+            println!(
+                "      task    {}",
+                crate::trace::resolve_artifact(&turn.task_prompt_path)?.display()
+            );
+        }
     }
 
     Ok(())
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct TraceDto {
+    pub run_id: String,
+    pub spans: Vec<SpanDto>,
+    pub launches: Vec<crate::trace::AgentLaunchRow>,
+    pub turns: Vec<crate::trace::AgentTurnRow>,
+    pub assets: Vec<crate::trace::ContextAssetRow>,
+    pub decisions: Vec<crate::trace::ContextDecisionRow>,
+}
+
+fn trace_events(
+    launches: &[crate::trace::AgentLaunchRow],
+    launch_prefix: Option<&str>,
+    jsonl: bool,
+) -> Result<()> {
+    let selected = launches
+        .iter()
+        .filter(|launch| launch_prefix.is_none_or(|prefix| launch.id.starts_with(prefix)))
+        .collect::<Vec<_>>();
+    if selected.is_empty() {
+        return Err(anyhow!("no captured launch matches the requested trace"));
+    }
+    if launch_prefix.is_some() && selected.len() > 1 {
+        return Err(anyhow!("launch prefix is ambiguous"));
+    }
+    if jsonl && selected.len() > 1 {
+        return Err(anyhow!(
+            "--jsonl needs --launch when a trace contains multiple launches"
+        ));
+    }
+
+    for launch in selected {
+        let path = crate::trace::resolve_artifact(&launch.conversation_path)?;
+        let file = std::fs::File::open(&path).map_err(|error| {
+            anyhow!(
+                "normalized conversation missing at {}: {error}",
+                path.display()
+            )
+        })?;
+        if !jsonl && launches.len() > 1 {
+            println!(
+                "launch {}  {}  {}",
+                short_id(&launch.id),
+                launch.provider,
+                launch.capture_status
+            );
+        }
+        let mut reader = BufReader::new(file);
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line)? == 0 {
+                break;
+            }
+            if line.trim().is_empty() {
+                continue;
+            }
+            let parsed = serde_json::from_str::<crate::trace::RecordedConversationEvent>(&line);
+            if parsed.is_err() && !line.ends_with('\n') {
+                break;
+            }
+            if jsonl {
+                print!("{line}");
+                continue;
+            }
+            let event = parsed?;
+            print_recorded_event(&event);
+        }
+    }
+    Ok(())
+}
+
+fn print_recorded_event(event: &crate::trace::RecordedConversationEvent) {
+    use crate::trace::RecordedConversationPayload;
+
+    match &event.payload {
+        RecordedConversationPayload::UserInput { op, text } => {
+            println!("user ({op})\n{text}\n");
+        }
+        RecordedConversationPayload::Conversation { event } => {
+            println!("{}  {:?}", event.event_type(), event);
+        }
+        RecordedConversationPayload::LegacyText { stream, text } => {
+            println!("{stream}\n{text}\n");
+        }
+        RecordedConversationPayload::LegacyTool { name, summary } => {
+            println!("tool {name}  {summary}");
+        }
+        RecordedConversationPayload::Usage { usage } => {
+            println!(
+                "usage  input {} output {} cache {}",
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cache_read_tokens.unwrap_or(0)
+            );
+        }
+        RecordedConversationPayload::Result { status, .. } => println!("result  {status}"),
+        RecordedConversationPayload::CaptureError { message } => {
+            println!("capture error  {message}");
+        }
+    }
 }
 
 /// One run folded out of the ledger — the shape `lf runs` prints and
@@ -504,53 +679,6 @@ fn display_repo(repo: Option<&str>) -> String {
         .or(repo)
         .unwrap_or("-")
         .to_string()
-}
-
-/// Prompt/context logs for a run: `~/.lf/logs/<repo>/<worktree>/*-<id>-*.md`.
-fn prompt_logs(run_id: &str) -> Vec<PathBuf> {
-    let Some(home) = dirs::home_dir() else {
-        return Vec::new();
-    };
-    let needle = format!("-{run_id}-");
-    let mut matches = Vec::new();
-    let logs_root = home.join(".lf/logs");
-    for repo in read_dirs(&logs_root) {
-        for worktree in read_dirs(&repo) {
-            if let Ok(entries) = std::fs::read_dir(&worktree) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .is_some_and(|name| name.contains(&needle))
-                    {
-                        matches.push(path);
-                    }
-                }
-            }
-        }
-    }
-    matches.sort();
-    matches
-}
-
-fn output_log(run_id: &str) -> Option<PathBuf> {
-    let path = dirs::home_dir()?
-        .join(".lf/output")
-        .join(format!("{run_id}.log"));
-    path.exists().then_some(path)
-}
-
-fn read_dirs(root: &std::path::Path) -> Vec<PathBuf> {
-    std::fs::read_dir(root)
-        .map(|entries| {
-            entries
-                .flatten()
-                .map(|entry| entry.path())
-                .filter(|path| path.is_dir())
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn format_time(unix: i64) -> String {

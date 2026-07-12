@@ -242,6 +242,13 @@ pub enum Commands {
         #[arg(long)]
         generation: u32,
     },
+    /// Internal: run one durable Project Session process generation
+    #[command(name = "__project", hide = true)]
+    ProjectRunner {
+        session_id: String,
+        #[arg(long)]
+        generation: u32,
+    },
     /// Measure this codebase: lines and tokens per directory (tracked files only)
     Tokens {
         /// Emit as JSON
@@ -484,7 +491,7 @@ pub enum MemoryCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
-    /// Create a Linear Project first, then queue it for its owning Wave
+    /// Create a Linear Project first, then start its durable Project Session
     Start {
         title: String,
         #[arg(short = 'w', long = "wave")]
@@ -492,10 +499,98 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Queue an existing Linear Project for its owning Wave to pursue
+    /// Start or resume the one durable Session for an existing Linear Project
     Run {
-        /// Linear Project UUID
+        /// Linear Project UUID or unique slug
         project_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show durable Project Session state and reconcile process liveness
+    Status {
+        project_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Queue an audited instruction for exactly the next provider turn
+    FollowUp {
+        project_id: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Redirect the active Project turn
+    Steer {
+        project_id: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Interrupt the active Project turn and optionally replace its next instruction
+    Interrupt {
+        project_id: String,
+        #[arg(long = "message")]
+        message: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read or wait for one durable Project command receipt
+    Receipt {
+        command_id: String,
+        #[arg(long)]
+        wait: bool,
+        #[arg(long, default_value = "30s")]
+        timeout: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resolve a durable Project decision request
+    Decide {
+        project_id: String,
+        decision_id: String,
+        choice: String,
+        #[arg(long)]
+        message: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ask the owning Wave to choose while preserving this Project Session
+    RequestDecision {
+        project_id: String,
+        prompt: String,
+        #[arg(long = "option", required = true)]
+        options: Vec<String>,
+        #[arg(long)]
+        wait: bool,
+        #[arg(long, default_value = "30m")]
+        timeout: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Wait without polling an LM
+    Wait {
+        project_id: String,
+        #[arg(long, default_value = "terminal", value_parser = ["waiting", "terminal"])]
+        until: String,
+        #[arg(long)]
+        timeout: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resume the same Project Session and provider history
+    Resume {
+        project_id: String,
+        message: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Attach to the writable Project Session control terminal
+    Attach { project_id: String },
+    /// End Project pursuit without deleting its durable history
+    Abandon {
+        project_id: String,
+        #[arg(long)]
+        reason: String,
         #[arg(long)]
         json: bool,
     },
@@ -1057,7 +1152,7 @@ mod tests {
             "lf",
             "task",
             "receipt",
-            "tc_00000000000000000000000000000000",
+            "cc_00000000000000000000000000000000",
             "--wait",
             "--timeout",
             "30s",
@@ -1081,7 +1176,7 @@ mod tests {
             "task",
             "decide",
             "INF-123",
-            "td_00000000000000000000000000000000",
+            "cd_00000000000000000000000000000000",
             "revise",
             "--message",
             "cover the race",
@@ -1172,6 +1267,51 @@ mod tests {
         assert_eq!(title, "Release stability");
         assert_eq!(wave.as_deref(), Some("infrastructure"));
         assert!(json);
+    }
+
+    #[test]
+    fn project_session_controls_parse_durable_ids_and_waits() {
+        let steer = Cli::try_parse_from([
+            "lf",
+            "project",
+            "steer",
+            "project-uuid",
+            "prioritize the CLI path",
+            "--json",
+        ])
+        .expect("parse project steer");
+        assert!(matches!(
+            steer.command,
+            Some(Commands::Project {
+                cmd: ProjectCommand::Steer {
+                    project_id,
+                    message,
+                    json: true,
+                },
+            }) if project_id == "project-uuid" && message == "prioritize the CLI path"
+        ));
+
+        let receipt = Cli::try_parse_from([
+            "lf",
+            "project",
+            "receipt",
+            "cc_00000000000000000000000000000000",
+            "--wait",
+            "--timeout",
+            "30s",
+        ])
+        .expect("parse project receipt");
+        assert!(matches!(
+            receipt.command,
+            Some(Commands::Project {
+                cmd: ProjectCommand::Receipt {
+                    command_id,
+                    wait: true,
+                    timeout,
+                    ..
+                },
+            }) if command_id.starts_with("cc_") && timeout == "30s"
+        ));
     }
 
     #[test]

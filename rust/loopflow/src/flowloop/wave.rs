@@ -476,6 +476,12 @@ impl WaveLoop {
                     self.queue.push(message);
                 }
             }
+            InboxItem::Project(observation) => {
+                let message = crate::wave::journal::project_observation_message(&observation);
+                if self.seen.insert(message.id.clone()) {
+                    self.queue.push(message);
+                }
+            }
             InboxItem::Interrupt | InboxItem::Skip => {}
         }
     }

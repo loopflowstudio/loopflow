@@ -1,6 +1,6 @@
 # Loopflow
 
-Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it coordinates Linear-backed Task Sessions, remembers what it learns, and shows you every live session.
+Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it coordinates Linear-backed Project and Task Sessions, remembers what it learns, and shows you every live session.
 
 Start a wave by hand and steer it interactively. As it earns trust, let it loop — picking work, dispatching flows, and reacting to changes on its own.
 
@@ -85,16 +85,20 @@ Typed, idempotent Task observations keep the Wave informed without copying raw
 tool chatter into its thread. Tasks can pause on a durable decision request;
 the owning Wave answers it in the same Task Session and provider transcript.
 
-Run an existing Linear task or queue a Project for its owning Wave:
+Run an existing Linear Project or task:
 
 ```bash
-lf task run INF-123
 lf project run <linear-project-id>
+lf project steer <linear-project-id> "prioritize the CLI path"
+lf project wait <linear-project-id> --until waiting
+
+lf task run INF-123
 ```
 
-`lf serve designer` boots the durable Wave mind. `lf task run` starts a durable
-child session. The Wave stays directly steerable while several independent
-tasks run.
+`lf project run` starts one durable KR-pursuit session with no branch or
+worktree. It creates and supervises Task Sessions, stops while only child
+progress can change the answer, and resumes from typed Task observations. The
+Wave stays directly steerable while Project and Task Sessions run.
 
 Inspect exactly what an agent received and what Loopflow observed:
 

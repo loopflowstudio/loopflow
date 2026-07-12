@@ -7,6 +7,7 @@ pub mod lf;
 pub mod lfd;
 pub mod lfdb;
 pub mod ops;
+pub mod project_session;
 pub mod provider_auth;
 pub mod trace;
 pub mod task;

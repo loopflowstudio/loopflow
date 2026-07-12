@@ -12,8 +12,8 @@ struct RegistryQueryTests {
     func wavesDecodeAndScope() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","iteration":3,"workers":2,"active_runs":1,"active_tasks":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
-          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","iteration":0,"workers":1,"active_runs":0,"active_tasks":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
+          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","iteration":3,"workers":2,"active_runs":1,"active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
+          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","iteration":0,"workers":1,"active_runs":0,"active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
         ]
         """
         let query = RegistryQuery { args, _ in
@@ -31,8 +31,8 @@ struct RegistryQueryTests {
     func allWavesDecode() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","iteration":3,"workers":2,"active_runs":1,"active_tasks":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
-          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","iteration":0,"workers":1,"active_runs":0,"active_tasks":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
+          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","iteration":3,"workers":2,"active_runs":1,"active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
+          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","iteration":0,"workers":1,"active_runs":0,"active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
         ]
         """
         let counter = CallCounter()
@@ -52,10 +52,11 @@ struct RegistryQueryTests {
     func statusMapsRunsAndAttention() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"active_tasks":1,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
+          "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"active_tasks":1,"active_projects":1,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
           "loop_state":"turning",
+          "projects":[{"project_id":"project-1","session_id":"ps_1","project":"developer-efficiency","status":"waiting","reason":"supervised Tasks are active","status_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","process_alive":false,"latest_event":null}],
           "runs":[{"id":"run-1","flow":"implement","task":"wire it","step_index":2,"status":"running","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":"https://example.test/pull/7","pr_state":"draft","pr_title":"Wire it"}],
-          "tasks":[{"issue_id":"INF-123","session_id":"ts_1","project":"developer-efficiency","status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","worktree":"/task-wt","branch":"jack/inf-123","provider":"codex","process_alive":true,"pr_url":null,"latest_event":null}],
+          "tasks":[{"issue_id":"INF-123","session_id":"ts_1","project":"developer-efficiency","supervisor":{"kind":"wave","wave_id":"wave-1"},"status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","worktree":"/task-wt","branch":"jack/inf-123","provider":"codex","process_alive":true,"pr_url":null,"latest_event":null}],
           "attention":[{"id":"att-1","kind":"interactive","status":"surfaced","title":"needs a human","summary":"review the design","run_id":"run-1","surfaced_at":"2026-07-06T00:00:00Z"}]
         }
         """
@@ -66,12 +67,14 @@ struct RegistryQueryTests {
 
         let result = try await query.status(wave: "goals", waveId: "wave-1", cwd: nil)
         #expect(result.loopState == "turning")
-        #expect(result.runs.map(\.id) == ["run-1", "ts_1"])
+        #expect(result.runs.map(\.id) == ["run-1", "ps_1", "ts_1"])
         #expect(result.runs[0].waveId == "wave-1")
         #expect(result.runs[0].status == .running)
         #expect(result.runs[0].stepIndex == 2)
         #expect(result.runs[0].pr?.state == .draft)
         #expect(result.runs[0].pr?.title == "Wire it")
+        #expect(result.runs[1].flow == "project")
+        #expect(result.runs[1].status == .waiting)
         #expect(result.attention.map(\.id) == ["att-1"])
         #expect(result.attention[0].waveId == "wave-1")
         #expect(result.attention[0].kind == .interactive)
@@ -81,8 +84,9 @@ struct RegistryQueryTests {
     func statusPreservesRunStatuses() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"active_tasks":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
+          "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
           "mind":null,
+          "projects":[],
           "runs":[
             {"id":"run-1","flow":"implement","task":null,"step_index":0,"status":"completed","branch":"b","worktree":"/wt","started_at":"2026-07-06T00:00:00Z","ended_at":null,"error":null,"pr_url":null,"pr_state":null,"pr_title":null},
             {"id":"run-2","flow":"gate","task":null,"step_index":0,"status":"new-token","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null,"pr_state":null,"pr_title":null}

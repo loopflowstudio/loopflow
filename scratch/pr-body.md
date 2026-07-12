@@ -18,6 +18,20 @@ lf task steer INF-123 "also audit the parser"
 lf task wait INF-123 --until submitted
 ```
 
+For a measured multi-Task bet:
+
+```bash
+lf project run <linear-project-id> --json
+lf project steer <linear-project-id> "prioritize the CLI path"
+lf project receipt <cc-id> --wait --timeout 30s --json
+lf project wait <linear-project-id> --until waiting
+```
+
+The Project Session owns one resumable KR-pursuit transcript, no worktree or
+PR, and sleeps while its supervised Task Sessions run. Typed Task observations
+wake it through the durable outbox; Project completion reaches the Wave through
+the same linked observation path.
+
 `run` returns after one durable Task Session and sibling worktree are registered
 and the provider is running. `status` reports the same Linear UUID, human issue
 identifier, session, worktree, process generation, provider thread, PR, and
@@ -75,10 +89,6 @@ starts and who owns it through review and merge.
 
 - Multi-task integration PRs, task dependency edges, or remote execution.
 - Rich Task transcript and direct steering UI.
-- Durable Project Sessions and Task→Project supervision. `lf project run`
-  remains a Wave directive in this PR.
-- A durable observation outbox/cursor. The interim Wave observer is correct by
-  journal idempotency but rescans Task event history every 10 seconds.
 - The side-effecting live Linear/provider/PR dogfood and the complete
   10-scenario × 3-adapter scripted-peer matrix. Typed Task observations,
   decisions, atomic turn settlement, waitable receipts, and provider capability

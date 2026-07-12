@@ -1,4 +1,4 @@
-# Review: Linear-backed Task Sessions
+# Review: Linear-backed Project and Task Sessions
 
 ## What was implemented
 
@@ -8,6 +8,14 @@ creates one immutable sibling worktree from `main`, and runs one provider
 harness under structured, persisted control. The CLI exposes create/run,
 status, follow-up, steer, interrupt, wait, resume, attach, and abandon; `lf status --json`
 and the Mac project the same Task Session state.
+
+Linear Projects now have the missing pursuit runtime. `lf project run` reserves
+one durable Project Session in the Wave home, resumes one provider transcript
+across generations, creates and supervises Linear-backed Task Sessions, sleeps
+without a process while Tasks run, and wakes from a transactional observation
+outbox. It owns no branch, worktree, or PR. Project and Task commands share one
+`child_commands` store, `cc_` receipts, control intent, and `cd_` decisions;
+their domain events remain distinct.
 
 The competing lifecycle was removed rather than bridged: generic `lf loop`,
 `lfq`, generic exec routes, stack/queue/combine delivery, Wave rotation, and
@@ -81,10 +89,9 @@ independent merge/cleanup path.
   implemented. The complete 10-scenario × 3-adapter scripted-peer matrix and
   live Linear/provider/PR dogfood remain parity evidence; keep the PR draft
   until one of those gates closes the black-box coverage gap.
-- The interim Wave observer scans each Task event ledger from its beginning on
-  every 10-second reconciliation pass. Journal idempotency keeps the result
-  correct, but the read cost grows with Task history; the planned durable
-  observation outbox/cursor belongs to the Project Session slice.
+- Task→Project and child→Wave delivery now use the durable observation outbox.
+  Project consumption and acknowledgement are one SQLite transaction; Wave
+  journal delivery is idempotent before acknowledgement.
 - Live Linear/provider create→run→steer→merge was not executed during this
   headless gate because it creates external records, worktrees, provider spend,
   and a PR. The deterministic store, migration, parser, PM, and lifecycle tests
@@ -99,18 +106,18 @@ independent merge/cleanup path.
 - Rich direct Task transcript/steering UI; the Mac projects Task Sessions into
   its existing run surface.
 - Automatic cleanup for failed/blocked sessions.
-- Durable Project Sessions, shared child-command storage, and Task→Project→Wave
-  observation delivery. `lf project run` still asks the Wave to pursue a
-  Project; it does not create a Project process in this PR.
 - The side-effecting live lifecycle dogfood and the complete scripted-peer
   conformance matrix named above.
 
 ## Validation
 
-- `uv run python scripts/test.py --all` — all six suites pass: 53 Python tests;
-  Rust format/clippy/nextest; 59 website tests (3 intentional skips); Swift
-  tests plus the multiplatform boundary check; CLI/API e2e smoke; signed macOS
-  `build-for-testing`.
+- `uv run python scripts/test.py --all` passed Python (53), Rust
+  format/clippy/nextest, Swift (298 plus the multiplatform boundary check),
+  CLI/API e2e smoke, and signed macOS `build-for-testing`. The website suite
+  exposed a pre-existing fixture deadlock: its undrained server log pipe could
+  block arbitrary page loads. The fixture now writes to a seekable temporary
+  log, preserves startup diagnostics, and the standalone website gate passes
+  59 tests with 3 intentional skips.
 - The focused migration 066 repair test passes after removing the trailing
   whitespace caught by `git diff --check`.
 - Focused regressions prove atomic resume capacity, forward repair of the
@@ -118,3 +125,32 @@ independent merge/cleanup path.
   parser separation, and cross-Wave command refusal.
 - `bash -n scripts/demo_wave.sh` and `git diff --check` pass.
 - The final branch is net-negative outside `scratch/`: 222 fewer lines.
+
+## Project Session operational review
+
+The implementation keeps ownership boring: Linear owns Project/KR truth;
+SQLite owns one Project Session, shared child-command receipts, event ledgers,
+and the observation outbox; the Wave server alone writes its journal. Project
+processes coordinate from a stable Wave checkout but own no branch, worktree,
+or PR. Task Sessions remain the only file-writing child.
+
+The failure-path review changed the code in three places rather than just
+producing notes:
+
+- `project run` now reconciles a stale active process before deciding that an
+  existing session is already running;
+- Project decisions interrupt-and-resume non-steerable Claude/OpenCode turns,
+  avoiding a blocked decision tool waiting on a turn that could never finish;
+- provider interrupt/send failures settle the claimed Project command as a
+  durable `failed` receipt and emit the matching typed event before the
+  session fails;
+- every shared-command query now includes its `target_kind`, so a `cc_…`
+  receipt cannot be reinterpreted through the wrong Task or Project API.
+
+The public interface still fits on one screen because Project controls mirror
+the proven Task vocabulary; the generic machinery stays private. Status JSON
+names process liveness, state reason, iteration, cursor, and pending
+observations, so a stopped process or stuck delivery is visible without
+reading tmux output. The main residual risk is evidence, not another state
+owner: the complete ten-scenario scripted-peer matrix and live two-Task
+Linear/PR dogfood remain explicit gates.

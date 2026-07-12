@@ -220,42 +220,6 @@ async fn post_message(endpoint: &str, text: &str, steer: bool) -> Result<()> {
     Ok(())
 }
 
-/// Queue a structured lifecycle/control note in a named Wave's durable
-/// conversation. A live Wave receives it through its door; a stopped Wave's
-/// journal receives it directly for replay on the next serve.
-pub(crate) async fn post_to_named_wave(wave: &str, text: &str) -> Result<bool> {
-    let context = CliContext::detect().await;
-    let target = WaveTargetArgs {
-        wave: Some(wave.to_string()),
-        parent: false,
-    };
-    let resolved = resolve_target(
-        &target,
-        context.store.as_ref(),
-        context.repo.as_deref(),
-        context.env_wave_id.as_deref(),
-        context.env_channel.as_deref(),
-    )
-    .await?
-    .ok_or_else(|| anyhow!("wave {wave:?} cannot be resolved"))?;
-    if let Some(endpoint) = resolved.endpoint {
-        post_message(&endpoint, text, false).await?;
-        return Ok(true);
-    }
-    let repo_root = resolved
-        .repo_root
-        .ok_or_else(|| anyhow!("wave {wave:?} has no registered repository"))?;
-    let path = crate::wave::journal::journal_path(&repo_root, &resolved.name);
-    let (mut journal, _) = Journal::open(&path)?;
-    journal.append(|seq| EventKind::UserMessage {
-        id: MessageId(format!("msg-{seq}")),
-        op: MessageOp::Message,
-        text: text.to_string(),
-        from: None,
-    });
-    Ok(false)
-}
-
 /// Nudge a live Wave server to fold one authoritative Task ledger event. A
 /// stopped Wave needs no direct journal writer: its store observer catches up
 /// from the durable Task ledger on the next serve.

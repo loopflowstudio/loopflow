@@ -60,6 +60,7 @@ public struct RegistryQuery: Sendable {
         let snapshot = try Self.decode(WaveStatusSnapshot.self, from: stdout)
         let repo = snapshot.wave.repo
         let runs = snapshot.runs.map { $0.toRun(waveId: waveId, repo: repo) }
+            + snapshot.projects.map { $0.toRun(waveId: waveId, repo: repo) }
             + snapshot.tasks.map { $0.toRun(waveId: waveId, repo: repo) }
         let attention = snapshot.attention.map { $0.toItem(waveId: waveId) }
         return (runs, attention, snapshot.loopState)
@@ -207,6 +208,7 @@ struct WaveSnapshot: Decodable {
     let workers: Int
     let activeRuns: Int
     let activeTasks: Int
+    let activeProjects: Int
     let live: Bool
     let endpoint: String?
     let createdAt: String?
@@ -216,6 +218,7 @@ struct WaveSnapshot: Decodable {
         case id, name, status, paused, goal, repo, iteration, workers, live, endpoint
         case activeRuns = "active_runs"
         case activeTasks = "active_tasks"
+        case activeProjects = "active_projects"
         case createdAt = "created_at"
         case parentWaveId = "parent_wave_id"
     }
@@ -243,11 +246,12 @@ struct WaveStatusSnapshot: Decodable {
     let wave: WaveSnapshot
     let loopState: String?
     let runs: [RunSnapshot]
+    let projects: [ProjectSnapshot]
     let tasks: [TaskSnapshot]
     let attention: [AttentionSnapshot]
 
     enum CodingKeys: String, CodingKey {
-        case wave, runs, tasks, attention
+        case wave, runs, projects, tasks, attention
         case loopState = "loop_state"
     }
 }
@@ -257,6 +261,7 @@ struct TaskSnapshot: Decodable {
     let issueId: String
     let sessionId: String
     let project: String
+    let supervisor: SessionSupervisorSnapshot
     let status: String
     let reason: String
     let statusAt: String
@@ -267,7 +272,7 @@ struct TaskSnapshot: Decodable {
     let prURL: String?
 
     enum CodingKeys: String, CodingKey {
-        case project, status, reason, worktree, branch, provider
+        case project, supervisor, status, reason, worktree, branch, provider
         case issueId = "issue_id"
         case sessionId = "session_id"
         case statusAt = "status_at"
@@ -301,6 +306,69 @@ struct TaskSnapshot: Decodable {
             pr: pr,
             startedAt: RegistrySnapshotDate.parse(statusAt),
             endedAt: ["merged", "abandoned"].contains(status)
+                ? RegistrySnapshotDate.parse(statusAt) : nil,
+            createdAt: RegistrySnapshotDate.parse(statusAt)
+        )
+    }
+}
+
+struct SessionSupervisorSnapshot: Decodable {
+    let kind: String
+    let waveId: String?
+    let sessionId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case waveId = "wave_id"
+        case sessionId = "session_id"
+    }
+}
+
+/// One durable Project Session under `lf status`.
+struct ProjectSnapshot: Decodable {
+    let projectId: String
+    let sessionId: String
+    let project: String
+    let status: String
+    let reason: String
+    let statusAt: String
+    let iteration: Int
+    let pendingObservations: Int
+    let provider: String
+    let processAlive: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case project, status, reason, iteration, provider
+        case projectId = "project_id"
+        case sessionId = "session_id"
+        case statusAt = "status_at"
+        case processAlive = "process_alive"
+        case pendingObservations = "pending_observations"
+    }
+
+    func toRun(waveId: String, repo: String) -> Run {
+        let runStatus: RunStatus = switch status {
+        case "created", "starting": .pending
+        case "running": .running
+        case "waiting", "blocked": .waiting
+        case "completed", "abandoned": .completed
+        case "failed": .failed
+        default: .unspecified
+        }
+        return Run(
+            id: sessionId,
+            waveId: waveId,
+            flow: "project",
+            task: project,
+            repo: repo,
+            status: runStatus,
+            stepIndex: iteration,
+            worktree: repo,
+            branch: "main",
+            error: status == "failed" ? reason : nil,
+            pr: nil,
+            startedAt: RegistrySnapshotDate.parse(statusAt),
+            endedAt: ["completed", "abandoned"].contains(status)
                 ? RegistrySnapshotDate.parse(statusAt) : nil,
             createdAt: RegistrySnapshotDate.parse(statusAt)
         )

@@ -309,6 +309,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "066_task_command_receipts",
         sql: include_str!("migrations/066_task_command_receipts.sql"),
     },
+    Migration {
+        version: "067_project_sessions",
+        sql: include_str!("migrations/067_project_sessions.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the
@@ -468,7 +472,15 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        for expected in ["waves", "repos", "runs", "terminal_sessions"] {
+        for expected in [
+            "waves",
+            "repos",
+            "runs",
+            "terminal_sessions",
+            "project_sessions",
+            "child_commands",
+            "observation_outbox",
+        ] {
             assert!(
                 tables.iter().any(|t| t == expected),
                 "expected table {expected} not found; tables: {tables:?}"
@@ -487,6 +499,8 @@ mod tests {
             "wave_crons",
             // Collapsed back onto `waves` in migration 052 (wave = 1 repo).
             "wave_repos",
+            "task_commands",
+            "project_commands",
         ] {
             assert!(
                 tables.iter().all(|t| t != unexpected),
@@ -565,6 +579,61 @@ mod tests {
                 "error": null,
             })
         );
+    }
+
+    #[test]
+    fn project_session_migration_moves_task_receipts_to_shared_ids() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        for migration in ALL_MIGRATIONS {
+            if migration.version == "067_project_sessions" {
+                break;
+            }
+            if let Err(error) = conn.execute_batch(migration.sql) {
+                if !is_tolerated_migration_error(migration.version, &error.to_string()) {
+                    panic!("migration {} failed: {error}", migration.version);
+                }
+            }
+        }
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();
+        conn.execute(
+            "INSERT INTO task_commands (
+                id, session_id, source_json, kind_json, created_at,
+                claimed_by_generation, accepted_at, state, effect, error
+             ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, 'persisted', NULL, NULL)",
+            rusqlite::params![
+                "tc_00000000000000000000000000000001",
+                "ts_00000000000000000000000000000001",
+                r#"{"kind":"human"}"#,
+                r#"{"kind":"decide","decision_id":"td_00000000000000000000000000000002","choice":"approve","message":null}"#,
+                1_i64,
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO task_events (session_id, kind_json, created_at)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![
+                "ts_00000000000000000000000000000001",
+                r#"{"kind":"command_changed","command_id":"tc_00000000000000000000000000000001","state":"persisted","effect":null,"error":null}"#,
+                1_i64,
+            ],
+        )
+        .unwrap();
+
+        conn.execute_batch(include_str!("migrations/067_project_sessions.sql"))
+            .unwrap();
+
+        let (id, kind): (String, String) = conn
+            .query_row("SELECT id, kind_json FROM child_commands", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(id, "cc_00000000000000000000000000000001");
+        assert!(kind.contains("cd_00000000000000000000000000000002"));
+        let event: String = conn
+            .query_row("SELECT kind_json FROM task_events", [], |row| row.get(0))
+            .unwrap();
+        assert!(event.contains("cc_00000000000000000000000000000001"));
     }
 
     #[test]

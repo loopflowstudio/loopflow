@@ -360,14 +360,14 @@ impl Supervisor {
                 }
                 message.op == MessageOp::Interrupt
             }
-            InboxItem::Task(_) => {
+            InboxItem::Task(_) | InboxItem::Project(_) => {
                 if self.spawner.is_some()
                     && self.child.is_none()
                     && matches!(self.runtime.loop_state(), LoopState::Failed { .. })
                 {
                     tracing::info!(
                         wave = self.runtime.name(),
-                        "Task observation for a dead resident; respawning now"
+                        "child observation for a dead resident; respawning now"
                     );
                     self.spawn().await;
                 }

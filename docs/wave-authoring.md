@@ -236,8 +236,9 @@ Run the wave agent and it works one move at a time:
    session when review changes course.
 5. **Remember** — the agent folds what shipped into `MEMORY.md` and updates Linear tasks.
 
-The Wave coordinates. Concrete changes ship through Task Sessions; Projects
-never own worktrees or provider processes.
+The Wave coordinates. A durable Project Session pursues a Project's KRs and
+sleeps while its Task Sessions run. Concrete changes ship through Task
+Sessions; Projects never own worktrees, branches, or PRs.
 
 ### Fold, Don't Drop
 

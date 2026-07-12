@@ -698,12 +698,17 @@ async fn events_handler(
         sub.pending
             .iter()
             .map(|message| {
-                let frame = sub.tasks.get(&message.id).map_or_else(
-                    || pending_inbox_frame(message),
-                    |observation| InboxFrame::Task {
+                let frame = if let Some(observation) = sub.tasks.get(&message.id) {
+                    InboxFrame::Task {
                         observation: observation.clone(),
-                    },
-                );
+                    }
+                } else if let Some(observation) = sub.projects.get(&message.id) {
+                    InboxFrame::Project {
+                        observation: observation.clone(),
+                    }
+                } else {
+                    pending_inbox_frame(message)
+                };
                 Ok(inbox_event(&frame))
             })
             .collect()
@@ -822,6 +827,9 @@ fn inbox_item_frame(item: &InboxItem) -> InboxFrame {
     match item {
         InboxItem::Message(message) => pending_inbox_frame(message),
         InboxItem::Task(observation) => InboxFrame::Task {
+            observation: observation.clone(),
+        },
+        InboxItem::Project(observation) => InboxFrame::Project {
             observation: observation.clone(),
         },
         InboxItem::Interrupt => InboxFrame::Interrupt,

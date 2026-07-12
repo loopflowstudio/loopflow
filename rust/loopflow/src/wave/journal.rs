@@ -34,6 +34,7 @@ use time::OffsetDateTime;
 
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::project_session::ProjectObservation;
 use crate::task::TaskObservation;
 use crate::wave::playhead::{BodyProvenance, Playhead, PlayheadEvent};
 use crate::wave::state::LoopState;
@@ -240,6 +241,9 @@ pub enum EventKind {
     },
     TaskObserved {
         observation: TaskObservation,
+    },
+    ProjectObserved {
+        observation: ProjectObservation,
     },
     // -- legacy channels --
     /// A work-line channel opened under this wave. No current code produces
@@ -515,6 +519,12 @@ impl Narrator {
                 observation.event_id,
                 ellipsize(&observation.prompt(), 70)
             )),
+            EventKind::ProjectObserved { observation } => info(format!(
+                "observed project {} event {} · {}",
+                observation.project,
+                observation.event_id,
+                ellipsize(&observation.prompt(), 70)
+            )),
             EventKind::ChannelOpened { name, run_id } => {
                 info(format!("channel {name} opened · run {}", short_id(run_id)))
             }
@@ -752,6 +762,8 @@ pub struct ThreadFold {
     pub messages: HashMap<MessageId, PendingMessage>,
     /// Typed Task observations indexed by their synthetic consumption id.
     pub tasks: HashMap<MessageId, TaskObservation>,
+    /// Typed Project observations indexed by their synthetic consumption id.
+    pub projects: HashMap<MessageId, ProjectObservation>,
     /// Message ids claimed (`answers`) by turns still open at the end of the
     /// log — the crash tail's consumption. The boot janitor requeues these
     /// when it finalizes the crashed turns as `Failed`.
@@ -834,6 +846,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
     let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
     let mut tasks: HashMap<MessageId, TaskObservation> = HashMap::new();
+    let mut projects: HashMap<MessageId, ProjectObservation> = HashMap::new();
     let mut consumed_messages: HashSet<MessageId> = HashSet::new();
     // Claims (`answers`) per still-open turn — the crash tail's consumption,
     // exported so the boot janitor can requeue it.
@@ -864,6 +877,14 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     pending_messages.push(message.clone());
                 }
                 tasks.insert(message.id.clone(), observation.clone());
+                messages.insert(message.id.clone(), message);
+            }
+            EventKind::ProjectObserved { observation } => {
+                let message = project_observation_message(observation);
+                if !consumed_messages.contains(&message.id) {
+                    pending_messages.push(message.clone());
+                }
+                projects.insert(message.id.clone(), observation.clone());
                 messages.insert(message.id.clone(), message);
             }
             EventKind::TurnStarted {
@@ -987,6 +1008,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         pending_messages,
         messages,
         tasks,
+        projects,
         open_claims,
         memory_adds,
     }
@@ -998,6 +1020,15 @@ pub fn task_observation_message(observation: &TaskObservation) -> PendingMessage
         op: MessageOp::Message,
         text: observation.prompt(),
         from: Some("task".to_string()),
+    }
+}
+
+pub fn project_observation_message(observation: &ProjectObservation) -> PendingMessage {
+    PendingMessage {
+        id: MessageId(observation.inbox_id()),
+        op: MessageOp::Message,
+        text: observation.prompt(),
+        from: Some("project".to_string()),
     }
 }
 

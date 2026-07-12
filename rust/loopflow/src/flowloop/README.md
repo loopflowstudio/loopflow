@@ -14,5 +14,5 @@ lf task wait INF-123
 ```
 
 Each Task Session owns one immutable sibling worktree, provider transcript,
-and pull request to `main`. Projects stay directives to the Wave; they do not
-own processes or worktrees.
+and pull request to `main`. A Project Session owns the bounded KR-pursuit
+process that creates and supervises Tasks, but no worktree, branch, or PR.

@@ -7,6 +7,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::lfd::id::LfdId;
+use crate::project_session::SessionSupervisor;
 
 pub mod runner;
 
@@ -70,8 +71,10 @@ pub enum TaskDataError {
 }
 
 string_id!(TaskSessionId, "ts_");
-string_id!(TaskCommandId, "tc_");
-string_id!(TaskDecisionId, "td_");
+string_id!(ChildCommandId, "cc_");
+pub type TaskCommandId = ChildCommandId;
+string_id!(ChildDecisionId, "cd_");
+pub type TaskDecisionId = ChildDecisionId;
 
 /// Opaque Linear identifier: non-empty, provider-assigned (no prefix grammar of
 /// our own, so distinct from `string_id!`).
@@ -222,6 +225,7 @@ pub struct TaskSession {
     pub pm_writeback: PmWritebackState,
     pub wave_id: LfdId,
     pub wave: String,
+    pub supervisor: SessionSupervisor,
     pub status: TaskSessionStatus,
     pub status_reason: String,
     pub status_at: OffsetDateTime,
@@ -266,7 +270,7 @@ impl TaskSession {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TaskCommandKind {
+pub enum ChildCommandKind {
     FollowUp {
         text: String,
     },
@@ -288,6 +292,7 @@ pub enum TaskCommandKind {
         reason: String,
     },
 }
+pub type TaskCommandKind = ChildCommandKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -338,13 +343,15 @@ impl TaskCommandEffect {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "wave_id", rename_all = "snake_case")]
-pub enum TaskCommandSource {
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum ChildCommandSource {
     Wave(LfdId),
+    Project(crate::project_session::ProjectSessionId),
     Human,
     Attachment,
     System,
 }
+pub type TaskCommandSource = ChildCommandSource;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskCommand {

@@ -448,7 +448,7 @@ impl StoreObserver {
     /// journal new starts and fresh finishes. Store errors are logged
     /// and skipped — the next poll retries.
     pub async fn poll_once(&self) {
-        self.poll_task_events().await;
+        self.poll_child_observations().await;
         let poll_started = OffsetDateTime::now_utc();
         let cutoff = *self
             .terminal_cutoff
@@ -622,6 +622,15 @@ impl StoreObserver {
                 "Task Session {session_id} belongs to a different Wave"
             )));
         }
+        if !matches!(
+            session.supervisor,
+            crate::project_session::SessionSupervisor::Wave { ref wave_id }
+                if wave_id == &self.wave_id
+        ) {
+            return Err(crate::lfdb::StoreError::InvalidData(format!(
+                "Task Session {session_id} reports to a Project Session, not directly to this Wave"
+            )));
+        }
         let event = self
             .store
             .get_task_event(session_id, event_id)
@@ -638,32 +647,69 @@ impl StoreObserver {
         }))
     }
 
-    async fn poll_task_events(&self) {
-        let sessions = match self.store.list_task_sessions(Some(&self.wave_id)).await {
-            Ok(sessions) => sessions,
+    async fn poll_child_observations(&self) {
+        let supervisor = crate::project_session::SessionSupervisor::Wave {
+            wave_id: self.wave_id.clone(),
+        };
+        let observations = match self.store.pending_observations(&supervisor).await {
+            Ok(observations) => observations,
             Err(error) => {
-                tracing::debug!(%error, "wave observer Task Session read failed");
+                tracing::debug!(%error, "wave observer child outbox read failed");
                 return;
             }
         };
-        for session in sessions {
-            let events = match self.store.task_events_after(&session.id, 0).await {
-                Ok(events) => events,
-                Err(error) => {
-                    tracing::debug!(%error, session_id = %session.id, "wave observer Task event read failed");
-                    continue;
+        for observation in observations {
+            let should_ack = match (observation.source, observation.payload) {
+                (
+                    crate::project_session::ChildSessionRef::Task { session_id },
+                    crate::project_session::ChildEventPayload::Task { event },
+                ) => match self.store.get_task_session(&session_id).await {
+                    Ok(Some(session)) => {
+                        self.runtime.deliver_task_observation(TaskObservation {
+                            session_id,
+                            issue_identifier: session.issue.identifier,
+                            event_id: observation.event_id,
+                            event,
+                        });
+                        true
+                    }
+                    Ok(None) => false,
+                    Err(error) => {
+                        tracing::debug!(%error, %session_id, "wave observer Task read failed");
+                        continue;
+                    }
+                },
+                (
+                    crate::project_session::ChildSessionRef::Project { session_id },
+                    crate::project_session::ChildEventPayload::Project { event },
+                ) => match self.store.get_project_session(&session_id).await {
+                    Ok(Some(session)) => {
+                        self.runtime.deliver_project_observation(
+                            crate::project_session::ProjectObservation {
+                                session_id,
+                                project: session.project.slug,
+                                event_id: observation.event_id,
+                                event,
+                            },
+                        );
+                        true
+                    }
+                    Ok(None) => false,
+                    Err(error) => {
+                        tracing::debug!(%error, %session_id, "wave observer Project read failed");
+                        continue;
+                    }
+                },
+                _ => {
+                    tracing::warn!(
+                        outbox_id = observation.id,
+                        "child observation shape mismatched its source"
+                    );
+                    false
                 }
             };
-            for event in events {
-                if !event.kind.is_wave_observable() {
-                    continue;
-                }
-                self.runtime.deliver_task_observation(TaskObservation {
-                    session_id: session.id.clone(),
-                    issue_identifier: session.issue.identifier.clone(),
-                    event_id: event.id,
-                    event: event.kind,
-                });
+            if should_ack {
+                let _ = self.store.mark_observation_delivered(observation.id).await;
             }
         }
     }

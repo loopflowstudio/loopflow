@@ -766,6 +766,9 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             wave: wave.name().to_string(),
+            supervisor: crate::project_session::SessionSupervisor::Wave {
+                wave_id: wave.id().clone(),
+            },
             status: TaskSessionStatus::Submitted,
             status_reason: format!("pull request #{pr_number} is open for review"),
             status_at: now,

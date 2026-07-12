@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
+use time::OffsetDateTime;
 
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
@@ -22,6 +23,12 @@ use crate::lfdb::{
 use crate::trace::{
     AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
     ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
+};
+use crate::project_session::SessionSupervisor;
+use crate::project_session::{
+    ChildEventPayload, ChildSessionRef, ObservationOutboxRow, ProjectCommand, ProjectCommandId,
+    ProjectCommandKind, ProjectCommandSource, ProjectEvent, ProjectEventKind, ProjectProcess,
+    ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
 use crate::task::{
     BoundaryResult, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
@@ -1479,11 +1486,11 @@ impl SqliteStore {
                 agent, provider, provider_session_id, process_generation, process_pid,
                 process_tmux_name, process_started_at, pr_number, pr_url,
                 created_at, updated_at, pm_snapshot_synced_at,
-                pm_snapshot_warning, pm_writeback_json
+                pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                 ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31
+                ?29, ?30, ?31, ?32, ?33
              )",
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
@@ -1515,11 +1522,11 @@ impl SqliteStore {
                 agent, provider, provider_session_id, process_generation, process_pid,
                 process_tmux_name, process_started_at, pr_number, pr_url,
                 created_at, updated_at, pm_snapshot_synced_at,
-                pm_snapshot_warning, pm_writeback_json
+                pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                 ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31
+                ?29, ?30, ?31, ?32, ?33
              )",
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
@@ -1682,7 +1689,9 @@ impl SqliteStore {
             let mut statement = transaction.prepare(
                 "SELECT id, session_id, source_json, kind_json, created_at,
                         claimed_by_generation, accepted_at, state, effect, error
-                 FROM task_commands WHERE session_id = ?1 ORDER BY created_at, id",
+                 FROM child_commands
+                 WHERE target_kind = 'task' AND session_id = ?1
+                 ORDER BY created_at, id",
             )?;
             let rows =
                 statement.query_map(params![command.session_id.as_str()], map_task_command_row)?;
@@ -1718,8 +1727,9 @@ impl SqliteStore {
         let transaction = conn.transaction()?;
         let superseded = {
             let mut statement = transaction.prepare(
-                "SELECT id FROM task_commands
-                 WHERE session_id = ?1 AND state IN ('persisted', 'claimed')
+                "SELECT id FROM child_commands
+                 WHERE target_kind = 'task' AND session_id = ?1
+                   AND state IN ('persisted', 'claimed')
                  ORDER BY created_at, id",
             )?;
             let rows = statement.query_map(params![command.session_id.as_str()], |row| {
@@ -1732,9 +1742,10 @@ impl SqliteStore {
             ids
         };
         transaction.execute(
-            "UPDATE task_commands
+            "UPDATE child_commands
              SET state = 'superseded', effect = NULL, error = NULL
-             WHERE session_id = ?1 AND state IN ('persisted', 'claimed')",
+             WHERE target_kind = 'task' AND session_id = ?1
+               AND state IN ('persisted', 'claimed')",
             params![command.session_id.as_str()],
         )?;
         insert_task_command(&transaction, command)?;
@@ -1758,7 +1769,9 @@ impl SqliteStore {
         let mut statement = conn.prepare(
             "SELECT id, session_id, source_json, kind_json, created_at,
                     claimed_by_generation, accepted_at, state, effect, error
-             FROM task_commands WHERE session_id = ?1 ORDER BY created_at, id",
+             FROM child_commands
+             WHERE target_kind = 'task' AND session_id = ?1
+             ORDER BY created_at, id",
         )?;
         let rows = statement.query_map(params![session_id.as_str()], map_task_command_row)?;
         let mut commands = Vec::new();
@@ -1776,17 +1789,19 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
         transaction.execute(
-            "UPDATE task_commands
+            "UPDATE child_commands
              SET claimed_by_generation = ?1, state = 'claimed'
-             WHERE session_id = ?2 AND state IN ('persisted', 'claimed')
+             WHERE target_kind = 'task' AND session_id = ?2
+               AND state IN ('persisted', 'claimed')
                AND (claimed_by_generation IS NULL OR claimed_by_generation <> ?1)",
             params![i64::from(generation), session_id.as_str()],
         )?;
         let mut statement = transaction.prepare(
             "SELECT id, session_id, source_json, kind_json, created_at,
                     claimed_by_generation, accepted_at, state, effect, error
-             FROM task_commands
-             WHERE session_id = ?1 AND claimed_by_generation = ?2
+             FROM child_commands
+             WHERE target_kind = 'task' AND session_id = ?1
+               AND claimed_by_generation = ?2
                AND state = 'claimed'
              ORDER BY created_at, id",
         )?;
@@ -1828,9 +1843,10 @@ impl SqliteStore {
             )));
         }
         transaction.execute(
-            "UPDATE task_commands
+            "UPDATE child_commands
              SET claimed_by_generation = ?1, state = 'claimed'
-             WHERE session_id = ?2 AND state IN ('persisted', 'claimed')
+             WHERE target_kind = 'task' AND session_id = ?2
+               AND state IN ('persisted', 'claimed')
                AND (claimed_by_generation IS NULL OR claimed_by_generation <> ?1)",
             params![i64::from(generation), session_id.as_str()],
         )?;
@@ -1838,8 +1854,9 @@ impl SqliteStore {
             let mut statement = transaction.prepare(
                 "SELECT id, session_id, source_json, kind_json, created_at,
                         claimed_by_generation, accepted_at, state, effect, error
-                 FROM task_commands
-                 WHERE session_id = ?1 AND claimed_by_generation = ?2
+                 FROM child_commands
+                 WHERE target_kind = 'task' AND session_id = ?1
+                   AND claimed_by_generation = ?2
                    AND state = 'claimed'
                  ORDER BY created_at, id",
             )?;
@@ -1878,9 +1895,10 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
-            "UPDATE task_commands
+            "UPDATE child_commands
              SET state = 'accepted', effect = ?1, accepted_at = ?2, error = NULL
-             WHERE id = ?3 AND state IN ('persisted', 'claimed')",
+             WHERE target_kind = 'task' AND id = ?3
+               AND state IN ('persisted', 'claimed')",
             params![
                 effect.map(TaskCommandEffect::as_str),
                 time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64,
@@ -1889,7 +1907,10 @@ impl SqliteStore {
         )?;
         if changed == 0 {
             let exists: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM task_commands WHERE id = ?1)",
+                "SELECT EXISTS(
+                    SELECT 1 FROM child_commands
+                    WHERE target_kind = 'task' AND id = ?1
+                 )",
                 params![command_id.as_str()],
                 |row| row.get(0),
             )?;
@@ -1911,8 +1932,8 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
-            "UPDATE task_commands SET effect = ?1
-             WHERE id = ?2 AND state = 'claimed'",
+            "UPDATE child_commands SET effect = ?1
+             WHERE target_kind = 'task' AND id = ?2 AND state = 'claimed'",
             params![effect.as_str(), command_id.as_str()],
         )?;
         if changed == 0 {
@@ -1931,9 +1952,10 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
-            "UPDATE task_commands
+            "UPDATE child_commands
              SET state = 'failed', effect = COALESCE(?1, effect), error = ?2
-             WHERE id = ?3 AND state IN ('persisted', 'claimed')",
+             WHERE target_kind = 'task' AND id = ?3
+               AND state IN ('persisted', 'claimed')",
             params![
                 effect.map(TaskCommandEffect::as_str),
                 error,
@@ -1953,9 +1975,10 @@ impl SqliteStore {
         session_id: &TaskSessionId,
         kind: &TaskEventKind,
     ) -> StoreResult<TaskEvent> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
         let created_at = now_unix();
-        conn.execute(
+        transaction.execute(
             "INSERT INTO task_events (session_id, kind_json, created_at) VALUES (?1, ?2, ?3)",
             params![
                 session_id.as_str(),
@@ -1963,8 +1986,29 @@ impl SqliteStore {
                 created_at
             ],
         )?;
+        let event_id = transaction.last_insert_rowid();
+        if kind.is_wave_observable() {
+            let session = transaction.query_row(
+                TASK_SESSION_SELECT,
+                params![session_id.as_str()],
+                map_task_session_row,
+            )?;
+            insert_observation(
+                &transaction,
+                &session.supervisor,
+                &ChildSessionRef::Task {
+                    session_id: session_id.clone(),
+                },
+                event_id,
+                &ChildEventPayload::Task {
+                    event: kind.clone(),
+                },
+                created_at,
+            )?;
+        }
+        transaction.commit()?;
         Ok(TaskEvent {
-            id: conn.last_insert_rowid(),
+            id: event_id,
             session_id: session_id.clone(),
             kind: kind.clone(),
             created_at: crate::lfdb::rows::unix_to_datetime(created_at),
@@ -2003,6 +2047,532 @@ impl SqliteStore {
         )
         .optional()
         .map_err(StoreError::from)
+    }
+
+    // Project Sessions are durable KR-pursuit children. They share the same
+    // process/receipt shape as Task Sessions but deliberately own no worktree.
+
+    pub fn insert_project_session(&self, session: &ProjectSession) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO project_sessions (
+                id, project_id, project_slug, project_name, project_context,
+                wave_id, wave_name, repo, pm_snapshot_synced_at, status,
+                status_reason, status_at, iteration, task_event_cursor,
+                state_fingerprint, agent, provider, provider_session_id,
+                process_generation, process_pid, process_tmux_name,
+                process_started_at, created_at, updated_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
+             )",
+            rusqlite::params_from_iter(
+                project_session_params(session)
+                    .iter()
+                    .map(|value| value.as_ref()),
+            ),
+        )?;
+        Ok(())
+    }
+
+    pub fn update_project_session(&self, session: &ProjectSession) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            PROJECT_SESSION_UPDATE,
+            rusqlite::params_from_iter(
+                project_session_params(session)
+                    .iter()
+                    .map(|value| value.as_ref()),
+            ),
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn reserve_project_process(
+        &self,
+        session: &ProjectSession,
+        expected_status: ProjectSessionStatus,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let changed = transaction.execute(
+            "UPDATE project_sessions SET
+                status=?2, status_reason=?3, status_at=?4,
+                process_generation=?5, process_pid=?6, process_tmux_name=?7,
+                process_started_at=?8, updated_at=?9
+             WHERE id=?1 AND status=?10",
+            params![
+                session.id.as_str(),
+                session.status.as_str(),
+                session.status_reason,
+                session.status_at.unix_timestamp(),
+                session
+                    .process
+                    .as_ref()
+                    .map(|process| i64::from(process.generation)),
+                session
+                    .process
+                    .as_ref()
+                    .and_then(|process| process.pid.map(i64::from)),
+                session.process.as_ref().map(|process| &process.tmux_name),
+                session
+                    .process
+                    .as_ref()
+                    .map(|process| process.started_at.unix_timestamp()),
+                session.updated_at.unix_timestamp(),
+                expected_status.as_str(),
+            ],
+        )?;
+        if changed == 0 {
+            return Ok(false);
+        }
+        transaction.commit()?;
+        Ok(true)
+    }
+
+    pub fn project_session(
+        &self,
+        session_id: &ProjectSessionId,
+    ) -> StoreResult<Option<ProjectSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            PROJECT_SESSION_SELECT,
+            params![session_id.as_str()],
+            map_project_session_row,
+        )
+        .optional()
+        .map_err(StoreError::from)
+    }
+
+    pub fn project_session_by_project(&self, project: &str) -> StoreResult<Option<ProjectSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let query = format!(
+            "{PROJECT_SESSION_COLUMNS} WHERE project_id=?1 OR project_slug=?1 ORDER BY created_at"
+        );
+        let mut statement = conn.prepare(&query)?;
+        let rows = statement.query_map(params![project], map_project_session_row)?;
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(row?);
+        }
+        match sessions.len() {
+            0 => Ok(None),
+            1 => Ok(sessions.pop()),
+            count => Err(StoreError::InvalidData(format!(
+                "project {project:?} resolves to {count} Project Sessions"
+            ))),
+        }
+    }
+
+    pub fn list_project_sessions(
+        &self,
+        wave_id: Option<&LfdId>,
+    ) -> StoreResult<Vec<ProjectSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let query = match wave_id {
+            Some(_) => {
+                format!("{PROJECT_SESSION_COLUMNS} WHERE wave_id=?1 ORDER BY updated_at DESC")
+            }
+            None => format!("{PROJECT_SESSION_COLUMNS} ORDER BY updated_at DESC"),
+        };
+        let mut statement = conn.prepare(&query)?;
+        let mut sessions = Vec::new();
+        if let Some(wave_id) = wave_id {
+            let rows = statement.query_map(params![wave_id], map_project_session_row)?;
+            for row in rows {
+                sessions.push(row?);
+            }
+        } else {
+            let rows = statement.query_map([], map_project_session_row)?;
+            for row in rows {
+                sessions.push(row?);
+            }
+        }
+        Ok(sessions)
+    }
+
+    pub fn insert_project_command(&self, command: &ProjectCommand) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        insert_project_command(&conn, command)
+    }
+
+    pub fn ensure_project_decision_command(
+        &self,
+        command: &ProjectCommand,
+    ) -> StoreResult<(ProjectCommand, bool)> {
+        let ProjectCommandKind::Decide { decision_id, .. } = &command.kind else {
+            return Err(StoreError::InvalidData(
+                "decision command required".to_string(),
+            ));
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let existing = {
+            let mut statement = transaction.prepare(
+                "SELECT id, session_id, source_json, kind_json, created_at,
+                        claimed_by_generation, accepted_at, state, effect, error
+                 FROM child_commands
+                 WHERE target_kind='project' AND session_id=?1
+                 ORDER BY created_at, id",
+            )?;
+            let rows = statement.query_map(
+                params![command.session_id.as_str()],
+                map_project_command_row,
+            )?;
+            let mut existing = None;
+            for row in rows {
+                let candidate = row?;
+                if matches!(
+                    &candidate.kind,
+                    ProjectCommandKind::Decide {
+                        decision_id: candidate_id,
+                        ..
+                    } if candidate_id == decision_id
+                ) {
+                    existing = Some(candidate);
+                    break;
+                }
+            }
+            existing
+        };
+        if let Some(existing) = existing {
+            return Ok((existing, false));
+        }
+        insert_project_command(&transaction, command)?;
+        transaction.commit()?;
+        Ok((command.clone(), true))
+    }
+
+    pub fn supersede_and_insert_project_command(
+        &self,
+        command: &ProjectCommand,
+    ) -> StoreResult<Vec<ProjectCommandId>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let superseded = {
+            let mut statement = transaction.prepare(
+                "SELECT id FROM child_commands
+                 WHERE target_kind='project' AND session_id=?1
+                   AND state IN ('persisted', 'claimed')
+                 ORDER BY created_at, id",
+            )?;
+            let rows = statement.query_map(params![command.session_id.as_str()], |row| {
+                Ok(ProjectCommandId::from_raw(row.get::<_, String>(0)?))
+            })?;
+            let mut ids = Vec::new();
+            for row in rows {
+                ids.push(row?);
+            }
+            ids
+        };
+        transaction.execute(
+            "UPDATE child_commands SET state='superseded', effect=NULL, error=NULL
+             WHERE target_kind='project' AND session_id=?1
+               AND state IN ('persisted', 'claimed')",
+            params![command.session_id.as_str()],
+        )?;
+        insert_project_command(&transaction, command)?;
+        transaction.commit()?;
+        Ok(superseded)
+    }
+
+    pub fn project_command(
+        &self,
+        command_id: &ProjectCommandId,
+    ) -> StoreResult<Option<ProjectCommand>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            PROJECT_COMMAND_SELECT,
+            params![command_id.as_str()],
+            map_project_command_row,
+        )
+        .optional()
+        .map_err(StoreError::from)
+    }
+
+    pub fn claim_project_commands(
+        &self,
+        session_id: &ProjectSessionId,
+        generation: u32,
+    ) -> StoreResult<Vec<ProjectCommand>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        claim_child_commands_in(&transaction, session_id, generation)?;
+        let commands = read_claimed_child_commands(&transaction, session_id, generation)?;
+        transaction.commit()?;
+        Ok(commands)
+    }
+
+    pub fn claim_project_commands_or_stop(
+        &self,
+        session_id: &ProjectSessionId,
+        generation: u32,
+        stopped_status: ProjectSessionStatus,
+        reason: &str,
+    ) -> StoreResult<(Vec<ProjectCommand>, Option<ProjectSession>)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let mut session = transaction
+            .query_row(
+                PROJECT_SESSION_SELECT,
+                params![session_id.as_str()],
+                map_project_session_row,
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        if session.process.as_ref().map(|process| process.generation) != Some(generation)
+            || !session.status.is_process_active()
+        {
+            return Err(StoreError::InvalidData(format!(
+                "Project Session {session_id} generation {generation} is not active"
+            )));
+        }
+        claim_child_commands_in(&transaction, session_id, generation)?;
+        let commands = read_claimed_child_commands(&transaction, session_id, generation)?;
+        if !commands.is_empty() {
+            transaction.commit()?;
+            return Ok((commands, None));
+        }
+        session.set_status(stopped_status, reason);
+        transaction.execute(
+            PROJECT_SESSION_UPDATE,
+            rusqlite::params_from_iter(
+                project_session_params(&session)
+                    .iter()
+                    .map(|value| value.as_ref()),
+            ),
+        )?;
+        transaction.commit()?;
+        Ok((Vec::new(), Some(session)))
+    }
+
+    pub fn accept_project_command(
+        &self,
+        command_id: &ProjectCommandId,
+        effect: Option<TaskCommandEffect>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE child_commands SET state='accepted', effect=?1,
+                accepted_at=?2, error=NULL
+             WHERE target_kind='project' AND id=?3
+               AND state IN ('persisted', 'claimed')",
+            params![
+                effect.map(TaskCommandEffect::as_str),
+                OffsetDateTime::now_utc().unix_timestamp_nanos() as i64,
+                command_id.as_str(),
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::InvalidData(format!(
+                "project command {command_id} is already resolved"
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn fail_project_command(
+        &self,
+        command_id: &ProjectCommandId,
+        effect: Option<TaskCommandEffect>,
+        error: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE child_commands SET state='failed', effect=COALESCE(?1, effect), error=?2
+             WHERE target_kind='project' AND id=?3
+               AND state IN ('persisted', 'claimed')",
+            params![
+                effect.map(TaskCommandEffect::as_str),
+                error,
+                command_id.as_str()
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::InvalidData(format!(
+                "project command {command_id} is already resolved"
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn append_project_event(
+        &self,
+        session_id: &ProjectSessionId,
+        kind: &ProjectEventKind,
+    ) -> StoreResult<ProjectEvent> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let created_at = now_unix();
+        transaction.execute(
+            "INSERT INTO project_events (session_id, kind_json, created_at)
+             VALUES (?1, ?2, ?3)",
+            params![
+                session_id.as_str(),
+                serde_json::to_string(kind)?,
+                created_at
+            ],
+        )?;
+        let event_id = transaction.last_insert_rowid();
+        if kind.is_wave_observable() {
+            let session = transaction.query_row(
+                PROJECT_SESSION_SELECT,
+                params![session_id.as_str()],
+                map_project_session_row,
+            )?;
+            insert_observation(
+                &transaction,
+                &SessionSupervisor::Wave {
+                    wave_id: session.wave_id,
+                },
+                &ChildSessionRef::Project {
+                    session_id: session_id.clone(),
+                },
+                event_id,
+                &ChildEventPayload::Project {
+                    event: kind.clone(),
+                },
+                created_at,
+            )?;
+        }
+        transaction.commit()?;
+        Ok(ProjectEvent {
+            id: event_id,
+            session_id: session_id.clone(),
+            kind: kind.clone(),
+            created_at: crate::lfdb::rows::unix_to_datetime(created_at),
+        })
+    }
+
+    pub fn project_events_after(
+        &self,
+        session_id: &ProjectSessionId,
+        cursor: i64,
+    ) -> StoreResult<Vec<ProjectEvent>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT id, session_id, kind_json, created_at
+             FROM project_events WHERE session_id=?1 AND id>?2 ORDER BY id",
+        )?;
+        let rows =
+            statement.query_map(params![session_id.as_str(), cursor], map_project_event_row)?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        Ok(events)
+    }
+
+    pub fn pending_observations(
+        &self,
+        supervisor: &SessionSupervisor,
+    ) -> StoreResult<Vec<ObservationOutboxRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (kind, id) = supervisor_columns(supervisor);
+        let mut statement = conn.prepare(
+            "SELECT id, supervisor_kind, supervisor_id, source_kind, source_id,
+                    event_id, payload_json, delivered_at
+             FROM observation_outbox
+             WHERE supervisor_kind=?1 AND supervisor_id=?2 AND delivered_at IS NULL
+             ORDER BY id",
+        )?;
+        let rows = statement.query_map(params![kind, id], map_observation_row)?;
+        let mut observations = Vec::new();
+        for row in rows {
+            observations.push(row?);
+        }
+        Ok(observations)
+    }
+
+    pub fn mark_observation_delivered(&self, id: i64) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE observation_outbox SET delivered_at=?1
+             WHERE id=?2 AND delivered_at IS NULL",
+            params![now_unix(), id],
+        )?;
+        Ok(())
+    }
+
+    pub fn consume_task_observation_for_project(
+        &self,
+        project_session_id: &ProjectSessionId,
+        observation: &ObservationOutboxRow,
+    ) -> StoreResult<bool> {
+        let (
+            SessionSupervisor::Project {
+                session_id: supervisor_id,
+            },
+            ChildSessionRef::Task {
+                session_id: task_id,
+            },
+            ChildEventPayload::Task { event },
+        ) = (
+            &observation.supervisor,
+            &observation.source,
+            &observation.payload,
+        )
+        else {
+            return Err(StoreError::InvalidData(
+                "Project Session can consume only supervised Task observations".to_string(),
+            ));
+        };
+        if supervisor_id != project_session_id {
+            return Err(StoreError::InvalidData(format!(
+                "observation {} belongs to Project Session {supervisor_id}",
+                observation.id
+            )));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let exists: bool = transaction.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM project_events
+                WHERE session_id=?1
+                  AND json_extract(kind_json, '$.kind')='task_observed'
+                  AND json_extract(kind_json, '$.task_session_id')=?2
+                  AND json_extract(kind_json, '$.task_event_id')=?3
+             )",
+            params![
+                project_session_id.as_str(),
+                task_id.as_str(),
+                observation.event_id,
+            ],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            let kind = ProjectEventKind::TaskObserved {
+                task_session_id: task_id.clone(),
+                task_event_id: observation.event_id,
+                event: Box::new(event.clone()),
+            };
+            transaction.execute(
+                "INSERT INTO project_events (session_id, kind_json, created_at)
+                 VALUES (?1, ?2, ?3)",
+                params![
+                    project_session_id.as_str(),
+                    serde_json::to_string(&kind)?,
+                    now_unix(),
+                ],
+            )?;
+        }
+        let now = now_unix();
+        transaction.execute(
+            "UPDATE observation_outbox SET delivered_at=?1
+             WHERE id=?2 AND delivered_at IS NULL",
+            params![now, observation.id],
+        )?;
+        transaction.execute(
+            "UPDATE project_sessions
+             SET task_event_cursor=MAX(task_event_cursor, ?1), updated_at=?2
+             WHERE id=?3",
+            params![observation.id, now, project_session_id.as_str()],
+        )?;
+        transaction.commit()?;
+        Ok(!exists)
     }
 
     // Run ledger (`run_events`): the machine-grain, append-only record of
@@ -2665,7 +3235,7 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
-    pm_snapshot_warning, pm_writeback_json
+    pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id
     FROM task_sessions";
 const TASK_SESSION_SELECT: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
@@ -2674,7 +3244,7 @@ const TASK_SESSION_SELECT: &str = "SELECT
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
-    pm_snapshot_warning, pm_writeback_json
+    pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id
     FROM task_sessions WHERE id = ?1";
 const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
@@ -2685,19 +3255,19 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     process_tmux_name=?23, process_started_at=?24, pr_number=?25,
     pr_url=?26, created_at=?27, updated_at=?28,
     pm_snapshot_synced_at=?29, pm_snapshot_warning=?30,
-    pm_writeback_json=?31
+    pm_writeback_json=?31, supervisor_kind=?32, supervisor_id=?33
     WHERE id=?1";
 const TASK_COMMAND_SELECT: &str = "SELECT
     id, session_id, source_json, kind_json, created_at,
     claimed_by_generation, accepted_at, state, effect, error
-    FROM task_commands WHERE id = ?1";
+    FROM child_commands WHERE target_kind = 'task' AND id = ?1";
 
 fn insert_task_command(conn: &Connection, command: &TaskCommand) -> StoreResult<()> {
     conn.execute(
-        "INSERT INTO task_commands (
-            id, session_id, source_json, kind_json, created_at,
+        "INSERT INTO child_commands (
+            id, target_kind, session_id, source_json, kind_json, created_at,
             claimed_by_generation, accepted_at, state, effect, error
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+         ) VALUES (?1, 'task', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             command.id.as_str(),
             command.session_id.as_str(),
@@ -2782,6 +3352,14 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
             serde_json::to_string(&session.pm_writeback)
                 .expect("Task Session PM writeback state must serialize"),
         ),
+        Box::new(match &session.supervisor {
+            SessionSupervisor::Wave { .. } => "wave".to_string(),
+            SessionSupervisor::Project { .. } => "project".to_string(),
+        }),
+        Box::new(match &session.supervisor {
+            SessionSupervisor::Wave { wave_id } => wave_id.as_str().to_string(),
+            SessionSupervisor::Project { session_id } => session_id.as_str().to_string(),
+        }),
     ]
 }
 
@@ -2842,6 +3420,25 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
             .map_err(|error| invalid_column(30, error))?,
         wave_id: LfdId::from_raw(row.get::<_, String>(9)?),
         wave: row.get(10)?,
+        supervisor: match row.get::<_, String>(31)?.as_str() {
+            "wave" => SessionSupervisor::Wave {
+                wave_id: LfdId::from_raw(row.get::<_, String>(32)?),
+            },
+            "project" => SessionSupervisor::Project {
+                session_id: crate::project_session::ProjectSessionId::from_raw(
+                    row.get::<_, String>(32)?,
+                ),
+            },
+            value => {
+                return Err(invalid_column(
+                    31,
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("unknown Task Session supervisor kind {value:?}"),
+                    ),
+                ))
+            }
+        },
         status,
         status_reason: row.get(12)?,
         status_at: crate::lfdb::rows::unix_to_datetime(row.get(13)?),
@@ -2923,5 +3520,354 @@ fn map_task_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
         session_id: TaskSessionId::from_raw(row.get::<_, String>(1)?),
         kind,
         created_at: crate::lfdb::rows::unix_to_datetime(row.get(3)?),
+    })
+}
+
+const PROJECT_SESSION_COLUMNS: &str = "SELECT
+    id, project_id, project_slug, project_name, project_context,
+    wave_id, wave_name, repo, pm_snapshot_synced_at, status,
+    status_reason, status_at, iteration, task_event_cursor, state_fingerprint,
+    agent, provider, provider_session_id, process_generation, process_pid,
+    process_tmux_name, process_started_at, created_at, updated_at
+    FROM project_sessions";
+const PROJECT_SESSION_SELECT: &str = "SELECT
+    id, project_id, project_slug, project_name, project_context,
+    wave_id, wave_name, repo, pm_snapshot_synced_at, status,
+    status_reason, status_at, iteration, task_event_cursor, state_fingerprint,
+    agent, provider, provider_session_id, process_generation, process_pid,
+    process_tmux_name, process_started_at, created_at, updated_at
+    FROM project_sessions WHERE id=?1";
+const PROJECT_SESSION_UPDATE: &str = "UPDATE project_sessions SET
+    project_id=?2, project_slug=?3, project_name=?4, project_context=?5,
+    wave_id=?6, wave_name=?7, repo=?8, pm_snapshot_synced_at=?9,
+    status=?10, status_reason=?11, status_at=?12, iteration=?13,
+    task_event_cursor=?14, state_fingerprint=?15, agent=?16, provider=?17,
+    provider_session_id=?18, process_generation=?19, process_pid=?20,
+    process_tmux_name=?21, process_started_at=?22, created_at=?23,
+    updated_at=?24 WHERE id=?1";
+const PROJECT_COMMAND_SELECT: &str = "SELECT
+    id, session_id, source_json, kind_json, created_at,
+    claimed_by_generation, accepted_at, state, effect, error
+    FROM child_commands WHERE target_kind='project' AND id=?1";
+
+fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
+    vec![
+        Box::new(session.id.as_str().to_string()),
+        Box::new(session.project.id.as_str().to_string()),
+        Box::new(session.project.slug.clone()),
+        Box::new(session.project.name.clone()),
+        Box::new(session.project.context.clone()),
+        Box::new(session.wave_id.clone()),
+        Box::new(session.wave.clone()),
+        Box::new(session.repo.clone()),
+        Box::new(session.pm_snapshot_synced_at),
+        Box::new(session.status.as_str().to_string()),
+        Box::new(session.status_reason.clone()),
+        Box::new(session.status_at.unix_timestamp()),
+        Box::new(i64::from(session.iteration)),
+        Box::new(session.task_event_cursor),
+        Box::new(session.state_fingerprint.clone()),
+        Box::new(session.agent.clone()),
+        Box::new(session.provider.clone()),
+        Box::new(session.provider_session_id.clone()),
+        Box::new(
+            session
+                .process
+                .as_ref()
+                .map(|process| i64::from(process.generation)),
+        ),
+        Box::new(
+            session
+                .process
+                .as_ref()
+                .and_then(|process| process.pid.map(i64::from)),
+        ),
+        Box::new(
+            session
+                .process
+                .as_ref()
+                .map(|process| process.tmux_name.clone()),
+        ),
+        Box::new(
+            session
+                .process
+                .as_ref()
+                .map(|process| process.started_at.unix_timestamp()),
+        ),
+        Box::new(session.created_at.unix_timestamp()),
+        Box::new(session.updated_at.unix_timestamp()),
+    ]
+}
+
+fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectSession> {
+    let status_text: String = row.get(9)?;
+    let status = status_text
+        .parse()
+        .map_err(|error| invalid_column(9, error))?;
+    let process_generation: Option<i64> = row.get(18)?;
+    let process_started_at: Option<i64> = row.get(21)?;
+    let process = match (process_generation, process_started_at) {
+        (Some(generation), Some(started_at)) => Some(ProjectProcess {
+            generation: generation as u32,
+            pid: row.get::<_, Option<i64>>(19)?.map(|pid| pid as u32),
+            tmux_name: row.get::<_, Option<String>>(20)?.unwrap_or_default(),
+            started_at: crate::lfdb::rows::unix_to_datetime(started_at),
+        }),
+        _ => None,
+    };
+    Ok(ProjectSession {
+        id: ProjectSessionId::from_raw(row.get::<_, String>(0)?),
+        project: LinearProjectRef {
+            id: LinearProjectId::from_raw(row.get::<_, String>(1)?),
+            slug: row.get(2)?,
+            name: row.get(3)?,
+            context: row.get(4)?,
+        },
+        wave_id: LfdId::from_raw(row.get::<_, String>(5)?),
+        wave: row.get(6)?,
+        repo: row.get(7)?,
+        pm_snapshot_synced_at: row.get(8)?,
+        status,
+        status_reason: row.get(10)?,
+        status_at: crate::lfdb::rows::unix_to_datetime(row.get(11)?),
+        iteration: row.get::<_, i64>(12)? as u32,
+        task_event_cursor: row.get(13)?,
+        state_fingerprint: row.get(14)?,
+        agent: row.get(15)?,
+        provider: row.get(16)?,
+        provider_session_id: row.get(17)?,
+        process,
+        created_at: crate::lfdb::rows::unix_to_datetime(row.get(22)?),
+        updated_at: crate::lfdb::rows::unix_to_datetime(row.get(23)?),
+    })
+}
+
+fn insert_project_command(conn: &Connection, command: &ProjectCommand) -> StoreResult<()> {
+    conn.execute(
+        "INSERT INTO child_commands (
+            id, target_kind, session_id, source_json, kind_json, created_at,
+            claimed_by_generation, accepted_at, state, effect, error
+         ) VALUES (?1, 'project', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            command.id.as_str(),
+            command.session_id.as_str(),
+            serde_json::to_string(&command.source)?,
+            serde_json::to_string(&command.kind)?,
+            command.created_at.unix_timestamp_nanos() as i64,
+            command.claimed_by_generation.map(i64::from),
+            command
+                .accepted_at
+                .map(|at| at.unix_timestamp_nanos() as i64),
+            command.state.as_str(),
+            command.effect.map(TaskCommandEffect::as_str),
+            command.error.as_deref(),
+        ],
+    )?;
+    Ok(())
+}
+
+fn claim_child_commands_in(
+    conn: &Connection,
+    session_id: &ProjectSessionId,
+    generation: u32,
+) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE child_commands SET claimed_by_generation=?1, state='claimed'
+         WHERE target_kind='project' AND session_id=?2
+           AND state IN ('persisted', 'claimed')
+           AND (claimed_by_generation IS NULL OR claimed_by_generation<>?1)",
+        params![i64::from(generation), session_id.as_str()],
+    )?;
+    Ok(())
+}
+
+fn read_claimed_child_commands(
+    conn: &Connection,
+    session_id: &ProjectSessionId,
+    generation: u32,
+) -> StoreResult<Vec<ProjectCommand>> {
+    let mut statement = conn.prepare(
+        "SELECT id, session_id, source_json, kind_json, created_at,
+                claimed_by_generation, accepted_at, state, effect, error
+         FROM child_commands
+         WHERE target_kind='project' AND session_id=?1
+           AND claimed_by_generation=?2 AND state='claimed'
+         ORDER BY created_at, id",
+    )?;
+    let rows = statement.query_map(
+        params![session_id.as_str(), i64::from(generation)],
+        map_project_command_row,
+    )?;
+    let mut commands = Vec::new();
+    for row in rows {
+        commands.push(row?);
+    }
+    Ok(commands)
+}
+
+fn map_project_command_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectCommand> {
+    let source: ProjectCommandSource = serde_json::from_str(&row.get::<_, String>(2)?)
+        .map_err(|error| invalid_column(2, error))?;
+    let kind: ProjectCommandKind = serde_json::from_str(&row.get::<_, String>(3)?)
+        .map_err(|error| invalid_column(3, error))?;
+    let state = parse_command_state(row.get::<_, String>(7)?.as_str(), 7)?;
+    let effect = parse_command_effect(row.get::<_, Option<String>>(8)?.as_deref(), 8)?;
+    Ok(ProjectCommand {
+        id: ProjectCommandId::from_raw(row.get::<_, String>(0)?),
+        session_id: ProjectSessionId::from_raw(row.get::<_, String>(1)?),
+        source,
+        kind,
+        state,
+        effect,
+        created_at: task_command_datetime(4, row.get(4)?)?,
+        claimed_by_generation: row.get::<_, Option<i64>>(5)?.map(|value| value as u32),
+        accepted_at: row
+            .get::<_, Option<i64>>(6)?
+            .map(|value| task_command_datetime(6, value))
+            .transpose()?,
+        error: row.get(9)?,
+    })
+}
+
+fn parse_command_state(value: &str, index: usize) -> rusqlite::Result<TaskCommandState> {
+    match value {
+        "persisted" => Ok(TaskCommandState::Persisted),
+        "claimed" => Ok(TaskCommandState::Claimed),
+        "accepted" => Ok(TaskCommandState::Accepted),
+        "failed" => Ok(TaskCommandState::Failed),
+        "superseded" => Ok(TaskCommandState::Superseded),
+        value => Err(invalid_column(
+            index,
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unknown command state {value:?}"),
+            ),
+        )),
+    }
+}
+
+fn parse_command_effect(
+    value: Option<&str>,
+    index: usize,
+) -> rusqlite::Result<Option<TaskCommandEffect>> {
+    match value {
+        None => Ok(None),
+        Some("live_steer") => Ok(Some(TaskCommandEffect::LiveSteer)),
+        Some("next_turn") => Ok(Some(TaskCommandEffect::NextTurn)),
+        Some("replacement") => Ok(Some(TaskCommandEffect::Replacement)),
+        Some("decision") => Ok(Some(TaskCommandEffect::Decision)),
+        Some(value) => Err(invalid_column(
+            index,
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unknown command effect {value:?}"),
+            ),
+        )),
+    }
+}
+
+fn map_project_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectEvent> {
+    let kind: ProjectEventKind = serde_json::from_str(&row.get::<_, String>(2)?)
+        .map_err(|error| invalid_column(2, error))?;
+    Ok(ProjectEvent {
+        id: row.get(0)?,
+        session_id: ProjectSessionId::from_raw(row.get::<_, String>(1)?),
+        kind,
+        created_at: crate::lfdb::rows::unix_to_datetime(row.get(3)?),
+    })
+}
+
+fn supervisor_columns(supervisor: &SessionSupervisor) -> (&'static str, String) {
+    match supervisor {
+        SessionSupervisor::Wave { wave_id } => ("wave", wave_id.as_str().to_string()),
+        SessionSupervisor::Project { session_id } => ("project", session_id.as_str().to_string()),
+    }
+}
+
+fn child_columns(source: &ChildSessionRef) -> (&'static str, String) {
+    match source {
+        ChildSessionRef::Project { session_id } => ("project", session_id.as_str().to_string()),
+        ChildSessionRef::Task { session_id } => ("task", session_id.as_str().to_string()),
+    }
+}
+
+fn insert_observation(
+    conn: &Connection,
+    supervisor: &SessionSupervisor,
+    source: &ChildSessionRef,
+    event_id: i64,
+    payload: &ChildEventPayload,
+    created_at: i64,
+) -> StoreResult<()> {
+    let (supervisor_kind, supervisor_id) = supervisor_columns(supervisor);
+    let (source_kind, source_id) = child_columns(source);
+    conn.execute(
+        "INSERT OR IGNORE INTO observation_outbox (
+            supervisor_kind, supervisor_id, source_kind, source_id,
+            event_id, payload_json, created_at, delivered_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
+        params![
+            supervisor_kind,
+            supervisor_id,
+            source_kind,
+            source_id,
+            event_id,
+            serde_json::to_string(payload)?,
+            created_at,
+        ],
+    )?;
+    Ok(())
+}
+
+fn map_observation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationOutboxRow> {
+    let supervisor_kind: String = row.get(1)?;
+    let supervisor_id: String = row.get(2)?;
+    let supervisor = match supervisor_kind.as_str() {
+        "wave" => SessionSupervisor::Wave {
+            wave_id: LfdId::from_raw(supervisor_id),
+        },
+        "project" => SessionSupervisor::Project {
+            session_id: ProjectSessionId::from_raw(supervisor_id),
+        },
+        value => {
+            return Err(invalid_column(
+                1,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown observation supervisor {value:?}"),
+                ),
+            ))
+        }
+    };
+    let source_kind: String = row.get(3)?;
+    let source_id: String = row.get(4)?;
+    let source = match source_kind.as_str() {
+        "project" => ChildSessionRef::Project {
+            session_id: ProjectSessionId::from_raw(source_id),
+        },
+        "task" => ChildSessionRef::Task {
+            session_id: TaskSessionId::from_raw(source_id),
+        },
+        value => {
+            return Err(invalid_column(
+                3,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown observation source {value:?}"),
+                ),
+            ))
+        }
+    };
+    let payload: ChildEventPayload = serde_json::from_str(&row.get::<_, String>(6)?)
+        .map_err(|error| invalid_column(6, error))?;
+    Ok(ObservationOutboxRow {
+        id: row.get(0)?,
+        supervisor,
+        source,
+        event_id: row.get(5)?,
+        payload,
+        delivered_at: row
+            .get::<_, Option<i64>>(7)?
+            .map(crate::lfdb::rows::unix_to_datetime),
     })
 }

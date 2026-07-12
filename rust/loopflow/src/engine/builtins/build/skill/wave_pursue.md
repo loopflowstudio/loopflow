@@ -36,8 +36,9 @@ lf pm task update --id <task-id> --title "..."
   speech. Answer it once with `lf task decide <issue> <decision-id> <choice>
   [--message "feedback"]`. Inspect delayed command acceptance with `lf task
   receipt <command-id> --wait --timeout 30s --json`.
-- Use `lf project run <linear-project-id>` to queue a Project directive for its
-  owning Wave. Projects never own worktrees or child minds.
+- Use `lf project run <linear-project-id>` to create or resume the Project's
+  durable pursuit session. It sleeps while supervised Tasks run and wakes from
+  their typed observations. Projects never own worktrees or Waves.
 - Trust linked Task events and summaries. Drill into the Task Session only when
   the report is insufficient; do not copy raw child tool chatter into the Wave.
 - Answer human steering before returning to the goal.

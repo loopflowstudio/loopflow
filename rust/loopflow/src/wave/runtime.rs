@@ -33,12 +33,13 @@ use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
 use crate::lfd::security::sanitize_fs_component;
+use crate::project_session::ProjectObservation;
 use crate::task::TaskObservation;
 use crate::wave::channel::matches_prefix;
 use crate::wave::journal::{
-    fold_thread, fold_workers, journal_path, restore_pending, run_completed_turn,
-    task_observation_message, EventKind, Journal, MessageId, MessageOp, PendingMessage, Usage,
-    WorkerOutcome, WorkerRecord,
+    fold_thread, fold_workers, journal_path, project_observation_message, restore_pending,
+    run_completed_turn, task_observation_message, EventKind, Journal, MessageId, MessageOp,
+    PendingMessage, Usage, WorkerOutcome, WorkerRecord,
 };
 use crate::wave::memory::Memory;
 use crate::wave::playhead::{
@@ -134,6 +135,8 @@ pub enum InboxItem {
     /// A typed Task ledger observation awaiting the same durable turn
     /// consumption acknowledgement as a queued message.
     Task(TaskObservation),
+    /// A typed Project ledger observation.
+    Project(ProjectObservation),
     /// A bare interrupt (no text): cancel the open turn. Nothing is journaled
     /// for it — the `LoopState` transition records the interrupt itself.
     Interrupt,
@@ -167,6 +170,7 @@ pub struct Subscription {
     /// named in any `answers` — the resident's boot replay.
     pub pending: Vec<PendingMessage>,
     pub tasks: HashMap<MessageId, TaskObservation>,
+    pub projects: HashMap<MessageId, ProjectObservation>,
     /// Live resident-directed ops sent after the snapshot.
     pub inbox_rx: broadcast::Receiver<InboxItem>,
     /// Live worker-run motion (`op` frames) sent after the snapshot. Live-only
@@ -222,6 +226,7 @@ struct Inner {
     /// from it (an id alone can't rebuild the text/op/from).
     messages: HashMap<MessageId, PendingMessage>,
     tasks: HashMap<MessageId, TaskObservation>,
+    projects: HashMap<MessageId, ProjectObservation>,
     /// Memory facts added since the last externalization. The compiled
     /// checkpoint lives in MEMORY.md; this is the replayable delta after it.
     memory_adds: Vec<String>,
@@ -372,6 +377,7 @@ impl WaveRuntime {
                 pending_messages: fold.pending_messages,
                 messages: fold.messages,
                 tasks: fold.tasks,
+                projects: fold.projects,
                 memory_adds: fold.memory_adds,
             }),
             turn_tx,
@@ -847,6 +853,7 @@ impl WaveRuntime {
             memory_add_rx: self.memory_add_tx.subscribe(),
             pending: inner.pending_messages.clone(),
             tasks: inner.tasks.clone(),
+            projects: inner.projects.clone(),
             inbox_rx: self.inbox_tx.subscribe(),
             op_rx: self.op_tx.subscribe(),
         }
@@ -1044,6 +1051,25 @@ impl WaveRuntime {
         inner.tasks.insert(pending.id.clone(), observation.clone());
         inner.pending_messages.push(pending);
         let _ = self.inbox_tx.send(InboxItem::Task(observation));
+        true
+    }
+
+    /// Journal and queue a typed Project observation exactly once.
+    pub fn deliver_project_observation(&self, observation: ProjectObservation) -> bool {
+        let mut inner = self.inner();
+        let pending = project_observation_message(&observation);
+        if inner.projects.contains_key(&pending.id) {
+            return false;
+        }
+        inner.journal.append(|_| EventKind::ProjectObserved {
+            observation: observation.clone(),
+        });
+        inner.messages.insert(pending.id.clone(), pending.clone());
+        inner
+            .projects
+            .insert(pending.id.clone(), observation.clone());
+        inner.pending_messages.push(pending);
+        let _ = self.inbox_tx.send(InboxItem::Project(observation));
         true
     }
 
@@ -1595,6 +1621,40 @@ mod tests {
         assert_eq!(replayed.pending.len(), 1);
         assert_eq!(
             replayed.tasks.get(&MessageId(observation.inbox_id())),
+            Some(&observation)
+        );
+    }
+
+    #[test]
+    fn project_observation_is_typed_idempotent_and_replayable() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let mut rx = rt.subscribe_inbox();
+        let observation = crate::project_session::ProjectObservation {
+            session_id: crate::project_session::ProjectSessionId::from_raw("ps_example"),
+            project: "developer-efficiency".to_string(),
+            event_id: 8,
+            event: crate::project_session::ProjectEventKind::Completed {
+                summary: "all KRs hold".to_string(),
+            },
+        };
+
+        assert!(rt.deliver_project_observation(observation.clone()));
+        assert!(!rt.deliver_project_observation(observation.clone()));
+        assert!(matches!(
+            rx.try_recv().expect("live Project observation"),
+            InboxItem::Project(ref received) if received == &observation
+        ));
+        let sub = rt.subscribe_with_snapshot();
+        assert_eq!(
+            sub.projects.get(&MessageId(observation.inbox_id())),
+            Some(&observation)
+        );
+
+        drop(rt);
+        let replayed = open_runtime(tmp.path()).subscribe_with_snapshot();
+        assert_eq!(
+            replayed.projects.get(&MessageId(observation.inbox_id())),
             Some(&observation)
         );
     }

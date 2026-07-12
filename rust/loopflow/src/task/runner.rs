@@ -971,6 +971,9 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             wave: wave.name().clone(),
+            supervisor: crate::project_session::SessionSupervisor::Wave {
+                wave_id: wave.id().clone(),
+            },
             status: TaskSessionStatus::Running,
             status_reason: "provider active".to_string(),
             status_at: now,

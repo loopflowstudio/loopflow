@@ -37,6 +37,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::project_session::ProjectObservation;
 use crate::task::{TaskObservation, TaskSessionId};
 use crate::wave::journal::MessageOp;
 use crate::wave::playhead::{BodyProvenance, PlayheadView, StepOutcome};
@@ -191,6 +192,9 @@ pub enum InboxFrame {
     },
     Task {
         observation: TaskObservation,
+    },
+    Project {
+        observation: ProjectObservation,
     },
     Interrupt,
     Skip,

@@ -60,12 +60,13 @@ sessions and keep running.
   the loop responds with judgment. Mid-pass due dates fire at the
   boundary; occurrences older than 24h are missed, not replayed. The
   daemon's cron poller and `wave_crons` table died in the collapse.
-- **The Wave coordinates; Task Sessions ship.** Each pass's seed is the rendered
-  `GOAL.md` plus the coordinating-session discipline. The Wave creates or
-  selects a Linear task, starts it with `lf task run <issue-id>`, and remains
-  available while that Task Session works in its immutable sibling worktree.
-  Structured Task commands and events carry steering and results; raw terminal
-  bytes and child tool chatter do not become the orchestration protocol.
+- **The Wave coordinates; Project Sessions pursue; Task Sessions ship.** The
+  Wave starts a Project Session for a measured bet or a Task Session for one
+  small direct change. Project Sessions create and supervise Tasks, then stop
+  while only child progress can change the answer. Task Sessions work in
+  immutable sibling worktrees. Structured commands and linked observations
+  carry steering and results; raw terminal bytes and child tool chatter do not
+  become the orchestration protocol.
 - **Interrupts stop the active harness.** The resident sends an `Interrupting`
   state delta, stops the body, and closes the turn
   (`TurnFinished{interrupted}`); non-empty interrupt text queues for the

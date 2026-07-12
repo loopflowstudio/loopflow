@@ -73,3 +73,21 @@
   state. A single 10-scenario × 3-adapter scripted-peer matrix is still broader
   than the added Harness-boundary profile test; keep the PR draft until that
   matrix or the live dogfood supplies the remaining parity evidence.
+
+# Project Session implementation pass (2026-07-12)
+
+- Project Sessions, immediate Task supervision, shared `child_commands`, `cc_`
+  receipts, `cd_` decisions, atomic Project boundary settlement, and the
+  Task→Project→Wave observation outbox are implemented. Project observation
+  consumption and acknowledgement are one SQLite transaction; Wave delivery
+  remains journal-idempotent across a crash before outbox acknowledgement.
+- The normal deterministic gate covers both Task and Project steering profiles
+  for Codex/Claude/OpenCode, persistence, migration, observation replay, and
+  Swift projection. The design's complete 10-scenario × 3-adapter scripted-peer
+  matrix is still broader than this pass; the explicit live two-Task Linear/PR
+  dogfood also remains side-effecting and was not run headlessly.
+- Standing frontier Projects use the same no-progress rule as milestone
+  Projects in this first implementation: with open KRs, no active Tasks, and
+  an unchanged state fingerprint they become `Blocked` rather than waiting
+  indefinitely. A distinct frontier convention needs real dogfood evidence
+  before adding another persisted policy bit.

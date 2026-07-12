@@ -14,6 +14,7 @@ use crate::engine::worktrees::{
 use crate::lfd::id::LfdId;
 use crate::lfdb::{open_existing_store, SharedStore, StoreError};
 use crate::ops::error::{OpsError, OpsResult};
+use crate::project_session::SessionSupervisor;
 use crate::task::{
     LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
     PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandId, TaskCommandKind,
@@ -57,14 +58,6 @@ pub struct TaskDecisionResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct ProjectRunResult {
-    pub project_id: String,
-    pub project: String,
-    pub wave: String,
-    pub delivery: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TaskDeliveryView {
     pub kind: String,
     pub base: String,
@@ -81,6 +74,7 @@ pub struct TaskSessionSnapshot {
     pub pm_snapshot_warning: Option<String>,
     pub pm_writeback: crate::task::PmWritebackState,
     pub wave: String,
+    pub supervisor: SessionSupervisor,
     pub status: String,
     pub status_reason: String,
     pub status_at: time::OffsetDateTime,
@@ -116,6 +110,31 @@ async fn task_store() -> OpsResult<SharedStore> {
 }
 
 fn command_source(session: &TaskSession) -> OpsResult<TaskCommandSource> {
+    match std::env::var("LFD_PROJECT_SESSION_ID") {
+        Ok(value) => {
+            let project_id =
+                crate::project_session::ProjectSessionId::parse(&value).map_err(|error| {
+                    task_error(format!("invalid ambient Project Session id: {error}"))
+                })?;
+            return match &session.supervisor {
+                SessionSupervisor::Project { session_id } if session_id == &project_id => {
+                    Ok(TaskCommandSource::Project(project_id))
+                }
+                SessionSupervisor::Project { session_id } => Err(task_error(format!(
+                    "Project Session {project_id} cannot control Task {}; its supervisor is {session_id}",
+                    session.issue.identifier
+                ))),
+                SessionSupervisor::Wave { .. } => Err(task_error(format!(
+                    "Project Session {project_id} cannot control directly supervised Task {}",
+                    session.issue.identifier
+                ))),
+            };
+        }
+        Err(std::env::VarError::NotPresent) => {}
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(task_error("ambient Project Session id is not valid UTF-8"))
+        }
+    }
     let ambient = match std::env::var(crate::lf::session::WAVE_ID_ENV) {
         Ok(value) => Some(
             LfdId::parse(&value)
@@ -201,6 +220,7 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
                 ))
             })?;
         let now = time::OffsetDateTime::now_utc();
+        let supervisor = task_supervisor(&store, wave.id(), &resolved.project.id).await?;
         let mut session = TaskSession {
             id: crate::task::TaskSessionId::new(),
             issue: LinearIssueRef {
@@ -218,6 +238,7 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
                 context: project_context(&resolved.project),
             },
             wave_id: wave.id().clone(),
+            supervisor,
             pm_snapshot_synced_at: resolved.snapshot.synced_at,
             // TODO(product-pm): main's `load_show_snapshot` logs a soft-stale
             // fallback to progress but does not return it on `PmShowResult`, so
@@ -288,7 +309,46 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
     })
 }
 
-fn project_context(project: &crate::lfd::pm::PmProject) -> String {
+async fn task_supervisor(
+    store: &SharedStore,
+    wave_id: &LfdId,
+    project_id: &str,
+) -> OpsResult<SessionSupervisor> {
+    match std::env::var("LFD_PROJECT_SESSION_ID") {
+        Ok(value) => {
+            let session_id =
+                crate::project_session::ProjectSessionId::parse(&value).map_err(|error| {
+                    task_error(format!("invalid ambient Project Session id: {error}"))
+                })?;
+            let project = store
+                .get_project_session(&session_id)
+                .await
+                .map_err(|error| {
+                    task_error(format!("failed to read ambient Project Session: {error}"))
+                })?
+                .ok_or_else(|| {
+                    task_error(format!(
+                        "ambient Project Session {session_id} does not exist"
+                    ))
+                })?;
+            if &project.wave_id != wave_id || project.project.id.as_str() != project_id {
+                return Err(task_error(format!(
+                    "Project Session {session_id} cannot supervise a Task outside {}/{}",
+                    project.wave, project.project.slug
+                )));
+            }
+            Ok(SessionSupervisor::Project { session_id })
+        }
+        Err(std::env::VarError::NotPresent) => Ok(SessionSupervisor::Wave {
+            wave_id: wave_id.clone(),
+        }),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err(task_error("ambient Project Session id is not valid UTF-8"))
+        }
+    }
+}
+
+pub(crate) fn project_context(project: &crate::lfd::pm::PmProject) -> String {
     let mut context = format!("Definition:\n{}", project.definition.trim());
     if !project.krs.is_empty() {
         context.push_str("\n\nKRs:");
@@ -317,32 +377,6 @@ pub fn task_start(repo: &Path, title: String, project_id: &str) -> OpsResult<Tas
         &marker,
     )?;
     task_run(repo, &created.item.id)
-}
-
-pub fn project_run(repo: &Path, project_id: &str) -> OpsResult<ProjectRunResult> {
-    let project =
-        crate::ops::task_pm::resolve_project(repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    let message = format!(
-        "Run Linear Project {} ({}) under wave/{}. Evaluate its definition and KRs, then select or create concrete Linear tasks and execute each through a Task Session.",
-        project.project.name, project.project.id, project.snapshot.wave
-    );
-    let wave = project.snapshot.wave.clone();
-    let live = block_on_task(async move {
-        crate::lf::commands::chat::post_to_named_wave(&wave, &message)
-            .await
-            .map_err(|error| task_error(format!("failed to queue Project directive: {error}")))
-    })?;
-    Ok(ProjectRunResult {
-        project_id: project.project.id,
-        project: project.project.name,
-        wave: project.snapshot.wave,
-        delivery: if live { "live" } else { "queued" }.to_string(),
-    })
-}
-
-pub fn project_start(repo: &Path, title: &str, wave: Option<&str>) -> OpsResult<ProjectRunResult> {
-    let project = crate::ops::pm::pm_create_project(repo, wave, title)?;
-    project_run(repo, &project.project.id)
 }
 
 /// Record a Task Session's transition into `Failed`: set the status, persist it,
@@ -694,6 +728,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             pm_snapshot_warning: session.pm_snapshot_warning,
             pm_writeback: session.pm_writeback,
             wave: session.wave,
+            supervisor: session.supervisor,
             status: session.status.as_str().to_string(),
             status_reason: session.status_reason,
             status_at: session.status_at,
@@ -1232,7 +1267,7 @@ mod tests {
         let result = TaskControlResult {
             issue_id: "INF-123".to_string(),
             session_id: "ts_example".to_string(),
-            command_id: "tc_example".to_string(),
+            command_id: "cc_example".to_string(),
             state: crate::task::TaskCommandState::Accepted,
             effect: Some(crate::task::TaskCommandEffect::LiveSteer),
             generation: Some(2),
@@ -1245,7 +1280,7 @@ mod tests {
             serde_json::json!({
                 "issue_id": "INF-123",
                 "session_id": "ts_example",
-                "command_id": "tc_example",
+                "command_id": "cc_example",
                 "state": "accepted",
                 "effect": "live_steer",
                 "generation": 2,

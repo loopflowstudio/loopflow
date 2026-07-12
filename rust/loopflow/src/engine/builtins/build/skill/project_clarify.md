@@ -12,11 +12,10 @@ wave; it owns KRs and closure criteria, not memory, cadence, or child projects.
 Read the seed, `lf pm show --wave <wave> --project <project> --json --no-sync`, and the
 wave's GOAL.md and MEMORY.md.
 
-Linear Project content is authoritative. Update it with `lf pm project update`;
-that write refreshes the SQLite snapshot before returning. During an isolated
-project loop, draft the clarification in
-`scratch/<branch>.md` until it can be written to Linear. Concrete tasks live
-outside the KR set.
+Linear Project content is authoritative. Update the exact Project with `lf pm
+project update`; that write refreshes the SQLite snapshot before returning.
+The Project Session owns no branch or worktree and must not edit repository
+files. Concrete tasks live outside the KR set.
 
 ## Work
 

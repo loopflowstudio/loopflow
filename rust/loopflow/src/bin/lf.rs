@@ -615,6 +615,187 @@ fn print_task_control(
     Ok(())
 }
 
+fn print_project_session(
+    session: &loopflow::project_session::ProjectSession,
+    json: bool,
+) -> anyhow::Result<()> {
+    if json {
+        let snapshot = loopflow::ops::project::project_snapshot(session)?;
+        println!("{}", serde_json::to_string_pretty(&snapshot)?);
+    } else {
+        println!(
+            "{}  {}  {}\n  session: {}\n  iteration: {}\n  reason: {}",
+            session.project.slug,
+            session.status.as_str(),
+            session.provider,
+            session.id,
+            session.iteration,
+            session.status_reason,
+        );
+    }
+    Ok(())
+}
+
+fn print_project_control(
+    result: &loopflow::ops::project::ProjectControlResult,
+    json: bool,
+) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(result)?);
+    } else {
+        let effect = result
+            .effect
+            .map(|effect| effect.as_str())
+            .unwrap_or("none");
+        println!(
+            "{} → {} (state={}, effect={})",
+            result.command_id,
+            result.project_id,
+            result.state.as_str(),
+            effect
+        );
+    }
+    Ok(())
+}
+
+fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<()> {
+    match command {
+        ProjectCommand::Run { project_id, json } => {
+            let session = loopflow::ops::project::project_run(repo, project_id)?;
+            print_project_session(&session, *json)
+        }
+        ProjectCommand::Start { title, wave, json } => {
+            let session = loopflow::ops::project::project_start(repo, title, wave.as_deref())?;
+            print_project_session(&session, *json)
+        }
+        ProjectCommand::Status { project_id, json } => {
+            let session = loopflow::ops::project::project_status(project_id)?;
+            print_project_session(&session, *json)
+        }
+        ProjectCommand::FollowUp {
+            project_id,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_follow_up(project_id, message.clone())?;
+            print_project_control(&result, *json)
+        }
+        ProjectCommand::Steer {
+            project_id,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_steer(project_id, message.clone())?;
+            print_project_control(&result, *json)
+        }
+        ProjectCommand::Interrupt {
+            project_id,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_interrupt(project_id, message.clone())?;
+            print_project_control(&result, *json)
+        }
+        ProjectCommand::Receipt {
+            command_id,
+            wait,
+            timeout,
+            json,
+        } => {
+            let read = loopflow::ops::project::project_receipt(
+                command_id,
+                *wait,
+                parse_duration(timeout)?,
+            )?;
+            print_project_control(&read.receipt, *json)?;
+            if read.timed_out {
+                std::process::exit(124);
+            }
+            Ok(())
+        }
+        ProjectCommand::Decide {
+            project_id,
+            decision_id,
+            choice,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_decide(
+                project_id,
+                decision_id,
+                choice.clone(),
+                message.clone(),
+            )?;
+            print_project_control(&result, *json)
+        }
+        ProjectCommand::RequestDecision {
+            project_id,
+            prompt,
+            options,
+            wait,
+            timeout,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_request_decision(
+                project_id,
+                prompt.clone(),
+                options.clone(),
+                *wait,
+                parse_duration(timeout)?,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else if result.resolved {
+                println!(
+                    "{} → {}",
+                    result.decision_id,
+                    result.choice.as_deref().unwrap_or("resolved")
+                );
+            } else {
+                println!("{} → pending", result.decision_id);
+            }
+            Ok(())
+        }
+        ProjectCommand::Wait {
+            project_id,
+            until,
+            timeout,
+            json,
+        } => {
+            let until = if until == "waiting" {
+                loopflow::ops::project::ProjectWaitUntil::Waiting
+            } else {
+                loopflow::ops::project::ProjectWaitUntil::Terminal
+            };
+            let timeout = timeout.as_deref().map(parse_duration).transpose()?;
+            let session = loopflow::ops::project::project_wait(project_id, until, timeout)?;
+            print_project_session(&session, *json)
+        }
+        ProjectCommand::Resume {
+            project_id,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_resume(project_id, message.clone())?;
+            print_project_control(&result, *json)
+        }
+        ProjectCommand::Attach { project_id } => {
+            loopflow::ops::project::project_attach(project_id).map_err(Into::into)
+        }
+        ProjectCommand::Abandon {
+            project_id,
+            reason,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_abandon(project_id, reason.clone())?;
+            print_project_control(&result, *json)
+        }
+        ProjectCommand::Promote { .. } => {
+            anyhow::bail!("project promote is handled by the authored promotion flow")
+        }
+    }
+}
+
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Run { issue, json } => {
@@ -894,34 +1075,9 @@ fn main() -> anyhow::Result<()> {
                 println!("promoted {slug} from {parent}; residency: {session}");
                 Ok(())
             }),
-            Some(Commands::Project {
-                cmd: ProjectCommand::Run { project_id, json },
-            }) => in_repo_runtime(&args, |repo| {
-                let result = loopflow::ops::task::project_run(repo, project_id)?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&result)?);
-                } else {
-                    println!(
-                        "{} → wave/{} ({})",
-                        result.project, result.wave, result.delivery
-                    );
-                }
-                Ok(())
-            }),
-            Some(Commands::Project {
-                cmd: ProjectCommand::Start { title, wave, json },
-            }) => in_repo_runtime(&args, |repo| {
-                let result = loopflow::ops::task::project_start(repo, title, wave.as_deref())?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&result)?);
-                } else {
-                    println!(
-                        "{} → wave/{} ({})",
-                        result.project, result.wave, result.delivery
-                    );
-                }
-                Ok(())
-            }),
+            Some(Commands::Project { cmd }) => {
+                in_repo_runtime(&args, |repo| run_project_command(repo, cmd))
+            }
             Some(Commands::Task { cmd }) => {
                 in_repo_runtime(&args, |repo| run_task_command(repo, cmd))
             }
@@ -934,6 +1090,15 @@ fn main() -> anyhow::Result<()> {
                     session_id,
                     *generation,
                 ))
+            }
+            Some(Commands::ProjectRunner {
+                session_id,
+                generation,
+            }) => {
+                let session_id = session_id.parse()?;
+                tokio::runtime::Runtime::new()?.block_on(
+                    loopflow::project_session::runner::run_project_session(session_id, *generation),
+                )
             }
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)
@@ -1080,15 +1245,11 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Ssh { .. })
         | Some(Commands::Task { .. })
         | Some(Commands::TaskRunner { .. })
-        | Some(Commands::Project {
-            cmd: ProjectCommand::Run { .. },
-        })
-        | Some(Commands::Project {
-            cmd: ProjectCommand::Start { .. },
-        }) => None,
+        | Some(Commands::ProjectRunner { .. }) => None,
         Some(Commands::Project {
             cmd: ProjectCommand::Promote { .. },
         }) => Some("project-promote".to_string()),
+        Some(Commands::Project { .. }) => None,
     }
 }
 

@@ -7,11 +7,12 @@ Pursue the open KRs.
 
 ## Orientation
 
-Read the KR set in `scratch/<branch>.md` and the wave's GOAL/MEMORY. The
+Read the exact Linear Project named by `LFD_PROJECT_SESSION_ID` and the wave's
+GOAL/MEMORY. The
 project loop owns the KR set, not a product PR. KRs are proof-shaped end
 states; tasks are the concrete work that advances them. Filed tasks live in
 Linear; running work lives in Task Sessions; merged PRs are closure evidence.
-Resolve the exact wave from the prompt or GOAL path; never guess it. If the PM
+Resolve the exact wave and Project from the session prompt; never guess them. If the PM
 reader fails, report that once and continue from the KR set instead of repairing
 PM or auth.
 
@@ -29,8 +30,15 @@ lf pm task create --project <project> --title "..." --notes "..."
 - Every file-writing task must already have a Linear identity. Start it with
   `lf task run <issue-id>` and supervise the same Task Session through review
   and merge.
+- The Project Session owns no worktree or delivery branch. Never edit, commit,
+  test, or open a PR from the Wave home; delegate every repository mutation to
+  a Task Session.
 - Use `lf task follow-up`, `steer`, `interrupt`, `wait`, and `resume`. Do not
   create another worktree or session for review feedback or CI repair.
+- Answer routine Task decisions with `lf task decide`. When the choice needs
+  Wave judgment, call `lf project request-decision <project-id> <prompt>
+  --option <choice> --option <choice> --wait`, then continue the same Project
+  and Task transcripts from the answer.
 - Never start another Project or Wave from Project pursuit, and never collapse
   the remaining Project into one anonymous task.
 - Discovered debt becomes a task under an existing KR unless it

@@ -15,6 +15,10 @@ use crate::lfd::types::{
     AttentionItem, AttentionKind, AttentionStatus, ChatMemoryBlock, ChatMessage,
     LivePullRequestState, Repo, RepoEdge, RepoId, Run, Session, SessionStatus, Summary, Wave,
 };
+use crate::project_session::{
+    ObservationOutboxRow, ProjectCommand, ProjectCommandId, ProjectEvent, ProjectEventKind,
+    ProjectSession, ProjectSessionId, ProjectSessionStatus, SessionSupervisor,
+};
 use crate::task::{
     BoundaryResult, TaskCommand, TaskCommandId, TaskEvent, TaskEventKind, TaskSession,
     TaskSessionId, TaskSessionStatus,
@@ -455,19 +459,39 @@ impl Store {
         .await?;
         if kind.is_wave_observable() {
             if let Some(session) = self.get_task_session(&session_id).await? {
-                if let Err(error) = crate::lf::commands::chat::post_task_observation_to_named_wave(
-                    &session.wave,
-                    &session_id,
-                    event.id,
-                )
-                .await
-                {
-                    tracing::debug!(
-                        %error,
-                        %session_id,
-                        event_id = event.id,
-                        "live Task observation delivery failed; Wave observer will retry"
-                    );
+                match &session.supervisor {
+                    SessionSupervisor::Wave { .. } => {
+                        if let Err(error) =
+                            crate::lf::commands::chat::post_task_observation_to_named_wave(
+                                &session.wave,
+                                &session_id,
+                                event.id,
+                            )
+                            .await
+                        {
+                            tracing::debug!(
+                                %error,
+                                %session_id,
+                                event_id = event.id,
+                                "live Task observation delivery failed; Wave observer will retry"
+                            );
+                        }
+                    }
+                    SessionSupervisor::Project {
+                        session_id: project_session_id,
+                    } => {
+                        if let Err(error) =
+                            crate::ops::project::wake_project_session(project_session_id).await
+                        {
+                            tracing::debug!(
+                                %error,
+                                %session_id,
+                                project_session_id = %project_session_id,
+                                event_id = event.id,
+                                "Task observation wake failed; Project lifecycle touch will retry"
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -494,6 +518,215 @@ impl Store {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.task_event(&session_id, event_id)
+        })
+        .await
+    }
+
+    pub async fn create_project_session(&self, session: &ProjectSession) -> StoreResult<()> {
+        let session = session.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.insert_project_session(&session)
+        })
+        .await
+    }
+
+    pub async fn update_project_session(&self, session: &ProjectSession) -> StoreResult<()> {
+        let session = session.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.update_project_session(&session)
+        })
+        .await
+    }
+
+    pub async fn reserve_project_process(
+        &self,
+        session: &ProjectSession,
+        expected_status: ProjectSessionStatus,
+    ) -> StoreResult<bool> {
+        let session = session.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_project_process(&session, expected_status)
+        })
+        .await
+    }
+
+    pub async fn get_project_session(
+        &self,
+        session_id: &ProjectSessionId,
+    ) -> StoreResult<Option<ProjectSession>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.project_session(&session_id)
+        })
+        .await
+    }
+
+    pub async fn get_project_session_by_project(
+        &self,
+        project: &str,
+    ) -> StoreResult<Option<ProjectSession>> {
+        let project = project.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.project_session_by_project(&project)
+        })
+        .await
+    }
+
+    pub async fn list_project_sessions(
+        &self,
+        wave_id: Option<&LfdId>,
+    ) -> StoreResult<Vec<ProjectSession>> {
+        let wave_id = wave_id.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_project_sessions(wave_id.as_ref())
+        })
+        .await
+    }
+
+    pub async fn create_project_command(&self, command: &ProjectCommand) -> StoreResult<()> {
+        let command = command.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.insert_project_command(&command)
+        })
+        .await
+    }
+
+    pub async fn ensure_project_decision_command(
+        &self,
+        command: &ProjectCommand,
+    ) -> StoreResult<(ProjectCommand, bool)> {
+        let command = command.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.ensure_project_decision_command(&command)
+        })
+        .await
+    }
+
+    pub async fn supersede_and_create_project_command(
+        &self,
+        command: &ProjectCommand,
+    ) -> StoreResult<Vec<ProjectCommandId>> {
+        let command = command.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.supersede_and_insert_project_command(&command)
+        })
+        .await
+    }
+
+    pub async fn get_project_command(
+        &self,
+        command_id: &ProjectCommandId,
+    ) -> StoreResult<Option<ProjectCommand>> {
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.project_command(&command_id)
+        })
+        .await
+    }
+
+    pub async fn claim_project_commands(
+        &self,
+        session_id: &ProjectSessionId,
+        generation: u32,
+    ) -> StoreResult<Vec<ProjectCommand>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_project_commands(&session_id, generation)
+        })
+        .await
+    }
+
+    pub async fn claim_project_commands_or_stop(
+        &self,
+        session_id: &ProjectSessionId,
+        generation: u32,
+        stopped_status: ProjectSessionStatus,
+        reason: String,
+    ) -> StoreResult<(Vec<ProjectCommand>, Option<ProjectSession>)> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_project_commands_or_stop(&session_id, generation, stopped_status, &reason)
+        })
+        .await
+    }
+
+    pub async fn accept_project_command(
+        &self,
+        command_id: &ProjectCommandId,
+        effect: Option<crate::task::TaskCommandEffect>,
+    ) -> StoreResult<()> {
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.accept_project_command(&command_id, effect)
+        })
+        .await
+    }
+
+    pub async fn fail_project_command(
+        &self,
+        command_id: &ProjectCommandId,
+        effect: Option<crate::task::TaskCommandEffect>,
+        error: String,
+    ) -> StoreResult<()> {
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.fail_project_command(&command_id, effect, &error)
+        })
+        .await
+    }
+
+    pub async fn append_project_event(
+        &self,
+        session_id: &ProjectSessionId,
+        kind: &ProjectEventKind,
+    ) -> StoreResult<ProjectEvent> {
+        let session_id = session_id.clone();
+        let kind = kind.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.append_project_event(&session_id, &kind)
+        })
+        .await
+    }
+
+    pub async fn project_events_after(
+        &self,
+        session_id: &ProjectSessionId,
+        cursor: i64,
+    ) -> StoreResult<Vec<ProjectEvent>> {
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.project_events_after(&session_id, cursor)
+        })
+        .await
+    }
+
+    pub async fn pending_observations(
+        &self,
+        supervisor: &SessionSupervisor,
+    ) -> StoreResult<Vec<ObservationOutboxRow>> {
+        let supervisor = supervisor.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.pending_observations(&supervisor)
+        })
+        .await
+    }
+
+    pub async fn mark_observation_delivered(&self, id: i64) -> StoreResult<()> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.mark_observation_delivered(id)
+        })
+        .await
+    }
+
+    pub async fn consume_task_observation_for_project(
+        &self,
+        project_session_id: &ProjectSessionId,
+        observation: &ObservationOutboxRow,
+    ) -> StoreResult<bool> {
+        let project_session_id = project_session_id.clone();
+        let observation = observation.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.consume_task_observation_for_project(&project_session_id, &observation)
         })
         .await
     }
@@ -1527,6 +1760,11 @@ mod tests {
         ChatMemoryBlock, Repo, RepoEdge, RepoId, Run, RunStatus, Summary, Wave, WaveStatus,
         DEFAULT_WAVE_FLOW,
     };
+    use crate::project_session::{
+        ChildEventPayload, ChildSessionRef, ProjectCommand, ProjectCommandKind,
+        ProjectCommandSource, ProjectDecisionId, ProjectProcess, ProjectSession, ProjectSessionId,
+        ProjectSessionStatus, SessionSupervisor,
+    };
     use crate::task::{
         BoundaryResult, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
         PmWritebackOperation, PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandKind,
@@ -1606,6 +1844,9 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             wave: wave.name().to_string(),
+            supervisor: crate::project_session::SessionSupervisor::Wave {
+                wave_id: wave.id().clone(),
+            },
             status: TaskSessionStatus::Created,
             status_reason: "task session reserved".to_string(),
             status_at: now,
@@ -1620,6 +1861,151 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    fn make_project_session(wave: &Wave) -> ProjectSession {
+        let now = OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp())
+            .expect("current unix time");
+        ProjectSession {
+            id: ProjectSessionId::new(),
+            project: LinearProjectRef {
+                id: LinearProjectId::new("project-uuid").unwrap(),
+                slug: "developer-efficiency".to_string(),
+                name: "Developer Efficiency".to_string(),
+                context: "Definition:\nKeep local work fast.".to_string(),
+            },
+            wave_id: wave.id().clone(),
+            wave: wave.name().to_string(),
+            repo: wave.repo().to_string(),
+            pm_snapshot_synced_at: now.unix_timestamp(),
+            status: ProjectSessionStatus::Running,
+            status_reason: "project turn active".to_string(),
+            status_at: now,
+            iteration: 1,
+            task_event_cursor: 0,
+            state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: Some("thread-project".to_string()),
+            process: Some(ProjectProcess {
+                generation: 1,
+                pid: None,
+                tmux_name: "lf-project-test".to_string(),
+                started_at: now,
+            }),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[tokio::test]
+    async fn project_sessions_persist_commands_and_receive_task_observations() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+
+        let command = ProjectCommand::new(
+            project.id.clone(),
+            ProjectCommandSource::Wave(wave.id().clone()),
+            ProjectCommandKind::FollowUp {
+                text: "audit the parser".to_string(),
+            },
+        );
+        store.create_project_command(&command).await.unwrap();
+        let claimed = store.claim_project_commands(&project.id, 1).await.unwrap();
+        assert_eq!(claimed.len(), 1);
+        store
+            .accept_project_command(&command.id, Some(TaskCommandEffect::NextTurn))
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .get_project_command(&command.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            TaskCommandState::Accepted
+        );
+        assert!(store.get_task_command(&command.id).await.unwrap().is_none());
+        let decision = ProjectDecisionId::new();
+        let decision_command = ProjectCommand::new(
+            project.id.clone(),
+            ProjectCommandSource::Wave(wave.id().clone()),
+            ProjectCommandKind::Decide {
+                decision_id: decision,
+                choice: "approve".to_string(),
+                message: None,
+            },
+        );
+        assert!(
+            store
+                .ensure_project_decision_command(&decision_command)
+                .await
+                .unwrap()
+                .1
+        );
+        assert!(
+            !store
+                .ensure_project_decision_command(&decision_command)
+                .await
+                .unwrap()
+                .1
+        );
+
+        let mut task = make_task_session(&wave);
+        task.supervisor = SessionSupervisor::Project {
+            session_id: project.id.clone(),
+        };
+        store.create_task_session(&task).await.unwrap();
+        store
+            .sqlite
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::Failed {
+                    error: "provider stopped".to_string(),
+                    resumable: true,
+                },
+            )
+            .unwrap();
+        let observations = store
+            .pending_observations(&SessionSupervisor::Project {
+                session_id: project.id.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(observations.len(), 1);
+        assert!(matches!(
+            (&observations[0].source, &observations[0].payload),
+            (
+                ChildSessionRef::Task { session_id },
+                ChildEventPayload::Task { event: TaskEventKind::Failed { .. } }
+            ) if session_id == &task.id
+        ));
+        assert!(store
+            .consume_task_observation_for_project(&project.id, &observations[0])
+            .await
+            .unwrap());
+        assert!(!store
+            .consume_task_observation_for_project(&project.id, &observations[0])
+            .await
+            .unwrap());
+        let project_events = store.project_events_after(&project.id, 0).await.unwrap();
+        assert_eq!(
+            project_events
+                .iter()
+                .filter(|event| matches!(
+                    event.kind,
+                    crate::project_session::ProjectEventKind::TaskObserved { .. }
+                ))
+                .count(),
+            1
+        );
     }
 
     #[tokio::test]

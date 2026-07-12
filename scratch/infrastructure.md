@@ -169,11 +169,23 @@ that Project Session as its immediate supervisor. Root ownership remains the
 Wave, so the Wave may always override the Project Session and steer the Task.
 A foreign Wave or unrelated Project Session is refused before persistence.
 
+The Project launcher sets both `LFD_WAVE_ID` and
+`LFD_PROJECT_SESSION_ID`. Command attribution resolves the Project session
+first, verifies that it belongs to the same Wave and owns the target Task's
+Linear Project, then falls back to the ambient Wave, then to explicit human
+control when neither variable exists. An invalid or foreign environment is an
+error, never relabeled as human.
+
 The Project Session runs as `lf __project <session-id> <generation>` in a named
 tmux session using the existing process launcher. It runs from the permanent
 Wave home only to read repository and PM context; it must not edit files.
 Every concrete file mutation is delegated to a Linear Task and Task Session.
 No Project worktree or branch is created.
+
+The Wave home may fast-forward only when the Wave has no active turn and no
+active Project process using that checkout. A Project generation therefore
+sees one stable checkout for its whole turn even though it does not own a
+worktree. Waiting Project Sessions have no process and do not pin the home.
 
 Public control mirrors the proven Task vocabulary:
 
@@ -1592,6 +1604,8 @@ Efficiency with the outage evidence.
 ## Constraints
 
 - A Wave path and branch never change for its lifetime.
+- A Wave-home fast-forward never runs while a Wave turn or Project process is
+  active in that checkout.
 - A Task Session path and branch never change for its lifetime; its initial
   base commit remains recorded even if normal review work later rebases it.
 - One live writer owns one worktree.
@@ -1660,6 +1674,9 @@ Efficiency with the outage evidence.
 - The Project Session creates or selects concrete Linear Tasks and starts every
   file-writing change through `lf task run`; the Project process leaves the
   repository tree clean.
+- While a Project turn is active, Wave-home reconciliation refuses to move the
+  checkout. After that generation exits, the next clean idle boundary may
+  fast-forward it.
 - When its Tasks are active, the Project Session becomes `Waiting`, exits its
   process, and consumes zero provider turns. A relevant Task event relaunches
   the same session/provider transcript exactly once.

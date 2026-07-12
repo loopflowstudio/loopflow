@@ -461,7 +461,14 @@ fn ensure_run_context(
         }
     };
 
-    let parent_process_id = std::env::var(LF_PROCESS_ID_ENV).ok().map(LfdId::from_raw);
+    // A parent process id only means "my parent within this trace." When we
+    // mint a fresh run id we are starting a new trace, so a lingering
+    // LF_PROCESS_ID belongs to the old one — carrying it forward would stamp
+    // this row with a cross-trace parent that `lf doctor`'s lineage check
+    // (rightly) rejects. Drop it so the violation is unspellable at write time.
+    let parent_process_id = (!minted_run_id)
+        .then(|| std::env::var(LF_PROCESS_ID_ENV).ok().map(LfdId::from_raw))
+        .flatten();
     let process_id = LfdId::default();
     std::env::set_var(LF_PROCESS_ID_ENV, process_id.as_str());
 
@@ -973,6 +980,35 @@ mod tests {
 
         assert_ne!(parent.process_id, child.process_id);
         assert_eq!(child.parent_process_id, Some(parent.process_id));
+        super::clear_context();
+        std::env::remove_var(super::LF_PROCESS_ID_ENV);
+        std::env::remove_var(super::LF_RUN_ID_ENV);
+    }
+
+    #[test]
+    fn minting_a_fresh_run_drops_a_stale_cross_trace_parent() {
+        let _guard = journal_test_guard();
+        let repo = TestRepo::new();
+        let fields = started_fields(
+            &["lf".to_string(), "kickoff".to_string()],
+            repo.path(),
+            "main",
+        );
+
+        // A process id lingers in the environment but no run id does — the
+        // `pr land` / `wt switch` / `kickoff` shape that historically stamped a
+        // new trace with a parent from the old one.
+        std::env::set_var(super::LF_PROCESS_ID_ENV, LfdId::new().as_str());
+
+        let context = super::ensure_run_context(repo.path(), &fields)
+            .expect("run context")
+            .expect("context");
+
+        assert!(context.minted_run_id, "no LF_RUN_ID means a fresh trace");
+        assert_eq!(
+            context.parent_process_id, None,
+            "a fresh trace has no in-trace parent to name"
+        );
         super::clear_context();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
         std::env::remove_var(super::LF_RUN_ID_ENV);

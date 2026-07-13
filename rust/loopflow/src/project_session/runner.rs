@@ -217,7 +217,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                                 harness.as_mut(),
                                 PendingInput {
                                     command_id: None,
-                                    text: "Project state changed and open KRs remain. Run the next clarify/pursue/mutate iteration now.".to_string(),
+                                    text: "Project state changed and open KRs remain. Run the next pursuit iteration now.".to_string(),
                                     effect: TaskCommandEffect::NextTurn,
                                     decision: None,
                                 },
@@ -738,7 +738,7 @@ fn project_seed(
         observations.join("\n")
     };
     format!(
-        "Pursue Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf project acknowledge {project_id} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nProject Session: {session_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThis is one clarify/pursue/mutate iteration. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Task Sessions. Do not edit repository files from the Wave home. Return a concise evidence summary; the runner decides complete, wait, repeat, or block from authoritative PM and Task state.",
+        "Pursue Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf project acknowledge {project_id} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nProject Session: {session_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThis is one pursuit iteration. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Task Sessions. Do not edit repository files from the Wave home. Return a concise evidence summary; the runner decides complete, wait, repeat, or block from authoritative PM and Task state.",
         name = session.project.name,
         project_id = session.project.id.as_str(),
         wave = session.wave,

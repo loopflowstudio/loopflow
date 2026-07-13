@@ -309,7 +309,7 @@ fn resident_door_fixture_round_trips_attach_and_context() {
     assert_eq!(context.in_flight[0].task, "Wire the endpoint.");
     assert_eq!(
         context.playhead.now.as_ref().map(|step| step.step.as_str()),
-        Some("wave_pursue")
+        Some("compress")
     );
 
     // Round-trip: no defaults injected or dropped.

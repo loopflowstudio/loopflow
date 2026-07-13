@@ -319,19 +319,23 @@ There is no `/goal` runtime or command in this branch. `GOAL.md` is the Wave's
 durable specification and context; the Wave server reads it into each turn.
 The actual repetition lives in the controller around provider turns.
 
-The current code has already split into two models:
+All three loops now run one policy skill, then a deterministic transition:
 
 | Loop | Body today | Transition after the body |
 |---|---|---|
-| Wave | Cycle `wave_clarify → wave_pursue → wave_mutate` | Reset the playhead to the first skill and increment the iteration forever |
+| Wave | Run `wave_pursue` once | Reset the playhead to its one skill and increment the iteration forever |
 | Project | Run `project_pursue` once | Complete if KRs hold; wait on active Tasks; block on an unchanged fingerprint; otherwise run again |
-| Task | Run `implement` once | Mark merged/submitted from PR state; otherwise wait until another command resumes it |
+| Task | Run `task_pursue` once | Mark merged/submitted from PR state; otherwise wait until another command resumes it |
 
-This is why the branch feels conceptually ahead of its skill files. Project
-and Task already use “one turn, then deterministic transition.” Wave still
-uses the older fixed three-skill playhead. The old `project_mutate` and
-`task_mutate` skills still describe an authored loop bit even though the new
-runners no longer consult one.
+The three tiers are now symmetric. Collapsing Wave to one skill needed **no
+controller rewrite**: `Playhead::load` already handles a single-step flow, so
+the change was `wave.yaml` → `[wave_pursue]` (folding the clarify/mutate duties
+into `wave_pursue`) plus deleting the two dead skills. The Task runner also
+moved off the generic `implement` skill onto the tier skill `task_pursue`, so
+the Task turn runs the directive-acknowledging, decision-aware policy the
+incorporation contract expects rather than the generic "design doc → code"
+skill (which required a `scratch/<branch>.md` a fresh Linear-issue worktree
+lacks).
 
 The cleaner target is:
 
@@ -1311,9 +1315,12 @@ What remains outside this pass:
 1. Checkpoint 6 still uses the existing durable decision backend. The UI makes
    options and lineage visible through Wave Chat, but provider approval mapping
    and a scripted Task → Project → Wave → human conformance test remain.
-2. Checkpoint 7 removed the public generic lifecycle and stale playhead UI, but
-   the internal Wave controller still runs its authored multi-step playhead.
-   Collapsing all three loops to one policy skill needs its own controller pass.
+2. Checkpoint 7 is done. The public generic lifecycle and stale playhead UI
+   were already gone; the internal Wave loop now runs a single `wave_pursue`
+   policy turn (no controller rewrite — the playhead already handled one-step
+   flows), and the Task runner launches the tier skill `task_pursue`, not the
+   generic `implement`. All three tiers now run one policy skill per turn with
+   the controller owning repeat/wait/block/complete.
 3. The three-provider crash/steer/acknowledgement harness and live two-Task
    Linear/GitHub dogfood are side-effecting follow-ups; this headless pass did
    not create records, worktrees, pushes, or PRs.

@@ -84,7 +84,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
         })?;
     let seed = task_seed(&session, directive);
     let mut prepared =
-        crate::lf::commands::run::prepare_harness_turn("implement", &seed, &session.wave, None)?;
+        crate::lf::commands::run::prepare_harness_turn("task_pursue", &seed, &session.wave, None)?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
     let resuming = generation > 1 || session.provider_session_id.is_some();
     prepared.config.agent = Some(session.agent.clone());

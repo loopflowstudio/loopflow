@@ -4,7 +4,7 @@
 //! This runs inside the resident process (the internal half of
 //! `lf serve <name>`,
 //! see [`crate::wave::resident`]) — never in the listener. A turn is one
-//! `wave` flow (`wave_clarify → wave_pursue → wave_mutate`) run as a
+//! `wave` flow (a single `wave_pursue` policy turn) run as a
 //! bounded headless child in the wave home; continuity is GOAL.md + memory +
 //! the chat journal riding every pass's seed, never a vendor thread.
 //! Everything the loop does surfaces as [`ResidentDelta`]s sent through

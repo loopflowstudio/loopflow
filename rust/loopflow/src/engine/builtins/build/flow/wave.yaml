@@ -1,4 +1,4 @@
-# One bounded pass of the wave loop.
-- wave_clarify
+# One bounded pass of the wave loop: a single policy turn. The controller,
+# not a loop-bit skill, decides whether the wave runs again, waits, or is
+# nudged. Clarify and evolve duties are folded into wave_pursue.
 - wave_pursue
-- wave_mutate

@@ -133,10 +133,13 @@ public struct WorkDirectiveSnapshot: Decodable, Sendable, Hashable {
 }
 
 public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {
+    case human
     case wave
     case project
     case task
     case review
+    case ci
+    case external
 }
 
 public struct WorkNextMove: Decodable, Sendable, Hashable {

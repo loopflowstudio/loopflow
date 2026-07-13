@@ -12,15 +12,16 @@
 //! - supervises the resident ([`supervisor`]): process liveness, the respawn
 //!   ladder, the interrupt janitor.
 //!
-//! The resident ([`resident`]) owns the
-//! pass scheduler, runs in the wave's `<repo>.<wave>` worktree, consumes its
-//! own wave's `/events?inbox=true` subscription, and publishes ordered turn
-//! deltas back through the resident door. The wire between them is [`wire`].
+//! The resident ([`resident`]) owns the pass scheduler, runs from the clean
+//! canonical main checkout as a read-and-coordinate control plane, consumes
+//! its own wave's `/events?inbox=true` subscription, and publishes ordered
+//! turn deltas back through the resident door. The wire between them is
+//! [`wire`].
 //!
 //! ```text
 //!   lf serve <name>                     lf __resident <name>
 //!   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
-//!   │ LISTENER (origin repo)│──────────▶│ RESIDENT (<repo>.<wave>) │
+//!   │ LISTENER (origin repo)│──────────▶│ RESIDENT (clean main)    │
 //!   │ pens · folds · doors  │           │ pass scheduler           │
 //!   │ observer · supervisor │◀──deltas──│ seed · queue             │
 //!   └──────────┬────────────┘           └────────────▲─────────────┘

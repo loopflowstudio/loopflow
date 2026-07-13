@@ -584,8 +584,8 @@ async fn launch_task_process(
     let generation_text = generation.to_string();
     let environment = [
         (crate::lf::session::WAVE_ID_ENV, session.wave_id.as_str()),
-        ("LF_TASK_SESSION_ID", session.id.as_str()),
-        ("LF_TASK_GENERATION", generation_text.as_str()),
+        ("LFD_TASK_SESSION_ID", session.id.as_str()),
+        ("LFD_TASK_GENERATION", generation_text.as_str()),
     ];
     if let Err(error) =
         start_lf_session_with_env(&tmux_name, &session.worktree, &argv, &environment).await
@@ -1249,7 +1249,7 @@ pub fn task_request_decision(
             .await
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-        let ambient = std::env::var("LF_TASK_SESSION_ID")
+        let ambient = std::env::var("LFD_TASK_SESSION_ID")
             .map_err(|_| task_error("decision requests must run inside the owning Task Session"))?;
         if ambient != session.id.as_str() {
             return Err(task_error(format!(
@@ -1324,7 +1324,7 @@ pub fn task_acknowledge(issue: &str, version: u32, summary: String) -> OpsResult
             .await
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-        let ambient = std::env::var("LF_TASK_SESSION_ID").map_err(|_| {
+        let ambient = std::env::var("LFD_TASK_SESSION_ID").map_err(|_| {
             task_error("directive acknowledgements must run inside the owning Task Session")
         })?;
         if ambient != session.id.as_str() {

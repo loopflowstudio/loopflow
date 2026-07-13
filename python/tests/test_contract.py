@@ -29,8 +29,4 @@ def test_wave_fixture_parses():
 
     assert wave.repo == "/home/user/project"
     assert wave.iteration == 3
-    assert wave.open_pr_count == 1
-    assert wave.local_worktree == "/home/user/project/.claude/worktrees/engbot"
-    assert wave.remote_branch == "engbot/build-3"
-    assert len(wave.commits) == 1
-    assert wave.commits[0].sha == "abc1234"
+    assert wave.active_run is None

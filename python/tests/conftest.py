@@ -4,6 +4,7 @@ from __future__ import annotations
 
 WAVE_MINIMAL = {
     "id": "abc-123",
+    "object": "wave",
     "name": "reduce",
     "goal": "ship-roadmap",
     "metrics": [],
@@ -15,24 +16,14 @@ WAVE_MINIMAL = {
     "parent_wave_id": None,
     "repo": "/tmp/repo",
     "iteration": 0,
-    "commits": [],
-    "open_pr_count": 0,
-    "stack_count": 0,
 }
 
 WAVE_FULL = {
     **WAVE_MINIMAL,
     "created_at": "2026-02-08T01:56:54Z",
     "flow_steps": ["review", "iterate", "build", "gate"],
-    "local_worktree": "/tmp/wt",
-    "remote_branch": "wave/architecture",
-    "commits": [
-        {"sha": "a1b2c3d", "message": "implement: add retry logic"},
-        {"sha": "e4f5g6h", "message": "design: initial sketch"},
-    ],
-    "diff_stat": " 3 files changed, 42 insertions(+), 7 deletions(-)",
-    "open_pr_count": 1,
-    "stack_count": 1,
+    "agent": "codex",
+    "skill_agents": {"gate": "claude"},
     "active_run": {
         "id": "run-1",
         "wave_id": "abc-123",
@@ -48,11 +39,6 @@ WAVE_FULL = {
         },
         "started_at": "2026-02-08T02:00:00Z",
         "flow_parents": ["parent-1"],
-    },
-    "pr": {
-        "url": "https://github.com/org/repo/pull/1",
-        "number": 1,
-        "state": "open",
     },
 }
 

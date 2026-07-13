@@ -99,7 +99,6 @@ enum ShortcutAction: Hashable {
     case deleteWave
     case retryWave
     case stopWave
-    case landWave
 
     // Tools
     case openTerminal
@@ -185,13 +184,6 @@ enum ShortcutCatalog {
             gesture: ShortcutGesture(key: .character("s"), modifiers: [], allowsRepeat: false),
             action: .stopWave,
             label: "Stop wave",
-            category: .waveActions,
-            requiresWave: true
-        ),
-        ShortcutBinding(
-            gesture: ShortcutGesture(key: .character("l"), modifiers: [], allowsRepeat: false),
-            action: .landWave,
-            label: "Land wave",
             category: .waveActions,
             requiresWave: true
         ),

@@ -99,8 +99,8 @@ Truth is the per-wave append-only journal —
 per-machine, never committed. One journal per served mind, zero per channel: a
 journal buys delivery to a subscriber who was absent at publish time, which is
 a need minds have and topics never do. A work line's report reaches the wave as
-one attributed copy in *this* journal, folded off the bus; nothing is written in
-its worktree. The in-process state (`WaveRuntime`) is a fold
+one attributed copy in *this* journal, folded off the bus; no Wave worktree
+exists. The in-process state (`WaveRuntime`) is a fold
 of it: the `thread` and the loop state are rebuilt from the journal on
 boot, so a restart keeps the full conversation and turn ids continue
 monotonically. The journal event vocabulary predates the pass model —

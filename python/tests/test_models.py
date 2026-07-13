@@ -17,7 +17,6 @@ from conftest import (
 from loopflow.models import (
     AuthFlow,
     AuthProviderStatus,
-    CommitEntry,
     CostRates,
     ModelInfo,
     ProviderInfo,
@@ -37,20 +36,16 @@ class TestWaveModel:
         assert wave.repo == "/tmp/repo"
         assert wave.iteration == 0
         assert wave.active_run is None
-        assert wave.commits == []
-        assert wave.diff_stat is None
+        assert wave.agent is None
+        assert wave.skill_agents is None
 
     def test_full_payload(self):
         wave = Wave.model_validate(WAVE_FULL)
         assert wave.created_at is not None
         assert wave.active_run.status == "running"
         assert wave.active_run.pr.number == 1
-        assert wave.remote_branch == "wave/architecture"
-        assert wave.pr.number == 1
-        assert len(wave.commits) == 2
-        assert wave.commits[0].sha == "a1b2c3d"
-        assert wave.commits[0].message == "implement: add retry logic"
-        assert wave.diff_stat == " 3 files changed, 42 insertions(+), 7 deletions(-)"
+        assert wave.agent == "codex"
+        assert wave.skill_agents == {"gate": "claude"}
         assert [skill.type for skill in wave.flow_steps] == ["skill", "skill", "skill", "skill"]
         assert [skill.name for skill in wave.flow_steps] == [
             "review",
@@ -65,8 +60,6 @@ class TestWaveModel:
         reparsed = Wave.model_validate(dumped)
         assert reparsed.id == wave.id
         assert reparsed.active_run.pr.url == wave.active_run.pr.url
-        assert reparsed.commits == wave.commits
-        assert reparsed.diff_stat == wave.diff_stat
         assert reparsed.flow_steps == wave.flow_steps
 
     def test_unknown_fields_ignored(self):
@@ -79,14 +72,6 @@ class TestWaveModel:
         wave = Wave.model_validate(data)
         assert [skill.type for skill in wave.flow_steps] == ["skill", "op"]
         assert wave.flow_steps[1].name == "pr land --create-pr"
-
-
-class TestCommitEntryModel:
-    def test_parse(self):
-        entry = CommitEntry.model_validate({"sha": "abc123", "message": "fix bug"})
-        assert entry.sha == "abc123"
-        assert entry.message == "fix bug"
-
 
 class TestRunModel:
     def test_minimal_payload(self):

@@ -100,10 +100,13 @@ pub struct PmTaskSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NextMoveOwner {
+    Human,
     Wave,
     Project,
     Task,
     Review,
+    Ci,
+    External,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

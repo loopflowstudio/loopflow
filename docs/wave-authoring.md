@@ -250,11 +250,13 @@ When a task ships, its context — what was learned, what changed, what downstre
 
 ```bash
 lf serve mywave              # start the wave agent (Ctrl-C to stop)
-tmux ls                     # the wave agent and every worker it launched
+tmux ls                     # live Wave, Project, and Task Sessions
 tmux attach -r -t <name>    # inspect one; agent output lives here
 ```
 
-In **Loopflow**, a wave's detail view groups its live work — the wave agent session, worker runs, PR state, and anything needing your attention.
+In **Loopflow**, a wave's detail view renders its native Project → Task work
+map, including current direction, next-move ownership, Task delivery, and
+anything needing attention.
 
 ### Crons
 

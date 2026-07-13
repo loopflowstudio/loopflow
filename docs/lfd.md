@@ -7,8 +7,8 @@ title: lfd Daemon Reference
 
 `lfd` runs the loopflow daemon: the HTTP read surface, session registry,
 GitHub webhook ingress translated to `lf` execs, provider token refresh, and
-worktree cleanup. It launches no agent work; each Wave resident and each
-registry-backed Task Session own their provider execution.
+worktree cleanup. It launches no agent work; Wave residents and registry-backed
+Project and Task Sessions own their provider execution.
 
 ## Run Native lfd
 

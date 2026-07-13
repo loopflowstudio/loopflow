@@ -75,10 +75,11 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
+    let clear_identity = "unset LFD_SESSION_INHERITED LFD_SESSION_ID LFD_WAVE_ID LFD_CHANNEL LFD_PROJECT_SESSION_ID LFD_PROJECT_GENERATION LFD_TASK_SESSION_ID LFD_TASK_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION";
     if env.is_empty() {
-        format!("unset LFD_SESSION_INHERITED; exec {command}")
+        format!("{clear_identity}; exec {command}")
     } else {
-        format!("unset LFD_SESSION_INHERITED; exec env {env} {command}")
+        format!("{clear_identity}; exec env {env} {command}")
     }
 }
 
@@ -134,12 +135,24 @@ mod tests {
         let argv = vec!["lf".to_string(), "__task".to_string()];
         let command = lf_session_shell_command(
             &argv,
-            &[("LF_TASK_SESSION_ID", "task-1"), ("LF_WAVE", "infra")],
+            &[("LFD_TASK_SESSION_ID", "task-1"), ("LFD_WAVE_ID", "infra")],
         );
 
         assert_eq!(
             command,
-            "unset LFD_SESSION_INHERITED; exec env 'LF_TASK_SESSION_ID'='task-1' 'LF_WAVE'='infra' 'lf' '__task'"
+            "unset LFD_SESSION_INHERITED LFD_SESSION_ID LFD_WAVE_ID LFD_CHANNEL LFD_PROJECT_SESSION_ID LFD_PROJECT_GENERATION LFD_TASK_SESSION_ID LFD_TASK_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION; exec env 'LFD_TASK_SESSION_ID'='task-1' 'LFD_WAVE_ID'='infra' 'lf' '__task'"
+        );
+    }
+
+    #[test]
+    fn lf_session_without_explicit_identity_does_not_inherit_its_parent() {
+        let argv = vec!["lf".to_string(), "serve".to_string(), "child".to_string()];
+
+        let command = lf_session_shell_command(&argv, &[]);
+
+        assert_eq!(
+            command,
+            "unset LFD_SESSION_INHERITED LFD_SESSION_ID LFD_WAVE_ID LFD_CHANNEL LFD_PROJECT_SESSION_ID LFD_PROJECT_GENERATION LFD_TASK_SESSION_ID LFD_TASK_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION; exec 'lf' 'serve' 'child'"
         );
     }
 }

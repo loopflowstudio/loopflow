@@ -169,6 +169,15 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                         if status == Lifecycle::Failed {
                             return finish_failed(&store, &mut session, harness.as_mut(), "provider turn failed").await;
                         }
+                        if let Err(error) = verify_control_plane_checkout(Path::new(&session.repo)) {
+                            return finish_failed(
+                                &store,
+                                &mut session,
+                                harness.as_mut(),
+                                &error.to_string(),
+                            )
+                            .await;
+                        }
                         let resume_interrupted_flow =
                             flow_turn_active && status == Lifecycle::Interrupted;
                         let flow_iteration_completed = if flow_turn_active {
@@ -656,8 +665,15 @@ async fn inspect_outcome(store: &SharedStore, session: &ProjectSession) -> Resul
                 )
         })
         .collect::<Vec<_>>();
+    let pm_tasks = resolved
+        .snapshot
+        .items
+        .iter()
+        .filter(|item| item.project.as_deref() == Some(session.project.slug.as_str()))
+        .collect::<Vec<_>>();
     let fingerprint_payload = serde_json::json!({
         "project": resolved.project,
+        "pm_tasks": pm_tasks,
         "tasks": tasks.iter().map(|task| (&task.id, task.status, &task.updated_at)).collect::<Vec<_>>(),
     });
     let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&fingerprint_payload)?));
@@ -696,6 +712,14 @@ async fn inspect_outcome(store: &SharedStore, session: &ProjectSession) -> Resul
         reason: "Project state changed; another iteration is actionable".to_string(),
         fingerprint,
     })
+}
+
+fn verify_control_plane_checkout(repo: &Path) -> Result<()> {
+    crate::ops::project::ensure_clean_main(repo, "Project turn")
+        .map(|_| ())
+        .map_err(|error| {
+            anyhow!("Project Session violated its read-only control-plane boundary: {error}")
+        })
 }
 
 async fn consume_task_observations(

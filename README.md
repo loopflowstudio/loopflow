@@ -83,10 +83,11 @@ The Linear task exists before its worktree. One durable Task Session retains
 that immutable sibling worktree and provider history through review, CI repair,
 and merge. Every Task PR targets `main`.
 
-Workers inherit the Wave objective, curated memory, Project definition, and KRs.
-Typed, idempotent Task observations keep the Wave informed without copying raw
-tool chatter into its thread. Tasks can pause on a durable decision request;
-the owning Wave answers it in the same Task Session and provider transcript.
+Task Sessions inherit the Wave objective, curated memory, Project definition,
+and KRs. Typed, idempotent Task observations keep the Wave informed without
+copying raw tool chatter into its thread. Tasks can pause on a durable decision
+request; the owning Wave answers it in the same Task Session and provider
+transcript.
 
 Run an existing Linear Project or task:
 
@@ -149,7 +150,7 @@ and folds into its thread attributed on the next sweep.
 
 | Event | What lfd runs |
 |-------|---------------|
-| CI fails on a wave's PR | `lf radio pub --channel <name> --from ci "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
+| CI fails on a Task PR | `lf radio pub --channel <name> --from ci "CI failed: …"` — the loop decides how to steer the owning Task Session |
 | PR merged | owning Task Session becomes merged; Linear completion is reconciled |
 | Push to main | `lf radio pub --channel <name> --from github "main moved: …"` — the loop decides whether to rebase or integrate |
 

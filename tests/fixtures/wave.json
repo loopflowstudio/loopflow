@@ -12,6 +12,5 @@
   "workers": 1,
   "parent_wave_id": "wave_parent999",
   "repo": "/home/user/project",
-  "iteration": 3,
-  "stack_count": 0
+  "iteration": 3
 }

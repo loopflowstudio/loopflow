@@ -9,11 +9,15 @@ use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
+use crate::child_control::{
+    absorb_commands as absorb_child_commands, apply_input as apply_child_input,
+    take_current_input as take_child_input, ChildTarget, CommandStop, PendingInput,
+};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::project_session::{
-    ChildEventPayload, ProjectCommand, ProjectCommandId, ProjectCommandKind, ProjectDecisionId,
-    ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus, SessionSupervisor,
+    ChildEventPayload, ProjectCommand, ProjectCommandId, ProjectCommandKind, ProjectEventKind,
+    ProjectSession, ProjectSessionId, ProjectSessionStatus, SessionSupervisor,
 };
 use crate::task::{
     unincorporated_directive_version, ChildDirective, ChildRef, TaskCommandEffect,
@@ -22,26 +26,6 @@ use crate::task::{
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
-
-#[derive(Debug)]
-struct PendingInput {
-    command_id: Option<ProjectCommandId>,
-    text: String,
-    effect: TaskCommandEffect,
-    decision: Option<DecisionResolution>,
-}
-
-#[derive(Debug)]
-struct DecisionResolution {
-    decision_id: ProjectDecisionId,
-    choice: String,
-    message: Option<String>,
-}
-
-enum CommandStop {
-    Interrupted,
-    Abandoned(String),
-}
 
 pub async fn run_project_session(session_id: ProjectSessionId, generation: u32) -> Result<()> {
     let result = run_project_session_inner(session_id.clone(), generation).await;
@@ -106,7 +90,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
         return finish_command_stop(&store, &mut session, harness.as_mut(), stop).await;
     }
     let mut flow_turn_active = false;
-    if let Some(input) = take_current_input(&store, &mut pending).await? {
+    if let Some(input) = take_current_input(&store, &session, &mut pending).await? {
         apply_input(&store, &session, harness.as_mut(), input).await?;
     } else {
         start_project_flow_turn(&store, &mut session, harness.as_mut(), &mut flow, prepared)
@@ -186,7 +170,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                             false
                         };
                         flow_turn_active = false;
-                        if let Some(input) = take_current_input(&store, &mut pending).await? {
+                        if let Some(input) = take_current_input(&store, &session, &mut pending).await? {
                             if resume_interrupted_flow {
                                 open_project_flow_body(&mut flow, &session)?;
                                 flow_turn_active = true;
@@ -202,15 +186,10 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                                     &store,
                                     &session,
                                     harness.as_mut(),
-                                    PendingInput {
-                                        command_id: None,
-                                        text: format!(
+                                    PendingInput::system(format!(
                                             "New supervised Task observations arrived. Continue the same Project iteration:\n{}",
                                             observations.join("\n")
-                                        ),
-                                        effect: TaskCommandEffect::NextTurn,
-                                        decision: None,
-                                    },
+                                        )),
                                 ).await?;
                                 continue;
                             }
@@ -309,7 +288,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                             ).await? {
                                 return finish_command_stop(&store, &mut session, harness.as_mut(), stop).await;
                             }
-                            if let Some(input) = take_current_input(&store, &mut pending).await? {
+                            if let Some(input) = take_current_input(&store, &session, &mut pending).await? {
                                 apply_input(&store, &session, harness.as_mut(), input).await?;
                             } else {
                                 let prepared = prepare_project_flow_step(
@@ -618,21 +597,10 @@ fn filter_new_commands(
 
 async fn take_current_input(
     store: &SharedStore,
+    session: &ProjectSession,
     pending: &mut VecDeque<PendingInput>,
 ) -> Result<Option<PendingInput>> {
-    while let Some(input) = pending.pop_front() {
-        let current = match &input.command_id {
-            Some(command_id) => store
-                .get_project_command(command_id)
-                .await?
-                .is_some_and(|command| command.state == TaskCommandState::Claimed),
-            None => true,
-        };
-        if current {
-            return Ok(Some(input));
-        }
-    }
-    Ok(None)
+    take_child_input(store, ChildTarget::Project(session), pending).await
 }
 
 struct ProjectOutcome {
@@ -755,156 +723,15 @@ async fn absorb_commands(
     turn_active: bool,
     pending: &mut VecDeque<PendingInput>,
 ) -> Result<Option<CommandStop>> {
-    for command in commands {
-        let claimed = store
-            .get_project_command(&command.id)
-            .await?
-            .is_some_and(|stored| stored.state == TaskCommandState::Claimed);
-        if !claimed {
-            continue;
-        }
-        match command.kind {
-            ProjectCommandKind::FollowUp { text } => pending.push_back(PendingInput {
-                command_id: Some(command.id),
-                text,
-                effect: TaskCommandEffect::NextTurn,
-                decision: None,
-            }),
-            ProjectCommandKind::Steer { text }
-                if turn_active && harness.capabilities().supports_steer =>
-            {
-                apply_input(
-                    store,
-                    session,
-                    harness,
-                    PendingInput {
-                        command_id: Some(command.id),
-                        text,
-                        effect: TaskCommandEffect::LiveSteer,
-                        decision: None,
-                    },
-                )
-                .await?;
-            }
-            ProjectCommandKind::Steer { text } => {
-                if turn_active {
-                    if let Err(error) = harness.interrupt().await {
-                        fail_command(
-                            store,
-                            session,
-                            &command.id,
-                            Some(TaskCommandEffect::Replacement),
-                            &error.to_string(),
-                        )
-                        .await?;
-                        return Err(error);
-                    }
-                }
-                pending.push_back(PendingInput {
-                    command_id: Some(command.id),
-                    text,
-                    effect: TaskCommandEffect::Replacement,
-                    decision: None,
-                });
-            }
-            ProjectCommandKind::Interrupt { replacement } => {
-                if turn_active {
-                    if let Err(error) = harness.interrupt().await {
-                        fail_command(
-                            store,
-                            session,
-                            &command.id,
-                            replacement.as_ref().map(|_| TaskCommandEffect::Replacement),
-                            &error.to_string(),
-                        )
-                        .await?;
-                        return Err(error);
-                    }
-                }
-                if let Some(text) = replacement {
-                    pending.clear();
-                    pending.push_back(PendingInput {
-                        command_id: Some(command.id),
-                        text,
-                        effect: TaskCommandEffect::Replacement,
-                        decision: None,
-                    });
-                } else {
-                    accept_command(store, session, &command.id, None).await?;
-                    return Ok(Some(CommandStop::Interrupted));
-                }
-            }
-            ProjectCommandKind::Resume { message } => {
-                if let Some(text) = message {
-                    pending.push_back(PendingInput {
-                        command_id: Some(command.id),
-                        text,
-                        effect: TaskCommandEffect::NextTurn,
-                        decision: None,
-                    });
-                } else {
-                    accept_command(store, session, &command.id, None).await?;
-                }
-            }
-            ProjectCommandKind::Decide {
-                decision_id,
-                choice,
-                message,
-            } => {
-                let text = format!(
-                    "Decision {decision_id}: {choice}{}",
-                    message
-                        .as_ref()
-                        .map(|message| format!("\n{message}"))
-                        .unwrap_or_default()
-                );
-                let resolution = DecisionResolution {
-                    decision_id,
-                    choice,
-                    message,
-                };
-                if turn_active && harness.capabilities().supports_steer {
-                    apply_input(
-                        store,
-                        session,
-                        harness,
-                        PendingInput {
-                            command_id: Some(command.id),
-                            text,
-                            effect: TaskCommandEffect::Decision,
-                            decision: Some(resolution),
-                        },
-                    )
-                    .await?;
-                } else {
-                    if turn_active {
-                        if let Err(error) = harness.interrupt().await {
-                            fail_command(
-                                store,
-                                session,
-                                &command.id,
-                                Some(TaskCommandEffect::Decision),
-                                &error.to_string(),
-                            )
-                            .await?;
-                            return Err(error);
-                        }
-                    }
-                    pending.push_back(PendingInput {
-                        command_id: Some(command.id),
-                        text,
-                        effect: TaskCommandEffect::Decision,
-                        decision: Some(resolution),
-                    });
-                }
-            }
-            ProjectCommandKind::Abandon { reason } => {
-                accept_command(store, session, &command.id, None).await?;
-                return Ok(Some(CommandStop::Abandoned(reason)));
-            }
-        }
-    }
-    Ok(None)
+    absorb_child_commands(
+        store,
+        ChildTarget::Project(session),
+        commands,
+        harness,
+        turn_active,
+        pending,
+    )
+    .await
 }
 
 async fn apply_input(
@@ -913,80 +740,7 @@ async fn apply_input(
     harness: &mut dyn Harness,
     input: PendingInput,
 ) -> Result<()> {
-    if let Err(error) = harness.send_input(&input.text).await {
-        if let Some(command_id) = input.command_id {
-            fail_command(
-                store,
-                session,
-                &command_id,
-                Some(input.effect),
-                &error.to_string(),
-            )
-            .await?;
-        }
-        return Err(error);
-    }
-    if let Some(command_id) = input.command_id {
-        accept_command(store, session, &command_id, Some(input.effect)).await?;
-    }
-    if let Some(decision) = input.decision {
-        store
-            .append_project_event(
-                &session.id,
-                &ProjectEventKind::DecisionResolved {
-                    decision_id: decision.decision_id,
-                    choice: decision.choice,
-                    message: decision.message,
-                },
-            )
-            .await?;
-    }
-    Ok(())
-}
-
-async fn fail_command(
-    store: &SharedStore,
-    session: &ProjectSession,
-    command_id: &ProjectCommandId,
-    effect: Option<TaskCommandEffect>,
-    error: &str,
-) -> Result<()> {
-    store
-        .fail_project_command(command_id, effect, error.to_string())
-        .await?;
-    store
-        .append_project_event(
-            &session.id,
-            &ProjectEventKind::CommandChanged {
-                command_id: command_id.clone(),
-                state: TaskCommandState::Failed,
-                effect,
-                error: Some(error.to_string()),
-            },
-        )
-        .await?;
-    Ok(())
-}
-
-async fn accept_command(
-    store: &SharedStore,
-    session: &ProjectSession,
-    command_id: &ProjectCommandId,
-    effect: Option<TaskCommandEffect>,
-) -> Result<()> {
-    store.accept_project_command(command_id, effect).await?;
-    store
-        .append_project_event(
-            &session.id,
-            &ProjectEventKind::CommandChanged {
-                command_id: command_id.clone(),
-                state: TaskCommandState::Accepted,
-                effect,
-                error: None,
-            },
-        )
-        .await?;
-    Ok(())
+    apply_child_input(store, ChildTarget::Project(session), harness, input).await
 }
 
 async fn set_and_record_status(
@@ -1357,7 +1111,7 @@ mod tests {
         .await
         .unwrap();
 
-        let input = take_current_input(&store, &mut pending)
+        let input = take_current_input(&store, &session, &mut pending)
             .await
             .unwrap()
             .expect("replacement input");
@@ -1457,7 +1211,7 @@ mod tests {
             assert_eq!(harness.interrupts, usize::from(!supports_steer));
             assert_eq!(
                 harness.sent,
-                vec![format!("Decision {decision_id}: approve")]
+                vec![format!("Decision {decision_id} resolved: approve")]
             );
             let receipt = store
                 .get_project_command(&command.id)

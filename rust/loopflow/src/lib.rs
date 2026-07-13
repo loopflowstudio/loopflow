@@ -1,4 +1,5 @@
 pub mod chat;
+pub(crate) mod child_control;
 pub mod engine;
 pub mod flowloop;
 pub mod harness;

@@ -9,30 +9,20 @@ use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
+use crate::child_control::{
+    absorb_commands as absorb_child_commands, apply_input as apply_child_input, input_is_current,
+    ChildTarget, CommandStop, DecisionResolution, PendingInput,
+};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::task::{
     unincorporated_directive_version, BoundaryResult, ChildDirective, ChildRef, TaskCommand,
-    TaskCommandEffect, TaskCommandId, TaskCommandKind, TaskCommandState, TaskDecisionId,
-    TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+    TaskCommandEffect, TaskCommandId, TaskCommandKind, TaskCommandState, TaskEventKind,
+    TaskSession, TaskSessionId, TaskSessionStatus,
 };
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DecisionResolution {
-    decision_id: TaskDecisionId,
-    choice: String,
-    message: Option<String>,
-}
-
-struct PendingInput {
-    command_id: Option<TaskCommandId>,
-    text: String,
-    effect: TaskCommandEffect,
-    decision: Option<DecisionResolution>,
-}
 
 pub async fn run_task_session(session_id: TaskSessionId, generation: u32) -> Result<()> {
     let result = run_task_session_inner(session_id.clone(), generation).await;
@@ -91,7 +81,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
     let mut pending = VecDeque::new();
     let mut seen_commands = HashSet::new();
     let commands = claim_commands(&store, &session, generation, &mut seen_commands).await?;
-    if let Some(reason) = absorb_commands(
+    if let Some(stop) = absorb_commands(
         &store,
         &session,
         commands,
@@ -101,12 +91,12 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
     )
     .await?
     {
-        return finish_abandoned(&store, &mut session, harness.as_mut(), reason).await;
+        return finish_command_stop(&store, &mut session, harness.as_mut(), stop).await;
     }
     let mut flow_turn_active = false;
     let mut sent_pending = false;
     while let Some(input) = pending.pop_front() {
-        if !pending_input_is_current(&store, &input).await? {
+        if !pending_input_is_current(&store, &session, &input).await? {
             continue;
         }
         let command = input.command_id.map(|id| (id, input.effect));
@@ -157,7 +147,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                     generation,
                     &mut seen_commands,
                 ).await?;
-                if let Some(reason) = absorb_commands(
+                if let Some(stop) = absorb_commands(
                     &store,
                     &session,
                     commands,
@@ -165,7 +155,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                     true,
                     &mut pending,
                 ).await? {
-                    return finish_abandoned(&store, &mut session, harness.as_mut(), reason).await;
+                    return finish_command_stop(&store, &mut session, harness.as_mut(), stop).await;
                 }
             }
             event = event_rx.recv() => {
@@ -204,7 +194,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                         flow_turn_active = false;
                         loop {
                             while let Some(input) = pending.pop_front() {
-                                if !pending_input_is_current(&store, &input).await? {
+                                if !pending_input_is_current(&store, &session, &input).await? {
                                     continue;
                                 }
                                 if resume_interrupted_flow {
@@ -325,13 +315,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 .await?;
                             let boundary_commands = match boundary {
                                 BoundaryResult::Commands(commands) => {
-                                    record_claimed_commands(
-                                        &store,
-                                        &session,
-                                        commands,
-                                        &mut seen_commands,
-                                    )
-                                    .await?
+                                    filter_new_commands(commands, &mut seen_commands)
                                 }
                                 BoundaryResult::Stopped(stopped) => {
                                     let _ = harness.stop().await;
@@ -378,7 +362,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                             let resume_requested = boundary_commands.iter().any(|command| {
                                 matches!(&command.kind, TaskCommandKind::Resume { .. })
                             });
-                            if let Some(reason) = absorb_commands(
+                            if let Some(stop) = absorb_commands(
                                 &store,
                                 &session,
                                 boundary_commands,
@@ -386,12 +370,13 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 false,
                                 &mut pending,
                             ).await? {
-                                return finish_abandoned(
+                                return finish_command_stop(
                                     &store,
                                     &mut session,
                                     harness.as_mut(),
-                                    reason,
-                                ).await;
+                                    stop,
+                                )
+                                .await;
                             }
                             if resume_requested && pending.is_empty() {
                                 let prepared =
@@ -532,11 +517,12 @@ fn task_state_fingerprint(session: &TaskSession) -> Result<String> {
     Ok(hex::encode(Sha256::digest(state.as_bytes())))
 }
 
-async fn pending_input_is_current(store: &SharedStore, input: &PendingInput) -> Result<bool> {
-    match &input.command_id {
-        Some(command_id) => command_is_claimed(store, command_id).await,
-        None => Ok(true),
-    }
+async fn pending_input_is_current(
+    store: &SharedStore,
+    session: &TaskSession,
+    input: &PendingInput,
+) -> Result<bool> {
+    input_is_current(store, ChildTarget::Task(session), input).await
 }
 
 async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: String) -> Result<()> {
@@ -656,149 +642,16 @@ async fn absorb_commands(
     harness: &mut dyn Harness,
     turn_active: bool,
     pending: &mut VecDeque<PendingInput>,
-) -> Result<Option<String>> {
-    for command in commands {
-        if !command_is_claimed(store, &command.id).await? {
-            continue;
-        }
-        match command.kind {
-            TaskCommandKind::FollowUp { text } => {
-                pending.push_back(PendingInput {
-                    command_id: Some(command.id),
-                    text,
-                    effect: TaskCommandEffect::NextTurn,
-                    decision: None,
-                });
-            }
-            TaskCommandKind::Steer { text } => {
-                if turn_active && harness.capabilities().supports_steer {
-                    apply_input(
-                        store,
-                        session,
-                        harness,
-                        &text,
-                        Some((command.id, TaskCommandEffect::LiveSteer)),
-                        None,
-                    )
-                    .await?;
-                } else {
-                    if turn_active {
-                        if let Err(error) = harness.interrupt().await {
-                            record_command_failed(
-                                store,
-                                session,
-                                command.id,
-                                Some(TaskCommandEffect::Replacement),
-                                &error.to_string(),
-                            )
-                            .await?;
-                            return Err(error);
-                        }
-                    }
-                    record_command_effect(
-                        store,
-                        session,
-                        &command.id,
-                        TaskCommandEffect::Replacement,
-                    )
-                    .await?;
-                    pending.push_back(PendingInput {
-                        command_id: Some(command.id),
-                        text,
-                        effect: TaskCommandEffect::Replacement,
-                        decision: None,
-                    });
-                }
-            }
-            TaskCommandKind::Resume {
-                message: Some(text),
-            } => {
-                pending.push_back(PendingInput {
-                    command_id: Some(command.id),
-                    text,
-                    effect: TaskCommandEffect::NextTurn,
-                    decision: None,
-                });
-            }
-            TaskCommandKind::Resume { message: None } => {
-                record_command_accepted(store, session, command.id, None).await?;
-            }
-            TaskCommandKind::Interrupt { replacement } => {
-                pending.clear();
-                if turn_active {
-                    if let Err(error) = harness.interrupt().await {
-                        record_command_failed(
-                            store,
-                            session,
-                            command.id,
-                            replacement.as_ref().map(|_| TaskCommandEffect::Replacement),
-                            &error.to_string(),
-                        )
-                        .await?;
-                        return Err(error);
-                    }
-                }
-                if let Some(text) = replacement {
-                    pending.push_back(PendingInput {
-                        command_id: Some(command.id),
-                        text,
-                        effect: TaskCommandEffect::Replacement,
-                        decision: None,
-                    });
-                } else {
-                    record_command_accepted(store, session, command.id, None).await?;
-                }
-            }
-            TaskCommandKind::Decide {
-                decision_id,
-                choice,
-                message,
-            } => {
-                let resolution = DecisionResolution {
-                    decision_id,
-                    choice,
-                    message,
-                };
-                let text = decision_prompt(&resolution);
-                if turn_active && harness.capabilities().supports_steer {
-                    apply_input(
-                        store,
-                        session,
-                        harness,
-                        &text,
-                        Some((command.id, TaskCommandEffect::Decision)),
-                        Some(resolution),
-                    )
-                    .await?;
-                } else {
-                    if turn_active {
-                        if let Err(error) = harness.interrupt().await {
-                            record_command_failed(
-                                store,
-                                session,
-                                command.id,
-                                Some(TaskCommandEffect::Decision),
-                                &error.to_string(),
-                            )
-                            .await?;
-                            return Err(error);
-                        }
-                    }
-                    pending.push_back(PendingInput {
-                        command_id: Some(command.id),
-                        text,
-                        effect: TaskCommandEffect::Decision,
-                        decision: Some(resolution),
-                    });
-                }
-            }
-            TaskCommandKind::Abandon { reason } => {
-                record_command_accepted(store, session, command.id, None).await?;
-                return Ok(Some(reason));
-            }
-        }
-    }
-    Ok(None)
+) -> Result<Option<CommandStop>> {
+    absorb_child_commands(
+        store,
+        ChildTarget::Task(session),
+        commands,
+        harness,
+        turn_active,
+        pending,
+    )
+    .await
 }
 
 async fn claim_commands(
@@ -808,79 +661,17 @@ async fn claim_commands(
     seen: &mut HashSet<TaskCommandId>,
 ) -> Result<Vec<TaskCommand>> {
     let commands = store.claim_task_commands(&session.id, generation).await?;
-    record_claimed_commands(store, session, commands, seen).await
+    Ok(filter_new_commands(commands, seen))
 }
 
-async fn record_claimed_commands(
-    store: &SharedStore,
-    session: &TaskSession,
+fn filter_new_commands(
     commands: Vec<TaskCommand>,
     seen: &mut HashSet<TaskCommandId>,
-) -> Result<Vec<TaskCommand>> {
-    let commands: Vec<_> = commands
+) -> Vec<TaskCommand> {
+    commands
         .into_iter()
         .filter(|command| seen.insert(command.id.clone()))
-        .collect();
-    for command in &commands {
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::CommandChanged {
-                    command_id: command.id.clone(),
-                    state: TaskCommandState::Claimed,
-                    effect: command.effect,
-                    error: None,
-                },
-            )
-            .await?;
-    }
-    Ok(commands)
-}
-
-async fn record_command_effect(
-    store: &SharedStore,
-    session: &TaskSession,
-    command_id: &TaskCommandId,
-    effect: TaskCommandEffect,
-) -> Result<()> {
-    store.set_task_command_effect(command_id, effect).await?;
-    store
-        .append_task_event(
-            &session.id,
-            &TaskEventKind::CommandChanged {
-                command_id: command_id.clone(),
-                state: TaskCommandState::Claimed,
-                effect: Some(effect),
-                error: None,
-            },
-        )
-        .await?;
-    Ok(())
-}
-
-async fn record_command_failed(
-    store: &SharedStore,
-    session: &TaskSession,
-    command_id: TaskCommandId,
-    effect: Option<TaskCommandEffect>,
-    error: &str,
-) -> Result<()> {
-    let error = crate::lfd::redaction::sanitize_operator_message(error);
-    store
-        .fail_task_command(&command_id, effect, error.clone())
-        .await?;
-    store
-        .append_task_event(
-            &session.id,
-            &TaskEventKind::CommandChanged {
-                command_id,
-                state: TaskCommandState::Failed,
-                effect,
-                error: Some(error),
-            },
-        )
-        .await?;
-    Ok(())
+        .collect()
 }
 
 async fn record_unhandled_failure(
@@ -926,27 +717,6 @@ async fn record_unhandled_failure(
         .await;
 }
 
-async fn record_command_accepted(
-    store: &SharedStore,
-    session: &TaskSession,
-    command_id: TaskCommandId,
-    effect: Option<TaskCommandEffect>,
-) -> Result<()> {
-    store.accept_task_command(&command_id, effect).await?;
-    store
-        .append_task_event(
-            &session.id,
-            &TaskEventKind::CommandChanged {
-                command_id,
-                state: TaskCommandState::Accepted,
-                effect,
-                error: None,
-            },
-        )
-        .await?;
-    Ok(())
-}
-
 /// Send `text` to the harness and record the driving command's fate: accepted on
 /// success, failed (with the error propagated) otherwise. `command` is `None`
 /// for the task seed, which has no command to reconcile.
@@ -958,48 +728,21 @@ async fn apply_input(
     command: Option<(TaskCommandId, TaskCommandEffect)>,
     decision: Option<DecisionResolution>,
 ) -> Result<()> {
-    if let Err(error) = harness.send_input(text).await {
-        if let Some((command_id, effect)) = command {
-            record_command_failed(store, session, command_id, Some(effect), &error.to_string())
-                .await?;
-        }
-        return Err(error);
-    }
-    if let Some((command_id, effect)) = command {
-        record_command_accepted(store, session, command_id, Some(effect)).await?;
-    }
-    if let Some(decision) = decision {
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::DecisionResolved {
-                    decision_id: decision.decision_id,
-                    choice: decision.choice,
-                    message: decision.message,
-                },
-            )
-            .await?;
-    }
-    Ok(())
-}
-
-fn decision_prompt(resolution: &DecisionResolution) -> String {
-    let message = resolution
-        .message
-        .as_deref()
-        .map(|message| format!("\nFeedback: {message}"))
-        .unwrap_or_default();
-    format!(
-        "Decision {} resolved: {}{}",
-        resolution.decision_id, resolution.choice, message
+    let (command_id, effect) = command
+        .map(|(command_id, effect)| (Some(command_id), effect))
+        .unwrap_or((None, TaskCommandEffect::NextTurn));
+    apply_child_input(
+        store,
+        ChildTarget::Task(session),
+        harness,
+        PendingInput {
+            command_id,
+            text: text.to_string(),
+            effect,
+            decision,
+        },
     )
-}
-
-async fn command_is_claimed(store: &SharedStore, command_id: &TaskCommandId) -> Result<bool> {
-    Ok(store
-        .get_task_command(command_id)
-        .await?
-        .is_some_and(|command| command.state == TaskCommandState::Claimed))
+    .await
 }
 
 /// Apply a status transition and persist it: set the status, update the row, and
@@ -1063,6 +806,27 @@ async fn finish_abandoned(
     .await
 }
 
+async fn finish_command_stop(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    harness: &mut dyn Harness,
+    stop: CommandStop,
+) -> Result<()> {
+    match stop {
+        CommandStop::Interrupted => {
+            let _ = harness.stop().await;
+            set_and_record_status(
+                store,
+                session,
+                TaskSessionStatus::Waiting,
+                "Task turn interrupted; waiting for resume or another instruction",
+            )
+            .await
+        }
+        CommandStop::Abandoned(reason) => finish_abandoned(store, session, harness, reason).await,
+    }
+}
+
 fn task_seed(session: &TaskSession, directive: &ChildDirective) -> String {
     let snapshot_warning = session
         .pm_snapshot_warning
@@ -1109,7 +873,7 @@ mod tests {
     use async_trait::async_trait;
     use time::OffsetDateTime;
 
-    use super::{absorb_commands, apply_input, handle_attachment, progress_summary};
+    use super::{absorb_commands, apply_input, handle_attachment, progress_summary, CommandStop};
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
     use crate::lfd::id::LfdId;
@@ -1443,11 +1207,11 @@ mod tests {
         let mut harness = ScriptedHarness::new(true);
         let mut pending = VecDeque::new();
 
-        let abandon = absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
+        let stop = absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
             .await
             .unwrap();
 
-        assert_eq!(abandon, None);
+        assert_eq!(stop, Some(CommandStop::Interrupted));
         assert_eq!(harness.interrupts, 1);
         assert!(pending.is_empty());
         assert_eq!(

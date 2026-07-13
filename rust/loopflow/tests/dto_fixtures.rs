@@ -296,9 +296,6 @@ fn resident_door_fixture_round_trips_attach_and_context() {
 
     let context: ContextResponse = serde_json::from_value(value["context_response"].clone())
         .expect("context response should parse");
-    assert_eq!(context.in_flight.len(), 1);
-    assert_eq!(context.in_flight[0].flow, "implement");
-    assert_eq!(context.in_flight[0].task, "Wire the endpoint.");
     assert_eq!(
         context
             .provider_session

@@ -17,19 +17,14 @@
 //!   lfd's session reconciliation (pid probe on `wave_server` rows) covers a
 //!   crash, and so does the boot-time probe of the next `lf serve`.
 //!
-//! - **Observation.** [`StoreObserver`] polls the store — this wave's worker
-//!   sessions and runs — and journals confirmed worker facts:
-//!   `RunObserved` when a worker session+run appears, `RunCompleted`
-//!   when the session goes terminal (summary = what the registry knows:
-//!   session exit status, run error, PR url). These are OBSERVATIONS — the
-//!   server is never in the worker start path. The runtime's run-id guard keeps
-//!   every fact journaled exactly once, however polls and restarts overlap.
+//! - **Observation.** [`StoreObserver`] drains typed Project and Task
+//!   observations addressed to this wave. Child ledgers and the SQLite outbox
+//!   are durable; delivery into the wave journal is idempotent.
 //!
 //! **The no-store story, honestly:** a machine without the registry db gets
-//! no registration, no one-brain enforcement, and no worker observations —
+//! no registration, no one-brain enforcement, and no child observations —
 //! the wave server is fully functional anyway, and says so once.
 
-use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::future::Future;
 use std::path::Path;
@@ -43,12 +38,11 @@ use tokio::process::Command;
 use crate::engine::wave_config::read_wave_config;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{
-    Run, RunStatus, Session, SessionStatus, SessionUse, Wave, WaveStatus, LIVE_SESSION_STATUSES,
-    WAVE_SERVER_ENDPOINT_ENV, WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
+    Session, SessionStatus, SessionUse, Wave, LIVE_SESSION_STATUSES, WAVE_SERVER_ENDPOINT_ENV,
+    WAVE_SERVER_PID_ENV, WAVE_SERVER_SOURCE,
 };
 use crate::lfdb::{SharedStore, StoreResult};
 use crate::task::{TaskObservation, TaskSessionId};
-use crate::wave::journal::WorkerOutcome;
 use crate::wave::runtime::WaveRuntime;
 
 /// How often the observer re-reads the store between turns. Modest by
@@ -332,32 +326,15 @@ fn block_on_new_runtime(future: impl Future<Output = ()>) {
 
 // -- Observation ---------------------------------------------------------
 
-/// Polls the store for this wave's worker facts and journals them.
-/// Idempotent end to end: the runtime's run-id guard makes overlapping
-/// polls, restarts, and the pre-turn refresh journal each fact exactly once.
+/// Polls the durable child-observation outbox for this wave.
 ///
-/// The observer is also the daemonless liveness authority for workers: a
-/// SIGKILL'd worker never closes its own Running row and the exit-file
-/// janitor only runs at lfd boot, so the poll probes live tmux-backed
-/// worker rows (the same way brains are pid-probed) and closes dead ones —
-/// otherwise `in_flight` and wave capacity stay poisoned forever.
+/// Project and Task lifecycle owners reconcile their own process liveness.
+/// This observer has one job: carry their typed events into the Wave journal.
 pub struct StoreObserver {
     runtime: Arc<WaveRuntime>,
     store: SharedStore,
     wave_id: LfdId,
-    /// Unix-seconds cutoff for the recently-terminal session query; `None`
-    /// until the first (full-history, catch-up) poll succeeds.
-    terminal_cutoff: std::sync::Mutex<Option<i64>>,
-    /// Run ids already journaled as started — a local snapshot so
-    /// steady-state polls don't take the runtime lock per session.
-    seen: std::sync::Mutex<HashSet<String>>,
-    #[cfg(test)]
-    liveness_override: std::sync::Mutex<Option<LivenessProbe>>,
 }
-
-/// Test seam: fabricated worker rows have no real tmux session to probe.
-#[cfg(test)]
-type LivenessProbe = Box<dyn Fn(&Session) -> bool + Send + Sync>;
 
 impl fmt::Debug for StoreObserver {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -367,21 +344,12 @@ impl fmt::Debug for StoreObserver {
     }
 }
 
-/// Margin subtracted from each poll's start when it becomes the next poll's
-/// terminal cutoff: clock jitter between writers can never hide a finish,
-/// and re-reading a row twice is free (journaling is idempotent).
-const TERMINAL_CUTOFF_MARGIN: time::Duration = time::Duration::seconds(60);
-
 impl StoreObserver {
     pub fn new(runtime: Arc<WaveRuntime>, store: SharedStore, wave_id: LfdId) -> Self {
         Self {
             runtime,
             store,
             wave_id,
-            terminal_cutoff: std::sync::Mutex::new(None),
-            seen: std::sync::Mutex::new(HashSet::new()),
-            #[cfg(test)]
-            liveness_override: std::sync::Mutex::new(None),
         }
     }
 
@@ -393,216 +361,10 @@ impl StoreObserver {
         }
     }
 
-    /// Whether a `RunObserved` is already journaled for `run_id`,
-    /// via the local seen-cache first (the runtime lock is taken at most
-    /// once per run id over the observer's lifetime).
-    fn known(&self, run_id: &str) -> bool {
-        if self
-            .seen
-            .lock()
-            .expect("observer seen cache poisoned")
-            .contains(run_id)
-        {
-            return true;
-        }
-        if self.runtime.worker_known(run_id) {
-            self.mark_seen(run_id);
-            return true;
-        }
-        false
-    }
-
-    fn mark_seen(&self, run_id: &str) {
-        self.seen
-            .lock()
-            .expect("observer seen cache poisoned")
-            .insert(run_id.to_string());
-    }
-
-    async fn worker_alive(&self, session: &Session) -> bool {
-        #[cfg(test)]
-        if let Some(probe) = self
-            .liveness_override
-            .lock()
-            .expect("observer probe override poisoned")
-            .as_ref()
-        {
-            return probe(session);
-        }
-        crate::engine::process::tmux_session_exists(&session.tmux_name)
-            .await
-            .unwrap_or(false)
-    }
-
-    #[cfg(test)]
-    fn set_liveness_probe(&self, probe: impl Fn(&Session) -> bool + Send + Sync + 'static) {
-        *self
-            .liveness_override
-            .lock()
-            .expect("observer probe override poisoned") = Some(Box::new(probe));
-    }
-
-    /// One reconciliation pass: read this wave's worker sessions (live plus
-    /// recently-terminal — the first poll scans full history to catch up on
-    /// anything that happened with no server watching), close dead workers,
-    /// journal new starts and fresh finishes. Store errors are logged
-    /// and skipped — the next poll retries.
+    /// Deliver every pending typed child observation. Store errors are logged
+    /// and retried on the next poll.
     pub async fn poll_once(&self) {
         self.poll_child_observations().await;
-        let poll_started = OffsetDateTime::now_utc();
-        let cutoff = *self
-            .terminal_cutoff
-            .lock()
-            .expect("observer cutoff poisoned");
-        let sessions = match cutoff {
-            None => {
-                self.store
-                    .list_control_sessions(Some(&self.wave_id), None)
-                    .await
-            }
-            Some(since) => {
-                self.store
-                    .list_recent_control_sessions(&self.wave_id, since)
-                    .await
-            }
-        };
-        let sessions = match sessions {
-            Ok(sessions) => sessions,
-            Err(err) => {
-                tracing::debug!(error = %err, "wave observer session read failed");
-                return;
-            }
-        };
-        // Advance the cutoff only after a successful read.
-        *self
-            .terminal_cutoff
-            .lock()
-            .expect("observer cutoff poisoned") =
-            Some((poll_started - TERMINAL_CUTOFF_MARGIN).unix_timestamp());
-
-        let mut workers: Vec<(Session, String)> = sessions
-            .into_iter()
-            .filter(|session| session.session_use == SessionUse::Worker)
-            .filter_map(|session| {
-                let run_id = session.run_id.as_ref().map(ToString::to_string)?;
-                Some((session, run_id))
-            })
-            .collect();
-
-        // Liveness: a Running tmux-backed worker whose tmux session is gone
-        // died without closing its row (SIGKILL, crash). Close it here —
-        // at most one probe per session per poll — so capacity frees up and
-        // the finish is journaled below as `process gone`.
-        let mut gone: HashSet<String> = HashSet::new();
-        for (session, run_id) in workers.iter_mut() {
-            if session.status != SessionStatus::Running
-                || !session.is_tmux_backed()
-                || session.tmux_name.is_empty()
-                || self.worker_alive(session).await
-            {
-                continue;
-            }
-            if session.complete(1) {
-                if let Err(err) = self.store.update_control_session(session).await {
-                    tracing::debug!(
-                        error = %err,
-                        session_id = %session.id,
-                        "failed to close dead worker session; will retry next poll"
-                    );
-                    continue;
-                }
-                tracing::info!(
-                    session_id = %session.id,
-                    run_id,
-                    "closed dead worker session (process gone)"
-                );
-            }
-            gone.insert(run_id.clone());
-        }
-
-        // Runs carry the flow/task for a start and the PR/error for a
-        // finish summary; fetch them only when this pass will journal.
-        let in_flight: HashSet<String> = self
-            .runtime
-            .in_flight_workers()
-            .into_iter()
-            .map(|worker| worker.run_id)
-            .collect();
-        let needs_runs = workers.iter().any(|(session, run_id)| {
-            !self.known(run_id) || (session.status.is_terminal() && in_flight.contains(run_id))
-        });
-        if !needs_runs {
-            return;
-        }
-        let runs: HashMap<String, Run> = match self.store.list_runs(Some(&self.wave_id), None).await
-        {
-            Ok(runs) => runs
-                .into_iter()
-                .map(|run| (run.id.to_string(), run))
-                .collect(),
-            Err(err) => {
-                tracing::debug!(error = %err, "wave observer run read failed");
-                return;
-            }
-        };
-
-        for (session, run_id) in workers {
-            if !self.known(&run_id) {
-                let Some(run) = runs.get(&run_id) else {
-                    tracing::warn!(run_id, "observed worker session with no run row; skipped");
-                    continue;
-                };
-                if self.runtime.journal_run_observed(
-                    &run_id,
-                    session.id.as_str(),
-                    &run.flow,
-                    run.task.as_deref().unwrap_or(""),
-                ) {
-                    tracing::info!(
-                        run_id,
-                        session_id = %session.id,
-                        flow = run.flow,
-                        "worker started"
-                    );
-                }
-                self.mark_seen(&run_id);
-            }
-            if !session.status.is_terminal() {
-                continue;
-            }
-            let outcome = if session.status == SessionStatus::Succeeded {
-                WorkerOutcome::Completed
-            } else {
-                WorkerOutcome::Failed
-            };
-            let summary = if gone.contains(&run_id) {
-                "process gone".to_string()
-            } else {
-                let mut summary = format!("session {}", session.status.as_str());
-                if let Some(run) = runs.get(&run_id) {
-                    if let Some(pr) = &run.pr {
-                        summary.push_str(&format!("; pr {}", pr.url));
-                    }
-                    if let Some(error) = &run.error {
-                        summary.push_str(&format!("; error: {error}"));
-                    }
-                }
-                summary
-            };
-            if self
-                .runtime
-                .journal_run_completed(&run_id, outcome, &summary)
-            {
-                tracing::info!(run_id, outcome = outcome.name(), summary, "worker finished");
-            }
-            // Close the loop the trinity leaves open: a terminal worker
-            // SESSION whose Run row is still active keeps the run — and the
-            // wave — counted Running forever, starving capacity. Mark the run
-            // row terminal here (the observer is the daemonless authority),
-            // then reset the wave's repo status if no active runs remain.
-            self.close_run_and_maybe_idle_wave(&runs, &run_id, outcome)
-                .await;
-        }
     }
 
     /// Resolve a narrow `(session_id, event_id)` door request against the Task
@@ -704,57 +466,6 @@ impl StoreObserver {
             }
         }
     }
-
-    /// Mark a finished worker's Run row terminal and, when the wave has no
-    /// active runs left, reset its repo status `Running → Idle`. Idempotent:
-    /// an already-terminal run row is skipped, and the wave reset is a no-op
-    /// once the status is settled. Store errors are logged and retried next
-    /// poll — never fatal.
-    async fn close_run_and_maybe_idle_wave(
-        &self,
-        runs: &HashMap<String, Run>,
-        run_id: &str,
-        outcome: WorkerOutcome,
-    ) {
-        let Some(run) = runs.get(run_id) else {
-            return;
-        };
-        if run.status.is_active() {
-            let mut run = run.clone();
-            run.status = match outcome {
-                WorkerOutcome::Completed => RunStatus::Completed,
-                WorkerOutcome::Failed => RunStatus::Failed,
-            };
-            run.ended_at = Some(OffsetDateTime::now_utc());
-            if let Err(err) = self.store.update_run(&run).await {
-                tracing::debug!(run_id, error = %err, "failed to close run row; retry next poll");
-                return;
-            }
-        }
-        // No active runs → the wave is idle again. Reset it if still stamped
-        // Running (the status create_run_for_placement set at start); leave
-        // Paused and already-Idle waves alone.
-        match self.store.count_active_runs(&self.wave_id).await {
-            Ok(0) => self.reset_wave_to_idle().await,
-            Ok(_) => {}
-            Err(err) => {
-                tracing::debug!(error = %err, "active-run count failed; wave status unchanged");
-            }
-        }
-    }
-
-    async fn reset_wave_to_idle(&self) {
-        let Ok(Some(mut wave)) = self.store.get_wave(&self.wave_id).await else {
-            return;
-        };
-        if wave.status != WaveStatus::Running {
-            return;
-        }
-        wave.status = WaveStatus::Idle;
-        if let Err(err) = self.store.update_wave(&wave).await {
-            tracing::debug!(wave_id = %self.wave_id, error = %err, "failed to reset wave status to idle");
-        }
-    }
 }
 
 #[cfg(test)]
@@ -762,9 +473,8 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    use crate::lfd::types::{PullRequest, RunStatus, WaveStatus, TMUX_TERMINAL_SOURCE};
+    use crate::lfd::types::WaveStatus;
     use crate::lfdb::{open_store, StorageConfig};
-    use crate::wave::journal::{journal_path, EventKind, Journal};
 
     async fn temp_store(tmp: &std::path::Path) -> SharedStore {
         Arc::new(
@@ -832,54 +542,6 @@ mod tests {
             completed_at: None,
             created_at: OffsetDateTime::now_utc(),
             completion_token: None,
-        }
-    }
-
-    fn worker_session(wave: &Wave, run_id: &LfdId) -> Session {
-        Session {
-            id: LfdId::new(),
-            wave_id: wave.id().clone(),
-            run_id: Some(run_id.clone()),
-            parent_session_id: None,
-            session_use: SessionUse::Worker,
-            skill: "implement".to_string(),
-            agent: "lf".to_string(),
-            cwd: "/tmp/repo.ship".to_string(),
-            argv: Vec::new(),
-            env: BTreeMap::new(),
-            source: TMUX_TERMINAL_SOURCE.to_string(),
-            tmux_name: "lf-x".to_string(),
-            status: SessionStatus::Running,
-            attached_at: None,
-            started_at: Some(OffsetDateTime::now_utc()),
-            completed_at: None,
-            created_at: OffsetDateTime::now_utc(),
-            completion_token: None,
-        }
-    }
-
-    fn make_run(wave: &Wave, flow: &str, task: &str) -> Run {
-        Run {
-            id: LfdId::new(),
-            wave_id: wave.id().clone(),
-            repo: "/tmp/repo".to_string(),
-            flow: flow.to_string(),
-            task: Some(task.to_string()),
-            direction: Vec::new(),
-            area: Vec::new(),
-            iteration: 0,
-            step_index: 0,
-            status: RunStatus::Running,
-            worktree: "/tmp/repo.ship".to_string(),
-            branch: "ship-branch".to_string(),
-            started_at: Some(OffsetDateTime::now_utc()),
-            ended_at: None,
-            error: None,
-            flow_parents: Vec::new(),
-            execution_cursor: None,
-            parent_run_id: None,
-            repair_of: None,
-            pr: None,
         }
     }
 
@@ -1092,197 +754,5 @@ mod tests {
         // The old process got the SIGTERM.
         let status = child.wait().expect("child reaped");
         assert!(!status.success(), "sleep was killed, not completed");
-    }
-
-    /// The observation fold, across poll gaps: rows created between polls
-    /// are picked up; nothing journals twice however often polls repeat.
-    #[tokio::test]
-    async fn observer_journals_worker_facts_exactly_once_across_polls() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let store = temp_store(tmp.path()).await;
-        let wave = make_wave("ship");
-        store.create_wave(&wave).await.expect("seed wave");
-        let runtime =
-            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
-        let observer = StoreObserver::new(runtime.clone(), store.clone(), wave.id().clone());
-        // This test's workers are fabricated rows, not real tmux sessions;
-        // pin them alive so the liveness probe stays out of the way.
-        observer.set_liveness_probe(|_| true);
-
-        // Poll 1: one running worker → one start observation.
-        let run_1 = make_run(&wave, "implement", "wire the tail");
-        store.create_run(&run_1).await.expect("run-1");
-        let mut sess_1 = worker_session(&wave, &run_1.id);
-        store.register_session(&sess_1).await.expect("sess-1");
-        observer.poll_once().await;
-        observer.poll_once().await; // repeat poll: guard holds
-        assert!(runtime.worker_known(run_1.id.as_str()));
-        assert_eq!(runtime.in_flight_workers().len(), 1);
-
-        // Between polls: a second worker appears, and run-1 finishes with
-        // a PR — the terminal fact and the late-run fact land in one gap.
-        let run_2 = make_run(&wave, "design", "sketch the next item");
-        store.create_run(&run_2).await.expect("run-2");
-        store
-            .register_session(&worker_session(&wave, &run_2.id))
-            .await
-            .expect("sess-2");
-        let mut finished_run = run_1.clone();
-        finished_run.pr = Some(PullRequest {
-            url: "https://github.com/x/y/pull/7".to_string(),
-            number: Some(7),
-            state: Some("open".to_string()),
-            title: None,
-            branch: None,
-        });
-        store.update_run(&finished_run).await.expect("run-1 pr");
-        assert!(sess_1.complete(0));
-        store
-            .update_control_session(&sess_1)
-            .await
-            .expect("sess-1 terminal");
-
-        observer.poll_once().await;
-        observer.poll_once().await; // and once more
-
-        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-        let started: Vec<String> = events
-            .iter()
-            .filter_map(|event| match &event.kind {
-                EventKind::RunObserved {
-                    run_id, flow, task, ..
-                } => Some(format!("{run_id}/{flow}/{task}")),
-                _ => None,
-            })
-            .collect();
-        let mut sorted = started.clone();
-        sorted.sort();
-        let mut expected = vec![
-            format!("{}/implement/wire the tail", run_1.id),
-            format!("{}/design/sketch the next item", run_2.id),
-        ];
-        expected.sort();
-        assert_eq!(sorted, expected, "each start journaled exactly once");
-
-        let finished: Vec<(String, String)> = events
-            .iter()
-            .filter_map(|event| match &event.kind {
-                EventKind::RunCompleted {
-                    run_id, summary, ..
-                } => Some((run_id.clone(), summary.clone())),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(finished.len(), 1, "one finish, once");
-        assert_eq!(finished[0].0, run_1.id.to_string());
-        assert!(
-            finished[0].1.contains("succeeded")
-                && finished[0].1.contains("https://github.com/x/y/pull/7"),
-            "summary carries what the registry knows: {}",
-            finished[0].1
-        );
-
-        // A restarted server (fresh runtime over the same journal) keeps the
-        // guard: nothing re-journals.
-        let runtime_2 =
-            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("reopen runtime");
-        let observer_2 = StoreObserver::new(runtime_2, store, wave.id().clone());
-        observer_2.set_liveness_probe(|_| true);
-        observer_2.poll_once().await;
-        let (_, events_after) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-        assert_eq!(
-            events.len(),
-            events_after.len(),
-            "restart journals nothing new"
-        );
-    }
-
-    /// Daemonless liveness: a SIGKILL'd worker leaves a Running row and no
-    /// process. The observer's probe must close the row (Failed) and journal
-    /// the finish as `process gone`, freeing in_flight and wave capacity —
-    /// and stay idempotent across repeated polls.
-    #[tokio::test]
-    async fn observer_closes_dead_worker_rows_and_journals_process_gone() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let store = temp_store(tmp.path()).await;
-        let wave = make_wave("ship");
-        store.create_wave(&wave).await.expect("seed wave");
-        let runtime =
-            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
-        let observer = StoreObserver::new(runtime.clone(), store.clone(), wave.id().clone());
-        observer.set_liveness_probe(|_| false);
-
-        let run = make_run(&wave, "implement", "wire the tail");
-        store.create_run(&run).await.expect("run");
-        let session = worker_session(&wave, &run.id);
-        store.register_session(&session).await.expect("session");
-
-        observer.poll_once().await;
-        observer.poll_once().await; // repeat poll: guard holds
-
-        let closed = store
-            .get_control_session(&session.id)
-            .await
-            .expect("lookup")
-            .expect("row kept");
-        assert_eq!(
-            closed.status,
-            SessionStatus::Failed,
-            "a dead worker's Running row is closed by the probe"
-        );
-        assert!(
-            runtime.in_flight_workers().is_empty(),
-            "in_flight frees up when the dead worker is closed"
-        );
-
-        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-        let finished: Vec<(String, WorkerOutcome, String)> = events
-            .iter()
-            .filter_map(|event| match &event.kind {
-                EventKind::RunCompleted {
-                    run_id,
-                    outcome,
-                    summary,
-                } => Some((run_id.clone(), *outcome, summary.clone())),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(finished.len(), 1, "one finish, once");
-        assert_eq!(finished[0].0, run.id.to_string());
-        assert_eq!(finished[0].1, WorkerOutcome::Failed);
-        assert_eq!(finished[0].2, "process gone");
-    }
-
-    /// Pending rows (registered but not yet launched) and non-tmux rows are
-    /// never probed — only a Running tmux-backed worker can be "gone".
-    #[tokio::test]
-    async fn observer_probe_leaves_pending_workers_alone() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let store = temp_store(tmp.path()).await;
-        let wave = make_wave("ship");
-        store.create_wave(&wave).await.expect("seed wave");
-        let runtime =
-            WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
-        let observer = StoreObserver::new(runtime, store.clone(), wave.id().clone());
-        observer.set_liveness_probe(|_| false);
-
-        let run = make_run(&wave, "implement", "not yet launched");
-        store.create_run(&run).await.expect("run");
-        let mut session = worker_session(&wave, &run.id);
-        session.status = SessionStatus::Pending;
-        store.register_session(&session).await.expect("session");
-
-        observer.poll_once().await;
-
-        let stored = store
-            .get_control_session(&session.id)
-            .await
-            .expect("lookup")
-            .expect("row kept");
-        assert_eq!(
-            stored.status,
-            SessionStatus::Pending,
-            "a Pending row belongs to its launcher, not the probe"
-        );
     }
 }

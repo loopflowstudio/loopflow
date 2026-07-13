@@ -16,13 +16,13 @@
 //! depends on explicit fields. Each line carries `v: 1` so the format can be
 //! migrated.
 //!
-//! `RunObserved`/`RunCompleted` are produced by the registry observer
-//! ([`crate::wave::registry::StoreObserver`]): the server polls the
-//! shared store — these are confirmed facts, not commands — and the in-flight
-//! view is their fold ([`fold_workers`]). `MemoryUpdated` and `MemoryAdded`
-//! are produced by the server's memory routes (`lf memory update`/`add` — the
-//! server holds MEMORY.md's pen). `ServerStarted` is appended once per boot,
-//! after replay — restarts are forensically visible in the record.
+//! `RunObserved`/`RunCompleted` remain readable for journals written before
+//! Project and Task Sessions replaced generic workers. New child lifecycle
+//! facts arrive as typed Project and Task observations. `MemoryUpdated` and
+//! `MemoryAdded` are produced by the server's memory routes (`lf memory
+//! update`/`add` — the server holds MEMORY.md's pen). `ServerStarted` is
+//! appended once per boot, after replay — restarts are forensically visible
+//! in the record.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
@@ -114,17 +114,6 @@ impl WorkerOutcome {
             Self::Failed => "failed",
         }
     }
-}
-
-/// One worker, folded from `RunObserved`/`RunCompleted` rows.
-/// `finished` is `None` while the worker is in flight.
-#[derive(Debug, Clone, PartialEq)]
-pub struct WorkerRecord {
-    pub run_id: String,
-    pub session_id: String,
-    pub flow: String,
-    pub task: String,
-    pub finished: Option<WorkerOutcome>,
 }
 
 /// A journaled user message that has not yet been consumed by a turn.
@@ -561,8 +550,7 @@ impl Narrator {
 }
 
 /// Flatten whitespace and cap at `max` chars (with an ellipsis when cut).
-/// Shared with the loop's heartbeat prompt, where the flattening keeps
-/// multi-line worker tasks from breaking the one-line `<in_flight>` format.
+/// Shared by journal narration and the CLI thread renderer.
 pub(crate) fn ellipsize(text: &str, max: usize) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.chars().count() <= max {
@@ -1061,45 +1049,6 @@ fn mark_consumed(
     pending_messages.retain(|message| !consumed_messages.contains(&message.id));
 }
 
-/// Fold worker observations: one record per run in start order, with
-/// `finished` stamped when its `RunCompleted` arrives. The run id is the
-/// idempotence key, whatever the observer saw.
-pub fn fold_workers(events: &[Event]) -> Vec<WorkerRecord> {
-    let mut workers: Vec<WorkerRecord> = Vec::new();
-    for event in events {
-        match &event.kind {
-            EventKind::RunObserved {
-                run_id,
-                session_id,
-                flow,
-                task,
-            } => {
-                if workers.iter().any(|w| &w.run_id == run_id) {
-                    tracing::warn!(run_id, seq = event.seq, "duplicate RunObserved in journal");
-                    continue;
-                }
-                workers.push(WorkerRecord {
-                    run_id: run_id.clone(),
-                    session_id: session_id.clone(),
-                    flow: flow.clone(),
-                    task: task.clone(),
-                    finished: None,
-                });
-            }
-            EventKind::RunCompleted {
-                run_id, outcome, ..
-            } => match workers.iter_mut().find(|w| &w.run_id == run_id) {
-                Some(worker) => worker.finished = Some(*outcome),
-                None => {
-                    tracing::warn!(run_id, seq = event.seq, "RunCompleted for unknown worker");
-                }
-            },
-            _ => {}
-        }
-    }
-    workers
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1460,7 +1409,7 @@ mod tests {
 
     /// A fixed event sequence renders the console a human would want to read:
     /// chat with bylines and ops, turn open/close with items and usage, the
-    /// prose gist once at INFO with the rest at DEBUG, worker observations,
+    /// prose gist once at INFO with the rest at DEBUG, legacy worker observations,
     /// memory curation.
     #[test]
     fn narration_demo_reads_like_a_console() {
@@ -1816,36 +1765,6 @@ mod tests {
         ];
         let fold = fold_thread(&consumed);
         assert!(fold.pending_messages.is_empty(), "answered say is consumed");
-    }
-
-    #[test]
-    fn fold_workers_tracks_start_and_finish_once_per_run() {
-        let (_tmp, path) = open_tmp();
-        let (mut journal, _) = Journal::open(&path).expect("open");
-        let started = |run: &str| EventKind::RunObserved {
-            run_id: run.to_string(),
-            session_id: format!("sess-{run}"),
-            flow: "implement".to_string(),
-            task: "build the thing".to_string(),
-        };
-        let events = vec![
-            journal.append(|_| started("run-1")),
-            journal.append(|_| started("run-2")),
-            // Duplicate observations are tolerated by the fold (first wins).
-            journal.append(|_| started("run-1")),
-            journal.append(|_| EventKind::RunCompleted {
-                run_id: "run-1".to_string(),
-                outcome: WorkerOutcome::Completed,
-                summary: "pr landed".to_string(),
-            }),
-        ];
-
-        let workers = fold_workers(&events);
-        assert_eq!(workers.len(), 2);
-        assert_eq!(workers[0].run_id, "run-1");
-        assert_eq!(workers[0].finished, Some(WorkerOutcome::Completed));
-        assert_eq!(workers[1].run_id, "run-2");
-        assert_eq!(workers[1].finished, None);
     }
 
     #[test]

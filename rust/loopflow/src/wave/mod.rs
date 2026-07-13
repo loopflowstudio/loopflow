@@ -6,8 +6,8 @@
 //! - holds the mind's one journal pen;
 //! - serves the doors: `/messages`, `/events`, `/memory`, `/health`,
 //!   and the token-gated resident door ([`server`]);
-//! - folds the store's worker facts ([`registry::StoreObserver`]) and its
-//!   hands' broadcasts off the shared-store bus ([`bus::BusListener`]);
+//! - drains typed Project/Task observations ([`registry::StoreObserver`]) and
+//!   its hands' broadcasts off the shared-store bus ([`bus::BusListener`]);
 //! - keeps the registry seat and the discovery pointer;
 //! - supervises the resident ([`supervisor`]): process liveness, the respawn
 //!   ladder, the interrupt janitor.
@@ -45,7 +45,7 @@
 //! [`registry`] (the same local store lfd serves from — the db IS the
 //! registry): a `WaveAgent` session row registered store-direct at boot (one
 //! brain per wave, enforced by a pid-probing pre-flight) and a store-polling
-//! observer that journals `RunObserved`/`RunCompleted` observations. No
+//! observer that carries typed Project/Task events into the Wave journal. No
 //! registry store on the machine → warn once, fully functional anyway.
 
 pub mod bus;
@@ -167,7 +167,7 @@ async fn request_stop(repo_root: &Path, wave: &str) -> Result<bool> {
 /// so a reachable store always yields a registered boot (see
 /// [`registry::ensure_wave_row`]). `None` (with one warning) only when the
 /// store itself is missing or unusable: the server runs unregistered — no
-/// one-brain enforcement, no worker observations — the pre-registry status
+/// one-brain enforcement, no child observations — the pre-registry status
 /// quo.
 async fn resolve_registry(
     main_repo: &Path,
@@ -178,7 +178,7 @@ async fn resolve_registry(
         tracing::warn!(
             wave,
             "no session registry on this machine; running unregistered \
-             (no one-brain enforcement, no worker observations)"
+             (no one-brain enforcement, no child observations)"
         );
         return None;
     };
@@ -333,7 +333,7 @@ async fn run_listener(
                     wave,
                     error = %err,
                     "session registry write failed; running unregistered (no one-brain \
-                     enforcement, no worker observations)"
+                     enforcement, no child observations)"
                 );
             }
         }
@@ -913,8 +913,7 @@ mod tests {
         assert_eq!(thread[0].text, "over the wire");
         assert_eq!(thread[0].status, Lifecycle::Completed);
 
-        // The context door serves the in-flight fold.
-        runtime.journal_run_observed("run-1", "sess-1", "implement", "wire it");
+        // The context door serves durable scheduler/provider state only.
         let context: serde_json::Value = client
             .get(format!("{base}/resident/context"))
             .header(RESIDENT_TOKEN_HEADER, "test-token")
@@ -925,8 +924,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(context["in_flight"][0]["run_id"], "run-1");
-        assert_eq!(context["in_flight"][0]["flow"], "implement");
+        assert!(context.get("playhead").is_some());
+        assert!(context.get("provider_session").is_some());
+        assert!(context.get("in_flight").is_none());
     }
 
     #[tokio::test]

@@ -14,8 +14,8 @@
 
 - **The listener** is the channel made durable — hear / check / fold / tell,
   **vendor-free**. It holds the wave's one journal pen (work-line channels are
-  bus addresses and journal nothing), serves the doors, folds the store's
-  worker observations and its hands' bus broadcasts, keeps the registry seat
+  bus addresses and journal nothing), serves the doors, drains typed
+  Project/Task observations and its hands' bus broadcasts, keeps the registry seat
   and the discovery pointer, and supervises the resident. It serves from the
   **origin repo** and creates no worktrees.
 - **The resident** is the wave's Loop (see `flowloop/wave.rs`): the durable
@@ -130,8 +130,8 @@ don't consume this wire):
   ride the wire — the listener mints them from its journal seq. Plus
   `POST /resident/attach {pid}` (liveness registration + revival; returns
   `{wave}`) and `GET /resident/context`
-  (`{in_flight, playhead, provider_session}`; serving it freshens the store
-  fold). The optional provider session is a typed `{harness, session_id}` pair,
+  (`{playhead, provider_session}`; serving it first drains typed child
+  observations). The optional provider session is a typed `{harness, session_id}` pair,
   so a resident restart resumes only through the harness that minted it.
 - **Listener → resident**: `GET /events?inbox=true` adds `inbox` SSE frames
   to the primary subscription — `{kind: "message", id, op, text, from}` per
@@ -214,9 +214,9 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 
 | Method + path             | Behavior |
 |---------------------------|----------|
-| `GET /health`             | `{status, loop_state, wave, turns, workers, paused, uptime_seconds}`; `status` is channel liveness; `loop_state` is `idle \| turning \| interrupting \| failed`; `workers` counts observed in-flight worker runs |
+| `GET /health`             | `{status, loop_state, wave, turns, paused, uptime_seconds}`; `status` is channel liveness; `loop_state` is `idle \| turning \| interrupting \| failed` |
 | `GET /conversation`       | `{turns: [Turn]}` — the whole thread; `?limit=N` tails the last N turns (open turn included) |
-| `GET /events`             | SSE, the served mind's thread. No channel scoping — agent broadcast is the bus, not this door. Event names: `state` (loop-state name), `playhead` (durable cursor snapshot), `turn` (replay then live; repeated ids replace), `op` (live worker motion), `memory-add` (replay then live), `memory` (live curation summaries), and — only with `?inbox=true` — `inbox` (pending replay + live controls). |
+| `GET /events`             | SSE, the served mind's thread. No channel scoping — agent broadcast is the bus, not this door. Event names: `state` (loop-state name), `playhead` (durable cursor snapshot), `turn` (replay then live; repeated ids replace), `memory-add` (replay then live), `memory` (live curation summaries), and — only with `?inbox=true` — `inbox` (pending replay + live controls). |
 | `POST /messages {op, text}` | Human thread input. `op` required: `message` (next body), `steer` (inject into the active steer-capable harness, otherwise queue), or `interrupt` (stop the active body; non-empty text queues for the retry). `say` and bylines are rejected; machine speech uses `lf radio pub`. Returns `{turn, state}`. |
 | `GET /playhead`           | Durable invocation stack, active body, `now`, `next`, local queue, and return target. |
 | `GET /memory`             | `{content}` — the wave's MEMORY.md (origin repo). |
@@ -224,7 +224,7 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 | `POST /memory {op, content, summary}` | `op`: `update` replaces `MEMORY.md`; `add` publishes one replayable fact. `summary` null → first non-empty content line. Returns `{summary}`. |
 | `POST /resident/attach {pid}` | Resident door (token-gated): register the resident's pid, revive a failed loop. Returns `{wave}`. |
 | `POST /resident/deltas {deltas}` | Resident door (token-gated): ordered turn deltas → the journal fold. Returns `{accepted}`. |
-| `GET /resident/context`   | Resident door (token-gated): `{in_flight, playhead, provider_session}`; the optional provider session carries `{harness, session_id}` and the read freshens store observations. |
+| `GET /resident/context`   | Resident door (token-gated): `{playhead, provider_session}`; the optional provider session carries `{harness, session_id}` and the read drains pending child observations. |
 
 ### Turn
 

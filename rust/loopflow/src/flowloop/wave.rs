@@ -24,8 +24,7 @@
 //!   closes `Interrupted`; non-empty interrupt text queues for the next pass.
 //! - **Interrupt while idle** → no-op; text, if any, queues like a message.
 //! - **Heartbeat**: idle for [`HEARTBEAT_IDLE`] with an empty queue → a
-//!   progress pass carrying a compact nudge plus the `<in_flight>` fold
-//!   fetched from `GET /resident/context`.
+//!   progress pass carrying a compact nudge.
 //! - **Cron**: the wave's `crons:` frontmatter (GOAL.md, re-read at every
 //!   deadline computation so edits land without a restart) arms a third
 //!   deadline; a due schedule opens a system pass ("cron due: <flow> —
@@ -61,12 +60,12 @@ use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
-use crate::wave::journal::{ellipsize, MessageId, MessageOp, PendingMessage};
+use crate::wave::journal::{MessageId, MessageOp, PendingMessage};
 use crate::wave::playhead::{BodyProvenance, StepKind, StepOutcome, StepRef};
 use crate::wave::resident::ListenerClient;
 use crate::wave::runtime::InboxItem;
 use crate::wave::supervisor::sleep_until_opt;
-use crate::wave::wire::{InFlightWorker, ProviderSessionRef, ResidentDelta, ResidentStateTo};
+use crate::wave::wire::{ProviderSessionRef, ResidentDelta, ResidentStateTo};
 
 /// How long an eventless Wave stays idle before a safety heartbeat. Human
 /// chat, child observations, and crons wake it immediately; the quiet cadence
@@ -88,10 +87,6 @@ pub const CRON_GRACE: chrono::Duration = chrono::Duration::hours(24);
 const HEARTBEAT_PROMPT: &str = "Heartbeat: re-read your goal and memory, then take the next \
      orchestration skill. If nothing needs doing, say so in one line.";
 
-/// Longest task excerpt carried per worker in the `<in_flight>` section —
-/// enough to recognize the dispatch, token-lean by design.
-const IN_FLIGHT_TASK_CHARS: usize = 80;
-
 fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) {
     let Some(capture) = capture else {
         return;
@@ -99,29 +94,6 @@ fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) 
     if let Err(error) = capture.finish(outcome, false) {
         tracing::warn!(%error, %outcome, "failed to finalize trace capture");
     }
-}
-
-/// The heartbeat nudge, plus a compact `<in_flight>` section when workers are
-/// grinding: one line per dispatched-not-finished worker, from the listener's
-/// `GET /resident/context` — the loop's orchestration turns see their workers
-/// without re-reading transcripts.
-pub fn heartbeat_prompt(workers: &[InFlightWorker]) -> String {
-    if workers.is_empty() {
-        return HEARTBEAT_PROMPT.to_string();
-    }
-    let mut prompt = String::from(HEARTBEAT_PROMPT);
-    prompt.push_str("\n\n<in_flight>\n");
-    for worker in workers {
-        // Whitespace-flattened, so a multi-line task can't break the
-        // one-line-per-worker format.
-        let task = ellipsize(&worker.task, IN_FLIGHT_TASK_CHARS);
-        prompt.push_str(&format!(
-            "- run {} · {}: {} · running\n",
-            worker.run_id, worker.flow, task
-        ));
-    }
-    prompt.push_str("</in_flight>");
-    prompt
 }
 
 // -- Cron: the third deadline ------------------------------------------------
@@ -321,9 +293,7 @@ enum InboxAction {
 enum TimeoutAction {
     /// The loop already ended mid-fetch: tear down and return.
     End,
-    /// Delegated work is still live: renew the pass lease and keep waiting.
-    Renew,
-    /// Nothing is running: the pass is out of time.
+    /// The pass is out of time.
     Expire,
 }
 
@@ -500,12 +470,8 @@ impl WaveLoop {
     }
 
     async fn on_heartbeat(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
-        let workers = self.fetch_in_flight().await;
-        if self.end.is_some() {
-            return;
-        }
-        let prompt = heartbeat_prompt(&workers);
-        self.run_pass(prompt, Vec::new(), inbox_rx).await;
+        self.run_pass(HEARTBEAT_PROMPT.to_string(), Vec::new(), inbox_rx)
+            .await;
     }
 
     async fn on_cron(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
@@ -645,14 +611,10 @@ impl WaveLoop {
                     }
                 }
                 _ = &mut timeout => {
-                    match self.timeout_action().await {
+                    match self.timeout_action() {
                         TimeoutAction::End => {
                             wait_task.abort();
                             return;
-                        }
-                        TimeoutAction::Renew => {
-                            timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
-                            continue;
                         }
                         TimeoutAction::Expire => {
                             wait_task.abort();
@@ -981,15 +943,11 @@ impl WaveLoop {
                     return;
                 }
                 _ = &mut timeout => {
-                    match self.timeout_action().await {
+                    match self.timeout_action() {
                         TimeoutAction::End => {
                             let _ = harness.stop().await;
                             finish_capture(capture.as_ref(), "interrupted");
                             return;
-                        }
-                        TimeoutAction::Renew => {
-                            timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
-                            continue;
                         }
                         TimeoutAction::Expire => {
                             let _ = harness.interrupt().await;
@@ -1096,15 +1054,9 @@ impl WaveLoop {
         }
     }
 
-    /// What a fired pass-timeout means right now. A durable Task Session can
-    /// outlive this pass; its registry row is presence, so live delegated work
-    /// renews the lease instead of hanging up on it at the ordinary boundary.
-    async fn timeout_action(&mut self) -> TimeoutAction {
-        let workers = self.fetch_in_flight().await;
+    fn timeout_action(&self) -> TimeoutAction {
         if self.end.is_some() {
             TimeoutAction::End
-        } else if !workers.is_empty() {
-            TimeoutAction::Renew
         } else {
             TimeoutAction::Expire
         }
@@ -1261,13 +1213,6 @@ impl WaveLoop {
             ))
             .await;
         }
-    }
-
-    async fn fetch_in_flight(&mut self) -> Vec<InFlightWorker> {
-        self.fetch_context()
-            .await
-            .map(|context| context.in_flight)
-            .unwrap_or_default()
     }
 
     async fn fetch_context(&mut self) -> Option<crate::wave::wire::ContextResponse> {
@@ -2013,52 +1958,6 @@ mod tests {
         wait_for("next heartbeat", || loop_.pass_count() >= 2).await;
     }
 
-    #[tokio::test]
-    async fn heartbeat_carries_in_flight_workers_when_present() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        // Journal the observations before the loop boots so the first
-        // heartbeat deterministically sees them (served by /resident/context).
-        {
-            let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
-            assert!(runtime.journal_run_observed(
-                "run-7",
-                "sess-7",
-                "implement",
-                "wire the observation tail",
-            ));
-            assert!(runtime.journal_run_observed("run-8", "sess-8", "design", "next item"));
-            // Multi-line task: must flatten to one line in the prompt.
-            assert!(runtime.journal_run_observed(
-                "run-9",
-                "sess-9",
-                "design",
-                "multi-line task\n  with an indented second line",
-            ));
-            assert!(runtime.journal_run_completed(
-                "run-8",
-                crate::wave::journal::WorkerOutcome::Completed,
-                "landed",
-            ));
-        }
-
-        let loop_ = boot_in(tmp, Duration::from_millis(50), "echo ok").await;
-        wait_for("heartbeat pass", || loop_.pass_count() == 1).await;
-        let wake = wake_of(&loop_.seed(0));
-        assert!(wake.starts_with(HEARTBEAT_PROMPT));
-        assert!(wake.contains("<in_flight>"), "in-flight section present");
-        assert!(wake.contains("run run-7 · implement: wire the observation tail · running"));
-        assert!(
-            !wake.contains("run-8"),
-            "finished workers are not in flight"
-        );
-        assert!(
-            wake.contains(
-                "run run-9 · design: multi-line task with an indented second line · running"
-            ),
-            "multi-line tasks flatten to one in-flight line"
-        );
-    }
-
     // -- Failure and teardown --
 
     /// The failure cap ends the RESIDENT: `run_loop` returns an error
@@ -2120,44 +2019,6 @@ mod tests {
             loop_.runtime.loop_state() == LoopState::Idle
         })
         .await;
-    }
-
-    #[tokio::test]
-    async fn active_child_loop_renews_the_pass_lease() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let config = LoopConfig {
-            heartbeat_idle: Duration::from_secs(600),
-            pass_timeout: Duration::from_millis(80),
-            max_turns: None,
-        };
-        let loop_ = boot_with(tmp, config, "sleep 0.25; echo inhabited").await;
-        assert!(loop_.runtime.journal_run_observed(
-            "run-child",
-            "session-child",
-            "task",
-            "foreground loop"
-        ));
-        loop_
-            .runtime
-            .deliver(MessageOp::Message, "go".into())
-            .expect("user turn");
-        wait_for("pass spawned", || loop_.pass_count() == 1).await;
-        wait_for("long pass completed", || {
-            loop_.runtime.thread_snapshot().iter().any(|turn| {
-                turn.role == ChatRole::Assistant
-                    && turn.status == Lifecycle::Completed
-                    && turn.text.contains("inhabited")
-            })
-        })
-        .await;
-        assert!(
-            !loop_
-                .runtime
-                .thread_snapshot()
-                .iter()
-                .any(|turn| turn.status == Lifecycle::Failed),
-            "presence renewed the lease instead of timing out"
-        );
     }
 
     /// An interrupt mid-pass kills the child and finalizes the turn

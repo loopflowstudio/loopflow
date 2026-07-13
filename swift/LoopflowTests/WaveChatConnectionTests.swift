@@ -105,31 +105,6 @@ struct WaveChatConnectionTests {
         #expect(conn.loopState == .idle)
     }
 
-    @Test("op frames expose the wave's latest run motion")
-    func opFramesExposeMotion() {
-        let conn = connection()
-        #expect(conn.lastOp == nil)
-
-        // A worker run starting — kind mirrors the run_events ledger vocabulary.
-        let started = "{\"kind\":\"run.started\",\"run_id\":\"run-42\",\"flow\":\"build\",\"task\":\"wire it\",\"summary\":null,\"ts\":\"2026-07-06T00:00:00Z\"}"
-        conn.handle(event: "op", data: started)
-        #expect(conn.lastOp?.kind == "run.started")
-        #expect(conn.lastOp?.runID == "run-42")
-        #expect(conn.lastOp?.flow == "build")
-        #expect(conn.lastOp?.task == "wire it")
-
-        // op frames never masquerade as turns or loop states.
-        #expect(conn.turns.isEmpty)
-        #expect(conn.loopState == .idle)
-
-        // A finish carries a summary, no flow — the same channel, latest wins.
-        let completed = "{\"kind\":\"run.completed\",\"run_id\":\"run-42\",\"flow\":null,\"task\":null,\"summary\":\"pr opened\",\"ts\":\"2026-07-06T00:01:00Z\"}"
-        conn.handle(event: "op", data: completed)
-        #expect(conn.lastOp?.kind == "run.completed")
-        #expect(conn.lastOp?.flow == nil)
-        #expect(conn.lastOp?.summary == "pr opened")
-    }
-
     @Test("state events update the observable loop state")
     func stateEventsUpdateLoopState() {
         let conn = connection()

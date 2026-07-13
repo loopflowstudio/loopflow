@@ -160,12 +160,9 @@ pub struct AttachResponse {
 }
 
 /// `GET /resident/context` response: the pre-turn snapshot the resident folds
-/// into its prompts. Serving it freshens the listener's store observations
-/// (one poll), so the `<in_flight>` view is current rather than one poll
-/// cadence stale.
+/// into its prompts. Serving it freshens the listener's child observations.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContextResponse {
-    pub in_flight: Vec<InFlightWorker>,
     pub playhead: PlayheadView,
     pub provider_session: Option<ProviderSessionRef>,
 }
@@ -175,15 +172,6 @@ pub struct ContextResponse {
 pub struct ProviderSessionRef {
     pub harness: String,
     pub session_id: String,
-}
-
-/// One started-but-not-finished worker, for the heartbeat's `<in_flight>`
-/// section.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct InFlightWorker {
-    pub run_id: String,
-    pub flow: String,
-    pub task: String,
 }
 
 /// One `inbox` SSE frame on `/events?inbox=true` — a resident-directed op.
@@ -217,36 +205,6 @@ pub struct ObserveTaskRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObserveTaskResponse {
     pub observed: bool,
-}
-
-/// One `op` SSE frame on `/events` — this wave's operational motion: a worker
-/// run starting or finishing, observed by the wave server's [`StoreObserver`]
-/// (`crate::wave::registry`). `kind` reuses the `run_events` ledger vocabulary
-/// 1:1 (`<node>.<event>`) so the durable ledger row and the live frame carry
-/// the same shape — a client folds `lf runs` history and live `op` frames with
-/// one code path. The base model emits run-grain kinds (`run.started`,
-/// `run.completed`, `run.errored`); skill/flow granularity is future work, so
-/// `kind` stays a free-form string like the ledger's `node`/`event` columns.
-///
-/// Live-only: the past is a ledger query (`lf runs`), never a stream — nothing
-/// replays `op` frames on connect. DTO discipline: `flow`/`task`/`summary` are
-/// explicitly Optional (a finish carries a summary but no flow; a start the
-/// reverse); `kind`/`run_id`/`ts` are always present.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct OpFrame {
-    /// `<node>.<event>` from the ledger vocabulary: `run.started`,
-    /// `run.completed`, `run.errored`.
-    pub kind: String,
-    pub run_id: String,
-    /// The run's flow, on a `run.started` frame; absent on a finish.
-    pub flow: Option<String>,
-    /// The run's task text, on a `run.started` frame; absent on a finish.
-    pub task: Option<String>,
-    /// What the registry knows about a finish (session status, PR url, error);
-    /// absent on a start.
-    pub summary: Option<String>,
-    /// RFC3339 emission time.
-    pub ts: String,
 }
 
 #[cfg(test)]
@@ -332,43 +290,5 @@ mod tests {
         }))
         .expect("message frame parses");
         assert!(matches!(frame, InboxFrame::Message { from: None, .. }));
-    }
-
-    /// The `op` frame round-trips and holds DTO discipline: `kind`/`run_id`/
-    /// `ts` are required (an absent one is a parse error), while
-    /// `flow`/`task`/`summary` are explicitly Optional (a finish carries a
-    /// summary but no flow; a start the reverse).
-    #[test]
-    fn op_frame_round_trips_and_enforces_required_fields() {
-        let started = OpFrame {
-            kind: "run.started".into(),
-            run_id: "run-1".into(),
-            flow: Some("implement".into()),
-            task: Some("wire it".into()),
-            summary: None,
-            ts: "2026-07-06T00:00:00Z".into(),
-        };
-        let decoded: OpFrame =
-            serde_json::from_value(serde_json::to_value(&started).unwrap()).unwrap();
-        assert_eq!(decoded, started);
-
-        // A required field absent is a parse error, never a silent default.
-        assert!(serde_json::from_value::<OpFrame>(
-            serde_json::json!({ "run_id": "run-1", "ts": "t" })
-        )
-        .is_err());
-
-        // A finish: no flow/task, a summary present. Absent Optionals decode
-        // as None.
-        let finished: OpFrame = serde_json::from_value(serde_json::json!({
-            "kind": "run.errored",
-            "run_id": "run-1",
-            "summary": "session failed",
-            "ts": "t"
-        }))
-        .expect("optionals may be absent");
-        assert_eq!(finished.flow, None);
-        assert_eq!(finished.task, None);
-        assert_eq!(finished.summary.as_deref(), Some("session failed"));
     }
 }

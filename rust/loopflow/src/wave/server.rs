@@ -19,12 +19,11 @@
 //! journal, no worktree binding. Doors are name-addressed.
 //!
 //! Wire contract (snake_case, stable — a Loopflow worker builds against it):
-//! - `GET /health` → `{status, loop_state, wave, turns, workers, paused, uptime_seconds}`;
+//! - `GET /health` → `{status, loop_state, wave, turns, paused, uptime_seconds}`;
 //!   `status` is CHANNEL liveness — always `serving` while this process
 //!   answers; `loop_state` is the resident's state (`idle | turning | interrupting
 //!   | failed`), or null before any resident has attached; a served channel whose resident died reads
-//!   `status: "serving", loop_state: "failed"`. `workers` counts this wave's
-//!   observed in-flight worker runs.
+//!   `status: "serving", loop_state: "failed"`.
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
 //!   `running`), if one is in progress, after the finalized thread. Optional
 //!   `?limit=N` tails the last N turns (open turn included) — `wave_context`
@@ -45,12 +44,6 @@
 //!     curation. Live-only, no replay — MEMORY.md itself is the durable
 //!     state. Primary channel only (memory is wave identity; work lines have
 //!     none).
-//!   - `op`: data is an [`OpFrame`] — this wave's operational motion (a worker
-//!     run starting or finishing, observed by the [`StoreObserver`]), `kind`
-//!     mirroring the `run_events` ledger vocabulary 1:1 (`run.started`,
-//!     `run.completed`, `run.errored`). Live-only, no replay — history is a
-//!     `lf runs` query, the durable ledger the frame mirrors. Primary channel
-//!     only (workers are the wave's, not a child channel's).
 //!   - `memory-add`: data is the full added fact. Replays on connect for the
 //!     facts since the last curation, then streams live. Primary channel only.
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
@@ -67,9 +60,9 @@
 //!   - `POST /resident/deltas {deltas: [...]}` → `{accepted}` — ordered turn
 //!     deltas, applied to the journal fold
 //!     ([`WaveRuntime::apply_resident_delta`]).
-//!   - `GET /resident/context` → `{in_flight, playhead, provider_session}` —
-//!     the pre-turn snapshot and optional typed provider thread; serving it
-//!     freshens the store observations (one poll).
+//!   - `GET /resident/context` → `{playhead, provider_session}` — the
+//!     pre-turn snapshot and optional typed provider thread; serving it drains
+//!     pending child observations first.
 //! - `POST /messages {op, text}` → `{turn, state}`. `op` is
 //!   required — `"message"` (queued; the next turn answers it), `"steer"`
 //!   (into the live turn when the harness supports it, else degrades to a
@@ -128,8 +121,8 @@ use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::state::LoopState;
 use crate::wave::supervisor::SupervisorHandle;
 use crate::wave::wire::{
-    AttachRequest, AttachResponse, ContextResponse, InFlightWorker, InboxFrame, ObserveTaskRequest,
-    ObserveTaskResponse, OpFrame, PostDeltasRequest, PostDeltasResponse, RESIDENT_TOKEN_FILE,
+    AttachRequest, AttachResponse, ContextResponse, InboxFrame, ObserveTaskRequest,
+    ObserveTaskResponse, PostDeltasRequest, PostDeltasResponse, RESIDENT_TOKEN_FILE,
     RESIDENT_TOKEN_HEADER,
 };
 
@@ -251,8 +244,6 @@ struct HealthBody {
     loop_state: Option<String>,
     wave: String,
     turns: usize,
-    /// Workers observed in flight for this wave. The store fold is truth.
-    workers: usize,
     /// Whether the wave is paused (GOAL.md `paused: true`): the listener
     /// refuses to start turns while set, though it keeps serving and queueing.
     paused: bool,
@@ -432,7 +423,6 @@ async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
         loop_state,
         wave: state.runtime.name().to_string(),
         turns: state.runtime.thread_len(),
-        workers: state.runtime.in_flight_workers().len(),
         paused: state.runtime.paused(),
         uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
     })
@@ -504,27 +494,15 @@ async fn resident_context_handler(
     headers: HeaderMap,
 ) -> Result<Json<ContextResponse>, (StatusCode, String)> {
     state.resident.authorize(&headers)?;
-    // Freshen the store fold so the resident's next turn sees current
-    // workers, not a poll cadence's stale view.
+    // Drain child observations before the resident captures its next turn.
     if let Some(observer) = &state.observer {
         observer.poll_once().await;
     }
-    let in_flight = state
-        .runtime
-        .in_flight_workers()
-        .into_iter()
-        .map(|worker| InFlightWorker {
-            run_id: worker.run_id,
-            flow: worker.flow,
-            task: worker.task,
-        })
-        .collect();
     let playhead = state
         .runtime
         .ensure_playhead()
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     Ok(Json(ContextResponse {
-        in_flight,
         playhead,
         provider_session: state.runtime.latest_provider_session(),
     }))
@@ -692,9 +670,6 @@ async fn events_handler(
     let live_turns = live_stream(sub.turn_rx, |frame| {
         Event::default().event("turn").data(frame.json.as_str())
     });
-    // Worker-run motion (`op` frames). Live-only — no replay; a client
-    // that lags re-reads history from `lf runs`.
-    let live_ops = live_stream(sub.op_rx, |frame| op_event(&frame));
     // Lagged: fine — the next transition carries the current state.
     let live_states = live_stream(sub.state_rx, |s| state_event(&s));
     let live_playhead = live_stream(sub.playhead_rx, |p| playhead_event(&p));
@@ -703,7 +678,7 @@ async fn events_handler(
     // Lagged: fine — MEMORY.md itself is the durable state.
     let live_memory = live_stream(sub.memory_rx, |summary| memory_event(&summary));
     let mut live: BoxedEventStream = Box::pin(stream::select(
-        stream::select(live_turns, live_ops),
+        live_turns,
         stream::select(
             stream::select(live_states, live_playhead),
             stream::select(live_memory, live_memory_adds),
@@ -757,12 +732,6 @@ fn state_event(state: &LoopState) -> Event {
 
 fn memory_event(summary: &str) -> Event {
     Event::default().event("memory").data(summary)
-}
-
-fn op_event(frame: &OpFrame) -> Event {
-    Event::default()
-        .event("op")
-        .data(serde_json::to_string(frame).expect("OpFrame serializes to JSON"))
 }
 
 fn memory_add_event(fact: &str) -> Event {
@@ -979,65 +948,6 @@ mod tests {
         assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
         requested.wait().await;
         server.abort();
-    }
-
-    /// A worker started while a client is subscribed to `/events` surfaces
-    /// as a live `op` frame carrying the ledger-vocabulary `kind`. This is the
-    /// wave's operational channel riding the same stream as `state`/`turn`.
-    #[tokio::test]
-    async fn op_frame_reaches_the_events_stream_for_a_run() {
-        use crate::wave::subscription::{stream_events, Frame};
-        use std::sync::{Arc, Mutex};
-
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let app = router(
-            runtime.clone(),
-            ResidentDoor::new("resident"),
-            None,
-            None,
-            ShutdownDoor::new(),
-        );
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
-        });
-
-        let seen: Arc<Mutex<Vec<Frame>>> = Arc::new(Mutex::new(Vec::new()));
-        let sink = seen.clone();
-        let endpoint = addr.to_string();
-        let task = tokio::spawn(async move {
-            let mut on_frame = |frame: Frame| sink.lock().unwrap().push(frame);
-            let _ = stream_events(&endpoint, "", &mut on_frame).await;
-        });
-
-        // Wait for the subscription to open (the state replay lands first),
-        // then a worker is observed — the live `op` frame must arrive.
-        for _ in 0..200 {
-            if seen.lock().unwrap().iter().any(|f| f.event == "state") {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        assert!(runtime.journal_run_observed("run-42", "sess-1", "implement", "wire it"));
-        for _ in 0..200 {
-            if seen.lock().unwrap().iter().any(|f| f.event == "op") {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        task.abort();
-
-        let frames = seen.lock().unwrap().clone();
-        let op = frames
-            .iter()
-            .find(|f| f.event == "op")
-            .expect("op frame arrives on /events");
-        let frame: OpFrame = serde_json::from_str(&op.data).expect("op frame parses");
-        assert_eq!(frame.kind, "run.started");
-        assert_eq!(frame.run_id, "run-42");
-        assert_eq!(frame.flow.as_deref(), Some("implement"));
     }
 
     /// A pointer to a dead address is stale: the probe says no live server.

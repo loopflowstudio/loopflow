@@ -6,13 +6,6 @@
     "wave": "ship"
   },
   "context_response": {
-    "in_flight": [
-      {
-        "run_id": "lfdrun_01HNX7XYZ0AZ1B2C3D4E5F6G7H",
-        "flow": "implement",
-        "task": "Wire the endpoint."
-      }
-    ],
     "playhead": {
       "stack": [
         {

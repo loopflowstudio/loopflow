@@ -362,3 +362,40 @@ opens PRs, and merges code, so it requires an explicit human-authorized run.
 
 Until that gate runs, keep the provider acceptance window and live UX quality
 as evidence gaps—not reasons to invent more architecture.
+
+## Current reduction: remove the dead generic Worker observer
+
+The top-down review found one live subsystem that contradicts the settled
+model. The Wave server still polls control `SessionUse::Worker` rows joined to
+generic `Run` rows, journals `RunObserved`/`RunCompleted`, repairs their
+liveness, projects them into `<in_flight>`, exposes a `workers` health count,
+and broadcasts `op` SSE frames. Swift decodes the last `op` frame but no view
+uses it.
+
+No production path on this branch creates a Worker control session with a
+`run_id`. One-shot `lf skill` sessions have `run_id = None`; Project and Task
+Sessions use their own tables, processes, events, liveness, and observation
+outbox. Only tests fabricate the legacy joined rows. Consequently the Wave’s
+supposed in-flight summary is normally empty while real Tasks run.
+
+Delete the dead live path:
+
+- make the store observer consume only native Project/Task outbox rows;
+- remove generic Worker liveness repair and Run state mutation from the Wave;
+- remove `WorkerRecord`, the runtime worker fold, `<in_flight>` resident field,
+  health worker count, and `op` SSE broadcast;
+- remove the unused Swift `WaveOpFrame`/`lastOp` projection;
+- retain historical journal variants required to read existing journals, but
+  create no new generic Worker observations;
+- keep Wave `workers:` configuration: it is Task concurrency capacity, not a
+  live generic Worker count.
+
+Do not immediately replace this with another generic child summary. Typed
+Project/Task observations already wake the Wave and `lf status --json` provides
+the native hierarchy. If real use proves that every turn needs a compact child
+snapshot, add a Project/Task-shaped context after the dead representation is
+gone.
+
+Done when no production Wave code joins generic Worker Sessions to Runs, the
+resident context and SSE wire contain only used fields, old journals still
+decode, DTO fixtures agree, and the full Rust/Swift gate passes.

@@ -28,10 +28,12 @@ selection. Follow the repo style guide.
 - Implement the smallest coherent slice described by the design doc.
 - Add or update tests for user-visible behavior.
 - Run the narrowest verification that covers the touched code.
-- When progress requires Wave judgment, run `lf task request-decision
-  <issue-id> "question" --option "first" --option "second" --wait`. Do not
-  invent a provider-specific approval path or start unrelated work while it is
-  pending.
+- When progress requires supervisor judgment, run `lf task request-decision
+  <issue-id> "question" --option "first" --option "second" --wait`. A directly
+  supervised Task asks its Wave; a Project-supervised Task asks that Project,
+  which resolves the routine choice or explicitly escalates it to the Wave. Do
+  not invent a provider-specific approval path or start unrelated work while
+  it is pending.
 - Use `lf pr open` when the branch has a reviewable PR-shaped change.
 - When a filed task id is known and its PR ships, close it with
   `lf pm task done --id <task-id> --pr <url>`.

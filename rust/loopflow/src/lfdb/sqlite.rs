@@ -2041,7 +2041,9 @@ impl SqliteStore {
                 },
                 created_at,
             )?;
-            if matches!(session.supervisor, SessionSupervisor::Project { .. }) {
+            if matches!(session.supervisor, SessionSupervisor::Project { .. })
+                && kind.is_root_wave_observable()
+            {
                 insert_observation(
                     &transaction,
                     &SessionSupervisor::Wave {

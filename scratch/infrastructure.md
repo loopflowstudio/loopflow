@@ -1451,3 +1451,32 @@ external acceptance window has disappeared: a process can still die after a
 provider accepts input but before SQLite records acceptance. Closing that last
 window requires provider idempotency or reconciliation evidence, not a more
 elaborate mock.
+
+## Current iteration: preserve decision supervision
+
+Root Wave visibility must not collapse the controller hierarchy. The current
+outbox duplicates every wave-observable Task event to the root Wave when a
+Project supervises the Task. That is correct for direction, failure, blocker,
+delivery, and completion state, but wrong for `DecisionRequested`: Wave Chat
+can ask the human before the Project has had a chance to answer a routine Task
+question.
+
+Route decisions by immediate responsibility:
+
+```text
+direct Wave → Task:       Task decision → Wave
+Wave → Project → Task:    Task decision → Project
+                          Project decides, or emits Project decision → Wave
+```
+
+For a Project-supervised Task, keep both `DecisionRequested` and
+`DecisionResolved` out of the root-Wave copy. The Project ledger already folds
+the typed Task observation, preserving its Task session and event ids. An
+explicit Project `DecisionRequested` is the escalation boundary and becomes
+the one Wave Chat card. Other material descendant events retain root-Wave
+visibility.
+
+Done when a Project-supervised Task request produces one pending Project
+observation and no Wave observation; a Project escalation produces one Wave
+observation; a directly supervised Task request still reaches its Wave; and
+retries remain idempotent.

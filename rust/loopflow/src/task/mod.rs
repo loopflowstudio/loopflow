@@ -574,6 +574,17 @@ impl TaskEventKind {
             _ => true,
         }
     }
+
+    /// Whether a Project-supervised Task event also belongs in the root Wave.
+    /// Routine decisions stay at the immediate Project boundary; a Project
+    /// escalates by emitting its own `DecisionRequested` event.
+    pub fn is_root_wave_observable(&self) -> bool {
+        self.is_wave_observable()
+            && !matches!(
+                self,
+                Self::DecisionRequested { .. } | Self::DecisionResolved { .. }
+            )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -669,6 +680,30 @@ mod tests {
         assert!(!event(TaskCommandState::Claimed).is_wave_observable());
         assert!(event(TaskCommandState::Accepted).is_wave_observable());
         assert!(event(TaskCommandState::Failed).is_wave_observable());
+    }
+
+    #[test]
+    fn project_supervision_keeps_routine_task_decisions_out_of_the_root_wave() {
+        let requested = TaskEventKind::DecisionRequested {
+            decision_id: TaskDecisionId::new(),
+            prompt: "Which parser shape?".to_string(),
+            options: vec!["strict".to_string(), "permissive".to_string()],
+        };
+        let resolved = TaskEventKind::DecisionResolved {
+            decision_id: TaskDecisionId::new(),
+            choice: "strict".to_string(),
+            message: None,
+        };
+
+        assert!(requested.is_wave_observable());
+        assert!(resolved.is_wave_observable());
+        assert!(!requested.is_root_wave_observable());
+        assert!(!resolved.is_root_wave_observable());
+        assert!(TaskEventKind::Failed {
+            error: "provider stopped".to_string(),
+            resumable: true,
+        }
+        .is_root_wave_observable());
     }
 
     #[test]

@@ -518,20 +518,22 @@ impl Store {
                                 "Task observation wake failed; Project lifecycle touch will retry"
                             );
                         }
-                        if let Err(error) =
-                            crate::lf::commands::chat::post_task_observation_to_named_wave(
-                                &session.wave,
-                                &session_id,
-                                event.id,
-                            )
-                            .await
-                        {
-                            tracing::debug!(
-                                %error,
-                                %session_id,
-                                event_id = event.id,
-                                "live descendant observation delivery failed; Wave observer will retry"
-                            );
+                        if kind.is_root_wave_observable() {
+                            if let Err(error) =
+                                crate::lf::commands::chat::post_task_observation_to_named_wave(
+                                    &session.wave,
+                                    &session_id,
+                                    event.id,
+                                )
+                                .await
+                            {
+                                tracing::debug!(
+                                    %error,
+                                    %session_id,
+                                    event_id = event.id,
+                                    "live descendant observation delivery failed; Wave observer will retry"
+                                );
+                            }
                         }
                     }
                 }
@@ -1872,8 +1874,8 @@ mod tests {
     };
     use crate::project_session::{
         ChildEventPayload, ChildSessionRef, ProjectCommand, ProjectCommandKind,
-        ProjectCommandSource, ProjectDecisionId, ProjectProcess, ProjectSession, ProjectSessionId,
-        ProjectSessionStatus, SessionSupervisor,
+        ProjectCommandSource, ProjectDecisionId, ProjectEventKind, ProjectProcess, ProjectSession,
+        ProjectSessionId, ProjectSessionStatus, SessionSupervisor,
     };
     use crate::task::{
         BoundaryResult, ChildDirective, ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId,
@@ -2264,6 +2266,128 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn project_supervision_routes_task_decisions_through_one_escalation_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+        let mut task = make_task_session(&wave);
+        task.supervisor = SessionSupervisor::Project {
+            session_id: project.id.clone(),
+        };
+        store.create_task_session(&task).await.unwrap();
+
+        let task_decision_id = TaskDecisionId::new();
+        store
+            .sqlite
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::DecisionRequested {
+                    decision_id: task_decision_id.clone(),
+                    prompt: "Use the strict parser?".to_string(),
+                    options: vec!["strict".to_string(), "permissive".to_string()],
+                },
+            )
+            .unwrap();
+
+        let project_observations = store
+            .pending_observations(&SessionSupervisor::Project {
+                session_id: project.id.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(project_observations.len(), 1);
+        assert!(matches!(
+            &project_observations[0].payload,
+            ChildEventPayload::Task {
+                event: TaskEventKind::DecisionRequested { decision_id, .. }
+            } if decision_id == &task_decision_id
+        ));
+        assert!(store
+            .pending_observations(&SessionSupervisor::Wave {
+                wave_id: wave.id().clone(),
+            })
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .consume_task_observation_for_project(&project.id, &project_observations[0])
+            .await
+            .unwrap());
+        assert!(!store
+            .consume_task_observation_for_project(&project.id, &project_observations[0])
+            .await
+            .unwrap());
+
+        let project_decision_id = ProjectDecisionId::new();
+        store
+            .append_project_event(
+                &project.id,
+                &ProjectEventKind::DecisionRequested {
+                    decision_id: project_decision_id.clone(),
+                    prompt: format!(
+                        "Task decision {task_decision_id} needs Wave judgment: use the strict parser?"
+                    ),
+                    options: vec!["strict".to_string(), "permissive".to_string()],
+                },
+            )
+            .await
+            .unwrap();
+        let wave_observations = store
+            .pending_observations(&SessionSupervisor::Wave {
+                wave_id: wave.id().clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(wave_observations.len(), 1);
+        assert!(matches!(
+            &wave_observations[0].payload,
+            ChildEventPayload::Project {
+                event: ProjectEventKind::DecisionRequested { decision_id, .. }
+            } if decision_id == &project_decision_id
+        ));
+
+        let mut direct = make_task_session(&wave);
+        direct.id = TaskSessionId::new();
+        direct.issue.id = LinearIssueId::new("direct-issue").unwrap();
+        direct.issue.identifier = "INF-124".to_string();
+        direct.worktree = PathBuf::from("/repo.inf-124");
+        direct.branch = "jack/inf-124".to_string();
+        store.create_task_session(&direct).await.unwrap();
+        store
+            .sqlite
+            .append_task_event(
+                &direct.id,
+                &TaskEventKind::DecisionRequested {
+                    decision_id: TaskDecisionId::new(),
+                    prompt: "Ship now?".to_string(),
+                    options: vec!["ship".to_string(), "wait".to_string()],
+                },
+            )
+            .unwrap();
+        let wave_observations = store
+            .pending_observations(&SessionSupervisor::Wave {
+                wave_id: wave.id().clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(wave_observations.len(), 2);
+        assert!(wave_observations.iter().any(|observation| matches!(
+            (&observation.source, &observation.payload),
+            (
+                ChildSessionRef::Task { session_id },
+                ChildEventPayload::Task {
+                    event: TaskEventKind::DecisionRequested { .. }
+                }
+            ) if session_id == &direct.id
+        )));
     }
 
     #[tokio::test]

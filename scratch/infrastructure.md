@@ -1419,3 +1419,35 @@ between Codex, Claude, and OpenCode.
 Done when a journal reopen recovers the same `(harness, session_id)`, a matching
 harness resumes it, and a differently configured harness receives no foreign
 session id.
+
+## Current iteration: prove child control as one contract
+
+The production adapters already expose the one orchestration distinction that
+matters: Codex supports live steering; Claude and OpenCode require
+interrupt-and-resume. Their production protocol mappings have trace coverage,
+and the Task/Project runners consume only the `Harness` capability. The
+remaining gap is that runner coverage is uneven: Project tests exercise
+replacement, interruption, and decisions, while Task tests prove only a live
+or replacement steer.
+
+Pin the complete provider-neutral control behavior at the runner boundary for
+both child tiers:
+
+- a gentle follow-up remains FIFO and never interrupts an active turn;
+- steer records `live_steer` for Codex and `replacement` for Claude/OpenCode;
+- replacement supersedes queued input and becomes the only next instruction;
+- a bare interrupt cancels one turn without abandoning the durable session;
+- a decision reaches the same provider transcript, interrupting only the
+  adapters that cannot steer live, and records one linked resolution;
+- provider send/interrupt failure leaves a durable failed receipt.
+
+Keep crash generation reclaim, atomic boundary settlement, ownership,
+idempotent observations, and parallel target isolation in their existing
+store/operations tests. Compose those with the adapter trace tests rather than
+adding test-only provider factories or moving protocol names into the runners.
+
+This is deterministic conformance evidence, not a claim that the unavoidable
+external acceptance window has disappeared: a process can still die after a
+provider accepts input but before SQLite records acceptance. Closing that last
+window requires provider idempotency or reconciliation evidence, not a more
+elaborate mock.

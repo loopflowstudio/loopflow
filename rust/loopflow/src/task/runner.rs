@@ -1118,13 +1118,28 @@ mod tests {
     use crate::task::{
         ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
         PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandKind, TaskCommandSource,
-        TaskCommandState, TaskProcess, TaskSession, TaskSessionId, TaskSessionStatus,
+        TaskCommandState, TaskDecisionId, TaskEventKind, TaskProcess, TaskSession, TaskSessionId,
+        TaskSessionStatus,
     };
 
     struct ScriptedHarness {
         supports_steer: bool,
         sent: Vec<String>,
         interrupts: usize,
+        fail_send: bool,
+        fail_interrupt: bool,
+    }
+
+    impl ScriptedHarness {
+        fn new(supports_steer: bool) -> Self {
+            Self {
+                supports_steer,
+                sent: Vec::new(),
+                interrupts: 0,
+                fail_send: false,
+                fail_interrupt: false,
+            }
+        }
     }
 
     #[async_trait]
@@ -1134,12 +1149,18 @@ mod tests {
         }
 
         async fn send_input(&mut self, content: &str) -> Result<()> {
+            if self.fail_send {
+                anyhow::bail!("scripted send failed");
+            }
             self.sent.push(content.to_string());
             Ok(())
         }
 
         async fn interrupt(&mut self) -> Result<()> {
             self.interrupts += 1;
+            if self.fail_interrupt {
+                anyhow::bail!("scripted interrupt failed");
+            }
             Ok(())
         }
 
@@ -1261,11 +1282,7 @@ mod tests {
             );
             store.create_task_command(&command).await.unwrap();
             let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
-            let mut harness = ScriptedHarness {
-                supports_steer,
-                sent: Vec::new(),
-                interrupts: 0,
-            };
+            let mut harness = ScriptedHarness::new(supports_steer);
             let mut pending = VecDeque::new();
 
             absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
@@ -1294,5 +1311,261 @@ mod tests {
                 "{provider}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn task_follow_up_is_fifo_and_never_interrupts() {
+        for provider in ["codex", "claude", "opencode"] {
+            let (store, session) = conformance_session(provider).await;
+            let first = TaskCommand::new(
+                session.id.clone(),
+                TaskCommandSource::Human,
+                TaskCommandKind::FollowUp {
+                    text: "first".to_string(),
+                },
+            );
+            let second = TaskCommand::new(
+                session.id.clone(),
+                TaskCommandSource::Human,
+                TaskCommandKind::FollowUp {
+                    text: "second".to_string(),
+                },
+            );
+            store.create_task_command(&first).await.unwrap();
+            store.create_task_command(&second).await.unwrap();
+            let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+            let mut harness = ScriptedHarness::new(provider == "codex");
+            let mut pending = VecDeque::new();
+
+            absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
+                .await
+                .unwrap();
+
+            assert_eq!(harness.interrupts, 0, "{provider}");
+            assert!(harness.sent.is_empty(), "{provider}");
+            for expected in ["first", "second"] {
+                let input = pending.pop_front().expect("queued follow-up");
+                apply_input(
+                    &store,
+                    &session,
+                    &mut harness,
+                    &input.text,
+                    input.command_id.map(|id| (id, input.effect)),
+                    input.decision,
+                )
+                .await
+                .unwrap();
+                assert_eq!(harness.sent.last().map(String::as_str), Some(expected));
+            }
+            assert_eq!(
+                store
+                    .get_task_command(&first.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .effect,
+                Some(TaskCommandEffect::NextTurn),
+                "{provider}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn task_replacement_supersedes_queued_input() {
+        let (store, session) = conformance_session("claude").await;
+        let first = TaskCommand::new(
+            session.id.clone(),
+            TaskCommandSource::Human,
+            TaskCommandKind::FollowUp {
+                text: "A".to_string(),
+            },
+        );
+        let second = TaskCommand::new(
+            session.id.clone(),
+            TaskCommandSource::Human,
+            TaskCommandKind::FollowUp {
+                text: "B".to_string(),
+            },
+        );
+        store.create_task_command(&first).await.unwrap();
+        store.create_task_command(&second).await.unwrap();
+        let mut harness = ScriptedHarness::new(false);
+        let mut pending = VecDeque::new();
+        let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+        absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
+            .await
+            .unwrap();
+
+        let replacement = TaskCommand::new(
+            session.id.clone(),
+            TaskCommandSource::Human,
+            TaskCommandKind::Interrupt {
+                replacement: Some("C".to_string()),
+            },
+        );
+        store
+            .supersede_and_create_task_command(&replacement)
+            .await
+            .unwrap();
+        let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+        absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
+            .await
+            .unwrap();
+
+        let input = pending.pop_front().expect("replacement input");
+        assert_eq!(input.command_id.as_ref(), Some(&replacement.id));
+        assert_eq!(input.text, "C");
+        assert!(pending.is_empty());
+        assert_eq!(harness.interrupts, 1);
+        for superseded in [&first, &second] {
+            assert_eq!(
+                store
+                    .get_task_command(&superseded.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .state,
+                TaskCommandState::Superseded
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn bare_task_interrupt_stops_one_turn_without_abandoning_the_session() {
+        let (store, session) = conformance_session("codex").await;
+        let command = TaskCommand::new(
+            session.id.clone(),
+            TaskCommandSource::Human,
+            TaskCommandKind::Interrupt { replacement: None },
+        );
+        store.create_task_command(&command).await.unwrap();
+        let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+        let mut harness = ScriptedHarness::new(true);
+        let mut pending = VecDeque::new();
+
+        let abandon = absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
+            .await
+            .unwrap();
+
+        assert_eq!(abandon, None);
+        assert_eq!(harness.interrupts, 1);
+        assert!(pending.is_empty());
+        assert_eq!(
+            store
+                .get_task_command(&command.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            TaskCommandState::Accepted
+        );
+        assert!(!session.status.is_terminal());
+    }
+
+    #[tokio::test]
+    async fn task_decisions_resume_every_provider_without_losing_lineage() {
+        for (provider, supports_steer) in [("codex", true), ("claude", false), ("opencode", false)]
+        {
+            let (store, session) = conformance_session(provider).await;
+            let decision_id = TaskDecisionId::new();
+            let command = TaskCommand::new(
+                session.id.clone(),
+                TaskCommandSource::Human,
+                TaskCommandKind::Decide {
+                    decision_id: decision_id.clone(),
+                    choice: "revise".to_string(),
+                    message: Some("cover the boundary".to_string()),
+                },
+            );
+            store.create_task_command(&command).await.unwrap();
+            let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+            let mut harness = ScriptedHarness::new(supports_steer);
+            let mut pending = VecDeque::new();
+
+            absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
+                .await
+                .unwrap();
+            if let Some(input) = pending.pop_front() {
+                apply_input(
+                    &store,
+                    &session,
+                    &mut harness,
+                    &input.text,
+                    input.command_id.map(|id| (id, input.effect)),
+                    input.decision,
+                )
+                .await
+                .unwrap();
+            }
+
+            assert_eq!(
+                harness.interrupts,
+                usize::from(!supports_steer),
+                "{provider}"
+            );
+            assert_eq!(
+                store
+                    .get_task_command(&command.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .effect,
+                Some(TaskCommandEffect::Decision),
+                "{provider}"
+            );
+            assert!(
+                store
+                    .task_events_after(&session.id, 0)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .any(|event| matches!(
+                        &event.kind,
+                        TaskEventKind::DecisionResolved {
+                            decision_id: resolved,
+                            choice,
+                            message: Some(message),
+                        } if resolved == &decision_id
+                            && choice == "revise"
+                            && message == "cover the boundary"
+                    )),
+                "{provider}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn task_provider_control_failures_settle_the_receipt() {
+        let (store, session) = conformance_session("claude").await;
+        let command = TaskCommand::new(
+            session.id.clone(),
+            TaskCommandSource::Human,
+            TaskCommandKind::Steer {
+                text: "change direction".to_string(),
+            },
+        );
+        store.create_task_command(&command).await.unwrap();
+        let commands = store.claim_task_commands(&session.id, 1).await.unwrap();
+        let mut harness = ScriptedHarness::new(false);
+        harness.fail_interrupt = true;
+
+        let error = absorb_commands(
+            &store,
+            &session,
+            commands,
+            &mut harness,
+            true,
+            &mut VecDeque::new(),
+        )
+        .await
+        .expect_err("interrupt failure should fail control");
+        assert!(error.to_string().contains("scripted interrupt failed"));
+        let receipt = store.get_task_command(&command.id).await.unwrap().unwrap();
+        assert_eq!(receipt.state, TaskCommandState::Failed);
+        assert_eq!(receipt.effect, Some(TaskCommandEffect::Replacement));
+        assert!(receipt
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("scripted interrupt failed")));
     }
 }

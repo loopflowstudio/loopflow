@@ -1159,6 +1159,20 @@ mod tests {
         supports_steer: bool,
         sent: Vec<String>,
         interrupts: usize,
+        fail_send: bool,
+        fail_interrupt: bool,
+    }
+
+    impl ScriptedHarness {
+        fn new(supports_steer: bool) -> Self {
+            Self {
+                supports_steer,
+                sent: Vec::new(),
+                interrupts: 0,
+                fail_send: false,
+                fail_interrupt: false,
+            }
+        }
     }
 
     #[async_trait]
@@ -1168,12 +1182,18 @@ mod tests {
         }
 
         async fn send_input(&mut self, content: &str) -> Result<()> {
+            if self.fail_send {
+                anyhow::bail!("scripted send failed");
+            }
             self.sent.push(content.to_string());
             Ok(())
         }
 
         async fn interrupt(&mut self) -> Result<()> {
             self.interrupts += 1;
+            if self.fail_interrupt {
+                anyhow::bail!("scripted interrupt failed");
+            }
             Ok(())
         }
 
@@ -1257,11 +1277,7 @@ mod tests {
             );
             store.create_project_command(&command).await.unwrap();
             let commands = store.claim_project_commands(&session.id, 1).await.unwrap();
-            let mut harness = ScriptedHarness {
-                supports_steer,
-                sent: Vec::new(),
-                interrupts: 0,
-            };
+            let mut harness = ScriptedHarness::new(supports_steer);
             let mut pending = std::collections::VecDeque::new();
 
             absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
@@ -1302,11 +1318,7 @@ mod tests {
         store.create_project_command(&first).await.unwrap();
         let mut seen = std::collections::HashSet::new();
         let mut pending = std::collections::VecDeque::new();
-        let mut harness = ScriptedHarness {
-            supports_steer: true,
-            sent: Vec::new(),
-            interrupts: 0,
-        };
+        let mut harness = ScriptedHarness::new(true);
 
         let commands = claim_commands(&store, &session, 1, &mut seen)
             .await
@@ -1388,11 +1400,7 @@ mod tests {
         );
         store.create_project_command(&command).await.unwrap();
         let commands = store.claim_project_commands(&session.id, 1).await.unwrap();
-        let mut harness = ScriptedHarness {
-            supports_steer: true,
-            sent: Vec::new(),
-            interrupts: 0,
-        };
+        let mut harness = ScriptedHarness::new(true);
         let stop = absorb_commands(
             &store,
             &session,
@@ -1434,11 +1442,7 @@ mod tests {
             );
             store.create_project_command(&command).await.unwrap();
             let commands = store.claim_project_commands(&session.id, 1).await.unwrap();
-            let mut harness = ScriptedHarness {
-                supports_steer,
-                sent: Vec::new(),
-                interrupts: 0,
-            };
+            let mut harness = ScriptedHarness::new(supports_steer);
             let mut pending = std::collections::VecDeque::new();
 
             absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
@@ -1475,6 +1479,98 @@ mod tests {
                     } if resolved == &decision_id
                 )));
         }
+    }
+
+    #[tokio::test]
+    async fn project_follow_up_is_fifo_and_never_interrupts() {
+        for provider in ["codex", "claude", "opencode"] {
+            let (store, session) = session(provider).await;
+            let first = ProjectCommand::new(
+                session.id.clone(),
+                ProjectCommandSource::Human,
+                ProjectCommandKind::FollowUp {
+                    text: "first".to_string(),
+                },
+            );
+            let second = ProjectCommand::new(
+                session.id.clone(),
+                ProjectCommandSource::Human,
+                ProjectCommandKind::FollowUp {
+                    text: "second".to_string(),
+                },
+            );
+            store.create_project_command(&first).await.unwrap();
+            store.create_project_command(&second).await.unwrap();
+            let commands = store.claim_project_commands(&session.id, 1).await.unwrap();
+            let mut harness = ScriptedHarness::new(provider == "codex");
+            let mut pending = std::collections::VecDeque::new();
+
+            absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
+                .await
+                .unwrap();
+
+            assert_eq!(harness.interrupts, 0, "{provider}");
+            assert!(harness.sent.is_empty(), "{provider}");
+            for expected in ["first", "second"] {
+                let input = pending.pop_front().expect("queued follow-up");
+                apply_input(&store, &session, &mut harness, input)
+                    .await
+                    .unwrap();
+                assert_eq!(harness.sent.last().map(String::as_str), Some(expected));
+            }
+            assert_eq!(
+                store
+                    .get_project_command(&first.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .effect,
+                Some(TaskCommandEffect::NextTurn),
+                "{provider}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn project_provider_control_failures_settle_the_receipt() {
+        let (store, session) = session("opencode").await;
+        let command = ProjectCommand::new(
+            session.id.clone(),
+            ProjectCommandSource::Human,
+            ProjectCommandKind::Steer {
+                text: "change direction".to_string(),
+            },
+        );
+        store.create_project_command(&command).await.unwrap();
+        let commands = store.claim_project_commands(&session.id, 1).await.unwrap();
+        let mut harness = ScriptedHarness::new(false);
+        harness.fail_interrupt = true;
+
+        let result = absorb_commands(
+            &store,
+            &session,
+            commands,
+            &mut harness,
+            true,
+            &mut std::collections::VecDeque::new(),
+        )
+        .await;
+        let error = match result {
+            Ok(_) => panic!("interrupt failure should fail control"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("scripted interrupt failed"));
+        let receipt = store
+            .get_project_command(&command.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(receipt.state, TaskCommandState::Failed);
+        assert_eq!(receipt.effect, Some(TaskCommandEffect::Replacement));
+        assert!(receipt
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("scripted interrupt failed")));
     }
 
     #[test]

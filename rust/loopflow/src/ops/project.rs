@@ -265,7 +265,7 @@ pub(crate) fn ensure_clean_main(repo: &Path, subject: &str) -> OpsResult<std::pa
     let main = std::fs::canonicalize(&main).unwrap_or(main);
     if worktree != main {
         return Err(project_error(format!(
-            "cannot run {subject} from {}: Wave and Project turns require the canonical main checkout; file-writing work belongs in `lf task start <issue>`",
+            "cannot run {subject} from {}: Wave and Project turns require the canonical main checkout; run existing work with `lf task run <issue-id>` or create it with `lf task start \"<title>\" --project <project>`",
             worktree.display()
         )));
     }

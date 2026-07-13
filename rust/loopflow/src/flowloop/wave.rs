@@ -392,6 +392,7 @@ async fn run_loop_with(
         consecutive_failures: 0,
         idle_since: Instant::now(),
         cron_last_fired: HashMap::new(),
+        provider_session_id: None,
         end: None,
     };
 
@@ -437,6 +438,7 @@ struct WaveLoop {
     consecutive_failures: u32,
     idle_since: Instant,
     cron_last_fired: HashMap<String, DateTime<Utc>>,
+    provider_session_id: Option<String>,
     end: Option<LoopEnd>,
 }
 
@@ -538,22 +540,46 @@ impl WaveLoop {
         answers: Vec<MessageId>,
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
-        let context = match self.fetch_context().await {
-            Some(context) => context,
-            None => return,
-        };
-        let Some(step) = context.playhead.now else {
-            self.fail("playhead has no current step").await;
-            return;
-        };
-        let seed = wave_pass_seed(&self.origin_repo, &self.wave, &wake);
-        let answers = answers.into_iter().map(|id| id.0).collect();
-        let live_skill =
-            step.kind == StepKind::Skill && matches!(&self.backend, BodyBackend::Harness { .. });
-        if live_skill {
-            self.run_harness_pass(step, seed, answers, inbox_rx).await;
-        } else {
-            self.run_process_pass(step, seed, answers, inbox_rx).await;
+        let mut answers = answers.into_iter().map(|id| id.0).collect::<Vec<_>>();
+        let mut invocation: Option<(String, u32)> = None;
+        loop {
+            let context = match self.fetch_context().await {
+                Some(context) => context,
+                None => return,
+            };
+            let Some(step) = context.playhead.now else {
+                self.fail("playhead has no current step").await;
+                return;
+            };
+            let key = (step.invocation_id.clone(), step.iteration);
+            if invocation.as_ref().is_some_and(|expected| expected != &key) {
+                return;
+            }
+            invocation.get_or_insert(key);
+            let completed_index = step.index;
+            let seed = wave_pass_seed(&self.origin_repo, &self.wave, &wake);
+            let live_skill = step.kind == StepKind::Skill
+                && matches!(&self.backend, BodyBackend::Harness { .. });
+            if live_skill {
+                self.run_harness_pass(step, seed, answers, inbox_rx).await;
+            } else {
+                self.run_process_pass(step, seed, answers, inbox_rx).await;
+            }
+            if self.end.is_some() {
+                return;
+            }
+            let next = match self.fetch_context().await {
+                Some(context) => context.playhead.now,
+                None => return,
+            };
+            let Some(next) = next else { return };
+            let same_iteration = invocation
+                .as_ref()
+                .is_some_and(|(id, iteration)| id == &next.invocation_id && *iteration == next.iteration);
+            if !same_iteration || next.index == completed_index {
+                return;
+            }
+            answers = Vec::new();
         }
     }
 
@@ -738,6 +764,7 @@ impl WaveLoop {
         if capture.is_some() {
             harness.set_raw_provider_sender(Some(raw_tx));
         }
+        harness.set_provider_session_id(self.provider_session_id.clone());
         if let Err(err) = harness.start(&prepared.config).await {
             finish_capture(capture.as_ref(), "failed");
             let body_id = body.body_id.clone();
@@ -752,6 +779,9 @@ impl WaveLoop {
         body.session_id = harness.provider_session_id();
         if let Some(capture) = &capture {
             capture.set_provider_session_id(body.session_id.clone());
+        }
+        if body.session_id.is_some() {
+            self.provider_session_id.clone_from(&body.session_id);
         }
         let mut body_session_id = body.session_id.clone();
         let body_id = body.body_id.clone();
@@ -830,6 +860,7 @@ impl WaveLoop {
                             if let Some(capture) = &capture {
                                 capture.set_provider_session_id(Some(session_id.clone()));
                             }
+                            self.provider_session_id = Some(session_id.clone());
                             self.send(vec![ResidentDelta::BodySessionUpdated {
                                 body_id: body_id.clone(),
                                 session_id,

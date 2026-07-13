@@ -306,6 +306,18 @@ pub fn is_clean(repo: &Path) -> Result<bool, GitError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
 }
 
+/// Repository state relevant to a Task flow's no-progress check.
+///
+/// The returned text is an opaque comparison value, not a user-facing diff.
+/// It includes committed, staged, tracked working-tree, and untracked-path
+/// changes without reading ignored files.
+pub fn worktree_state(repo: &Path) -> Result<String, GitError> {
+    let head = git_stdout(repo, &["rev-parse", "HEAD"])?;
+    let status = git_stdout(repo, &["status", "--porcelain"])?;
+    let diff = git_stdout(repo, &["diff", "--binary", "HEAD"])?;
+    Ok(format!("{head}\0{status}\0{diff}"))
+}
+
 /// Return true if working tree is clean, ignoring untracked `scratch/` entries.
 ///
 /// Used for worktree pruning where leftover scratch directories from landed
@@ -1101,6 +1113,23 @@ mod tests {
         let path = repo.path().join("dirty.txt");
         fs::write(&path, "dirty").expect("write file");
         assert!(!is_clean(repo.path()).expect("dirty repo"));
+    }
+
+    #[test]
+    fn worktree_state_changes_with_committed_and_uncommitted_work() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "one");
+        let initial = worktree_state(repo.path()).expect("initial state");
+
+        fs::write(repo.path().join("README.md"), "two").expect("edit tracked file");
+        let dirty = worktree_state(repo.path()).expect("dirty state");
+        assert_ne!(dirty, initial);
+
+        stage_all(repo.path()).expect("stage all");
+        commit(repo.path(), "update readme").expect("commit");
+        let committed = worktree_state(repo.path()).expect("committed state");
+        assert_ne!(committed, initial);
+        assert_ne!(committed, dirty);
     }
 
     #[test]

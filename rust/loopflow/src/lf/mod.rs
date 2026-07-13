@@ -291,8 +291,8 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show one wave's runs, attention, and (when live) loop state, from the
-    /// registry. Defaults to the ambient wave (`LFD_WAVE_ID`).
+    /// Show one wave's Project/Task hierarchy, runs, attention, and live loop
+    /// state from the registry. Defaults to the ambient wave (`LFD_WAVE_ID`).
     Status {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,

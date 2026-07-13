@@ -8,8 +8,8 @@ SELECT
     session.id,
     1,
     'initial',
-    'Resume existing Linear Project ' || session.project_name || '.\n\n' ||
-        session.project_context,
+    'Resume existing Linear Project ' || session.project_name || '.' ||
+        char(10) || char(10) || session.project_context,
     '{"kind":"system"}',
     NULL,
     session.created_at * 1000000000,
@@ -50,7 +50,7 @@ SELECT
         session.issue_title ||
         CASE
             WHEN trim(session.issue_description) = '' THEN ''
-            ELSE '\n\n' || session.issue_description
+            ELSE char(10) || char(10) || session.issue_description
         END,
     '{"kind":"system"}',
     NULL,

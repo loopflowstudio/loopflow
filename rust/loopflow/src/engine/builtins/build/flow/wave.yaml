@@ -1,4 +1,6 @@
-# One bounded pass of the wave loop: a single policy turn. The controller,
-# not a loop-bit skill, decides whether the wave runs again, waits, or is
-# nudged. Clarify and evolve duties are folded into wave_pursue.
+# One bounded Wave iteration. The resident plays every skill through the Wave
+# harness; its scheduler, not a loop-bit file, decides when another iteration
+# is useful.
+- wave_clarify
 - wave_pursue
+- wave_mutate

@@ -254,6 +254,21 @@ mod tests {
         assert!(task.contains("lf pr land"));
         assert!(task.contains("lf pm task done"));
         assert!(task.contains("lf pm task create"));
+
+        for (flow, steps) in [
+            ("wave", ["wave_clarify", "wave_pursue", "wave_mutate"]),
+            (
+                "project",
+                ["project_clarify", "project_pursue", "project_mutate"],
+            ),
+            ("task", ["task_clarify", "task_pursue", "task_mutate"]),
+        ] {
+            let flow = get_builtin_flow(flow).expect("tier flow");
+            for step in steps {
+                assert!(flow.contains(&format!("- {step}")));
+            }
+            assert!(!flow.contains("loop:"));
+        }
     }
 
     #[test]

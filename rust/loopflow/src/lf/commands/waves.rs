@@ -3,12 +3,12 @@
 //! Discovery and history are QUERIES over the durable store, not a streaming
 //! center (see `scratch/eventing.md`): `lf ls` lists every wave the registry
 //! knows — running and stopped alike (`list_waves(None)`) — and marks which
-//! have a live server answering; `lf status <wave>` reports one wave's runs,
-//! attention, and (when live) its loop state. Both are pure readers over the
-//! shared SQLite ledger; `--json` is the machine-readable snapshot Loopflow's
-//! dashboard reads. A live wave has an endpoint you can subscribe to for
-//! motion (`GET /events`); a stopped one is a row with no endpoint — visible,
-//! inert, restartable.
+//! have a live server answering; `lf status <wave>` reports one wave's native
+//! Project/Task hierarchy, historical runs, attention, and live loop state.
+//! Both are pure readers over the shared SQLite ledger; `--json` is the
+//! machine-readable snapshot Loopflow's dashboard reads. A live wave has an
+//! endpoint you can subscribe to for motion (`GET /events`); a stopped one is
+//! a row with no endpoint — visible, inert, restartable.
 
 use std::path::Path;
 
@@ -56,8 +56,8 @@ pub struct WaveSnapshot {
     pub parent_wave_id: Option<String>,
 }
 
-/// `lf status <wave>` snapshot: the wave plus its runs, attention, and — when
-/// a server is live — its loop state. Wire type; no serde defaults.
+/// `lf status <wave>` snapshot: native work hierarchy, historical runs,
+/// attention, and — when a server is live — loop state. Wire type; no defaults.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
@@ -239,7 +239,7 @@ pub fn ls(json: bool) -> Result<()> {
     })
 }
 
-/// `lf status <wave>` — one wave's runs, attention, and live loop state.
+/// `lf status <wave>` — one wave's work hierarchy, runs, attention, and loop.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let name = wave
         .map(str::to_string)

@@ -718,8 +718,8 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert!(project_text.contains("Work Isolation"));
-        assert!(task_text.contains("INF-123"));
+        assert!(project_text.contains("Work Isolation.\n\nKeep writers isolated."));
+        assert!(task_text.contains("Fix task placement\n\nPreserve the existing worktree."));
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&project_source).unwrap(),
             serde_json::json!({ "kind": "system" })

@@ -1,4 +1,6 @@
 use std::collections::{HashSet, VecDeque};
+use std::io::BufRead;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,6 +18,9 @@ use crate::project_session::{
 use crate::task::{
     unincorporated_directive_version, ChildDirective, ChildRef, TaskCommandEffect,
     TaskCommandState, TaskSessionStatus,
+};
+use crate::wave::playhead::{
+    BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
 
 #[derive(Debug)]
@@ -74,28 +79,9 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
         .await?;
 
     let observations = consume_task_observations(&store, &mut session).await?;
-    let directives = store
-        .child_directives(&ChildRef::Project(session.id.clone()))
-        .await?;
-    let directive = directives
-        .iter()
-        .find(|directive| directive.version == session.current_directive_version)
-        .ok_or_else(|| {
-            anyhow!(
-                "Project Session {} has no current directive v{}",
-                session.id,
-                session.current_directive_version
-            )
-        })?;
-    let seed = project_seed(&session, directive, &observations);
-    let mut prepared = crate::lf::commands::run::prepare_harness_turn(
-        "project_pursue",
-        &seed,
-        &session.wave,
-        None,
-    )?;
+    let (mut flow, _) = Playhead::new(QueuedInvocation::load(Path::new(&session.repo), "project")?);
+    let prepared = prepare_project_flow_step(&store, &mut session, &flow, &observations).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
-    prepared.config.agent = Some(session.agent.clone());
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
     harness.set_provider_session_id(session.provider_session_id.clone());
@@ -119,36 +105,38 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
     {
         return finish_command_stop(&store, &mut session, harness.as_mut(), stop).await;
     }
-    let input = if generation > 1 {
-        take_current_input(&store, &mut pending)
-            .await?
-            .unwrap_or(PendingInput {
-                command_id: None,
-                text: prepared.input,
-                effect: TaskCommandEffect::NextTurn,
-                decision: None,
-            })
+    let mut flow_turn_active = false;
+    if let Some(input) = take_current_input(&store, &mut pending).await? {
+        apply_input(&store, &session, harness.as_mut(), input).await?;
     } else {
-        PendingInput {
-            command_id: None,
-            text: prepared.input,
-            effect: TaskCommandEffect::NextTurn,
-            decision: None,
-        }
-    };
-    apply_input(&store, &session, harness.as_mut(), input).await?;
-    store
-        .mark_child_directive_applied(
-            &ChildRef::Project(session.id.clone()),
-            session.current_directive_version,
-        )
-        .await?;
+        start_project_flow_turn(&store, &mut session, harness.as_mut(), &mut flow, prepared)
+            .await?;
+        flow_turn_active = true;
+    }
 
+    let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            if attachment_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    println!(
+        "project {}> attached; /status, /interrupt [message], /detach, or type an instruction",
+        session.project.slug
+    );
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_text = String::new();
     loop {
         tokio::select! {
+            line = attachment_rx.recv() => {
+                if let Some(line) = line {
+                    handle_attachment(&store, &session, line).await?;
+                }
+            }
             _ = poll.tick() => {
                 let commands = claim_commands(
                     &store,
@@ -181,37 +169,73 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                         if status == Lifecycle::Failed {
                             return finish_failed(&store, &mut session, harness.as_mut(), "provider turn failed").await;
                         }
+                        let resume_interrupted_flow =
+                            flow_turn_active && status == Lifecycle::Interrupted;
+                        let flow_iteration_completed = if flow_turn_active {
+                            finish_project_flow_turn(&mut flow, status)?
+                        } else {
+                            false
+                        };
+                        flow_turn_active = false;
                         if let Some(input) = take_current_input(&store, &mut pending).await? {
+                            if resume_interrupted_flow {
+                                open_project_flow_body(&mut flow, &session)?;
+                                flow_turn_active = true;
+                            }
                             apply_input(&store, &session, harness.as_mut(), input).await?;
                             continue;
                         }
-                        let observations = consume_task_observations(&store, &mut session).await?;
-                        if !observations.is_empty() {
-                            apply_input(
+                        if status != Lifecycle::Interrupted {
+                            let observations =
+                                consume_task_observations(&store, &mut session).await?;
+                            if !observations.is_empty() {
+                                apply_input(
+                                    &store,
+                                    &session,
+                                    harness.as_mut(),
+                                    PendingInput {
+                                        command_id: None,
+                                        text: format!(
+                                            "New supervised Task observations arrived. Continue the same Project iteration:\n{}",
+                                            observations.join("\n")
+                                        ),
+                                        effect: TaskCommandEffect::NextTurn,
+                                        decision: None,
+                                    },
+                                ).await?;
+                                continue;
+                            }
+                        }
+                        if !flow_iteration_completed && status != Lifecycle::Interrupted {
+                            let prepared = prepare_project_flow_step(
                                 &store,
-                                &session,
+                                &mut session,
+                                &flow,
+                                &[],
+                            )
+                            .await?;
+                            start_project_flow_turn(
+                                &store,
+                                &mut session,
                                 harness.as_mut(),
-                                PendingInput {
-                                    command_id: None,
-                                    text: format!(
-                                        "New supervised Task observations arrived. Continue the same Project iteration:\n{}",
-                                        observations.join("\n")
-                                    ),
-                                    effect: TaskCommandEffect::NextTurn,
-                                    decision: None,
-                                },
-                            ).await?;
+                                &mut flow,
+                                prepared,
+                            )
+                            .await?;
+                            flow_turn_active = true;
                             continue;
                         }
-                        session.iteration += 1;
                         let summary = bounded_summary(&last_text);
-                        store.append_project_event(
-                            &session.id,
-                            &ProjectEventKind::IterationCompleted {
-                                iteration: session.iteration,
-                                summary: summary.clone(),
-                            },
-                        ).await?;
+                        if flow_iteration_completed {
+                            session.iteration += 1;
+                            store.append_project_event(
+                                &session.id,
+                                &ProjectEventKind::IterationCompleted {
+                                    iteration: session.iteration,
+                                    summary: summary.clone(),
+                                },
+                            ).await?;
+                        }
                         let latest = store
                             .get_project_session(&session.id)
                             .await?
@@ -220,6 +244,10 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                         session.incorporated_directive_version =
                             latest.incorporated_directive_version;
                         let mut outcome = inspect_outcome(&store, &session).await?;
+                        if status == Lifecycle::Interrupted {
+                            outcome.status = ProjectSessionStatus::Waiting;
+                            outcome.reason = "Project flow step interrupted; waiting for resume or another instruction".to_string();
+                        }
                         if let Some(version) = unincorporated_directive_version(
                             session.current_directive_version,
                             session.incorporated_directive_version,
@@ -234,17 +262,22 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                             session.updated_at = time::OffsetDateTime::now_utc();
                             store.update_project_session(&session).await?;
                             last_text.clear();
-                            apply_input(
+                            let prepared = prepare_project_flow_step(
                                 &store,
-                                &session,
+                                &mut session,
+                                &flow,
+                                &[],
+                            )
+                            .await?;
+                            start_project_flow_turn(
+                                &store,
+                                &mut session,
                                 harness.as_mut(),
-                                PendingInput {
-                                    command_id: None,
-                                    text: "Project state changed and open KRs remain. Run the next pursuit iteration now.".to_string(),
-                                    effect: TaskCommandEffect::NextTurn,
-                                    decision: None,
-                                },
-                            ).await?;
+                                &mut flow,
+                                prepared,
+                            )
+                            .await?;
+                            flow_turn_active = true;
                             continue;
                         }
                         session.state_fingerprint = Some(outcome.fingerprint);
@@ -312,6 +345,227 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
             }
         }
     }
+}
+
+async fn prepare_project_flow_step(
+    store: &SharedStore,
+    session: &mut ProjectSession,
+    flow: &Playhead,
+    observations: &[String],
+) -> Result<crate::lf::commands::run::PreparedHarnessTurn> {
+    let latest = store
+        .get_project_session(&session.id)
+        .await?
+        .ok_or_else(|| anyhow!("Project Session {} disappeared", session.id))?;
+    session.current_directive_version = latest.current_directive_version;
+    session.incorporated_directive_version = latest.incorporated_directive_version;
+    let directives = store
+        .child_directives(&ChildRef::Project(session.id.clone()))
+        .await?;
+    let directive = directives
+        .iter()
+        .find(|directive| directive.version == session.current_directive_version)
+        .ok_or_else(|| {
+            anyhow!(
+                "Project Session {} has no current directive v{}",
+                session.id,
+                session.current_directive_version
+            )
+        })?;
+    let step = flow
+        .current()
+        .ok_or_else(|| anyhow!("Project flow has no current step"))?;
+    if step.kind != StepKind::Skill {
+        anyhow::bail!(
+            "Project flow step {} is {:?}; durable Project flows currently require skills",
+            step.step,
+            step.kind
+        );
+    }
+    session.status_reason = format!(
+        "Project flow iteration {}, step {}/{}: {}",
+        step.iteration + 1,
+        step.index + 1,
+        step.total,
+        step.step
+    );
+    store.update_project_session(session).await?;
+    let seed = project_seed(session, directive, observations);
+    let mut prepared =
+        crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, &session.wave, None)?;
+    prepared.config.agent = Some(session.agent.clone());
+    Ok(prepared)
+}
+
+fn open_project_flow_body(flow: &mut Playhead, session: &ProjectSession) -> Result<()> {
+    let step = flow
+        .current()
+        .ok_or_else(|| anyhow!("Project flow has no current step"))?;
+    if step.kind != StepKind::Skill {
+        anyhow::bail!("Project flow step {} is not a skill", step.step);
+    }
+    flow.start_body(BodyProvenance::for_step(&step, Path::new(&session.repo)))?;
+    Ok(())
+}
+
+async fn start_project_flow_turn(
+    store: &SharedStore,
+    session: &mut ProjectSession,
+    harness: &mut dyn Harness,
+    flow: &mut Playhead,
+    prepared: crate::lf::commands::run::PreparedHarnessTurn,
+) -> Result<()> {
+    open_project_flow_body(flow, session)?;
+    apply_input(
+        store,
+        session,
+        harness,
+        PendingInput {
+            command_id: None,
+            text: prepared.input,
+            effect: TaskCommandEffect::NextTurn,
+            decision: None,
+        },
+    )
+    .await?;
+    store
+        .mark_child_directive_applied(
+            &ChildRef::Project(session.id.clone()),
+            session.current_directive_version,
+        )
+        .await?;
+    Ok(())
+}
+
+fn finish_project_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool> {
+    let body_id = flow
+        .active
+        .as_ref()
+        .map(|body| body.body_id.clone())
+        .ok_or_else(|| anyhow!("Project flow turn completed without an active body"))?;
+    let outcome = match status {
+        Lifecycle::Completed => StepOutcome::Completed,
+        Lifecycle::Interrupted => StepOutcome::Interrupted,
+        _ => anyhow::bail!("Project flow turn ended with unexpected status {status:?}"),
+    };
+    let events = flow.finish_body(&body_id, outcome, status.name())?;
+    Ok(events
+        .iter()
+        .any(|event| matches!(event, PlayheadEvent::InvocationCompleted { .. })))
+}
+
+async fn handle_attachment(
+    store: &SharedStore,
+    session: &ProjectSession,
+    line: String,
+) -> Result<()> {
+    let line = line.trim();
+    if line.is_empty() {
+        return Ok(());
+    }
+    if line == "/status" {
+        println!(
+            "{}  {}  {}",
+            session.project.slug,
+            session.status.as_str(),
+            session.status_reason
+        );
+        return Ok(());
+    }
+    if line == "/detach" {
+        let _ = std::process::Command::new("tmux")
+            .args(["detach-client"])
+            .status();
+        return Ok(());
+    }
+    let kind = if let Some(message) = line.strip_prefix("/interrupt") {
+        let message = message.trim();
+        ProjectCommandKind::Interrupt {
+            replacement: (!message.is_empty()).then(|| message.to_string()),
+        }
+    } else {
+        ProjectCommandKind::Steer {
+            text: line.to_string(),
+        }
+    };
+    let command = ProjectCommand::new(
+        session.id.clone(),
+        crate::project_session::ProjectCommandSource::Attachment,
+        kind,
+    );
+    let replacement = match &command.kind {
+        ProjectCommandKind::Steer { text } => Some(text.clone()),
+        ProjectCommandKind::Interrupt {
+            replacement: Some(text),
+        } => Some(text.clone()),
+        _ => None,
+    };
+    let (superseded, directive_event) = if let Some(text) = replacement {
+        let latest = store
+            .get_project_session(&session.id)
+            .await?
+            .ok_or_else(|| anyhow!("Project Session {} disappeared", session.id))?;
+        let directive = ChildDirective::replacement(
+            ChildRef::Project(session.id.clone()),
+            latest.current_directive_version + 1,
+            text,
+            command.source.clone(),
+            command.id.clone(),
+        );
+        let superseded = store
+            .create_project_command_with_directive(&command, &directive)
+            .await?;
+        (
+            superseded,
+            Some((directive.id, directive.version, directive.kind)),
+        )
+    } else if matches!(&command.kind, ProjectCommandKind::Interrupt { .. }) {
+        (
+            store.supersede_and_create_project_command(&command).await?,
+            None,
+        )
+    } else {
+        store.create_project_command(&command).await?;
+        (Vec::new(), None)
+    };
+    for command_id in superseded {
+        store
+            .append_project_event(
+                &session.id,
+                &ProjectEventKind::CommandChanged {
+                    command_id,
+                    state: TaskCommandState::Superseded,
+                    effect: None,
+                    error: None,
+                },
+            )
+            .await?;
+    }
+    if let Some((directive_id, version, directive_kind)) = directive_event {
+        store
+            .append_project_event(
+                &session.id,
+                &ProjectEventKind::DirectiveChanged {
+                    directive_id,
+                    version,
+                    directive_kind,
+                },
+            )
+            .await?;
+    }
+    store
+        .append_project_event(
+            &session.id,
+            &ProjectEventKind::CommandChanged {
+                command_id: command.id.clone(),
+                state: TaskCommandState::Persisted,
+                effect: command.effect,
+                error: None,
+            },
+        )
+        .await?;
+    println!("queued {}", command.id);
+    Ok(())
 }
 
 async fn claim_commands(
@@ -390,7 +644,7 @@ async fn inspect_outcome(store: &SharedStore, session: &ProjectSession) -> Resul
         "tasks": tasks.iter().map(|task| (&task.id, task.status, &task.updated_at)).collect::<Vec<_>>(),
     });
     let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&fingerprint_payload)?));
-    if resolved.project.krs.iter().all(|kr| kr.holds) {
+    if !resolved.project.krs.is_empty() && resolved.project.krs.iter().all(|kr| kr.holds) {
         return Ok(ProjectOutcome {
             status: ProjectSessionStatus::Completed,
             reason: "every current Project KR holds".to_string(),
@@ -843,7 +1097,10 @@ mod tests {
     use async_trait::async_trait;
     use time::OffsetDateTime;
 
-    use super::{absorb_commands, apply_input, claim_commands, take_current_input, CommandStop};
+    use super::{
+        absorb_commands, apply_input, claim_commands, handle_attachment, take_current_input,
+        CommandStop,
+    };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
     use crate::lfd::id::LfdId;
@@ -853,7 +1110,9 @@ mod tests {
         ProjectCommand, ProjectCommandKind, ProjectCommandSource, ProjectDecisionId,
         ProjectProcess, ProjectSession, ProjectSessionId, ProjectSessionStatus,
     };
-    use crate::task::{LinearProjectId, LinearProjectRef, TaskCommandEffect, TaskCommandState};
+    use crate::task::{
+        ChildRef, LinearProjectId, LinearProjectRef, TaskCommandEffect, TaskCommandState,
+    };
 
     struct ScriptedHarness {
         supports_steer: bool,
@@ -1052,6 +1311,30 @@ mod tests {
         assert_eq!(input.command_id.as_ref(), Some(&replacement.id));
         assert_eq!(input.text, "new direction");
         assert!(pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn attached_project_direction_is_versioned_before_delivery() {
+        let (store, session) = session("codex").await;
+
+        handle_attachment(&store, &session, "pursue the parser first".to_string())
+            .await
+            .unwrap();
+
+        let current = store
+            .get_project_session(&session.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let directives = store
+            .child_directives(&ChildRef::Project(session.id.clone()))
+            .await
+            .unwrap();
+        assert_eq!(current.current_directive_version, 1);
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].text, "pursue the parser first");
+        assert_eq!(directives[0].source, ProjectCommandSource::Attachment);
+        assert!(directives[0].command_id.is_some());
     }
 
     #[tokio::test]

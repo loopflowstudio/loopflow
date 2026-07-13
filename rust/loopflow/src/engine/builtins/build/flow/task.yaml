@@ -1,0 +1,5 @@
+# One bounded Task iteration. The Task runner loops this whole flow while work
+# changes, and waits on review or blocks on a no-progress pass.
+- task_clarify
+- task_pursue
+- task_mutate

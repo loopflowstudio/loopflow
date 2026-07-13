@@ -1,9 +1,11 @@
 use std::collections::{HashSet, VecDeque};
 use std::io::BufRead;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
@@ -13,6 +15,9 @@ use crate::task::{
     unincorporated_directive_version, BoundaryResult, ChildDirective, ChildRef, TaskCommand,
     TaskCommandEffect, TaskCommandId, TaskCommandKind, TaskCommandState, TaskDecisionId,
     TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+};
+use crate::wave::playhead::{
+    BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,25 +74,9 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
         .append_task_event(&session.id, &TaskEventKind::Started)
         .await?;
 
-    let directives = store
-        .child_directives(&ChildRef::Task(session.id.clone()))
-        .await?;
-    let directive = directives
-        .iter()
-        .find(|directive| directive.version == session.current_directive_version)
-        .ok_or_else(|| {
-            anyhow!(
-                "Task Session {} has no current directive v{}",
-                session.id,
-                session.current_directive_version
-            )
-        })?;
-    let seed = task_seed(&session, directive);
-    let mut prepared =
-        crate::lf::commands::run::prepare_harness_turn("task_pursue", &seed, &session.wave, None)?;
+    let (mut flow, _) = Playhead::new(QueuedInvocation::load(&session.worktree, "task")?);
+    let prepared = prepare_task_flow_step(&store, &mut session, &flow).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
-    let resuming = generation > 1 || session.provider_session_id.is_some();
-    prepared.config.agent = Some(session.agent.clone());
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
     harness.set_provider_session_id(session.provider_session_id.clone());
@@ -97,6 +86,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
     }
     session.provider = harness_name;
     store.update_task_session(&session).await?;
+    let mut state_fingerprint = task_state_fingerprint(&session)?;
 
     let mut pending = VecDeque::new();
     let mut seen_commands = HashSet::new();
@@ -113,31 +103,29 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
     {
         return finish_abandoned(&store, &mut session, harness.as_mut(), reason).await;
     }
-    let task_seed_input = prepared.input;
-    let (mut first_input, mut first_command, mut first_decision) =
-        take_first_input(task_seed_input.clone(), resuming, &mut pending);
-    if let Some((command_id, _)) = &first_command {
-        if !command_is_claimed(&store, command_id).await? {
-            first_input = task_seed_input;
-            first_command = None;
-            first_decision = None;
+    let mut flow_turn_active = false;
+    let mut sent_pending = false;
+    while let Some(input) = pending.pop_front() {
+        if !pending_input_is_current(&store, &input).await? {
+            continue;
         }
-    }
-    apply_input(
-        &store,
-        &session,
-        harness.as_mut(),
-        &first_input,
-        first_command,
-        first_decision,
-    )
-    .await?;
-    store
-        .mark_child_directive_applied(
-            &ChildRef::Task(session.id.clone()),
-            session.current_directive_version,
+        let command = input.command_id.map(|id| (id, input.effect));
+        apply_input(
+            &store,
+            &session,
+            harness.as_mut(),
+            &input.text,
+            command,
+            input.decision,
         )
         .await?;
+        sent_pending = true;
+        break;
+    }
+    if !sent_pending {
+        start_task_flow_turn(&store, &mut session, harness.as_mut(), &mut flow, prepared).await?;
+        flow_turn_active = true;
+    }
 
     let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
     std::thread::spawn(move || {
@@ -206,10 +194,22 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 "provider turn failed",
                             ).await;
                         }
+                        let resume_interrupted_flow =
+                            flow_turn_active && status == Lifecycle::Interrupted;
+                        let flow_iteration_completed = if flow_turn_active {
+                            finish_task_flow_turn(&mut flow, status)?
+                        } else {
+                            false
+                        };
+                        flow_turn_active = false;
                         loop {
                             while let Some(input) = pending.pop_front() {
                                 if !pending_input_is_current(&store, &input).await? {
                                     continue;
+                                }
+                                if resume_interrupted_flow {
+                                    open_task_flow_body(&mut flow, &session)?;
+                                    flow_turn_active = true;
                                 }
                                 let command = input.command_id.map(|id| (id, input.effect));
                                 apply_input(
@@ -220,6 +220,20 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                     command,
                                     input.decision,
                                 ).await?;
+                                continue 'runner;
+                            }
+                            if !flow_iteration_completed && status != Lifecycle::Interrupted {
+                                let prepared =
+                                    prepare_task_flow_step(&store, &mut session, &flow).await?;
+                                start_task_flow_turn(
+                                    &store,
+                                    &mut session,
+                                    harness.as_mut(),
+                                    &mut flow,
+                                    prepared,
+                                )
+                                .await?;
+                                flow_turn_active = true;
                                 continue 'runner;
                             }
                             let summary = progress_summary(&last_text);
@@ -244,6 +258,11 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                         "current directive v{version} was applied but not incorporated; resume the Task flow and acknowledge it before settling"
                                     ),
                                 )
+                            } else if status == Lifecycle::Interrupted {
+                                (
+                                    TaskSessionStatus::Waiting,
+                                    "Task flow step interrupted; waiting for resume or another instruction".to_string(),
+                                )
                             } else if let Some(pr) = observed_pr {
                                 let pull_request = crate::task::PullRequestRef {
                                     number: pr.number as u32,
@@ -263,9 +282,34 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                     )
                                 }
                             } else {
+                                let next_fingerprint = task_state_fingerprint(&session)?;
+                                if next_fingerprint != state_fingerprint {
+                                    state_fingerprint = next_fingerprint;
+                                    session.status_reason =
+                                        "Task flow changed the worktree; starting another iteration"
+                                            .to_string();
+                                    store.update_task_session(&session).await?;
+                                    let prepared = prepare_task_flow_step(
+                                        &store,
+                                        &mut session,
+                                        &flow,
+                                    )
+                                    .await?;
+                                    start_task_flow_turn(
+                                        &store,
+                                        &mut session,
+                                        harness.as_mut(),
+                                        &mut flow,
+                                        prepared,
+                                    )
+                                    .await?;
+                                    flow_turn_active = true;
+                                    last_text.clear();
+                                    continue 'runner;
+                                }
                                 (
-                                    TaskSessionStatus::Waiting,
-                                    "provider turn completed; Task Session is waiting for review, merge, or another instruction".to_string(),
+                                    TaskSessionStatus::Blocked,
+                                    "Task flow completed without a PR or any worktree change; another automatic iteration would spin".to_string(),
                                 )
                             };
                             // Persist non-status fields while the generation is still active.
@@ -371,29 +415,104 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
     }
 }
 
-fn take_first_input(
-    task_seed: String,
-    resuming: bool,
-    pending: &mut VecDeque<PendingInput>,
-) -> (
-    String,
-    Option<(TaskCommandId, TaskCommandEffect)>,
-    Option<DecisionResolution>,
-) {
-    if !resuming {
-        return (task_seed, None, None);
-    }
-    pending
-        .pop_front()
-        .map_or((task_seed, None, None), |input| {
-            (
-                input.text,
-                input
-                    .command_id
-                    .map(|command_id| (command_id, input.effect)),
-                input.decision,
+async fn prepare_task_flow_step(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    flow: &Playhead,
+) -> Result<crate::lf::commands::run::PreparedHarnessTurn> {
+    let latest = store
+        .get_task_session(&session.id)
+        .await?
+        .ok_or_else(|| anyhow!("Task Session {} disappeared", session.id))?;
+    session.current_directive_version = latest.current_directive_version;
+    session.incorporated_directive_version = latest.incorporated_directive_version;
+    let directives = store
+        .child_directives(&ChildRef::Task(session.id.clone()))
+        .await?;
+    let directive = directives
+        .iter()
+        .find(|directive| directive.version == session.current_directive_version)
+        .ok_or_else(|| {
+            anyhow!(
+                "Task Session {} has no current directive v{}",
+                session.id,
+                session.current_directive_version
             )
-        })
+        })?;
+    let step = flow
+        .current()
+        .ok_or_else(|| anyhow!("Task flow has no current step"))?;
+    if step.kind != StepKind::Skill {
+        anyhow::bail!(
+            "Task flow step {} is {:?}; durable Task flows currently require skills",
+            step.step,
+            step.kind
+        );
+    }
+    session.status_reason = format!(
+        "Task flow iteration {}, step {}/{}: {}",
+        step.iteration + 1,
+        step.index + 1,
+        step.total,
+        step.step
+    );
+    store.update_task_session(session).await?;
+    let seed = task_seed(session, directive);
+    let mut prepared =
+        crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, &session.wave, None)?;
+    prepared.config.agent = Some(session.agent.clone());
+    Ok(prepared)
+}
+
+fn open_task_flow_body(flow: &mut Playhead, session: &TaskSession) -> Result<()> {
+    let step = flow
+        .current()
+        .ok_or_else(|| anyhow!("Task flow has no current step"))?;
+    if step.kind != StepKind::Skill {
+        anyhow::bail!("Task flow step {} is not a skill", step.step);
+    }
+    flow.start_body(BodyProvenance::for_step(&step, &session.worktree))?;
+    Ok(())
+}
+
+async fn start_task_flow_turn(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    harness: &mut dyn Harness,
+    flow: &mut Playhead,
+    prepared: crate::lf::commands::run::PreparedHarnessTurn,
+) -> Result<()> {
+    open_task_flow_body(flow, session)?;
+    apply_input(store, session, harness, &prepared.input, None, None).await?;
+    store
+        .mark_child_directive_applied(
+            &ChildRef::Task(session.id.clone()),
+            session.current_directive_version,
+        )
+        .await?;
+    Ok(())
+}
+
+fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool> {
+    let body_id = flow
+        .active
+        .as_ref()
+        .map(|body| body.body_id.clone())
+        .ok_or_else(|| anyhow!("Task flow turn completed without an active body"))?;
+    let outcome = match status {
+        Lifecycle::Completed => StepOutcome::Completed,
+        Lifecycle::Interrupted => StepOutcome::Interrupted,
+        _ => anyhow::bail!("Task flow turn ended with unexpected status {status:?}"),
+    };
+    let events = flow.finish_body(&body_id, outcome, status.name())?;
+    Ok(events
+        .iter()
+        .any(|event| matches!(event, PlayheadEvent::InvocationCompleted { .. })))
+}
+
+fn task_state_fingerprint(session: &TaskSession) -> Result<String> {
+    let state = crate::engine::git::worktree_state(Path::new(&session.worktree))?;
+    Ok(hex::encode(Sha256::digest(state.as_bytes())))
 }
 
 async fn pending_input_is_current(store: &SharedStore, input: &PendingInput) -> Result<bool> {
@@ -438,11 +557,40 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
         crate::task::TaskCommandSource::Attachment,
         kind,
     );
-    let superseded = if matches!(&command.kind, TaskCommandKind::Interrupt { .. }) {
-        store.supersede_and_create_task_command(&command).await?
+    let replacement = match &command.kind {
+        TaskCommandKind::Steer { text } => Some(text.clone()),
+        TaskCommandKind::Interrupt {
+            replacement: Some(text),
+        } => Some(text.clone()),
+        _ => None,
+    };
+    let (superseded, directive_event) = if let Some(text) = replacement {
+        let latest = store
+            .get_task_session(&session.id)
+            .await?
+            .ok_or_else(|| anyhow!("Task Session {} disappeared", session.id))?;
+        let directive = ChildDirective::replacement(
+            ChildRef::Task(session.id.clone()),
+            latest.current_directive_version + 1,
+            text,
+            command.source.clone(),
+            command.id.clone(),
+        );
+        let superseded = store
+            .create_task_command_with_directive(&command, &directive)
+            .await?;
+        (
+            superseded,
+            Some((directive.id, directive.version, directive.kind)),
+        )
+    } else if matches!(&command.kind, TaskCommandKind::Interrupt { .. }) {
+        (
+            store.supersede_and_create_task_command(&command).await?,
+            None,
+        )
     } else {
         store.create_task_command(&command).await?;
-        Vec::new()
+        (Vec::new(), None)
     };
     for command_id in superseded {
         store
@@ -453,6 +601,18 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
                     state: TaskCommandState::Superseded,
                     effect: None,
                     error: None,
+                },
+            )
+            .await?;
+    }
+    if let Some((directive_id, version, directive_kind)) = directive_event {
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::DirectiveChanged {
+                    directive_id,
+                    version,
+                    directive_kind,
                 },
             )
             .await?;
@@ -932,16 +1092,17 @@ mod tests {
     use async_trait::async_trait;
     use time::OffsetDateTime;
 
-    use super::{absorb_commands, apply_input, progress_summary, take_first_input, PendingInput};
+    use super::{absorb_commands, apply_input, handle_attachment, progress_summary};
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::Wave;
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackState,
-        TaskCommand, TaskCommandEffect, TaskCommandId, TaskCommandKind, TaskCommandSource,
-        TaskCommandState, TaskProcess, TaskSession, TaskSessionId, TaskSessionStatus,
+        ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
+        PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandId, TaskCommandKind,
+        TaskCommandSource, TaskCommandState, TaskProcess, TaskSession, TaskSessionId,
+        TaskSessionStatus,
     };
 
     struct ScriptedHarness {
@@ -1047,46 +1208,24 @@ mod tests {
         assert!(summary.ends_with('…'));
     }
 
-    #[test]
-    fn fresh_session_keeps_task_seed_ahead_of_racing_commands() {
-        let command_id = TaskCommandId::new();
-        let mut pending = VecDeque::from([PendingInput {
-            command_id: Some(command_id.clone()),
-            text: "rename the flag".to_string(),
-            effect: TaskCommandEffect::Replacement,
-            decision: None,
-        }]);
+    #[tokio::test]
+    async fn attached_task_direction_is_versioned_before_delivery() {
+        let (store, session) = conformance_session("codex").await;
 
-        let first = take_first_input("implement INF-123".to_string(), false, &mut pending);
+        handle_attachment(&store, &session, "fix the parser first".to_string())
+            .await
+            .unwrap();
 
-        assert_eq!(first, ("implement INF-123".to_string(), None, None));
-        assert_eq!(
-            pending.front().and_then(|input| input.command_id.clone()),
-            Some(command_id)
-        );
-    }
-
-    #[test]
-    fn resumed_session_starts_with_the_oldest_queued_command() {
-        let command_id = TaskCommandId::new();
-        let mut pending = VecDeque::from([PendingInput {
-            command_id: Some(command_id.clone()),
-            text: "address review".to_string(),
-            effect: TaskCommandEffect::NextTurn,
-            decision: None,
-        }]);
-
-        let first = take_first_input("original seed".to_string(), true, &mut pending);
-
-        assert_eq!(
-            first,
-            (
-                "address review".to_string(),
-                Some((command_id, TaskCommandEffect::NextTurn)),
-                None,
-            )
-        );
-        assert!(pending.is_empty());
+        let current = store.get_task_session(&session.id).await.unwrap().unwrap();
+        let directives = store
+            .child_directives(&ChildRef::Task(session.id.clone()))
+            .await
+            .unwrap();
+        assert_eq!(current.current_directive_version, 1);
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].text, "fix the parser first");
+        assert_eq!(directives[0].source, TaskCommandSource::Attachment);
+        assert!(directives[0].command_id.is_some());
     }
 
     #[tokio::test]

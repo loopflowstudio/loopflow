@@ -617,17 +617,14 @@ details until one of them earns a distinct human-facing behavior.
 These are not polish. They mark decisions that the branch text claims more
 strongly than the runtime currently implements.
 
-- The Project runner launches the `project_pursue` skill directly; the Task
-  runner launches `implement` directly. Neither executes a `*_clarify →
-  *_pursue → *_mutate` flow. Those dead three-phase flows (`task.yaml`,
-  `project.yaml`) and the loop-bit skills only they referenced
-  (`task_clarify`, `task_mutate`, `project_clarify`, `project_mutate` — the
-  `*_mutate` pair still instructed "flip the loop bit" / read `lf runs`) are
-  now **removed**. The `*_pursue` policy skills stay. What survives of this
-  mismatch is narrower: the Task runner launches `implement` while
-  `task_pursue` — the symmetric policy skill the builtins test treats as the
-  Task tier's — is not what runs. Reconciling `implement` vs `task_pursue` is
-  part of the deferred controller-collapse pass, not a skill-file cleanup.
+- **Resolved.** Each tier now launches its own `*_pursue` policy skill: the
+  Project runner runs `project_pursue`, the Task runner runs `task_pursue`, and
+  the Wave loop runs a single-step `[wave_pursue]` flow. The dead three-phase
+  flows (`task.yaml`, `project.yaml`, and the old three-step `wave.yaml`) and
+  the loop-bit skills they referenced (`task_clarify`, `task_mutate`,
+  `project_clarify`, `project_mutate`, `wave_clarify`, `wave_mutate`) are all
+  removed. No `*_clarify → *_pursue → *_mutate` flow survives, and no runner
+  consults an agent-authored loop bit.
 - Project and Task commands share a table and aliases, but still have separate
   Rust command structs and largely duplicated runner control loops. The second
   consumer has proven common mechanics exist; it has not yet found their

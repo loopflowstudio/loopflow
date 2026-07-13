@@ -122,15 +122,10 @@ pub fn router(state: HttpState) -> Router {
                 .delete(waves::delete_wave_handler),
         )
         .route(
-            "/waves/{wave_id}/diff",
-            get(waves::get_wave_file_diff_handler),
-        )
-        .route(
             "/waves/{wave_id}/agent-tree",
             get(waves::get_wave_agent_tree_handler),
         )
         .route("/waves/{wave_id}/stop", post(waves::stop_wave_handler))
-        .route("/waves/{wave_id}/land", post(waves::land_wave_handler))
         .route(
             "/waves/{wave_id}/runs",
             get(runs::list_runs_for_wave_handler),

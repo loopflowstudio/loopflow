@@ -85,8 +85,7 @@
             "base": "main",
             "pr_number": 912,
             "pr_url": "https://github.com/loopflowstudio/loopflow/pull/912"
-          },
-          "workers": {"active": 0, "total": 0}
+          }
         },
         {
           "task": {
@@ -101,8 +100,7 @@
           "runtime": null,
           "directive": null,
           "next_move": {"owner": "project", "reason": "Task is ready to start"},
-          "delivery": null,
-          "workers": {"active": 0, "total": 0}
+          "delivery": null
         }
       ]
     }

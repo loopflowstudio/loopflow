@@ -6,21 +6,19 @@ import Testing
 @MainActor
 @Suite("Portfolio Repo State")
 struct PortfolioRepoStateTests {
-    @Test("summary metrics count blocked and diff totals")
+    @Test("summary metrics count blocked Waves")
     func summaryMetrics() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-state")
         let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
         let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
 
         state.applyConnectedWaves([
-            makeWave(id: "running", repoPath: repo.path, status: .running, diffStat: " 1 files changed, 8 insertions(+), 2 deletions(-)"),
-            makeWave(id: "waiting", repoPath: repo.path, status: .waiting, diffStat: " 2 files changed, 3 insertions(+), 7 deletions(-)"),
-            makeWave(id: "failed", repoPath: repo.path, status: .failed, diffStat: " 1 files changed, 4 insertions(+), 0 deletions(-)"),
+            makeWave(id: "running", repoPath: repo.path, status: .running),
+            makeWave(id: "waiting", repoPath: repo.path, status: .waiting),
+            makeWave(id: "failed", repoPath: repo.path, status: .failed),
         ])
 
         #expect(state.blockedCount == 1)
-        #expect(state.totalDiff.insertions == 15)
-        #expect(state.totalDiff.deletions == 9)
     }
 
     @Test("connected waves keep only this repo's rows")
@@ -29,12 +27,11 @@ struct PortfolioRepoStateTests {
         let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
         let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
 
-        let mine = makeWave(id: "mine", repoPath: repo.path, status: .running, diffStat: nil)
+        let mine = makeWave(id: "mine", repoPath: repo.path, status: .running)
         let other = makeWave(
             id: "other",
             repoPath: URL(fileURLWithPath: "/tmp/portfolio-other").normalizedFilePath,
-            status: .running,
-            diffStat: nil
+            status: .running
         )
         state.applyConnectedWaves([mine, other])
 
@@ -48,10 +45,10 @@ struct PortfolioRepoStateTests {
         let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
 
         state.applyConnectedWaves([
-            makeWave(id: "running", repoPath: repo.path, status: .running, diffStat: nil),
-            makeWave(id: "idle", repoPath: repo.path, status: .idle, diffStat: nil),
-            makeWave(id: "waiting", repoPath: repo.path, status: .waiting, diffStat: nil),
-            makeWave(id: "failed", repoPath: repo.path, status: .failed, diffStat: nil),
+            makeWave(id: "running", repoPath: repo.path, status: .running),
+            makeWave(id: "idle", repoPath: repo.path, status: .idle),
+            makeWave(id: "waiting", repoPath: repo.path, status: .waiting),
+            makeWave(id: "failed", repoPath: repo.path, status: .failed),
         ])
 
         #expect(state.waves.map(\.id) == ["failed", "waiting", "running", "idle"])
@@ -151,7 +148,7 @@ struct PortfolioRepoStateTests {
         #expect(!FileManager.default.fileExists(atPath: worktreeGoal.path), "nothing written into the worktree")
     }
 
-    private func makeWave(id: String, repoPath: String, status: WaveStatus, diffStat: String?) -> Wave {
+    private func makeWave(id: String, repoPath: String, status: WaveStatus) -> Wave {
         Wave(
             id: id,
             name: id,
@@ -160,8 +157,7 @@ struct PortfolioRepoStateTests {
             area: ["."],
             triggers: [],
             status: status,
-            iteration: 0,
-            diffStat: diffStat
+            iteration: 0
         )
     }
 }

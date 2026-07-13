@@ -115,22 +115,6 @@ final class PortfolioRepoState {
         waves.filter { $0.status == .waiting }.count
     }
 
-    var totalDiff: (insertions: Int, deletions: Int) {
-        waves.reduce(into: (insertions: 0, deletions: 0)) { partial, wave in
-            let stat = Self.parseDiffStat(wave.diffStat)
-            partial.insertions += stat.insertions
-            partial.deletions += stat.deletions
-        }
-    }
-
-    func diffSummary(for wave: WaveViewModel) -> String? {
-        let summary = Self.parseDiffStat(wave.diffStat)
-        guard summary.insertions > 0 || summary.deletions > 0 else {
-            return nil
-        }
-        return "+\(summary.insertions) -\(summary.deletions)"
-    }
-
     private static func sortWaves(_ waves: [WaveViewModel]) -> [WaveViewModel] {
         waves.sorted { lhs, rhs in
             let lhsPriority = statusPriority(lhs.status)
@@ -150,14 +134,6 @@ final class PortfolioRepoState {
         case .paused: 3
         case .idle: 4
         }
-    }
-
-    private static func parseDiffStat(_ diffStat: String?) -> (insertions: Int, deletions: Int) {
-        guard let diffStat else { return (0, 0) }
-        return (
-            extractCount(from: diffStat, pattern: #"(\d+)\s+insertions?\(\+\)"#),
-            extractCount(from: diffStat, pattern: #"(\d+)\s+deletions?\(-\)"#)
-        )
     }
 
     /// The tmux session name for a wave. Named after the wave's ORIGIN repo
@@ -193,13 +169,4 @@ final class PortfolioRepoState {
         return sanitized.isEmpty ? "wave" : sanitized
     }
 
-    private static func extractCount(from text: String, pattern: String) -> Int {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return 0 }
-        let range = NSRange(text.startIndex..., in: text)
-        guard let match = regex.firstMatch(in: text, range: range),
-              let valueRange = Range(match.range(at: 1), in: text) else {
-            return 0
-        }
-        return Int(text[valueRange]) ?? 0
-    }
 }

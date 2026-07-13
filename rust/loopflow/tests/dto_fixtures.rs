@@ -49,14 +49,6 @@ fn wave_fixture_carries_single_repo() {
 
     assert_eq!(wave.repo, "/home/user/project");
     assert_eq!(wave.iteration, 3);
-    assert_eq!(
-        wave.local_worktree.as_deref(),
-        Some("/home/user/project/.claude/worktrees/engbot")
-    );
-    assert_eq!(wave.remote_branch.as_deref(), Some("engbot/build-3"));
-    assert_eq!(wave.open_pr_count, 1);
-    assert_eq!(wave.commits.len(), 1);
-    assert_eq!(wave.commits[0].sha, "abc1234");
 }
 
 #[test]

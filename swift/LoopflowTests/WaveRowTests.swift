@@ -13,8 +13,7 @@ struct WaveRowViewTests {
         name: String = "swift-falcon",
         area: [String] = ["src/"],
         triggers: [Trigger] = [],
-        hasDiff: Bool = false,
-        diffStat: String? = nil
+        status: WaveStatus = .idle
     ) -> WaveViewModel {
         WaveViewModel(
             api: Wave(
@@ -23,11 +22,9 @@ struct WaveRowViewTests {
                 repo: "/tmp/repo",
                 area: area,
                 triggers: triggers,
-                status: .idle,
-                iteration: 0,
-                diffStat: diffStat
-            ),
-            hasDiff: hasDiff
+                status: status,
+                iteration: 0
+            )
         )
     }
 
@@ -51,22 +48,12 @@ struct WaveRowViewTests {
         #expect(try nameText.string() == "aurora-melody")
     }
 
-    @Test("Row shows diff indicator when wave has diff")
-    func showsDiffIndicator() throws {
-        let wave = makeWave(hasDiff: true, diffStat: "3 files changed, 42 insertions(+), 8 deletions(-)")
+    @Test("Row shows Wave lifecycle status")
+    func showsStatus() throws {
+        let wave = makeWave(status: .running)
         let row = makeRow(wave: wave)
 
-        let diffText = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-diff").text()
-        #expect(try diffText.string() == "+42 −8")
-    }
-
-    @Test("Row hides diff indicator when no diff")
-    func hidesDiffWhenNoDiff() throws {
-        let wave = makeWave(hasDiff: false)
-        let row = makeRow(wave: wave)
-
-        #expect(throws: Error.self) {
-            try row.inspect().find(viewWithAccessibilityIdentifier: "wave-diff")
-        }
+        let status = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-status").text()
+        #expect(try status.string() == "Running")
     }
 }

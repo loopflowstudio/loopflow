@@ -17,10 +17,7 @@ struct WaveModelTests {
         triggers: [Trigger] = [],
         status: WaveStatus = .idle,
         iteration: Int = 0,
-        recentSteps: [StepRun] = [],
-        waitingReason: WaitingReason? = nil,
-        diffStat: String? = nil,
-        hasDiff: Bool = false
+        recentSteps: [StepRun] = []
     ) -> WaveViewModel {
         WaveViewModel(
             api: Wave(
@@ -31,12 +28,9 @@ struct WaveModelTests {
                 area: area,
                 triggers: triggers,
                 status: status,
-                iteration: iteration,
-                diffStat: diffStat
+                iteration: iteration
             ),
-            hasDiff: hasDiff,
-            recentSteps: recentSteps,
-            waitingReason: waitingReason
+            recentSteps: recentSteps
         )
     }
 
@@ -124,17 +118,6 @@ struct WaveModelTests {
         #expect(wave.areaDisplay == ".")
     }
 
-    @Test("diff helpers share parsed stat counts")
-    func diffHelpersUseSharedCounts() {
-        let wave = makeWave(
-            diffStat: "3 files changed, 12 insertions(+), 4 deletions(-)",
-            hasDiff: true
-        )
-
-        #expect(wave.diffIndicator == "+12 −4")
-        #expect(wave.diffIsPositive == true)
-    }
-
     @Test("areaDisplay returns empty for nil area")
     func areaDisplayNil() {
         let wave = makeWave(id: "test", repo: "/tmp", area: [])
@@ -158,26 +141,6 @@ struct WaveModelTests {
         let wave = makeWave(id: "test", repo: "/tmp", direction: [])
 
         #expect(wave.directionDisplay == "")
-    }
-
-    @Test("worktree and branch fall back to wave when no active run")
-    func worktreeBranchFallbackToWave() {
-        let model = WaveViewModel(
-            api: Wave(
-                id: "test",
-                name: "test",
-                repo: "/tmp/repo",
-                direction: [],
-                area: [],
-                status: .idle,
-                iteration: 0,
-                localWorktree: "/tmp/repo.test",
-                remoteBranch: "jack/test"
-            )
-        )
-
-        #expect(model.worktreePath == "/tmp/repo.test")
-        #expect(model.branch == "jack/test")
     }
 
     @Test("shortId returns first 7 characters")
@@ -372,57 +335,6 @@ struct WaveModelTests {
     }
 }
 
-@Suite("WaitingReason")
-struct WaitingReasonTests {
-
-    private func makeViewModel(
-        status: WaveStatus = .idle,
-        waitingReason: WaitingReason? = nil
-    ) -> WaveViewModel {
-        WaveViewModel(
-            api: Wave(id: "test", repo: "/tmp", status: status),
-            waitingReason: waitingReason
-        )
-    }
-
-    @Test("description shows count fraction")
-    func descriptionShowsCountFraction() {
-        let reason = WaitingReason.prLimitReached(open: 2, limit: 5)
-
-        #expect(reason.description == "2/5 PRs open")
-    }
-
-    @Test("accessibilityDescription shows full text")
-    func accessibilityDescriptionShowsFullText() {
-        let reason = WaitingReason.prLimitReached(open: 3, limit: 5)
-
-        #expect(reason.accessibilityDescription == "3 of 5 PRs open")
-    }
-
-    @Test("Wave with waitingReason stores it correctly")
-    func waveStoresWaitingReason() {
-        let wave = makeViewModel(
-            status: .waiting,
-            waitingReason: .prLimitReached(open: 2, limit: 3)
-        )
-
-        #expect(wave.waitingReason != nil)
-        if case .prLimitReached(let open, let limit) = wave.waitingReason {
-            #expect(open == 2)
-            #expect(limit == 3)
-        } else {
-            Issue.record("Expected prLimitReached")
-        }
-    }
-
-    @Test("Wave without waitingReason has nil")
-    func waveWithoutWaitingReasonHasNil() {
-        let wave = makeViewModel(status: .idle)
-
-        #expect(wave.waitingReason == nil)
-    }
-}
-
 @Suite("Flow skill progress")
 struct FlowStepProgressTests {
 
@@ -564,8 +476,6 @@ struct ParseWaveFromJSONTests {
             "flow_steps": ["ingest", "kickoff"],
             "repo": "/tmp/repo",
             "iteration": 0,
-            "open_pr_count": 3,
-            "commits": [],
             "active_run": [
                 "id": "run-1",
                 "wave_id": "wave-1",
@@ -584,7 +494,6 @@ struct ParseWaveFromJSONTests {
         let wave = WaveService.parseWaveFromJSON(json)
 
         #expect(wave.flowSteps == ["ingest", "kickoff"])
-        #expect(wave.openPRCount == 3)
         #expect(wave.activeRun?.stepIndex == 1)
 
         let vm = WaveViewModel(api: wave)
@@ -602,8 +511,6 @@ struct ParseWaveFromJSONTests {
             "flow_steps": ["ingest", "kickoff"],
             "repo": "/tmp/repo",
             "iteration": 0,
-            "open_pr_count": 0,
-            "commits": [],
         ]
 
         let wave = WaveService.parseWaveFromJSON(json)

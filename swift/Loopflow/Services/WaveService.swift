@@ -191,11 +191,6 @@ public struct WaveService: @unchecked Sendable {
         throw unsupported("Terminal session cancel is not available through the retired lfd HTTP API.")
     }
 
-    public func landWave(_ id: String) async throws {
-        _ = id
-        throw unsupported("Wave landing must run through lf with explicit worktree context.")
-    }
-
     public func listFlowsAndDirections(repo: RepoTarget) async throws -> WaveFlowsResult {
         guard case .local(let url) = repo else {
             return WaveFlowsResult(flows: [], directions: [])
@@ -327,14 +322,8 @@ public extension WaveService {
             crons: parseCrons(json["crons"]),
             status: WaveStatus(rawValue: normalizedStatus) ?? .idle,
             iteration: normalizeInt(json["iteration"]),
-            localWorktree: json["local_worktree"] as? String,
-            remoteBranch: json["remote_branch"] as? String,
-            commits: parseCommits(json["commits"]),
-            diffStat: json["diff_stat"] as? String,
             flowSteps: json["flow_steps"] as? [String] ?? [],
-            openPRCount: normalizeInt(json["open_pr_count"]),
             activeRun: (json["active_run"] as? [String: Any]).flatMap(parseRunFromJSON),
-            pr: parsePullRequest(json["pr"]),
             createdAt: parseDate(json["created_at"]),
             parentWaveId: json["parent_wave_id"] as? String
         )
@@ -444,18 +433,6 @@ public extension WaveService {
                 lastTriggeredAt: normalizeUnixDate(item["last_triggered_at"]),
                 createdAt: parseDate(item["created_at"])
             )
-        }
-    }
-
-    private static func parseCommits(_ value: Any?) -> [CommitEntry] {
-        guard let items = value as? [[String: Any]] else { return [] }
-        return items.compactMap { item in
-            guard let sha = item["sha"] as? String,
-                  let message = item["message"] as? String
-            else {
-                return nil
-            }
-            return CommitEntry(sha: sha, message: message)
         }
     }
 

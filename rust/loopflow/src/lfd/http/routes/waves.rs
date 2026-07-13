@@ -10,14 +10,10 @@ use tokio::process::Command as TokioCommand;
 use tracing::warn;
 
 use super::session_controls::connection_host;
-use crate::engine::git::{branch_rename, current_branch, delete_remote_branch, push_with_upstream};
-use crate::engine::naming::sanitize_for_branch;
 use crate::engine::wave_config::update_wave_agent_config;
-use crate::engine::worktree::remove_worktree;
-use crate::engine::worktrees::{branch_exists, ensure_wave_worktree, worktree_path};
 use crate::lfd::http::dto::{
-    session_connection_info_dto, session_dto, DeletedResourceResponse, LandWaveResponse,
-    ListResponse, StopWaveResponse, WaveAgentTreeDto, WaveAgentTreeSessionDto, WaveDto,
+    session_connection_info_dto, session_dto, DeletedResourceResponse, ListResponse,
+    StopWaveResponse, WaveAgentTreeDto, WaveAgentTreeSessionDto, WaveDto,
 };
 use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
@@ -100,14 +96,6 @@ pub struct UpdateWaveRequest {
     serialized: Option<bool>,
 }
 
-#[derive(Debug, Deserialize, Default)]
-pub struct LandWaveRequest {
-    strict: Option<bool>,
-    local: Option<bool>,
-    create_pr: Option<bool>,
-    worktree: Option<String>,
-}
-
 pub async fn list_waves_handler(
     State(state): State<HttpState>,
     Query(query): Query<ListWavesQuery>,
@@ -125,14 +113,9 @@ pub async fn list_waves_handler(
         query.ending_before.as_deref(),
         |w| w.id(),
     );
-    let views = crate::lfd::http::routes::build_wave_dtos(
-        &state.store,
-        &state.github,
-        waves,
-        include_active_run,
-    )
-    .await
-    .map_err(map_store_error)?;
+    let views = crate::lfd::http::routes::build_wave_dtos(&state.store, waves, include_active_run)
+        .await
+        .map_err(map_store_error)?;
     Ok(Json(ListResponse::new(views, has_more)))
 }
 
@@ -153,11 +136,6 @@ fn update_wave_workers(
         .unwrap_or(current_workers)
 }
 
-async fn wave_name_exists(state: &HttpState, name: &str) -> Result<bool, crate::lfdb::StoreError> {
-    let waves = state.store.list_waves(None).await?;
-    Ok(waves.into_iter().any(|wave| wave.name() == name))
-}
-
 pub async fn get_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
@@ -171,7 +149,7 @@ pub async fn get_wave_handler(
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
     let include_active_run = query.expand.contains("active_run");
-    let view = build_wave_dto(&state.store, &state.github, wave, include_active_run)
+    let view = build_wave_dto(&state.store, wave, include_active_run)
         .await
         .map_err(map_store_error)?;
     Ok(Json(view))
@@ -190,47 +168,14 @@ pub async fn update_wave_handler(
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
-    // Handle rename: move worktree + rename branch before updating DB.
+    // A Wave's authored name is its `wave/<name>/` identity. HTTP cannot move
+    // that directory atomically with its Linear Initiative and durable store.
     if let Some(ref name) = payload.name {
         if !name.is_empty() && *name != *wave.name() {
-            let new_name = name.clone();
-
-            // Check for duplicate wave name (globally unique).
-            let existing = wave_name_exists(&state, &new_name)
-                .await
-                .map_err(map_store_error)?;
-            if existing {
-                return Err(wave_name_exists_error(&new_name));
-            }
-
-            // Reject rename while wave is running or waiting.
-            let active_run = state
-                .store
-                .get_active_run(wave.id())
-                .await
-                .map_err(map_store_error)?;
-            if let Some(run) = active_run {
-                if matches!(run.status, RunStatus::Running | RunStatus::Waiting) {
-                    return Err(api_error(
-                        StatusCode::PRECONDITION_FAILED,
-                        "cannot rename wave while running",
-                    ));
-                }
-            }
-
-            // Move worktree + rename branch on disk.
-            let old_name = wave.name().clone();
-            let repo = wave.repo().to_string();
-            let new_name_for_wt = new_name.clone();
-            run_blocking_result(
-                move || {
-                    rename_wave_worktree(std::path::Path::new(&repo), &old_name, &new_name_for_wt)
-                },
-                StatusCode::CONFLICT,
-            )
-            .await?;
-
-            wave.name = new_name;
+            return Err(api_error(
+                StatusCode::PRECONDITION_FAILED,
+                "Wave names are authored by the wave/<name>/ directory and cannot be renamed through HTTP",
+            ));
         }
     }
 
@@ -268,7 +213,7 @@ pub async fn update_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    let view = build_wave_dto(&state.store, &state.github, wave, false)
+    let view = build_wave_dto(&state.store, wave, false)
         .await
         .map_err(map_store_error)?;
     Ok(Json(view))
@@ -280,8 +225,7 @@ pub async fn delete_wave_handler(
 ) -> ApiResult<DeletedResourceResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
 
-    // Get wave info before deleting (for worktree cleanup).
-    let wave = state
+    state
         .store
         .get_wave(&wave_id)
         .await
@@ -294,25 +238,6 @@ pub async fn delete_wave_handler(
         .delete_wave(&wave_id)
         .await
         .map_err(map_store_error)?;
-
-    // Clean up the worktree on disk.
-    let repo = wave.repo().to_string();
-    let wave_name = wave.name().clone();
-    tokio::task::spawn_blocking(move || {
-        let wt = worktree_path(std::path::Path::new(&repo), &wave_name);
-        if wt.exists() {
-            if let Err(err) = remove_worktree(&wt, false) {
-                tracing::warn!(worktree = %wt.display(), error = %err, "failed to remove worktree");
-            }
-        }
-    })
-    .await
-    .map_err(|err| {
-        api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ApiMessage::Untrusted(err.to_string()),
-        )
-    })?;
 
     Ok(Json(DeletedResourceResponse {
         id: wave_id.to_string(),
@@ -334,7 +259,7 @@ pub async fn get_wave_agent_tree_handler(
         .await
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-    let root_wave = build_wave_dto(&state.store, &state.github, wave, false)
+    let root_wave = build_wave_dto(&state.store, wave, false)
         .await
         .map_err(map_store_error)?;
     let children = state
@@ -342,10 +267,9 @@ pub async fn get_wave_agent_tree_handler(
         .list_child_waves(&wave_id)
         .await
         .map_err(map_store_error)?;
-    let child_waves =
-        crate::lfd::http::routes::build_wave_dtos(&state.store, &state.github, children, false)
-            .await
-            .map_err(map_store_error)?;
+    let child_waves = crate::lfd::http::routes::build_wave_dtos(&state.store, children, false)
+        .await
+        .map_err(map_store_error)?;
     let statuses = query
         .active_only
         .unwrap_or(true)
@@ -459,145 +383,6 @@ async fn cancel_active_session(state: &HttpState, run: &Run) -> Result<(), ApiEr
     Ok(())
 }
 
-pub async fn land_wave_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-    payload: Option<Json<LandWaveRequest>>,
-) -> ApiResult<LandWaveResponse> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let payload = payload.map(|Json(value)| value).unwrap_or_default();
-    let wave = state
-        .store
-        .get_wave(&wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-
-    let latest_run = state
-        .store
-        .get_latest_run(wave.id())
-        .await
-        .map_err(map_store_error)?;
-
-    let latest_worktree = payload
-        .worktree
-        .or_else(|| latest_run.as_ref().map(|run| run.worktree.clone()))
-        .filter(|value| !value.is_empty());
-    let worktree = resolve_wave_work_dir_for_api(
-        wave.repo().to_string(),
-        wave.name().clone(),
-        latest_worktree,
-    )
-    .await?;
-
-    let strict = payload.strict.unwrap_or(false);
-    let local = payload.local.unwrap_or(false);
-    let create_pr = payload.create_pr.unwrap_or(true);
-
-    let repo_path = wave.repo().to_string();
-    let land_result = run_blocking_result(
-        move || {
-            let progress = crate::ops::NullProgress;
-            crate::ops::land(
-                std::path::Path::new(&repo_path),
-                &crate::ops::LandOptions {
-                    strict,
-                    local,
-                    create_pr,
-                    worktree: Some(worktree),
-                    commit_message: None,
-                    pr_title: None,
-                    pr_body: None,
-                    agent: None,
-                },
-                &progress,
-            )
-        },
-        StatusCode::BAD_REQUEST,
-    )
-    .await?;
-
-    // Sync PR info back to the run so downstream code (CI webhooks) can find it.
-    if let (Some(mut run), Some(pr_info)) = (latest_run, land_result) {
-        run.pr = Some(crate::lfd::types::PullRequest {
-            url: pr_info.url,
-            number: Some(pr_info.number as u32),
-            state: Some(pr_info.state),
-            title: None,
-            branch: Some(pr_info.branch),
-        });
-        if let Err(err) = state.store.update_run(&run).await {
-            tracing::warn!(run_id = %run.id, error = %err, "failed to sync PR to run after land");
-        }
-    }
-
-    Ok(Json(LandWaveResponse { merged: true }))
-}
-
-#[derive(Debug, Deserialize)]
-pub struct WaveDiffQuery {
-    path: String,
-}
-
-pub async fn get_wave_file_diff_handler(
-    State(state): State<HttpState>,
-    Path(wave_id): Path<String>,
-    Query(query): Query<WaveDiffQuery>,
-) -> ApiResult<serde_json::Value> {
-    let wave_id = resolve_wave_id(&state, &wave_id).await?;
-    let wave = state
-        .store
-        .get_wave(&wave_id)
-        .await
-        .map_err(map_store_error)?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-
-    let file_path = query.path;
-    if file_path.contains("..") {
-        return Err(api_error(StatusCode::BAD_REQUEST, "invalid file path"));
-    }
-
-    let repo = wave.repo().to_string();
-    let wave_name = wave.name().clone();
-    let diff = tokio::task::spawn_blocking(move || {
-        let repo_path = std::path::Path::new(&repo);
-        let worktree = crate::engine::worktrees::worktree_path(repo_path, &wave_name);
-        if !worktree.exists() {
-            return String::new();
-        }
-        let diff_ref = super::nearest_base_ref(&worktree, &wave_name);
-        super::git_file_diff(&worktree, &diff_ref, &file_path)
-    })
-    .await
-    .map_err(|err| {
-        api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ApiMessage::Untrusted(err.to_string()),
-        )
-    })?;
-
-    Ok(Json(serde_json::json!({ "diff": diff })))
-}
-
-fn wave_name_exists_error(name: &str) -> ApiError {
-    api_error(
-        StatusCode::CONFLICT,
-        ApiMessage::Safe(format!("wave '{name}' already exists in this repo")),
-    )
-}
-
-async fn resolve_wave_work_dir_for_api(
-    repo_path: String,
-    wave_name: String,
-    latest_worktree: Option<String>,
-) -> Result<String, ApiError> {
-    run_blocking_result(
-        move || resolve_wave_work_dir(&repo_path, &wave_name, latest_worktree),
-        StatusCode::BAD_REQUEST,
-    )
-    .await
-}
-
 fn map_join_error(err: tokio::task::JoinError) -> ApiError {
     api_error(
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -615,79 +400,6 @@ where
         .await
         .map_err(map_join_error)?
         .map_err(|err| api_error(failure_status, ApiMessage::Untrusted(err.to_string())))
-}
-
-fn resolve_wave_work_dir(
-    repo_path: &str,
-    wave_name: &str,
-    latest_worktree: Option<String>,
-) -> Result<String, String> {
-    if let Some(worktree) = latest_worktree {
-        let path = FsPath::new(&worktree);
-        if path.exists() && path.join(".git").exists() {
-            return Ok(worktree);
-        }
-        warn!(
-            worktree = %path.display(),
-            wave_name,
-            "stored worktree missing; recreating wave worktree"
-        );
-    }
-
-    let lease =
-        ensure_wave_worktree(FsPath::new(repo_path), wave_name).map_err(|err| err.to_string())?;
-    Ok(lease.path.to_string_lossy().to_string())
-}
-
-/// Move a wave's worktree and rename its branch to match the new name.
-/// Returns Ok(()) if no worktree exists (legacy wave). Returns Err with a
-/// user-facing message if the rename is not possible.
-fn rename_wave_worktree(
-    repo: &std::path::Path,
-    old_name: &str,
-    new_name: &str,
-) -> Result<(), String> {
-    use crate::engine::git::worktree_move;
-
-    let old_wt = worktree_path(repo, old_name);
-    if !old_wt.exists() {
-        return Ok(());
-    }
-
-    let new_wt = worktree_path(repo, new_name);
-    if new_wt.exists() {
-        return Err(format!(
-            "destination worktree already exists: {}",
-            new_wt.display()
-        ));
-    }
-
-    // Compute new branch name by substituting the sanitized wave name.
-    let old_branch = current_branch(&old_wt)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "worktree is in detached HEAD state".to_string())?;
-
-    let old_sanitized = sanitize_for_branch(old_name);
-    let new_sanitized = sanitize_for_branch(new_name);
-    let new_branch = old_branch.replacen(&old_sanitized, &new_sanitized, 1);
-
-    if new_branch != old_branch && branch_exists(repo, &new_branch).map_err(|e| e.to_string())? {
-        return Err(format!("branch already exists: {new_branch}"));
-    }
-
-    // Move worktree directory.
-    worktree_move(repo, &old_wt, &new_wt).map_err(|e| e.to_string())?;
-
-    // Rename branch.
-    if new_branch != old_branch {
-        branch_rename(repo, &old_branch, &new_branch).map_err(|e| e.to_string())?;
-
-        // Update remote (best-effort).
-        let _ = push_with_upstream(repo, "origin", &new_branch);
-        let _ = delete_remote_branch(repo, "origin", &old_branch);
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -990,7 +702,6 @@ mod tests {
             State(state.clone()),
             Path(created_id.clone()),
             Json(UpdateWaveRequest {
-                name: Some("after".to_string()),
                 direction: Some(vec!["clarity".to_string()]),
                 area: Some(vec!["docs/".to_string()]),
                 ..Default::default()
@@ -999,7 +710,7 @@ mod tests {
         .await
         .expect("update wave");
 
-        assert_eq!(updated.name, "after");
+        assert_eq!(updated.name, "before");
         assert_eq!(updated.direction, vec!["clarity".to_string()]);
         assert_eq!(updated.area, vec!["docs/".to_string()]);
 
@@ -1010,9 +721,38 @@ mod tests {
         )
         .await
         .expect("get updated wave");
-        assert_eq!(found.name, "after");
+        assert_eq!(found.name, "before");
         assert_eq!(found.direction, vec!["clarity".to_string()]);
         assert_eq!(found.area, vec!["docs/".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn update_rejects_wave_rename_without_mutating_identity() {
+        let state = test_http_state().await;
+        let repo_tmp = tempdir().expect("tempdir");
+        init_git_repo(repo_tmp.path());
+        let repo = repo_tmp.path().to_string_lossy().to_string();
+        let wave = make_wave(&repo, "before");
+        state.store.create_wave(&wave).await.expect("create wave");
+
+        let result = update_wave_handler(
+            State(state.clone()),
+            Path(wave.id().to_string()),
+            Json(UpdateWaveRequest {
+                name: Some("after".to_string()),
+                ..Default::default()
+            }),
+        )
+        .await;
+
+        assert!(matches!(result, Err((StatusCode::PRECONDITION_FAILED, _))));
+        let stored = state
+            .store
+            .get_wave(wave.id())
+            .await
+            .expect("lookup")
+            .expect("wave");
+        assert_eq!(stored.name(), "before");
     }
 
     #[tokio::test]

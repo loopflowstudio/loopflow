@@ -33,10 +33,9 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
     public let delivery: TaskDeliverySnapshot?
-    public let workers: WorkerSummary
 
     enum CodingKeys: String, CodingKey {
-        case task, runtime, directive, delivery, workers
+        case task, runtime, directive, delivery
         case nextMove = "next_move"
     }
 }
@@ -134,13 +133,10 @@ public struct WorkDirectiveSnapshot: Decodable, Sendable, Hashable {
 }
 
 public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {
-    case human
     case wave
     case project
     case task
     case review
-    case ci
-    case external
 }
 
 public struct WorkNextMove: Decodable, Sendable, Hashable {
@@ -159,11 +155,6 @@ public struct TaskDeliverySnapshot: Decodable, Sendable, Hashable {
         case prNumber = "pr_number"
         case prURL = "pr_url"
     }
-}
-
-public struct WorkerSummary: Decodable, Sendable, Hashable {
-    public let active: UInt32
-    public let total: UInt32
 }
 
 public struct WaveStatusResult: Sendable {

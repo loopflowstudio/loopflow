@@ -59,12 +59,6 @@ impl<T> ListResponse<T> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CommitEntryDto {
-    pub sha: String,
-    pub message: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDto {
     pub id: String,
     pub object: String,
@@ -81,27 +75,12 @@ pub struct WaveDto {
     /// Wave-level status rolled up over `repos` (see `Wave::status`).
     pub status: String,
     pub flow_steps: Vec<String>,
-    pub has_stale_pr_state: bool,
     pub workers: u32,
-    /// The single repo this wave targets (wave = 1 repo). The remaining
-    /// execution fields below describe that repo's live git + PR state, inferred
-    /// at DTO-build time.
+    /// The single repository whose main checkout is this Wave's control plane.
     pub repo: String,
     pub iteration: u32,
-    /// Live worktree path inferred from git at build time.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub local_worktree: Option<String>,
-    /// Live branch inferred from git at build time.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub remote_branch: Option<String>,
-    pub commits: Vec<CommitEntryDto>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub diff_stat: Option<String>,
-    pub open_pr_count: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<RunDto>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pr: Option<PullRequestDto>,
     /// Parent wave in the chord tree. `null` for a root wave. Always emitted
     /// (no `skip_serializing_if`) so the Python/Swift mirrors stay in lockstep.
     pub parent_wave_id: Option<String>,
@@ -287,11 +266,6 @@ pub struct StopWaveResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct LandWaveResponse {
-    pub merged: bool,
-}
-
-#[derive(Debug, Serialize)]
 pub struct DeletedResourceResponse {
     pub id: String,
     pub object: String,
@@ -413,16 +387,9 @@ mod contract_tests {
             workers: 1,
             created_at: None,
             flow_steps: Vec::new(),
-            has_stale_pr_state: false,
             repo: "/home/user/project".to_string(),
             iteration: 0,
-            local_worktree: None,
-            remote_branch: None,
-            commits: Vec::new(),
-            diff_stat: None,
-            open_pr_count: 0,
             active_run: None,
-            pr: None,
             parent_wave_id: None,
         };
 

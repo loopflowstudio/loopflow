@@ -1,7 +1,6 @@
 // Row view for displaying a wave in the sidebar.
 
 import SwiftUI
-import AppKit
 import Loopflow
 
 struct WaveRow: View {
@@ -24,51 +23,16 @@ struct WaveRow: View {
 
                 Spacer()
 
-                HStack(spacing: 6) {
-                    // PR badge
-                    if let pr = wave.pendingPR {
-                        Button {
-                            if let url = pr.url {
-                                NSWorkspace.shared.open(url)
-                            }
-                        } label: {
-                            Text("PR #\(pr.number)")
-                                .font(Typography.caption(10))
-                                .fontWeight(.medium)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.statusSuccess.opacity(0.3))
-                                .foregroundStyle(Color.statusSuccess)
-                                .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    // Diff indicator
-                    if let diff = wave.diffIndicator {
-                        Text(diff)
-                            .font(Typography.caption(10))
-                            .fontWeight(.medium)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background((wave.diffIsPositive ? Color.statusSuccess : Color.statusError).opacity(0.22))
-                            .foregroundStyle(wave.diffIsPositive ? Color.statusSuccess : Color.statusError)
-                            .clipShape(Capsule())
-                            .accessibilityIdentifier("wave-diff")
-                    }
-
-                    if wave.effectiveOpenPRCount > 1 {
-                        Text("\(wave.effectiveOpenPRCount) open")
-                            .font(Typography.caption(10))
-                            .fontWeight(.medium)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.statusWarning.opacity(0.22))
-                            .foregroundStyle(Color.statusWarning)
-                            .clipShape(Capsule())
-                    }
-                }
-                .fixedSize()
+                Text(wave.statusText)
+                    .font(Typography.caption(10))
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(wave.statusIndicator.color.opacity(0.22))
+                    .foregroundStyle(wave.statusIndicator.color)
+                    .clipShape(Capsule())
+                    .fixedSize()
+                    .accessibilityIdentifier("wave-status")
             }
             .lineLimit(1)
             .accessibilityIdentifier("wave-name-row")

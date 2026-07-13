@@ -92,29 +92,6 @@ public enum WaveStatus: String, Sendable, Codable {
     }
 }
 
-public enum MergeMode: String, Sendable, Codable {
-    case pr
-    case land
-}
-
-public enum WaitingReason: Sendable, Hashable {
-    case prLimitReached(open: Int, limit: Int)
-
-    public var description: String {
-        switch self {
-        case .prLimitReached(let open, let limit):
-            return "\(open)/\(limit) PRs open"
-        }
-    }
-
-    public var accessibilityDescription: String {
-        switch self {
-        case .prLimitReached(let open, let limit):
-            return "\(open) of \(limit) PRs open"
-        }
-    }
-}
-
 /// An interactive session running in the embedded terminal.
 public struct InteractiveSession: Sendable, Identifiable {
     public let id: String
@@ -161,18 +138,6 @@ public func shellEscape(_ string: String) -> String {
     return "'\(escaped)'"
 }
 
-public struct CommitEntry: Sendable, Hashable, Identifiable {
-    public let sha: String
-    public let message: String
-
-    public var id: String { sha }
-
-    public init(sha: String, message: String) {
-        self.sha = sha
-        self.message = message
-    }
-}
-
 public struct WaveCron: Sendable, Hashable, Codable, Identifiable {
     public let id: String
     public var flow: String
@@ -195,9 +160,8 @@ public struct WaveCron: Sendable, Hashable, Codable, Identifiable {
     }
 }
 
-/// A wave targets exactly one repo, so its execution surface is carried inline,
-/// mirroring `WaveDto`. `localWorktree`/`remoteBranch` are git-inferred at build
-/// time; the persisted `worktree`/`branch` duplicates were dropped from the wire.
+/// A durable control plane for one repository. Projects and Tasks carry the
+/// shipping state; a Wave itself has no worktree, branch, diff, or PR.
 public struct Wave: Sendable, Identifiable, Hashable {
     public let id: String
     public var name: String
@@ -210,16 +174,10 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var triggers: [Trigger]
     public var crons: [WaveCron]
     public var status: WaveStatus
-    /// The single repo this wave targets, plus its live execution state.
+    /// The single repository whose main checkout is this Wave's control plane.
     public var repo: String
     public var iteration: Int
-    public var localWorktree: String?
-    public var remoteBranch: String?
-    public var commits: [CommitEntry]
-    public var diffStat: String?
-    public var openPRCount: Int
     public var activeRun: Run?
-    public var pr: PullRequest?
     public var flowSteps: [String]
     public var createdAt: Date?
     /// Parent wave in the chord tree. `nil` for a root wave.
@@ -239,14 +197,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         crons: [WaveCron] = [],
         status: WaveStatus = .idle,
         iteration: Int = 0,
-        localWorktree: String? = nil,
-        remoteBranch: String? = nil,
-        commits: [CommitEntry] = [],
-        diffStat: String? = nil,
         flowSteps: [String] = [],
-        openPRCount: Int = 0,
         activeRun: Run? = nil,
-        pr: PullRequest? = nil,
         createdAt: Date? = nil,
         parentWaveId: String? = nil
     ) {
@@ -263,13 +215,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.crons = crons
         self.status = status
         self.iteration = iteration
-        self.localWorktree = localWorktree
-        self.remoteBranch = remoteBranch
-        self.commits = commits
-        self.diffStat = diffStat
-        self.openPRCount = openPRCount
         self.activeRun = activeRun
-        self.pr = pr
         self.flowSteps = flowSteps
         self.createdAt = createdAt
         self.parentWaveId = parentWaveId

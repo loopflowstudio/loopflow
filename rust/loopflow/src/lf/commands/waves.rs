@@ -100,13 +100,10 @@ pub struct PmTaskSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NextMoveOwner {
-    Human,
     Wave,
     Project,
     Task,
     Review,
-    Ci,
-    External,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,19 +156,12 @@ pub struct TaskDeliverySnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkerSummary {
-    pub active: u32,
-    pub total: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskDetailSnapshot {
     pub task: PmTaskSummary,
     pub runtime: Option<TaskRuntimeSnapshot>,
     pub directive: Option<DirectiveSnapshot>,
     pub next_move: NextMove,
     pub delivery: Option<TaskDeliverySnapshot>,
-    pub workers: WorkerSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -450,13 +440,11 @@ async fn snapshot_projects(
         .collect::<Vec<_>>();
 
     for project_session in &project_sessions {
-        let index = ensure_project(
-            &mut details,
+        let index = project_index(
+            &details,
             project_session.project.id.as_str(),
             &project_session.project.slug,
-            &project_session.project.name,
-            &project_session.project.context,
-        );
+        )?;
         details[index].next_move =
             next_move_for_project(project_session.status, &project_session.status_reason);
         details[index].runtime = Some(snapshot_project_runtime(store, project_session).await?);
@@ -469,10 +457,14 @@ async fn snapshot_projects(
     }
 
     for item in planning.items {
-        let Some(project_slug) = item.project.as_deref() else {
-            continue;
-        };
-        let index = ensure_project(&mut details, project_slug, project_slug, project_slug, "");
+        let project_slug = item.project.as_deref().ok_or_else(|| {
+            anyhow!(
+                "Task {} belongs to no Project in the PM snapshot; fix it in Linear and run `lf pm sync --wave {}`",
+                item.identifier,
+                wave.name()
+            )
+        })?;
+        let index = project_index(&details, project_slug, project_slug)?;
         let runtime_session = task_sessions.iter().find(|session| {
             session.issue.id.as_str() == item.id || session.issue.identifier == item.identifier
         });
@@ -482,13 +474,11 @@ async fn snapshot_projects(
     }
 
     for task_session in &task_sessions {
-        let project_index = ensure_project(
-            &mut details,
+        let project_index = project_index(
+            &details,
             task_session.project.id.as_str(),
             &task_session.project.slug,
-            &task_session.project.name,
-            &task_session.project.context,
-        );
+        )?;
         if details[project_index].tasks.iter().any(|task| {
             task.task.id == task_session.issue.id.as_str()
                 || task.task.identifier == task_session.issue.identifier
@@ -522,37 +512,15 @@ async fn snapshot_projects(
     Ok(details)
 }
 
-fn ensure_project(
-    projects: &mut Vec<ProjectDetailSnapshot>,
-    id: &str,
-    slug: &str,
-    name: &str,
-    definition: &str,
-) -> usize {
-    if let Some(index) = projects
+fn project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) -> Result<usize> {
+    projects
         .iter()
         .position(|project| project.project.id == id || project.project.slug == slug)
-    {
-        return index;
-    }
-    projects.push(ProjectDetailSnapshot {
-        project: PmProjectSummary {
-            id: id.to_string(),
-            slug: slug.to_string(),
-            name: name.to_string(),
-            summary: name.to_string(),
-            definition: definition.to_string(),
-            krs: Vec::new(),
-        },
-        runtime: None,
-        directive: None,
-        next_move: NextMove {
-            owner: NextMoveOwner::Wave,
-            reason: "Project is not present in the current PM snapshot".to_string(),
-        },
-        tasks: Vec::new(),
-    });
-    projects.len() - 1
+        .ok_or_else(|| {
+            anyhow!(
+                "Project {slug} ({id}) is not present in the current PM snapshot; run `lf pm sync` before reading the Wave work map"
+            )
+        })
 }
 
 async fn snapshot_task_detail(
@@ -606,10 +574,6 @@ async fn snapshot_task_detail(
         directive,
         next_move,
         delivery,
-        workers: WorkerSummary {
-            active: 0,
-            total: 0,
-        },
     })
 }
 
@@ -689,12 +653,6 @@ fn next_move_for_unstarted_project(project: &PmProject) -> NextMove {
 }
 
 fn next_move_for_project(status: ProjectSessionStatus, reason: &str) -> NextMove {
-    if let Some(owner) = reason_owner(reason) {
-        return NextMove {
-            owner,
-            reason: reason.to_string(),
-        };
-    }
     let owner = match status {
         ProjectSessionStatus::Created
         | ProjectSessionStatus::Starting
@@ -714,12 +672,6 @@ fn next_move_for_task(
     reason: &str,
     supervisor: &SessionSupervisor,
 ) -> NextMove {
-    if let Some(owner) = reason_owner(reason) {
-        return NextMove {
-            owner,
-            reason: reason.to_string(),
-        };
-    }
     let controller = match supervisor {
         SessionSupervisor::Wave { .. } => NextMoveOwner::Wave,
         SessionSupervisor::Project { .. } => NextMoveOwner::Project,
@@ -737,21 +689,6 @@ fn next_move_for_task(
     NextMove {
         owner,
         reason: reason.to_string(),
-    }
-}
-
-fn reason_owner(reason: &str) -> Option<NextMoveOwner> {
-    let reason = reason.to_ascii_lowercase();
-    if reason.contains("decision") || reason.contains("human") {
-        Some(NextMoveOwner::Human)
-    } else if reason.contains("ci") || reason.contains("check") {
-        Some(NextMoveOwner::Ci)
-    } else if reason.contains("review") {
-        Some(NextMoveOwner::Review)
-    } else if reason.contains("external") {
-        Some(NextMoveOwner::External)
-    } else {
-        None
     }
 }
 
@@ -988,6 +925,14 @@ mod tests {
     use crate::lfd::id::LfdId;
     use crate::lfdb::{open_store, PmSnapshotRow, StorageConfig};
 
+    #[test]
+    fn unknown_project_is_a_snapshot_error_not_a_synthetic_project() {
+        let error = project_index(&[], "project-1", "missing")
+            .expect_err("unknown Project must fail loudly");
+
+        assert!(error.to_string().contains("lf pm sync"));
+    }
+
     #[tokio::test]
     async fn cached_pm_snapshot_builds_the_native_project_task_hierarchy() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1167,10 +1112,6 @@ mod tests {
                         reason: "Task is ready to start".into(),
                     },
                     delivery: None,
-                    workers: WorkerSummary {
-                        active: 0,
-                        total: 0,
-                    },
                 }],
             }],
             attention: vec![AttentionSnapshot {

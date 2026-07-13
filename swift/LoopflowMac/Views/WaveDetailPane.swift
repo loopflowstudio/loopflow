@@ -97,6 +97,7 @@ private struct WavePlanView: View {
 
     @Environment(\.palette) private var palette
     @State private var workMap: WaveWorkMap?
+    @State private var workMapError: String?
 
     private var identity: String { "\(repoPath)|\(wave.id)" }
 
@@ -159,7 +160,12 @@ private struct WavePlanView: View {
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
             }
 
-            if let workMap, !workMap.projects.isEmpty {
+            if let workMapError {
+                Label(workMapError, systemImage: "exclamationmark.triangle")
+                    .font(Typography.caption(11))
+                    .foregroundStyle(Color.statusError)
+                    .textSelection(.enabled)
+            } else if let workMap, !workMap.projects.isEmpty {
                 LazyVStack(alignment: .leading, spacing: Spacing.md) {
                     ForEach(workMap.projects) { project in
                         WaveProjectWorkView(
@@ -183,12 +189,17 @@ private struct WavePlanView: View {
     }
 
     private func refreshWorkMap() async {
-        if let snapshot = try? await RegistryQueryLocal.shared.status(
-            wave: wave.name,
-            waveId: wave.id,
-            cwd: repoPath
-        ) {
+        do {
+            let snapshot = try await RegistryQueryLocal.shared.status(
+                wave: wave.name,
+                waveId: wave.id,
+                cwd: repoPath
+            )
             workMap = snapshot.workMap
+            workMapError = nil
+        } catch {
+            workMap = nil
+            workMapError = "Work map unavailable: \(error.localizedDescription)"
         }
     }
 }

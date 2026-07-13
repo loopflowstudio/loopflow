@@ -14,12 +14,8 @@ pub mod worktrees;
 #[cfg(test)]
 pub(crate) mod test_helpers;
 
-use crate::lfd::config::GitHubConfig;
-use crate::lfd::http::dto::{
-    format_datetime, run_dto, CommitEntryDto, ErrorResponse, PullRequestDto, WaveDto,
-};
+use crate::lfd::http::dto::{format_datetime, run_dto, ErrorResponse, WaveDto};
 use crate::lfd::id::LfdId;
-use crate::lfd::live_pr::build_live_pr_snapshot;
 use crate::lfd::types::{Run, Wave, DEFAULT_WAVE_FLOW};
 use crate::lfdb::{SharedStore, StoreError};
 use axum::http::StatusCode;
@@ -53,20 +49,18 @@ pub async fn resolve_wave_id(
 
 pub async fn build_wave_dtos(
     store: &SharedStore,
-    github_config: &GitHubConfig,
     waves: Vec<Wave>,
     include_active_run: bool,
 ) -> Result<Vec<WaveDto>, StoreError> {
     let mut views = Vec::with_capacity(waves.len());
     for wave in waves {
-        views.push(build_wave_dto(store, github_config, wave, include_active_run).await?);
+        views.push(build_wave_dto(store, wave, include_active_run).await?);
     }
     Ok(views)
 }
 
 pub async fn build_wave_dto(
     store: &SharedStore,
-    github_config: &GitHubConfig,
     wave: Wave,
     include_active_run: bool,
 ) -> Result<WaveDto, StoreError> {
@@ -80,51 +74,19 @@ pub async fn build_wave_dto(
     .await
     .unwrap_or_default();
 
-    // Execution surface for the wave's single repo: infer git state + live-PR
-    // snapshot for the runs that touched it.
+    // Runs are execution history, not Wave delivery. A Wave has no branch,
+    // worktree, diff, or PR; only Task Sessions own those shipping fields.
     let repo_runs: Vec<Run> = stored_runs
         .iter()
         .filter(|run| run.repo == wave.repo)
         .cloned()
         .collect();
-    let snapshot = build_live_pr_snapshot(store, github_config, &repo_runs).await?;
-    let has_stale_pr_state = snapshot.has_stale_pr_state();
-    let repo = wave.repo.clone();
-    let name = wave.name().clone();
-    let git_state = tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
-        .await
-        .ok()
-        .flatten();
-    let (local_worktree, remote_branch, commits, diff_stat) = match git_state {
-        Some(state) => (
-            Some(state.worktree),
-            state.branch,
-            state.commits,
-            state.diff_stat,
-        ),
-        None => (None, None, Vec::new(), None),
-    };
-
     let latest_for_repo = repo_runs.iter().max_by_key(|run| run.started_at);
-    let pr = latest_for_repo.and_then(|run| {
-        run.pr.as_ref().map(|pr| PullRequestDto {
-            url: pr.url.clone(),
-            number: pr.number,
-            state: pr.state.clone(),
-            title: pr.title.clone(),
-            branch: pr.branch.clone(),
-        })
-    });
     let active_run = if include_active_run {
-        latest_for_repo.map(|run| {
-            let live_pr_state = snapshot.state_for_run(run);
-            let pr_state_stale = snapshot.stale_for_run(run);
-            run_dto(run.clone(), live_pr_state, pr_state_stale)
-        })
+        latest_for_repo.map(|run| run_dto(run.clone(), None, false))
     } else {
         None
     };
-    let open_pr_count = snapshot.open_pr_count();
     let wave_config = crate::engine::wave_config::read_wave_config(
         std::path::Path::new(wave.repo()),
         wave.name(),
@@ -143,17 +105,10 @@ pub async fn build_wave_dto(
         created_at: format_datetime(wave.created_at()),
         status: wave.status().as_str().to_string(),
         flow_steps,
-        has_stale_pr_state,
         workers: wave.workers(),
         repo: wave.repo.clone(),
         iteration: wave.iteration(),
-        local_worktree,
-        remote_branch,
-        commits,
-        diff_stat,
-        open_pr_count,
         active_run,
-        pr,
         parent_wave_id: wave.parent_wave_id().map(|id| id.to_string()),
     })
 }
@@ -187,42 +142,6 @@ pub fn paginate<T>(
     (items, has_more)
 }
 
-#[derive(Debug)]
-pub(crate) struct WaveGitState {
-    pub(crate) worktree: String,
-    pub(crate) branch: Option<String>,
-    pub(crate) commits: Vec<CommitEntryDto>,
-    pub(crate) diff_stat: Option<String>,
-}
-
-pub(crate) fn infer_wave_git_state(repo: &str, wave_name: &str) -> Option<WaveGitState> {
-    let repo_path = std::path::Path::new(repo);
-    let worktree = crate::engine::worktrees::worktree_path(repo_path, wave_name);
-    infer_wave_git_state_for_worktree(&worktree, wave_name)
-}
-
-pub(crate) fn infer_wave_git_state_for_worktree(
-    worktree: &std::path::Path,
-    wave_name: &str,
-) -> Option<WaveGitState> {
-    if !worktree.exists() {
-        return None;
-    }
-    let branch = crate::engine::git::current_branch(worktree).ok().flatten();
-
-    let diff_ref = nearest_base_ref(worktree, wave_name);
-
-    let commits = git_commit_log(worktree, &diff_ref);
-    let diff_stat = git_diff_stat(worktree, &diff_ref);
-
-    Some(WaveGitState {
-        worktree: worktree.to_string_lossy().to_string(),
-        branch,
-        commits,
-        diff_stat,
-    })
-}
-
 pub(crate) fn is_open_pr_state(state: Option<&str>) -> bool {
     match state {
         Some(state) => state.eq_ignore_ascii_case("open") || state.eq_ignore_ascii_case("draft"),
@@ -230,202 +149,14 @@ pub(crate) fn is_open_pr_state(state: Option<&str>) -> bool {
     }
 }
 
-/// Find the nearest ancestor branch for diff comparison.
-///
-/// Candidates are the default branch plus any remote branches belonging to this wave
-/// (matched by the sanitized wave name in the branch). For each candidate, compute
-/// merge-base with HEAD and pick the closest one (fewest commits away). This handles
-/// stacked workers: the parent branch can be a closer ancestor than main. After the
-/// parent merges and the worker rebases onto main, main becomes closest again.
-fn nearest_base_ref(worktree: &std::path::Path, wave_name: &str) -> String {
-    let main_repo = crate::engine::worktrees::main_repo_root(worktree)
-        .unwrap_or_else(|_| worktree.to_path_buf());
-    let default_branch =
-        crate::engine::git::get_default_branch(&main_repo).unwrap_or_else(|_| "main".to_string());
-
-    let current = crate::engine::git::current_branch(worktree)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-
-    // Candidates: default branch + remote branches sharing this wave's name.
-    let wave_slug = crate::engine::naming::sanitize_for_branch(wave_name);
-    let mut candidates: Vec<String> = vec![default_branch.clone()];
-    if let Some(sibling_branches) = wave_remote_branches(worktree, &wave_slug) {
-        for branch in sibling_branches {
-            if !is_current_or_tracking_branch(&branch, &current) && !candidates.contains(&branch) {
-                candidates.push(branch);
-            }
-        }
-    }
-
-    // For each candidate, find merge-base with HEAD and count commits from there to HEAD.
-    // Pick the one closest to HEAD.
-    let mut best_ref = default_branch;
-    let mut best_distance = u64::MAX;
-
-    for candidate in &candidates {
-        let mb = match crate::engine::git::merge_base(worktree, "HEAD", candidate) {
-            Ok(sha) => sha,
-            Err(_) => continue,
-        };
-        let distance = commit_count(worktree, &mb);
-        if distance < best_distance {
-            best_distance = distance;
-            best_ref = mb;
-        }
-    }
-
-    best_ref
-}
-
-fn is_current_or_tracking_branch(candidate: &str, current: &str) -> bool {
-    if candidate == current {
-        return true;
-    }
-    candidate
-        .split_once('/')
-        .is_some_and(|(_, branch)| branch == current)
-}
-
-/// List remote branches whose name contains the wave slug (e.g. ".conviction.").
-fn wave_remote_branches(worktree: &std::path::Path, wave_slug: &str) -> Option<Vec<String>> {
-    let pattern = format!(".{}.", wave_slug);
-    let output = std::process::Command::new("git")
-        .args(["branch", "-r", "--format=%(refname:short)"])
-        .current_dir(worktree)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let branches = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|line| line.contains(&pattern))
-        .map(|line| line.trim().to_string())
-        .collect();
-    Some(branches)
-}
-
-fn commit_count(worktree: &std::path::Path, from_ref: &str) -> u64 {
-    std::process::Command::new("git")
-        .args(["rev-list", "--count", &format!("{from_ref}..HEAD")])
-        .current_dir(worktree)
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                String::from_utf8_lossy(&o.stdout).trim().parse().ok()
-            } else {
-                None
-            }
-        })
-        .unwrap_or(u64::MAX)
-}
-
-fn git_commit_log(worktree: &std::path::Path, diff_ref: &str) -> Vec<CommitEntryDto> {
-    let output = std::process::Command::new("git")
-        .args(["log", "--oneline", &format!("{diff_ref}..HEAD")])
-        .current_dir(worktree)
-        .output();
-    let output = match output {
-        Ok(o) if o.status.success() => o,
-        _ => return Vec::new(),
-    };
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let (sha, message) = line.split_once(' ')?;
-            Some(CommitEntryDto {
-                sha: sha.to_string(),
-                message: message.to_string(),
-            })
-        })
-        .collect()
-}
-
-fn git_file_diff(worktree: &std::path::Path, diff_ref: &str, file_path: &str) -> String {
-    let output = std::process::Command::new("git")
-        .args(["diff", diff_ref, "--", file_path])
-        .current_dir(worktree)
-        .output();
-    let output = match output {
-        Ok(o) if o.status.success() => o,
-        _ => return String::new(),
-    };
-    let diff = String::from_utf8_lossy(&output.stdout).to_string();
-
-    // Truncate at 500 lines for glanceability.
-    let lines: Vec<&str> = diff.lines().collect();
-    if lines.len() > 500 {
-        let truncated: String = lines[..500].join("\n");
-        let remaining = lines.len() - 500;
-        format!("{truncated}\n... (truncated, {remaining} more lines)")
-    } else {
-        diff
-    }
-}
-
-fn git_diff_stat(worktree: &std::path::Path, diff_ref: &str) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["diff", "--stat", diff_ref])
-        .current_dir(worktree)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stat = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if stat.is_empty() {
-        None
-    } else {
-        Some(stat)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lfd::id::LfdId;
-    use crate::lfd::live_pr::LivePrSnapshot;
-    use crate::lfd::types::{
-        LivePrState, LivePullRequestState, PullRequest, Run, RunStatus, Wave, WaveStatus,
-    };
+    use crate::lfd::types::{Run, RunStatus, Wave, WaveStatus};
     use crate::lfdb::SharedStore;
-    use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
     use time::OffsetDateTime;
-
-    fn run_with_pr(pr_number: Option<u32>, pr_state: Option<&str>) -> Run {
-        Run {
-            id: LfdId::new(),
-            wave_id: LfdId::new(),
-            repo: ".".to_string(),
-            flow: "build".to_string(),
-            task: None,
-            direction: Vec::new(),
-            area: Vec::new(),
-            iteration: 0,
-            step_index: 0,
-            status: RunStatus::Running,
-            worktree: "/tmp/worktree".to_string(),
-            branch: "feature".to_string(),
-            started_at: None,
-            ended_at: None,
-            error: None,
-            flow_parents: Vec::new(),
-            execution_cursor: None,
-            parent_run_id: None,
-            repair_of: None,
-            pr: Some(PullRequest {
-                url: "https://example.test/pr/1".to_string(),
-                number: pr_number,
-                state: pr_state.map(ToString::to_string),
-                title: Some("test".to_string()),
-                branch: Some("feature".to_string()),
-            }),
-        }
-    }
 
     async fn sqlite_store() -> SharedStore {
         let db_path = std::env::temp_dir().join(format!("lfd-routes-test-{}.db", LfdId::new()));
@@ -440,7 +171,7 @@ mod tests {
     fn make_wave(repo: &str) -> Wave {
         Wave {
             id: LfdId::new(),
-            name: "wave-live-pr".to_string(),
+            name: "wave-runtime".to_string(),
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo: repo.to_string(),
@@ -458,7 +189,7 @@ mod tests {
         }
     }
 
-    fn make_run(wave: &Wave, pr_number: u32) -> Run {
+    fn make_run(wave: &Wave, iteration: u32) -> Run {
         Run {
             id: LfdId::new(),
             wave_id: wave.id().clone(),
@@ -467,11 +198,11 @@ mod tests {
             task: None,
             direction: wave.direction().clone(),
             area: wave.area().clone(),
-            iteration: pr_number,
+            iteration,
             step_index: 0,
             status: RunStatus::Completed,
             worktree: "/tmp/worktree".to_string(),
-            branch: format!("feature-{pr_number}"),
+            branch: String::new(),
             started_at: Some(OffsetDateTime::now_utc()),
             ended_at: Some(OffsetDateTime::now_utc()),
             error: None,
@@ -479,66 +210,8 @@ mod tests {
             execution_cursor: None,
             parent_run_id: None,
             repair_of: None,
-            pr: Some(PullRequest {
-                url: format!("https://example.test/pr/{pr_number}"),
-                number: Some(pr_number),
-                state: Some("open".to_string()),
-                title: Some("title".to_string()),
-                branch: Some(format!("feature-{pr_number}")),
-            }),
+            pr: None,
         }
-    }
-
-    async fn setup_wave_with_run(pr_number: u32) -> (SharedStore, tempfile::TempDir, Wave, Run) {
-        let store = sqlite_store().await;
-        let repo_dir = tempfile::tempdir().expect("tempdir should be created");
-        let wave = make_wave(
-            repo_dir
-                .path()
-                .to_str()
-                .expect("tempdir path should be valid UTF-8"),
-        );
-        store
-            .create_wave(&wave)
-            .await
-            .expect("wave should be created in store");
-        let run = make_run(&wave, pr_number);
-        store
-            .create_run(&run)
-            .await
-            .expect("wave run should be created in store");
-        (store, repo_dir, wave, run)
-    }
-
-    fn live_state(repo_id: &str, pr_number: u32, state: LivePrState) -> LivePullRequestState {
-        LivePullRequestState {
-            repo_id: repo_id.to_string(),
-            pr_number,
-            state,
-            is_draft: false,
-            head_ref: format!("feature-{pr_number}"),
-            head_sha: "abc123".to_string(),
-            base_ref: "main".to_string(),
-            updated_at: OffsetDateTime::now_utc(),
-            merged_at: (state == LivePrState::Merged).then(OffsetDateTime::now_utc),
-            synced_at: OffsetDateTime::now_utc(),
-        }
-    }
-
-    #[test]
-    fn current_tracking_branch_matches_local_branch_name() {
-        assert!(is_current_or_tracking_branch(
-            "origin/jack.wave.20260209_1000",
-            "jack.wave.20260209_1000"
-        ));
-    }
-
-    #[test]
-    fn sibling_branch_does_not_match_current_branch_name() {
-        assert!(!is_current_or_tracking_branch(
-            "origin/jack.wave.20260209_1001",
-            "jack.wave.20260209_1000"
-        ));
     }
 
     #[test]
@@ -548,58 +221,6 @@ mod tests {
         assert!(!is_open_pr_state(Some("merged")));
         assert!(is_open_pr_state(Some("open")));
         assert!(is_open_pr_state(Some("draft")));
-    }
-
-    #[test]
-    fn snapshot_returns_state_and_stale_for_run() {
-        let run = run_with_pr(Some(101), Some("open"));
-        let key = crate::lfd::live_pr::run_live_pr_key(&run).expect("key");
-        let snapshot = LivePrSnapshot {
-            live_states: HashMap::from([(
-                key.clone(),
-                LivePullRequestState {
-                    repo_id: ".".to_string(),
-                    pr_number: 101,
-                    state: LivePrState::Open,
-                    is_draft: false,
-                    head_ref: "feature".to_string(),
-                    head_sha: "abc123".to_string(),
-                    base_ref: "main".to_string(),
-                    updated_at: OffsetDateTime::now_utc(),
-                    merged_at: None,
-                    synced_at: OffsetDateTime::now_utc(),
-                },
-            )]),
-            stale_keys: HashSet::from([key]),
-        };
-
-        assert_eq!(snapshot.state_for_run(&run).map(|s| s.pr_number), Some(101));
-        assert!(snapshot.stale_for_run(&run));
-    }
-
-    #[tokio::test]
-    async fn build_wave_dto_uses_live_pr_state_for_open_counts() {
-        let (store, _repo_dir, wave, _) = setup_wave_with_run(17).await;
-
-        store
-            .upsert_live_pr_state(&live_state(wave.repo(), 17, LivePrState::Closed))
-            .await
-            .expect("live PR state should be upserted");
-
-        let dto = build_wave_dto(
-            &store,
-            &crate::lfd::config::GitHubConfig::default(),
-            wave,
-            false,
-        )
-        .await
-        .expect("wave dto should be built");
-
-        assert_eq!(
-            dto.open_pr_count, 0,
-            "closed live PRs should not count as open even if snapshot says open"
-        );
-        assert!(dto.has_stale_pr_state);
     }
 
     #[tokio::test]
@@ -630,55 +251,14 @@ mod tests {
             .await
             .expect("new run should be created");
 
-        let dto = build_wave_dto(
-            &store,
-            &crate::lfd::config::GitHubConfig::default(),
-            wave,
-            true,
-        )
-        .await
-        .expect("wave dto should be built");
+        let dto = build_wave_dto(&store, wave, true)
+            .await
+            .expect("wave dto should be built");
 
         assert_eq!(
-            dto.active_run
-                .as_ref()
-                .and_then(|run| run.pr.as_ref())
-                .and_then(|pr| pr.number),
+            dto.active_run.as_ref().map(|run| run.iteration),
             Some(22),
             "the latest run by start time wins"
         );
-    }
-
-    #[tokio::test]
-    async fn build_snapshot_tracks_live_pr_state_transitions() {
-        let (store, _repo_dir, wave, run) = setup_wave_with_run(21).await;
-        let key =
-            crate::lfd::live_pr::run_live_pr_key(&run).expect("run should have a live PR key");
-
-        let github = crate::lfd::config::GitHubConfig::default();
-        for (state, expected_open_count) in [
-            (LivePrState::Open, 1_u32),
-            (LivePrState::Merged, 0_u32),
-            (LivePrState::Closed, 0_u32),
-            (LivePrState::Unknown, 0_u32),
-        ] {
-            store
-                .upsert_live_pr_state(&live_state(wave.repo(), 21, state))
-                .await
-                .expect("live PR state should be upserted");
-
-            let snapshot = build_live_pr_snapshot(&store, &github, std::slice::from_ref(&run))
-                .await
-                .expect("snapshot should build");
-            assert_eq!(snapshot.open_pr_count(), expected_open_count);
-            assert_eq!(
-                snapshot.live_states.get(&key).map(|value| value.state),
-                Some(state)
-            );
-            assert!(
-                snapshot.has_stale_pr_state(),
-                "missing GitHub token should keep stale visibility explicit"
-            );
-        }
     }
 }

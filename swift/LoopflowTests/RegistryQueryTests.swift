@@ -64,8 +64,7 @@ struct RegistryQueryTests {
               "runtime":{"session_id":"ts_1","supervisor":{"kind":"wave","wave_id":"wave-1"},"status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","worktree":"/task-wt","branch":"jack/inf-123","provider":"codex","process_alive":true},
               "directive":null,
               "next_move":{"owner":"task","reason":"provider turn is active"},
-              "delivery":{"kind":"pull_request","base":"main","pr_number":null,"pr_url":null},
-              "workers":{"active":0,"total":0}
+              "delivery":{"kind":"pull_request","base":"main","pr_number":null,"pr_url":null}
             }]
           }],
           "runs":[{"id":"run-1","flow":"implement","task":"wire it","step_index":2,"status":"running","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":"https://example.test/pull/7","pr_state":"draft","pr_title":"Wire it"}],

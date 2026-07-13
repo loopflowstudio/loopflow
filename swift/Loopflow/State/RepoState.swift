@@ -279,16 +279,11 @@ public final class RepoState {
         selectedWaveId = nil
         isLoading = false
         errorMessage = nil
-        let selectBranch = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_SELECT_BRANCH"]
-
         switch mode {
         case .emptyWorkspaces:
             break
         case .sampleWorkspaces, .mockWaves:
             configureMockWaves()
-            if mode == .mockWaves, let selectBranch {
-                selectedWaveId = waves.first { $0.branch == selectBranch }?.id
-            }
         }
     }
 
@@ -309,9 +304,6 @@ public final class RepoState {
                     status: .running,
                     iteration: 3
                 ),
-                branch: "wave-auth-feature",
-                prLimit: 5,
-                mergeMode: .pr,
                 pid: 12345
             ),
             WaveViewModel(
@@ -324,10 +316,7 @@ public final class RepoState {
                     triggers: [Trigger(signal: .repo, flow: "integrate")],
                     status: .waiting,
                     iteration: 5
-                ),
-                branch: "wave-api-refactor",
-                prLimit: 3,
-                mergeMode: .pr
+                )
             ),
             WaveViewModel(
                 api: Wave(
@@ -339,9 +328,7 @@ public final class RepoState {
                     triggers: [],
                     status: .idle,
                     iteration: 0
-                ),
-                prLimit: 5,
-                mergeMode: .pr
+                )
             ),
             WaveViewModel(
                 api: Wave(
@@ -353,9 +340,7 @@ public final class RepoState {
                     triggers: [Trigger(signal: .ciFailure, flow: "ci-fix")],
                     status: .idle,
                     iteration: 12
-                ),
-                prLimit: 5,
-                mergeMode: .pr
+                )
             ),
             WaveViewModel(
                 api: Wave(
@@ -379,10 +364,7 @@ public final class RepoState {
                         error: "Build failed: missing dependency 'libcrypto'",
                         createdAt: Date().addingTimeInterval(-3600)
                     )
-                ),
-                branch: "wave-deploy-fix",
-                prLimit: 5,
-                mergeMode: .pr
+                )
             )
         ])
 
@@ -766,14 +748,7 @@ public final class RepoState {
             )
 
         case .idle:
-            guard oldStatus == .running, let prNumber = wave.prNumber, wave.prState == .open else {
-                break
-            }
-            NotificationService.shared.notifyPRReady(
-                waveId: wave.id,
-                waveName: wave.displayName,
-                prNumber: prNumber
-            )
+            break
 
         case .running, .paused:
             break
@@ -867,12 +842,6 @@ public final class RepoState {
             )
             _ = try await self.waveService.updateWave(wave.id, config: config)
         }
-    }
-
-    public func landWave(_ wave: WaveViewModel) async throws {
-        inFlightActions.insert(wave.id)
-        defer { inFlightActions.remove(wave.id) }
-        try await waveService.landWave(wave.id)
     }
 
     public func connectLfd(outputBuffer: OutputBuffer) async throws {
@@ -1209,7 +1178,7 @@ public final class RepoState {
             return
         }
 
-        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: wave.name, branch: wave.branch)
+        let content = WaveContentParser.parse(repoRoot: repoRoot, waveName: wave.name)
         let objective = WavePlanParser.objective(repoRoot: repoRoot, waveName: wave.name) ?? ""
         _ = waveStore.applyOptimistic(waveId) {
             $0.content = content

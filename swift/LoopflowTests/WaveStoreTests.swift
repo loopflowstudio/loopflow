@@ -13,10 +13,7 @@ struct WaveStoreOptimisticTests {
         name: String = "original",
         status: WaveStatus = .idle,
         area: [String] = ["src/"],
-        direction: [String] = [],
-        openPRCount: Int = 0,
-        prNumber: Int? = nil,
-        prState: PRState? = nil
+        direction: [String] = []
     ) -> WaveViewModel {
         WaveViewModel(
             api: Wave(
@@ -27,11 +24,8 @@ struct WaveStoreOptimisticTests {
                 area: area,
                 triggers: [],
                 status: status,
-                iteration: 0,
-                openPRCount: openPRCount
-            ),
-            prNumber: prNumber,
-            prState: prState
+                iteration: 0
+            )
         )
     }
 
@@ -213,20 +207,6 @@ struct WaveStoreOptimisticTests {
 
         #expect(store.wave(for: "wave-1")?.name == "optimistic")
         #expect(store.wave(for: "wave-2")?.name == "other-updated")
-    }
-
-    @Test("waves with open PRs appear in idle group when idle")
-    func wavesWithOpenPRsGroupedByStatus() {
-        let store = WaveStore()
-        store.setAll([
-            makeWave(id: "wave-1", openPRCount: 2),
-            makeWave(id: "wave-2", prNumber: 12, prState: .open),
-            makeWave(id: "wave-3"),
-        ])
-
-        // All three are idle status, so all land in idle group
-        #expect(store.groups.idle.count == 3)
-        #expect(store.groups.active.count == 0)
     }
 
     // MARK: - insertPending / replacePending / removePending

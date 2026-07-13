@@ -40,10 +40,6 @@ struct ContractTests {
 
         #expect(wave.repo == "/home/user/project")
         #expect(wave.iteration == 3)
-        #expect(wave.openPRCount == 1)
-        #expect(wave.localWorktree == "/home/user/project/.claude/worktrees/engbot")
-        #expect(wave.remoteBranch == "engbot/build-3")
-        #expect(wave.commits.count == 1)
 
         // Triggers and crons left the wire in the collapse's organ cut:
         // absent keys parse as empty.

@@ -1,5 +1,5 @@
 // NotificationService - local macOS notifications for wave state changes.
-// Notifies users when waves need attention, fail, or complete with PRs.
+// Notifies users when Waves need attention or fail.
 
 import Foundation
 import UserNotifications
@@ -38,15 +38,6 @@ public final class NotificationService: NSObject, UNUserNotificationCenterDelega
             id: "error-\(waveId)",
             title: "\(waveName) failed",
             body: truncated,
-            waveId: waveId
-        )
-    }
-
-    public func notifyPRReady(waveId: String, waveName: String, prNumber: Int) {
-        post(
-            id: "pr-\(waveId)",
-            title: "\(waveName) PR #\(prNumber)",
-            body: "Ready for review",
             waveId: waveId
         )
     }

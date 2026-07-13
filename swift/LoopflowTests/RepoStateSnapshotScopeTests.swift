@@ -33,8 +33,7 @@ struct RepoStateSnapshotScopeTests {
             area: ["."],
             triggers: [],
             status: .running,
-            iteration: 0,
-            diffStat: nil
+            iteration: 0
         )
     }
 }

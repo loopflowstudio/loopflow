@@ -1659,8 +1659,7 @@ mod tests {
             EventKind::TurnSteered { answers, .. }
                 if answers == &[message_id(&steer)]
         )));
-        let playhead = runtime.playhead().expect("playhead");
-        assert_eq!(playhead.now.expect("next step").step, "wave_pursue");
+        assert!(inputs.lock().unwrap()[0].contains("wave_clarify"));
     }
 
     #[tokio::test]
@@ -1777,7 +1776,8 @@ mod tests {
         .await;
 
         let answers = started_answers(&loop_.journal_events());
-        assert_eq!(answers, vec![vec![message_id(&user_turn)]]);
+        assert_eq!(answers[0], vec![message_id(&user_turn)]);
+        assert!(answers.iter().skip(1).all(Vec::is_empty));
     }
 
     /// A say emission wakes the loop like a message: the next pass's

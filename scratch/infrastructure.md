@@ -556,6 +556,473 @@ The Wave may manage zero, one, or several Project and Task Sessions. It stays
 directly steerable while they run. Talking to the Wave never silently
 retargets the human to a child transcript.
 
+#### The Wave runtime contract
+
+These six responsibilities are one product boundary, not six services. The
+Wave is the only durable mind and the only human-addressable session. Its
+implementation is split into a vendor-free listener and a replaceable
+resident so a provider crash cannot take the conversation, memory, schedule,
+or address down with it:
+
+```text
+origin repository
+  wave/<wave>/GOAL.md + MEMORY.md
+  .lf/journal/waves/<wave>/journal.jsonl
+  wave/<wave>/.wave-endpoint
+               │
+               ▼
+lf serve <wave> — listener              permanent Wave control plane
+  journal pen · HTTP/SSE · registry
+  child observations · resident keeper
+               │ private resident wire
+               ▼
+lf __resident <wave>                    replaceable Wave execution plane
+  playhead · cadence · provider harness
+  cwd = permanent <repo>.<wave> home
+               │ durable child commands
+               ▼
+Project Sessions → Task Sessions        bounded children, separate transcripts
+```
+
+“Permanent” means the Wave identity and state survive turn, harness, resident,
+and listener restarts. It does not mean one immortal Codex/Claude/OpenCode
+thread. The durable state is Loopflow-owned; provider sessions are bodies that
+state can replace.
+
+##### 1. The human conversation
+
+The Wave journal is the conversation's source of truth. The live thread, open
+turn, pending inbox, loop state, and SSE stream are projections. The core
+event vocabulary already exists in `rust/loopflow/src/wave/journal.rs`:
+
+```rust
+pub struct Event {
+    pub v: u32,
+    pub seq: u64,
+    pub at: OffsetDateTime,
+    pub kind: EventKind,
+}
+
+pub enum EventKind {
+    UserMessage {
+        id: MessageId,
+        op: MessageOp,
+        text: String,
+        from: Option<String>,
+    },
+    TurnStarted {
+        turn_id: String,
+        answers: Vec<MessageId>,
+        body: Option<Box<BodyProvenance>>,
+    },
+    TurnItem { turn_id: String, item: ConversationItem },
+    TurnSteered { turn_id: String, answers: Vec<MessageId> },
+    MessagesRequeued { ids: Vec<MessageId> },
+    TurnFinished {
+        turn_id: String,
+        status: Lifecycle,
+        usage: Usage,
+        termination_reason: Option<String>,
+    },
+    TaskObserved { observation: TaskObservation },
+    ProjectObserved { observation: ProjectObservation },
+    // loop, playhead, memory, and server events omitted here
+}
+```
+
+`POST /messages` does not write directly to a provider. It calls
+`WaveRuntime::deliver`, which appends the `UserMessage`, commits the visible
+human turn, adds a `PendingMessage`, and broadcasts the resident inbox while
+holding one runtime lock:
+
+```rust
+fn deliver_message(
+    &self,
+    text: String,
+    op: MessageOp,
+    from: Option<String>,
+) -> ChatTurn {
+    let mut inner = self.inner();
+    let event = inner.journal.append(|seq| EventKind::UserMessage {
+        id: MessageId(format!("msg-{seq}")),
+        op,
+        text: text.clone(),
+        from: from.clone(),
+    });
+    // Commit the visible turn, then add the same id to the durable pending fold.
+    // The inbox broadcast happens under this lock, so journal and delivery order agree.
+    // ...
+}
+```
+
+The resident later names consumed message ids in `TurnStarted.answers` or
+`TurnSteered.answers`. If the body dies before completing, the listener appends
+`MessagesRequeued` and the ids become pending again. This is the delivery
+contract: an input is pending, claimed by a specific Wave turn, answered, or
+explicitly returned to pending. An SSE frame is never the sole copy.
+
+The human always speaks to the Wave, including while a child is working. For
+example, “also rename the flag” is first a durable human turn in the Wave
+journal. The Wave may translate it into `lf task steer INF-123 ...`; that
+command and the child's response live in the Task ledger. The next Wave body
+sees the human exchange in `<lf:wave-chat-recent>` and sees the Task result as
+a typed `TaskObserved` event. It does not need the child's raw transcript to
+remember what the human said.
+
+This keeps three transcript boundaries honest:
+
+- Human ↔ Wave dialogue lives only in the Wave journal.
+- Wave/Project control of a child lives in durable child commands and receipts.
+- Provider turns and tool chatter stay in the Project or Task transcript.
+
+Typed child observations are queued as orchestration input but do not create a
+fake human chat turn. The Wave can render their linked summary in its answer;
+the UI can drill into the child by id when more detail is needed.
+
+Both human clients use the same contract. `lf chat` and
+`swift/Loopflow/Services/WaveChatClient.swift` post an explicit
+`message | steer | interrupt` operation, then consume the same `GET /events`
+stream. The Swift composer selects its verb from the streamed `LoopState`; it
+does not own another conversation model.
+
+Preserve these behaviors while completing child supervision:
+
+- restarting the listener reconstructs finalized and open turns from JSONL;
+- reconnecting a client receives an atomic thread/state/playhead snapshot
+  before live frames;
+- a lagged client resyncs from durable state rather than losing turns;
+- a human message never becomes a direct write to a Task provider;
+- no Project or Task transcript is silently promoted into Wave chat.
+
+##### 2. Permanent memory and cadence
+
+Conversation and memory serve different time scales. The journal preserves
+everything for replay and audit, but only the newest 12 turns, capped at 4,000
+characters, ride `<lf:wave-chat-recent>`. Durable learning belongs in the
+curated `wave/<wave>/MEMORY.md` checkpoint:
+
+```rust
+#[derive(Debug)]
+pub struct Memory {
+    path: PathBuf,
+}
+
+impl Memory {
+    pub fn for_wave(repo_root: &Path, wave: &str) -> Self;
+    pub fn read(&self) -> String;
+    pub fn write(&self, content: &str) -> std::io::Result<()>;
+}
+```
+
+The listener is the one live writer. `lf memory update` replaces the
+checkpoint and journals `MemoryUpdated`; `lf memory add` appends a replayable
+`MemoryAdded` fact without turning the Markdown file into a concurrent IPC
+surface. A later curation folds useful facts into the checkpoint and clears
+the add-stream delta. A stopped Wave can still read the checkpoint and fold
+its journal without starting a provider.
+
+Every Wave body is reconstructed from current durable context, not from faith
+in a provider thread:
+
+```rust
+fn wave_pass_seed(origin_repo: &Path, wave: &str, wake: &str) -> String {
+    let seed = build_goal_seed(origin_repo, wave); // GOAL.md + MEMORY.md
+    format!(
+        "{seed}\n\n{}\n\n{}\n\n<wake>\n{wake}\n</wake>",
+        orchestration_discipline(wave),
+        crate::engine::prompt::loopflow_section(),
+    )
+}
+```
+
+Normal prompt assembly additionally resolves the Wave's origin repository and
+injects recent journal conversation. If the listener is live it reads
+`GET /conversation`; if not, `engine/wave_context.rs` performs a read-only
+journal fold. This is why killing a resident can discard its provider process
+without erasing the Wave's mind.
+
+Cadence is Wave-owned configuration in `GOAL.md`, not a daemon table and not a
+Project property:
+
+```rust
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct WaveCronDef {
+    pub flow: String,
+    pub schedule: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct WaveConfig {
+    pub crons: Option<Vec<WaveCronDef>>,
+    pub workers: Option<u32>,
+    pub agent: Option<String>,
+    pub pm: Option<WavePmConfig>,
+    pub paused: Option<bool>,
+    // other Wave policy fields
+}
+```
+
+The resident re-reads cron definitions when computing every deadline, so an
+edit takes effect without a restart. Three things may wake a Wave body:
+
+1. a human message or typed child observation;
+2. a due cron;
+3. the idle heartbeat.
+
+Today `HEARTBEAT_IDLE` is `Duration::ZERO`: after a successful body, the root
+playlist is immediately eligible to continue. `paused: true` is the safety
+valve: the listener keeps the address and queues inputs but refuses to start a
+new turn. A Project Session has no heartbeat or cron; it wakes only when its
+supervisor commands it or a supervised Task changes. A Task Session likewise
+has no cadence. This asymmetry is what makes a Wave a durable operating
+context rather than a large child job.
+
+##### 3. A server and stable address
+
+The stable address is `(origin repository, Wave identity)`, not a TCP port.
+`lf serve <wave>` binds an ephemeral loopback port, writes it to
+`wave/<wave>/.wave-endpoint`, and records the same endpoint on the live
+`WaveAgent` registry row. The port may change on every boot while the logical
+address remains the same.
+
+```rust
+pub fn serve(name: &str, force: bool) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let origin = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
+    let wave = resolve_wave_name(&origin, Some(name))
+        .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
+    // run_listener binds, registers, opens the journal, writes discovery,
+    // supervises the resident, and serves until shutdown.
+    // ...
+}
+```
+
+The listener serves from the origin repository and creates no worktree. The
+resident ensures and enters the permanent sibling `<repo>.<wave>` home. A Task
+always gets another immutable worktree, so neither shipping work nor PR
+lifecycle moves the Wave listener or resident out from under the human.
+
+The public listener surface stays narrow:
+
+```text
+GET  /health
+GET  /conversation
+GET  /events                 # thread/state/playhead as SSE
+POST /messages               # human message, steer, interrupt
+GET  /memory
+POST /memory
+GET  /playhead
+POST /playhead/enqueue
+POST /playhead/skip
+POST /tasks/observe          # narrow loopback child-observation door
+POST /stop
+```
+
+The private resident door adds `attach`, ordered `deltas`, and `context`,
+guarded by a per-boot token. Project and Task Sessions do not receive HTTP
+servers. Their control state is SQLite plus CLI JSON, and the Wave receives
+their typed observations through the listener.
+
+One-brain enforcement has two floors. The shared registry refuses a second
+live `WaveAgent` session, and a responsive `.wave-endpoint` refuses a second
+listener even without a registry. `--force` is an explicit takeover, not
+ordinary recovery. The resident door separately allows only one live resident
+seat, preventing two provider loops from writing deltas into one Wave.
+
+Swift demonstrates the address abstraction already:
+
+```swift
+public enum WaveEndpoint {
+    public static let fileName = ".wave-endpoint"
+
+    public static func path(repoPath: String, waveName: String) -> URL {
+        URL(fileURLWithPath: WaveOrigin.resolve(repoPath))
+            .appendingPathComponent("wave", isDirectory: true)
+            .appendingPathComponent(waveName, isDirectory: true)
+            .appendingPathComponent(fileName)
+    }
+}
+```
+
+`WaveChatConnection` polls that pointer while stopped, reconnects to the new
+port when the Wave returns, replays the durable snapshot, and resumes live
+SSE. Rich child controls may later appear in the Wave UI, but they must route
+through the same Wave/child command APIs; the Mac app must never become a
+second session owner.
+
+##### 4. The orchestration playhead
+
+The playhead is a deterministic durable scheduler, not the LM's memory. It
+answers: which flow invocation and logical step should the next Wave body
+execute, what body is active, what runs next, and where a queued continuation
+returns.
+
+```rust
+pub struct QueuedInvocation {
+    pub id: String,
+    pub flow: String,
+    pub steps: Vec<StepPlan>,
+}
+
+pub struct InvocationState {
+    pub id: String,
+    pub flow: String,
+    pub steps: Vec<StepPlan>,
+    pub cursor: u32,
+    pub iteration: u32,
+    pub queue: Vec<QueuedInvocation>,
+}
+
+pub struct Playhead {
+    pub stack: Vec<InvocationState>,
+    pub active: Option<BodyProvenance>,
+}
+```
+
+On the first resident attach, `WaveRuntime::ensure_playhead` loads the root
+`wave` flow, currently `wave_clarify → wave_pursue → wave_mutate`, and journals
+the resulting `PlayheadChanged` snapshot. Replay wins over today's flow file:
+an in-progress invocation does not change shape because an upgrade edited its
+definition.
+
+Each attempt receives `BodyProvenance` with the invocation/step, provider
+session id, harness/model, host, Wave worktree, timestamps, and termination
+reason. There is at most one active body. The transition rules are deliberately
+small:
+
+- completed or skipped advances the cursor;
+- failed or interrupted clears the body but leaves the same step selected;
+- a queued invocation runs at the next boundary, then returns to its caller;
+- completing the root resets its cursor to zero and increments `iteration`.
+
+Every mutation journals both the event explaining the move and the entire
+post-move `Playhead`, so a restart does not repeat scheduling judgment merely
+to reconstruct a cursor.
+
+Project and Task Sessions are not playhead frames. The `wave_pursue` body may
+start or steer them, record their ids, and then complete normally. Their
+processes continue independently; later typed observations enter the Wave
+inbox and wake whichever root step the playhead currently selects. This avoids
+turning “child is still working” into a Wave body that pins a provider or
+worktree for hours.
+
+##### 5. Project selection and root supervision
+
+Project selection is Wave judgment applied to authoritative PM state. It is
+not a Rust priority formula and it is not delegated to the playhead. The
+`wave_pursue` skill reads the exact Wave's GOAL/MEMORY, Linear Project
+definitions, proof-shaped KRs, filed Tasks, recent chat, and live child
+sessions, then takes one orchestration move:
+
+```text
+select or create a Linear Project
+→ run/resume its Project Session for a measured multi-Task bet
+→ or create/run one Task directly for a small change
+→ inspect, steer, interrupt, decide, wait, or resume existing children
+→ answer human steering before returning to autonomous pursuit
+```
+
+The runtime ownership is explicit in the stored records:
+
+```rust
+pub enum SessionSupervisor {
+    Wave { wave_id: LfdId },
+    Project { session_id: ProjectSessionId },
+}
+
+pub struct TaskSession {
+    // identity, PM snapshot, worktree, provider, and delivery fields
+    pub wave_id: LfdId,
+    pub supervisor: SessionSupervisor,
+    // ...
+}
+```
+
+A direct small Task records the Wave as supervisor. A Task created during
+Project pursuit records that Project Session as immediate supervisor. Command
+authorization checks the ambient `LFD_PROJECT_SESSION_ID` first, then the
+owning `LFD_WAVE_ID`; an unrelated Project or foreign Wave is rejected before
+the command is persisted. The owning Wave remains the root owner and may
+override any descendant Task when the Project is stuck, wrong, or unavailable.
+
+Root supervision means authority and observability, not Unix parenthood:
+
+- stopping the Wave does not kill durable Task Sessions;
+- restarting the Wave does not create replacement child sessions;
+- the Wave observes Project completions and directly supervised Task events;
+- Project Sessions observe the Tasks they supervise and escalate only linked
+  decisions or consequential state;
+- raw child tool output never becomes required Wave context;
+- all child controls return durable receipts, so a Wave crash after issuing a
+  command can recover its outcome by command id.
+
+The normal hierarchy is Human → Wave → Project Session → Task Session. The
+direct Human → Project/Task CLI remains an attributed escape hatch for repair,
+not a second product conversation. The Wave's next turn can always reconstruct
+the tree from stored supervisor ids and pending observations instead of
+inferring ownership from branch names, worktree paths, or prose.
+
+Linear remains the identity gate. Selection may use an acceptable cached PM
+snapshot when the task/project already exists, but natural-language creation
+must obtain the formal Linear record before starting a child. A failure leaves
+the Wave's server and chat alive while creating no anonymous Task Session.
+
+##### 6. Continuous residency
+
+Only a Wave is continuously resident because only a Wave owns a human mailbox
+and autonomous cadence. Project Sessions deliberately stop their process while
+waiting for Tasks; Task Sessions stop between implementation/review turns. A
+Wave keeps a cheap scheduler alive so a message, observation, cron, or heartbeat
+can become judgment without another user command.
+
+The lifecycle is:
+
+```text
+lf serve <wave>
+  1. listener binds, registers one WaveAgent, opens/replays the journal
+  2. listener writes discovery and starts its resident supervisor
+  3. supervisor spawns lf __resident <wave>
+  4. resident enters <repo>.<wave>, takes the one resident seat, subscribes
+  5. resident selects inbox / cron / heartbeat, then runs one bounded body
+  6. body streams ordered deltas; resident returns to the scheduler boundary
+  7. root playhead wraps forever until paused, stopped, or failed
+```
+
+The resident uses `tokio::select!` so human input and provider events are
+handled concurrently. A steer-capable harness receives a live `send_input`;
+otherwise the input queues for the next body. Interrupt stops the harness and
+leaves the selected logical step retryable. The listener remains responsive
+throughout because no provider code runs in it.
+
+Residency is replaceable at every layer:
+
+- one failed body returns to the scheduler with a failed turn;
+- three consecutive failed bodies mark the loop failed and exit the resident;
+- the listener's supervisor force-closes any dangling turn and respawns the
+  resident on a 5/15/45-minute ladder;
+- a human message or typed child observation revives a failed resident
+  immediately;
+- a completed assistant turn resets the ladder;
+- listener shutdown first disarms the supervisor, then terminates the resident
+  and removes only that boot's discovery files.
+
+The listener is the availability anchor, but it is still a local process. If
+the listener itself dies, the resident exits when its SSE subscription closes;
+tmux, launchd/systemd, or the future maintained host restarts `lf serve`. The
+child-session redesign does not reintroduce machine `lfd` execution merely to
+make that process immortal.
+
+This yields the intended progressive disclosure:
+
+```text
+lf serve infrastructure
+# chat in CLI or Mac; the Wave creates and supervises formal work
+```
+
+The human does not choose listener versus resident, provider session reuse,
+Project process topology, worktree placement, or detach mode. Those are
+implementation details behind one durable Wave address.
+
 ### Project
 
 A Project is one Linear Project inside exactly one Wave/Linear Initiative. It

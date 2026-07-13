@@ -9,6 +9,6 @@ pub mod lfdb;
 pub mod ops;
 pub mod project_session;
 pub mod provider_auth;
-pub mod trace;
 pub mod task;
+pub mod trace;
 pub mod wave;

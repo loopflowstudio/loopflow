@@ -20,10 +20,6 @@ use crate::lfdb::token_crypto;
 use crate::lfdb::{
     BusMessage, ForkRun, ForkRunStatus, PmSnapshotRow, RunEventRow, StoreError, StoreResult,
 };
-use crate::trace::{
-    AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
-    ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
-};
 use crate::project_session::SessionSupervisor;
 use crate::project_session::{
     ChildEventPayload, ChildSessionRef, ObservationOutboxRow, ProjectCommand, ProjectCommandId,
@@ -35,6 +31,10 @@ use crate::task::{
     LinearIssueRef, LinearProjectId, LinearProjectRef, PullRequestRef, TaskCommand,
     TaskCommandEffect, TaskCommandId, TaskCommandKind, TaskCommandSource, TaskCommandState,
     TaskEvent, TaskEventKind, TaskProcess, TaskSession, TaskSessionId, TaskSessionStatus,
+};
+use crate::trace::{
+    AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
+    ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
 };
 
 #[derive(Debug, Clone)]

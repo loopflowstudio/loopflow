@@ -1356,3 +1356,34 @@ What remains outside this pass:
 The known headless UI test-runner hang remains unproven rather than a
 regression. Deterministic Rust, DTO, and Swift package gates are the evidence
 for this pass.
+
+## Current iteration: make the Wave flow yield
+
+The harness owns execution of a tier flow; the tier controller owns whether
+that flow runs again. One wake runs the complete Wave flow through the same
+provider transcript:
+
+```text
+wave_clarify → wave_pursue → wave_mutate → idle
+```
+
+Completing `wave_mutate` means the Wave is done **for this wake**, not that the
+durable Wave is complete. The resident must then wait for human chat, a typed
+Project/Task observation, a cron, or the coarse safety heartbeat. It must not
+start another paid iteration merely because a Wave has no terminal state.
+
+Project and Task controllers remain different: they inspect authoritative KR,
+Task, worktree, PR, and directive state after the full flow and immediately
+repeat only when another iteration is concretely actionable. No tier uses an
+LM-authored loop bit.
+
+Implement this iteration in `flowloop/wave.rs`:
+
+- restore the four-hour quiet-Wave heartbeat instead of the zero-delay
+  continuous playlist;
+- describe the live harness/provider transcript accurately;
+- pin the production default and the one-wake/one-flow boundary in tests.
+
+Done when an idle Wave consumes no provider turns between wakes, while a new
+message, child observation, cron, or heartbeat still runs the complete Wave
+flow and remains steerable during its active phase.

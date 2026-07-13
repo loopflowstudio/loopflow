@@ -4,9 +4,10 @@
 //! This runs inside the resident process (the internal half of
 //! `lf serve <name>`,
 //! see [`crate::wave::resident`]) — never in the listener. A turn is one
-//! `wave` flow (clarify, pursue, then mutate) run as a
-//! bounded headless child in the wave home; continuity is GOAL.md + memory +
-//! the chat journal riding every pass's seed, never a vendor thread.
+//! `wave` flow (clarify, pursue, then mutate) played through the live Harness
+//! boundary. Phases reuse one provider session while the resident lives;
+//! GOAL.md, memory, and the chat journal preserve continuity across resident
+//! restarts.
 //! Everything the loop does surfaces as [`ResidentDelta`]s sent through
 //! the listener's resident door, where the journal, the open-turn snapshot,
 //! SSE broadcast, and `LoopState` transitions live.
@@ -67,9 +68,10 @@ use crate::wave::runtime::InboxItem;
 use crate::wave::supervisor::sleep_until_opt;
 use crate::wave::wire::{InFlightWorker, ResidentDelta, ResidentStateTo};
 
-/// The default playlist advances continuously. Tests and specialized callers
-/// can still supply a non-zero idle cadence.
-pub const HEARTBEAT_IDLE: Duration = Duration::ZERO;
+/// How long an eventless Wave stays idle before a safety heartbeat. Human
+/// chat, child observations, and crons wake it immediately; the quiet cadence
+/// is deliberately coarse because every wake runs the full three-phase flow.
+pub const HEARTBEAT_IDLE: Duration = Duration::from_secs(4 * 60 * 60);
 
 /// Consecutive failed turns before the loop itself is declared failed and
 /// the resident exits (the listener's supervisor revives by respawning).
@@ -160,8 +162,8 @@ pub(crate) fn cron_prompt(due: &[WaveCronDef]) -> String {
         .join("\n")
 }
 
-/// Loop knobs. Production advances the playlist immediately and gives each
-/// body a 30-minute timeout.
+/// Loop knobs. Production uses a four-hour quiet heartbeat and gives each body
+/// a 30-minute timeout.
 #[derive(Debug, Clone)]
 pub struct LoopConfig {
     /// Idle window before a heartbeat `wave`.
@@ -1751,7 +1753,33 @@ mod tests {
         assert!(seed.contains("Ship the thing."));
         assert!(seed.contains("<lf:loopflow>"));
         assert!(seed.contains("<wake>\nhello from chat\n</wake>"));
-        assert_eq!(LoopConfig::default().heartbeat_idle, Duration::ZERO);
+        assert_eq!(
+            LoopConfig::default().heartbeat_idle,
+            Duration::from_secs(4 * 60 * 60)
+        );
+    }
+
+    #[tokio::test]
+    async fn one_wake_runs_one_full_wave_flow_then_idles() {
+        let loop_ = boot(Duration::from_secs(600), "echo done").await;
+
+        loop_
+            .runtime
+            .deliver(MessageOp::Message, "first wake".into())
+            .expect("first wake");
+        wait_for("first Wave flow", || loop_.pass_count() == 3).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            loop_.pass_count(),
+            3,
+            "a completed Wave flow waits instead of starting another iteration"
+        );
+
+        loop_
+            .runtime
+            .deliver(MessageOp::Message, "second wake".into())
+            .expect("second wake");
+        wait_for("second Wave flow", || loop_.pass_count() == 6).await;
     }
 
     // -- Scheduling, over the full wire --

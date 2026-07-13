@@ -67,8 +67,9 @@
 //!   - `POST /resident/deltas {deltas: [...]}` → `{accepted}` — ordered turn
 //!     deltas, applied to the journal fold
 //!     ([`WaveRuntime::apply_resident_delta`]).
-//!   - `GET /resident/context` → `{in_flight, playhead}` — the pre-turn
-//!     snapshot; serving it freshens the store observations (one poll).
+//!   - `GET /resident/context` → `{in_flight, playhead, provider_session}` —
+//!     the pre-turn snapshot and optional typed provider thread; serving it
+//!     freshens the store observations (one poll).
 //! - `POST /messages {op, text}` → `{turn, state}`. `op` is
 //!   required — `"message"` (queued; the next turn answers it), `"steer"`
 //!   (into the live turn when the harness supports it, else degrades to a

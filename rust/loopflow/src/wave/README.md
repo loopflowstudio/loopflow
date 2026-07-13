@@ -7,7 +7,7 @@
   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
   │ LISTENER (origin repo)│──────────▶│ RESIDENT (clean main)     │
   │ pens · folds · doors  │           │ wave runner · queue │
-  │ observer · supervisor │◀──deltas──│ GOAL.md seed · schedule  │
+  │ observer · supervisor │◀──deltas──│ GOAL.md · inbox · crons  │
   └──────────┬────────────┘           └────────────▲─────────────┘
              └────────── /events?inbox=true ───────┘
 ```
@@ -52,8 +52,10 @@ sessions and keep running.
   queue it for the next body. The resident declares what it consumed in its `TurnOpened`
   delta's `answers`, and the listener validates against its pending fold
   before journaling `TurnStarted.answers`; live inputs append
-  `TurnSteered.answers`. With no explicit continuation queued, the default
-  `wave` flow advances continuously and wraps to its next iteration.
+  `TurnSteered.answers`. One wake runs the complete default `wave` flow
+  (`clarify → pursue → mutate`) and then idles. Human input, a typed child
+  observation, a cron, or the coarse heartbeat starts the next flow; a quiet
+  Wave consumes no provider turns merely because it remains served.
 - **Crons are the third deadline.** `crons: [{flow, schedule}]` in the
   wave's `GOAL.md` frontmatter (re-read live, no restart); a due schedule
   while idle opens a system pass — "cron due: <flow> — run it" — and
@@ -127,8 +129,10 @@ don't consume this wire):
   Sent serially, so per-turn order is the transport's order; turn ids never
   ride the wire — the listener mints them from its journal seq. Plus
   `POST /resident/attach {pid}` (liveness registration + revival; returns
-  `{wave}`) and `GET /resident/context` (`{in_flight}`; serving it freshens
-  the store fold).
+  `{wave}`) and `GET /resident/context`
+  (`{in_flight, playhead, provider_session}`; serving it freshens the store
+  fold). The optional provider session is a typed `{harness, session_id}` pair,
+  so a resident restart resumes only through the harness that minted it.
 - **Listener → resident**: `GET /events?inbox=true` adds `inbox` SSE frames
   to the primary subscription — `{kind: "message", id, op, text, from}` per
   resident-directed op, the pending queue replayed on connect. Bare interrupts
@@ -220,7 +224,7 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 | `POST /memory {op, content, summary}` | `op`: `update` replaces `MEMORY.md`; `add` publishes one replayable fact. `summary` null → first non-empty content line. Returns `{summary}`. |
 | `POST /resident/attach {pid}` | Resident door (token-gated): register the resident's pid, revive a failed loop. Returns `{wave}`. |
 | `POST /resident/deltas {deltas}` | Resident door (token-gated): ordered turn deltas → the journal fold. Returns `{accepted}`. |
-| `GET /resident/context`   | Resident door (token-gated): `{in_flight, playhead}`; freshens the store observations. |
+| `GET /resident/context`   | Resident door (token-gated): `{in_flight, playhead, provider_session}`; the optional provider session carries `{harness, session_id}` and the read freshens store observations. |
 
 ### Turn
 

@@ -146,7 +146,8 @@ lf pr land    # submit to merge queue
 
 ## Scale with Waves
 
-Ready to automate? Waves run your workflows continuously.
+Ready to automate? Waves remain available continuously and run a complete flow
+when chat, child observations, crons, or a heartbeat wake them.
 
 `lf` skills are manual building blocks. A Wave is a named agent that reads its
 Linear Projects and tasks, starts durable Task Sessions, and supervises their

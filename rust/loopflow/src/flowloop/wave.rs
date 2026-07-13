@@ -1711,8 +1711,14 @@ mod tests {
                         ..crate::engine::AgentConfig::default()
                     },
                     input: format!("{skill}\n{seed}"),
+                    context: crate::trace::PreparedTurnContext::from_prompts(
+                        "",
+                        &format!("{skill}\n{seed}"),
+                    ),
                     harness: "fake".to_string(),
                     model: None,
+                    context_gather_ms: 0,
+                    context_render_ms: 0,
                 })
             }),
             create: Box::new(move |_name, _approval, events| {

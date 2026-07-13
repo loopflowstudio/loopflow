@@ -4,6 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::engine::error::GitError;
 
@@ -309,13 +310,34 @@ pub fn is_clean(repo: &Path) -> Result<bool, GitError> {
 /// Repository state relevant to a Task flow's no-progress check.
 ///
 /// The returned text is an opaque comparison value, not a user-facing diff.
-/// It includes committed, staged, tracked working-tree, and untracked-path
+/// It includes committed, staged, tracked working-tree, and untracked-file
 /// changes without reading ignored files.
 pub fn worktree_state(repo: &Path) -> Result<String, GitError> {
     let head = git_stdout(repo, &["rev-parse", "HEAD"])?;
     let status = git_stdout(repo, &["status", "--porcelain"])?;
     let diff = git_stdout(repo, &["diff", "--binary", "HEAD"])?;
-    Ok(format!("{head}\0{status}\0{diff}"))
+    let untracked = git_stdout(repo, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    let mut untracked_state = String::new();
+    for relative in untracked.split('\0').filter(|path| !path.is_empty()) {
+        let path = repo.join(relative);
+        let metadata = std::fs::symlink_metadata(&path)?;
+        let contents = if metadata.file_type().is_symlink() {
+            std::fs::read_link(path)?
+                .as_os_str()
+                .as_encoded_bytes()
+                .to_vec()
+        } else if metadata.is_file() {
+            std::fs::read(path)?
+        } else {
+            Vec::new()
+        };
+        let digest = hex::encode(Sha256::digest(contents));
+        untracked_state.push_str(relative);
+        untracked_state.push('\0');
+        untracked_state.push_str(&digest);
+        untracked_state.push('\0');
+    }
+    Ok(format!("{head}\0{status}\0{diff}\0{untracked_state}"))
 }
 
 /// Return true if working tree is clean, ignoring untracked `scratch/` entries.
@@ -1130,6 +1152,19 @@ mod tests {
         let committed = worktree_state(repo.path()).expect("committed state");
         assert_ne!(committed, initial);
         assert_ne!(committed, dirty);
+    }
+
+    #[test]
+    fn worktree_state_tracks_untracked_file_contents() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "tracked");
+
+        fs::write(repo.path().join("new.txt"), "one").expect("write untracked file");
+        let initial = worktree_state(repo.path()).expect("initial untracked state");
+        fs::write(repo.path().join("new.txt"), "two").expect("update untracked file");
+        let updated = worktree_state(repo.path()).expect("updated untracked state");
+
+        assert_ne!(initial, updated);
     }
 
     #[test]

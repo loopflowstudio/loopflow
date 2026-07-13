@@ -5,7 +5,9 @@ title: lf Command Reference
 
 # lf Command Reference
 
-`lf` is a prompt launcher. Every command launches a prompt—assembling context and passing it to Claude, Codex, Gemini, or OpenCode.
+`lf` launches prompts and operates durable Waves, Projects, and Tasks. Prompt
+commands assemble context for Claude, Codex, Gemini, or OpenCode; lifecycle and
+repository commands use the same CLI.
 
 ## Basic Usage
 
@@ -28,7 +30,7 @@ lf office-hours                   # bare name works when unambiguous
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
-lf --wave designer loop task "fix the flaky test"   # loop task until the PR merges
+lf task run DES-123 --directive "fix the flaky test" # keep one Task through merge
 ```
 
 ## Skills

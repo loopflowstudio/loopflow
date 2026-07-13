@@ -319,17 +319,16 @@ There is no `/goal` runtime or command in this branch. `GOAL.md` is the Wave's
 durable specification and context; the Wave server reads it into each turn.
 The actual repetition lives in the controller around provider turns.
 
-All three loops currently run one policy skill, then a deterministic
+All three loops run one three-phase domain iteration, then a deterministic
 transition:
 
 | Loop | Body today | Transition after the body |
 |---|---|---|
-| Wave | Run `wave_pursue` once | Reset the playhead to its one skill and increment the iteration forever |
-| Project | Run `project_pursue` once | Complete if KRs hold; wait on active Tasks; block on an unchanged fingerprint; otherwise run again |
-| Task | Run `task_pursue` once | Mark merged/submitted from PR state; otherwise wait until another command resumes it |
+| Wave | Run `wave_clarify → wave_pursue → wave_mutate` | Yield after the full iteration; chat, cadence, or child activity wakes the next |
+| Project | Run `project_clarify → project_pursue → project_mutate` | Complete if non-empty KRs hold; wait on active Tasks; block on an unchanged fingerprint; otherwise loop the full flow |
+| Task | Run `task_clarify → task_pursue → task_mutate` | Mark merged/submitted from PR state; loop the full flow when the worktree changed; block rather than spin on no progress |
 
-That is a useful reduction checkpoint, but it hides a lifecycle shared by all
-three tiers. Each loop has the same three semantic phases:
+Each loop has the same three semantic phases:
 
 ```text
 clarify the current intent → pursue it → judge the evidence
@@ -353,7 +352,7 @@ LM-written loop bit:
 # the durable Task runner plays this whole flow through one harness
 - task_clarify
 - task_pursue
-- task_evaluate
+- task_mutate
 ```
 
 Project and Wave use the same shape with their own skills. The existing
@@ -364,12 +363,14 @@ chooses repeat, the runner loads another invocation of the same flow through
 the same harness. The provider never decides its own lifecycle merely by
 writing a file or returning a magic bit.
 
-One durable session, harness, and provider transcript spans all flow steps and
-iterations. They are not three disposable agents. A Wave steer reaches the
-active step live when the adapter supports it; otherwise it interrupts and
-restarts that same step in the same transcript with the new directive. The
-playhead and directive version are visible together, so the Wave can tell both
-*what the child is doing* and *which instruction it is doing it under*.
+One durable domain session and provider transcript span all flow steps and
+iterations. They are not three disposable agents. Project and Task runners
+keep one harness active; the Wave resumes the same provider session across
+phase processes. A Wave steer reaches the active step live when the adapter
+supports it; otherwise it interrupts and restarts that same step in the same
+transcript with the new directive. The playhead and directive version are
+visible together, so the Wave can tell both *what the child is doing* and
+*which instruction it is doing it under*.
 
 The cleaner target is:
 
@@ -382,7 +383,7 @@ Wave loop
         └── Worker / Exec          may run in parallel inside the same Task
 ```
 
-Each loop performs one policy turn, then its controller chooses the next
+Each loop performs one full policy flow, then its controller chooses the next
 state:
 
 | Loop | Repeat | Wait | Complete |
@@ -396,8 +397,8 @@ must busy-spin. The current zero-idle continuous playhead is a cadence policy,
 not the definition of a Wave.
 
 The working model therefore has one loop per concept, not necessarily one
-skill per concept. Clarify, pursue, and evaluate are explicit phases inside the
-loop. The controller, not the LM, owns the transition after evaluation. This
+skill per concept. Clarify, pursue, and mutate are explicit phases inside the
+loop. The controller, not the LM, owns the transition after mutation. This
 keeps the useful compositional part of the flow language while deleting the
 part that made a generic flow pretend to own durable product lifecycle.
 
@@ -649,32 +650,20 @@ details until one of them earns a distinct human-facing behavior.
 ## Concrete implementation/design mismatches
 
 These are not polish. They mark decisions that the branch text claims more
-strongly than the runtime currently implements.
+strongly than the runtime currently implements. The phase model and native
+Swift hierarchy are resolved: each tier owns one
+`*_clarify → *_pursue → *_mutate` flow, controllers own lifecycle, and Swift
+preserves Project/Task identity instead of manufacturing Runs.
 
-- **Resolved.** Each tier now launches its own `*_pursue` policy skill: the
-  Project runner runs `project_pursue`, the Task runner runs `task_pursue`, and
-  the Wave loop runs a single-step `[wave_pursue]` flow. The dead three-phase
-  flows (`task.yaml`, `project.yaml`, and the old three-step `wave.yaml`) and
-  the loop-bit skills they referenced (`task_clarify`, `task_mutate`,
-  `project_clarify`, `project_mutate`, `wave_clarify`, `wave_mutate`) are all
-  removed. No `*_clarify → *_pursue → *_mutate` flow survives, and no runner
-  consults an agent-authored loop bit.
 - Project and Task commands share a table and aliases, but still have separate
   Rust command structs and largely duplicated runner control loops. The second
   consumer has proven common mechanics exist; it has not yet found their
   simplest boundary.
-- The design says a Wave home is pinned while a Project turn uses it. The
-  launcher does not coordinate Project activity with the Wave resident or
-  enforce a stable checkout.
+- Project launch and relaunch enforce a clean canonical `main`, but the runtime
+  does not yet prevent a Wave resident and Project process from taking
+  overlapping turns in that checkout.
 - The design allows standing-frontier Projects to wait indefinitely. The
   implementation blocks any Project whose fingerprint repeats with open KRs.
-- The architecture docs still define generic Run and terminal Session as the
-  core runtime model, while the README presents Project and Task Sessions as
-  the product. Both descriptions are true of different layers.
-- Swift receives native Project/Task snapshots, concatenates them with generic
-  Runs, and converts them into one `Run` array. Project iteration, Task
-  supervision, waiting reason, command receipts, and observation identity do
-  not survive that mapping.
 - The branch's normal tests cover many local state transitions, but the planned
   ten-scenario × three-provider conformance matrix and live two-Task Project
   path remain unexecuted.
@@ -1213,12 +1202,13 @@ answers refused.
 
 Use the working product to simplify the old lifecycle:
 
-1. Give Wave, Project, and Task one mandatory policy skill each.
+1. Give Wave, Project, and Task one domain flow each, composed from clarify,
+   pursue, and mutate skills.
 2. Move repeat/wait/block/complete decisions into deterministic controllers.
-3. Remove the Project/Task loop-bit language and stale mutate skills where they
-   exist only to flip that bit.
-4. Replace Wave Chat's now/next/return playhead, Skip, and arbitrary flow
-   enqueue with domain state and attention.
+3. Remove Project/Task loop-bit language; mutate judges evidence but never
+   decides its controller's lifecycle.
+4. Keep the active tier flow phase as useful status, while removing Skip and
+   arbitrary flow enqueue from the ordinary Wave Chat product.
 5. Enforce clean-main admission for Wave and Project commands; reject file
    mutation before provider launch with the exact Task creation instruction.
 6. Keep Task worktree and PR lifetime unchanged through review and merge.
@@ -1347,15 +1337,18 @@ What remains outside this pass:
    options and lineage visible through Wave Chat, but provider approval mapping
    and a scripted Task → Project → Wave → human conformance test remain.
 2. Checkpoint 7 is done. The public generic lifecycle and stale playhead UI
-   were already gone; the internal Wave loop now runs a single `wave_pursue`
-   policy turn (no controller rewrite — the playhead already handled one-step
-   flows), and the Task runner launches the tier skill `task_pursue`, not the
-   generic `implement`. All three tiers now run one policy skill per turn with
-   the controller owning repeat/wait/block/complete.
-3. The three-provider crash/steer/acknowledgement harness and live two-Task
+   were already gone. Wave, Project, and Task now each run a tier-specific
+   clarify/pursue/mutate flow through the shared playhead, while their
+   deterministic controllers own repeat/wait/block/complete. No phase writes
+   a loop bit.
+3. Migration 069 forward-repairs Project/Task Sessions created before the
+   directive ledger. General runner writes preserve monotonic directive
+   versions, and an unincorporated current directive blocks the flow boundary
+   instead of disappearing into a waiting state.
+4. The three-provider crash/steer/acknowledgement harness and live two-Task
    Linear/GitHub dogfood are side-effecting follow-ups; this headless pass did
    not create records, worktrees, pushes, or PRs.
-4. Clean-main admission intentionally treats a compiled `MEMORY.md` update as
+5. Clean-main admission intentionally treats a compiled `MEMORY.md` update as
    a repository change. A memory checkpoint must be committed before a later
    Project process can launch; weakening that invariant would make the control
    plane silently writable again.

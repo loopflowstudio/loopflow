@@ -165,11 +165,11 @@ Wave intent lives in `wave/<name>/GOAL.md`:
 
 ## Objective
 
-Run one loop iteration for this wave.
+Keep the release path verifiably green.
 
 ## Measures
 
-- **Key Results**: backlog is empty.
+- **Key Results**: nightly verification stays green for fourteen days.
 ```
 
 Run it with `lf serve shipper`.

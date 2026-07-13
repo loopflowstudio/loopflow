@@ -72,15 +72,15 @@ crons:
 
 ## Objective
 
-Run one loop iteration for the shipper wave.
+Keep releases routine and recoverable.
 
 ## Measures
 
-- **Key Results**: backlog is empty.
+- **Key Results**: four weekly releases complete without manual repair.
 
 ## Process
 
-Read the live tasks and dispatch the appropriate flow for the next useful move.
+Clarify the portfolio, direct the next Project or Task, and judge the evidence.
 ```
 
 Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due mid-turn fires at the next turn boundary; occurrences older than 24 hours are missed, not replayed.
@@ -98,7 +98,7 @@ crons:
     schedule: "0 0 0 * * * *"
 ---
 
-Run one loop iteration for the governance wave.
+Keep governance checks current and actionable.
 ```
 
 ---

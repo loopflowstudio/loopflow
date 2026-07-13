@@ -87,7 +87,7 @@ Important paths:
 - `rust/loopflow/src/lfd/http/`
 - `rust/loopflow/src/lfdb/`
 - `rust/loopflow/src/lfd/triggers/` (token refresh — the one surviving loop)
-- `rust/loopflow/src/lfd/executor/` (placement helpers and worktree janitor)
+- `rust/loopflow/src/lfd/session_supervisor.rs` (worktree janitor)
 - `rust/loopflow/src/lfd/types/`
 
 `lfd` uses sqlite and a local capability token. The old container service path
@@ -108,20 +108,20 @@ surfaces for attention, terminal workspaces, provider auth, and live output.
 
 Important paths:
 
-- `swift/LoopflowCore/Models/`
-- `swift/LoopflowCore/State/`
-- `swift/LoopflowCore/Services/`
+- `swift/Loopflow/Models/`
+- `swift/Loopflow/State/`
+- `swift/Loopflow/Services/`
 - `swift/Loopflow/Views/`
 
 ## Wave Loop
 
 ```text
 1. Read GOAL.md, MEMORY.md, the PM snapshot's Projects and tasks, and relevant docs.
-2. Assess current wave state and messages in the thread.
-3. Pick one move: study, direct a Project or Task, unblock, review, or wait.
-4. Run one policy turn from the canonical `main` checkout.
-5. Record events, update PM/repo state, and surface attention.
-6. Loop when mode, a `GOAL.md` cron, or an incoming message asks for another pass.
+2. Clarify the current objective and portfolio.
+3. Pursue one move: direct a Project or Task, unblock, review, or wait.
+4. Judge the evidence and return scheduling to the controller.
+5. Record events, update PM state, and surface attention.
+6. Repeat when the controller, a `GOAL.md` cron, or an incoming message asks for another iteration.
 ```
 
 A Wave coordinates. Project loops pursue KR proof. Task loops do scoped
@@ -138,7 +138,7 @@ Important paths:
 
 - `rust/loopflow/src/lfd/http/dto.rs`
 - `python/loopflow/models.py`
-- `swift/LoopflowCore/Models/`
+- `swift/Loopflow/Models/`
 - `tests/fixtures/dto/`
 
 This boundary deserves special care. If a field changes, update every mirror and

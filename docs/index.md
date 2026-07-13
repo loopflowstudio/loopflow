@@ -94,15 +94,15 @@ workers: 2
 
 ## Objective
 
-Run one loop iteration for this wave.
+Make first-run onboarding self-explanatory.
 
 ## Measures
 
-- **Key Results**: backlog is empty.
+- **Key Results**: five new users complete setup without help.
 
 ## Process
 
-Read the live tasks, pick the next useful move, and dispatch the appropriate flow.
+Clarify the portfolio, direct the next Project or Task, and judge the evidence.
 ```
 
 ---

@@ -2,7 +2,7 @@
 
 Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it coordinates Linear-backed Project and Task Sessions, remembers what it learns, and shows you every live session.
 
-Start a wave by hand and steer it interactively. As it earns trust, let it loop — picking work, dispatching flows, and reacting to changes on its own.
+Start a wave by hand and steer it interactively. As it earns trust, let it loop — selecting Projects, directing Tasks, and reacting to changes on its own.
 
 ## Waves
 
@@ -45,8 +45,8 @@ lf stop designer              # stop its listener and resident gracefully
 ```
 
 Sessions are plain tmux — `tmux ls` to see the Wave, Project, and Task
-Sessions. Use
-`lf task attach <issue-id>` for the audited writable task prompt.
+Sessions. Use `lf project attach <project>` or `lf task attach <issue-id>` for
+an audited writable control prompt.
 
 `lf serve <name>` starts a long-lived server and resident at the repo's clean
 canonical main checkout. Wave turns coordinate there; Task Sessions own every

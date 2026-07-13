@@ -4,7 +4,7 @@
 //! This runs inside the resident process (the internal half of
 //! `lf serve <name>`,
 //! see [`crate::wave::resident`]) — never in the listener. A turn is one
-//! `wave` flow (a single `wave_pursue` policy turn) run as a
+//! `wave` flow (clarify, pursue, then mutate) run as a
 //! bounded headless child in the wave home; continuity is GOAL.md + memory +
 //! the chat journal riding every pass's seed, never a vendor thread.
 //! Everything the loop does surfaces as [`ResidentDelta`]s sent through
@@ -573,9 +573,9 @@ impl WaveLoop {
                 None => return,
             };
             let Some(next) = next else { return };
-            let same_iteration = invocation
-                .as_ref()
-                .is_some_and(|(id, iteration)| id == &next.invocation_id && *iteration == next.iteration);
+            let same_iteration = invocation.as_ref().is_some_and(|(id, iteration)| {
+                id == &next.invocation_id && *iteration == next.iteration
+            });
             if !same_iteration || next.index == completed_index {
                 return;
             }
@@ -829,6 +829,15 @@ impl WaveLoop {
                             {
                                 timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
                             }
+                        }
+                        InboxAction::Deliver(InboxItem::Message(message))
+                            if message.op == MessageOp::Steer =>
+                        {
+                            if self.seen.insert(message.id.clone()) {
+                                self.queue.push(message);
+                            }
+                            self.interrupt_harness(&body_id, harness.as_mut(), false).await;
+                            return;
                         }
                         InboxAction::Deliver(item) => self.on_inbox(item).await,
                         InboxAction::ListenerGone => {
@@ -1507,6 +1516,7 @@ mod tests {
     struct SteeringHarness {
         events: mpsc::UnboundedSender<ConversationEvent>,
         inputs: Arc<Mutex<Vec<String>>>,
+        supports_steer: bool,
     }
 
     #[async_trait]
@@ -1559,7 +1569,7 @@ mod tests {
 
         fn capabilities(&self) -> Capabilities {
             Capabilities {
-                supports_steer: true,
+                supports_steer: self.supports_steer,
             }
         }
 
@@ -1605,6 +1615,7 @@ mod tests {
                 Ok(Box::new(SteeringHarness {
                     events,
                     inputs: harness_inputs.clone(),
+                    supports_steer: true,
                 }))
             }),
         };
@@ -1650,6 +1661,68 @@ mod tests {
         )));
         let playhead = runtime.playhead().expect("playhead");
         assert_eq!(playhead.now.expect("next step").step, "wave_pursue");
+    }
+
+    #[tokio::test]
+    async fn unsupported_steer_restarts_the_same_wave_step() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let status = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(tmp.path())
+            .status()
+            .expect("git init");
+        assert!(status.success());
+
+        let inputs = Arc::new(Mutex::new(Vec::new()));
+        let harness_inputs = inputs.clone();
+        let backend = BodyBackend::Harness {
+            prepare: Box::new(|skill, seed, _wave, max_turns| {
+                Ok(crate::lf::commands::run::PreparedHarnessTurn {
+                    config: crate::engine::AgentConfig {
+                        agent: Some("fake".to_string()),
+                        cwd: None,
+                        max_turns,
+                        ..crate::engine::AgentConfig::default()
+                    },
+                    input: format!("{skill}\n{seed}"),
+                    harness: "fake".to_string(),
+                    model: None,
+                })
+            }),
+            create: Box::new(move |_name, _approval, events| {
+                Ok(Box::new(SteeringHarness {
+                    events,
+                    inputs: harness_inputs.clone(),
+                    supports_steer: false,
+                }))
+            }),
+        };
+        let loop_ = boot_backend(
+            tmp,
+            test_config(Duration::from_secs(600)),
+            backend,
+            Arc::new(Mutex::new(Vec::new())),
+        )
+        .await;
+        let runtime = loop_.runtime.clone();
+
+        runtime
+            .deliver(MessageOp::Message, "begin".into())
+            .expect("user turn");
+        wait_for("initial live input", || inputs.lock().unwrap().len() == 1).await;
+        runtime
+            .deliver(MessageOp::Steer, "finish differently".into())
+            .expect("steer");
+        wait_for("replacement turn", || inputs.lock().unwrap().len() >= 2).await;
+
+        let inputs = inputs.lock().unwrap();
+        assert!(inputs[0].starts_with("wave_clarify\n"));
+        assert!(inputs[1].starts_with("wave_clarify\n"));
+        assert!(inputs[1].contains("finish differently"));
+        assert!(runtime
+            .thread_snapshot()
+            .iter()
+            .any(|turn| turn.status == Lifecycle::Interrupted));
     }
 
     #[test]
@@ -1734,8 +1807,8 @@ mod tests {
         );
     }
 
-    /// Messages landing mid-pass queue — never rejected, never injected —
-    /// and one boundary pass drains the whole queue.
+    /// Messages landing mid-flow queue — never rejected, never injected —
+    /// and the next full Wave iteration drains the whole queue.
     #[tokio::test]
     async fn messages_during_a_pass_coalesce_into_one_boundary_pass() {
         let loop_ = boot(Duration::from_secs(600), "sleep 0.4; echo done").await;
@@ -1757,17 +1830,20 @@ mod tests {
             .deliver(MessageOp::Message, "third".into())
             .expect("user turn");
 
-        // One boundary pass drains the whole queue.
-        wait_for("boundary pass spawned", || loop_.pass_count() == 2).await;
-        let wake = wake_of(&loop_.seed(1));
+        // Clarify, pursue, and mutate finish the current iteration before the
+        // queued human direction starts the next one.
+        wait_for("next iteration spawned", || loop_.pass_count() == 4).await;
+        let wake = wake_of(&loop_.seed(3));
         assert!(wake.contains("second") && wake.contains("third"));
 
-        wait_for("second TurnStarted journaled", || {
-            started_answers(&loop_.journal_events()).len() == 2
+        wait_for("next iteration TurnStarted journaled", || {
+            started_answers(&loop_.journal_events()).len() == 4
         })
         .await;
         let answers = started_answers(&loop_.journal_events());
-        assert_eq!(answers[1], vec![message_id(&m2), message_id(&m3)]);
+        assert!(answers[1].is_empty());
+        assert!(answers[2].is_empty());
+        assert_eq!(answers[3], vec![message_id(&m2), message_id(&m3)]);
     }
 
     // -- Cron: the third deadline --

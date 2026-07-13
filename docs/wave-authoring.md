@@ -292,10 +292,10 @@ Migration shim     → Legacy API compatibility layer
 Cleanup            → Remove old billing code
 ```
 
-The wave agent reads tasks with `lf pm show --no-sync`, picks the highest-priority move,
-and resolves its local blocker inline. It creates a child loop only when an
-independent task earns its own lifecycle or useful parallelism, then folds each
-shipped PR into memory and closes the task with `lf pm task done`.
+The wave agent reads Projects and Tasks with `lf pm show --no-sync`, then
+directs the highest-priority Project. Every independent file-writing change
+starts a Task Session under that Project. Each shipped PR folds into memory and
+the Task closes with `lf pm task done`.
 
 ---
 

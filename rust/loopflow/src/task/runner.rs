@@ -375,6 +375,9 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                     return Ok(());
                                 }
                             };
+                            let resume_requested = boundary_commands.iter().any(|command| {
+                                matches!(&command.kind, TaskCommandKind::Resume { .. })
+                            });
                             if let Some(reason) = absorb_commands(
                                 &store,
                                 &session,
@@ -389,6 +392,20 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                     harness.as_mut(),
                                     reason,
                                 ).await;
+                            }
+                            if resume_requested && pending.is_empty() {
+                                let prepared =
+                                    prepare_task_flow_step(&store, &mut session, &flow).await?;
+                                start_task_flow_turn(
+                                    &store,
+                                    &mut session,
+                                    harness.as_mut(),
+                                    &mut flow,
+                                    prepared,
+                                )
+                                .await?;
+                                flow_turn_active = true;
+                                continue 'runner;
                             }
                         }
                     }
@@ -1053,7 +1070,7 @@ fn task_seed(session: &TaskSession, directive: &ChildDirective) -> String {
         .map(|warning| format!("\nPM snapshot warning: {warning}"))
         .unwrap_or_default();
     format!(
-        "Implement Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}{snapshot_warning}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nBase commit: {base_commit}\nDelivery: one pull request targeting main. Opening the PR submits the task; completion is merge or explicit abandonment.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}{snapshot_warning}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nBase commit: {base_commit}\nDelivery: one pull request targeting main. The runner plays clarify, pursue, and mutate through this same provider session, then decides whether the whole Task flow repeats. Opening the PR submits the task; completion is merge or explicit abandonment.",
         identifier = session.issue.identifier,
         title = session.issue.title,
         description = session.issue.description,
@@ -1100,9 +1117,8 @@ mod tests {
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use crate::task::{
         ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
-        PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandId, TaskCommandKind,
-        TaskCommandSource, TaskCommandState, TaskProcess, TaskSession, TaskSessionId,
-        TaskSessionStatus,
+        PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandKind, TaskCommandSource,
+        TaskCommandState, TaskProcess, TaskSession, TaskSessionId, TaskSessionStatus,
     };
 
     struct ScriptedHarness {

@@ -2034,6 +2034,38 @@ mod tests {
             .await
             .unwrap());
         assert_eq!(store.child_directives(&task_target).await.unwrap().len(), 1);
+        let stale_task = task.clone();
+
+        let task_command = TaskCommand::new(
+            task.id.clone(),
+            TaskCommandSource::Wave(wave.id().clone()),
+            TaskCommandKind::Steer {
+                text: "Fix the parser before the docs or tests".to_string(),
+            },
+        );
+        let task_replacement = ChildDirective::replacement(
+            task_target.clone(),
+            2,
+            "Fix the parser before the docs or tests".to_string(),
+            task_command.source.clone(),
+            task_command.id.clone(),
+        );
+        store
+            .create_task_command_with_directive(&task_command, &task_replacement)
+            .await
+            .unwrap();
+        store
+            .mark_child_directive_applied(&task_target, 2)
+            .await
+            .unwrap();
+        store
+            .incorporate_child_directive(&task_target, 2, "Parser remains first")
+            .await
+            .unwrap();
+        store.update_task_session(&stale_task).await.unwrap();
+        let persisted_task = store.get_task_session(&task.id).await.unwrap().unwrap();
+        assert_eq!(persisted_task.current_directive_version, 2);
+        assert_eq!(persisted_task.incorporated_directive_version, 2);
 
         let mut project = make_project_session(&wave);
         project.current_directive_version = 1;
@@ -2047,6 +2079,7 @@ mod tests {
             .create_project_session_with_directive(&project, &project_initial)
             .await
             .unwrap();
+        let stale_project = project.clone();
 
         let command = ProjectCommand::new(
             project.id.clone(),
@@ -2098,6 +2131,7 @@ mod tests {
                 .unwrap()
                 .1
         );
+        store.update_project_session(&stale_project).await.unwrap();
         assert_eq!(
             store
                 .get_project_session(&project.id)

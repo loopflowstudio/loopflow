@@ -10,9 +10,9 @@ use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::task::{
-    BoundaryResult, ChildDirective, ChildRef, TaskCommand, TaskCommandEffect, TaskCommandId,
-    TaskCommandKind, TaskCommandState, TaskDecisionId, TaskEventKind, TaskSession, TaskSessionId,
-    TaskSessionStatus,
+    unincorporated_directive_version, BoundaryResult, ChildDirective, ChildRef, TaskCommand,
+    TaskCommandEffect, TaskCommandId, TaskCommandKind, TaskCommandState, TaskDecisionId,
+    TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,10 +223,28 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 continue 'runner;
                             }
                             let summary = progress_summary(&last_text);
+                            let latest = store
+                                .get_task_session(&session.id)
+                                .await?
+                                .ok_or_else(|| anyhow!("Task Session {} disappeared", session.id))?;
+                            session.current_directive_version = latest.current_directive_version;
+                            session.incorporated_directive_version =
+                                latest.incorporated_directive_version;
+                            let pending_directive = unincorporated_directive_version(
+                                session.current_directive_version,
+                                session.incorporated_directive_version,
+                            );
                             let observed_pr = crate::ops::current_or_merged_pr(&session.worktree)
                                 .ok()
                                 .flatten();
-                            let (stopped_status, stopped_reason) = if let Some(pr) = observed_pr {
+                            let (stopped_status, stopped_reason) = if let Some(version) = pending_directive {
+                                (
+                                    TaskSessionStatus::Blocked,
+                                    format!(
+                                        "current directive v{version} was applied but not incorporated; resume the Task flow and acknowledge it before settling"
+                                    ),
+                                )
+                            } else if let Some(pr) = observed_pr {
                                 let pull_request = crate::task::PullRequestRef {
                                     number: pr.number as u32,
                                     url: pr.url.clone(),

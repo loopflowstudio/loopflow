@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,7 +14,8 @@ use crate::project_session::{
     ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus, SessionSupervisor,
 };
 use crate::task::{
-    ChildDirective, ChildRef, TaskCommandEffect, TaskCommandState, TaskSessionStatus,
+    unincorporated_directive_version, ChildDirective, ChildRef, TaskCommandEffect,
+    TaskCommandState, TaskSessionStatus,
 };
 
 #[derive(Debug)]
@@ -104,9 +105,8 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
     store.update_project_session(&session).await?;
 
     let mut pending = VecDeque::new();
-    let commands = store
-        .claim_project_commands(&session.id, generation)
-        .await?;
+    let mut seen_commands = HashSet::new();
+    let commands = claim_commands(&store, &session, generation, &mut seen_commands).await?;
     if let Some(stop) = absorb_commands(
         &store,
         &session,
@@ -120,12 +120,14 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
         return finish_command_stop(&store, &mut session, harness.as_mut(), stop).await;
     }
     let input = if generation > 1 {
-        pending.pop_front().unwrap_or(PendingInput {
-            command_id: None,
-            text: prepared.input,
-            effect: TaskCommandEffect::NextTurn,
-            decision: None,
-        })
+        take_current_input(&store, &mut pending)
+            .await?
+            .unwrap_or(PendingInput {
+                command_id: None,
+                text: prepared.input,
+                effect: TaskCommandEffect::NextTurn,
+                decision: None,
+            })
     } else {
         PendingInput {
             command_id: None,
@@ -148,7 +150,12 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
     loop {
         tokio::select! {
             _ = poll.tick() => {
-                let commands = store.claim_project_commands(&session.id, generation).await?;
+                let commands = claim_commands(
+                    &store,
+                    &session,
+                    generation,
+                    &mut seen_commands,
+                ).await?;
                 if let Some(stop) = absorb_commands(
                     &store,
                     &session,
@@ -174,7 +181,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                         if status == Lifecycle::Failed {
                             return finish_failed(&store, &mut session, harness.as_mut(), "provider turn failed").await;
                         }
-                        if let Some(input) = pending.pop_front() {
+                        if let Some(input) = take_current_input(&store, &mut pending).await? {
                             apply_input(&store, &session, harness.as_mut(), input).await?;
                             continue;
                         }
@@ -205,7 +212,23 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                                 summary: summary.clone(),
                             },
                         ).await?;
-                        let outcome = inspect_outcome(&store, &session).await?;
+                        let latest = store
+                            .get_project_session(&session.id)
+                            .await?
+                            .ok_or_else(|| anyhow!("Project Session {} disappeared", session.id))?;
+                        session.current_directive_version = latest.current_directive_version;
+                        session.incorporated_directive_version =
+                            latest.incorporated_directive_version;
+                        let mut outcome = inspect_outcome(&store, &session).await?;
+                        if let Some(version) = unincorporated_directive_version(
+                            session.current_directive_version,
+                            session.incorporated_directive_version,
+                        ) {
+                            outcome.status = ProjectSessionStatus::Blocked;
+                            outcome.reason = format!(
+                                "current directive v{version} was applied but not incorporated; resume the Project flow and acknowledge it before settling"
+                            );
+                        }
                         if outcome.status == ProjectSessionStatus::Running {
                             session.state_fingerprint = Some(outcome.fingerprint);
                             session.updated_at = time::OffsetDateTime::now_utc();
@@ -232,6 +255,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                             outcome.status,
                             outcome.reason.clone(),
                         ).await?;
+                        let commands = filter_new_commands(commands, &mut seen_commands);
                         if !commands.is_empty() {
                             if let Some(stop) = absorb_commands(
                                 &store,
@@ -243,7 +267,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                             ).await? {
                                 return finish_command_stop(&store, &mut session, harness.as_mut(), stop).await;
                             }
-                            if let Some(input) = pending.pop_front() {
+                            if let Some(input) = take_current_input(&store, &mut pending).await? {
                                 apply_input(&store, &session, harness.as_mut(), input).await?;
                             }
                             continue;
@@ -288,6 +312,47 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
             }
         }
     }
+}
+
+async fn claim_commands(
+    store: &SharedStore,
+    session: &ProjectSession,
+    generation: u32,
+    seen: &mut HashSet<ProjectCommandId>,
+) -> Result<Vec<ProjectCommand>> {
+    let commands = store
+        .claim_project_commands(&session.id, generation)
+        .await?;
+    Ok(filter_new_commands(commands, seen))
+}
+
+fn filter_new_commands(
+    commands: Vec<ProjectCommand>,
+    seen: &mut HashSet<ProjectCommandId>,
+) -> Vec<ProjectCommand> {
+    commands
+        .into_iter()
+        .filter(|command| seen.insert(command.id.clone()))
+        .collect()
+}
+
+async fn take_current_input(
+    store: &SharedStore,
+    pending: &mut VecDeque<PendingInput>,
+) -> Result<Option<PendingInput>> {
+    while let Some(input) = pending.pop_front() {
+        let current = match &input.command_id {
+            Some(command_id) => store
+                .get_project_command(command_id)
+                .await?
+                .is_some_and(|command| command.state == TaskCommandState::Claimed),
+            None => true,
+        };
+        if current {
+            return Ok(Some(input));
+        }
+    }
+    Ok(None)
 }
 
 struct ProjectOutcome {
@@ -396,6 +461,13 @@ async fn absorb_commands(
     pending: &mut VecDeque<PendingInput>,
 ) -> Result<Option<CommandStop>> {
     for command in commands {
+        let claimed = store
+            .get_project_command(&command.id)
+            .await?
+            .is_some_and(|stored| stored.state == TaskCommandState::Claimed);
+        if !claimed {
+            continue;
+        }
         match command.kind {
             ProjectCommandKind::FollowUp { text } => pending.push_back(PendingInput {
                 command_id: Some(command.id),
@@ -771,7 +843,7 @@ mod tests {
     use async_trait::async_trait;
     use time::OffsetDateTime;
 
-    use super::{absorb_commands, apply_input, CommandStop};
+    use super::{absorb_commands, apply_input, claim_commands, take_current_input, CommandStop};
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
     use crate::lfd::id::LfdId;
@@ -915,6 +987,71 @@ mod tests {
                 "{provider}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn project_runner_delivers_each_command_once_and_skips_superseded_input() {
+        let (store, session) = session("codex").await;
+        let first = ProjectCommand::new(
+            session.id.clone(),
+            ProjectCommandSource::Human,
+            ProjectCommandKind::FollowUp {
+                text: "old context".to_string(),
+            },
+        );
+        store.create_project_command(&first).await.unwrap();
+        let mut seen = std::collections::HashSet::new();
+        let mut pending = std::collections::VecDeque::new();
+        let mut harness = ScriptedHarness {
+            supports_steer: true,
+            sent: Vec::new(),
+            interrupts: 0,
+        };
+
+        let commands = claim_commands(&store, &session, 1, &mut seen)
+            .await
+            .unwrap();
+        absorb_commands(&store, &session, commands, &mut harness, true, &mut pending)
+            .await
+            .unwrap();
+        assert!(claim_commands(&store, &session, 1, &mut seen)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(pending.len(), 1);
+
+        let replacement = ProjectCommand::new(
+            session.id.clone(),
+            ProjectCommandSource::Human,
+            ProjectCommandKind::Steer {
+                text: "new direction".to_string(),
+            },
+        );
+        store
+            .supersede_and_create_project_command(&replacement)
+            .await
+            .unwrap();
+        let commands = claim_commands(&store, &session, 1, &mut seen)
+            .await
+            .unwrap();
+        absorb_commands(
+            &store,
+            &session,
+            commands,
+            &mut harness,
+            false,
+            &mut pending,
+        )
+        .await
+        .unwrap();
+
+        let input = take_current_input(&store, &mut pending)
+            .await
+            .unwrap()
+            .expect("replacement input");
+        assert_eq!(input.command_id.as_ref(), Some(&replacement.id));
+        assert_eq!(input.text, "new direction");
+        assert!(pending.is_empty());
     }
 
     #[tokio::test]

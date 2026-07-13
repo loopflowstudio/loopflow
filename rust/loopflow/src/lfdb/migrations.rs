@@ -317,6 +317,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "068_child_directives",
         sql: include_str!("migrations/068_child_directives.sql"),
     },
+    Migration {
+        version: "069_child_directive_backfill",
+        sql: include_str!("migrations/069_child_directive_backfill.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the
@@ -638,6 +642,92 @@ mod tests {
             .query_row("SELECT kind_json FROM task_events", [], |row| row.get(0))
             .unwrap();
         assert!(event.contains("cc_00000000000000000000000000000001"));
+    }
+
+    #[test]
+    fn child_directive_backfill_repairs_existing_sessions() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_sqlite(&conn).unwrap();
+        conn.execute(
+            "DELETE FROM schema_migrations WHERE version = ?1",
+            rusqlite::params!["069_child_directive_backfill"],
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        conn.execute_batch(
+            "INSERT INTO project_sessions (
+                 id, project_id, project_slug, project_name, project_context,
+                 wave_id, wave_name, repo, pm_snapshot_synced_at, status,
+                 status_reason, status_at, iteration, task_event_cursor,
+                 agent, provider, created_at, updated_at
+             ) VALUES (
+                 'ps_existing', 'project-id', 'work-isolation', 'Work Isolation',
+                 'Keep writers isolated.', 'wave-id', 'infrastructure', '/repo',
+                 1, 'waiting', 'ready', 1, 2, 0, 'codex', 'codex', 1, 1
+             );
+             INSERT INTO task_sessions (
+                 id, issue_id, issue_identifier, issue_title, issue_description,
+                 project_id, project_slug, project_name, project_context,
+                 wave_id, wave_name, status, status_reason, status_at,
+                 worktree, branch, base_commit, agent, provider,
+                 created_at, updated_at, pm_snapshot_synced_at,
+                 pm_writeback_json, supervisor_kind, supervisor_id
+             ) VALUES (
+                 'ts_existing', 'issue-id', 'INF-123', 'Fix task placement',
+                 'Preserve the existing worktree.', 'project-id',
+                 'work-isolation', 'Work Isolation', 'Keep writers isolated.',
+                 'wave-id', 'infrastructure', 'waiting', 'ready', 1,
+                 '/repo.inf-123', 'jack/inf-123', 'abc123', 'codex', 'codex',
+                 1, 1, 1, '{\"state\":\"current\"}', 'project', 'ps_existing'
+             );",
+        )
+        .unwrap();
+
+        apply_sqlite(&conn).expect("existing sessions should receive initial directives");
+
+        let project_version: i64 = conn
+            .query_row(
+                "SELECT current_directive_version FROM project_sessions WHERE id='ps_existing'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let task_version: i64 = conn
+            .query_row(
+                "SELECT current_directive_version FROM task_sessions WHERE id='ts_existing'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(project_version, 1);
+        assert_eq!(task_version, 1);
+
+        let (project_text, project_source): (String, String) = conn
+            .query_row(
+                "SELECT text, source_json FROM child_directives
+                 WHERE target_kind='project' AND target_id='ps_existing' AND version=1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let (task_text, task_source): (String, String) = conn
+            .query_row(
+                "SELECT text, source_json FROM child_directives
+                 WHERE target_kind='task' AND target_id='ts_existing' AND version=1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(project_text.contains("Work Isolation"));
+        assert!(task_text.contains("INF-123"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&project_source).unwrap(),
+            serde_json::json!({ "kind": "system" })
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&task_source).unwrap(),
+            serde_json::json!({ "kind": "system" })
+        );
     }
 
     #[test]

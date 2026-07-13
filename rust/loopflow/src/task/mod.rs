@@ -379,6 +379,13 @@ impl ChildRef {
     }
 }
 
+pub(crate) fn unincorporated_directive_version(
+    current_version: u32,
+    incorporated_version: u32,
+) -> Option<u32> {
+    (current_version > incorporated_version).then_some(current_version)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -641,6 +648,12 @@ mod tests {
         assert!(TaskSessionStatus::Abandoned.is_terminal());
         assert!(!TaskSessionStatus::Submitted.is_terminal());
         assert!(!TaskSessionStatus::Failed.is_terminal());
+    }
+
+    #[test]
+    fn a_newer_directive_blocks_the_flow_boundary_until_incorporated() {
+        assert_eq!(super::unincorporated_directive_version(2, 1), Some(2));
+        assert_eq!(super::unincorporated_directive_version(2, 2), None);
     }
 
     #[test]

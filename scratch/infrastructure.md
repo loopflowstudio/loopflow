@@ -319,7 +319,8 @@ There is no `/goal` runtime or command in this branch. `GOAL.md` is the Wave's
 durable specification and context; the Wave server reads it into each turn.
 The actual repetition lives in the controller around provider turns.
 
-All three loops now run one policy skill, then a deterministic transition:
+All three loops currently run one policy skill, then a deterministic
+transition:
 
 | Loop | Body today | Transition after the body |
 |---|---|---|
@@ -327,15 +328,48 @@ All three loops now run one policy skill, then a deterministic transition:
 | Project | Run `project_pursue` once | Complete if KRs hold; wait on active Tasks; block on an unchanged fingerprint; otherwise run again |
 | Task | Run `task_pursue` once | Mark merged/submitted from PR state; otherwise wait until another command resumes it |
 
-The three tiers are now symmetric. Collapsing Wave to one skill needed **no
-controller rewrite**: `Playhead::load` already handles a single-step flow, so
-the change was `wave.yaml` → `[wave_pursue]` (folding the clarify/mutate duties
-into `wave_pursue`) plus deleting the two dead skills. The Task runner also
-moved off the generic `implement` skill onto the tier skill `task_pursue`, so
-the Task turn runs the directive-acknowledging, decision-aware policy the
-incorporation contract expects rather than the generic "design doc → code"
-skill (which required a `scratch/<branch>.md` a fresh Linear-issue worktree
-lacks).
+That is a useful reduction checkpoint, but it hides a lifecycle shared by all
+three tiers. Each loop has the same three semantic phases:
+
+```text
+clarify the current intent → pursue it → judge the evidence
+```
+
+The owned artifact and completion rule change by tier:
+
+| Loop | Clarify | Pursue | Judge |
+|---|---|---|---|
+| Wave | Keep the objective and portfolio computable | Create or direct Projects, with a direct Task only for a small concrete change | Decide what deserves attention now, then return to the scheduler; a Wave never completes |
+| Project | Make the definition and KRs proof-shaped | Create, direct, and wait on Tasks | Compare current evidence to the KRs; repeat, wait, block, or complete |
+| Task | Turn the directive into a concrete change design | Implement, test, review, and repair in the Task worktree | Compare the PR and verification evidence to the task; repeat, wait, or finish only on merge/abandonment |
+
+This three-stage grammar belongs in the Loopflow language as the **body of one
+domain iteration**, while the domain runner owns the lifecycle around it. The
+runner sends each flow step through the same harness and provider session. The
+language composes the three tier-specific skills; it must not regain a generic
+LM-written loop bit:
+
+```yaml
+# the durable Task runner plays this whole flow through one harness
+- task_clarify
+- task_pursue
+- task_evaluate
+```
+
+Project and Wave use the same shape with their own skills. The existing
+playhead is the phase cursor; do not add a parallel phase state machine.
+Finishing a skill advances the playhead. Finishing the whole flow asks the
+authoritative domain runner to choose repeat, wait, block, or complete. If it
+chooses repeat, the runner loads another invocation of the same flow through
+the same harness. The provider never decides its own lifecycle merely by
+writing a file or returning a magic bit.
+
+One durable session, harness, and provider transcript spans all flow steps and
+iterations. They are not three disposable agents. A Wave steer reaches the
+active step live when the adapter supports it; otherwise it interrupts and
+restarts that same step in the same transcript with the new directive. The
+playhead and directive version are visible together, so the Wave can tell both
+*what the child is doing* and *which instruction it is doing it under*.
 
 The cleaner target is:
 
@@ -361,11 +395,11 @@ state:
 must busy-spin. The current zero-idle continuous playhead is a cadence policy,
 not the definition of a Wave.
 
-The working model collapses the **mandatory lifecycle** to one policy skill per
-concept: Wave, Project, and Task. Clarify, pursue, and mutate can remain useful
-callable skills or internal guidance, but they should not be three compulsory
-phases whose final phase writes a loop bit. The controller, not the LM, owns
-the state transition.
+The working model therefore has one loop per concept, not necessarily one
+skill per concept. Clarify, pursue, and evaluate are explicit phases inside the
+loop. The controller, not the LM, owns the transition after evaluation. This
+keeps the useful compositional part of the flow language while deleting the
+part that made a generic flow pretend to own durable product lifecycle.
 
 Workers/Execs are below the Task loop. They are execution attempts, not PM
 objects, loops, worktree owners, or direct children of a Wave. A Wave starts or

@@ -3495,7 +3495,8 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     pr_url=?26, created_at=?27, updated_at=?28,
     pm_snapshot_synced_at=?29, pm_snapshot_warning=?30,
     pm_writeback_json=?31, supervisor_kind=?32, supervisor_id=?33,
-    current_directive_version=?34, incorporated_directive_version=?35
+    current_directive_version=MAX(current_directive_version, ?34),
+    incorporated_directive_version=MAX(incorporated_directive_version, ?35)
     WHERE id=?1";
 const TASK_COMMAND_SELECT: &str = "SELECT
     id, session_id, source_json, kind_json, created_at,
@@ -3933,8 +3934,10 @@ const PROJECT_SESSION_UPDATE: &str = "UPDATE project_sessions SET
     task_event_cursor=?14, state_fingerprint=?15, agent=?16, provider=?17,
     provider_session_id=?18, process_generation=?19, process_pid=?20,
     process_tmux_name=?21, process_started_at=?22, created_at=?23,
-    updated_at=?24, current_directive_version=?25,
-    incorporated_directive_version=?26 WHERE id=?1";
+    updated_at=?24,
+    current_directive_version=MAX(current_directive_version, ?25),
+    incorporated_directive_version=MAX(incorporated_directive_version, ?26)
+    WHERE id=?1";
 const PROJECT_COMMAND_SELECT: &str = "SELECT
     id, session_id, source_json, kind_json, created_at,
     claimed_by_generation, accepted_at, state, effect, error

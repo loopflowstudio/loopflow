@@ -25,14 +25,16 @@ lf pm task create --project <project> --title "..." --notes "..."
 
 ## Work
 
+- Acknowledge the seed's current directive before pursuit with its exact `lf
+  project acknowledge` command. State the resulting priority or plan change.
 - Read the filed backlog before creating work. File a concrete task when the
   KR needs it; no rule requires every filed task to start immediately.
 - Every file-writing task must already have a Linear identity. Start it with
-  `lf task run <issue-id>` and supervise the same Task Session through review
-  and merge.
+  `lf task run <issue-id> --directive "<delegation brief>"` and supervise the
+  same Task Session through review and merge.
 - The Project Session owns no worktree or delivery branch. Never edit, commit,
-  test, or open a PR from the Wave home; delegate every repository mutation to
-  a Task Session.
+  test, or open a PR from the canonical main checkout; delegate every
+  repository mutation to a Task Session.
 - Use `lf task follow-up`, `steer`, `interrupt`, `wait`, and `resume`. Do not
   create another worktree or session for review feedback or CI repair.
 - Answer routine Task decisions with `lf task decide`. When the choice needs

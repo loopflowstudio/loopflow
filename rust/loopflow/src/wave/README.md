@@ -5,7 +5,7 @@
 ```
   lf serve <name>                     lf __resident <name>
   ┌───────────────────────┐  spawns   ┌──────────────────────────┐
-  │ LISTENER (origin repo)│──────────▶│ RESIDENT (<repo>.<wave>) │
+  │ LISTENER (origin repo)│──────────▶│ RESIDENT (clean main)     │
   │ pens · folds · doors  │           │ wave runner · queue │
   │ observer · supervisor │◀──deltas──│ GOAL.md seed · schedule  │
   └──────────┬────────────┘           └────────────▲─────────────┘
@@ -20,10 +20,10 @@
   **origin repo** and creates no worktrees.
 - **The resident** is the wave's Loop (see `flowloop/wave.rs`): the durable
   playhead selects one flow step, starts one live harness session as that
-  step's body, then advances only when the body completes or the user skips.
+  step's body, then advances when the body completes.
   Continuity is the journaled thread, playhead, GOAL.md, and memory. It
-  bootstraps and enters the wave's `<repo>.<wave>` sibling worktree — passes
-  never run in the main checkout. Its input is its own wave's
+  enters the clean canonical main checkout as a read-and-coordinate surface.
+  Repository mutations belong to Task Sessions. Its input is its own wave's
   `/events?inbox=true` subscription — the SSE thread stream `lf chat --follow`
   follows, plus the inbox scope, and nothing to do with `lf radio sub`, which polls
   the bus table and never opens a socket. Its
@@ -61,9 +61,9 @@ sessions and keep running.
   boundary; occurrences older than 24h are missed, not replayed. The
   daemon's cron poller and `wave_crons` table died in the collapse.
 - **The Wave coordinates; Project Sessions pursue; Task Sessions ship.** The
-  Wave starts a Project Session for a measured bet or a Task Session for one
-  small direct change. Project Sessions create and supervise Tasks, then stop
-  while only child progress can change the answer. Task Sessions work in
+  Wave starts a Project Session for a measured bet; every Task belongs to that
+  Project before it starts. Project Sessions create and supervise Tasks, then
+  stop while only child progress can change the answer. Task Sessions work in
   immutable sibling worktrees. Structured commands and linked observations
   carry steering and results; raw terminal bytes and child tool chatter do not
   become the orchestration protocol.
@@ -215,8 +215,6 @@ wave/<name>/.wave-resident-token   →  this boot's resident token (owner-only)
 | `GET /events`             | SSE, the served mind's thread. No channel scoping — agent broadcast is the bus, not this door. Event names: `state` (loop-state name), `playhead` (durable cursor snapshot), `turn` (replay then live; repeated ids replace), `op` (live worker motion), `memory-add` (replay then live), `memory` (live curation summaries), and — only with `?inbox=true` — `inbox` (pending replay + live controls). |
 | `POST /messages {op, text}` | Human thread input. `op` required: `message` (next body), `steer` (inject into the active steer-capable harness, otherwise queue), or `interrupt` (stop the active body; non-empty text queues for the retry). `say` and bylines are rejected; machine speech uses `lf radio pub`. Returns `{turn, state}`. |
 | `GET /playhead`           | Durable invocation stack, active body, `now`, `next`, local queue, and return target. |
-| `POST /playhead/enqueue {flow}` | Enqueue a flow FIFO at the innermost invocation and return the updated playhead. |
-| `POST /playhead/skip`     | Stop and skip the current body, or advance a failed idle step, without destroying its route. |
 | `GET /memory`             | `{content}` — the wave's MEMORY.md (origin repo). |
 | `GET /memory/log`         | `{facts}` — add-stream facts since the last curation, oldest first. |
 | `POST /memory {op, content, summary}` | `op`: `update` replaces `MEMORY.md`; `add` publishes one replayable fact. `summary` null → first non-empty content line. Returns `{summary}`. |
@@ -250,7 +248,7 @@ across all sources. `from` is the speaker byline of an attributed emission
 ```
 lf serve demo
 # → lf serve · demo · listener on http://127.0.0.1:52306 · spawning resident (Ctrl-C to stop, …)
-# → lf serve · demo · resident · listener http://127.0.0.1:52306 · worktree …/demo-repo.demo
+# → lf serve · demo · resident · listener http://127.0.0.1:52306 · control plane …/demo-repo
 
 curl 127.0.0.1:52306/health
 curl -X POST 127.0.0.1:52306/messages -H 'content-type: application/json' \

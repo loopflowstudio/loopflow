@@ -5,8 +5,9 @@
 
 use std::path::PathBuf;
 
-use loopflow::chat::turns::{ChatRole, ChatTurn};
+use loopflow::chat::turns::{ChatRole, ChatTurn, ChildActivityKind, ChildControlActivity};
 use loopflow::chat::types::{ConversationItem, Lifecycle};
+use loopflow::lf::commands::waves::WaveDetailSnapshot;
 use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, WaveDto};
 use loopflow::wave::playhead::StepOutcome;
 use loopflow::wave::state::LoopState;
@@ -56,6 +57,37 @@ fn wave_fixture_carries_single_repo() {
     assert_eq!(wave.open_pr_count, 1);
     assert_eq!(wave.commits.len(), 1);
     assert_eq!(wave.commits[0].sha, "abc1234");
+}
+
+#[test]
+fn wave_detail_fixture_preserves_the_native_work_hierarchy() {
+    let value = load_fixture("wave_detail.json");
+    let detail: WaveDetailSnapshot =
+        serde_json::from_value(value.clone()).expect("wave detail fixture should parse");
+
+    assert_eq!(detail.projects[0].project.slug, "release-feedback");
+    assert_eq!(detail.projects[0].tasks.len(), 2);
+    assert_eq!(detail.projects[0].tasks[0].task.identifier, "INF-123");
+    assert_eq!(detail.projects[0].directive.as_ref().unwrap().version, 1);
+    assert_eq!(
+        detail.projects[0].tasks[0]
+            .directive
+            .as_ref()
+            .unwrap()
+            .version,
+        2
+    );
+    assert_eq!(
+        detail.projects[0].tasks[0]
+            .delivery
+            .as_ref()
+            .and_then(|delivery| delivery.pr_number),
+        Some(912)
+    );
+    assert_eq!(
+        serde_json::to_value(detail).expect("serialize wave detail"),
+        value
+    );
 }
 
 #[test]
@@ -118,6 +150,19 @@ fn chat_turn_fixture_pins_wave_chat_shape() {
     without_from.as_object_mut().expect("object").remove("from");
     let turn: ChatTurn = serde_json::from_value(without_from).expect("absent from parses");
     assert_eq!(turn.from, None);
+}
+
+#[test]
+fn child_control_activity_fixture_pins_structured_motion() {
+    let value = load_fixture("child_control_activity.json");
+    let activity: ChildControlActivity =
+        serde_json::from_value(value.clone()).expect("child activity should parse");
+
+    assert_eq!(activity.subject_id, "INF-123");
+    assert_eq!(activity.kind, ChildActivityKind::Incorporated);
+    assert_eq!(activity.directive_version, Some(2));
+    assert_eq!(activity.effect.as_deref(), Some("live_steer"));
+    assert_eq!(serde_json::to_value(activity).unwrap(), value);
 }
 
 #[test]

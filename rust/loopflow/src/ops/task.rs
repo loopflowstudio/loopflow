@@ -8,18 +8,18 @@ use crate::engine::process::{
     resolve_lf_binary, start_lf_session_with_env, tmux_session_exists, tmux_session_slug,
 };
 use crate::engine::worktrees::{
-    create_from_placement_plan, main_repo_root, plan_placement, PlacementRequest,
-    PlacementStrategy, WorktreeSegment,
+    create_from_placement_plan, plan_placement, PlacementRequest, PlacementStrategy,
+    WorktreeSegment,
 };
 use crate::lfd::id::LfdId;
 use crate::lfdb::{open_existing_store, SharedStore, StoreError};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::project_session::SessionSupervisor;
 use crate::task::{
-    LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
-    PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandId, TaskCommandKind,
-    TaskCommandSource, TaskCommandState, TaskDecisionId, TaskEventKind, TaskSession,
-    TaskSessionStatus,
+    ChildDirective, ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
+    PmWritebackOperation, PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandId,
+    TaskCommandKind, TaskCommandSource, TaskCommandState, TaskDecisionId, TaskEventKind,
+    TaskSession, TaskSessionStatus,
 };
 use sha2::{Digest, Sha256};
 
@@ -29,15 +29,24 @@ pub enum TaskWaitUntil {
     Terminal,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ChildReceiptUntil {
+    Applied,
+    Incorporated,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TaskControlResult {
     pub issue_id: String,
     pub session_id: String,
     pub command_id: String,
+    pub directive_version: Option<u32>,
     pub state: TaskCommandState,
     pub effect: Option<TaskCommandEffect>,
+    pub incorporated: bool,
     pub generation: Option<u32>,
     pub accepted_at: Option<time::OffsetDateTime>,
+    pub incorporated_at: Option<time::OffsetDateTime>,
     pub error: Option<String>,
 }
 
@@ -75,6 +84,8 @@ pub struct TaskSessionSnapshot {
     pub pm_writeback: crate::task::PmWritebackState,
     pub wave: String,
     pub supervisor: SessionSupervisor,
+    pub current_directive_version: u32,
+    pub incorporated_directive_version: u32,
     pub status: String,
     pub status_reason: String,
     pub status_at: time::OffsetDateTime,
@@ -168,18 +179,50 @@ fn command_source_for_wave(
     }
 }
 
-pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
+pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResult<TaskSession> {
+    let directive = directive
+        .map(|directive| {
+            let directive = directive.trim().to_string();
+            if directive.is_empty() {
+                Err(task_error("directive cannot be empty"))
+            } else {
+                Ok(directive)
+            }
+        })
+        .transpose()?;
     if let Some(existing) = block_on_task(async {
         let store = task_store().await?;
-        store
+        let existing = store
             .get_task_session_by_issue(issue)
             .await
-            .map_err(|error| task_error(format!("failed to read task registry: {error}")))
+            .map_err(|error| task_error(format!("failed to read task registry: {error}")))?;
+        if let Some(session) = &existing {
+            if let Some(requested) = directive.as_deref() {
+                let current = store
+                    .child_directives(&ChildRef::Task(session.id.clone()))
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?
+                    .into_iter()
+                    .find(|value| value.version == session.current_directive_version)
+                    .ok_or_else(|| task_error("Task Session has no current directive"))?;
+                if current.text != requested {
+                    return Err(task_error(format!(
+                        "Task {} already exists with directive v{}; use `lf task steer {} <new-direction>` to replace it",
+                        session.issue.identifier,
+                        current.version,
+                        session.issue.identifier,
+                    )));
+                }
+            }
+        }
+        Ok(existing)
     })? {
         return Ok(existing);
     }
-    let resolved = crate::ops::task_pm::resolve_task(repo, issue, crate::ops::pm::PmRefresh::Auto)?;
-    let main_repo = main_repo_root(repo).map_err(|error| task_error(error.to_string()))?;
+    let main_repo = crate::ops::project::ensure_clean_main(repo, "Task start")
+        .map_err(|error| task_error(error.to_string()))?;
+    let resolved =
+        crate::ops::task_pm::resolve_task(&main_repo, issue, crate::ops::pm::PmRefresh::Auto)?;
     let segment = WorktreeSegment::parse(&resolved.item.identifier)
         .map_err(|error| task_error(error.to_string()))?;
     let plan = plan_placement(&main_repo, PlacementRequest::Main { segment })
@@ -199,6 +242,12 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
     let agent = config.agent.as_deref().unwrap_or("claude:opus");
     let (provider, _) = parse_agent(agent);
     let agent = agent.to_string();
+    let directive = directive.unwrap_or_else(|| {
+        format!(
+            "Complete {}: {}\n\n{}",
+            resolved.item.identifier, resolved.item.name, resolved.item.description
+        )
+    });
 
     block_on_task(async move {
         let store = task_store().await?;
@@ -239,6 +288,8 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
             },
             wave_id: wave.id().clone(),
             supervisor,
+            current_directive_version: 1,
+            incorporated_directive_version: 0,
             pm_snapshot_synced_at: resolved.snapshot.synced_at,
             // TODO(product-pm): main's `load_show_snapshot` logs a soft-stale
             // fallback to progress but does not return it on `PmShowResult`, so
@@ -262,8 +313,13 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
             updated_at: now,
         };
 
+        let initial = ChildDirective::initial(
+            ChildRef::Task(session.id.clone()),
+            directive,
+            command_source(&session)?,
+        );
         match store
-            .reserve_task_session(&session, wave.workers.max(1))
+            .reserve_task_session_with_directive(&session, &initial, wave.workers.max(1))
             .await
         {
             Ok(true) => {}
@@ -290,6 +346,18 @@ pub fn task_run(repo: &Path, issue: &str) -> OpsResult<TaskSession> {
             }
             Err(error) => return Err(task_error(format!("failed to reserve task: {error}"))),
         }
+
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::DirectiveChanged {
+                    directive_id: initial.id,
+                    version: initial.version,
+                    directive_kind: initial.kind,
+                },
+            )
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
 
         if let Err(error) = create_from_placement_plan(&main_repo, &plan) {
             record_task_failure(
@@ -360,9 +428,16 @@ pub(crate) fn project_context(project: &crate::lfd::pm::PmProject) -> String {
     context
 }
 
-pub fn task_start(repo: &Path, title: String, project_id: &str) -> OpsResult<TaskSession> {
+pub fn task_start(
+    repo: &Path,
+    title: String,
+    project_id: &str,
+    directive: Option<String>,
+) -> OpsResult<TaskSession> {
+    let main = crate::ops::project::ensure_clean_main(repo, "Task start")
+        .map_err(|error| task_error(error.to_string()))?;
     let project =
-        crate::ops::task_pm::resolve_project(repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
+        crate::ops::task_pm::resolve_project(&main, project_id, crate::ops::pm::PmRefresh::Auto)?;
     let marker = format!(
         "<!-- loopflow-task-start:{} -->",
         hex::encode(Sha256::digest(
@@ -370,13 +445,13 @@ pub fn task_start(repo: &Path, title: String, project_id: &str) -> OpsResult<Tas
         ))
     );
     let created = crate::ops::task_pm::create_and_load_task(
-        repo,
+        &main,
         &project.snapshot.wave,
         &project.project.slug,
         &title,
         &marker,
     )?;
-    task_run(repo, &created.item.id)
+    task_run(&main, &created.item.id, directive)
 }
 
 /// Record a Task Session's transition into `Failed`: set the status, persist it,
@@ -729,6 +804,8 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             pm_writeback: session.pm_writeback,
             wave: session.wave,
             supervisor: session.supervisor,
+            current_directive_version: session.current_directive_version,
+            incorporated_directive_version: session.incorporated_directive_version,
             status: session.status.as_str().to_string(),
             status_reason: session.status_reason,
             status_at: session.status_at,
@@ -770,35 +847,55 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
         }
         let command = TaskCommand::new(session.id.clone(), command_source(&session)?, kind);
         let wait_for_resolution = !matches!(&command.kind, TaskCommandKind::FollowUp { .. });
-        let (command, created, superseded) =
-            if matches!(&command.kind, TaskCommandKind::Decide { .. }) {
-                let (command, created) = store
-                    .ensure_task_decision_command(&command)
-                    .await
-                    .map_err(|error| {
-                        task_error(format!("failed to persist task decision: {error}"))
-                    })?;
-                (command, created, Vec::new())
-            } else if matches!(&command.kind, TaskCommandKind::Interrupt { .. }) {
-                let superseded = store
-                    .supersede_and_create_task_command(&command)
-                    .await
-                    .map_err(|error| {
-                        task_error(format!("failed to persist task command: {error}"))
-                    })?;
-                (command, true, superseded)
-            } else {
-                store.create_task_command(&command).await.map_err(|error| {
-                    task_error(format!("failed to persist task command: {error}"))
+        let replacement = match &command.kind {
+            TaskCommandKind::Steer { text } => Some(text.clone()),
+            TaskCommandKind::Interrupt {
+                replacement: Some(text),
+            } => Some(text.clone()),
+            _ => None,
+        };
+        let (command, created, superseded, directive_event) = if let Some(text) = replacement {
+            let directive = ChildDirective::replacement(
+                ChildRef::Task(session.id.clone()),
+                session.current_directive_version + 1,
+                text,
+                command.source.clone(),
+                command.id.clone(),
+            );
+            let superseded = store
+                .create_task_command_with_directive(&command, &directive)
+                .await
+                .map_err(|error| {
+                    task_error(format!("failed to persist task directive: {error}"))
                 })?;
-                (command, true, Vec::new())
-            };
+            let event = (directive.id, directive.version, directive.kind);
+            session.current_directive_version = directive.version;
+            (command, true, superseded, Some(event))
+        } else if matches!(&command.kind, TaskCommandKind::Decide { .. }) {
+            let (command, created) = store
+                .ensure_task_decision_command(&command)
+                .await
+                .map_err(|error| task_error(format!("failed to persist task decision: {error}")))?;
+            (command, created, Vec::new(), None)
+        } else if matches!(&command.kind, TaskCommandKind::Interrupt { .. }) {
+            let superseded = store
+                .supersede_and_create_task_command(&command)
+                .await
+                .map_err(|error| task_error(format!("failed to persist task command: {error}")))?;
+            (command, true, superseded, None)
+        } else {
+            store
+                .create_task_command(&command)
+                .await
+                .map_err(|error| task_error(format!("failed to persist task command: {error}")))?;
+            (command, true, Vec::new(), None)
+        };
         if !created {
             if !command.state.is_terminal() && !session.status.is_process_active() {
                 relaunch_inactive_process(&store, &mut session).await?;
             }
             let receipt = resolve_receipt(&store, &command.id, wait_for_resolution).await?;
-            return Ok(control_result(&session, &command, receipt));
+            return control_result(&store, &session, &command, receipt).await;
         }
         for command_id in superseded {
             append_command_event(
@@ -809,6 +906,19 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                 None,
             )
             .await?;
+        }
+        if let Some((directive_id, version, directive_kind)) = directive_event {
+            store
+                .append_task_event(
+                    &session.id,
+                    &TaskEventKind::DirectiveChanged {
+                        directive_id,
+                        version,
+                        directive_kind,
+                    },
+                )
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
         }
         append_command_event(
             &store,
@@ -853,7 +963,7 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                     .await
                     .map_err(|error| task_error(error.to_string()))?;
                 let receipt = wait_for_command_receipt(&store, &command.id).await?;
-                return Ok(control_result(&session, &command, receipt));
+                return control_result(&store, &session, &command, receipt).await;
             }
         }
         if !session.status.is_process_active() {
@@ -875,25 +985,35 @@ fn queue_command(issue: &str, kind: TaskCommandKind) -> OpsResult<TaskControlRes
                 receipt = resolve_receipt(&store, &command.id, wait_for_resolution).await?;
             }
         }
-        Ok(control_result(&session, &command, receipt))
+        control_result(&store, &session, &command, receipt).await
     })
 }
 
-fn control_result(
+async fn control_result(
+    store: &SharedStore,
     session: &TaskSession,
     command: &TaskCommand,
     receipt: TaskCommand,
-) -> TaskControlResult {
-    TaskControlResult {
+) -> OpsResult<TaskControlResult> {
+    let directive = store
+        .child_directive_for_command(&command.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read task directive: {error}")))?;
+    Ok(TaskControlResult {
         issue_id: session.issue.identifier.clone(),
         session_id: session.id.to_string(),
         command_id: command.id.to_string(),
+        directive_version: directive.as_ref().map(|directive| directive.version),
         state: receipt.state,
         effect: receipt.effect,
+        incorporated: directive
+            .as_ref()
+            .is_some_and(|directive| directive.incorporated_at.is_some()),
         generation: receipt.claimed_by_generation,
         accepted_at: receipt.accepted_at,
+        incorporated_at: directive.and_then(|directive| directive.incorporated_at),
         error: receipt.error,
-    }
+    })
 }
 
 async fn resolve_receipt(
@@ -986,13 +1106,17 @@ pub fn task_resume(issue: &str, message: Option<String>) -> OpsResult<TaskContro
     queue_command(issue, TaskCommandKind::Resume { message })
 }
 
-pub fn task_receipt(command_id: &str, wait: bool, timeout: Duration) -> OpsResult<TaskReceiptRead> {
+pub fn task_receipt(
+    command_id: &str,
+    until: Option<ChildReceiptUntil>,
+    timeout: Duration,
+) -> OpsResult<TaskReceiptRead> {
     let command_id =
         TaskCommandId::parse(command_id).map_err(|error| task_error(error.to_string()))?;
     block_on_task(async move {
         let store = task_store().await?;
-        let (command, timed_out) = if wait {
-            wait_for_command_receipt_until(&store, &command_id, timeout).await?
+        let (command, timed_out) = if let Some(until) = until {
+            wait_for_task_receipt_condition(&store, &command_id, until, timeout).await?
         } else {
             (read_command_receipt(&store, &command_id).await?, false)
         };
@@ -1004,10 +1128,49 @@ pub fn task_receipt(command_id: &str, wait: bool, timeout: Duration) -> OpsResul
                 task_error(format!("Task Session {} disappeared", command.session_id))
             })?;
         Ok(TaskReceiptRead {
-            receipt: control_result(&session, &command, command.clone()),
+            receipt: control_result(&store, &session, &command, command.clone()).await?,
             timed_out,
         })
     })
+}
+
+async fn wait_for_task_receipt_condition(
+    store: &SharedStore,
+    command_id: &TaskCommandId,
+    until: ChildReceiptUntil,
+    timeout: Duration,
+) -> OpsResult<(TaskCommand, bool)> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let command = read_command_receipt(store, command_id).await?;
+        if matches!(
+            command.state,
+            TaskCommandState::Failed | TaskCommandState::Superseded
+        ) {
+            return Ok((command, false));
+        }
+        let settled = match until {
+            ChildReceiptUntil::Applied => command.state.is_terminal(),
+            ChildReceiptUntil::Incorporated => store
+                .child_directive_for_command(command_id)
+                .await
+                .map_err(|error| task_error(format!("failed to read task directive: {error}")))?
+                .ok_or_else(|| {
+                    task_error(format!(
+                        "task command {command_id} does not carry a directive to incorporate"
+                    ))
+                })?
+                .incorporated_at
+                .is_some(),
+        };
+        if settled {
+            return Ok((command, false));
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Ok((command, true));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 pub fn task_decide(
@@ -1147,6 +1310,50 @@ pub fn task_request_decision(
     })
 }
 
+pub fn task_acknowledge(issue: &str, version: u32, summary: String) -> OpsResult<ChildDirective> {
+    let summary = summary.trim().to_string();
+    if summary.is_empty() {
+        return Err(task_error(
+            "directive acknowledgement summary cannot be empty",
+        ));
+    }
+    block_on_task(async move {
+        let store = task_store().await?;
+        let session = store
+            .get_task_session_by_issue(issue)
+            .await
+            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+        let ambient = std::env::var("LF_TASK_SESSION_ID").map_err(|_| {
+            task_error("directive acknowledgements must run inside the owning Task Session")
+        })?;
+        if ambient != session.id.as_str() {
+            return Err(task_error(format!(
+                "Task Session {ambient} cannot acknowledge a directive for {}",
+                session.id
+            )));
+        }
+        let (directive, incorporated) = store
+            .incorporate_child_directive(&ChildRef::Task(session.id.clone()), version, &summary)
+            .await
+            .map_err(|error| task_error(format!("failed to acknowledge directive: {error}")))?;
+        if incorporated {
+            store
+                .append_task_event(
+                    &session.id,
+                    &TaskEventKind::DirectiveIncorporated {
+                        directive_id: directive.id.clone(),
+                        version,
+                        summary,
+                    },
+                )
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+        }
+        Ok(directive)
+    })
+}
+
 pub fn task_abandon(issue: &str, reason: String) -> OpsResult<TaskControlResult> {
     let reason = reason.trim();
     if reason.is_empty() {
@@ -1268,10 +1475,13 @@ mod tests {
             issue_id: "INF-123".to_string(),
             session_id: "ts_example".to_string(),
             command_id: "cc_example".to_string(),
+            directive_version: Some(2),
             state: crate::task::TaskCommandState::Accepted,
             effect: Some(crate::task::TaskCommandEffect::LiveSteer),
+            incorporated: true,
             generation: Some(2),
             accepted_at: None,
+            incorporated_at: None,
             error: None,
         };
 
@@ -1281,10 +1491,13 @@ mod tests {
                 "issue_id": "INF-123",
                 "session_id": "ts_example",
                 "command_id": "cc_example",
+                "directive_version": 2,
                 "state": "accepted",
                 "effect": "live_steer",
+                "incorporated": true,
                 "generation": 2,
                 "accepted_at": null,
+                "incorporated_at": null,
                 "error": null,
             })
         );

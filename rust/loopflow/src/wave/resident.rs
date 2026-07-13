@@ -11,10 +11,9 @@
 //!   on connect;
 //! - **output**: ordered wire deltas through the token-gated resident door.
 //!
-//! The worktree bootstrap lives HERE now (it moved out of the listener): the
-//! resident ensures and enters the wave's `<repo>.<wave>` sibling worktree —
-//! the loop never runs in the main checkout — while the listener serves from
-//! the origin repo.
+//! The resident runs from a clean canonical main checkout. Wave turns read and
+//! coordinate there; file-writing work must first become a Task Session with
+//! its own worktree.
 //!
 //! # Lifecycle
 //! Spawned by the listener with the endpoint and
@@ -32,7 +31,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use tokio::sync::mpsc;
 
 use crate::engine::repo::find_repo_root;
-use crate::engine::worktrees::{ensure_wave_worktree, main_repo_root};
+use crate::engine::worktrees::main_repo_root;
 use crate::flowloop::wave::{path_for_children, run_loop, LoopConfig};
 use crate::lfd::types::WAVE_SERVER_ENDPOINT_ENV;
 use crate::ops::util::resolve_wave_name;
@@ -59,9 +58,7 @@ pub fn run(name: &str) -> Result<()> {
         &wave,
     )?;
 
-    // Worktree bootstrap (moved here from the listener): ensure and enter
-    // the wave's worktree — the loop never runs in the main checkout.
-    let loop_cwd = wave_worktree(&main_repo, &wave)?;
+    let loop_cwd = wave_main_checkout(&main_repo)?;
     if std::env::current_dir().ok().as_deref() != Some(loop_cwd.as_path()) {
         std::env::set_current_dir(&loop_cwd)?;
     }
@@ -72,7 +69,7 @@ pub fn run(name: &str) -> Result<()> {
 
     println!(
         "lf serve · {wave} · resident · listener http://{endpoint} \
-         · worktree {}",
+         · control plane {}",
         loop_cwd.display()
     );
 
@@ -115,10 +112,22 @@ pub async fn drive(
     result
 }
 
-/// The wave's own worktree — `<repo>.<wave>`, a sibling of the main repo —
-/// created on first boot, reused after.
-fn wave_worktree(main_repo: &Path, wave: &str) -> Result<PathBuf> {
-    Ok(ensure_wave_worktree(main_repo, wave)?.path)
+fn wave_main_checkout(main_repo: &Path) -> Result<PathBuf> {
+    let main = std::fs::canonicalize(main_repo).unwrap_or_else(|_| main_repo.to_path_buf());
+    let default_branch = crate::engine::git::get_default_branch(&main)?;
+    let branch = crate::engine::git::current_branch(&main)?;
+    if branch.as_deref() != Some(default_branch.as_str()) {
+        bail!(
+            "cannot start Wave resident: canonical checkout is on {}, expected {default_branch}",
+            branch.as_deref().unwrap_or("detached HEAD")
+        );
+    }
+    if !crate::engine::git::is_clean(&main)? {
+        bail!(
+            "cannot start Wave resident: canonical {default_branch} checkout is dirty; Wave turns never edit repository files"
+        );
+    }
+    Ok(main)
 }
 
 /// Where the listener is and how to prove we belong at its resident door:
@@ -487,28 +496,22 @@ mod tests {
         ));
     }
 
-    /// The resident self-bootstraps the wave's `<repo>.<wave>` sibling
-    /// worktree: created on first boot, reused after — the loop never runs in
-    /// the main checkout. (This moved here from the listener, which now
-    /// serves from the origin repo.)
     #[test]
-    fn wave_worktree_creates_and_reuses_the_sibling_tree() {
+    fn wave_resident_requires_a_clean_main_checkout() {
         let repo = loopflow_test_support::TestRepo::new();
-
-        let created = wave_worktree(repo.path(), "ship").expect("bootstrap worktree");
-        let repo_name = repo
-            .path()
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("repo name");
+        repo.create_file(".gitignore", "**/.wave-endpoint\n**/.wave-resident-token\n");
+        repo.stage_all();
+        repo.commit("ignore wave discovery files");
+        repo.create_file("wave/infrastructure/.wave-endpoint", "127.0.0.1:50123");
+        repo.create_file("wave/infrastructure/.wave-resident-token", "test-token");
         assert_eq!(
-            created.file_name().and_then(|name| name.to_str()),
-            Some(format!("{repo_name}.ship").as_str()),
-            "wave worktree is the <repo>.<wave> sibling"
+            wave_main_checkout(repo.path()).expect("clean main"),
+            std::fs::canonicalize(repo.path()).expect("canonical repo")
         );
-        assert!(created.join(".git").exists(), "worktree is a checkout");
-
-        let reused = wave_worktree(repo.path(), "ship").expect("reuse worktree");
-        assert_eq!(reused, created, "second boot reuses the same tree");
+        std::fs::write(repo.path().join("dirty.txt"), "dirty\n").expect("dirty main");
+        assert!(wave_main_checkout(repo.path())
+            .unwrap_err()
+            .to_string()
+            .contains("checkout is dirty"));
     }
 }

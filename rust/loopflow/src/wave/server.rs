@@ -263,11 +263,6 @@ struct ConversationBody {
     turns: Vec<ChatTurn>,
 }
 
-#[derive(Debug, Deserialize)]
-struct EnqueueFlowRequest {
-    flow: String,
-}
-
 /// `GET /conversation` query. `limit` is explicitly Optional: `None` serves
 /// the whole thread, `Some(n)` tails the last n turns.
 #[derive(Debug, Deserialize)]
@@ -380,8 +375,6 @@ pub fn router(
         .route("/stop", post(stop_handler))
         .route("/conversation", get(conversation_handler))
         .route("/playhead", get(playhead_handler))
-        .route("/playhead/enqueue", post(playhead_enqueue_handler))
-        .route("/playhead/skip", post(playhead_skip_handler))
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
         .route("/tasks/observe", post(task_observe_handler))
@@ -424,40 +417,6 @@ async fn playhead_handler(
         .ensure_playhead()
         .map(Json)
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))
-}
-
-async fn playhead_enqueue_handler(
-    State(state): State<ServerState>,
-    Json(request): Json<EnqueueFlowRequest>,
-) -> Result<Json<PlayheadView>, (StatusCode, String)> {
-    let flow = request.flow.trim();
-    if flow.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "flow is required".to_string()));
-    }
-    state
-        .runtime
-        .enqueue_flow(flow)
-        .map(Json)
-        .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))
-}
-
-async fn playhead_skip_handler(
-    State(state): State<ServerState>,
-) -> Result<Json<PlayheadView>, (StatusCode, String)> {
-    let current = state
-        .runtime
-        .ensure_playhead()
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
-    if current.active.is_some() {
-        state.runtime.deliver_skip();
-        Ok(Json(current))
-    } else {
-        state
-            .runtime
-            .skip_current("skipped by user")
-            .map(Json)
-            .map_err(|err| (StatusCode::CONFLICT, err.to_string()))
-    }
 }
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {

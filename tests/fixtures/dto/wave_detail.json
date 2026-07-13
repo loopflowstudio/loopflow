@@ -1,0 +1,111 @@
+{
+  "wave": {
+    "id": "wave-1",
+    "name": "infrastructure",
+    "status": "waiting",
+    "paused": false,
+    "goal": "Make releases boring.",
+    "repo": "/src/loopflow",
+    "iteration": 7,
+    "workers": 2,
+    "active_runs": 0,
+    "active_tasks": 1,
+    "active_projects": 1,
+    "live": true,
+    "endpoint": "127.0.0.1:7777",
+    "created_at": "2026-07-01T00:00:00Z",
+    "parent_wave_id": null
+  },
+  "loop_state": "idle",
+  "runs": [],
+  "projects": [
+    {
+      "project": {
+        "id": "project-1",
+        "slug": "release-feedback",
+        "name": "Release feedback",
+        "summary": "Failures become focused work.",
+        "definition": "Close the release feedback loop.",
+        "krs": [
+          {"text": "Every failed run has an owner", "holds": false}
+        ]
+      },
+      "runtime": {
+        "session_id": "ps_11111111111111111111111111111111",
+        "status": "waiting",
+        "reason": "supervised Tasks are active",
+        "status_at": "2026-07-13T18:00:00Z",
+        "iteration": 2,
+        "pending_observations": 0,
+        "provider": "codex",
+        "process_alive": false
+      },
+      "directive": {
+        "version": 1,
+        "kind": "initial",
+        "text": "Own release feedback and supervise failures.",
+        "applied_at": "2026-07-13T17:55:00Z",
+        "incorporated_at": "2026-07-13T17:56:00Z",
+        "incorporated_summary": "Failure ownership is the active priority."
+      },
+      "next_move": {"owner": "project", "reason": "supervised Tasks are active"},
+      "tasks": [
+        {
+          "task": {
+            "id": "issue-1",
+            "identifier": "INF-123",
+            "name": "Surface nightly failures",
+            "description": "Create one focused attention item.",
+            "rank": 1,
+            "completed": false,
+            "assignee": "user-1"
+          },
+          "runtime": {
+            "session_id": "ts_22222222222222222222222222222222",
+            "supervisor": {"kind": "project", "session_id": "ps_11111111111111111111111111111111"},
+            "status": "submitted",
+            "reason": "waiting for review",
+            "status_at": "2026-07-13T19:00:00Z",
+            "worktree": "/src/loopflow.infrastructure.task",
+            "branch": "jack/infrastructure.task.20260713_1200",
+            "provider": "codex",
+            "process_alive": false
+          },
+          "directive": {
+            "version": 2,
+            "kind": "replacement",
+            "text": "Surface verification failures before publish failures.",
+            "applied_at": "2026-07-13T18:30:00Z",
+            "incorporated_at": "2026-07-13T18:31:00Z",
+            "incorporated_summary": "Verification failures are now first."
+          },
+          "next_move": {"owner": "review", "reason": "waiting for review"},
+          "delivery": {
+            "kind": "pull_request",
+            "base": "main",
+            "pr_number": 912,
+            "pr_url": "https://github.com/loopflowstudio/loopflow/pull/912"
+          },
+          "workers": {"active": 0, "total": 0}
+        },
+        {
+          "task": {
+            "id": "issue-2",
+            "identifier": "INF-124",
+            "name": "Classify publish failures",
+            "description": "",
+            "rank": 2,
+            "completed": false,
+            "assignee": null
+          },
+          "runtime": null,
+          "directive": null,
+          "next_move": {"owner": "project", "reason": "Task is ready to start"},
+          "delivery": null,
+          "workers": {"active": 0, "total": 0}
+        }
+      ]
+    }
+  ],
+  "attention": []
+}

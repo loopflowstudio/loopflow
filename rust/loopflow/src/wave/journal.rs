@@ -873,6 +873,13 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             }
             EventKind::TaskObserved { observation } => {
                 let message = task_observation_message(observation);
+                let mut turn = ChatTurn::user(format!("turn-{}", event.seq), String::new());
+                turn.created_at = event.at_rfc3339();
+                turn.from = Some("task".to_string());
+                turn.activity = Some(crate::chat::turns::ChildControlActivity::from_task(
+                    observation,
+                ));
+                turns.push(turn);
                 if !consumed_messages.contains(&message.id) {
                     pending_messages.push(message.clone());
                 }
@@ -881,6 +888,13 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             }
             EventKind::ProjectObserved { observation } => {
                 let message = project_observation_message(observation);
+                let mut turn = ChatTurn::user(format!("turn-{}", event.seq), String::new());
+                turn.created_at = event.at_rfc3339();
+                turn.from = Some("project".to_string());
+                turn.activity = Some(crate::chat::turns::ChildControlActivity::from_project(
+                    observation,
+                ));
+                turns.push(turn);
                 if !consumed_messages.contains(&message.id) {
                     pending_messages.push(message.clone());
                 }
@@ -903,6 +917,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     created_at: event.at_rfc3339(),
                     from: None,
                     body: body.as_deref().cloned(),
+                    activity: None,
                 });
             }
             EventKind::TurnItem { turn_id, item } => {
@@ -1417,7 +1432,15 @@ mod tests {
         let pending = fold_thread(std::slice::from_ref(&observed));
         assert_eq!(pending.pending_messages.len(), 1);
         assert_eq!(pending.tasks.get(&observation_id), Some(&observation));
-        assert!(pending.turns.is_empty(), "Task facts are not user speech");
+        assert_eq!(pending.turns.len(), 1);
+        assert!(pending.turns[0].text.is_empty());
+        assert_eq!(
+            pending.turns[0]
+                .activity
+                .as_ref()
+                .map(|activity| activity.id.as_str()),
+            Some(observation_id.0.as_str())
+        );
 
         let consumed = fold_thread(&[
             observed,

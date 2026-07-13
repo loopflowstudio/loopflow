@@ -12,13 +12,14 @@ import Loopflow
 struct WaveChatView: View {
     let repoPath: String
     let waveName: String
+    let prefill: WaveComposerPrefill?
+    let onSelectChild: (WaveWorkSelection) -> Void
 
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var connection: WaveChatConnection?
     @State private var composerText = ""
-    @State private var enqueueFlow = ""
     @State private var sendError: String?
     @State private var launch: LaunchState = .idle
     @State private var isStopping = false
@@ -44,7 +45,7 @@ struct WaveChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             if isLive {
-                playheadHeader
+                waveControlHeader
                 Divider()
             }
             transcript
@@ -66,6 +67,11 @@ struct WaveChatView: View {
             conn.start()
         }
         .onDisappear { connection?.stop() }
+        .onChange(of: prefill) { _, value in
+            guard let value else { return }
+            composerText = value.text
+            composerFocused = true
+        }
         .confirmationDialog(
             "Stop \(waveName)?",
             isPresented: $confirmStop,
@@ -95,12 +101,30 @@ struct WaveChatView: View {
                         if let body = turn.body, turn.role == .assistant {
                             bodyBoundary(body, status: turn.status)
                         }
-                        MessageRow(
-                            turn: turn,
-                            timestampLabel: timestampLabel(for: turn),
-                            attemptFailure: failures[turn.id]
-                        )
+                        if let activity = turn.activity {
+                            ChildControlActivityCard(
+                                activity: activity,
+                                select: {
+                                    onSelectChild(WaveWorkSelection(
+                                        kind: activity.subject,
+                                        id: activity.subjectId
+                                    ))
+                                },
+                                choose: { option in
+                                    let decision = activity.decisionId.map { " \($0)" } ?? ""
+                                    composerText = "Resolve \(activity.subject.rawValue) \(activity.subjectId) decision\(decision): \(option)"
+                                    composerFocused = true
+                                }
+                            )
                             .id(turn.id)
+                        } else {
+                            MessageRow(
+                                turn: turn,
+                                timestampLabel: timestampLabel(for: turn),
+                                attemptFailure: failures[turn.id]
+                            )
+                                .id(turn.id)
+                        }
                     }
                     Color.clear
                         .frame(height: 1)
@@ -145,86 +169,37 @@ struct WaveChatView: View {
         }
     }
 
-    // MARK: - Playhead
+    // MARK: - Wave control
 
-    private var playheadHeader: some View {
-        let playhead = connection?.playhead
-        let breadcrumb = (playhead?.stack.map(\.flow) ?? [])
-            + (playhead?.now.map { [$0.step] } ?? [])
-        return VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(spacing: Spacing.sm) {
-                Text(breadcrumb.isEmpty ? waveName : breadcrumb.joined(separator: " › "))
-                    .font(Typography.caption().weight(.semibold))
-                    .foregroundStyle(palette.text)
-                    .lineLimit(1)
-                Spacer()
-                if let now = playhead?.now {
-                    Text("\(now.index + 1)/\(now.total) · loop \(now.iteration + 1)")
-                        .font(Typography.caption())
-                        .foregroundStyle(palette.textSecondary)
-                }
-                Button("Skip") { skipStep() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(playhead?.now == nil)
-                    .accessibilityIdentifier("wave-chat-skip")
-                Button {
-                    confirmStop = true
-                } label: {
-                    HStack(spacing: Spacing.xs) {
-                        if isStopping {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text(isStopping ? "Stopping…" : "Stop")
+    private var waveControlHeader: some View {
+        HStack(spacing: Spacing.sm) {
+            Text(waveName)
+                .font(Typography.caption().weight(.semibold))
+                .foregroundStyle(palette.text)
+            Text(connection?.loopState.rawValue ?? "idle")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+            Spacer()
+            Button {
+                confirmStop = true
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    if isStopping {
+                        ProgressView()
+                            .controlSize(.small)
                     }
+                    Text(isStopping ? "Stopping…" : "Stop")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .foregroundStyle(Color.statusError)
-                .disabled(isStopping)
-                .accessibilityIdentifier("wave-chat-stop")
             }
-
-            HStack(spacing: Spacing.lg) {
-                playheadFact("now", playhead?.now.map { "\($0.flow) / \($0.step)" })
-                playheadFact("next", playhead?.next.map { "\($0.flow) / \($0.step)" })
-                playheadFact("return", playhead?.returnTo.map { "\($0.flow) / \($0.step)" })
-            }
-
-            if let queued = playhead?.stack.last?.queue, !queued.isEmpty {
-                Text("queued  " + queued.map(\.flow).joined(separator: "  →  "))
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-            }
-
-            HStack(spacing: Spacing.sm) {
-                TextField("Enqueue flow", text: $enqueueFlow)
-                    .textFieldStyle(.roundedBorder)
-                    .controlSize(.small)
-                    .onSubmit { enqueue() }
-                    .accessibilityIdentifier("wave-chat-enqueue-field")
-                Button("Enqueue") { enqueue() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(enqueueFlow.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier("wave-chat-enqueue")
-            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .foregroundStyle(Color.statusError)
+            .disabled(isStopping)
+            .accessibilityIdentifier("wave-chat-stop")
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)
         .background(palette.surfaceMuted.opacity(0.45))
-    }
-
-    private func playheadFact(_ label: String, _ value: String?) -> some View {
-        HStack(spacing: Spacing.xs) {
-            Text(label)
-                .foregroundStyle(palette.textSecondary)
-            Text(value ?? "—")
-                .foregroundStyle(palette.text)
-                .lineLimit(1)
-        }
-        .font(Typography.caption())
     }
 
     private func bodyBoundary(_ body: BodyProvenance, status: Lifecycle) -> some View {
@@ -271,31 +246,6 @@ struct WaveChatView: View {
         case .interrupted: return "interrupted"
         case .failed: return "failed"
         default: return String(describing: status)
-        }
-    }
-
-    private func enqueue() {
-        let flow = enqueueFlow.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !flow.isEmpty, let connection else { return }
-        enqueueFlow = ""
-        Task {
-            do {
-                try await connection.enqueue(flow)
-            } catch {
-                enqueueFlow = flow
-                sendError = "Enqueue failed: \(error.localizedDescription)"
-            }
-        }
-    }
-
-    private func skipStep() {
-        guard let connection else { return }
-        Task {
-            do {
-                try await connection.skip()
-            } catch {
-                sendError = "Skip failed: \(error.localizedDescription)"
-            }
         }
     }
 
@@ -557,6 +507,74 @@ struct WaveChatView: View {
     private func timestampLabel(for turn: ChatTurn) -> String? {
         guard let date = turn.createdAtDate else { return nil }
         return Self.timestampFormatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+private struct ChildControlActivityCard: View {
+    let activity: ChildControlActivity
+    let select: () -> Void
+    let choose: (String) -> Void
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Button(action: select) {
+                HStack(alignment: .top, spacing: Spacing.md) {
+                    Image(systemName: icon)
+                        .foregroundStyle(activity.kind == .failed ? Color.statusError : palette.accent)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        Text("\(activity.subjectId) · \(activity.title)")
+                            .font(Typography.caption(12))
+                            .fontWeight(.medium)
+                            .foregroundStyle(palette.text)
+                        if !activity.summary.isEmpty {
+                            Text(activity.summary)
+                                .font(Typography.caption(11))
+                                .foregroundStyle(palette.textSecondary)
+                                .lineLimit(3)
+                        }
+                        if let version = activity.directiveVersion {
+                            Text("directive v\(version)\(activity.effect.map { " · \($0)" } ?? "")")
+                                .font(Typography.caption(10))
+                                .foregroundStyle(palette.textSecondary)
+                        }
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(Typography.caption(9))
+                        .foregroundStyle(palette.textSecondary)
+                }
+            }
+            .buttonStyle(.plain)
+            if !activity.options.isEmpty {
+                HStack(spacing: Spacing.xs) {
+                    ForEach(activity.options, id: \.self) { option in
+                        Button(option) { choose(option) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }
+        .padding(Spacing.md)
+        .background(palette.surfaceMuted)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        .accessibilityLabel("\(activity.subjectId), \(activity.title)")
+    }
+
+    private var icon: String {
+        switch activity.kind {
+        case .directed: "arrow.triangle.turn.up.right.circle"
+        case .incorporated: "checkmark.circle.fill"
+        case .decisionRequired: "questionmark.circle.fill"
+        case .decisionResolved: "checkmark.bubble.fill"
+        case .pullRequestOpened: "arrow.triangle.pull"
+        case .completed: "checkmark.seal.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        case .stateChanged, .controlApplied: "circle.dotted"
+        }
     }
 }
 

@@ -75,6 +75,7 @@ string_id!(ChildCommandId, "cc_");
 pub type TaskCommandId = ChildCommandId;
 string_id!(ChildDecisionId, "cd_");
 pub type TaskDecisionId = ChildDecisionId;
+string_id!(ChildDirectiveId, "dir_");
 
 /// Opaque Linear identifier: non-empty, provider-assigned (no prefix grammar of
 /// our own, so distinct from `string_id!`).
@@ -226,6 +227,8 @@ pub struct TaskSession {
     pub wave_id: LfdId,
     pub wave: String,
     pub supervisor: SessionSupervisor,
+    pub current_directive_version: u32,
+    pub incorporated_directive_version: u32,
     pub status: TaskSessionStatus,
     pub status_reason: String,
     pub status_at: OffsetDateTime,
@@ -354,6 +357,103 @@ pub enum ChildCommandSource {
 pub type TaskCommandSource = ChildCommandSource;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum ChildRef {
+    Project(crate::project_session::ProjectSessionId),
+    Task(TaskSessionId),
+}
+
+impl ChildRef {
+    pub fn target_kind(&self) -> &'static str {
+        match self {
+            Self::Project(_) => "project",
+            Self::Task(_) => "task",
+        }
+    }
+
+    pub fn target_id(&self) -> &str {
+        match self {
+            Self::Project(id) => id.as_str(),
+            Self::Task(id) => id.as_str(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DirectiveKind {
+    Initial,
+    Replacement,
+    WorkRevised,
+}
+
+impl DirectiveKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Initial => "initial",
+            Self::Replacement => "replacement",
+            Self::WorkRevised => "work_revised",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildDirective {
+    pub id: ChildDirectiveId,
+    pub target: ChildRef,
+    pub version: u32,
+    pub kind: DirectiveKind,
+    pub text: String,
+    pub source: ChildCommandSource,
+    pub command_id: Option<ChildCommandId>,
+    pub issued_at: OffsetDateTime,
+    pub applied_at: Option<OffsetDateTime>,
+    pub incorporated_at: Option<OffsetDateTime>,
+    pub incorporated_summary: Option<String>,
+}
+
+impl ChildDirective {
+    pub fn initial(target: ChildRef, text: String, source: ChildCommandSource) -> Self {
+        Self {
+            id: ChildDirectiveId::new(),
+            target,
+            version: 1,
+            kind: DirectiveKind::Initial,
+            text,
+            source,
+            command_id: None,
+            issued_at: OffsetDateTime::now_utc(),
+            applied_at: None,
+            incorporated_at: None,
+            incorporated_summary: None,
+        }
+    }
+
+    pub fn replacement(
+        target: ChildRef,
+        version: u32,
+        text: String,
+        source: ChildCommandSource,
+        command_id: ChildCommandId,
+    ) -> Self {
+        Self {
+            id: ChildDirectiveId::new(),
+            target,
+            version,
+            kind: DirectiveKind::Replacement,
+            text,
+            source,
+            command_id: Some(command_id),
+            issued_at: OffsetDateTime::now_utc(),
+            applied_at: None,
+            incorporated_at: None,
+            incorporated_summary: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskCommand {
     pub id: TaskCommandId,
     pub session_id: TaskSessionId,
@@ -422,6 +522,16 @@ pub enum TaskEventKind {
         effect: Option<TaskCommandEffect>,
         error: Option<String>,
     },
+    DirectiveChanged {
+        directive_id: ChildDirectiveId,
+        version: u32,
+        directive_kind: DirectiveKind,
+    },
+    DirectiveIncorporated {
+        directive_id: ChildDirectiveId,
+        version: u32,
+        summary: String,
+    },
     DecisionRequested {
         decision_id: TaskDecisionId,
         prompt: String,
@@ -451,7 +561,11 @@ pub enum TaskEventKind {
 
 impl TaskEventKind {
     pub fn is_wave_observable(&self) -> bool {
-        !matches!(self, Self::Started | Self::Progress { .. })
+        match self {
+            Self::Started | Self::Progress { .. } => false,
+            Self::CommandChanged { state, .. } => state.is_terminal(),
+            _ => true,
+        }
     }
 }
 
@@ -489,8 +603,8 @@ impl TaskObservation {
 #[cfg(test)]
 mod tests {
     use super::{
-        PmWritebackOperation, PmWritebackState, TaskCommandId, TaskDecisionId, TaskObservation,
-        TaskSessionId, TaskSessionStatus,
+        PmWritebackOperation, PmWritebackState, TaskCommandId, TaskCommandState, TaskDecisionId,
+        TaskEventKind, TaskObservation, TaskSessionId, TaskSessionStatus,
     };
 
     #[test]
@@ -527,6 +641,21 @@ mod tests {
         assert!(TaskSessionStatus::Abandoned.is_terminal());
         assert!(!TaskSessionStatus::Submitted.is_terminal());
         assert!(!TaskSessionStatus::Failed.is_terminal());
+    }
+
+    #[test]
+    fn wave_observes_command_outcomes_not_transport_chatter() {
+        let event = |state| TaskEventKind::CommandChanged {
+            command_id: TaskCommandId::new(),
+            state,
+            effect: None,
+            error: None,
+        };
+
+        assert!(!event(TaskCommandState::Persisted).is_wave_observable());
+        assert!(!event(TaskCommandState::Claimed).is_wave_observable());
+        assert!(event(TaskCommandState::Accepted).is_wave_observable());
+        assert!(event(TaskCommandState::Failed).is_wave_observable());
     }
 
     #[test]

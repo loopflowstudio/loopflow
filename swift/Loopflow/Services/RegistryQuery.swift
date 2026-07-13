@@ -55,15 +55,18 @@ public struct RegistryQuery: Sendable {
     /// plus the live loop state when a server is answering. Feeds `RunStore`
     /// and `AttentionStore` for the focused wave.
     public func status(wave: String, waveId: String, cwd: String?) async throws
-        -> (runs: [Run], attention: [AttentionItem], loopState: String?) {
+        -> WaveStatusResult {
         let stdout = try await run(["status", wave, "--json"], cwd)
         let snapshot = try Self.decode(WaveStatusSnapshot.self, from: stdout)
         let repo = snapshot.wave.repo
         let runs = snapshot.runs.map { $0.toRun(waveId: waveId, repo: repo) }
-            + snapshot.projects.map { $0.toRun(waveId: waveId, repo: repo) }
-            + snapshot.tasks.map { $0.toRun(waveId: waveId, repo: repo) }
         let attention = snapshot.attention.map { $0.toItem(waveId: waveId) }
-        return (runs, attention, snapshot.loopState)
+        return WaveStatusResult(
+            runs: runs,
+            workMap: WaveWorkMap(objective: snapshot.wave.goal, projects: snapshot.projects),
+            attention: attention,
+            loopState: snapshot.loopState
+        )
     }
 
     /// The recent-run window across every wave on the machine — the ledger the
@@ -246,132 +249,12 @@ struct WaveStatusSnapshot: Decodable {
     let wave: WaveSnapshot
     let loopState: String?
     let runs: [RunSnapshot]
-    let projects: [ProjectSnapshot]
-    let tasks: [TaskSnapshot]
+    let projects: [WaveProjectWork]
     let attention: [AttentionSnapshot]
 
     enum CodingKeys: String, CodingKey {
-        case wave, runs, projects, tasks, attention
+        case wave, runs, projects, attention
         case loopState = "loop_state"
-    }
-}
-
-/// One durable Task Session under `lf status`.
-struct TaskSnapshot: Decodable {
-    let issueId: String
-    let sessionId: String
-    let project: String
-    let supervisor: SessionSupervisorSnapshot
-    let status: String
-    let reason: String
-    let statusAt: String
-    let worktree: String
-    let branch: String
-    let provider: String
-    let processAlive: Bool
-    let prURL: String?
-
-    enum CodingKeys: String, CodingKey {
-        case project, supervisor, status, reason, worktree, branch, provider
-        case issueId = "issue_id"
-        case sessionId = "session_id"
-        case statusAt = "status_at"
-        case processAlive = "process_alive"
-        case prURL = "pr_url"
-    }
-
-    func toRun(waveId: String, repo: String) -> Run {
-        let runStatus: RunStatus = switch status {
-        case "created", "starting": .pending
-        case "running": .running
-        case "waiting", "submitted", "blocked": .waiting
-        case "merged", "abandoned": .completed
-        case "failed": .failed
-        default: .unspecified
-        }
-        let pr = prURL.flatMap(URL.init(string:)).map {
-            PullRequest(url: $0, number: nil, state: nil, title: nil, branch: branch)
-        }
-        return Run(
-            id: sessionId,
-            waveId: waveId,
-            flow: "task",
-            task: issueId,
-            repo: repo,
-            status: runStatus,
-            stepIndex: 0,
-            worktree: worktree,
-            branch: branch,
-            error: status == "failed" ? reason : nil,
-            pr: pr,
-            startedAt: RegistrySnapshotDate.parse(statusAt),
-            endedAt: ["merged", "abandoned"].contains(status)
-                ? RegistrySnapshotDate.parse(statusAt) : nil,
-            createdAt: RegistrySnapshotDate.parse(statusAt)
-        )
-    }
-}
-
-struct SessionSupervisorSnapshot: Decodable {
-    let kind: String
-    let waveId: String?
-    let sessionId: String?
-
-    enum CodingKeys: String, CodingKey {
-        case kind
-        case waveId = "wave_id"
-        case sessionId = "session_id"
-    }
-}
-
-/// One durable Project Session under `lf status`.
-struct ProjectSnapshot: Decodable {
-    let projectId: String
-    let sessionId: String
-    let project: String
-    let status: String
-    let reason: String
-    let statusAt: String
-    let iteration: Int
-    let pendingObservations: Int
-    let provider: String
-    let processAlive: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case project, status, reason, iteration, provider
-        case projectId = "project_id"
-        case sessionId = "session_id"
-        case statusAt = "status_at"
-        case processAlive = "process_alive"
-        case pendingObservations = "pending_observations"
-    }
-
-    func toRun(waveId: String, repo: String) -> Run {
-        let runStatus: RunStatus = switch status {
-        case "created", "starting": .pending
-        case "running": .running
-        case "waiting", "blocked": .waiting
-        case "completed", "abandoned": .completed
-        case "failed": .failed
-        default: .unspecified
-        }
-        return Run(
-            id: sessionId,
-            waveId: waveId,
-            flow: "project",
-            task: project,
-            repo: repo,
-            status: runStatus,
-            stepIndex: iteration,
-            worktree: repo,
-            branch: "main",
-            error: status == "failed" ? reason : nil,
-            pr: nil,
-            startedAt: RegistrySnapshotDate.parse(statusAt),
-            endedAt: ["completed", "abandoned"].contains(status)
-                ? RegistrySnapshotDate.parse(statusAt) : nil,
-            createdAt: RegistrySnapshotDate.parse(statusAt)
-        )
     }
 }
 

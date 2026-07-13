@@ -1,0 +1,14 @@
+{
+  "id": "task-ts_22222222222222222222222222222222-14",
+  "subject": "task",
+  "subject_id": "INF-123",
+  "session_id": "ts_22222222222222222222222222222222",
+  "kind": "incorporated",
+  "title": "Incorporated direction v2",
+  "summary": "Parser first; docs remain paused.",
+  "directive_version": 2,
+  "command_id": "cc_33333333333333333333333333333333",
+  "effect": "live_steer",
+  "decision_id": null,
+  "options": []
+}

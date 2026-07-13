@@ -660,12 +660,26 @@ fn print_project_control(
 
 fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<()> {
     match command {
-        ProjectCommand::Run { project_id, json } => {
-            let session = loopflow::ops::project::project_run(repo, project_id)?;
+        ProjectCommand::Run {
+            project_id,
+            directive,
+            json,
+        } => {
+            let session = loopflow::ops::project::project_run(repo, project_id, directive.clone())?;
             print_project_session(&session, *json)
         }
-        ProjectCommand::Start { title, wave, json } => {
-            let session = loopflow::ops::project::project_start(repo, title, wave.as_deref())?;
+        ProjectCommand::Start {
+            title,
+            wave,
+            directive,
+            json,
+        } => {
+            let session = loopflow::ops::project::project_start(
+                repo,
+                title,
+                wave.as_deref(),
+                directive.clone(),
+            )?;
             print_project_session(&session, *json)
         }
         ProjectCommand::Status { project_id, json } => {
@@ -698,18 +712,36 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
         }
         ProjectCommand::Receipt {
             command_id,
-            wait,
+            until,
             timeout,
             json,
         } => {
             let read = loopflow::ops::project::project_receipt(
                 command_id,
-                *wait,
+                *until,
                 parse_duration(timeout)?,
             )?;
             print_project_control(&read.receipt, *json)?;
             if read.timed_out {
                 std::process::exit(124);
+            }
+            Ok(())
+        }
+        ProjectCommand::Acknowledge {
+            project_id,
+            directive,
+            summary,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_acknowledge(
+                project_id,
+                *directive,
+                summary.clone(),
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("{} incorporated directive v{}", project_id, directive);
             }
             Ok(())
         }
@@ -798,16 +830,26 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
 
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
-        TaskCommand::Run { issue, json } => {
-            let session = loopflow::ops::task::task_run(repo, issue)?;
+        TaskCommand::Run {
+            issue,
+            directive,
+            json,
+        } => {
+            let session = loopflow::ops::task::task_run(repo, issue, directive.clone())?;
             print_task_session(&session, *json)
         }
         TaskCommand::Start {
             title,
             project_id,
+            directive,
             json,
         } => {
-            let session = loopflow::ops::task::task_start(repo, title.clone(), project_id)?;
+            let session = loopflow::ops::task::task_start(
+                repo,
+                title.clone(),
+                project_id,
+                directive.clone(),
+            )?;
             print_task_session(&session, *json)
         }
         TaskCommand::Status { issue, json } => {
@@ -840,15 +882,29 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         }
         TaskCommand::Receipt {
             command_id,
-            wait,
+            until,
             timeout,
             json,
         } => {
             let timeout = parse_duration(timeout)?;
-            let read = loopflow::ops::task::task_receipt(command_id, *wait, timeout)?;
+            let read = loopflow::ops::task::task_receipt(command_id, *until, timeout)?;
             print_task_control(&read.receipt, *json)?;
             if read.timed_out {
                 std::process::exit(124);
+            }
+            Ok(())
+        }
+        TaskCommand::Acknowledge {
+            issue,
+            directive,
+            summary,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_acknowledge(issue, *directive, summary.clone())?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("{} incorporated directive v{}", issue, directive);
             }
             Ok(())
         }
@@ -1050,12 +1106,6 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Resident { name }) => {
                 in_repo_runtime(&args, |_| loopflow::wave::resident::run(name))
             }
-            Some(Commands::Enqueue { flow }) => in_repo_runtime(&args, |repo| {
-                loopflow::lf::commands::playhead::enqueue(repo, cli.wave.as_deref(), flow)
-            }),
-            Some(Commands::Skip) => in_repo_runtime(&args, |repo| {
-                loopflow::lf::commands::playhead::skip(repo, cli.wave.as_deref())
-            }),
             Some(Commands::FlowStep { flow, index, seed }) => in_repo_runtime(&args, |repo| {
                 loopflow::lf::commands::flow::run_step(flow, *index, seed, &cli, repo)
             }),
@@ -1227,8 +1277,6 @@ fn run_label(cli: &Cli) -> Option<String> {
         | Some(Commands::Serve { .. })
         | Some(Commands::Stop { .. })
         | Some(Commands::Resident { .. })
-        | Some(Commands::Enqueue { .. })
-        | Some(Commands::Skip)
         | Some(Commands::FlowStep { .. })
         | Some(Commands::Usage { .. })
         | Some(Commands::Context { .. })

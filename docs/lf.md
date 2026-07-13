@@ -141,10 +141,11 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 lf serve designer                                  # start the named mind
 lf stop designer                                   # stop its listener and resident
 lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
-lf task run DES-123
+lf task run DES-123 --directive "fix the parser before the docs"
 lf task steer DES-123 "rename the flag"
 lf task interrupt DES-123 --message "take the smaller approach"
-lf task receipt COMMAND_ID --wait --timeout 30s --json
+lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
+lf task acknowledge DES-123 --directive 2 --summary "the smaller parser path is active"
 lf task decide DES-123 DECISION_ID approve
 lf task wait DES-123
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree

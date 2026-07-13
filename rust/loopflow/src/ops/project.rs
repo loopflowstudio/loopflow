@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::engine::config::{load_config_or_default, parse_agent};
+use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
 use crate::engine::process::{
     resolve_lf_binary, start_lf_session, start_lf_session_with_env, tmux_session_exists,
     tmux_session_slug,
@@ -10,12 +11,16 @@ use crate::engine::process::{
 use crate::lfd::id::LfdId;
 use crate::lfd::types::Wave;
 use crate::lfdb::{open_existing_store, SharedStore, Store};
+use crate::ops::task::ChildReceiptUntil;
 use crate::ops::{OpsError, OpsResult};
 use crate::project_session::{
     ProjectCommand, ProjectCommandId, ProjectCommandKind, ProjectCommandSource, ProjectDecisionId,
     ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
-use crate::task::{LinearProjectId, LinearProjectRef, TaskCommandEffect, TaskCommandState};
+use crate::task::{
+    ChildDirective, ChildRef, LinearProjectId, LinearProjectRef, TaskCommandEffect,
+    TaskCommandState,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ProjectSessionSnapshot {
@@ -24,6 +29,8 @@ pub struct ProjectSessionSnapshot {
     pub project_name: String,
     pub session_id: String,
     pub wave: String,
+    pub current_directive_version: u32,
+    pub incorporated_directive_version: u32,
     pub status: String,
     pub status_reason: String,
     pub status_at: time::OffsetDateTime,
@@ -45,10 +52,13 @@ pub struct ProjectControlResult {
     pub project_id: String,
     pub session_id: String,
     pub command_id: String,
+    pub directive_version: Option<u32>,
     pub state: TaskCommandState,
     pub effect: Option<TaskCommandEffect>,
+    pub incorporated: bool,
     pub generation: Option<u32>,
     pub accepted_at: Option<time::OffsetDateTime>,
+    pub incorporated_at: Option<time::OffsetDateTime>,
     pub error: Option<String>,
 }
 
@@ -90,7 +100,12 @@ async fn project_store() -> OpsResult<SharedStore> {
     })
 }
 
-pub fn project_run(repo: &Path, project_id: &str) -> OpsResult<ProjectSession> {
+pub fn project_run(
+    repo: &Path,
+    project_id: &str,
+    directive: Option<String>,
+) -> OpsResult<ProjectSession> {
+    let directive = normalize_directive(directive)?;
     if let Some(existing) = block_on_project(async {
         let store = project_store().await?;
         let mut existing = store
@@ -99,6 +114,23 @@ pub fn project_run(repo: &Path, project_id: &str) -> OpsResult<ProjectSession> {
             .map_err(|error| project_error(format!("failed to read Project Session: {error}")))?;
         if let Some(session) = &mut existing {
             reconcile_project_liveness(&store, session).await?;
+            if let Some(requested) = directive.as_deref() {
+                let current = store
+                    .child_directives(&ChildRef::Project(session.id.clone()))
+                    .await
+                    .map_err(|error| project_error(error.to_string()))?
+                    .into_iter()
+                    .find(|value| value.version == session.current_directive_version)
+                    .ok_or_else(|| project_error("Project Session has no current directive"))?;
+                if current.text != requested {
+                    return Err(project_error(format!(
+                        "Project {} already exists with directive v{}; use `lf project steer {} <new-direction>` to replace it",
+                        session.project.slug,
+                        current.version,
+                        session.project.slug,
+                    )));
+                }
+            }
         }
         Ok(existing)
     })? {
@@ -113,15 +145,20 @@ pub fn project_run(repo: &Path, project_id: &str) -> OpsResult<ProjectSession> {
         });
     }
 
+    let repo = ensure_clean_main(repo, "Project")?;
+
     let resolved =
-        crate::ops::task_pm::resolve_project(repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    let config = load_config_or_default(Some(repo));
+        crate::ops::task_pm::resolve_project(&repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
+    let config = load_config_or_default(Some(&repo));
     let agent = config.agent.as_deref().unwrap_or("codex");
     let (provider, _) = parse_agent(agent);
     let agent = agent.to_string();
-    let repo = crate::engine::worktrees::main_repo_root(repo)
-        .map_err(|error| project_error(error.to_string()))?;
-
+    let directive = directive.unwrap_or_else(|| {
+        format!(
+            "Pursue {}.\n\n{}",
+            resolved.project.name, resolved.project.definition
+        )
+    });
     block_on_project(async move {
         let store = project_store().await?;
         if let Some(existing) = store
@@ -156,6 +193,8 @@ pub fn project_run(repo: &Path, project_id: &str) -> OpsResult<ProjectSession> {
             wave: resolved.snapshot.wave,
             repo: repo.display().to_string(),
             pm_snapshot_synced_at: resolved.snapshot.synced_at,
+            current_directive_version: 1,
+            incorporated_directive_version: 0,
             status: ProjectSessionStatus::Created,
             status_reason: "Linear Project reserved for pursuit".to_string(),
             status_at: now,
@@ -169,7 +208,15 @@ pub fn project_run(repo: &Path, project_id: &str) -> OpsResult<ProjectSession> {
             created_at: now,
             updated_at: now,
         };
-        if let Err(error) = store.create_project_session(&session).await {
+        let initial = ChildDirective::initial(
+            ChildRef::Project(session.id.clone()),
+            directive,
+            project_command_source(&session)?,
+        );
+        if let Err(error) = store
+            .create_project_session_with_directive(&session, &initial)
+            .await
+        {
             if let Some(existing) = store
                 .get_project_session_by_project(session.project.id.as_str())
                 .await
@@ -181,20 +228,82 @@ pub fn project_run(repo: &Path, project_id: &str) -> OpsResult<ProjectSession> {
                 "failed to reserve Project Session: {error}"
             )));
         }
+        store
+            .append_project_event(
+                &session.id,
+                &ProjectEventKind::DirectiveChanged {
+                    directive_id: initial.id,
+                    version: initial.version,
+                    directive_kind: initial.kind,
+                },
+            )
+            .await
+            .map_err(|error| project_error(error.to_string()))?;
         launch_project_process(&store, &mut session).await?;
         wait_until_project_running(&store, &session.id).await
     })
 }
 
-pub fn project_start(repo: &Path, title: &str, wave: Option<&str>) -> OpsResult<ProjectSession> {
-    let project = crate::ops::pm::pm_create_project(repo, wave, title)?;
-    project_run(repo, &project.project.id)
+fn normalize_directive(directive: Option<String>) -> OpsResult<Option<String>> {
+    directive
+        .map(|directive| {
+            let directive = directive.trim().to_string();
+            if directive.is_empty() {
+                Err(project_error("directive cannot be empty"))
+            } else {
+                Ok(directive)
+            }
+        })
+        .transpose()
+}
+
+pub(crate) fn ensure_clean_main(repo: &Path, subject: &str) -> OpsResult<std::path::PathBuf> {
+    let worktree = worktree_root(repo).map_err(|error| project_error(error.to_string()))?;
+    let main = crate::engine::worktrees::main_repo_root(repo)
+        .map_err(|error| project_error(error.to_string()))?;
+    let worktree = std::fs::canonicalize(&worktree).unwrap_or(worktree);
+    let main = std::fs::canonicalize(&main).unwrap_or(main);
+    if worktree != main {
+        return Err(project_error(format!(
+            "cannot run {subject} from {}: Wave and Project turns require the canonical main checkout; file-writing work belongs in `lf task start <issue>`",
+            worktree.display()
+        )));
+    }
+    let default_branch =
+        get_default_branch(&main).map_err(|error| project_error(error.to_string()))?;
+    let branch = current_branch(&main).map_err(|error| project_error(error.to_string()))?;
+    if branch.as_deref() != Some(default_branch.as_str()) {
+        return Err(project_error(format!(
+            "cannot run {subject}: canonical checkout is on {}, expected {default_branch}",
+            branch.as_deref().unwrap_or("detached HEAD")
+        )));
+    }
+    if !is_clean(&main).map_err(|error| project_error(error.to_string()))? {
+        return Err(project_error(format!(
+            "cannot run {subject}: canonical {default_branch} checkout is dirty; Wave and Project turns never edit repository files"
+        )));
+    }
+    Ok(main)
+}
+
+pub fn project_start(
+    repo: &Path,
+    title: &str,
+    wave: Option<&str>,
+    directive: Option<String>,
+) -> OpsResult<ProjectSession> {
+    let main = ensure_clean_main(repo, "Project start")?;
+    let project = crate::ops::pm::pm_create_project(&main, wave, title)?;
+    project_run(&main, &project.project.id, directive)
 }
 
 async fn launch_project_process(
     store: &SharedStore,
     session: &mut ProjectSession,
 ) -> OpsResult<()> {
+    // Re-check at the launch boundary: commands and observations can wake a
+    // stopped Project long after its initial reservation.
+    ensure_clean_main(Path::new(&session.repo), "Project turn")?;
     let tmux_name = format!(
         "lf-project-{}-{}",
         tmux_session_slug(&session.project.slug),
@@ -388,6 +497,8 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
             project_name: session.project.name,
             session_id: session.id.to_string(),
             wave: session.wave,
+            current_directive_version: session.current_directive_version,
+            incorporated_directive_version: session.incorporated_directive_version,
             status: session.status.as_str().to_string(),
             status_reason: session.status_reason,
             status_at: session.status_at,
@@ -447,26 +558,47 @@ fn queue_project_command(
         }
         let command =
             ProjectCommand::new(session.id.clone(), project_command_source(&session)?, kind);
-        let (command, created, superseded) =
-            if matches!(command.kind, ProjectCommandKind::Decide { .. }) {
-                let (command, created) = store
-                    .ensure_project_decision_command(&command)
-                    .await
-                    .map_err(|error| project_error(error.to_string()))?;
-                (command, created, Vec::new())
-            } else if matches!(command.kind, ProjectCommandKind::Interrupt { .. }) {
-                let superseded = store
-                    .supersede_and_create_project_command(&command)
-                    .await
-                    .map_err(|error| project_error(error.to_string()))?;
-                (command, true, superseded)
-            } else {
-                store
-                    .create_project_command(&command)
-                    .await
-                    .map_err(|error| project_error(error.to_string()))?;
-                (command, true, Vec::new())
-            };
+        let replacement = match &command.kind {
+            ProjectCommandKind::Steer { text } => Some(text.clone()),
+            ProjectCommandKind::Interrupt {
+                replacement: Some(text),
+            } => Some(text.clone()),
+            _ => None,
+        };
+        let (command, created, superseded, directive_event) = if let Some(text) = replacement {
+            let directive = ChildDirective::replacement(
+                ChildRef::Project(session.id.clone()),
+                session.current_directive_version + 1,
+                text,
+                command.source.clone(),
+                command.id.clone(),
+            );
+            let superseded = store
+                .create_project_command_with_directive(&command, &directive)
+                .await
+                .map_err(|error| project_error(error.to_string()))?;
+            let event = (directive.id, directive.version, directive.kind);
+            session.current_directive_version = directive.version;
+            (command, true, superseded, Some(event))
+        } else if matches!(command.kind, ProjectCommandKind::Decide { .. }) {
+            let (command, created) = store
+                .ensure_project_decision_command(&command)
+                .await
+                .map_err(|error| project_error(error.to_string()))?;
+            (command, created, Vec::new(), None)
+        } else if matches!(command.kind, ProjectCommandKind::Interrupt { .. }) {
+            let superseded = store
+                .supersede_and_create_project_command(&command)
+                .await
+                .map_err(|error| project_error(error.to_string()))?;
+            (command, true, superseded, None)
+        } else {
+            store
+                .create_project_command(&command)
+                .await
+                .map_err(|error| project_error(error.to_string()))?;
+            (command, true, Vec::new(), None)
+        };
         if !created {
             if !command.state.is_terminal() && !session.status.is_process_active() {
                 launch_project_process(&store, &mut session).await?;
@@ -474,7 +606,7 @@ fn queue_project_command(
             let receipt = wait_for_project_receipt(&store, &command.id, Duration::from_secs(2))
                 .await?
                 .0;
-            return Ok(project_control_result(&session, &command, receipt));
+            return project_control_result(&store, &session, &command, receipt).await;
         }
         for command_id in superseded {
             append_project_command_event(
@@ -485,6 +617,19 @@ fn queue_project_command(
                 None,
             )
             .await?;
+        }
+        if let Some((directive_id, version, directive_kind)) = directive_event {
+            store
+                .append_project_event(
+                    &session.id,
+                    &ProjectEventKind::DirectiveChanged {
+                        directive_id,
+                        version,
+                        directive_kind,
+                    },
+                )
+                .await
+                .map_err(|error| project_error(error.to_string()))?;
         }
         append_project_command_event(
             &store,
@@ -500,7 +645,7 @@ fn queue_project_command(
         let receipt = wait_for_project_receipt(&store, &command.id, Duration::from_secs(2))
             .await?
             .0;
-        Ok(project_control_result(&session, &command, receipt))
+        project_control_result(&store, &session, &command, receipt).await
     })
 }
 
@@ -526,21 +671,31 @@ async fn append_project_command_event(
     Ok(())
 }
 
-fn project_control_result(
+async fn project_control_result(
+    store: &SharedStore,
     session: &ProjectSession,
     command: &ProjectCommand,
     receipt: ProjectCommand,
-) -> ProjectControlResult {
-    ProjectControlResult {
+) -> OpsResult<ProjectControlResult> {
+    let directive = store
+        .child_directive_for_command(&command.id)
+        .await
+        .map_err(|error| project_error(format!("failed to read Project directive: {error}")))?;
+    Ok(ProjectControlResult {
         project_id: session.project.id.as_str().to_string(),
         session_id: session.id.to_string(),
         command_id: command.id.to_string(),
+        directive_version: directive.as_ref().map(|directive| directive.version),
         state: receipt.state,
         effect: receipt.effect,
+        incorporated: directive
+            .as_ref()
+            .is_some_and(|directive| directive.incorporated_at.is_some()),
         generation: receipt.claimed_by_generation,
         accepted_at: receipt.accepted_at,
+        incorporated_at: directive.and_then(|directive| directive.incorporated_at),
         error: receipt.error,
-    }
+    })
 }
 
 async fn wait_for_project_receipt(
@@ -730,21 +885,69 @@ pub fn project_request_decision(
     })
 }
 
+pub fn project_acknowledge(
+    project: &str,
+    version: u32,
+    summary: String,
+) -> OpsResult<ChildDirective> {
+    let summary = summary.trim().to_string();
+    if summary.is_empty() {
+        return Err(project_error(
+            "directive acknowledgement summary cannot be empty",
+        ));
+    }
+    block_on_project(async move {
+        let store = project_store().await?;
+        let session = store
+            .get_project_session_by_project(project)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
+        let ambient = std::env::var("LFD_PROJECT_SESSION_ID").map_err(|_| {
+            project_error("directive acknowledgements must run inside the owning Project Session")
+        })?;
+        if ambient != session.id.as_str() {
+            return Err(project_error(format!(
+                "Project Session {ambient} cannot acknowledge a directive for {}",
+                session.id
+            )));
+        }
+        let (directive, incorporated) = store
+            .incorporate_child_directive(&ChildRef::Project(session.id.clone()), version, &summary)
+            .await
+            .map_err(|error| project_error(format!("failed to acknowledge directive: {error}")))?;
+        if incorporated {
+            store
+                .append_project_event(
+                    &session.id,
+                    &ProjectEventKind::DirectiveIncorporated {
+                        directive_id: directive.id.clone(),
+                        version,
+                        summary,
+                    },
+                )
+                .await
+                .map_err(|error| project_error(error.to_string()))?;
+        }
+        Ok(directive)
+    })
+}
+
 pub fn project_abandon(project: &str, reason: String) -> OpsResult<ProjectControlResult> {
     queue_project_command(project, ProjectCommandKind::Abandon { reason })
 }
 
 pub fn project_receipt(
     command_id: &str,
-    wait: bool,
+    until: Option<ChildReceiptUntil>,
     timeout: Duration,
 ) -> OpsResult<ProjectReceiptRead> {
     let command_id =
         ProjectCommandId::parse(command_id).map_err(|error| project_error(error.to_string()))?;
     block_on_project(async move {
         let store = project_store().await?;
-        let (command, timed_out) = if wait {
-            wait_for_project_receipt(&store, &command_id, timeout).await?
+        let (command, timed_out) = if let Some(until) = until {
+            wait_for_project_receipt_condition(&store, &command_id, until, timeout).await?
         } else {
             let command = store
                 .get_project_command(&command_id)
@@ -759,10 +962,53 @@ pub fn project_receipt(
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error("Project Session disappeared"))?;
         Ok(ProjectReceiptRead {
-            receipt: project_control_result(&session, &command, command.clone()),
+            receipt: project_control_result(&store, &session, &command, command.clone()).await?,
             timed_out,
         })
     })
+}
+
+async fn wait_for_project_receipt_condition(
+    store: &SharedStore,
+    command_id: &ProjectCommandId,
+    until: ChildReceiptUntil,
+    timeout: Duration,
+) -> OpsResult<(ProjectCommand, bool)> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let command = store
+            .get_project_command(command_id)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .ok_or_else(|| project_error(format!("project command {command_id} disappeared")))?;
+        if matches!(
+            command.state,
+            TaskCommandState::Failed | TaskCommandState::Superseded
+        ) {
+            return Ok((command, false));
+        }
+        let settled = match until {
+            ChildReceiptUntil::Applied => command.state.is_terminal(),
+            ChildReceiptUntil::Incorporated => store
+                .child_directive_for_command(command_id)
+                .await
+                .map_err(|error| project_error(format!("failed to read directive: {error}")))?
+                .ok_or_else(|| {
+                    project_error(format!(
+                        "project command {command_id} does not carry a directive to incorporate"
+                    ))
+                })?
+                .incorporated_at
+                .is_some(),
+        };
+        if settled {
+            return Ok((command, false));
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Ok((command, true));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 pub fn project_wait(
@@ -973,6 +1219,47 @@ mod tests {
     use crate::lf::{Cli, Commands};
     use crate::lfdb::{open_store, StorageConfig};
     use clap::Parser;
+    use std::process::Command;
+
+    #[test]
+    fn control_plane_requires_a_clean_canonical_main() {
+        let tmp = tempfile::tempdir().unwrap();
+        for args in [
+            vec!["init", "-b", "main"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            assert!(Command::new("git")
+                .args(args)
+                .current_dir(tmp.path())
+                .status()
+                .unwrap()
+                .success());
+        }
+        std::fs::write(tmp.path().join("README.md"), "hello\n").unwrap();
+        assert!(Command::new("git")
+            .args(["add", "."])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap()
+            .success());
+        assert!(Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap()
+            .success());
+
+        assert_eq!(
+            ensure_clean_main(tmp.path(), "Project").unwrap(),
+            std::fs::canonicalize(tmp.path()).unwrap()
+        );
+        std::fs::write(tmp.path().join("README.md"), "changed\n").unwrap();
+        let error = ensure_clean_main(tmp.path(), "Project").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("canonical main checkout is dirty"));
+    }
 
     /// Promotion grants residency: the spawned child must be the steerable
     /// half. A one-shot task runner would never publish an endpoint.

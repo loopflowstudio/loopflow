@@ -622,15 +622,6 @@ impl StoreObserver {
                 "Task Session {session_id} belongs to a different Wave"
             )));
         }
-        if !matches!(
-            session.supervisor,
-            crate::project_session::SessionSupervisor::Wave { ref wave_id }
-                if wave_id == &self.wave_id
-        ) {
-            return Err(crate::lfdb::StoreError::InvalidData(format!(
-                "Task Session {session_id} reports to a Project Session, not directly to this Wave"
-            )));
-        }
         let event = self
             .store
             .get_task_event(session_id, event_id)

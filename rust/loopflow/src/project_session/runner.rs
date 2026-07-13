@@ -13,7 +13,9 @@ use crate::project_session::{
     ChildEventPayload, ProjectCommand, ProjectCommandId, ProjectCommandKind, ProjectDecisionId,
     ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus, SessionSupervisor,
 };
-use crate::task::{TaskCommandEffect, TaskCommandState, TaskSessionStatus};
+use crate::task::{
+    ChildDirective, ChildRef, TaskCommandEffect, TaskCommandState, TaskSessionStatus,
+};
 
 #[derive(Debug)]
 struct PendingInput {
@@ -71,7 +73,20 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
         .await?;
 
     let observations = consume_task_observations(&store, &mut session).await?;
-    let seed = project_seed(&session, &observations);
+    let directives = store
+        .child_directives(&ChildRef::Project(session.id.clone()))
+        .await?;
+    let directive = directives
+        .iter()
+        .find(|directive| directive.version == session.current_directive_version)
+        .ok_or_else(|| {
+            anyhow!(
+                "Project Session {} has no current directive v{}",
+                session.id,
+                session.current_directive_version
+            )
+        })?;
+    let seed = project_seed(&session, directive, &observations);
     let mut prepared = crate::lf::commands::run::prepare_harness_turn(
         "project_pursue",
         &seed,
@@ -120,6 +135,12 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
         }
     };
     apply_input(&store, &session, harness.as_mut(), input).await?;
+    store
+        .mark_child_directive_applied(
+            &ChildRef::Project(session.id.clone()),
+            session.current_directive_version,
+        )
+        .await?;
 
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -706,18 +727,25 @@ async fn record_unhandled_failure(
     .await;
 }
 
-fn project_seed(session: &ProjectSession, observations: &[String]) -> String {
+fn project_seed(
+    session: &ProjectSession,
+    directive: &ChildDirective,
+    observations: &[String],
+) -> String {
     let observations = if observations.is_empty() {
         "none".to_string()
     } else {
         observations.join("\n")
     };
     format!(
-        "Pursue Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\nProject Session: {session_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThis is one clarify/pursue/mutate iteration. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Task Sessions. Do not edit repository files from the Wave home. Return a concise evidence summary; the runner decides complete, wait, repeat, or block from authoritative PM and Task state.",
+        "Pursue Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf project acknowledge {project_id} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nProject Session: {session_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThis is one clarify/pursue/mutate iteration. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Task Sessions. Do not edit repository files from the Wave home. Return a concise evidence summary; the runner decides complete, wait, repeat, or block from authoritative PM and Task state.",
         name = session.project.name,
         project_id = session.project.id.as_str(),
         wave = session.wave,
         context = session.project.context,
+        directive_version = directive.version,
+        directive_kind = directive.kind.as_str(),
+        directive_text = directive.text,
         session_id = session.id,
         iteration = session.iteration + 1,
         synced_at = session.pm_snapshot_synced_at,
@@ -816,6 +844,8 @@ mod tests {
             wave: wave.name().clone(),
             repo: "/repo".to_string(),
             pm_snapshot_synced_at: now.unix_timestamp(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
             status: ProjectSessionStatus::Running,
             status_reason: "provider active".to_string(),
             status_at: now,

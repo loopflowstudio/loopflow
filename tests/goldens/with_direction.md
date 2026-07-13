@@ -35,9 +35,8 @@ lands it:
   finish for anything a person should land by hand.
 - **`lf pr land`** — the work is done and **loopflow** lands it hands-off. Does
   everything `submit` does, then arms auto-merge so it merges when checks pass.
-  Use it in headless/auto runs where no human is gating. The wave home stays put
-  — landing never moves your worktree; a merged worker's tree is pruned when its
-  branch is deleted.
+  Use it in headless/auto runs where no human is gating. Landing never moves the
+  current worktree; a merged worker's tree is pruned when its branch is deleted.
 
 Stay in the worktree Loopflow placed for this run. If the assigned task is
 explicitly about worktree management, use `lf wt`; never create another

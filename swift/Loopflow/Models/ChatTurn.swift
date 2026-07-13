@@ -12,6 +12,46 @@ public enum ChatRole: String, Codable, Sendable, Hashable {
     case assistant
 }
 
+public enum ChildActivitySubject: String, Codable, Sendable, Hashable {
+    case project, task
+}
+
+public enum ChildActivityKind: String, Codable, Sendable, Hashable {
+    case stateChanged = "state_changed"
+    case controlApplied = "control_applied"
+    case directed
+    case incorporated
+    case decisionRequired = "decision_required"
+    case decisionResolved = "decision_resolved"
+    case pullRequestOpened = "pull_request_opened"
+    case completed
+    case failed
+}
+
+public struct ChildControlActivity: Codable, Sendable, Hashable, Identifiable {
+    public let id: String
+    public let subject: ChildActivitySubject
+    public let subjectId: String
+    public let sessionId: String
+    public let kind: ChildActivityKind
+    public let title: String
+    public let summary: String
+    public let directiveVersion: UInt32?
+    public let commandId: String?
+    public let effect: String?
+    public let decisionId: String?
+    public let options: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case id, subject, kind, title, summary, effect, options
+        case subjectId = "subject_id"
+        case sessionId = "session_id"
+        case directiveVersion = "directive_version"
+        case commandId = "command_id"
+        case decisionId = "decision_id"
+    }
+}
+
 public enum PlayheadStepKind: String, Codable, Sendable, Hashable {
     case skill, op, and, xor, or, loop
 }
@@ -223,13 +263,14 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     public let from: String?
     /// Body that produced an assistant span; nil for human/attributed turns.
     public let body: BodyProvenance?
+    public let activity: ChildControlActivity?
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, text, status, items, from, body
+        case id, role, text, status, items, from, body, activity
         case createdAt = "created_at"
     }
 
-    public init(id: String, role: ChatRole, text: String, status: Lifecycle, items: [ConversationItem], createdAt: String, from: String?, body: BodyProvenance?) {
+    public init(id: String, role: ChatRole, text: String, status: Lifecycle, items: [ConversationItem], createdAt: String, from: String?, body: BodyProvenance?, activity: ChildControlActivity?) {
         self.id = id
         self.role = role
         self.text = text
@@ -238,6 +279,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
         self.createdAt = createdAt
         self.from = from
         self.body = body
+        self.activity = activity
     }
 
     /// Monotonic sequence parsed from a `"turn-<n>"` id; used to order the thread.

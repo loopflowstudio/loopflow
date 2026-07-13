@@ -122,7 +122,8 @@ struct AttemptFailurePresentationTests {
             items: [],
             createdAt: "2026-07-10T17:53:00Z",
             from: nil,
-            body: nil
+            body: nil,
+            activity: nil
         )
 
         #expect(attemptFailurePresentations(
@@ -172,7 +173,8 @@ struct AttemptFailurePresentationTests {
             items: [],
             createdAt: "2026-07-10T17:53:00Z",
             from: nil,
-            body: body
+            body: body,
+            activity: nil
         )
     }
 

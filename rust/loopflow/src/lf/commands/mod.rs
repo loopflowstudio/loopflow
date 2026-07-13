@@ -8,7 +8,6 @@ pub mod flow;
 pub mod list;
 pub mod memory;
 pub mod ops;
-pub mod playhead;
 pub mod radio;
 pub mod run;
 pub mod runs;

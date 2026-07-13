@@ -2,6 +2,16 @@
 import SwiftUI
 import Loopflow
 
+struct WaveComposerPrefill: Equatable {
+    let id: UUID
+    let text: String
+}
+
+struct WaveWorkSelection: Equatable {
+    let kind: ChildActivitySubject
+    let id: String
+}
+
 /// The wave detail pane: a header over the local wave plan and live WaveChat
 /// transcript. The wave still runs in its own `lf serve` process; Loopflow frames
 /// the objective and projects around the vendor-owned conversation.
@@ -11,6 +21,8 @@ struct WaveDetailPane: View {
     let onClose: () -> Void
 
     @Environment(\.palette) private var palette
+    @State private var selection: WaveWorkSelection?
+    @State private var prefill: WaveComposerPrefill?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,14 +32,30 @@ struct WaveDetailPane: View {
                 WavePlanView(
                     plan: wave.plan ?? WavePlan(objective: ""),
                     wave: wave,
-                    repoPath: repoPath
+                    repoPath: repoPath,
+                    selection: $selection,
+                    onTellWave: tellWave
                 )
                 .frame(minWidth: 230, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
 
-                WaveChatView(repoPath: repoPath, waveName: wave.name)
+                WaveChatView(
+                    repoPath: repoPath,
+                    waveName: wave.name,
+                    prefill: prefill,
+                    onSelectChild: { selection = $0 }
+                )
                     .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+
+    private func tellWave(_ selection: WaveWorkSelection) {
+        self.selection = selection
+        let noun = selection.kind == .project ? "Project" : "Task"
+        prefill = WaveComposerPrefill(
+            id: UUID(),
+            text: "Regarding \(noun) \(selection.id): "
+        )
     }
 
     private var header: some View {
@@ -64,42 +92,26 @@ private struct WavePlanView: View {
     let plan: WavePlan
     let wave: WaveViewModel
     let repoPath: String
+    @Binding var selection: WaveWorkSelection?
+    let onTellWave: (WaveWorkSelection) -> Void
 
     @Environment(\.palette) private var palette
-    @State private var runs: [Run] = []
-    @State private var backlog: [BacklogItem] = []
-    @State private var backlogUnavailable = false
+    @State private var workMap: WaveWorkMap?
 
     private var identity: String { "\(repoPath)|\(wave.id)" }
-
-    private var activeRuns: [Run] {
-        runs.filter {
-            switch $0.status {
-            case .pending, .running, .waiting: true
-            default: false
-            }
-        }
-    }
-
-    private var openPullRequests: [Run] {
-        runs.filter { run in
-            run.pr?.state == .open || run.pr?.state == .draft
-        }
-    }
-
-    private var filedBacklog: [BacklogItem] {
-        let running = Set(activeRuns.compactMap { $0.task?.normalizedTaskTitle })
-        return backlog.filter { !running.contains($0.name.normalizedTaskTitle) }
-    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 objective
                 projects
-                openPRs
-                sessions
-                backlogSection
+                if let selection, let workMap {
+                    WaveWorkInspector(
+                        selection: selection,
+                        workMap: workMap,
+                        onTellWave: onTellWave
+                    )
+                }
             }
             .padding(Spacing.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -107,26 +119,21 @@ private struct WavePlanView: View {
         .background(palette.background)
         .task(id: identity) {
             while !Task.isCancelled {
-                await refreshRuns()
+                await refreshWorkMap()
                 try? await Task.sleep(for: .seconds(5))
-            }
-        }
-        .task(id: "\(identity)|backlog") {
-            while !Task.isCancelled {
-                await refreshBacklog()
-                try? await Task.sleep(for: .seconds(60))
             }
         }
     }
 
     private var objective: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
+        let text = workMap?.objective ?? plan.objective
+        return VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Objective")
                 .font(Typography.caption(10))
                 .fontWeight(.medium)
                 .foregroundStyle(palette.textSecondary)
 
-            Text(plan.objective.isEmpty ? "No objective written yet." : plan.objective)
+            Text(text.isEmpty ? "No objective written yet." : text)
                 .font(Typography.body(14))
                 .foregroundStyle(palette.text)
                 .lineSpacing(3)
@@ -135,14 +142,15 @@ private struct WavePlanView: View {
     }
 
     private var projects: some View {
-        VStack(alignment: .leading, spacing: Spacing.md) {
+        let projectCount = workMap?.projects.count ?? plan.projects.count
+        return VStack(alignment: .leading, spacing: Spacing.md) {
             HStack(spacing: Spacing.sm) {
                 Text("Projects")
                     .font(Typography.caption(10))
                     .fontWeight(.medium)
                     .foregroundStyle(palette.textSecondary)
 
-                Text("\(plan.projects.count)")
+                Text("\(projectCount)")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                     .padding(.horizontal, Spacing.sm)
@@ -151,7 +159,16 @@ private struct WavePlanView: View {
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
             }
 
-            if plan.projects.isEmpty {
+            if let workMap, !workMap.projects.isEmpty {
+                LazyVStack(alignment: .leading, spacing: Spacing.md) {
+                    ForEach(workMap.projects) { project in
+                        WaveProjectWorkView(
+                            project: project,
+                            selection: $selection
+                        )
+                    }
+                }
+            } else if plan.projects.isEmpty {
                 Text("No live projects.")
                     .font(Typography.caption())
                     .foregroundStyle(palette.textSecondary)
@@ -165,151 +182,263 @@ private struct WavePlanView: View {
         }
     }
 
-    private var openPRs: some View {
-        operationalSection(title: "Open PRs", count: openPullRequests.count) {
-            if openPullRequests.isEmpty {
-                emptyOperationalRow("No open PRs.")
-            } else {
-                ForEach(openPullRequests) { run in
-                    if let pr = run.pr {
-                        Link(destination: pr.url) {
-                            operationalRow(
-                                icon: "arrow.triangle.pull",
-                                title: pr.title ?? run.task ?? run.branch ?? run.flow,
-                                detail: run.branch ?? pr.url.absoluteString
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-
-    private var sessions: some View {
-        operationalSection(title: "Active sessions", count: activeRuns.count) {
-            if activeRuns.isEmpty {
-                emptyOperationalRow("No hands running.")
-            } else {
-                ForEach(activeRuns) { run in
-                    operationalRow(
-                        icon: "hand.raised",
-                        title: run.task ?? run.flow,
-                        detail: [run.flow, run.loopPassDetail, run.worktree]
-                            .compactMap { $0 }
-                            .joined(separator: " · ")
-                    )
-                }
-            }
-        }
-    }
-
-    private var backlogSection: some View {
-        operationalSection(title: "Backlog", count: filedBacklog.count) {
-            if backlogUnavailable {
-                emptyOperationalRow("Backlog unavailable — connect Linear for this wave.")
-            } else if filedBacklog.isEmpty {
-                emptyOperationalRow("No filed work waiting.")
-            } else {
-                ForEach(filedBacklog) { item in
-                    operationalRow(
-                        icon: "tray",
-                        title: item.name,
-                        detail: item.project.map { "project:\($0)" } ?? ""
-                    )
-                }
-            }
-        }
-    }
-
-    private func operationalSection<Content: View>(
-        title: String,
-        count: Int,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(spacing: Spacing.sm) {
-                Text(title)
-                    .font(Typography.caption(10))
-                    .fontWeight(.medium)
-                    .foregroundStyle(palette.textSecondary)
-                Text("\(count)")
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-                    .padding(.horizontal, Spacing.sm)
-                    .padding(.vertical, Spacing.xxs)
-                    .background(palette.surfaceMuted)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
-            }
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                content()
-            }
-        }
-    }
-
-    private func operationalRow(icon: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: icon)
-                .font(Typography.caption(11))
-                .foregroundStyle(palette.accent)
-                .frame(width: 14)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(title)
-                    .font(Typography.caption(12))
-                    .foregroundStyle(palette.text)
-                    .lineLimit(2)
-                if !detail.isEmpty {
-                    Text(detail)
-                        .font(Typography.caption(10))
-                        .foregroundStyle(palette.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Spacing.sm)
-        .background(palette.surfaceMuted.opacity(0.65))
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
-        .accessibilityElement(children: .combine)
-    }
-
-    private func emptyOperationalRow(_ text: String) -> some View {
-        Text(text)
-            .font(Typography.caption())
-            .foregroundStyle(palette.textSecondary)
-    }
-
-    private func refreshRuns() async {
+    private func refreshWorkMap() async {
         if let snapshot = try? await RegistryQueryLocal.shared.status(
             wave: wave.name,
             waveId: wave.id,
             cwd: repoPath
         ) {
-            runs = snapshot.runs
-        }
-    }
-
-    private func refreshBacklog() async {
-        do {
-            backlog = try await RegistryQueryLocal.shared.backlog(wave: wave.name, cwd: repoPath)
-            backlogUnavailable = false
-        } catch {
-            backlogUnavailable = true
+            workMap = snapshot.workMap
         }
     }
 }
 
-private extension String {
-    var normalizedTaskTitle: String {
-        trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+private struct WaveProjectWorkView: View {
+    let project: WaveProjectWork
+    @Binding var selection: WaveWorkSelection?
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text(project.project.name)
+                    .font(Typography.sectionTitle(17))
+                    .foregroundStyle(palette.text)
+                Spacer()
+                Text(project.runtime?.status ?? "unstarted")
+                    .font(Typography.caption(10))
+                    .foregroundStyle(palette.textSecondary)
+            }
+
+            if !project.project.definition.isEmpty {
+                Text(project.project.definition)
+                    .font(Typography.body(13))
+                    .foregroundStyle(palette.textSecondary)
+                    .lineSpacing(2)
+                    .textSelection(.enabled)
+            }
+
+            if !project.project.krs.isEmpty {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(project.project.krs) { kr in
+                        proofRow(text: kr.text, holds: kr.holds)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                ForEach(project.tasks) { task in
+                    WaveTaskWorkView(
+                        task: task,
+                        selection: $selection
+                    )
+                }
+            }
+
+            Text("Next: \(project.nextMove.owner.rawValue) · \(project.nextMove.reason)")
+                .font(Typography.caption(10))
+                .foregroundStyle(palette.textSecondary)
+            if let directive = project.directive {
+                directiveStatus(directive)
+            }
+        }
+        .padding(Spacing.md)
+        .background(palette.surfaceMuted.opacity(0.65))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        .overlay {
+            RoundedRectangle(cornerRadius: CornerRadius.md)
+                .stroke(isSelected ? palette.accent : Color.clear, lineWidth: 1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selection = WaveWorkSelection(kind: .project, id: project.project.slug)
+        }
+    }
+
+    private var isSelected: Bool {
+        selection == WaveWorkSelection(kind: .project, id: project.project.slug)
+    }
+
+    private func directiveStatus(_ directive: WorkDirectiveSnapshot) -> some View {
+        Text("Direction v\(directive.version) · \(directive.incorporatedAt == nil ? "pending incorporation" : "incorporated")")
+            .font(Typography.caption(10))
+            .foregroundStyle(directive.incorporatedAt == nil ? palette.textSecondary : palette.accent)
+    }
+
+    private func proofRow(text: String, holds: Bool) -> some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: holds ? "checkmark.circle.fill" : "circle")
+                .font(Typography.caption(11))
+                .foregroundStyle(holds ? palette.accent : palette.textSecondary)
+                .frame(width: 14)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(Typography.caption(12))
+                .foregroundStyle(palette.text)
+                .lineSpacing(2)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(text)
+        .accessibilityValue(holds ? "Holds" : "Open")
     }
 }
 
-private extension Run {
-    var loopPassDetail: String? {
-        stepIndex > 0 ? "pass \(stepIndex)" : nil
+private struct WaveTaskWorkView: View {
+    let task: WaveTaskWork
+    @Binding var selection: WaveWorkSelection?
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: task.task.completed ? "checkmark.circle.fill" : "circle")
+                .font(Typography.caption(11))
+                .foregroundStyle(task.task.completed ? palette.accent : palette.textSecondary)
+                .frame(width: 14)
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                    Text(task.task.identifier)
+                        .font(Typography.caption(10))
+                        .foregroundStyle(palette.textSecondary)
+                    Text(task.task.name)
+                        .font(Typography.caption(12))
+                        .foregroundStyle(palette.text)
+                        .lineLimit(2)
+                }
+                Text("\(task.runtime?.status ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
+                    .font(Typography.caption(10))
+                    .foregroundStyle(palette.textSecondary)
+                if let directive = task.directive {
+                    Text("direction v\(directive.version) · \(directive.incorporatedAt == nil ? "pending" : "incorporated")")
+                        .font(Typography.caption(10))
+                        .foregroundStyle(directive.incorporatedAt == nil ? palette.textSecondary : palette.accent)
+                }
+                if let url = task.delivery?.prURL {
+                    Link("PR #\(task.delivery?.prNumber.map(String.init) ?? "—")", destination: url)
+                        .font(Typography.caption(10))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Spacing.sm)
+        .background(palette.background.opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+        .overlay {
+            RoundedRectangle(cornerRadius: CornerRadius.sm)
+                .stroke(isSelected ? palette.accent : Color.clear, lineWidth: 1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selection = WaveWorkSelection(kind: .task, id: task.task.identifier)
+        }
+    }
+
+    private var isSelected: Bool {
+        selection == WaveWorkSelection(kind: .task, id: task.task.identifier)
+    }
+}
+
+private struct WaveWorkInspector: View {
+    let selection: WaveWorkSelection
+    let workMap: WaveWorkMap
+    let onTellWave: (WaveWorkSelection) -> Void
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack {
+                Text("Selected work")
+                    .font(Typography.caption(10))
+                    .foregroundStyle(palette.textSecondary)
+                Spacer()
+                Button("Tell Wave about this") { onTellWave(selection) }
+                    .buttonStyle(.borderless)
+                    .font(Typography.caption(10))
+            }
+            if let project {
+                Text(project.project.name)
+                    .font(Typography.sectionTitle(15))
+                    .foregroundStyle(palette.text)
+                details(
+                    directive: project.directive,
+                    status: project.runtime?.status ?? "unstarted",
+                    reason: project.nextMove.reason,
+                    provider: project.runtime?.provider,
+                    location: nil,
+                    delivery: nil
+                )
+            } else if let task {
+                Text("\(task.task.identifier) · \(task.task.name)")
+                    .font(Typography.sectionTitle(15))
+                    .foregroundStyle(palette.text)
+                details(
+                    directive: task.directive,
+                    status: task.runtime?.status ?? "unstarted",
+                    reason: task.nextMove.reason,
+                    provider: task.runtime?.provider,
+                    location: task.runtime.map { "\($0.worktree)\n\($0.branch)" },
+                    delivery: task.delivery
+                )
+            }
+        }
+        .padding(Spacing.md)
+        .background(palette.surfaceMuted)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+    }
+
+    private var project: WaveProjectWork? {
+        guard selection.kind == .project else { return nil }
+        return workMap.projects.first { $0.project.slug == selection.id || $0.project.id == selection.id }
+    }
+
+    private var task: WaveTaskWork? {
+        guard selection.kind == .task else { return nil }
+        return workMap.projects
+            .flatMap(\.tasks)
+            .first { $0.task.identifier == selection.id || $0.task.id == selection.id }
+    }
+
+    @ViewBuilder
+    private func details(
+        directive: WorkDirectiveSnapshot?,
+        status: String,
+        reason: String,
+        provider: String?,
+        location: String?,
+        delivery: TaskDeliverySnapshot?
+    ) -> some View {
+        Text("\(status) · \(reason)")
+            .font(Typography.caption(11))
+            .foregroundStyle(palette.textSecondary)
+        if let directive {
+            Text("Direction v\(directive.version)")
+                .font(Typography.caption(10))
+                .foregroundStyle(palette.textSecondary)
+            Text(directive.text)
+                .font(Typography.body(12))
+                .foregroundStyle(palette.text)
+                .textSelection(.enabled)
+            Text(directive.incorporatedAt == nil ? "Awaiting incorporation" : "Incorporated")
+                .font(Typography.caption(10))
+                .foregroundStyle(directive.incorporatedAt == nil ? palette.textSecondary : palette.accent)
+        }
+        if let provider {
+            Text("Provider · \(provider)")
+                .font(Typography.caption(10))
+                .foregroundStyle(palette.textSecondary)
+        }
+        if let location {
+            Text(location)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(palette.textSecondary)
+                .textSelection(.enabled)
+        }
+        if let url = delivery?.prURL {
+            Link("PR #\(delivery?.prNumber.map(String.init) ?? "—")", destination: url)
+                .font(Typography.caption(10))
+        }
     }
 }
 

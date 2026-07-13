@@ -313,6 +313,10 @@ const ALL_MIGRATIONS: &[Migration] = &[
         version: "067_project_sessions",
         sql: include_str!("migrations/067_project_sessions.sql"),
     },
+    Migration {
+        version: "068_child_directives",
+        sql: include_str!("migrations/068_child_directives.sql"),
+    },
 ];
 
 /// Migrations that rename or drop schema objects some dbs never had (the

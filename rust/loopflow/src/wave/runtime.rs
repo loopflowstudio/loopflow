@@ -1044,9 +1044,16 @@ impl WaveRuntime {
         if inner.tasks.contains_key(&pending.id) {
             return false;
         }
-        inner.journal.append(|_| EventKind::TaskObserved {
+        let event = inner.journal.append(|_| EventKind::TaskObserved {
             observation: observation.clone(),
         });
+        let mut turn = ChatTurn::user(format!("turn-{}", event.seq), String::new());
+        turn.created_at = event.at_rfc3339();
+        turn.from = Some("task".to_string());
+        turn.activity = Some(crate::chat::turns::ChildControlActivity::from_task(
+            &observation,
+        ));
+        self.commit_locked(&mut inner, turn);
         inner.messages.insert(pending.id.clone(), pending.clone());
         inner.tasks.insert(pending.id.clone(), observation.clone());
         inner.pending_messages.push(pending);
@@ -1061,9 +1068,16 @@ impl WaveRuntime {
         if inner.projects.contains_key(&pending.id) {
             return false;
         }
-        inner.journal.append(|_| EventKind::ProjectObserved {
+        let event = inner.journal.append(|_| EventKind::ProjectObserved {
             observation: observation.clone(),
         });
+        let mut turn = ChatTurn::user(format!("turn-{}", event.seq), String::new());
+        turn.created_at = event.at_rfc3339();
+        turn.from = Some("project".to_string());
+        turn.activity = Some(crate::chat::turns::ChildControlActivity::from_project(
+            &observation,
+        ));
+        self.commit_locked(&mut inner, turn);
         inner.messages.insert(pending.id.clone(), pending.clone());
         inner
             .projects
@@ -1256,6 +1270,7 @@ impl WaveRuntime {
             created_at: event.at_rfc3339(),
             from: None,
             body,
+            activity: None,
         };
         let _ = self.turn_tx.send(TurnFrame::share(open.clone()));
         inner.open = Some(OpenTurn {
@@ -1490,6 +1505,7 @@ mod tests {
             created_at: String::new(),
             from: None,
             body: None,
+            activity: None,
         }
     }
 

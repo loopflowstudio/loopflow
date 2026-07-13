@@ -31,10 +31,10 @@ use crate::project_session::{
     ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
 use crate::task::{
-    BoundaryResult, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
-    PullRequestRef, TaskCommand, TaskCommandEffect, TaskCommandId, TaskCommandKind,
-    TaskCommandSource, TaskCommandState, TaskEvent, TaskEventKind, TaskProcess, TaskSession,
-    TaskSessionId, TaskSessionStatus,
+    BoundaryResult, ChildDirective, ChildDirectiveId, ChildRef, DirectiveKind, LinearIssueId,
+    LinearIssueRef, LinearProjectId, LinearProjectRef, PullRequestRef, TaskCommand,
+    TaskCommandEffect, TaskCommandId, TaskCommandKind, TaskCommandSource, TaskCommandState,
+    TaskEvent, TaskEventKind, TaskProcess, TaskSession, TaskSessionId, TaskSessionStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -1479,19 +1479,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let parameters = task_session_params(session);
         conn.execute(
-            "INSERT INTO task_sessions (
-                id, issue_id, issue_identifier, issue_title, issue_description,
-                project_id, project_slug, project_name, project_context, wave_id, wave_name,
-                status, status_reason, status_at, worktree, branch, base_commit,
-                agent, provider, provider_session_id, process_generation, process_pid,
-                process_tmux_name, process_started_at, pr_number, pr_url,
-                created_at, updated_at, pm_snapshot_synced_at,
-                pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id
-             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31, ?32, ?33
-             )",
+            TASK_SESSION_INSERT,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
         Ok(())
@@ -1515,21 +1503,37 @@ impl SqliteStore {
         }
         let parameters = task_session_params(session);
         transaction.execute(
-            "INSERT INTO task_sessions (
-                id, issue_id, issue_identifier, issue_title, issue_description,
-                project_id, project_slug, project_name, project_context, wave_id, wave_name,
-                status, status_reason, status_at, worktree, branch, base_commit,
-                agent, provider, provider_session_id, process_generation, process_pid,
-                process_tmux_name, process_started_at, pr_number, pr_url,
-                created_at, updated_at, pm_snapshot_synced_at,
-                pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id
-             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31, ?32, ?33
-             )",
+            TASK_SESSION_INSERT,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
+        transaction.commit()?;
+        Ok(true)
+    }
+
+    pub fn reserve_task_session_with_directive(
+        &self,
+        session: &TaskSession,
+        directive: &ChildDirective,
+        max_active: u32,
+    ) -> StoreResult<bool> {
+        ensure_directive_target(directive, "task", session.id.as_str())?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let active: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM task_sessions
+             WHERE wave_id = ?1 AND status IN ('created', 'starting', 'running')",
+            params![session.wave_id],
+            |row| row.get(0),
+        )?;
+        if active >= i64::from(max_active) {
+            return Ok(false);
+        }
+        let parameters = task_session_params(session);
+        transaction.execute(
+            TASK_SESSION_INSERT,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )?;
+        insert_child_directive(&transaction, directive)?;
         transaction.commit()?;
         Ok(true)
     }
@@ -1753,6 +1757,30 @@ impl SqliteStore {
         Ok(superseded)
     }
 
+    pub fn insert_task_command_with_directive(
+        &self,
+        command: &TaskCommand,
+        directive: &ChildDirective,
+    ) -> StoreResult<Vec<TaskCommandId>> {
+        ensure_directive_target(directive, "task", command.session_id.as_str())?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let superseded =
+            supersede_child_commands(&transaction, "task", command.session_id.as_str())?;
+        insert_task_command(&transaction, command)?;
+        insert_child_directive(&transaction, directive)?;
+        transaction.execute(
+            "UPDATE task_sessions SET current_directive_version=?2, updated_at=?3 WHERE id=?1",
+            params![
+                command.session_id.as_str(),
+                i64::from(directive.version),
+                OffsetDateTime::now_utc().unix_timestamp(),
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(superseded)
+    }
+
     pub fn task_command(&self, command_id: &TaskCommandId) -> StoreResult<Option<TaskCommand>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
@@ -1893,20 +1921,22 @@ impl SqliteStore {
         command_id: &TaskCommandId,
         effect: Option<TaskCommandEffect>,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let accepted_at = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64;
+        let changed = transaction.execute(
             "UPDATE child_commands
              SET state = 'accepted', effect = ?1, accepted_at = ?2, error = NULL
              WHERE target_kind = 'task' AND id = ?3
                AND state IN ('persisted', 'claimed')",
             params![
                 effect.map(TaskCommandEffect::as_str),
-                time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64,
+                accepted_at,
                 command_id.as_str()
             ],
         )?;
         if changed == 0 {
-            let exists: bool = conn.query_row(
+            let exists: bool = transaction.query_row(
                 "SELECT EXISTS(
                     SELECT 1 FROM child_commands
                     WHERE target_kind = 'task' AND id = ?1
@@ -1922,6 +1952,12 @@ impl SqliteStore {
                 Err(StoreError::NotFound)
             };
         }
+        transaction.execute(
+            "UPDATE child_directives SET applied_at=COALESCE(applied_at, ?1)
+             WHERE command_id=?2",
+            params![accepted_at, command_id.as_str()],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -2005,6 +2041,22 @@ impl SqliteStore {
                 },
                 created_at,
             )?;
+            if matches!(session.supervisor, SessionSupervisor::Project { .. }) {
+                insert_observation(
+                    &transaction,
+                    &SessionSupervisor::Wave {
+                        wave_id: session.wave_id,
+                    },
+                    &ChildSessionRef::Task {
+                        session_id: session_id.clone(),
+                    },
+                    event_id,
+                    &ChildEventPayload::Task {
+                        event: kind.clone(),
+                    },
+                    created_at,
+                )?;
+            }
         }
         transaction.commit()?;
         Ok(TaskEvent {
@@ -2055,23 +2107,31 @@ impl SqliteStore {
     pub fn insert_project_session(&self, session: &ProjectSession) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO project_sessions (
-                id, project_id, project_slug, project_name, project_context,
-                wave_id, wave_name, repo, pm_snapshot_synced_at, status,
-                status_reason, status_at, iteration, task_event_cursor,
-                state_fingerprint, agent, provider, provider_session_id,
-                process_generation, process_pid, process_tmux_name,
-                process_started_at, created_at, updated_at
-             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
-             )",
+            PROJECT_SESSION_INSERT,
             rusqlite::params_from_iter(
                 project_session_params(session)
                     .iter()
                     .map(|value| value.as_ref()),
             ),
         )?;
+        Ok(())
+    }
+
+    pub fn insert_project_session_with_directive(
+        &self,
+        session: &ProjectSession,
+        directive: &ChildDirective,
+    ) -> StoreResult<()> {
+        ensure_directive_target(directive, "project", session.id.as_str())?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let parameters = project_session_params(session);
+        transaction.execute(
+            PROJECT_SESSION_INSERT,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )?;
+        insert_child_directive(&transaction, directive)?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -2279,6 +2339,30 @@ impl SqliteStore {
         Ok(superseded)
     }
 
+    pub fn insert_project_command_with_directive(
+        &self,
+        command: &ProjectCommand,
+        directive: &ChildDirective,
+    ) -> StoreResult<Vec<ProjectCommandId>> {
+        ensure_directive_target(directive, "project", command.session_id.as_str())?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let superseded =
+            supersede_child_commands(&transaction, "project", command.session_id.as_str())?;
+        insert_project_command(&transaction, command)?;
+        insert_child_directive(&transaction, directive)?;
+        transaction.execute(
+            "UPDATE project_sessions SET current_directive_version=?2, updated_at=?3 WHERE id=?1",
+            params![
+                command.session_id.as_str(),
+                i64::from(directive.version),
+                OffsetDateTime::now_utc().unix_timestamp(),
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(superseded)
+    }
+
     pub fn project_command(
         &self,
         command_id: &ProjectCommandId,
@@ -2354,15 +2438,17 @@ impl SqliteStore {
         command_id: &ProjectCommandId,
         effect: Option<TaskCommandEffect>,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let accepted_at = OffsetDateTime::now_utc().unix_timestamp_nanos() as i64;
+        let changed = transaction.execute(
             "UPDATE child_commands SET state='accepted', effect=?1,
                 accepted_at=?2, error=NULL
              WHERE target_kind='project' AND id=?3
                AND state IN ('persisted', 'claimed')",
             params![
                 effect.map(TaskCommandEffect::as_str),
-                OffsetDateTime::now_utc().unix_timestamp_nanos() as i64,
+                accepted_at,
                 command_id.as_str(),
             ],
         )?;
@@ -2371,6 +2457,12 @@ impl SqliteStore {
                 "project command {command_id} is already resolved"
             )));
         }
+        transaction.execute(
+            "UPDATE child_directives SET applied_at=COALESCE(applied_at, ?1)
+             WHERE command_id=?2",
+            params![accepted_at, command_id.as_str()],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -2573,6 +2665,137 @@ impl SqliteStore {
         )?;
         transaction.commit()?;
         Ok(!exists)
+    }
+
+    pub fn child_directives(&self, target: &ChildRef) -> StoreResult<Vec<ChildDirective>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT id, target_kind, target_id, version, kind, text, source_json,
+                    command_id, issued_at, applied_at, incorporated_at, incorporated_summary
+             FROM child_directives
+             WHERE target_kind=?1 AND target_id=?2
+             ORDER BY version",
+        )?;
+        let rows = statement.query_map(
+            params![target.target_kind(), target.target_id()],
+            map_child_directive_row,
+        )?;
+        let mut directives = Vec::new();
+        for row in rows {
+            directives.push(row?);
+        }
+        Ok(directives)
+    }
+
+    pub fn child_directive_for_command(
+        &self,
+        command_id: &TaskCommandId,
+    ) -> StoreResult<Option<ChildDirective>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT id, target_kind, target_id, version, kind, text, source_json,
+                    command_id, issued_at, applied_at, incorporated_at, incorporated_summary
+             FROM child_directives WHERE command_id=?1",
+            params![command_id.as_str()],
+            map_child_directive_row,
+        )
+        .optional()
+        .map_err(StoreError::from)
+    }
+
+    pub fn mark_child_directive_applied(&self, target: &ChildRef, version: u32) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE child_directives SET applied_at=COALESCE(applied_at, ?1)
+             WHERE target_kind=?2 AND target_id=?3 AND version=?4",
+            params![
+                OffsetDateTime::now_utc().unix_timestamp_nanos() as i64,
+                target.target_kind(),
+                target.target_id(),
+                i64::from(version),
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn incorporate_child_directive(
+        &self,
+        target: &ChildRef,
+        version: u32,
+        summary: &str,
+    ) -> StoreResult<(ChildDirective, bool)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let mut directive = transaction
+            .query_row(
+                "SELECT id, target_kind, target_id, version, kind, text, source_json,
+                        command_id, issued_at, applied_at, incorporated_at, incorporated_summary
+                 FROM child_directives
+                 WHERE target_kind=?1 AND target_id=?2 AND version=?3",
+                params![target.target_kind(), target.target_id(), i64::from(version)],
+                map_child_directive_row,
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        let (table, current): (&str, i64) = match target {
+            ChildRef::Project(_) => (
+                "project_sessions",
+                transaction.query_row(
+                    "SELECT current_directive_version FROM project_sessions WHERE id=?1",
+                    params![target.target_id()],
+                    |row| row.get(0),
+                )?,
+            ),
+            ChildRef::Task(_) => (
+                "task_sessions",
+                transaction.query_row(
+                    "SELECT current_directive_version FROM task_sessions WHERE id=?1",
+                    params![target.target_id()],
+                    |row| row.get(0),
+                )?,
+            ),
+        };
+        if current != i64::from(version) {
+            return Err(StoreError::InvalidData(format!(
+                "directive v{version} is not current; {table} {} is at v{current}",
+                target.target_id()
+            )));
+        }
+        if directive.incorporated_at.is_some() {
+            return Ok((directive, false));
+        }
+        let now = OffsetDateTime::now_utc();
+        transaction.execute(
+            "UPDATE child_directives
+             SET incorporated_at=?1, incorporated_summary=?2
+             WHERE target_kind=?3 AND target_id=?4 AND version=?5",
+            params![
+                now.unix_timestamp_nanos() as i64,
+                summary,
+                target.target_kind(),
+                target.target_id(),
+                i64::from(version),
+            ],
+        )?;
+        match target {
+            ChildRef::Project(_) => transaction.execute(
+                "UPDATE project_sessions
+                 SET incorporated_directive_version=?2, updated_at=?3 WHERE id=?1",
+                params![target.target_id(), i64::from(version), now.unix_timestamp()],
+            )?,
+            ChildRef::Task(_) => transaction.execute(
+                "UPDATE task_sessions
+                 SET incorporated_directive_version=?2, updated_at=?3 WHERE id=?1",
+                params![target.target_id(), i64::from(version), now.unix_timestamp()],
+            )?,
+        };
+        transaction.commit()?;
+        directive.incorporated_at = Some(now);
+        directive.incorporated_summary = Some(summary.to_string());
+        Ok((directive, true))
     }
 
     // Run ledger (`run_events`): the machine-grain, append-only record of
@@ -3228,6 +3451,20 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
     })
 }
 
+const TASK_SESSION_INSERT: &str = "INSERT INTO task_sessions (
+    id, issue_id, issue_identifier, issue_title, issue_description,
+    project_id, project_slug, project_name, project_context, wave_id, wave_name,
+    status, status_reason, status_at, worktree, branch, base_commit,
+    agent, provider, provider_session_id, process_generation, process_pid,
+    process_tmux_name, process_started_at, pr_number, pr_url,
+    created_at, updated_at, pm_snapshot_synced_at,
+    pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id,
+    current_directive_version, incorporated_directive_version
+) VALUES (
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+    ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
+    ?29, ?30, ?31, ?32, ?33, ?34, ?35
+)";
 const TASK_SESSION_COLUMNS: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
     project_id, project_slug, project_name, project_context, wave_id, wave_name,
@@ -3235,7 +3472,8 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
-    pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id
+    pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id,
+    current_directive_version, incorporated_directive_version
     FROM task_sessions";
 const TASK_SESSION_SELECT: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
@@ -3244,7 +3482,8 @@ const TASK_SESSION_SELECT: &str = "SELECT
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
-    pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id
+    pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id,
+    current_directive_version, incorporated_directive_version
     FROM task_sessions WHERE id = ?1";
 const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
@@ -3255,12 +3494,143 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     process_tmux_name=?23, process_started_at=?24, pr_number=?25,
     pr_url=?26, created_at=?27, updated_at=?28,
     pm_snapshot_synced_at=?29, pm_snapshot_warning=?30,
-    pm_writeback_json=?31, supervisor_kind=?32, supervisor_id=?33
+    pm_writeback_json=?31, supervisor_kind=?32, supervisor_id=?33,
+    current_directive_version=?34, incorporated_directive_version=?35
     WHERE id=?1";
 const TASK_COMMAND_SELECT: &str = "SELECT
     id, session_id, source_json, kind_json, created_at,
     claimed_by_generation, accepted_at, state, effect, error
     FROM child_commands WHERE target_kind = 'task' AND id = ?1";
+
+fn ensure_directive_target(
+    directive: &ChildDirective,
+    target_kind: &str,
+    target_id: &str,
+) -> StoreResult<()> {
+    if directive.target.target_kind() != target_kind || directive.target.target_id() != target_id {
+        return Err(StoreError::InvalidData(format!(
+            "directive {} targets {} {}, expected {target_kind} {target_id}",
+            directive.id,
+            directive.target.target_kind(),
+            directive.target.target_id()
+        )));
+    }
+    Ok(())
+}
+
+fn insert_child_directive(conn: &Connection, directive: &ChildDirective) -> StoreResult<()> {
+    conn.execute(
+        "INSERT INTO child_directives (
+            id, target_kind, target_id, version, kind, text, source_json,
+            command_id, issued_at, applied_at, incorporated_at, incorporated_summary
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            directive.id.as_str(),
+            directive.target.target_kind(),
+            directive.target.target_id(),
+            i64::from(directive.version),
+            directive.kind.as_str(),
+            directive.text,
+            serde_json::to_string(&directive.source)?,
+            directive.command_id.as_ref().map(TaskCommandId::as_str),
+            directive.issued_at.unix_timestamp_nanos() as i64,
+            directive
+                .applied_at
+                .map(|at| at.unix_timestamp_nanos() as i64),
+            directive
+                .incorporated_at
+                .map(|at| at.unix_timestamp_nanos() as i64),
+            directive.incorporated_summary,
+        ],
+    )?;
+    Ok(())
+}
+
+fn supersede_child_commands(
+    conn: &Connection,
+    target_kind: &str,
+    target_id: &str,
+) -> StoreResult<Vec<TaskCommandId>> {
+    let superseded = {
+        let mut statement = conn.prepare(
+            "SELECT id FROM child_commands
+             WHERE target_kind=?1 AND session_id=?2
+               AND state IN ('persisted', 'claimed')
+             ORDER BY created_at, id",
+        )?;
+        let rows = statement.query_map(params![target_kind, target_id], |row| {
+            Ok(TaskCommandId::from_raw(row.get::<_, String>(0)?))
+        })?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row?);
+        }
+        ids
+    };
+    conn.execute(
+        "UPDATE child_commands SET state='superseded', effect=NULL, error=NULL
+         WHERE target_kind=?1 AND session_id=?2
+           AND state IN ('persisted', 'claimed')",
+        params![target_kind, target_id],
+    )?;
+    Ok(superseded)
+}
+
+fn map_child_directive_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChildDirective> {
+    let target_kind: String = row.get(1)?;
+    let target_id: String = row.get(2)?;
+    let target = match target_kind.as_str() {
+        "project" => ChildRef::Project(ProjectSessionId::from_raw(target_id)),
+        "task" => ChildRef::Task(TaskSessionId::from_raw(target_id)),
+        value => {
+            return Err(invalid_column(
+                1,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown directive target {value:?}"),
+                ),
+            ))
+        }
+    };
+    let kind = match row.get::<_, String>(4)?.as_str() {
+        "initial" => DirectiveKind::Initial,
+        "replacement" => DirectiveKind::Replacement,
+        "work_revised" => DirectiveKind::WorkRevised,
+        value => {
+            return Err(invalid_column(
+                4,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown directive kind {value:?}"),
+                ),
+            ))
+        }
+    };
+    let source_json: String = row.get(6)?;
+    let applied_at = row
+        .get::<_, Option<i64>>(9)?
+        .map(|value| task_command_datetime(9, value))
+        .transpose()?;
+    let incorporated_at = row
+        .get::<_, Option<i64>>(10)?
+        .map(|value| task_command_datetime(10, value))
+        .transpose()?;
+    Ok(ChildDirective {
+        id: ChildDirectiveId::from_raw(row.get::<_, String>(0)?),
+        target,
+        version: row.get::<_, i64>(3)? as u32,
+        kind,
+        text: row.get(5)?,
+        source: serde_json::from_str(&source_json).map_err(|error| invalid_column(6, error))?,
+        command_id: row
+            .get::<_, Option<String>>(7)?
+            .map(TaskCommandId::from_raw),
+        issued_at: task_command_datetime(8, row.get(8)?)?,
+        applied_at,
+        incorporated_at,
+        incorporated_summary: row.get(11)?,
+    })
+}
 
 fn insert_task_command(conn: &Connection, command: &TaskCommand) -> StoreResult<()> {
     conn.execute(
@@ -3360,6 +3730,8 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
             SessionSupervisor::Wave { wave_id } => wave_id.as_str().to_string(),
             SessionSupervisor::Project { session_id } => session_id.as_str().to_string(),
         }),
+        Box::new(i64::from(session.current_directive_version)),
+        Box::new(i64::from(session.incorporated_directive_version)),
     ]
 }
 
@@ -3439,6 +3811,8 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
                 ))
             }
         },
+        current_directive_version: row.get::<_, i64>(33)? as u32,
+        incorporated_directive_version: row.get::<_, i64>(34)? as u32,
         status,
         status_reason: row.get(12)?,
         status_at: crate::lfdb::rows::unix_to_datetime(row.get(13)?),
@@ -3523,19 +3897,34 @@ fn map_task_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
     })
 }
 
+const PROJECT_SESSION_INSERT: &str = "INSERT INTO project_sessions (
+    id, project_id, project_slug, project_name, project_context,
+    wave_id, wave_name, repo, pm_snapshot_synced_at, status,
+    status_reason, status_at, iteration, task_event_cursor,
+    state_fingerprint, agent, provider, provider_session_id,
+    process_generation, process_pid, process_tmux_name,
+    process_started_at, created_at, updated_at,
+    current_directive_version, incorporated_directive_version
+) VALUES (
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+    ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24,
+    ?25, ?26
+)";
 const PROJECT_SESSION_COLUMNS: &str = "SELECT
     id, project_id, project_slug, project_name, project_context,
     wave_id, wave_name, repo, pm_snapshot_synced_at, status,
     status_reason, status_at, iteration, task_event_cursor, state_fingerprint,
     agent, provider, provider_session_id, process_generation, process_pid,
-    process_tmux_name, process_started_at, created_at, updated_at
+    process_tmux_name, process_started_at, created_at, updated_at,
+    current_directive_version, incorporated_directive_version
     FROM project_sessions";
 const PROJECT_SESSION_SELECT: &str = "SELECT
     id, project_id, project_slug, project_name, project_context,
     wave_id, wave_name, repo, pm_snapshot_synced_at, status,
     status_reason, status_at, iteration, task_event_cursor, state_fingerprint,
     agent, provider, provider_session_id, process_generation, process_pid,
-    process_tmux_name, process_started_at, created_at, updated_at
+    process_tmux_name, process_started_at, created_at, updated_at,
+    current_directive_version, incorporated_directive_version
     FROM project_sessions WHERE id=?1";
 const PROJECT_SESSION_UPDATE: &str = "UPDATE project_sessions SET
     project_id=?2, project_slug=?3, project_name=?4, project_context=?5,
@@ -3544,7 +3933,8 @@ const PROJECT_SESSION_UPDATE: &str = "UPDATE project_sessions SET
     task_event_cursor=?14, state_fingerprint=?15, agent=?16, provider=?17,
     provider_session_id=?18, process_generation=?19, process_pid=?20,
     process_tmux_name=?21, process_started_at=?22, created_at=?23,
-    updated_at=?24 WHERE id=?1";
+    updated_at=?24, current_directive_version=?25,
+    incorporated_directive_version=?26 WHERE id=?1";
 const PROJECT_COMMAND_SELECT: &str = "SELECT
     id, session_id, source_json, kind_json, created_at,
     claimed_by_generation, accepted_at, state, effect, error
@@ -3596,6 +3986,8 @@ fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
         ),
         Box::new(session.created_at.unix_timestamp()),
         Box::new(session.updated_at.unix_timestamp()),
+        Box::new(i64::from(session.current_directive_version)),
+        Box::new(i64::from(session.incorporated_directive_version)),
     ]
 }
 
@@ -3627,6 +4019,8 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
         wave: row.get(6)?,
         repo: row.get(7)?,
         pm_snapshot_synced_at: row.get(8)?,
+        current_directive_version: row.get::<_, i64>(24)? as u32,
+        incorporated_directive_version: row.get::<_, i64>(25)? as u32,
         status,
         status_reason: row.get(10)?,
         status_at: crate::lfdb::rows::unix_to_datetime(row.get(11)?),

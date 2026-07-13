@@ -262,37 +262,6 @@ public final class WaveChatConnection {
         }
     }
 
-    public func enqueue(_ flow: String) async throws {
-        let trimmed = flow.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        playhead = try await postPlayhead(
-            path: "/playhead/enqueue",
-            body: ["flow": trimmed]
-        )
-    }
-
-    public func skip() async throws {
-        playhead = try await postPlayhead(path: "/playhead/skip", body: nil)
-    }
-
-    private func postPlayhead(path: String, body: [String: String]?) async throws -> PlayheadView {
-        guard let endpoint = currentEndpoint,
-              let url = URL(string: "http://\(endpoint)\(path)") else {
-            throw WaveChatError.notRunning
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        }
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw WaveChatError.badStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
-        return try decoder.decode(PlayheadView.self, from: data)
-    }
-
     // MARK: - Discovery + streaming loop
 
     private func run() async {

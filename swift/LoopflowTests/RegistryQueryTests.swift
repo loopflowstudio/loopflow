@@ -54,9 +54,21 @@ struct RegistryQueryTests {
         {
           "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"active_tasks":1,"active_projects":1,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
           "loop_state":"turning",
-          "projects":[{"project_id":"project-1","session_id":"ps_1","project":"developer-efficiency","status":"waiting","reason":"supervised Tasks are active","status_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","process_alive":false,"latest_event":null}],
+          "projects":[{
+            "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","krs":[{"text":"Fast loops","holds":false}]},
+            "runtime":{"session_id":"ps_1","status":"waiting","reason":"supervised Tasks are active","status_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","process_alive":false},
+            "directive":null,
+            "next_move":{"owner":"project","reason":"supervised Tasks are active"},
+            "tasks":[{
+              "task":{"id":"issue-1","identifier":"INF-123","name":"Wire it","description":"","rank":1,"completed":false,"assignee":null},
+              "runtime":{"session_id":"ts_1","supervisor":{"kind":"wave","wave_id":"wave-1"},"status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","worktree":"/task-wt","branch":"jack/inf-123","provider":"codex","process_alive":true},
+              "directive":null,
+              "next_move":{"owner":"task","reason":"provider turn is active"},
+              "delivery":{"kind":"pull_request","base":"main","pr_number":null,"pr_url":null},
+              "workers":{"active":0,"total":0}
+            }]
+          }],
           "runs":[{"id":"run-1","flow":"implement","task":"wire it","step_index":2,"status":"running","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":"https://example.test/pull/7","pr_state":"draft","pr_title":"Wire it"}],
-          "tasks":[{"issue_id":"INF-123","session_id":"ts_1","project":"developer-efficiency","supervisor":{"kind":"wave","wave_id":"wave-1"},"status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","worktree":"/task-wt","branch":"jack/inf-123","provider":"codex","process_alive":true,"pr_url":null,"latest_event":null}],
           "attention":[{"id":"att-1","kind":"interactive","status":"surfaced","title":"needs a human","summary":"review the design","run_id":"run-1","surfaced_at":"2026-07-06T00:00:00Z"}]
         }
         """
@@ -67,14 +79,16 @@ struct RegistryQueryTests {
 
         let result = try await query.status(wave: "goals", waveId: "wave-1", cwd: nil)
         #expect(result.loopState == "turning")
-        #expect(result.runs.map(\.id) == ["run-1", "ps_1", "ts_1"])
+        #expect(result.runs.map(\.id) == ["run-1"])
         #expect(result.runs[0].waveId == "wave-1")
         #expect(result.runs[0].status == .running)
         #expect(result.runs[0].stepIndex == 2)
         #expect(result.runs[0].pr?.state == .draft)
         #expect(result.runs[0].pr?.title == "Wire it")
-        #expect(result.runs[1].flow == "project")
-        #expect(result.runs[1].status == .waiting)
+        #expect(result.workMap.projects[0].project.slug == "developer-efficiency")
+        #expect(result.workMap.projects[0].runtime?.status == "waiting")
+        #expect(result.workMap.projects[0].tasks[0].task.identifier == "INF-123")
+        #expect(result.workMap.projects[0].tasks[0].runtime?.supervisor.kind == "wave")
         #expect(result.attention.map(\.id) == ["att-1"])
         #expect(result.attention[0].waveId == "wave-1")
         #expect(result.attention[0].kind == .interactive)

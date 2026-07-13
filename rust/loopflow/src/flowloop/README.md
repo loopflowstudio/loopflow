@@ -4,12 +4,13 @@
 crons schedule provider-backed flow steps while the listener owns the journal,
 thread, and crash recovery.
 
-Concrete file-writing work leaves the Wave home through a Linear-backed Task
-Session:
+Concrete file-writing work leaves the canonical main control plane through a
+Linear-backed Task Session:
 
 ```bash
-lf task run INF-123
+lf task run INF-123 --directive "fix the parser before the docs"
 lf task steer INF-123 "also rename the flag"
+lf task receipt COMMAND_ID --until incorporated --timeout 30s
 lf task wait INF-123
 ```
 

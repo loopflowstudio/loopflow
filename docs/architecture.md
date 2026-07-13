@@ -5,9 +5,9 @@ title: Architecture
 
 # Architecture
 
-Loopflow turns repo-authored intent into persistent agent work. Skills and flows
-run one job. Waves keep working: they remember, dispatch workers, respond to
-messages in their thread, surface attention, and leave an auditable trail.
+Loopflow turns repo-authored intent into persistent agent work. Humans talk to
+a Wave. The Wave directs Projects, Projects supervise Tasks, and each Task owns
+the worktree and delivery lifecycle for one concrete change.
 
 ## System Map
 
@@ -33,8 +33,8 @@ Local CLI                 Daemon
   lf                        lfd
   rust/.../lf               rust/.../lfd
   rust/.../ops              HTTP read surface, sessions,
-                            webhook lf-exec bridge, worktree
-                            janitor, token refresh
+                            webhook Task reconciliation,
+                            worktree janitor, token refresh
         |                        |
         v                        v
 Git/PR/PM ops             Clients
@@ -50,11 +50,11 @@ Git/PR/PM ops             Clients
 | Skill | `.lf/skills/` and built-ins | `engine` |
 | Flow | `.lf/flows/` and built-ins | `engine` |
 | Direction | `.lf/directions/` | `engine` prompt assembly |
-| Wave goal | `wave/<name>/GOAL.md` | `lf serve` server + resident loop |
-| Wave memory | `wave/<name>/MEMORY.md` | wave agent |
-| Task | Linear | `lf pm` and wave flows |
-| Session | lfdb | `lf` runs and placement flags |
-| Run/event | lfdb | lfd HTTP/event stream |
+| Wave | repo files + lfdb | `lf serve` listener and resident on clean `main` |
+| Project | Linear Project + lfdb runtime | Project loop on clean `main` |
+| Task | Linear issue + lfdb runtime | Task loop in one sibling worktree |
+| Directive | lfdb | Project/Task controller and acknowledgement |
+| Run/event | lfdb | historical execution and durable observations |
 | Attention | lfdb | lfd + Loopflow |
 
 ## CLI and Engine
@@ -76,10 +76,10 @@ side-effectful workflows around git, PRs, PM providers, and release artifacts.
 
 ## Daemon
 
-`lfd` is the gatekeeper: it serves read routes and the event push, verifies
-GitHub webhooks and translates them inward as `lf` execs, refreshes provider
-tokens, and tidies the registry at boot. It dispatches no work; Wave residents
-and durable Project/Task Session processes own agent execution.
+`lfd` is the gatekeeper: it serves read routes and event push, verifies GitHub
+webhooks and reconciles merged Task Sessions, refreshes provider tokens, and
+tidies the registry at boot. It dispatches no work; Wave residents and durable
+Project/Task processes own agent execution.
 
 Important paths:
 
@@ -102,9 +102,9 @@ Important paths:
 
 - `python/loopflow/models.py`
 
-Loopflow is the Swift app. It reads lfd state, renders waves and sessions, and
-provides native surfaces for attention, terminal workspaces, provider auth, and
-live output.
+Loopflow is the Swift app. It reads the native Wave → Project → Task snapshot,
+renders the work map beside the one Wave conversation, and provides native
+surfaces for attention, terminal workspaces, provider auth, and live output.
 
 Important paths:
 
@@ -118,14 +118,15 @@ Important paths:
 ```text
 1. Read GOAL.md, MEMORY.md, the PM snapshot's Projects and tasks, and relevant docs.
 2. Assess current wave state and messages in the thread.
-3. Pick one move: study, ingest, dispatch, unblock, review, or wait.
-4. Run a skill or flow, often by dispatching a worker.
+3. Pick one move: study, direct a Project or Task, unblock, review, or wait.
+4. Run one policy turn from the canonical `main` checkout.
 5. Record events, update PM/repo state, and surface attention.
 6. Loop when mode, a `GOAL.md` cron, or an incoming message asks for another pass.
 ```
 
-A wave agent coordinates. Workers do scoped implementation and report back
-through PRs, PM state, events, and memory updates.
+A Wave coordinates. Project loops pursue KR proof. Task loops do scoped
+implementation in their own worktrees and report through typed observations,
+directive receipts, PR state, and PM state.
 
 ## Data Boundaries
 
@@ -149,16 +150,16 @@ Loopflow integrates with:
 
 - Git and worktrees for branch isolation.
 - GitHub for PRs, webhook ingress translated to `lf` execs, and release workflows.
-- Linear and Notion for PM-backed wave tasks.
-- tmux and local processes for interactive sessions.
+- Linear for the Wave → Project → Task planning hierarchy.
+- tmux and local processes for Wave, Project, and Task processes.
 - Swift/macOS services for Loopflow and native host behavior.
 
 ## Where Complexity Collects
 
 - Context assembly: every agent session depends on it, and the sources span
   docs, prompts, skills, wave memory, scratch notes, and command arguments.
-- Session lifecycle: lfd, Loopflow, tmux, and external agents must agree on
-  what is running, blocked, attachable, complete, or failed.
+- Child control: SQLite, Loopflow, tmux, and external agents must agree on the
+  current directive, its provider effect, incorporation, state, and next move.
 - DTO parity: Rust, Python, Swift, and fixtures can drift unless changes are
   made as one contract update.
 - Product continuity: backend, CLI, UI, docs, tests, and release notes often

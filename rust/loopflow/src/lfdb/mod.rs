@@ -20,8 +20,8 @@ use crate::project_session::{
     ProjectSession, ProjectSessionId, ProjectSessionStatus, SessionSupervisor,
 };
 use crate::task::{
-    BoundaryResult, TaskCommand, TaskCommandId, TaskEvent, TaskEventKind, TaskSession,
-    TaskSessionId, TaskSessionStatus,
+    BoundaryResult, ChildDirective, ChildRef, TaskCommand, TaskCommandId, TaskEvent, TaskEventKind,
+    TaskSession, TaskSessionId, TaskSessionStatus,
 };
 
 pub mod catalog;
@@ -286,6 +286,20 @@ impl Store {
         .await
     }
 
+    pub async fn reserve_task_session_with_directive(
+        &self,
+        session: &TaskSession,
+        directive: &ChildDirective,
+        max_active: u32,
+    ) -> StoreResult<bool> {
+        let session = session.clone();
+        let directive = directive.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_task_session_with_directive(&session, &directive, max_active)
+        })
+        .await
+    }
+
     pub async fn update_task_session(&self, session: &TaskSession) -> StoreResult<()> {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
@@ -360,6 +374,19 @@ impl Store {
         let command = command.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.supersede_and_insert_task_command(&command)
+        })
+        .await
+    }
+
+    pub async fn create_task_command_with_directive(
+        &self,
+        command: &TaskCommand,
+        directive: &ChildDirective,
+    ) -> StoreResult<Vec<TaskCommandId>> {
+        let command = command.clone();
+        let directive = directive.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.insert_task_command_with_directive(&command, &directive)
         })
         .await
     }
@@ -491,6 +518,21 @@ impl Store {
                                 "Task observation wake failed; Project lifecycle touch will retry"
                             );
                         }
+                        if let Err(error) =
+                            crate::lf::commands::chat::post_task_observation_to_named_wave(
+                                &session.wave,
+                                &session_id,
+                                event.id,
+                            )
+                            .await
+                        {
+                            tracing::debug!(
+                                %error,
+                                %session_id,
+                                event_id = event.id,
+                                "live descendant observation delivery failed; Wave observer will retry"
+                            );
+                        }
                     }
                 }
             }
@@ -526,6 +568,19 @@ impl Store {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.insert_project_session(&session)
+        })
+        .await
+    }
+
+    pub async fn create_project_session_with_directive(
+        &self,
+        session: &ProjectSession,
+        directive: &ChildDirective,
+    ) -> StoreResult<()> {
+        let session = session.clone();
+        let directive = directive.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.insert_project_session_with_directive(&session, &directive)
         })
         .await
     }
@@ -609,6 +664,19 @@ impl Store {
         let command = command.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.supersede_and_insert_project_command(&command)
+        })
+        .await
+    }
+
+    pub async fn create_project_command_with_directive(
+        &self,
+        command: &ProjectCommand,
+        directive: &ChildDirective,
+    ) -> StoreResult<Vec<ProjectCommandId>> {
+        let command = command.clone();
+        let directive = directive.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.insert_project_command_with_directive(&command, &directive)
         })
         .await
     }
@@ -727,6 +795,48 @@ impl Store {
         let observation = observation.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.consume_task_observation_for_project(&project_session_id, &observation)
+        })
+        .await
+    }
+
+    pub async fn child_directives(&self, target: &ChildRef) -> StoreResult<Vec<ChildDirective>> {
+        let target = target.clone();
+        run_sqlite(&self.sqlite, move |store| store.child_directives(&target)).await
+    }
+
+    pub async fn child_directive_for_command(
+        &self,
+        command_id: &TaskCommandId,
+    ) -> StoreResult<Option<ChildDirective>> {
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.child_directive_for_command(&command_id)
+        })
+        .await
+    }
+
+    pub async fn mark_child_directive_applied(
+        &self,
+        target: &ChildRef,
+        version: u32,
+    ) -> StoreResult<()> {
+        let target = target.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.mark_child_directive_applied(&target, version)
+        })
+        .await
+    }
+
+    pub async fn incorporate_child_directive(
+        &self,
+        target: &ChildRef,
+        version: u32,
+        summary: &str,
+    ) -> StoreResult<(ChildDirective, bool)> {
+        let target = target.clone();
+        let summary = summary.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.incorporate_child_directive(&target, version, &summary)
         })
         .await
     }
@@ -1766,10 +1876,10 @@ mod tests {
         ProjectSessionStatus, SessionSupervisor,
     };
     use crate::task::{
-        BoundaryResult, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
-        PmWritebackOperation, PmWritebackState, TaskCommand, TaskCommandEffect, TaskCommandKind,
-        TaskCommandSource, TaskCommandState, TaskDecisionId, TaskEventKind, TaskSession,
-        TaskSessionId, TaskSessionStatus,
+        BoundaryResult, ChildDirective, ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId,
+        LinearProjectRef, PmWritebackOperation, PmWritebackState, TaskCommand, TaskCommandEffect,
+        TaskCommandKind, TaskCommandSource, TaskCommandState, TaskDecisionId, TaskEventKind,
+        TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use std::env;
     use std::path::PathBuf;
@@ -1847,6 +1957,8 @@ mod tests {
             supervisor: crate::project_session::SessionSupervisor::Wave {
                 wave_id: wave.id().clone(),
             },
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
             status: TaskSessionStatus::Created,
             status_reason: "task session reserved".to_string(),
             status_at: now,
@@ -1878,6 +1990,8 @@ mod tests {
             wave: wave.name().to_string(),
             repo: wave.repo().to_string(),
             pm_snapshot_synced_at: now.unix_timestamp(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
             status: ProjectSessionStatus::Running,
             status_reason: "project turn active".to_string(),
             status_at: now,
@@ -1896,6 +2010,103 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    #[tokio::test]
+    async fn child_directives_reserve_replace_and_incorporate_atomically() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+
+        let mut task = make_task_session(&wave);
+        task.current_directive_version = 1;
+        let task_target = ChildRef::Task(task.id.clone());
+        let task_initial = ChildDirective::initial(
+            task_target.clone(),
+            "Fix the parser before the docs".to_string(),
+            TaskCommandSource::Wave(wave.id().clone()),
+        );
+        assert!(store
+            .reserve_task_session_with_directive(&task, &task_initial, 2)
+            .await
+            .unwrap());
+        assert_eq!(store.child_directives(&task_target).await.unwrap().len(), 1);
+
+        let mut project = make_project_session(&wave);
+        project.current_directive_version = 1;
+        let project_target = ChildRef::Project(project.id.clone());
+        let project_initial = ChildDirective::initial(
+            project_target.clone(),
+            "Pursue onboarding first".to_string(),
+            TaskCommandSource::Wave(wave.id().clone()),
+        );
+        store
+            .create_project_session_with_directive(&project, &project_initial)
+            .await
+            .unwrap();
+
+        let command = ProjectCommand::new(
+            project.id.clone(),
+            ProjectCommandSource::Wave(wave.id().clone()),
+            ProjectCommandKind::Steer {
+                text: "Prove the parser path first".to_string(),
+            },
+        );
+        let replacement = ChildDirective::replacement(
+            project_target.clone(),
+            2,
+            "Prove the parser path first".to_string(),
+            command.source.clone(),
+            command.id.clone(),
+        );
+        store
+            .create_project_command_with_directive(&command, &replacement)
+            .await
+            .unwrap();
+        let persisted = store
+            .get_project_session(&project.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.current_directive_version, 2);
+        assert_eq!(
+            store.child_directives(&project_target).await.unwrap().len(),
+            2
+        );
+        assert!(store
+            .incorporate_child_directive(&project_target, 1, "stale")
+            .await
+            .is_err());
+        store
+            .mark_child_directive_applied(&project_target, 2)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .incorporate_child_directive(&project_target, 2, "Parser is now first")
+                .await
+                .unwrap()
+                .1
+        );
+        assert!(
+            !store
+                .incorporate_child_directive(&project_target, 2, "Parser is now first")
+                .await
+                .unwrap()
+                .1
+        );
+        assert_eq!(
+            store
+                .get_project_session(&project.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .incorporated_directive_version,
+            2
+        );
     }
 
     #[tokio::test]
@@ -1987,6 +2198,19 @@ mod tests {
                 ChildEventPayload::Task { event: TaskEventKind::Failed { .. } }
             ) if session_id == &task.id
         ));
+        let wave_observations = store
+            .pending_observations(&SessionSupervisor::Wave {
+                wave_id: wave.id().clone(),
+            })
+            .await
+            .unwrap();
+        assert!(wave_observations.iter().any(|observation| matches!(
+            (&observation.source, &observation.payload),
+            (
+                ChildSessionRef::Task { session_id },
+                ChildEventPayload::Task { event: TaskEventKind::Failed { .. } }
+            ) if session_id == &task.id
+        )));
         assert!(store
             .consume_task_observation_for_project(&project.id, &observations[0])
             .await

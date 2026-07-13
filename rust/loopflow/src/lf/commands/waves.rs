@@ -13,18 +13,21 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::lf::output::Colors;
+use crate::lfd::pm::{PmItem, PmKr, PmProject};
 use crate::lfd::types::{AttentionItem, AttentionStatus, LivePrState, Run, RunStatus, Wave};
 use crate::lfdb::{open_existing_store, SharedStore};
+use crate::project_session::{ProjectSession, ProjectSessionStatus, SessionSupervisor};
+use crate::task::{TaskSession, TaskSessionStatus};
 use crate::wave::journal::short_id;
 use crate::wave::server::live_endpoint;
 
 /// One wave's registry snapshot — the `lf ls` row and the `wave` field of
 /// `lf status`. Wire type consumed by Loopflow: every field is required or
 /// explicitly Optional, no serde defaults.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveSnapshot {
     pub id: String,
     pub name: String,
@@ -55,41 +58,76 @@ pub struct WaveSnapshot {
 
 /// `lf status <wave>` snapshot: the wave plus its runs, attention, and — when
 /// a server is live — its loop state. Wire type; no serde defaults.
-#[derive(Debug, Serialize)]
-pub struct WaveStatusSnapshot {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
     /// Resident loop state name from the live server's `/health`
     /// (`idle | turning | interrupting | failed`), `null` when stopped or
     /// serving dormant.
     pub loop_state: Option<String>,
     pub runs: Vec<RunSnapshot>,
-    pub projects: Vec<ProjectSnapshot>,
-    pub tasks: Vec<TaskSnapshot>,
+    pub projects: Vec<ProjectDetailSnapshot>,
     pub attention: Vec<AttentionSnapshot>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct TaskSnapshot {
-    pub issue_id: String,
-    pub session_id: String,
-    pub project: String,
-    pub supervisor: crate::project_session::SessionSupervisor,
-    pub status: String,
-    pub reason: String,
-    pub status_at: String,
-    pub worktree: String,
-    pub branch: String,
-    pub provider: String,
-    pub process_alive: bool,
-    pub pr_url: Option<String>,
-    pub latest_event: Option<crate::task::TaskEvent>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PmKrSummary {
+    pub text: String,
+    pub holds: bool,
 }
 
-#[derive(Debug, Serialize)]
-pub struct ProjectSnapshot {
-    pub project_id: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PmProjectSummary {
+    pub id: String,
+    pub slug: String,
+    pub name: String,
+    pub summary: String,
+    pub definition: String,
+    pub krs: Vec<PmKrSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PmTaskSummary {
+    pub id: String,
+    pub identifier: String,
+    pub name: String,
+    pub description: String,
+    pub rank: u32,
+    pub completed: bool,
+    pub assignee: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NextMoveOwner {
+    Human,
+    Wave,
+    Project,
+    Task,
+    Review,
+    Ci,
+    External,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NextMove {
+    pub owner: NextMoveOwner,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectiveSnapshot {
+    pub version: u32,
+    pub kind: String,
+    pub text: String,
+    pub applied_at: Option<String>,
+    pub incorporated_at: Option<String>,
+    pub incorporated_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectRuntimeSnapshot {
     pub session_id: String,
-    pub project: String,
     pub status: String,
     pub reason: String,
     pub status_at: String,
@@ -97,11 +135,56 @@ pub struct ProjectSnapshot {
     pub pending_observations: u32,
     pub provider: String,
     pub process_alive: bool,
-    pub latest_event: Option<crate::project_session::ProjectEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskRuntimeSnapshot {
+    pub session_id: String,
+    pub supervisor: SessionSupervisor,
+    pub status: String,
+    pub reason: String,
+    pub status_at: String,
+    pub worktree: String,
+    pub branch: String,
+    pub provider: String,
+    pub process_alive: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskDeliverySnapshot {
+    pub kind: String,
+    pub base: String,
+    pub pr_number: Option<u32>,
+    pub pr_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkerSummary {
+    pub active: u32,
+    pub total: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskDetailSnapshot {
+    pub task: PmTaskSummary,
+    pub runtime: Option<TaskRuntimeSnapshot>,
+    pub directive: Option<DirectiveSnapshot>,
+    pub next_move: NextMove,
+    pub delivery: Option<TaskDeliverySnapshot>,
+    pub workers: WorkerSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectDetailSnapshot {
+    pub project: PmProjectSummary,
+    pub runtime: Option<ProjectRuntimeSnapshot>,
+    pub directive: Option<DirectiveSnapshot>,
+    pub next_move: NextMove,
+    pub tasks: Vec<TaskDetailSnapshot>,
 }
 
 /// One run's snapshot for `lf status`. Wire type; no serde defaults.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RunSnapshot {
     pub id: String,
     pub flow: String,
@@ -120,7 +203,7 @@ pub struct RunSnapshot {
 }
 
 /// One attention item's snapshot for `lf status`. Wire type; no serde defaults.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AttentionSnapshot {
     pub id: String,
     pub kind: String,
@@ -189,18 +272,11 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .list_project_sessions(Some(wave.id()))
             .await
             .map_err(|err| anyhow!("failed to read Project Sessions: {err}"))?;
-        let mut projects = Vec::with_capacity(stored_projects.len());
-        for project in stored_projects {
-            projects.push(snapshot_project(&store, project).await?);
-        }
         let stored_tasks = store
             .list_task_sessions(Some(wave.id()))
             .await
             .map_err(|err| anyhow!("failed to read Task Sessions: {err}"))?;
-        let mut tasks = Vec::with_capacity(stored_tasks.len());
-        for task in stored_tasks {
-            tasks.push(snapshot_task(&store, task).await?);
-        }
+        let projects = snapshot_projects(&store, &wave, stored_projects, stored_tasks).await?;
         let wave_id = wave.id().clone();
         let attention = store
             .list_attention_items(None, None)
@@ -210,12 +286,11 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .filter(|item| item.wave_id == wave_id && item.status != AttentionStatus::Resolved)
             .map(snapshot_attention)
             .collect::<Vec<_>>();
-        let status = WaveStatusSnapshot {
+        let status = WaveDetailSnapshot {
             wave: snapshot,
             loop_state,
             runs,
             projects,
-            tasks,
             attention,
         };
         if json {
@@ -273,10 +348,7 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
     })
 }
 
-async fn snapshot_task(
-    store: &SharedStore,
-    task: crate::task::TaskSession,
-) -> Result<TaskSnapshot> {
+async fn snapshot_task_runtime(task: &TaskSession) -> TaskRuntimeSnapshot {
     let process_alive = if task.status.is_process_active() {
         match task.process.as_ref() {
             Some(process) => crate::engine::process::tmux_session_exists(&process.tmux_name)
@@ -287,33 +359,23 @@ async fn snapshot_task(
     } else {
         false
     };
-    let latest_event = store
-        .task_events_after(&task.id, 0)
-        .await
-        .map_err(|err| anyhow!("failed to read Task Session events: {err}"))?
-        .into_iter()
-        .last();
-    Ok(TaskSnapshot {
-        issue_id: task.issue.identifier,
+    TaskRuntimeSnapshot {
         session_id: task.id.to_string(),
-        project: task.project.slug,
-        supervisor: task.supervisor,
+        supervisor: task.supervisor.clone(),
         status: task.status.as_str().to_string(),
-        reason: task.status_reason,
+        reason: task.status_reason.clone(),
         status_at: format_time(task.status_at).unwrap_or_default(),
         worktree: task.worktree.display().to_string(),
-        branch: task.branch,
-        provider: task.provider,
+        branch: task.branch.clone(),
+        provider: task.provider.clone(),
         process_alive,
-        pr_url: task.pull_request.map(|pull_request| pull_request.url),
-        latest_event,
-    })
+    }
 }
 
-async fn snapshot_project(
+async fn snapshot_project_runtime(
     store: &SharedStore,
-    project: crate::project_session::ProjectSession,
-) -> Result<ProjectSnapshot> {
+    project: &ProjectSession,
+) -> Result<ProjectRuntimeSnapshot> {
     let process_alive = if project.status.is_process_active() {
         match project.process.as_ref() {
             Some(process) => crate::engine::process::tmux_session_exists(&process.tmux_name)
@@ -324,12 +386,6 @@ async fn snapshot_project(
     } else {
         false
     };
-    let latest_event = store
-        .project_events_after(&project.id, 0)
-        .await
-        .map_err(|err| anyhow!("failed to read Project Session events: {err}"))?
-        .into_iter()
-        .last();
     let pending_observations = store
         .pending_observations(&crate::project_session::SessionSupervisor::Project {
             session_id: project.id.clone(),
@@ -337,19 +393,366 @@ async fn snapshot_project(
         .await
         .map_err(|err| anyhow!("failed to read Project observation outbox: {err}"))?
         .len() as u32;
-    Ok(ProjectSnapshot {
-        project_id: project.project.id.as_str().to_string(),
+    Ok(ProjectRuntimeSnapshot {
         session_id: project.id.to_string(),
-        project: project.project.slug,
         status: project.status.as_str().to_string(),
-        reason: project.status_reason,
+        reason: project.status_reason.clone(),
         status_at: format_time(project.status_at).unwrap_or_default(),
         iteration: project.iteration,
         pending_observations,
-        provider: project.provider,
+        provider: project.provider.clone(),
         process_alive,
-        latest_event,
     })
+}
+
+#[derive(Debug, Deserialize)]
+struct CachedPmSnapshot {
+    projects: Vec<PmProject>,
+    items: Vec<PmItem>,
+}
+
+async fn snapshot_projects(
+    store: &SharedStore,
+    wave: &Wave,
+    project_sessions: Vec<ProjectSession>,
+    task_sessions: Vec<TaskSession>,
+) -> Result<Vec<ProjectDetailSnapshot>> {
+    let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
+        .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
+    let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
+    let planning = match store
+        .pm_snapshot(repo.to_string_lossy().into_owned(), wave.name().clone())
+        .await
+        .map_err(|err| anyhow!("failed to read PM snapshot: {err}"))?
+    {
+        Some(row) => serde_json::from_str::<CachedPmSnapshot>(&row.payload).map_err(|err| {
+            anyhow!(
+                "invalid PM snapshot for wave/{}; run `lf pm sync`: {err}",
+                wave.name()
+            )
+        })?,
+        None => CachedPmSnapshot {
+            projects: Vec::new(),
+            items: Vec::new(),
+        },
+    };
+
+    let mut details = planning
+        .projects
+        .into_iter()
+        .map(|project| ProjectDetailSnapshot {
+            next_move: next_move_for_unstarted_project(&project),
+            project: project_summary(project),
+            runtime: None,
+            directive: None,
+            tasks: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+
+    for project_session in &project_sessions {
+        let index = ensure_project(
+            &mut details,
+            project_session.project.id.as_str(),
+            &project_session.project.slug,
+            &project_session.project.name,
+            &project_session.project.context,
+        );
+        details[index].next_move =
+            next_move_for_project(project_session.status, &project_session.status_reason);
+        details[index].runtime = Some(snapshot_project_runtime(store, project_session).await?);
+        details[index].directive = current_directive(
+            store,
+            crate::task::ChildRef::Project(project_session.id.clone()),
+            project_session.current_directive_version,
+        )
+        .await?;
+    }
+
+    for item in planning.items {
+        let Some(project_slug) = item.project.as_deref() else {
+            continue;
+        };
+        let index = ensure_project(&mut details, project_slug, project_slug, project_slug, "");
+        let runtime_session = task_sessions.iter().find(|session| {
+            session.issue.id.as_str() == item.id || session.issue.identifier == item.identifier
+        });
+        details[index]
+            .tasks
+            .push(snapshot_task_detail(store, item, runtime_session).await?);
+    }
+
+    for task_session in &task_sessions {
+        let project_index = ensure_project(
+            &mut details,
+            task_session.project.id.as_str(),
+            &task_session.project.slug,
+            &task_session.project.name,
+            &task_session.project.context,
+        );
+        if details[project_index].tasks.iter().any(|task| {
+            task.task.id == task_session.issue.id.as_str()
+                || task.task.identifier == task_session.issue.identifier
+        }) {
+            continue;
+        }
+        let task = PmItem {
+            id: task_session.issue.id.as_str().to_string(),
+            identifier: task_session.issue.identifier.clone(),
+            name: task_session.issue.title.clone(),
+            description: task_session.issue.description.clone(),
+            rank: u32::MAX,
+            completed: task_session.status.is_terminal(),
+            project: Some(task_session.project.slug.clone()),
+            assignee: None,
+        };
+        details[project_index]
+            .tasks
+            .push(snapshot_task_detail(store, task, Some(task_session)).await?);
+    }
+
+    for project in &mut details {
+        project.tasks.sort_by(|left, right| {
+            left.task
+                .completed
+                .cmp(&right.task.completed)
+                .then(left.task.rank.cmp(&right.task.rank))
+                .then(left.task.identifier.cmp(&right.task.identifier))
+        });
+    }
+    Ok(details)
+}
+
+fn ensure_project(
+    projects: &mut Vec<ProjectDetailSnapshot>,
+    id: &str,
+    slug: &str,
+    name: &str,
+    definition: &str,
+) -> usize {
+    if let Some(index) = projects
+        .iter()
+        .position(|project| project.project.id == id || project.project.slug == slug)
+    {
+        return index;
+    }
+    projects.push(ProjectDetailSnapshot {
+        project: PmProjectSummary {
+            id: id.to_string(),
+            slug: slug.to_string(),
+            name: name.to_string(),
+            summary: name.to_string(),
+            definition: definition.to_string(),
+            krs: Vec::new(),
+        },
+        runtime: None,
+        directive: None,
+        next_move: NextMove {
+            owner: NextMoveOwner::Wave,
+            reason: "Project is not present in the current PM snapshot".to_string(),
+        },
+        tasks: Vec::new(),
+    });
+    projects.len() - 1
+}
+
+async fn snapshot_task_detail(
+    store: &SharedStore,
+    item: PmItem,
+    session: Option<&TaskSession>,
+) -> Result<TaskDetailSnapshot> {
+    let runtime = match session {
+        Some(session) => Some(snapshot_task_runtime(session).await),
+        None => None,
+    };
+    let next_move = match session {
+        Some(session) => {
+            next_move_for_task(session.status, &session.status_reason, &session.supervisor)
+        }
+        None if item.completed => NextMove {
+            owner: NextMoveOwner::Project,
+            reason: "Linear Task is complete".to_string(),
+        },
+        None => NextMove {
+            owner: NextMoveOwner::Project,
+            reason: "Task is ready to start".to_string(),
+        },
+    };
+    let delivery = session.map(|session| TaskDeliverySnapshot {
+        kind: "pull_request".to_string(),
+        base: "main".to_string(),
+        pr_number: session
+            .pull_request
+            .as_ref()
+            .map(|pull_request| pull_request.number),
+        pr_url: session
+            .pull_request
+            .as_ref()
+            .map(|pull_request| pull_request.url.clone()),
+    });
+    let directive = match session {
+        Some(session) => {
+            current_directive(
+                store,
+                crate::task::ChildRef::Task(session.id.clone()),
+                session.current_directive_version,
+            )
+            .await?
+        }
+        None => None,
+    };
+    Ok(TaskDetailSnapshot {
+        task: task_summary(item),
+        runtime,
+        directive,
+        next_move,
+        delivery,
+        workers: WorkerSummary {
+            active: 0,
+            total: 0,
+        },
+    })
+}
+
+async fn current_directive(
+    store: &SharedStore,
+    target: crate::task::ChildRef,
+    version: u32,
+) -> Result<Option<DirectiveSnapshot>> {
+    if version == 0 {
+        return Ok(None);
+    }
+    let directive = store
+        .child_directives(&target)
+        .await
+        .map_err(|err| anyhow!("failed to read child directives: {err}"))?
+        .into_iter()
+        .find(|directive| directive.version == version)
+        .ok_or_else(|| {
+            anyhow!(
+                "{} {} points at missing directive v{version}",
+                target.target_kind(),
+                target.target_id()
+            )
+        })?;
+    Ok(Some(DirectiveSnapshot {
+        version: directive.version,
+        kind: directive.kind.as_str().to_string(),
+        text: directive.text,
+        applied_at: directive.applied_at.and_then(format_time),
+        incorporated_at: directive.incorporated_at.and_then(format_time),
+        incorporated_summary: directive.incorporated_summary,
+    }))
+}
+
+fn project_summary(project: PmProject) -> PmProjectSummary {
+    PmProjectSummary {
+        id: project.id,
+        slug: project.slug,
+        name: project.name,
+        summary: project.summary,
+        definition: project.definition,
+        krs: project.krs.into_iter().map(kr_summary).collect(),
+    }
+}
+
+fn kr_summary(kr: PmKr) -> PmKrSummary {
+    PmKrSummary {
+        text: kr.text,
+        holds: kr.holds,
+    }
+}
+
+fn task_summary(item: PmItem) -> PmTaskSummary {
+    PmTaskSummary {
+        id: item.id,
+        identifier: item.identifier,
+        name: item.name,
+        description: item.description,
+        rank: item.rank,
+        completed: item.completed,
+        assignee: item.assignee,
+    }
+}
+
+fn next_move_for_unstarted_project(project: &PmProject) -> NextMove {
+    if !project.krs.is_empty() && project.krs.iter().all(|kr| kr.holds) {
+        NextMove {
+            owner: NextMoveOwner::Wave,
+            reason: "Every current KR holds".to_string(),
+        }
+    } else {
+        NextMove {
+            owner: NextMoveOwner::Wave,
+            reason: "Project is ready to start".to_string(),
+        }
+    }
+}
+
+fn next_move_for_project(status: ProjectSessionStatus, reason: &str) -> NextMove {
+    if let Some(owner) = reason_owner(reason) {
+        return NextMove {
+            owner,
+            reason: reason.to_string(),
+        };
+    }
+    let owner = match status {
+        ProjectSessionStatus::Created
+        | ProjectSessionStatus::Starting
+        | ProjectSessionStatus::Running
+        | ProjectSessionStatus::Waiting => NextMoveOwner::Project,
+        ProjectSessionStatus::Blocked | ProjectSessionStatus::Failed => NextMoveOwner::Wave,
+        ProjectSessionStatus::Completed | ProjectSessionStatus::Abandoned => NextMoveOwner::Wave,
+    };
+    NextMove {
+        owner,
+        reason: reason.to_string(),
+    }
+}
+
+fn next_move_for_task(
+    status: TaskSessionStatus,
+    reason: &str,
+    supervisor: &SessionSupervisor,
+) -> NextMove {
+    if let Some(owner) = reason_owner(reason) {
+        return NextMove {
+            owner,
+            reason: reason.to_string(),
+        };
+    }
+    let controller = match supervisor {
+        SessionSupervisor::Wave { .. } => NextMoveOwner::Wave,
+        SessionSupervisor::Project { .. } => NextMoveOwner::Project,
+    };
+    let owner = match status {
+        TaskSessionStatus::Created | TaskSessionStatus::Starting | TaskSessionStatus::Running => {
+            NextMoveOwner::Task
+        }
+        TaskSessionStatus::Waiting | TaskSessionStatus::Blocked | TaskSessionStatus::Failed => {
+            controller
+        }
+        TaskSessionStatus::Submitted => NextMoveOwner::Review,
+        TaskSessionStatus::Merged | TaskSessionStatus::Abandoned => NextMoveOwner::Project,
+    };
+    NextMove {
+        owner,
+        reason: reason.to_string(),
+    }
+}
+
+fn reason_owner(reason: &str) -> Option<NextMoveOwner> {
+    let reason = reason.to_ascii_lowercase();
+    if reason.contains("decision") || reason.contains("human") {
+        Some(NextMoveOwner::Human)
+    } else if reason.contains("ci") || reason.contains("check") {
+        Some(NextMoveOwner::Ci)
+    } else if reason.contains("review") {
+        Some(NextMoveOwner::Review)
+    } else if reason.contains("external") {
+        Some(NextMoveOwner::External)
+    } else {
+        None
+    }
 }
 
 async fn snapshot_run(store: &SharedStore, run: Run) -> Result<RunSnapshot> {
@@ -488,7 +891,7 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     }
 }
 
-fn print_status(status: &WaveStatusSnapshot) {
+fn print_status(status: &WaveDetailSnapshot) {
     let colors = Colors::default();
     let wave = &status.wave;
     println!(
@@ -522,32 +925,39 @@ fn print_status(status: &WaveStatusSnapshot) {
             );
         }
     }
-    if status.tasks.is_empty() {
-        println!("  tasks     none");
-    } else {
-        println!("  tasks");
-        for task in &status.tasks {
-            println!(
-                "    {issue:<12}  {status:<10}  {project:<20}  {reason}",
-                issue = task.issue_id,
-                status = task.status,
-                project = truncate(&task.project, 20),
-                reason = task.reason,
-            );
-        }
-    }
     if status.projects.is_empty() {
         println!("  projects  none");
     } else {
         println!("  projects");
         for project in &status.projects {
+            let (project_status, iteration, reason) = match &project.runtime {
+                Some(runtime) => (
+                    runtime.status.as_str(),
+                    runtime.iteration,
+                    runtime.reason.as_str(),
+                ),
+                None => ("unstarted", 0, project.next_move.reason.as_str()),
+            };
             println!(
                 "    {project:<24}  {status:<10}  iteration {iteration:<3}  {reason}",
-                project = truncate(&project.project, 24),
-                status = project.status,
-                iteration = project.iteration,
-                reason = project.reason,
+                project = truncate(&project.project.slug, 24),
+                status = project_status,
+                iteration = iteration,
+                reason = reason,
             );
+            for task in &project.tasks {
+                let (task_status, reason) = match &task.runtime {
+                    Some(runtime) => (runtime.status.as_str(), runtime.reason.as_str()),
+                    None if task.task.completed => ("completed", task.next_move.reason.as_str()),
+                    None => ("unstarted", task.next_move.reason.as_str()),
+                };
+                println!(
+                    "      {issue:<12}  {status:<10}  {reason}",
+                    issue = task.task.identifier,
+                    status = task_status,
+                    reason = reason,
+                );
+            }
         }
     }
     if !status.attention.is_empty() {
@@ -572,7 +982,88 @@ fn truncate(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use crate::lfd::id::LfdId;
+    use crate::lfdb::{open_store, PmSnapshotRow, StorageConfig};
+
+    #[tokio::test]
+    async fn cached_pm_snapshot_builds_the_native_project_task_hierarchy() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = std::fs::canonicalize(dir.path()).expect("canonical repo");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+                .await
+                .expect("open store"),
+        );
+        let wave = Wave::new(
+            LfdId::new(),
+            "infrastructure".to_string(),
+            repo.display().to_string(),
+        );
+        store
+            .put_pm_snapshot(PmSnapshotRow {
+                repo: repo.display().to_string(),
+                wave: wave.name().clone(),
+                provider: "linear".to_string(),
+                initiative: "initiative-1".to_string(),
+                synced_at: 1,
+                payload: serde_json::json!({
+                    "projects": [{
+                        "id": "project-1",
+                        "slug": "first-run",
+                        "name": "First run",
+                        "summary": "Make first run clear",
+                        "definition": "A new user succeeds without help",
+                        "krs": [{"text": "Parser accepts --hello", "holds": false}],
+                        "initiative_ids": ["initiative-1"]
+                    }],
+                    "items": [
+                        {
+                            "id": "issue-1",
+                            "identifier": "INF-123",
+                            "name": "Fix parser",
+                            "description": "Accept --hello",
+                            "rank": 1,
+                            "completed": false,
+                            "project": "first-run",
+                            "assignee": null
+                        },
+                        {
+                            "id": "issue-2",
+                            "identifier": "INF-124",
+                            "name": "Update docs",
+                            "description": "Explain --hello",
+                            "rank": 2,
+                            "completed": false,
+                            "project": "first-run",
+                            "assignee": null
+                        }
+                    ]
+                })
+                .to_string(),
+            })
+            .await
+            .expect("write cached PM snapshot");
+
+        let projects = snapshot_projects(&store, &wave, Vec::new(), Vec::new())
+            .await
+            .expect("build native hierarchy");
+
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].project.slug, "first-run");
+        assert_eq!(
+            projects[0]
+                .tasks
+                .iter()
+                .map(|task| task.task.identifier.as_str())
+                .collect::<Vec<_>>(),
+            ["INF-123", "INF-124"]
+        );
+        assert!(projects[0].runtime.is_none());
+        assert!(projects[0].tasks.iter().all(|task| task.runtime.is_none()));
+    }
 
     #[test]
     fn wave_snapshot_json_has_stable_keys() {
@@ -607,7 +1098,7 @@ mod tests {
 
     #[test]
     fn status_snapshot_nests_wave_runs_and_attention() {
-        let status = WaveStatusSnapshot {
+        let status = WaveDetailSnapshot {
             wave: WaveSnapshot {
                 id: "wave-1".into(),
                 name: "goals".into(),
@@ -641,8 +1132,47 @@ mod tests {
                 pr_state: None,
                 pr_title: None,
             }],
-            projects: Vec::new(),
-            tasks: Vec::new(),
+            projects: vec![ProjectDetailSnapshot {
+                project: PmProjectSummary {
+                    id: "project-1".into(),
+                    slug: "runtime".into(),
+                    name: "Runtime".into(),
+                    summary: "Run reliably".into(),
+                    definition: "Keep execution boring".into(),
+                    krs: vec![PmKrSummary {
+                        text: "Survives restart".into(),
+                        holds: true,
+                    }],
+                },
+                runtime: None,
+                directive: None,
+                next_move: NextMove {
+                    owner: NextMoveOwner::Wave,
+                    reason: "Project is ready to start".into(),
+                },
+                tasks: vec![TaskDetailSnapshot {
+                    task: PmTaskSummary {
+                        id: "issue-1".into(),
+                        identifier: "INF-123".into(),
+                        name: "Wire it".into(),
+                        description: String::new(),
+                        rank: 1,
+                        completed: false,
+                        assignee: None,
+                    },
+                    runtime: None,
+                    directive: None,
+                    next_move: NextMove {
+                        owner: NextMoveOwner::Project,
+                        reason: "Task is ready to start".into(),
+                    },
+                    delivery: None,
+                    workers: WorkerSummary {
+                        active: 0,
+                        total: 0,
+                    },
+                }],
+            }],
             attention: vec![AttentionSnapshot {
                 id: "att-1".into(),
                 kind: "interactive".into(),
@@ -660,6 +1190,15 @@ mod tests {
         assert_eq!(value["runs"][0]["step_index"], 2);
         assert_eq!(value["runs"][0]["pr_state"], serde_json::Value::Null);
         assert_eq!(value["runs"][0]["pr_title"], serde_json::Value::Null);
+        assert_eq!(value["projects"][0]["project"]["slug"], "runtime");
+        assert_eq!(
+            value["projects"][0]["tasks"][0]["task"]["identifier"],
+            "INF-123"
+        );
+        assert_eq!(
+            value["projects"][0]["tasks"][0]["runtime"],
+            serde_json::Value::Null
+        );
         assert_eq!(value["attention"][0]["kind"], "interactive");
     }
 

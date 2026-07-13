@@ -254,6 +254,20 @@ pub fn current_branch(repo: &Path) -> Result<Option<String>, GitError> {
     }
 }
 
+/// Resolve the root of the working tree containing `repo`.
+pub fn worktree_root(repo: &Path) -> Result<PathBuf, GitError> {
+    let output = run_git(repo, &["rev-parse", "--show-toplevel"])?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: "git rev-parse --show-toplevel".to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(PathBuf::from(
+        String::from_utf8_lossy(&output.stdout).trim(),
+    ))
+}
+
 /// Return default branch name from origin/HEAD. Falls back to "main".
 pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
     let output = run_git(

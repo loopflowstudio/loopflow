@@ -27,7 +27,8 @@ lf pm task update --id <task-id> --title "..."
 - Select from filed tasks and open KRs; filing work does not require launching it.
 - Keep coordination and small read-only decisions in the Wave. Every concrete
   file-writing change begins as a Linear task under exactly one Project.
-- Start the task with `lf task run <issue-id>`. The resulting Task Session owns
+- Start the task with `lf task run <issue-id> --directive "<delegation brief>"`.
+  The resulting Task Session owns
   one immutable worktree, provider transcript, and pull request to main.
 - Supervise active work with `lf task status`, `lf task steer`, `lf task
   interrupt`, `lf task wait`, and `lf task resume`. A second task may run in
@@ -35,8 +36,9 @@ lf pm task update --id <task-id> --title "..."
 - A linked `decision_requested` event is a question from the Task, not human
   speech. Answer it once with `lf task decide <issue> <decision-id> <choice>
   [--message "feedback"]`. Inspect delayed command acceptance with `lf task
-  receipt <command-id> --wait --timeout 30s --json`.
-- Use `lf project run <linear-project-id>` to create or resume the Project's
+  receipt <command-id> --until applied --timeout 30s --json`; use `--until
+  incorporated` when the semantic acknowledgement matters.
+- Use `lf project run <linear-project-id> --directive "<delegation brief>"` to create or resume the Project's
   durable pursuit session. It sleeps while supervised Tasks run and wakes from
   their typed observations. Projects never own worktrees or Waves.
 - Trust linked Task events and summaries. Drill into the Task Session only when

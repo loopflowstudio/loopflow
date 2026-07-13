@@ -10,8 +10,9 @@ use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::task::{
-    BoundaryResult, TaskCommand, TaskCommandEffect, TaskCommandId, TaskCommandKind,
-    TaskCommandState, TaskDecisionId, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+    BoundaryResult, ChildDirective, ChildRef, TaskCommand, TaskCommandEffect, TaskCommandId,
+    TaskCommandKind, TaskCommandState, TaskDecisionId, TaskEventKind, TaskSession, TaskSessionId,
+    TaskSessionStatus,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,7 +69,20 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
         .append_task_event(&session.id, &TaskEventKind::Started)
         .await?;
 
-    let seed = task_seed(&session);
+    let directives = store
+        .child_directives(&ChildRef::Task(session.id.clone()))
+        .await?;
+    let directive = directives
+        .iter()
+        .find(|directive| directive.version == session.current_directive_version)
+        .ok_or_else(|| {
+            anyhow!(
+                "Task Session {} has no current directive v{}",
+                session.id,
+                session.current_directive_version
+            )
+        })?;
+    let seed = task_seed(&session, directive);
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn("implement", &seed, &session.wave, None)?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
@@ -118,6 +132,12 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
         first_decision,
     )
     .await?;
+    store
+        .mark_child_directive_applied(
+            &ChildRef::Task(session.id.clone()),
+            session.current_directive_version,
+        )
+        .await?;
 
     let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
     std::thread::spawn(move || {
@@ -848,20 +868,23 @@ async fn finish_abandoned(
     .await
 }
 
-fn task_seed(session: &TaskSession) -> String {
+fn task_seed(session: &TaskSession, directive: &ChildDirective) -> String {
     let snapshot_warning = session
         .pm_snapshot_warning
         .as_deref()
         .map(|warning| format!("\nPM snapshot warning: {warning}"))
         .unwrap_or_default();
     format!(
-        "Implement Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nPM snapshot synced at: {snapshot_synced_at}{snapshot_warning}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nBase commit: {base_commit}\nDelivery: one pull request targeting main. Opening the PR submits the task; completion is merge or explicit abandonment.",
+        "Implement Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}{snapshot_warning}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nBase commit: {base_commit}\nDelivery: one pull request targeting main. Opening the PR submits the task; completion is merge or explicit abandonment.",
         identifier = session.issue.identifier,
         title = session.issue.title,
         description = session.issue.description,
         project = session.project.name,
         project_id = session.project.id.as_str(),
         project_context = session.project.context,
+        directive_version = directive.version,
+        directive_kind = directive.kind.as_str(),
+        directive_text = directive.text,
         snapshot_synced_at = session.pm_snapshot_synced_at,
         wave = session.wave,
         session_id = session.id,
@@ -974,6 +997,8 @@ mod tests {
             supervisor: crate::project_session::SessionSupervisor::Wave {
                 wave_id: wave.id().clone(),
             },
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
             status: TaskSessionStatus::Running,
             status_reason: "provider active".to_string(),
             status_at: now,

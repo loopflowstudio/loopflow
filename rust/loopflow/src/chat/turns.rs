@@ -14,6 +14,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::project_session::{ProjectEventKind, ProjectObservation};
+use crate::task::{TaskEventKind, TaskObservation};
 use crate::wave::playhead::{now_rfc3339, BodyProvenance};
 
 /// Who authored a turn. Mirrors Swift `MessageRole` (user/assistant).
@@ -22,6 +24,83 @@ use crate::wave::playhead::{now_rfc3339, BodyProvenance};
 pub enum ChatRole {
     User,
     Assistant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildActivitySubject {
+    Project,
+    Task,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildActivityKind {
+    StateChanged,
+    ControlApplied,
+    Directed,
+    Incorporated,
+    DecisionRequired,
+    DecisionResolved,
+    PullRequestOpened,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildControlActivity {
+    pub id: String,
+    pub subject: ChildActivitySubject,
+    pub subject_id: String,
+    pub session_id: String,
+    pub kind: ChildActivityKind,
+    pub title: String,
+    pub summary: String,
+    pub directive_version: Option<u32>,
+    pub command_id: Option<String>,
+    pub effect: Option<String>,
+    pub decision_id: Option<String>,
+    pub options: Vec<String>,
+}
+
+impl ChildControlActivity {
+    pub fn from_task(observation: &TaskObservation) -> Self {
+        let (kind, title, summary, directive_version, command_id, effect, decision_id, options) =
+            task_activity_fields(&observation.event);
+        Self {
+            id: observation.inbox_id(),
+            subject: ChildActivitySubject::Task,
+            subject_id: observation.issue_identifier.clone(),
+            session_id: observation.session_id.to_string(),
+            kind,
+            title,
+            summary,
+            directive_version,
+            command_id,
+            effect,
+            decision_id,
+            options,
+        }
+    }
+
+    pub fn from_project(observation: &ProjectObservation) -> Self {
+        let (kind, title, summary, directive_version, command_id, effect, decision_id, options) =
+            project_activity_fields(&observation.event);
+        Self {
+            id: observation.inbox_id(),
+            subject: ChildActivitySubject::Project,
+            subject_id: observation.project.clone(),
+            session_id: observation.session_id.to_string(),
+            kind,
+            title,
+            summary,
+            directive_version,
+            command_id,
+            effect,
+            decision_id,
+            options,
+        }
+    }
 }
 
 /// One turn in a wave chat — the unit the chat server streams.
@@ -48,6 +127,9 @@ pub struct ChatTurn {
     /// Body that produced an assistant span. Required on the wire and
     /// explicitly null for human/attributed turns.
     pub body: Option<BodyProvenance>,
+    /// Structured child motion rendered as a linked activity card. Required on
+    /// the wire and explicitly null for ordinary conversation turns.
+    pub activity: Option<ChildControlActivity>,
 }
 
 impl ChatTurn {
@@ -62,6 +144,7 @@ impl ChatTurn {
             created_at: now_rfc3339(),
             from: None,
             body: None,
+            activity: None,
         }
     }
 
@@ -101,6 +184,192 @@ impl ChatTurn {
         }
         self.text.push_str(fragment);
     }
+}
+
+type ActivityFields = (
+    ChildActivityKind,
+    String,
+    String,
+    Option<u32>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+);
+
+fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
+    match event {
+        TaskEventKind::Started => activity(ChildActivityKind::StateChanged, "Task started", ""),
+        TaskEventKind::StatusChanged { to, reason, .. } => activity(
+            ChildActivityKind::StateChanged,
+            &format!("Task is {}", to.as_str()),
+            reason,
+        ),
+        TaskEventKind::CommandChanged {
+            command_id,
+            state,
+            effect,
+            error,
+        } => (
+            ChildActivityKind::ControlApplied,
+            format!("Control {}", state.as_str()),
+            error.clone().unwrap_or_default(),
+            None,
+            Some(command_id.to_string()),
+            effect.map(|value| value.as_str().to_string()),
+            None,
+            Vec::new(),
+        ),
+        TaskEventKind::DirectiveChanged { version, .. } => (
+            ChildActivityKind::Directed,
+            format!("Direction v{version}"),
+            "Waiting for incorporation".to_string(),
+            Some(*version),
+            None,
+            None,
+            None,
+            Vec::new(),
+        ),
+        TaskEventKind::DirectiveIncorporated {
+            version, summary, ..
+        } => (
+            ChildActivityKind::Incorporated,
+            format!("Incorporated direction v{version}"),
+            summary.clone(),
+            Some(*version),
+            None,
+            None,
+            None,
+            Vec::new(),
+        ),
+        TaskEventKind::DecisionRequested {
+            decision_id,
+            prompt,
+            options,
+        } => (
+            ChildActivityKind::DecisionRequired,
+            "Decision required".to_string(),
+            prompt.clone(),
+            None,
+            None,
+            None,
+            Some(decision_id.to_string()),
+            options.clone(),
+        ),
+        TaskEventKind::DecisionResolved { choice, .. } => activity(
+            ChildActivityKind::DecisionResolved,
+            "Decision resolved",
+            choice,
+        ),
+        TaskEventKind::Progress { summary } => {
+            activity(ChildActivityKind::StateChanged, "Task progress", summary)
+        }
+        TaskEventKind::PullRequestOpened { number, url } => activity(
+            ChildActivityKind::PullRequestOpened,
+            &format!("Opened PR #{number}"),
+            url,
+        ),
+        TaskEventKind::Completed { summary, .. } => {
+            activity(ChildActivityKind::Completed, "Task completed", summary)
+        }
+        TaskEventKind::Failed { error, .. } => {
+            activity(ChildActivityKind::Failed, "Task failed", error)
+        }
+    }
+}
+
+fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
+    match event {
+        ProjectEventKind::Started => {
+            activity(ChildActivityKind::StateChanged, "Project started", "")
+        }
+        ProjectEventKind::StatusChanged { to, reason, .. } => activity(
+            ChildActivityKind::StateChanged,
+            &format!("Project is {}", to.as_str()),
+            reason,
+        ),
+        ProjectEventKind::CommandChanged {
+            command_id,
+            state,
+            effect,
+            error,
+        } => (
+            ChildActivityKind::ControlApplied,
+            format!("Control {}", state.as_str()),
+            error.clone().unwrap_or_default(),
+            None,
+            Some(command_id.to_string()),
+            effect.map(|value| value.as_str().to_string()),
+            None,
+            Vec::new(),
+        ),
+        ProjectEventKind::DirectiveChanged { version, .. } => (
+            ChildActivityKind::Directed,
+            format!("Direction v{version}"),
+            "Waiting for incorporation".to_string(),
+            Some(*version),
+            None,
+            None,
+            None,
+            Vec::new(),
+        ),
+        ProjectEventKind::DirectiveIncorporated {
+            version, summary, ..
+        } => (
+            ChildActivityKind::Incorporated,
+            format!("Incorporated direction v{version}"),
+            summary.clone(),
+            Some(*version),
+            None,
+            None,
+            None,
+            Vec::new(),
+        ),
+        ProjectEventKind::TaskObserved { event, .. } => task_activity_fields(event),
+        ProjectEventKind::DecisionRequested {
+            decision_id,
+            prompt,
+            options,
+        } => (
+            ChildActivityKind::DecisionRequired,
+            "Decision required".to_string(),
+            prompt.clone(),
+            None,
+            None,
+            None,
+            Some(decision_id.to_string()),
+            options.clone(),
+        ),
+        ProjectEventKind::DecisionResolved { choice, .. } => activity(
+            ChildActivityKind::DecisionResolved,
+            "Decision resolved",
+            choice,
+        ),
+        ProjectEventKind::IterationCompleted { summary, .. } => activity(
+            ChildActivityKind::StateChanged,
+            "Project iteration completed",
+            summary,
+        ),
+        ProjectEventKind::Completed { summary } => {
+            activity(ChildActivityKind::Completed, "Project completed", summary)
+        }
+        ProjectEventKind::Failed { error, .. } => {
+            activity(ChildActivityKind::Failed, "Project failed", error)
+        }
+    }
+}
+
+fn activity(kind: ChildActivityKind, title: &str, summary: &str) -> ActivityFields {
+    (
+        kind,
+        title.to_string(),
+        summary.to_string(),
+        None,
+        None,
+        None,
+        None,
+        Vec::new(),
+    )
 }
 
 #[cfg(test)]
@@ -170,5 +439,25 @@ mod tests {
         }
 
         assert_eq!(turn.text, "hello world");
+    }
+
+    #[test]
+    fn decision_activity_keeps_options_and_lineage() {
+        let decision_id = crate::task::TaskDecisionId::new();
+        let observation = TaskObservation {
+            session_id: crate::task::TaskSessionId::new(),
+            issue_identifier: "INF-123".to_string(),
+            event_id: 9,
+            event: TaskEventKind::DecisionRequested {
+                decision_id: decision_id.clone(),
+                prompt: "Which parser mode?".to_string(),
+                options: vec!["strict".to_string(), "permissive".to_string()],
+            },
+        };
+
+        let activity = ChildControlActivity::from_task(&observation);
+        assert_eq!(activity.kind, ChildActivityKind::DecisionRequired);
+        assert_eq!(activity.decision_id.as_deref(), Some(decision_id.as_str()));
+        assert_eq!(activity.options, ["strict", "permissive"]);
     }
 }

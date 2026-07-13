@@ -15,6 +15,9 @@ selection. Follow the repo style guide.
 
 ## Work
 
+- Acknowledge the seed's current directive before editing with the exact `lf
+  task acknowledge` command it provides. Summarize how that direction changes
+  the execution plan; provider acceptance alone is not incorporation.
 - Own execution in this process and worktree. Operational Loopflow children such
   as `lf commit`, `lf pr land`, `lf rebase`, and direct skill or flow calls are
   part of that execution and remain available. Do not boot a server, create a

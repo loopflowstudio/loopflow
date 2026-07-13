@@ -54,6 +54,7 @@
   ],
   "created_at": "2026-07-03T18:30:00Z",
   "from": "worker",
+  "activity": null,
   "body": {
     "body_id": "body-3",
     "invocation_id": "inv-wave-1",

@@ -704,12 +704,16 @@ public final class RepoState {
         }
     }
 
-    private func statusSnapshot(for waveId: String) async throws
-        -> (runs: [Run], attention: [AttentionItem], loopState: String?) {
+    private func statusSnapshot(for waveId: String) async throws -> WaveStatusResult {
         guard let registryQuery,
               let wave = waveStore.wave(for: waveId)
         else {
-            return ([], [], nil)
+            return WaveStatusResult(
+                runs: [],
+                workMap: WaveWorkMap(objective: "", projects: []),
+                attention: [],
+                loopState: nil
+            )
         }
         let cwd = currentRepo?.path()
         return try await registryQuery.status(wave: wave.name, waveId: wave.id, cwd: cwd)

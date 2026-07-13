@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use crate::lfd::id::LfdId;
 use crate::task::{
-    LinearProjectRef, TaskCommandEffect, TaskCommandState, TaskEventKind, TaskSessionId,
+    ChildDirectiveId, DirectiveKind, LinearProjectRef, TaskCommandEffect, TaskCommandState,
+    TaskEventKind, TaskSessionId,
 };
 
 pub mod runner;
@@ -153,6 +154,8 @@ pub struct ProjectSession {
     pub wave: String,
     pub repo: String,
     pub pm_snapshot_synced_at: i64,
+    pub current_directive_version: u32,
+    pub incorporated_directive_version: u32,
     pub status: ProjectSessionStatus,
     pub status_reason: String,
     pub status_at: OffsetDateTime,
@@ -261,6 +264,16 @@ pub enum ProjectEventKind {
         effect: Option<TaskCommandEffect>,
         error: Option<String>,
     },
+    DirectiveChanged {
+        directive_id: ChildDirectiveId,
+        version: u32,
+        directive_kind: DirectiveKind,
+    },
+    DirectiveIncorporated {
+        directive_id: ChildDirectiveId,
+        version: u32,
+        summary: String,
+    },
     TaskObserved {
         task_session_id: TaskSessionId,
         task_event_id: i64,
@@ -291,7 +304,11 @@ pub enum ProjectEventKind {
 
 impl ProjectEventKind {
     pub fn is_wave_observable(&self) -> bool {
-        !matches!(self, Self::Started | Self::TaskObserved { .. })
+        match self {
+            Self::Started | Self::TaskObserved { .. } => false,
+            Self::CommandChanged { state, .. } => state.is_terminal(),
+            _ => true,
+        }
     }
 }
 
@@ -352,7 +369,8 @@ pub struct ObservationOutboxRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProjectCommandId, ProjectSessionId, ProjectSessionStatus};
+    use super::{ProjectCommandId, ProjectEventKind, ProjectSessionId, ProjectSessionStatus};
+    use crate::task::TaskCommandState;
 
     #[test]
     fn project_ids_are_prefixed_and_round_trip() {
@@ -367,5 +385,20 @@ mod tests {
         assert!(ProjectSessionStatus::Completed.is_terminal());
         assert!(ProjectSessionStatus::Abandoned.is_terminal());
         assert!(!ProjectSessionStatus::Waiting.is_terminal());
+    }
+
+    #[test]
+    fn wave_observes_project_control_outcomes_not_transport_chatter() {
+        let event = |state| ProjectEventKind::CommandChanged {
+            command_id: ProjectCommandId::new(),
+            state,
+            effect: None,
+            error: None,
+        };
+
+        assert!(!event(TaskCommandState::Persisted).is_wave_observable());
+        assert!(!event(TaskCommandState::Claimed).is_wave_observable());
+        assert!(event(TaskCommandState::Accepted).is_wave_observable());
+        assert!(event(TaskCommandState::Failed).is_wave_observable());
     }
 }

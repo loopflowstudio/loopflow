@@ -44,12 +44,13 @@ lf memory add "buttons: variants unified" # curate what it knows
 lf stop designer              # stop its listener and resident gracefully
 ```
 
-Sessions are plain tmux — `tmux ls` to see the Wave and Task Sessions. Use
+Sessions are plain tmux — `tmux ls` to see the Wave, Project, and Task
+Sessions. Use
 `lf task attach <issue-id>` for the audited writable task prompt.
 
-`lf serve <name>` starts a long-lived server at the repo's main checkout (the
-wave's journal and endpoint live at the origin); its playhead enters the wave's
-worktree and gives each flow step a live harness session. Progress and chat are
+`lf serve <name>` starts a long-lived server and resident at the repo's clean
+canonical main checkout. Wave turns coordinate there; Task Sessions own every
+repository mutation. Progress and chat are
 a single conversation: `lf chat --steer` reaches the body now playing (and
 queues when it cannot). Truth is an append-only journal, so a restart keeps the
 whole thread. Humans use `lf chat`; agents broadcast with `lf radio pub`; `lf
@@ -69,9 +70,11 @@ lf stop s3            # stop only this wave
 The wave agent coordinates concrete work through Linear-backed Task Sessions:
 
 ```bash
-lf task start "unify button variants" --project <linear-project-id>
+lf task start "unify button variants" --project <linear-project-id> \
+  --directive "fix the shared primitive before the call sites"
 lf task steer INF-123 "also audit the settings panes"
-lf task receipt COMMAND_ID --wait --timeout 30s --json
+lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
+lf task acknowledge INF-123 --directive 2 --summary "the shared primitive is first"
 lf task decide INF-123 DECISION_ID revise --message "cover the boundary race"
 lf task wait INF-123
 ```
@@ -88,12 +91,18 @@ the owning Wave answers it in the same Task Session and provider transcript.
 Run an existing Linear Project or task:
 
 ```bash
-lf project run <linear-project-id>
+lf project run <linear-project-id> --directive "pursue onboarding first"
 lf project steer <linear-project-id> "prioritize the CLI path"
+lf project acknowledge <linear-project-id> --directive 2 --summary "CLI proof is first"
 lf project wait <linear-project-id> --until waiting
 
 lf task run INF-123
 ```
+
+Launch persists directive v1 before the provider starts. `steer` and an
+interrupt with replacement advance the version; `follow-up` does not replace
+current intent. A receipt distinguishes provider application from explicit
+child incorporation.
 
 `lf project run` starts one durable KR-pursuit session with no branch or
 worktree. It creates and supervises Task Sessions, stops while only child
@@ -221,7 +230,7 @@ Side-channel utilities — wrappers around git, PR, release, and wave state.
 | `commit` | Commit with generated message |
 | `rebase` | Rebase onto main |
 | `pr` | Generate PR title/body and call `lf pr open --title --body` |
-| `land` | Land PR, rotate worktree |
+| `land` | Land the PR and prune its merged worker worktree |
 | `lint` | Run linter, fix issues |
 | `update-wave` | Create, update, or delete wave state |
 | `split-wave` | Split a wave into smaller independent waves |
@@ -380,13 +389,12 @@ Install the Rust binaries directly with cargo.
 ```bash
 lf serve engbot       # start the wave agent (Ctrl-C to stop)
 lf task run ENG-123   # start the Linear task in its own worktree
-tmux ls              # list live sessions — the wave agent and its workers
+tmux ls              # list live Wave, Project, and Task Sessions
 lf task attach ENG-123    # writable audited control prompt
 ```
 
 Read `wave/engbot/GOAL.md` and `wave/engbot/MEMORY.md` for a wave's state, or
-watch it in Loopflow. To remove a wave, delete `wave/engbot/` and its worktree
-(`lf wt remove engbot`).
+watch it in Loopflow. To remove a wave, stop it, then delete `wave/engbot/`.
 
 ```bash
 lf auth status    # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Linear)

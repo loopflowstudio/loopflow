@@ -221,7 +221,7 @@ Worktree branches use the fixed identity shape `<user>/<name>`. `bugs` creates
 Switch to a worktree by wave name, chain leaf, or full branch.
 
 ```bash
-lf wt switch bugs             # the bugs wave worktree
+lf wt switch bugs             # the manually created bugs worktree
 lf wt switch fix-auth         # the …bugs.fix-auth… worktree, by leaf
 lf wt switch jack/bugs.fix-auth.20260316_1856  # exact branch
 ```

@@ -214,10 +214,6 @@ pub enum Commands {
         /// Wave name
         name: String,
     },
-    /// Enqueue a flow in the current wave's innermost invocation
-    Enqueue { flow: String },
-    /// Skip the current logical step without destroying its route
-    Skip,
     /// Internal resident primitive: execute one expanded top-level flow step.
     #[command(name = "__flow-step", hide = true)]
     FlowStep {
@@ -497,12 +493,16 @@ pub enum ProjectCommand {
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
         #[arg(long)]
+        directive: Option<String>,
+        #[arg(long)]
         json: bool,
     },
     /// Start or resume the one durable Session for an existing Linear Project
     Run {
         /// Linear Project UUID or unique slug
         project_id: String,
+        #[arg(long)]
+        directive: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -537,10 +537,20 @@ pub enum ProjectCommand {
     /// Read or wait for one durable Project command receipt
     Receipt {
         command_id: String,
-        #[arg(long)]
-        wait: bool,
+        #[arg(long, value_enum)]
+        until: Option<crate::ops::task::ChildReceiptUntil>,
         #[arg(long, default_value = "30s")]
         timeout: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Confirm that this Project incorporated its current direction
+    Acknowledge {
+        project_id: String,
+        #[arg(long)]
+        directive: u32,
+        #[arg(long)]
+        summary: String,
         #[arg(long)]
         json: bool,
     },
@@ -610,6 +620,8 @@ pub enum TaskCommand {
     Run {
         issue: String,
         #[arg(long)]
+        directive: Option<String>,
+        #[arg(long)]
         json: bool,
     },
     /// Create a Linear task first, then start its Task Session
@@ -617,6 +629,8 @@ pub enum TaskCommand {
         title: String,
         #[arg(short = 'p', long = "project")]
         project_id: String,
+        #[arg(long)]
+        directive: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -651,10 +665,20 @@ pub enum TaskCommand {
     /// Read or wait for one durable command receipt
     Receipt {
         command_id: String,
-        #[arg(long)]
-        wait: bool,
+        #[arg(long, value_enum)]
+        until: Option<crate::ops::task::ChildReceiptUntil>,
         #[arg(long, default_value = "30s")]
         timeout: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Confirm that this Task incorporated its current direction
+    Acknowledge {
+        issue: String,
+        #[arg(long)]
+        directive: u32,
+        #[arg(long)]
+        summary: String,
         #[arg(long)]
         json: bool,
     },
@@ -1110,7 +1134,7 @@ mod tests {
         let cli = Cli::try_parse_from(["lf", "task", "run", "INF-123", "--json"])
             .expect("parse task run");
         let Some(Commands::Task {
-            cmd: TaskCommand::Run { issue, json },
+            cmd: TaskCommand::Run { issue, json, .. },
         }) = cli.command
         else {
             panic!("expected task run command");
@@ -1153,7 +1177,8 @@ mod tests {
             "task",
             "receipt",
             "cc_00000000000000000000000000000000",
-            "--wait",
+            "--until",
+            "incorporated",
             "--timeout",
             "30s",
             "--json",
@@ -1163,12 +1188,34 @@ mod tests {
             receipt.command,
             Some(Commands::Task {
                 cmd: TaskCommand::Receipt {
-                    wait: true,
+                    until: Some(crate::ops::task::ChildReceiptUntil::Incorporated),
                     timeout,
                     json: true,
                     ..
                 }
             }) if timeout == "30s"
+        ));
+
+        let acknowledge = Cli::try_parse_from([
+            "lf",
+            "task",
+            "acknowledge",
+            "INF-123",
+            "--directive",
+            "2",
+            "--summary",
+            "parser work is now first",
+        ])
+        .expect("parse task acknowledgement");
+        assert!(matches!(
+            acknowledge.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Acknowledge {
+                    issue,
+                    directive: 2,
+                    ..
+                }
+            }) if issue == "INF-123"
         ));
 
         let decide = Cli::try_parse_from([
@@ -1259,7 +1306,9 @@ mod tests {
         ])
         .expect("parse project start");
         let Some(Commands::Project {
-            cmd: ProjectCommand::Start { title, wave, json },
+            cmd: ProjectCommand::Start {
+                title, wave, json, ..
+            },
         }) = cli.command
         else {
             panic!("expected project start command");
@@ -1296,7 +1345,8 @@ mod tests {
             "project",
             "receipt",
             "cc_00000000000000000000000000000000",
-            "--wait",
+            "--until",
+            "applied",
             "--timeout",
             "30s",
         ])
@@ -1306,7 +1356,7 @@ mod tests {
             Some(Commands::Project {
                 cmd: ProjectCommand::Receipt {
                     command_id,
-                    wait: true,
+                    until: Some(crate::ops::task::ChildReceiptUntil::Applied),
                     timeout,
                     ..
                 },

@@ -769,6 +769,8 @@ mod tests {
             supervisor: crate::project_session::SessionSupervisor::Wave {
                 wave_id: wave.id().clone(),
             },
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
             status: TaskSessionStatus::Submitted,
             status_reason: format!("pull request #{pr_number} is open for review"),
             status_at: now,

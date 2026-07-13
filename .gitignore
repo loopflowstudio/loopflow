@@ -20,6 +20,7 @@ local-bin/
 
 # Loopflow (generated)
 **/.wave-endpoint
+**/.wave-resident-token
 .lf/log/
 .lf/logs/
 .lf/prompts/

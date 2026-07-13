@@ -16,12 +16,12 @@ You author wave files under `wave/<name>/`:
 | **`MEMORY.md`** | What the wave remembers between loops — written by the wave agent |
 
 Tasks live in Linear. Run the agent and it reads its Projects, tasks, and
-memory; creates or selects the next task; starts one durable Task Session; and
-folds the linked result back into memory.
+memory; selects a Project before creating or selecting the next Task; starts
+one durable Task Session; and folds the linked result back into memory.
 
 ```bash
 lf serve shipper            # start the wave agent
-tmux ls                    # the wave agent and every worker it launches
+tmux ls                    # live Wave, Project, and Task Sessions
 lf task attach INF-123     # audited writable task control prompt
 ```
 
@@ -43,7 +43,8 @@ PR:
 ```bash
 lf task status INF-123
 lf task interrupt INF-123 --message "take the smaller approach"
-lf task receipt COMMAND_ID --wait --timeout 30s --json
+lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
+lf task acknowledge INF-123 --directive 2 --summary "the smaller approach is active"
 lf task decide INF-123 DECISION_ID approve
 lf task wait INF-123
 ```
@@ -114,11 +115,11 @@ Or run manually: `lfd serve`. Watch progress in Loopflow.
 
 ```bash
 lf serve <name>          # start the wave agent (Ctrl-C to stop)
-tmux ls                 # live sessions — the wave agent and its workers
+tmux ls                 # live Wave, Project, and Task Sessions
 tmux attach -r -t <name>   # inspect one; stdin stays closed
 ```
 
-To remove a wave, delete `wave/<name>/` and its worktree (`lf wt remove <name>`).
+To remove a wave, stop it, then delete `wave/<name>/`.
 
 ## Next
 

@@ -190,6 +190,20 @@ lf rebase origin/main
 lf rebase --plan parent.branch
 ```
 
+Keep conflict resolution in the current process when the branch is too large
+or sensitive to hand to another agent:
+
+```bash
+lf rebase --manual
+# edit the conflict paths printed by lf
+lf rebase --continue
+
+lf rebase --abort # restore the pre-rebase branch instead
+```
+
+Manual recovery stays local and never pushes. Each `--continue` stages only
+the current conflict paths; repeat edit/continue until the rebase completes.
+
 ## lf wt
 
 Worktree helper commands.

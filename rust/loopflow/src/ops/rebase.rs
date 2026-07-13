@@ -2,8 +2,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::engine::git::{
-    current_branch, delete_local_branch, fetch, get_default_branch, is_merged_into, rebase,
-    rev_parse, squash_merge_fork_point, sync_main,
+    abort_rebase as abort_git_rebase, continue_rebase as continue_git_rebase, current_branch,
+    delete_local_branch, fetch, get_default_branch, is_merged_into, rebase,
+    rebase_for_resolution as start_git_rebase_for_resolution, rev_parse, squash_merge_fork_point,
+    sync_main,
 };
 use crate::engine::identity::WaveId;
 use crate::engine::naming::git_user;
@@ -252,8 +254,66 @@ pub fn rebase_with_recovery(
         }
         return Ok(());
     }
-    let detail = result
-        .conflicts
+    let detail = conflict_detail(result.conflicts);
+    Err(OpsError::RebaseConflict {
+        onto: options.onto.clone(),
+        detail,
+    })
+}
+
+/// Start a local rebase and preserve conflicts for inline resolution.
+pub fn start_rebase_for_resolution(
+    repo: &Path,
+    options: &RebaseOptions,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    let plan = plan_rebase(repo, Some(&options.onto))?;
+    if matches!(plan.strategy, RebaseStrategy::ResetToBase) && !plan.protected {
+        return reset_to_base(repo, &plan, false, progress);
+    }
+
+    if let Some(branch) = options.onto.strip_prefix("origin/") {
+        let _ = fetch(repo, "origin", branch);
+        let _ = sync_main(repo, branch);
+    }
+
+    let fork_point = plan
+        .fork_point
+        .clone()
+        .or_else(|| squash_merge_fork_point(repo, &options.onto).unwrap_or(None));
+    progress.status(&format!("Rebasing onto {}...", options.onto));
+    let result = start_git_rebase_for_resolution(repo, &options.onto, fork_point.as_deref())?;
+    if result.success {
+        return Ok(());
+    }
+
+    let detail = conflict_detail(result.conflicts);
+    Err(OpsError::RebaseConflict {
+        onto: options.onto.clone(),
+        detail,
+    })
+}
+
+/// Continue a local rebase after its conflict paths have been resolved.
+pub fn continue_rebase_for_resolution(repo: &Path) -> OpsResult<()> {
+    let result = continue_git_rebase(repo)?;
+    if result.success {
+        return Ok(());
+    }
+    Err(OpsError::RebaseConflict {
+        onto: "the selected base".to_string(),
+        detail: conflict_detail(result.conflicts),
+    })
+}
+
+/// Abort a local rebase that was left open for inline resolution.
+pub fn abort_rebase_for_resolution(repo: &Path) -> OpsResult<()> {
+    abort_git_rebase(repo)?;
+    Ok(())
+}
+
+fn conflict_detail(conflicts: Option<Vec<PathBuf>>) -> String {
+    conflicts
         .filter(|conflicts| !conflicts.is_empty())
         .map(|conflicts| {
             let conflict_paths = conflicts
@@ -263,11 +323,7 @@ pub fn rebase_with_recovery(
                 .join(", ");
             format!("conflicts: {conflict_paths}")
         })
-        .unwrap_or_else(|| "manual resolution required".to_string());
-    Err(OpsError::RebaseConflict {
-        onto: options.onto.clone(),
-        detail,
-    })
+        .unwrap_or_else(|| "manual resolution required".to_string())
 }
 
 fn reset_to_base(

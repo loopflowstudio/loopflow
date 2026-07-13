@@ -1480,3 +1480,34 @@ Done when a Project-supervised Task request produces one pending Project
 observation and no Wave observation; a Project escalation produces one Wave
 observation; a directly supervised Task request still reaches its Wave; and
 retries remain idempotent.
+
+## Current iteration: keep large-branch recovery inline
+
+The ship gate exposed the branch workflow's own failure mode. `lf rebase`
+correctly classified this 53-commit expansion branch, found conflicts with two
+new main commits, then tried to launch a resolver with all 182 changed files
+embedded in one task-prompt argument. macOS rejected the process with
+`Argument list too long`. The fallback also left no inline recovery path even
+though the current process already owns the design context.
+
+Keep automatic conflict resolution bounded to the conflict receipt; the
+resolver can inspect the repository from its cwd. Also expose a local recovery
+path for the current process:
+
+```text
+lf rebase --manual
+edit the printed conflict paths
+lf rebase --continue
+
+lf rebase --abort  # restore instead
+```
+
+Manual mode never pushes. It leaves Git's sequencer in place, stages only the
+current conflict paths on `--continue`, and may repeat across several commits.
+Authored flows reject these stateful recovery flags; they are CLI operations,
+not reusable flow steps.
+
+Done when a deterministic conflict test proves preserve → edit → continue,
+the recovery flags are mutually exclusive, the agent fallback does not gather
+branch files or raw diff, and this branch can rebase through `lf` without
+delegating its blocking conflict or pushing.

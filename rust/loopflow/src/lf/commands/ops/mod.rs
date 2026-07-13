@@ -20,10 +20,11 @@ use crate::lf::{
 };
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, current_pr, land, plan_rebase,
-    rebase_class_name, rebase_strategy_name, rebase_with_recovery, release_bump, release_check,
-    release_notes, release_run, release_status, release_tag, submit, AbandonOptions, CommitOptions,
-    CronSpec, LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
+    abandon_branch, abort_rebase_for_resolution, commit_workflow, continue_rebase_for_resolution,
+    create_or_update_pr, current_pr, land, plan_rebase, rebase_class_name, rebase_strategy_name,
+    rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
+    release_tag, start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronSpec,
+    LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -134,15 +135,47 @@ impl Progress for CliProgress {
     }
 }
 
-pub fn run_rebase(onto: Option<&str>, plan_only: bool) -> Result<()> {
+pub fn run_rebase(
+    onto: Option<&str>,
+    plan_only: bool,
+    manual: bool,
+    continue_rebase: bool,
+    abort: bool,
+) -> Result<()> {
     let progress = &CliProgress;
     let repo_root = find_repo_root()?;
+    if onto.is_some() && (continue_rebase || abort) {
+        return Err(anyhow!(
+            "a rebase target cannot be combined with --continue or --abort"
+        ));
+    }
+    if continue_rebase {
+        continue_rebase_for_resolution(&repo_root)?;
+        progress.status("Rebase complete; branch remains local.");
+        return Ok(());
+    }
+    if abort {
+        abort_rebase_for_resolution(&repo_root)?;
+        progress.status("Rebase aborted.");
+        return Ok(());
+    }
     let started = Instant::now();
     let plan = plan_rebase(&repo_root, onto)?;
     let onto_ref = plan.base_ref.clone();
     if plan_only {
         print_rebase_plan(&plan);
         return Ok(());
+    }
+    if manual {
+        return start_rebase_for_resolution(
+            &repo_root,
+            &RebaseOptions {
+                onto: onto_ref,
+                push: false,
+            },
+            progress,
+        )
+        .map_err(Into::into);
     }
     match rebase_with_recovery(
         &repo_root,
@@ -1477,7 +1510,13 @@ fn launch_skill_agent(repo_root: &Path, skill_name: &str, context: Option<&str>)
             cwd: Some(repo_root.to_path_buf()),
             yolo_mode: config.yolo,
             source_overrides: ContextSourceOverrides {
-                diff_files: Some(true),
+                // Rebase conflicts already name the affected paths in `context`.
+                // Embedding every authored file here makes the task prompt grow
+                // with the branch and can exceed the OS argument limit before
+                // the resolver starts. The agent has the repository as its cwd
+                // and can inspect the conflict in place.
+                diff_files: Some(false),
+                diff: Some(false),
                 ..Default::default()
             },
             ..LaunchPromptInput::default()

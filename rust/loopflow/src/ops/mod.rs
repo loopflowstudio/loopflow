@@ -32,7 +32,8 @@ pub use land::{land, mark_ready, submit, LandOptions};
 pub use pr::{create_or_update_pr, current_or_merged_pr, current_pr, PrInfo, PrOptions, PrResult};
 pub use progress::{NullProgress, Progress};
 pub use rebase::{
-    plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, RebaseClass,
+    abort_rebase_for_resolution, continue_rebase_for_resolution, plan_rebase, rebase_class_name,
+    rebase_strategy_name, rebase_with_recovery, start_rebase_for_resolution, RebaseClass,
     RebaseOptions, RebasePlan, RebaseStrategy,
 };
 pub use release::{

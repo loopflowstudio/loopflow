@@ -786,6 +786,24 @@ pub fn rebase(
     onto: &str,
     base_commit: Option<&str>,
 ) -> Result<RebaseResult, GitError> {
+    rebase_command(worktree, onto, base_commit, true)
+}
+
+/// Start a rebase and leave conflicts in place for the current process.
+pub fn rebase_for_resolution(
+    worktree: &Path,
+    onto: &str,
+    base_commit: Option<&str>,
+) -> Result<RebaseResult, GitError> {
+    rebase_command(worktree, onto, base_commit, false)
+}
+
+fn rebase_command(
+    worktree: &Path,
+    onto: &str,
+    base_commit: Option<&str>,
+    abort_on_conflict: bool,
+) -> Result<RebaseResult, GitError> {
     let mut args = vec!["rebase"];
     if let Some(base) = base_commit {
         args.extend(["--onto", onto, base]);
@@ -805,7 +823,9 @@ pub fn rebase(
     }
 
     let conflicts = list_conflicts(worktree)?;
-    let _ = run_git(worktree, &["rebase", "--abort"])?;
+    if abort_on_conflict {
+        let _ = run_git(worktree, &["rebase", "--abort"])?;
+    }
     Ok(RebaseResult {
         success: false,
         conflicts: if conflicts.is_empty() {
@@ -815,6 +835,53 @@ pub fn rebase(
         },
         new_head: None,
     })
+}
+
+/// Stage the resolved conflict paths and continue an in-progress rebase.
+pub fn continue_rebase(worktree: &Path) -> Result<RebaseResult, GitError> {
+    let conflicts = list_conflicts(worktree)?;
+    if !conflicts.is_empty() {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(worktree)
+            .args(["add", "--"])
+            .args(&conflicts)
+            .output()?;
+        if !output.status.success() {
+            return Err(GitError::CommandFailed {
+                command: "git add -- <resolved conflicts>".to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            });
+        }
+    }
+
+    let output = run_git(
+        worktree,
+        &["-c", "core.editor=true", "rebase", "--continue"],
+    )?;
+    if output.status.success() {
+        let new_head = git_stdout(worktree, &["rev-parse", "HEAD"])?
+            .trim()
+            .to_string();
+        return Ok(RebaseResult {
+            success: true,
+            conflicts: None,
+            new_head: Some(new_head),
+        });
+    }
+
+    let conflicts = list_conflicts(worktree)?;
+    Ok(RebaseResult {
+        success: false,
+        conflicts: (!conflicts.is_empty()).then_some(conflicts),
+        new_head: None,
+    })
+}
+
+/// Abort an in-progress rebase and restore its pre-rebase state.
+pub fn abort_rebase(worktree: &Path) -> Result<(), GitError> {
+    git_stdout(worktree, &["rebase", "--abort"])?;
+    Ok(())
 }
 
 pub fn create_branch(worktree: &Path, name: &str) -> Result<BranchInfo, GitError> {
@@ -1020,6 +1087,40 @@ mod tests {
         let result = rebase(repo.path(), "main", None).expect("rebase");
         assert!(result.success);
         assert!(result.new_head.is_some());
+    }
+
+    #[test]
+    fn git_rebase_can_preserve_and_continue_conflicts() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "base\n");
+        create_branch(repo.path(), "feature").expect("create branch");
+        fs::write(repo.path().join("README.md"), "feature\n").expect("write feature");
+        git_stdout(repo.path(), &["add", "README.md"]).expect("stage feature");
+        git_stdout(repo.path(), &["commit", "-m", "feature change"]).expect("commit feature");
+
+        git_stdout(repo.path(), &["checkout", "main"]).expect("checkout main");
+        fs::write(repo.path().join("README.md"), "main\n").expect("write main");
+        git_stdout(repo.path(), &["add", "README.md"]).expect("stage main");
+        git_stdout(repo.path(), &["commit", "-m", "main change"]).expect("commit main");
+        git_stdout(repo.path(), &["checkout", "feature"]).expect("checkout feature");
+
+        let conflicted =
+            rebase_for_resolution(repo.path(), "main", None).expect("start manual rebase");
+        assert!(!conflicted.success);
+        assert_eq!(conflicted.conflicts, Some(vec![PathBuf::from("README.md")]));
+        assert_eq!(list_conflicts(repo.path()).unwrap().len(), 1);
+
+        fs::write(repo.path().join("README.md"), "main\nfeature\n").expect("resolve conflict");
+        let completed = continue_rebase(repo.path()).expect("continue rebase");
+        assert!(completed.success);
+        assert_eq!(
+            current_branch(repo.path()).unwrap(),
+            Some("feature".to_string())
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("README.md")).unwrap(),
+            "main\nfeature\n"
+        );
     }
 
     #[test]

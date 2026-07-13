@@ -147,8 +147,17 @@ pub enum Commands {
     /// Rebase current branch onto target (default: main)
     Rebase {
         /// Print the planned rebase strategy without mutating git
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["manual", "continue_rebase", "abort"])]
         plan: bool,
+        /// Keep the rebase local and leave conflicts for this process to resolve
+        #[arg(long, conflicts_with_all = ["plan", "continue_rebase", "abort"])]
+        manual: bool,
+        /// Stage resolved conflict paths and continue the local rebase
+        #[arg(long = "continue", conflicts_with_all = ["plan", "manual", "abort"])]
+        continue_rebase: bool,
+        /// Abort the local rebase in progress
+        #[arg(long, conflicts_with_all = ["plan", "manual", "continue_rebase"])]
+        abort: bool,
         /// Branch to rebase onto
         onto: Option<String>,
     },
@@ -1373,6 +1382,25 @@ mod tests {
         assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "up"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "down"]).is_err());
+    }
+
+    #[test]
+    fn rebase_manual_recovery_modes_are_explicit_and_exclusive() {
+        let manual = Cli::try_parse_from(["lf", "rebase", "--manual", "origin/main"])
+            .expect("parse manual rebase");
+        assert!(matches!(
+            manual.command,
+            Some(Commands::Rebase {
+                manual: true,
+                continue_rebase: false,
+                abort: false,
+                onto: Some(ref onto),
+                ..
+            }) if onto == "origin/main"
+        ));
+
+        assert!(Cli::try_parse_from(["lf", "rebase", "--continue", "--abort"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "rebase", "--plan", "--manual"]).is_err());
     }
 
     #[test]

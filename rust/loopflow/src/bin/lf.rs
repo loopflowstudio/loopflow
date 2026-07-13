@@ -1069,8 +1069,20 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Wt { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_wt(cmd))
             }
-            Some(Commands::Rebase { plan, onto }) => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::ops::run_rebase(onto.as_deref(), *plan)
+            Some(Commands::Rebase {
+                plan,
+                manual,
+                continue_rebase,
+                abort,
+                onto,
+            }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run_rebase(
+                    onto.as_deref(),
+                    *plan,
+                    *manual,
+                    *continue_rebase,
+                    *abort,
+                )
             }),
             Some(Commands::Commit {
                 message,

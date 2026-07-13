@@ -66,7 +66,7 @@ use crate::wave::playhead::{BodyProvenance, StepKind, StepOutcome, StepRef};
 use crate::wave::resident::ListenerClient;
 use crate::wave::runtime::InboxItem;
 use crate::wave::supervisor::sleep_until_opt;
-use crate::wave::wire::{InFlightWorker, ResidentDelta, ResidentStateTo};
+use crate::wave::wire::{InFlightWorker, ProviderSessionRef, ResidentDelta, ResidentStateTo};
 
 /// How long an eventless Wave stays idle before a safety heartbeat. Human
 /// chat, child observations, and crons wake it immediately; the quiet cadence
@@ -284,6 +284,15 @@ fn body_provenance(step: &StepRef, cwd: &Path) -> BodyProvenance {
     body
 }
 
+fn provider_session_id_for_harness(
+    provider_session: Option<&ProviderSessionRef>,
+    harness: &str,
+) -> Option<String> {
+    provider_session
+        .filter(|session| session.harness == harness)
+        .map(|session| session.session_id.clone())
+}
+
 // -- The scheduler --
 
 /// Why the loop ended.
@@ -394,7 +403,7 @@ async fn run_loop_with(
         consecutive_failures: 0,
         idle_since: Instant::now(),
         cron_last_fired: HashMap::new(),
-        provider_session_id: None,
+        provider_session: None,
         end: None,
     };
 
@@ -440,7 +449,7 @@ struct WaveLoop {
     consecutive_failures: u32,
     idle_since: Instant,
     cron_last_fired: HashMap<String, DateTime<Utc>>,
-    provider_session_id: Option<String>,
+    provider_session: Option<ProviderSessionRef>,
     end: Option<LoopEnd>,
 }
 
@@ -766,7 +775,12 @@ impl WaveLoop {
         if capture.is_some() {
             harness.set_raw_provider_sender(Some(raw_tx));
         }
-        harness.set_provider_session_id(self.provider_session_id.clone());
+        let resume_session_id =
+            provider_session_id_for_harness(self.provider_session.as_ref(), &prepared.harness);
+        if resume_session_id.is_none() {
+            self.provider_session = None;
+        }
+        harness.set_provider_session_id(resume_session_id);
         if let Err(err) = harness.start(&prepared.config).await {
             finish_capture(capture.as_ref(), "failed");
             let body_id = body.body_id.clone();
@@ -782,8 +796,11 @@ impl WaveLoop {
         if let Some(capture) = &capture {
             capture.set_provider_session_id(body.session_id.clone());
         }
-        if body.session_id.is_some() {
-            self.provider_session_id.clone_from(&body.session_id);
+        if let Some(session_id) = &body.session_id {
+            self.provider_session = Some(ProviderSessionRef {
+                harness: prepared.harness.clone(),
+                session_id: session_id.clone(),
+            });
         }
         let mut body_session_id = body.session_id.clone();
         let body_id = body.body_id.clone();
@@ -871,7 +888,10 @@ impl WaveLoop {
                             if let Some(capture) = &capture {
                                 capture.set_provider_session_id(Some(session_id.clone()));
                             }
-                            self.provider_session_id = Some(session_id.clone());
+                            self.provider_session = Some(ProviderSessionRef {
+                                harness: prepared.harness.clone(),
+                                session_id: session_id.clone(),
+                            });
                             self.send(vec![ResidentDelta::BodySessionUpdated {
                                 body_id: body_id.clone(),
                                 session_id,
@@ -1252,7 +1272,12 @@ impl WaveLoop {
 
     async fn fetch_context(&mut self) -> Option<crate::wave::wire::ContextResponse> {
         match self.client.context().await {
-            Ok(context) => Some(context),
+            Ok(context) => {
+                if self.provider_session.is_none() {
+                    self.provider_session.clone_from(&context.provider_session);
+                }
+                Some(context)
+            }
             Err(err) => {
                 tracing::info!(
                     error = %format!("{err:#}"),
@@ -1738,6 +1763,23 @@ mod tests {
         assert_eq!(
             first, exe_dir,
             "the loop's PATH resolves `lf` to this build first"
+        );
+    }
+
+    #[test]
+    fn provider_sessions_resume_only_through_their_own_harness() {
+        let session = ProviderSessionRef {
+            harness: "codex".to_string(),
+            session_id: "thread-resume".to_string(),
+        };
+
+        assert_eq!(
+            provider_session_id_for_harness(Some(&session), "codex"),
+            Some("thread-resume".to_string())
+        );
+        assert_eq!(
+            provider_session_id_for_harness(Some(&session), "claude"),
+            None
         );
     }
 

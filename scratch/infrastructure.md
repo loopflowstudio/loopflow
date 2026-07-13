@@ -1387,3 +1387,35 @@ Implement this iteration in `flowloop/wave.rs`:
 Done when an idle Wave consumes no provider turns between wakes, while a new
 message, child observation, cron, or heartbeat still runs the complete Wave
 flow and remains steerable during its active phase.
+
+## Current iteration: preserve the Wave provider thread
+
+Project and Task Sessions persist their provider session ids. The Wave journal
+also records `BodyProvenance { harness, session_id }`, but a new resident does
+not currently recover it: `WaveLoop.provider_session_id` starts empty after
+every process restart. It also carries only the id, so a phase configured for a
+different harness can receive another provider's opaque session id.
+
+Make the listener's resident context expose the latest durable provider
+session as a typed pair:
+
+```rust
+struct ProviderSessionRef {
+    harness: String,
+    session_id: String,
+}
+```
+
+The Wave runtime derives it from the open body or newest journal-folded
+assistant body. `GET /resident/context` returns the optional pair as a required
+wire field. A resident hydrates its in-memory Wave loop from that context
+before the next phase and passes the id to a harness only when the harness name
+matches. A newly announced provider session replaces the recovered pair.
+
+This keeps one resumable Wave transcript across clarify/pursue/mutate,
+iterations, and resident crashes without pretending session ids are portable
+between Codex, Claude, and OpenCode.
+
+Done when a journal reopen recovers the same `(harness, session_id)`, a matching
+harness resumes it, and a differently configured harness receives no foreign
+session id.

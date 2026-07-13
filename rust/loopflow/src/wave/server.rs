@@ -525,6 +525,7 @@ async fn resident_context_handler(
     Ok(Json(ContextResponse {
         in_flight,
         playhead,
+        provider_session: state.runtime.latest_provider_session(),
     }))
 }
 

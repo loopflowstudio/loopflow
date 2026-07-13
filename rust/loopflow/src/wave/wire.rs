@@ -167,6 +167,14 @@ pub struct AttachResponse {
 pub struct ContextResponse {
     pub in_flight: Vec<InFlightWorker>,
     pub playhead: PlayheadView,
+    pub provider_session: Option<ProviderSessionRef>,
+}
+
+/// A provider thread is only meaningful to the harness that minted it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderSessionRef {
+    pub harness: String,
+    pub session_id: String,
 }
 
 /// One started-but-not-finished worker, for the heartbeat's `<in_flight>`

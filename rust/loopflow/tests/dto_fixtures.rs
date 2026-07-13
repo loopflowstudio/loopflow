@@ -300,6 +300,13 @@ fn resident_door_fixture_round_trips_attach_and_context() {
     assert_eq!(context.in_flight[0].flow, "implement");
     assert_eq!(context.in_flight[0].task, "Wire the endpoint.");
     assert_eq!(
+        context
+            .provider_session
+            .as_ref()
+            .map(|session| (session.harness.as_str(), session.session_id.as_str())),
+        Some(("codex", "thread_01HNX7XYZ0AZ1B2C3D4E5F6G7H"))
+    );
+    assert_eq!(
         context.playhead.now.as_ref().map(|step| step.step.as_str()),
         Some("compress")
     );

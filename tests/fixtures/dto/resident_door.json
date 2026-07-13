@@ -49,6 +49,10 @@
         "iteration": 2
       },
       "return_to": null
+    },
+    "provider_session": {
+      "harness": "codex",
+      "session_id": "thread_01HNX7XYZ0AZ1B2C3D4E5F6G7H"
     }
   }
 }

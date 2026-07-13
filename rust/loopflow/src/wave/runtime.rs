@@ -47,7 +47,7 @@ use crate::wave::playhead::{
     StepOutcome,
 };
 use crate::wave::state::{can_transition, LoopState};
-use crate::wave::wire::{OpFrame, ResidentDelta, ResidentStateTo};
+use crate::wave::wire::{OpFrame, ProviderSessionRef, ResidentDelta, ResidentStateTo};
 
 /// Capacity of the live turn broadcast. SSE clients that fall this far behind
 /// get a lag error and resync from `/conversation`; the journal is the source
@@ -456,6 +456,26 @@ impl WaveRuntime {
         inner.thread.len() + usize::from(inner.open.is_some())
     }
 
+    /// The newest provider thread recorded by the durable Wave journal.
+    pub fn latest_provider_session(&self) -> Option<ProviderSessionRef> {
+        let inner = self.inner();
+        if let Some(body) = inner
+            .open
+            .as_ref()
+            .and_then(|open| open.turn.body.as_ref())
+            .filter(|body| body_has_harness(body))
+        {
+            return provider_session_from_body(body);
+        }
+        inner
+            .thread
+            .iter()
+            .rev()
+            .filter_map(|turn| turn.body.as_ref())
+            .find(|body| body_has_harness(body))
+            .and_then(provider_session_from_body)
+    }
+
     /// Current loop state, for `/health` and the composer.
     pub fn loop_state(&self) -> LoopState {
         self.inner().state.clone()
@@ -610,7 +630,6 @@ impl WaveRuntime {
         Ok(view)
     }
 
-    /// The last journaled vendor thread id, if any — the loop's resume handle.
     /// User messages journaled but not yet consumed by a turn — the durable
     /// queue. Replayed as `inbox` frames when a resident subscribes, and the
     /// validator for the resident's `answers` declarations.
@@ -1440,6 +1459,24 @@ impl WaveRuntime {
     }
 }
 
+fn provider_session_from_body(body: &BodyProvenance) -> Option<ProviderSessionRef> {
+    let harness = body.harness.as_deref()?.trim();
+    let session_id = body.session_id.as_deref()?.trim();
+    if harness.is_empty() || session_id.is_empty() {
+        return None;
+    }
+    Some(ProviderSessionRef {
+        harness: harness.to_string(),
+        session_id: session_id.to_string(),
+    })
+}
+
+fn body_has_harness(body: &BodyProvenance) -> bool {
+    body.harness
+        .as_deref()
+        .is_some_and(|harness| !harness.trim().is_empty())
+}
+
 /// Validate a wire `answers` declaration against the pending fold: known ids
 /// are claimed (removed from pending) and returned in wire order; unknown or
 /// already-consumed ids are dropped with a warning — the journal never names
@@ -1560,6 +1597,27 @@ mod tests {
             cost_usd: None,
             reason: None,
         }
+    }
+
+    fn complete_body(rt: &WaveRuntime, harness: &str, session_id: Option<&str>) {
+        let step = rt
+            .ensure_playhead()
+            .expect("initialize playhead")
+            .now
+            .expect("wave has a current step");
+        let mut body = BodyProvenance::for_step(&step, rt.repo_root());
+        body.harness = Some(harness.to_string());
+        body.session_id = session_id.map(str::to_string);
+        let body_id = body.body_id.clone();
+        rt.apply_resident_delta(ResidentDelta::BodyStarted { body });
+        rt.apply_resident_delta(d_opened(&[]));
+        rt.apply_resident_delta(d_text("done"));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
+        rt.apply_resident_delta(ResidentDelta::BodyFinished {
+            body_id,
+            outcome: StepOutcome::Completed,
+            reason: "completed".to_string(),
+        });
     }
 
     #[test]
@@ -1873,6 +1931,40 @@ mod tests {
         assert_eq!(usage.input_tokens, Some(10));
         assert_eq!(usage.output_tokens, Some(4));
         assert_eq!(usage.cost_usd, Some(0.02));
+    }
+
+    #[test]
+    fn provider_session_survives_runtime_reopen() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        complete_body(&rt, "codex", Some("thread-resume"));
+        assert_eq!(
+            rt.latest_provider_session(),
+            Some(ProviderSessionRef {
+                harness: "codex".to_string(),
+                session_id: "thread-resume".to_string(),
+            })
+        );
+
+        drop(rt);
+        let reopened = open_runtime(tmp.path());
+        assert_eq!(
+            reopened.latest_provider_session(),
+            Some(ProviderSessionRef {
+                harness: "codex".to_string(),
+                session_id: "thread-resume".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn newest_harness_body_masks_an_older_provider_session() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        complete_body(&rt, "codex", Some("codex-thread"));
+        complete_body(&rt, "claude", None);
+
+        assert_eq!(rt.latest_provider_session(), None);
     }
 
     /// The consumption declaration is the RESIDENT's, validated by the

@@ -16,15 +16,4 @@ enum SharedDaemon {
     }
 }
 
-extension RepoState {
-    convenience init() {
-        let bundledDaemon = SharedDaemon.manager
-        self.init(
-            startBundledDaemon: {
-                try await bundledDaemon.start()
-            },
-            shellCommandRunner: LocalShellCommandRunner.run
-        )
-    }
-}
 #endif

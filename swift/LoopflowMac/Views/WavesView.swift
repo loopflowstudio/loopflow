@@ -440,7 +440,7 @@ struct WavesView: View {
     /// `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS.
     private func registerInitialRepoIfNeeded() async -> String? {
         guard let initialRepoPath, !didApplyInitialRepo else { return nil }
-        if RepoState.uiTestMode() != nil { return nil }
+        if AppTestMode.current() != nil { return nil }
         let readPath = await Task.detached {
             Self.resolveLaunchRepo(initialRepoPath).path
         }.value
@@ -474,7 +474,7 @@ struct WavesView: View {
     /// (worktree included) as a single row labeled with the main-repo name.
     /// Runs the git/FS work off the main thread.
     private func refreshRepos() async {
-        if RepoState.uiTestMode() != nil {
+        if AppTestMode.current() != nil {
             repos = portfolioService.repos
             return
         }
@@ -521,7 +521,7 @@ struct WavesView: View {
     /// directories — off the main thread, so the list can offer them as launchable
     /// rows before lfd has created them.
     private func refreshAuthoredWaves() async {
-        if RepoState.uiTestMode() != nil { return }
+        if AppTestMode.current() != nil { return }
         let paths = repos.map(\.path)
         authoredWavesByRepo = await Task.detached {
             let liveSessions = LocalWaveAgentLauncher.tmuxSessionNames()
@@ -586,7 +586,7 @@ struct WavesView: View {
 
     private func prepareConnectionIfNeeded() async {
         // UI tests run against mock data; never start a daemon or reach a remote lfd.
-        if RepoState.uiTestMode() != nil { return }
+        if AppTestMode.current() != nil { return }
         guard connectionStore.mode == .bundled else { return }
         if let current = SharedDaemon.currentConnection {
             connectionStore.setBundledRuntimeConnection(current)
@@ -598,7 +598,7 @@ struct WavesView: View {
     }
 
     private func syncRepoStates() async {
-        if RepoState.uiTestMode() != nil { return }
+        if AppTestMode.current() != nil { return }
         ensureRepoStates()
 
         if connectionStore.mode == .bundled {
@@ -686,7 +686,7 @@ struct WavesView: View {
     /// bind the store to a wave service and read the provider list. There is no
     /// machine-wide auth push in the base model.
     private func prepareAuth() async {
-        if RepoState.uiTestMode() != nil { return }
+        if AppTestMode.current() != nil { return }
         if connectionStore.mode == .bundled, SharedDaemon.currentConnection == nil {
             return
         }
@@ -702,7 +702,7 @@ struct WavesView: View {
     /// Each wave's live conversation + run motion is its own per-wave SSE,
     /// opened by the detail pane — not funnelled through a center.
     private func pollRegistry() async {
-        if RepoState.uiTestMode() != nil { return }
+        if AppTestMode.current() != nil { return }
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(5))
             if Task.isCancelled { return }

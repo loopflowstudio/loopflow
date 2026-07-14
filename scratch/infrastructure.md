@@ -562,3 +562,15 @@ Delete those helpers and their preference/test surface. Keep the reachable
 Ghostty diagnostic window, GUI process-environment repair, and the Wave's own
 detached tmux lifecycle. A terminal remains a display or debugging tool; Wave,
 Project, and Task lifecycles decide what work exists and where it runs.
+
+## Current reduction: one app orchestrator
+
+With mobile gone, `RepoState` has no production owner. The Mac has already
+moved to `PortfolioRepoState`; the thousand-line predecessor survives only so
+`WavesView` can call its static UI-test-mode parser and one test can instantiate
+it. Its connection, Wave mutation, trigger, attention, worktree, and catalog
+paths therefore describe an application that no longer runs.
+
+Move the test-mode parser into a small Mac type, keep `SharedDaemon` as the
+reachable bundled-daemon owner, and delete `RepoState`. The app now has one
+orchestrator per repository and one source for its Wave/Project/Task view.

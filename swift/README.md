@@ -84,8 +84,8 @@ See `LoopflowMac/Services/Ghostty/README.md` for integration details.
 
 ## Architecture
 
-- `Loopflow/State/RepoState.swift` — shared connection and Wave discovery state
-- `Loopflow/State/*.swift` — shared state containers (`WaveStore`, `WorktreeStore`, `ConnectionStore`, `OutputBuffer`)
+- `LoopflowMac/PortfolioRepoState.swift` — per-repository Wave, plan, and work-map state
+- `Loopflow/State/*.swift` — shared state containers used by the Mac surface
 - `Loopflow/Models` + `Loopflow/Services` — shared API models and transport/services
 - `LoopflowMac` — the macOS product surface and platform services
 - `LoopflowMac/Services/Ghostty` — embedded terminal integration (macOS-only)

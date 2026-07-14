@@ -1,113 +1,93 @@
-# v0.10.1
+# v0.11.0
 
-This is a maintenance release that **completes the PM migration from Asana to Linear** and plugs a few operational gaps exposed by v0.10.0 running in CI and on headless hosts.
+This is the release where loopflow stops being a distributed system. The `lfd` daemon, the `lfq` remote-exec door, the HTTP route surface, the queue reconciler, and a SQLite catalog carrying sixty-odd accreted migrations are all gone. What's left is one `lf` binary: a resident wave server you chat with, a store rebuilt from an honest baseline, and three planning nouns — **wave**, **project**, **task** — that the runtime now models directly instead of approximating with five overlapping ones. The `lf op` drawer is gone too; the mechanical operations you use every day are top-level commands. Upgrade for the smaller thing that does more: this release is a net deletion of tens of thousands of lines while adding a trustworthy run ledger, durable prompt traces, Linear-native planning, and a Mac app that finally shares the framework's name.
 
-## Linear replaces Asana
+## The runtime is waves, projects, and tasks
 
-The PM backend migrated from Asana to Linear. Configuration now lives in `.lf/config.toml` and wave frontmatter; the GraphQL client handles OAuth, paginated issue listing, priority ranking, and rate-limit retries.
+The style guide has committed to three planning nouns for a while; the code hadn't. It does now. A wave is a durable operating context that owns memory, cadence, chat, and project selection. A project is a measured bet with KRs, pursued by a durable child session. A task is concrete work under a project, run by the same primitives. Everything that existed to support the older, more speculative model was deleted rather than ported — the daemon, the worktree fork machinery, the provider/session token plumbing, and the three-tier phase ladder that used to sit between a wave and its work.
 
-- **Linear is the sole PM provider** — Asana is gone. The ~2700-line Asana client, HTML/markdown conversion layer, OAuth code-paste flow, config, and wave `asana_project` field are all deleted. New issues land in Todo instead of Backlog (#819, #820, #821, #822).
-- **Docs retarget to Linear** — wave operating guidance, GOAL.md, and PM documentation reference Linear rather than Asana (#823).
+- **`lfd` and `lfq` are gone** — no daemon, no HTTP service, no remote-exec door. `lf wave <name>` boots a resident server (listener, thread, playhead) in-process; `lf stop <name>` stands it down gracefully and is idempotent against a stale endpoint (#872, #866).
+- **One session layer, shared** — wave, project, and task each run one policy skill (`*_clarify` / `*_mutate` / `*_pursue`) over a common child-session layer, instead of each tier growing its own executor. Launch and control state on a child is explicit; interrupting a stopped child is a no-op (#872).
+- **The prompt unit is a *skill*** — `.lf/steps/` → `.lf/skills/`, `Step` → `Skill`, `--skill`, and every DTO field renamed across Rust, Python, and Swift. The persistent wave "mind" became the **flowloop**: a looping flow where the agent sets the termination bit and the runner checks it, replacing ~2.5k lines of tiered scheduler (#845).
+- **Inline-first execution** — the current process and worktree are the default surface, not a dispatch desk. A wave resolves its own blocking move inline and spins off a child loop only for a strict subset that earns its own lifecycle or real parallelism. `LOOPFLOW.md` and the builtin skills were rewritten to teach that (#864).
+- **`GOAL.md` is the durable charter** — Objective, Measures, Cron, Process. Routing judgment lives in Process; `primary_flow` is gone from the wave shape entirely (#843).
 
-## `lf op submit`: a human-gated finish
+## One binary, one command grammar
 
-`lf op pr` and `lf op land` sat at opposite ends — one keeps work visible mid-stream, the other merges hands-off. `lf op submit` is the middle gear for finished work a human should land.
+`lf op` was a drawer you had to know about. Its contents are now first-class verbs, and the same grammar is used by humans, builtin flows, docs, prompts, and smoke tests.
 
 ```bash
-lf op submit    # prep to land, mark ready, assign to you — you click merge
-lf op land      # hands-off: same prep, then arm auto-merge + rotate worktree
+lf commit -m "message" -p     # gate + commit + push
+lf pr open / submit / land    # visible mid-stream / human merges / hands-off merge
+lf wt create next-thing       # sibling worktree; --child to stack
+lf pm show --wave systems
+lf release run minor
 ```
 
-`submit` rebases onto main, clears `scratch/`, marks the PR ready, and assigns it to you — then stops. Nothing merges until you click merge on GitHub. The merge click is the required gate (#828).
+- **Ops promoted to top level** — `lf pr`, `lf wt`, `lf rebase`, `lf commit`, `lf pm`, `lf release`, `lf cron`. Flow steps use the same payloads (`- op: pr land --create-pr`) (#853).
+- **Retired spellings say what to use instead** — `lf op land` no longer reports "skill or flow not found: op". It errors with the replacement (`lf pr land`), and `lf op next`, which has none, says so. This matters for agents running an installed `lf` that predates the collapse (#874).
+- **Flags cross to the subcommand that owns them** — the arg pre-parser derives flag ownership recursively from the clap definition, so a flag written after its subcommand normalizes to the canonical global-first order rather than failing (#864).
+- **`lf chat` is the sole human thread surface** — `lf wavechat` is folded into `lf chat --follow`, one pane that watches the wave's turns and speaks into its thread. Machine speech has its own wire: `lf radio pub` / `lf radio sub`. The old bare `lf sub` fails with a pointer (#867, #870, #856).
 
-## Headless reliability
+## Planning lives in Linear, natively
 
-- **Git identity fallback** — `commit()` now supplies a `loopflow` committer identity when the environment has none (headless hosts, CI runners). A configured identity is never overridden (#826).
-- **Scheduled release notes without agent CLIs** — `lf op release notes` now falls back to deterministic notes when the runner lacks a Claude/Codex/OpenCode CLI; decisions are still folded in and archives are still written (#824).
+The wave/project/task model now maps onto Linear one-for-one: a wave is an Initiative, a project is a Project, a task is an Issue. Linear owns project definitions and KRs in Project content — `wave/<wave>/projects/` becomes a generated offline cache and a migration seed, not a second editable source of truth.
 
-## Small changes
+- **Waves map to Initiatives** — `pm.linear_project` becomes `pm.linear_initiative` in `GOAL.md`; `lf pm init` creates the Initiative and migrates seeded project files into native Linear Projects (#865).
+- **OAuth stops dropping** — tokens refresh automatically before expiry using a recorded PKCE client id, so a long-running wave keeps its connection (#865).
+- **Task operations in wave-project terms** — create, move, close, filter, rename, and diagnose Linear tasks against the local wave project tree; `lf pm sync --plan` shows Linear/cache drift before writing anything (#852, #870).
+- **Linear driving fixes found in headless runs** — `issueUpdate` no longer wipes an issue title when only the description changed; workflow-state queries type `$teamId` as `ID!` (what Linear's schema wants) rather than `String!`, so status transitions resolve; `lf pm show --json` emits parseable JSON with no progress chatter (#873, #834).
+- **KRs read as proof** — the Wave Chat project's KRs were rewritten with explicit windows, pass conditions, and named failure events instead of aspirations (#863).
 
-- **`lf op doctor` declares system dependencies** — `uv` and `doppler` are required deps, checks run from a single `SYSTEM_DEPS` list, and `lf op doctor --brewfile` regenerates the repo-root `Brewfile` (#827).
-- **Dead code swept from `lfdb`** — three unused items removed (#825).
-- **Wave cleanup** — the website wave wrapper and root/mobile/workflows waves are retired (#817, #818).
-- **Provider auth fallback** — `provider_auth` falls back to Doppler for OAuth client credentials when local secrets are unavailable (#819).
+## Memory a wave can actually carry
 
-## Operational notes
+`lf memory add` used to append a bullet onto `MEMORY.md`, so the compiled file accreted forever. The add stream and the compiled checkpoint are now separate things.
 
-- **Set `pm.provider = "linear"` in `.lf/config.toml`** and use `linear_project` in wave frontmatter instead of `asana_project`. Asana configuration is no longer recognized.
-- The Asana OAuth code-paste flow is removed from `lf auth connect`; use `lf auth connect linear` instead.
+- **`add` publishes; `update` curates** — `add` writes a replayable fact to a memory stream without touching the checkpoint. `update` is the sole writer of `MEMORY.md` and clears the accumulated delta, since the checkpoint becomes the new seed (#823).
+- **`lf memory log` reads the delta** — facts added since the last curation, through the live server's replay buffer when one is running, falling back to the journal fold otherwise. Those recent facts are also layered above the compiled base in a wave's prompt, so it sees them before the next fold (#833).
+- **Scheduled curation without a live server** — `lf cron add --wave <w> --flow export-memory --schedule daily` installs a launchd job; the `export-memory` skill compiles `MEMORY.md` from base plus stream and commits it, preferring the live server and falling back to writing the file directly (#835). The compile organizes memory into typed blocks (Decisions, Constraints, Glossary, How To) — a suggested vocabulary the agent owns and can reshape, not an enforced schema (#837).
 
----
+## See what your agents actually did
 
-# v0.10.0
+Two independent records, both local, both auditable after the fact.
 
-This is the release where the **Wave** becomes loopflow's core primitive: a persistent, goal-driven looping agent that reads one `goal.md`, keeps its own `MEMORY.md`, works an Asana roadmap, and dispatches steerable sub-sessions instead of solving inline. Around that idea the runtime collapsed hard — the lifecycle model shrank to three nouns (Wave, Run, Session), and Postgres, `lfq`, the Docker `lfd` path, the conversations subsystem, Linear/Notion, and studio auth all left the tree. The result deletes far more than it adds: a self-hosted-by-default product with one authoring surface and a much smaller surface to run. If you upgrade for one reason, upgrade for the Wave.
+- **A trustworthy run ledger** — canonical process identity, cumulative usage boundaries that reconcile exactly, codebase-weight history, and trace trees. `lf runs`, `lf usage`, `lf tokens`, and `lf doctor` all read the same evidence, and the Mac app's Telemetry page renders it: tokens by skill and model, cache reuse, and a zoomable code-weight icicle (#857).
+- **Durable prompt and conversation capture** — every provider invocation writes the prompt and the normalized conversation exchange under `~/.lf/traces`. `lf trace <run-id>` prints paths and metadata; `--events` reads recorded bodies. `lf context` surfaces turn, asset, and inclusion-decision rows, keeping initial assembled context separate from follow-up input and provider-reported history (#871).
+- **The journal survives concurrency** — appends to `events.jsonl` take an exclusive `flock` and write each event as one buffered call, so parallel writers stop interleaving partial lines into unparseable JSONL (#840).
 
-## The Wave: a goal-driven looping agent
+## Loopflow on the Mac
 
-A wave used to be a config row scoped by `area × flow × direction`, woken by a cold ticker. It is now the looping orchestrator itself. You author one file — `wave/<name>/goal.md`, intent in frontmatter, the loop prompt as body — and the wave runs it as a persistent mind: reading the roadmap, capturing the next move as a task, then dispatching a flow against that task as a session you can attach to and steer. It talks back through a chat/memory speech surface rather than a transcript you have to dig through.
+The desktop app was called Concerto. It is now Loopflow, matching the framework — a shared `Loopflow` Swift library with `LoopflowMac` and `LoopflowiOS` app targets (#848). The wave viewer shows a wave's Objective beside its live projects, reading the wave directory directly rather than adding a new wire shape (#846). Wave Chat gained a truthful stop/retry story, and CI now compiles the Mac UI test runners **signed** (ad-hoc identity) rather than with signing disabled — it refuses to build an unsigned DMG (#866).
 
-- **`lf goal` and `lf loop` launch and drive looping waves** — `lf goal` starts a wave's goal agent via `lf op dispatch`; `lf loop` adds a foreground progress runtime so a loop's turns, state, and memory are visible as it works (#757, #752, #778).
-- **A reactive server, one persistent mind** — the goal loop is replaced by a persistent reactive server with a chat/memory speech surface and a harness engine, so a wave is a single continuous agent rather than repeated cold runs (#796).
-- **`goal.md` + `MEMORY.md` are the wave's authored and remembered state** — one human-authored intent file per wave; server-owned curated memory the agent maintains and never hand-edits (#752, #782).
-- **Chords are just waves with children** — wave ancestry is back, so a parent chord surfaces its children through `parent_wave_id`; no separate chord entity, and the vocabulary is parent/child/sibling (#781).
-- **VSM system charters ship as builtin goals** — `s1..s5` govern charters are available as builtin goals for structuring a wave hierarchy without authoring them from scratch (#765).
-- **A local run ledger** — `lf runs` and `lf trace` record and inspect each dispatched run locally, so what a wave launched is auditable after the fact (#797).
+## Worktrees, stacks, and sandboxes
 
-## A smaller runtime: Wave, Run, Session
+- **`WaveId` is the worktree identity** — one type, two deliberately non-derivable projections: a flat `dir_component` for the local path and an author-scoped `branch` for the remote. Creation is two relative-to-here verbs — **sibling** (the default, roots from main) and **child** (stacks under its parent) — with `lf wt up`/`down` stack navigation and a tree-view `list`. Landing no longer rotates the worktree; a merged worker's tree is pruned when its branch is deleted (#818).
+- **Stacked children re-parent when their parent lands** — the old lazy rebase replayed a merged parent's commits against `origin/main` and blocked the queue with a spurious conflict. Landing is now detected content-independently (so a *reworked* parent is handled too) and the child rebases with `--onto <default> <parent-tip>`, dropping the parent's history exactly (#836).
+- **Agents respect your sandbox config** — loopflow treats its permissions as a floor: it reads the effective Codex `config.toml` and Claude `settings.json`, supplies its conservative default only when yours is unset or weaker, and leaves permissive configs alone. Sessions launched from a worktree add the main repo as a writable directory, so Git worktree metadata stays writable without loosening the sandbox (#851).
+- **Claude keeps its prompt in a worktree** — `--add-dir` is variadic and was swallowing the positional skill seed, opening a blank session (#880).
 
-The lifecycle model had grown five overlapping nouns (`WaveRun`, `AgentRun`, `TerminalSession`, `Session`, `AgentLaunch`). It is now three. **Wave** is durable goal/memory identity, **Run** is one agent invocation's execution and PR lineage, **Session** is the attachable live conversation surface. `/v0/wave_runs` and `/v0/terminal-sessions` collapse into `/v0/runs` and `/v0/sessions`. Alongside the rename, whole subsystems that no longer earned their place were removed outright — this release is a net deletion of tens of thousands of lines.
+## Release engineering
 
-- **Three nouns end to end** — Rust core types, HTTP DTOs/routes, Python/`lfq` models, Swift/Concerto models, and fixtures all move to `Run`/`Session`/`run_id`/`session_id` (#759).
-- **The `lfd`/`lfq`/`lfdb` collapse** — the daemon, queue, and database layers realign into one coherent runtime instead of three drifting ones (#801).
-- **Postgres, `lf q`, and the Docker `lfd` path are gone** — SQLite is the backend; the standalone queue command and the container deploy path retire in favor of the self-hosted native/remote model (#803).
-- **The dormant conversations subsystem is removed** (#766), and **RLM** — the ~150-line map-reduce playbook injected into *every* prompt — is deleted; the looping Wave is now the framework for running sub-agents (decision ledger).
-- **Asana is the only PM backend** — Linear, Notion, the down-mirror PM tables, and ingestion are removed; the roadmap lives in Asana and the wave reads and writes it directly (#764).
-
-## Self-hosted by default
-
-Remote `lfd` is now yours to run, authenticated by a single explicit token. Studio auth, daemon registration, and hosted discovery are gone; each repo owns its deployment config and keeps secrets in Doppler or host-local env. On top of that base, this cycle built the native Mac host story: a manager, scheduled self-updates, plist hygiene, and spend guardrails.
-
-- **Bearer-token auth only** — `LFD_AUTH_TOKEN` is the lone remote-auth knob; `AuthMode`, the `/v0/tokens` routes, and `lfq token revoke` are removed (#721).
-- **TLS-fronted remote lfd from Concerto** — connect to a self-hosted host over TLS/Caddy/Tailscale with an explicit URL + token (#755).
-- **A native Mac `lfd` host manager** — bring up, update, and manage a native host; scheduled updates keep it on the default branch, and tokens stay out of launchd plists (#740, #742, #743, #734).
-- **Cron host bootstrap + docs** — a bootstrap script and a hardened Mac Mini setup guide, with private host details scrubbed from the committed docs (#724, #727, #738, #729).
-- **Monthly spend guardrails** — stdlib-only spend caps to keep a self-hosted host from running away (#733, #735).
-
-## Concerto and the desktop app
-
-The desktop app is now **Loopflow.app**, and it launches real repo-backed waves through `lf tmux` rather than an in-app runtime. Navigation and window scoping got sharper so a window always reflects one repo.
-
-- **Repo-backed waves through `lf tmux`** — Concerto launches waves as attachable tmux sessions, aligning the desktop with the CLI's session model (#763).
-- **Renamed to Loopflow, one build entry per worktree** — the app is Loopflow.app, and local builds are scoped per worktree so parallel work doesn't collide (#744).
-- **Deep-link and menu navigation** to open a specific repo or the portfolio (#728), with the connected wave snapshot **scoped to the window's repo** so windows don't bleed state (#732).
-- **`concerto-dev run-debug --repo`** launches the debug build straight into any repo (#736).
-
-## Release, install, and CI machinery
-
-The automation spine got boring on purpose. Weekly publishing runs the canonical release flow, the local update path is one command, and `lf op` now plans a rebase before touching git. CI shed close to a minute-and-a-half of wall time per run.
-
-- **Canonical release flow for weekly publishing** — the scheduled path uses `lf op release run` (create release PR → wait for merge → tag → wait for publish) instead of a bespoke workflow (#748).
-- **Plan-first rebase and worktree placement** — `lf op rebase --plan` and `lf op wt create` classify the branch and print the deterministic reset/rebase/placement decision before mutating git (#802).
-- **One shared local refresh path** — `install.py refresh` is the shared update command for laptops and native hosts, it ignores stale pull config, and it syncs agent skills after every install so `~/.claude/skills` tracks the freshly built binary (#750, #741, #779).
-- **Repo-grain token usage + `lf usage`** — per-repo token accounting with a CLI surface to read it (#792).
-- **Close roadmap tasks with a PR link** — `lf op pm update --pr <url>` marks an Asana task done and comments the shipped PR without clobbering its description (#780).
-- **CI is faster and green** — `cargo-nextest` for Rust (~15–30s/run), `-gnone` on the Swift test build (~10–15s), a trimmed Concerto UI test host (~45s) that now exits cleanly instead of relying on an idle-kill hack, and a changed-aware `scripts/test.py` runner for the gate loop (#787, #788, #785, #790, #789, #795).
-
-## Operational notes
-
-This is a minor bump with real breaking changes — no backwards-compat aliases were kept.
-
-- **Set `LFD_AUTH_TOKEN`.** Remote `lfd` requires it; studio auth, daemon registration, hosted discovery, and `LFD_AUTH_MODE` are removed. Point clients at explicit URLs + tokens (#721).
-- **HTTP routes moved.** `/v0/wave_runs` → `/v0/runs`, `/v0/terminal-sessions` → `/v0/sessions`; DTOs and models use `run_id`/`session_id`. Update any external caller (#759).
-- **Postgres and the Docker `lfd` path are gone** — migrate to SQLite and the native/remote self-hosted deploy path; `lf q` is removed (#803).
-- **Linear and Notion are gone** — the roadmap is Asana-only; a wave needs an Asana project to carry a roadmap (#764).
-- The launchd plist is `loopflow.server.plist`; native host tokens live in host-local env, not the plist (#721, #743).
+- **Migrations are namespaced by release** — a migration's identity is `<major>.<minor>.<ordinal>` (`0.10.001_initial`), ordered by the numeric tuple so `0.9.001` correctly precedes `0.10.001`. `lf release check` now fails if a shipped migration was edited: rewriting one doesn't fix the databases already in the wild, it just makes their ledger lie. Databases carrying the old flat `001_initial` stamp are adopted byte-identically, so nothing runs and no data moves (#876).
+- **The central `DECISIONS.md` ledger is retired** — release notes are synthesized from merged PRs and their descriptions; per-decision context lives in each wave's `MEMORY.md` (#839).
+- **Release PR copy is deterministic** — the title reuses the release commit message and the body is the generated `RELEASE_NOTES.md` verbatim, so no LLM sits in the loop for a PR whose contents are already known (#854). Release worktrees use flat hyphenated names (`release-default-v0-11-0`), matching the worktree identity contract (#879).
+- **Notes still generate on a bare runner** — when the host has no Claude/Codex/OpenCode CLI, the release falls back to deterministic notes instead of failing (#819).
 
 ## Small changes
 
-- **`engine/git` no longer reverts just-merged work** when `sync_main` sees overlapping paths (#730).
-- **`lfd` SQLite health checks fixed** (#731); **native service environment now persists** across restarts (#734).
-- **Loopflow's public website** is imported and deploys from the repo (#739).
-- **Prompt trims** — loopflow operating guidance is opt-in and docs context is explicit rather than always-injected (#756, #760).
-- Dependency bumps: `time` 0.3.51→0.3.53, `ignore` 0.4.26→0.4.27, `rusqlite` 0.39.0→0.40.1 (#769, #770, #771).
+- **`lf ssh` forwards local credentials** — GitHub, agent, and Linear tokens plus `--secret NAME` Doppler values are resolved *locally* and piped into a remote command's environment, so a stateless remote host can run authenticated `lf` while storing nothing. Values never touch argv, `ps`, or logs (#831).
+- **`sync-skills` compiles into home only** (`~/.claude/skills`, `~/.agents/skills`). It never writes into a working repo, so skills resolve identically from any repo; `--global` is gone (#830, #850).
+- **`lf doctor` drives off a declared `SYSTEM_DEPS` list**, adds `uv` and `doppler` as required deps, and generates the repo-root `Brewfile` (#827).
+- **Git identity fallback** on headless hosts with no `user.name`/`user.email`; a configured identity is never overridden (#820).
+- **Provider OAuth credentials fall back to Doppler** when the env vars are unset (#805).
+- **Dependabot groups minor/patch bumps** into one PR per ecosystem; majors still open individually (#868). Bumps: `bytes` 1.12.1, `regex` 1.13.0, `ignore` 0.4.28, `rand` 0.10.2, `ruff` 0.15.21, `actions/cache` v6 (#858–#862, #869).
+- **Dead code swept** — unreferenced store tables and pre-rename serde shims, the wave server's six hand-copied SSE stream closures, and the retired `LocalWaveService` (~1500 lines) (#821, #838, #846).
+
+## Operational notes
+
+- **The daemon is gone.** Anything that talked to `lfd` over HTTP, or dispatched through `lfq`, has no replacement endpoint. Use `lf` directly: `lf wave <name>` boots a wave, `lf stop <name>` stands it down.
+- **`lf op <verb>` is retired.** Use `lf pr`, `lf wt`, `lf rebase`, `lf commit`, `lf pm`, `lf release`. Retired spellings error with their replacement rather than executing anything — update `.lf/` adaptations and prompts on other machines.
+- **Reconnect Linear once** (`lf auth linear`) to record the PKCE client id that automatic refresh needs. Rename `pm.linear_project` to `pm.linear_initiative` in each wave's `GOAL.md`, then run `lf pm init --wave <w>` to create the Initiative and migrate seeded projects into Linear.
+- **Rename `.lf/steps/` to `.lf/skills/`.** The prompt unit is a skill everywhere.
+- **`lf wavechat` and bare `lf sub` are gone** — use `lf chat --follow` and `lf radio sub`.
+- **New migrations use the release-namespaced form.** Create them with `uv run python scripts/new_migration.py <name>` and check with `uv run python scripts/check_migrations.py` (what CI and the release run). Editing a shipped migration is now a build failure.

@@ -28,9 +28,12 @@
 //!   `running`), if one is in progress, after the finalized thread. Optional
 //!   `?limit=N` tails the last N turns (open turn included) — `wave_context`
 //!   passes 12; absent means the whole thread. Primary channel only.
-//! - `GET /events` → SSE, the served mind's thread. It carries the PRIMARY
-//!   channel and nothing else: agent-to-agent traffic is the bus, a table in
-//!   the shared store that no server sits in front of (`crate::wave::bus`).
+//! - `GET /events` → SSE, the served mind's thread. Human subscriptions replay
+//!   the most recent 12 turns by default; optional `?limit=N` overrides that
+//!   tail while every subsequent turn still streams live. Resident inbox
+//!   subscriptions remain complete. It carries the PRIMARY channel and
+//!   nothing else: agent-to-agent traffic is the bus, a table in the shared
+//!   store that no server sits in front of (`crate::wave::bus`).
 //!   Event names:
 //!   - `state`: data is the loop-state name (`idle | turning | interrupting |
 //!     failed`), sent once on subscribe (before the turn replay) and again on
@@ -275,10 +278,14 @@ struct PostMessage {
 /// `GET /events` query. `inbox` is explicitly Optional: `true` adds the
 /// resident's `inbox` frames (pending replay + live ops) to the subscription;
 /// absent/false leaves the wire byte-identical to the pre-resident stream.
+/// `limit` bounds only the initial turn replay; live turns are never dropped.
 #[derive(Debug, Deserialize)]
 struct EventsQuery {
     inbox: Option<bool>,
+    limit: Option<usize>,
 }
+
+const HUMAN_THREAD_REPLAY_LIMIT: usize = 12;
 
 /// `GET /memory` response.
 #[derive(Debug, Serialize)]
@@ -624,7 +631,12 @@ async fn events_handler(
 ) -> axum::response::Response {
     let shutdown = state.shutdown.clone();
     let include_inbox = query.inbox == Some(true);
-    let sub = state.runtime.subscribe_with_snapshot();
+    let replay_limit = if include_inbox {
+        query.limit
+    } else {
+        Some(query.limit.unwrap_or(HUMAN_THREAD_REPLAY_LIMIT))
+    };
+    let sub = state.runtime.subscribe_with_snapshot(replay_limit);
     // The resident's subscription replays the pending queue after the
     // thread — its boot inbox. Consumption is validated at the resident
     // door, so a stale replay can never double-consume.

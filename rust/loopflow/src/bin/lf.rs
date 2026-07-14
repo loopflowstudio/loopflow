@@ -1239,10 +1239,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Chat {
                 text,
                 follow,
-                audit,
                 steer,
                 target,
-            }) => loopflow::lf::commands::chat::run(text, *follow, *audit, *steer, target),
+            }) => loopflow::lf::commands::chat::run(text, *follow, *steer, target),
             Some(Commands::Radio { command }) => match command {
                 loopflow::lf::RadioCommand::Pub {
                     text,

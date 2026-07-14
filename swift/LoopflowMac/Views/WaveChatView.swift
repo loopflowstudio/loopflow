@@ -29,11 +29,6 @@ struct WaveChatView: View {
     @State private var isNearTranscriptBottom = true
     @FocusState private var composerFocused: Bool
 
-    /// Audit is a mode, not a per-turn expander. The flow-step boundaries
-    /// (`task / task_clarify`) are structure, not content — revealing them one
-    /// turn at a time would just rebuild the log this view exists to retire.
-    @AppStorage("waveChatAudit") private var audit = false
-
     enum LaunchState: Equatable {
         case idle
         case starting
@@ -103,14 +98,11 @@ struct WaveChatView: View {
             playhead: connection?.playhead,
             loopState: connection?.loopState ?? .idle
         )
-        let visible = turns.filter { isVisibleTurn($0, audit: audit) }
+        let visible = turns.filter(isVisibleTurn)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.lg) {
                     ForEach(visible) { turn in
-                        if audit, let body = turn.body, turn.role == .assistant {
-                            bodyBoundary(body, status: turn.status)
-                        }
                         if let activity = turn.activity {
                             ChildControlActivityCard(
                                 activity: activity,
@@ -131,8 +123,7 @@ struct WaveChatView: View {
                             MessageRow(
                                 turn: turn,
                                 timestampLabel: timestampLabel(for: turn),
-                                attemptFailure: failures[turn.id],
-                                audit: audit
+                                attemptFailure: failures[turn.id]
                             )
                                 .id(turn.id)
                         }
@@ -187,19 +178,7 @@ struct WaveChatView: View {
             Text(waveName)
                 .font(Typography.caption().weight(.semibold))
                 .foregroundStyle(palette.text)
-            Text(connection?.loopState.rawValue ?? "idle")
-                .font(Typography.caption())
-                .foregroundStyle(palette.textSecondary)
             Spacer()
-            Toggle(isOn: $audit) {
-                Text("Audit")
-                    .font(Typography.caption())
-            }
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .foregroundStyle(palette.textSecondary)
-            .help("Show every tool call, command, and flow step behind the conversation")
-            .accessibilityIdentifier("wave-chat-audit")
             Button {
                 confirmStop = true
             } label: {
@@ -220,53 +199,6 @@ struct WaveChatView: View {
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)
         .background(palette.surfaceMuted.opacity(0.45))
-    }
-
-    private func bodyBoundary(_ body: BodyProvenance, status: Lifecycle) -> some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("body  \(body.bodyId)")
-                Text("invocation  \(body.invocationId)")
-                Text("step index  \(body.stepIndex)")
-                Text("session  \(body.sessionId ?? "—")")
-                Text("harness  \(body.harness ?? "—") · model  \(body.model ?? "—")")
-                Text("host  \(body.host)")
-                Text("worktree  \(body.worktree)")
-                Text("started  \(body.startedAt)")
-                Text("finished  \(body.endedAt ?? "—")")
-                if let reason = body.terminationReason {
-                    Text("reason  \(reason)")
-                }
-            }
-            .font(Typography.caption())
-            .foregroundStyle(palette.textSecondary)
-            .textSelection(.enabled)
-        } label: {
-            HStack(spacing: Spacing.sm) {
-                Rectangle()
-                    .fill(palette.border)
-                    .frame(height: 1)
-                Text("\(body.flow) / \(body.step) · \(bodyLabel(status, body))")
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-                    .fixedSize()
-                Rectangle()
-                    .fill(palette.border)
-                    .frame(height: 1)
-            }
-        }
-        .accessibilityIdentifier("wave-chat-body-\(body.bodyId)")
-    }
-
-    private func bodyLabel(_ status: Lifecycle, _ body: BodyProvenance) -> String {
-        if body.terminationReason == "skipped by user" { return "skipped" }
-        switch status {
-        case .running: return "now playing"
-        case .completed: return "completed"
-        case .interrupted: return "interrupted"
-        case .failed: return "failed"
-        default: return String(describing: status)
-        }
     }
 
     private func stopWave() {

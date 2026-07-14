@@ -287,7 +287,6 @@ public final class WaveChatConnection {
 
     /// Poll interval while the wave isn't running yet, in nanoseconds.
     private let pollInterval: UInt64 = 1_000_000_000
-
     public init(repoPath: String, waveName: String, session: URLSession? = nil) {
         self.repoPath = repoPath
         self.waveName = waveName
@@ -379,10 +378,10 @@ public final class WaveChatConnection {
         guard http.statusCode == 200 else {
             throw WaveChatError.badStatus(http.statusCode)
         }
-        // A fresh stream replays the server's authoritative full transcript.
-        // Drop the previous snapshot first so recovery changes cannot leave a
-        // stale turn beside the replay. The loop state resets too; the server's
-        // first frame is a `state` event.
+        // A fresh stream replays the server's authoritative recent tail. Drop
+        // the previous snapshot first so recovery changes cannot leave a stale
+        // turn beside the replay. The loop state resets too; the server's first
+        // frame is a `state` event.
         turns = []
         loopState = .idle
         playhead = nil

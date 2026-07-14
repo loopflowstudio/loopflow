@@ -5,9 +5,9 @@ import Testing
 // flow: clarify reads the repo and writes a design note, pursue builds and hits
 // a red test, mutate opens the PR, and a child project asks for a decision.
 //
-// What a human must see: the wave's prose, the red test, the decision. What
-// must collapse: twenty-odd tool calls, shell commands, file edits, thoughts,
-// and the `task_clarify` / `task_pursue` / `task_mutate` phase structure.
+// What a human must see: the wave's prose and the decision. What must disappear:
+// twenty-odd tool calls, shell commands, file edits, thoughts, and the
+// `task_clarify` / `task_pursue` / `task_mutate` phase structure.
 
 private func turn(
     id: String,
@@ -92,10 +92,10 @@ private func childActivity(_ kind: ChildActivityKind) -> ChildControlActivity {
 @Suite("Wave chat reads as a conversation")
 struct WaveChatTranscriptTests {
     /// task_clarify: five items of machinery behind one sentence of speech.
-    @Test func machineryCollapsesToOneActivityRow() throws {
+    @Test func machineryDoesNotEnterTheConversation() throws {
         let clarify = try turn(
             id: "turn-2",
-            text: "The transcript renders every tool call as a card. I'll collapse them behind an audit toggle.",
+            text: "The transcript renders every tool call as a card. I'll keep them out of the conversation.",
             items: [
                 .thought(id: "h0", text: "weighing the options"),
                 tool("t0", "Read"),
@@ -106,16 +106,14 @@ struct WaveChatTranscriptTests {
             body: provenance(step: "task_clarify")
         )
 
-        let view = turnPresentation(clarify, audit: false)
+        let view = turnPresentation(clarify)
         #expect(view.prose.hasPrefix("The transcript renders"))
-        #expect(view.activity?.label == "1 command · 1 file edited · 2 tool calls")
-        #expect(view.failures.isEmpty)
-        #expect(view.auditItems.isEmpty, "the raw cards stay behind the disclosure")
-        #expect(view.showsBoundary == false, "task_clarify is backend phase structure")
+        #expect(view == TurnPresentation(prose: clarify.text))
     }
 
-    /// task_pursue: the red test is not evidence. It stays on the surface.
-    @Test func actionableFailureSurvivesTheCollapse() throws {
+    /// task_pursue: an expected red test is execution evidence, not another
+    /// command card in the human conversation.
+    @Test func backendFailuresDoNotBecomeChatCards() throws {
         let pursue = try turn(
             id: "turn-3",
             text: "Projection landed. One test caught a stale signature; fixed and green.",
@@ -129,18 +127,8 @@ struct WaveChatTranscriptTests {
             body: provenance(step: "task_pursue")
         )
 
-        let view = turnPresentation(pursue, audit: false)
-        #expect(view.failures.count == 1)
-        #expect(isActionableFailure(view.failures[0]))
-        #expect(view.activity?.label == "3 commands · 1 file edited · 1 tool call")
-    }
-
-    /// A command the harness called `completed` while the shell said no is
-    /// still a failure a human has to act on.
-    @Test func nonzeroExitIsAFailureEvenWhenTheHarnessSaysCompleted() {
-        #expect(isActionableFailure(command("c", "swift test", exit: 1, status: .completed)))
-        #expect(!isActionableFailure(command("c", "swift test", exit: 0, status: .completed)))
-        #expect(isActionableFailure(tool("t", "Edit", status: .failed)))
+        let view = turnPresentation(pursue)
+        #expect(view == TurnPresentation(prose: pursue.text))
     }
 
     /// A running turn that has not spoken yet still reads as motion, so a
@@ -152,25 +140,8 @@ struct WaveChatTranscriptTests {
             items: [tool("t0", "Read"), command("c0", "cargo test")],
             body: provenance(step: "task_pursue")
         )
-        let view = turnPresentation(running, audit: false)
-        #expect(view.activity?.isRunning == true)
-        #expect(view.activity?.label == "Working — 1 command · 1 tool call")
-        #expect(!view.hasProse)
-    }
-
-    /// Audit is the old view: every card, the flow-step boundary, nothing
-    /// coalesced.
-    @Test func auditReturnsTheExecutionLog() throws {
-        let pursue = try turn(
-            id: "turn-3",
-            text: "Projection landed.",
-            items: [command("c1", "cargo build"), command("c2", "swift test", exit: 1), tool("t2", "Edit")],
-            body: provenance(step: "task_pursue")
-        )
-        let view = turnPresentation(pursue, audit: true)
-        #expect(view.auditItems.count == 3)
-        #expect(view.activity == nil, "the cards carry their own status")
-        #expect(view.showsBoundary)
+        #expect(!turnPresentation(running).hasProse)
+        #expect(isVisibleTurn(running))
     }
 
     /// Prose the harness emitted as an item reads with the turn's speech, not
@@ -184,40 +155,8 @@ struct WaveChatTranscriptTests {
                 .thought(id: "h0", text: "should I rebase?"),
             ]
         )
-        let view = turnPresentation(reporting, audit: false)
+        let view = turnPresentation(reporting)
         #expect(view.prose == "Opened the PR.\n\nWaiting on CI.")
-        #expect(view.activity == nil, "a thought is not evidence of work")
-    }
-
-    /// Audit restores the prior execution-log shape exactly, which means a
-    /// `.message` item appears once — in its own card. Folding it into the
-    /// prose as well (as the conversation does) would print the same words
-    /// twice, since `auditItems` already carries the card.
-    @Test func auditRendersHarnessProseExactlyOnce() throws {
-        let reporting = try turn(
-            id: "turn-5",
-            text: "Opened the PR.",
-            items: [
-                .message(id: "m0", text: "Waiting on CI.", phase: "task_mutate"),
-                command("c1", "lf pr open"),
-            ]
-        )
-
-        let view = turnPresentation(reporting, audit: true)
-        #expect(view.prose == "Opened the PR.", "the message item is not folded into audit prose")
-        #expect(!view.prose.contains("Waiting on CI."))
-
-        let messageCards = view.auditItems.filter { if case .message = $0 { return true } else { return false } }
-        #expect(messageCards.count == 1, "the message survives as exactly one card")
-
-        // Once in the cards, zero times in the prose: rendered once in total.
-        let proseHits = view.prose.contains("Waiting on CI.") ? 1 : 0
-        #expect(proseHits + messageCards.count == 1)
-
-        // The conversation still reads it as speech — that behavior is preserved.
-        let conversation = turnPresentation(reporting, audit: false)
-        #expect(conversation.prose == "Opened the PR.\n\nWaiting on CI.")
-        #expect(conversation.auditItems.isEmpty)
     }
 
     /// Decisions and reports are conversation; lifecycle churn is not.
@@ -228,16 +167,17 @@ struct WaveChatTranscriptTests {
         #expect(isConversational(childActivity(.completed)))
         #expect(!isConversational(childActivity(.stateChanged)))
         #expect(!isConversational(childActivity(.controlApplied)))
+        #expect(!isConversational(childActivity(.directed)))
+        #expect(!isConversational(childActivity(.incorporated)))
     }
 
-    /// The whole transcript: what a human sees of a long-running task, and what
-    /// the audit toggle brings back.
-    @Test func theVisibleThreadIsSpeechFailuresAndDecisions() throws {
+    /// The whole transcript: what a human sees of a long-running task.
+    @Test func theVisibleThreadIsSpeechAndDecisions() throws {
         let thread = [
             try turn(id: "turn-1", role: .user, text: "make wave chat human-first"),
             try turn(
                 id: "turn-2",
-                text: "Collapsing the cards behind an audit toggle.",
+                text: "Collapsing the cards into one activity line.",
                 items: [tool("t0", "Read"), command("c0", "git log")],
                 body: provenance(step: "task_clarify")
             ),
@@ -255,11 +195,8 @@ struct WaveChatTranscriptTests {
             ),
         ]
 
-        let visible = thread.filter { isVisibleTurn($0, audit: false) }.map(\.id)
+        let visible = thread.filter(isVisibleTurn).map(\.id)
         #expect(visible == ["turn-1", "turn-2", "turn-5", "turn-6"],
                 "the empty span and the lifecycle churn never reach the eye")
-
-        let audited = thread.filter { isVisibleTurn($0, audit: true) }.map(\.id)
-        #expect(audited == thread.map(\.id), "audit hides nothing")
     }
 }

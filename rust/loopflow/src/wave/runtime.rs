@@ -407,24 +407,14 @@ impl WaveRuntime {
     /// Snapshot of the whole thread — finalized turns plus the open turn
     /// (status `Running`), if one is in progress.
     pub fn thread_snapshot(&self) -> Vec<ChatTurn> {
-        snapshot_locked(&self.inner())
+        snapshot_tail_locked(&self.inner(), None)
     }
 
     /// The last `limit` turns (open turn included, newest last), cloned
     /// inside the lock — a `/conversation?limit=N` tail never clones the
     /// whole thread. `None` serves everything.
     pub fn thread_tail(&self, limit: Option<usize>) -> Vec<ChatTurn> {
-        let inner = self.inner();
-        let open_count = usize::from(inner.open.is_some());
-        let total = inner.thread.len() + open_count;
-        let take = limit.unwrap_or(total).min(total);
-        let take_open = take.min(open_count);
-        let take_thread = take - take_open;
-        let mut turns = inner.thread[inner.thread.len() - take_thread..].to_vec();
-        if take_open == 1 {
-            turns.extend(inner.open.as_ref().map(|open| open.turn.clone()));
-        }
-        turns
+        snapshot_tail_locked(&self.inner(), limit)
     }
 
     /// Thread length (open turn included) without cloning a single turn —
@@ -719,10 +709,10 @@ impl WaveRuntime {
     /// exactly the frames sent after this snapshot — no gap, no overlap, no
     /// frame older than the snapshot. A live frame's id may match a snapshot
     /// turn: it is that turn, newer; consumers replace by id.
-    pub fn subscribe_with_snapshot(&self) -> Subscription {
+    pub fn subscribe_with_snapshot(&self, limit: Option<usize>) -> Subscription {
         let inner = self.inner();
         Subscription {
-            turns: snapshot_locked(&inner),
+            turns: snapshot_tail_locked(&inner, limit),
             turn_rx: self.turn_tx.subscribe(),
             state: inner.state.clone(),
             state_rx: self.state_tx.subscribe(),
@@ -1362,9 +1352,16 @@ fn claim_answers(inner: &mut Inner, answers: Vec<String>) -> Vec<MessageId> {
 
 /// The thread plus the open turn, in one clone. The open turn rides last:
 /// clients order by the sequence in the turn id, not array position.
-fn snapshot_locked(inner: &Inner) -> Vec<ChatTurn> {
-    let mut turns = inner.thread.clone();
-    turns.extend(inner.open.as_ref().map(|open| open.turn.clone()));
+fn snapshot_tail_locked(inner: &Inner, limit: Option<usize>) -> Vec<ChatTurn> {
+    let open_count = usize::from(inner.open.is_some());
+    let total = inner.thread.len() + open_count;
+    let take = limit.unwrap_or(total).min(total);
+    let take_open = take.min(open_count);
+    let take_thread = take - take_open;
+    let mut turns = inner.thread[inner.thread.len() - take_thread..].to_vec();
+    if take_open == 1 {
+        turns.extend(inner.open.as_ref().map(|open| open.turn.clone()));
+    }
     turns
 }
 
@@ -1546,7 +1543,7 @@ mod tests {
             rx.try_recv().expect("live Task observation"),
             InboxItem::Task(ref received) if received == &observation
         ));
-        let sub = rt.subscribe_with_snapshot();
+        let sub = rt.subscribe_with_snapshot(None);
         assert_eq!(sub.pending.len(), 1);
         assert_eq!(
             sub.tasks.get(&MessageId(observation.inbox_id())),
@@ -1554,11 +1551,38 @@ mod tests {
         );
 
         drop(rt);
-        let replayed = open_runtime(tmp.path()).subscribe_with_snapshot();
+        let replayed = open_runtime(tmp.path()).subscribe_with_snapshot(None);
         assert_eq!(replayed.pending.len(), 1);
         assert_eq!(
             replayed.tasks.get(&MessageId(observation.inbox_id())),
             Some(&observation)
+        );
+    }
+
+    #[test]
+    fn bounded_subscription_tails_replay_but_keeps_live_turns() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        for i in 0..5 {
+            rt.deliver(MessageOp::Message, format!("message {i}"))
+                .expect("user turn");
+        }
+
+        let mut sub = rt.subscribe_with_snapshot(Some(2));
+        assert_eq!(
+            sub.turns
+                .iter()
+                .map(|turn| turn.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["message 3", "message 4"]
+        );
+
+        rt.deliver(MessageOp::Message, "message 5".into())
+            .expect("live user turn");
+        assert_eq!(
+            sub.turn_rx.try_recv().expect("live frame").turn.text,
+            "message 5",
+            "the limit applies only to replay"
         );
     }
 
@@ -1583,14 +1607,14 @@ mod tests {
             rx.try_recv().expect("live Project observation"),
             InboxItem::Project(ref received) if received == &observation
         ));
-        let sub = rt.subscribe_with_snapshot();
+        let sub = rt.subscribe_with_snapshot(None);
         assert_eq!(
             sub.projects.get(&MessageId(observation.inbox_id())),
             Some(&observation)
         );
 
         drop(rt);
-        let replayed = open_runtime(tmp.path()).subscribe_with_snapshot();
+        let replayed = open_runtime(tmp.path()).subscribe_with_snapshot(None);
         assert_eq!(
             replayed.projects.get(&MessageId(observation.inbox_id())),
             Some(&observation)
@@ -1675,7 +1699,7 @@ mod tests {
         rt.append_memory(long_fact).expect("append");
         rt.append_memory("second fact").expect("append");
 
-        let sub = rt.subscribe_with_snapshot();
+        let sub = rt.subscribe_with_snapshot(None);
         assert_eq!(
             sub.memory_adds,
             vec![long_fact.to_string(), "second fact".to_string()]
@@ -1699,7 +1723,7 @@ mod tests {
         }
 
         let rt = open_runtime(tmp.path());
-        let sub = rt.subscribe_with_snapshot();
+        let sub = rt.subscribe_with_snapshot(None);
         assert_eq!(
             sub.memory_adds,
             vec!["third".to_string()],
@@ -1883,7 +1907,7 @@ mod tests {
     fn open_turn_streams_growing_snapshots_then_the_terminal_turn() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let sub = rt.subscribe_with_snapshot();
+        let sub = rt.subscribe_with_snapshot(None);
         assert!(sub.turns.is_empty());
         assert_eq!(sub.state, LoopState::Idle);
         let mut frames = sub.turn_rx;
@@ -1943,7 +1967,7 @@ mod tests {
     fn empty_thoughts_never_enter_the_thread_or_journal() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let mut frames = rt.subscribe_with_snapshot().turn_rx;
+        let mut frames = rt.subscribe_with_snapshot(None).turn_rx;
 
         rt.apply_resident_delta(d_opened(&[]));
         let opened = frames.try_recv().expect("opened frame");
@@ -2402,7 +2426,7 @@ mod tests {
         rt.deliver(MessageOp::Message, "before".into())
             .expect("user turn");
 
-        let mut sub = rt.subscribe_with_snapshot();
+        let mut sub = rt.subscribe_with_snapshot(None);
         assert_eq!(sub.pending.len(), 1);
         assert_eq!(sub.pending[0].text, "before");
         assert!(sub.inbox_rx.try_recv().is_err(), "no frames from before");

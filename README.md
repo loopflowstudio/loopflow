@@ -53,10 +53,12 @@ canonical main checkout. Wave turns coordinate there; Task Sessions own every
 repository mutation. Progress and chat are
 a single conversation: `lf chat --steer` reaches the body now playing (and
 queues when it cannot). Truth is an append-only journal, so a restart keeps the
-whole thread. Humans use `lf chat`; agents broadcast with `lf radio pub`; `lf
+whole thread while human chat resumes from its recent tail. Commands, tools,
+file edits, and loop bookkeeping stay out of chat; decisions, deliveries, and
+human-level failures remain visible. Humans use `lf chat`; agents broadcast with `lf radio pub`; `lf
 memory` curates retained facts. A running Wave folds family reports into its
-thread with attribution. Outside any wave a publish prints a short drop note
-and exits 0, so the verbs are safe in every prompt. See
+thread with attribution. Outside any wave a publish prints a short drop note and
+exits 0, so the verbs are safe in every prompt. See
 `rust/loopflow/src/wave/README.md` for the wire contract. Inspect a live
 Wave/Project/Task hierarchy and open the app with:
 

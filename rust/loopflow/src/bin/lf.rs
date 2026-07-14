@@ -384,7 +384,7 @@ fn with_runtime<T>(
         LfNode::Run,
         LfEventType::Started,
         LfEventFields {
-            wave_name: loopflow::engine::wave_context::resolve_run_wave_name(repo_root),
+            wave_name: loopflow::engine::wave_context::resolve_run_wave_name(),
             worktree: Some(repo_root.display().to_string()),
             command: Some(command.to_vec()),
             ..LfEventFields::default()
@@ -1124,10 +1124,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Project {
                 cmd: ProjectCommand::Promote { slug, wave },
             }) => in_repo_runtime(&args, |repo| {
-                let parent = wave
-                    .clone()
-                    .or_else(|| loopflow::ops::resolve_wave_name(repo, None))
-                    .ok_or_else(|| anyhow::anyhow!("cannot determine parent wave"))?;
+                let parent = wave.clone().ok_or_else(|| {
+                    anyhow::anyhow!("cannot determine parent wave; pass --wave <name>")
+                })?;
                 let message = format!(
                     "Promote project '{slug}' from parent wave '{parent}'. Complete the authored migration, PM move, parent link, and residency checks."
                 );

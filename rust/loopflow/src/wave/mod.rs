@@ -92,8 +92,8 @@ pub(crate) const RESIDENT_SUBCOMMAND: &str = "__resident";
 pub fn serve(name: &str, force: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
-    let wave = resolve_wave_name(&main_repo, Some(name))
-        .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
+    let wave =
+        resolve_wave_name(Some(name)).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let registry_config = resolve_registry(&main_repo, &wave, force).await;
@@ -114,8 +114,8 @@ pub fn serve(name: &str, force: bool) -> Result<()> {
 pub fn stop(name: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
-    let wave = resolve_wave_name(&main_repo, Some(name))
-        .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
+    let wave =
+        resolve_wave_name(Some(name)).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
     let rt = tokio::runtime::Runtime::new()?;
     let requested = rt.block_on(request_stop(&main_repo, &wave))?;
     if requested {
@@ -1543,8 +1543,6 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo: "/tmp/repo".to_string(),
-            worktree: String::new(),
-            branch: String::new(),
             status: WaveStatus::Idle,
             iteration: 0,
             cycle_start_iteration: 0,

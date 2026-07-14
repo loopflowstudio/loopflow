@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # demo_wave.sh — guided live demo of the wave (`lf serve`), two processes:
 # the LISTENER (journal pens, doors, supervisor — vendor-free) and the
-# RESIDENT it spawns (`lf __resident`, with private server env,
-# running in the wave's own worktree).
+# RESIDENT it spawns (`lf __resident`, with private server env, running from
+# the clean canonical checkout).
 #
 # Walks the Wave surface against a throwaway repo: boot + discovery (both
 # processes from one command), chat, steer, interrupt, memory curation, restart

@@ -491,8 +491,6 @@ mod tests {
             goal: "keep child control coherent".to_string(),
             metrics: Vec::new(),
             repo: repo.to_string(),
-            worktree: repo.to_string(),
-            branch: "main".to_string(),
             status: WaveStatus::Idle,
             iteration: 0,
             cycle_start_iteration: 0,

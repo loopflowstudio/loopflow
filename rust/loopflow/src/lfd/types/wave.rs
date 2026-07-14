@@ -140,10 +140,6 @@ pub struct Wave {
     pub metrics: Vec<String>,
     /// The single repo this wave targets. A wave = exactly one repo.
     pub repo: String,
-    /// Worktree path for the wave's repo, `""` when none.
-    pub worktree: String,
-    /// Branch name for the wave's repo, `""` when none.
-    pub branch: String,
     /// Execution status of the wave's repo. Rolled into `status()` together with
     /// the wave-level `paused` flag.
     pub status: WaveStatus,
@@ -174,8 +170,6 @@ impl Wave {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo,
-            worktree: String::new(),
-            branch: String::new(),
             status: WaveStatus::Idle,
             iteration: 0,
             cycle_start_iteration: 0,

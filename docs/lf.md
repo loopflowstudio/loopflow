@@ -181,7 +181,9 @@ lf memory update < MEMORY.md                # replace it from stdin
 | `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays and follows while typed lines post, `/status` reads health, and `/quit` leaves. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
 | `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 
-Both default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
+Managed sessions default to their invoking Wave through `LFD_WAVE_ID`. From a
+human shell, pass `--wave`; repository location does not identify one of the
+Waves sharing `main`.
 
 | Flag | Description |
 |------|-------------|

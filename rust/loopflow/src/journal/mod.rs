@@ -44,10 +44,8 @@ struct RunContext {
     parent_process_id: Option<LfdId>,
     /// Serialized argv captured at run start so terminal rows name their work.
     command: Option<String>,
-    /// File-journal directory. Written in any git repo (main, wave worktree,
-    /// or plain worktree); None only when the journal can't be git-excluded.
-    /// The daemon's poller tails wave worktrees; the SQLite ledger records
-    /// every run regardless.
+    /// File-journal directory. Written in any git checkout; None only when the
+    /// journal can't be git-excluded. The SQLite ledger records every run.
     run_dir: Option<PathBuf>,
     repo: Option<String>,
     wave: Option<String>,
@@ -447,7 +445,7 @@ fn ensure_run_context(
     }
 
     let main_repo = main_repo_root(repo_root).ok();
-    let wave_name = crate::engine::wave_context::resolve_run_wave_name(repo_root);
+    let wave_name = crate::engine::wave_context::resolve_run_wave_name();
 
     let (run_id, minted_run_id) = match configured_run_id(repo_root) {
         Some(run_id) => (run_id, false),
@@ -472,9 +470,8 @@ fn ensure_run_context(
     let process_id = LfdId::default();
     std::env::set_var(LF_PROCESS_ID_ENV, process_id.as_str());
 
-    // Write the file journal wherever we can, wave or not — the daemon's
-    // poller only tails wave worktrees today, but the record should exist in
-    // any repo. Fall back to ledger-only when the journal can't be
+    // Write the file journal wherever we can. Fall back to ledger-only when
+    // the journal can't be
     // git-excluded (e.g. not a git repo).
     let run_dir = match ensure_journal_ignored(repo_root) {
         Ok(()) => {

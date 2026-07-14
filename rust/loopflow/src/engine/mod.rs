@@ -21,7 +21,6 @@ pub mod stream;
 pub mod structured_reply;
 pub mod wave_config;
 pub mod wave_context;
-pub mod workspace;
 pub mod worktree;
 pub mod worktrees;
 

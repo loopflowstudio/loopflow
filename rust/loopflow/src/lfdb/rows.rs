@@ -61,7 +61,8 @@ pub fn parse_pr(value: Option<String>) -> StoreResult<Option<PullRequest>> {
 
 /// SELECT id, name, direction, area, paused, created_at, workers,
 ///        goal, metrics, parent_wave_id,
-///        repo, worktree, branch, status, iteration, cycle_start_iteration
+///        repo, legacy_worktree, legacy_branch, status, iteration,
+///        cycle_start_iteration
 pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
     let direction = parse_json_vec(&text(row, 2)?)?;
     let area = parse_json_vec(&text(row, 3)?)?;
@@ -80,8 +81,6 @@ pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
         goal,
         metrics,
         repo: text(row, 10)?,
-        worktree: text(row, 11)?,
-        branch: text(row, 12)?,
         status: WaveStatus::from_i32(int(row, 13)?),
         iteration: int(row, 14)? as u32,
         cycle_start_iteration: int(row, 15)? as u32,

@@ -1,10 +1,4 @@
-use std::path::Path;
 use std::process::{Command, Output};
-
-use crate::engine::git::current_branch;
-use crate::engine::identity::WaveId;
-use crate::engine::naming::git_user;
-use crate::engine::worktrees::wave_name_from_worktree;
 
 pub fn command_exists(name: &str) -> bool {
     Command::new(name)
@@ -20,23 +14,9 @@ pub fn stderr_from_output(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).trim().to_string()
 }
 
-/// Resolve the wave name for workflow operations.
-///
-/// Priority: explicit wave name > worktree directory name > branch name component.
-pub fn resolve_wave_name(repo: &Path, explicit: Option<&str>) -> Option<String> {
-    if let Some(name) = explicit.and_then(normalize_wave_name) {
-        return Some(name);
-    }
-    if let Some(name) = wave_name_from_worktree(repo).and_then(|name| normalize_wave_name(&name)) {
-        return Some(name);
-    }
-    if let Ok(Some(branch)) = current_branch(repo) {
-        let user = git_user(repo).unwrap_or_else(|_| "user".to_string());
-        return WaveId::parse(&branch, &user)
-            .map(|id| id.wave_name().to_string())
-            .and_then(|name| normalize_wave_name(&name));
-    }
-    None
+/// Normalize an explicitly selected Wave name for workflow operations.
+pub fn resolve_wave_name(explicit: Option<&str>) -> Option<String> {
+    explicit.and_then(normalize_wave_name)
 }
 
 pub fn normalize_wave_name(value: &str) -> Option<String> {

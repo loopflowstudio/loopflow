@@ -4,9 +4,9 @@
 //! and children chain wave/parent attribution off that env. A bare
 //! `lf design` typed inside such a session used to be invisible — no Session
 //! row, no wave attribution. This module closes the gap: when an
-//! agent-launching `lf` command starts inside a wave context — the shared
-//! ambient rule ([`crate::engine::wave_context::resolve_ambient_wave`]): env
-//! first, else the wave worktree the run executes in — it writes its own
+//! agent-launching `lf` command starts inside a managed Wave context — the
+//! shared ambient rule ([`crate::engine::wave_context::resolve_ambient_wave`])
+//! reads the launcher's environment — it writes its own
 //! Session row to the shared local store (the db IS the registry — no daemon
 //! in the path) and marks itself terminal when the run ends. A run whose row
 //! placement already created
@@ -17,8 +17,7 @@
 //! # Env contract
 //!
 //! - `LFD_WAVE_ID` — wave attribution. Set by the session launcher, inherited down
-//!   the process tree. Absent → fall back to the run's wave worktree; outside
-//!   any wave context, never register.
+//!   the process tree. Absent means the run has no ambient Wave.
 //! - `LFD_SESSION_ID` — the nearest enclosing session. The launcher sets it on
 //!   the process it launches, pointing at that process's *own* session row. A
 //!   self-registered `lf` overwrites it for its descendants with the id of the
@@ -39,16 +38,13 @@ use std::sync::Arc;
 
 use time::OffsetDateTime;
 
-use crate::engine::wave_context::{resolve_ambient_wave, AmbientWaveRef};
+use crate::engine::wave_context::resolve_ambient_wave;
 use crate::lfd::id::LfdId;
 use crate::lfd::types::{Session, SessionStatus, SessionUse, Wave, LF_CLI_SOURCE};
 use crate::lfdb::{open_existing_store, SharedStore};
 
 pub const WAVE_ID_ENV: &str = "LFD_WAVE_ID";
-/// The channel a managed process speaks on by default — the work line's
-/// ownership name (`goals.148e0e02`), set by placed `lf` runs. A bare run
-/// without it falls back to the worktree name, which is the same channel
-/// name by construction (see `engine::wave_context::resolve_ambient_channel`).
+/// The channel a managed process speaks on by default, set by its launcher.
 pub const CHANNEL_ENV: &str = "LFD_CHANNEL";
 pub const SESSION_ID_ENV: &str = "LFD_SESSION_ID";
 pub const SESSION_INHERITED_ENV: &str = "LFD_SESSION_INHERITED";
@@ -56,8 +52,7 @@ pub const SESSION_INHERITED_ENV: &str = "LFD_SESSION_INHERITED";
 /// Where this `lf` invocation stands relative to the session registry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunContext {
-    /// No ambient wave (no env, not a wave worktree): leave everything
-    /// untouched.
+    /// No managed Wave identity: leave everything untouched.
     Outside,
     /// Launcher-owned: placement already created this process's session row and set
     /// `LFD_SESSION_ID` to it. Registering again would double-count, but the
@@ -66,7 +61,7 @@ pub enum RunContext {
     OwnSession,
     /// Inside a wave context without an own session row: register one.
     NeedsRegistration {
-        wave: AmbientWaveRef,
+        wave_id: String,
         parent_session_id: Option<String>,
     },
 }
@@ -75,14 +70,13 @@ pub enum RunContext {
 /// `LFD_SESSION_INHERITED` is *this process's* session (the launcher made
 /// the row); with the marker it is an ancestor's session and this run
 /// registers its own row underneath it. The wave itself comes from the
-/// shared ambient rule ([`resolve_ambient_wave`]) — a bare run inside a wave
-/// worktree registers just like an env-attributed one.
+/// shared ambient rule ([`resolve_ambient_wave`]).
 pub fn classify_run_context(
-    ambient: Option<AmbientWaveRef>,
+    ambient_wave_id: Option<String>,
     session_id: Option<&str>,
     session_inherited: bool,
 ) -> RunContext {
-    let Some(wave) = ambient else {
+    let Some(wave_id) = ambient_wave_id else {
         return RunContext::Outside;
     };
     let session_id = session_id.filter(|value| !value.is_empty());
@@ -90,7 +84,7 @@ pub fn classify_run_context(
         return RunContext::OwnSession;
     }
     RunContext::NeedsRegistration {
-        wave,
+        wave_id,
         parent_session_id: session_id.map(str::to_string),
     }
 }
@@ -136,15 +130,15 @@ pub fn resolve_explicit_wave(name: &str) -> anyhow::Result<Wave> {
 /// (the binary hands in the discovered root; tests hand in fixture paths so
 /// they never touch the developer's real registry).
 fn register_run_in(
-    repo_root: Option<&Path>,
+    _repo_root: Option<&Path>,
     skill: &str,
     agent: &str,
     argv: &[String],
     explicit_wave: Option<&Wave>,
 ) -> Option<RunSession> {
     let ambient = explicit_wave
-        .map(|wave| AmbientWaveRef::Id(wave.id().to_string()))
-        .or_else(|| resolve_ambient_wave(env_var(WAVE_ID_ENV).as_deref(), repo_root));
+        .map(|wave| wave.id().to_string())
+        .or_else(|| resolve_ambient_wave(env_var(WAVE_ID_ENV).as_deref()));
     let session_id = env_var(SESSION_ID_ENV);
     let inherited = env_var(SESSION_INHERITED_ENV).is_some();
     // A launcher-owned row may describe the ambient wave the process was
@@ -158,23 +152,23 @@ fn register_run_in(
                 .is_some_and(|session_id| !session_belongs_to_wave(session_id, wave.id()))
         });
     let context = classify_run_context(ambient, session_id.as_deref(), inherited);
-    let (wave, parent_session_id) = match context {
+    let (wave_id, parent_session_id) = match context {
         RunContext::Outside => return None,
         RunContext::OwnSession => {
             mark_child_sessions_inherited();
             return adopt_own_session();
         }
         RunContext::NeedsRegistration {
-            wave,
+            wave_id,
             parent_session_id,
-        } => (wave, parent_session_id),
+        } => (wave_id, parent_session_id),
     };
     let parent_session_id: Option<LfdId> = match parent_session_id {
         Some(value) => Some(value.parse().ok()?),
         None => None,
     };
     let session = block_on(register_session(
-        wave,
+        wave_id,
         parent_session_id,
         skill.to_string(),
         agent.to_string(),
@@ -305,24 +299,17 @@ impl SessionHandle {
 /// missing, insert error — is a silent `None`: instrumentation never gets in
 /// the run's way.
 async fn register_session(
-    wave: AmbientWaveRef,
+    wave_id: String,
     mut parent_session_id: Option<LfdId>,
     skill: String,
     agent: String,
     argv: Vec<String>,
 ) -> Option<RunSession> {
     let store: SharedStore = Arc::new(open_existing_store().await?);
-    // The wave row anchors the registration; an env id this store never
-    // heard of is stale env, and a worktree name with no wave row is just a
-    // branch — both silent no-ops, not errors.
-    let wave_id = match wave {
-        AmbientWaveRef::Id(id) => {
-            let id: LfdId = id.parse().ok()?;
-            store.get_wave(&id).await.ok()??;
-            id
-        }
-        AmbientWaveRef::Name(name) => store.get_wave_by_name(&name).await.ok()??.id().clone(),
-    };
+    // The Wave row anchors the registration; an identity this store never
+    // heard of is stale env and therefore a silent no-op.
+    let wave_id: LfdId = wave_id.parse().ok()?;
+    store.get_wave(&wave_id).await.ok()??;
     // A parent the store never heard of: keep the registration, drop the
     // attribution (the row's FK would reject it otherwise).
     if let Some(parent) = &parent_session_id {
@@ -424,15 +411,13 @@ mod tests {
     use crate::lfd::types::{Session, SessionStatus, Wave, WaveStatus, TMUX_TERMINAL_SOURCE};
     use crate::lfdb::{open_store, StorageConfig};
 
-    use crate::engine::wave_context::AmbientWaveRef;
-
     use super::{
         block_on_new_runtime, classify_run_context, register_run_in, resolve_explicit_wave,
         RunContext,
     };
 
-    fn env_wave(id: &str) -> Option<AmbientWaveRef> {
-        Some(AmbientWaveRef::Id(id.to_string()))
+    fn env_wave(id: &str) -> Option<String> {
+        Some(id.to_string())
     }
 
     // ── classify_run_context: the disambiguation rule ───────────────────
@@ -461,7 +446,7 @@ mod tests {
         assert_eq!(
             classify_run_context(env_wave("wave-1"), Some("sess-1"), true),
             RunContext::NeedsRegistration {
-                wave: AmbientWaveRef::Id("wave-1".to_string()),
+                wave_id: "wave-1".to_string(),
                 parent_session_id: Some("sess-1".to_string()),
             }
         );
@@ -469,12 +454,10 @@ mod tests {
 
     #[test]
     fn wave_context_without_session_registers_a_root_child() {
-        // The ambient rule hands worktree-resolved runs in by name; they
-        // classify exactly like env-attributed ones.
         assert_eq!(
-            classify_run_context(Some(AmbientWaveRef::Name("goals".to_string())), None, false),
+            classify_run_context(env_wave("wave-1"), None, false),
             RunContext::NeedsRegistration {
-                wave: AmbientWaveRef::Name("goals".to_string()),
+                wave_id: "wave-1".to_string(),
                 parent_session_id: None,
             }
         );
@@ -504,8 +487,6 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo: repo.to_string(),
-            worktree: String::new(),
-            branch: String::new(),
             status: WaveStatus::Idle,
             iteration: 0,
             cycle_start_iteration: 0,
@@ -670,42 +651,6 @@ mod tests {
         );
         assert!(register_run_in(None, "design", "lf", &["lf".to_string()], None).is_none());
         assert!(std::env::var(super::SESSION_INHERITED_ENV).is_err());
-    }
-
-    /// Decision 2b — no invisible runs: a bare `lf` typed inside a wave
-    /// worktree (no env at all) registers against the wave row its worktree
-    /// name resolves to, root-parented.
-    #[test]
-    fn bare_run_in_wave_worktree_registers_by_worktree_name() {
-        let _guard = super::test_env_lock();
-        clear_session_env();
-        let repo = loopflow_test_support::TestRepo::new();
-        let worktree = repo.create_wave_worktree("registry-wave");
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let db = tmp.path().join("lfd.db");
-        let wave = seed_registry(&db);
-
-        let argv = vec!["lf".to_string(), "design".to_string()];
-        let registration =
-            register_run_in(Some(&worktree), "design", "lf", &argv, None).expect("registered");
-
-        let stored = load_session(&db, registration.session_id());
-        assert_eq!(stored.status, SessionStatus::Running);
-        assert_eq!(stored.wave_id, *wave.id());
-        assert_eq!(stored.parent_session_id, None, "root-parented");
-        assert_eq!(stored.skill, "design");
-        // Descendants chain off the new session.
-        assert_eq!(
-            std::env::var(super::SESSION_ID_ENV).as_deref(),
-            Ok(registration.session_id())
-        );
-
-        registration.complete(0);
-        assert_eq!(
-            load_session(&db, registration.session_id()).status,
-            SessionStatus::Succeeded
-        );
-        clear_session_env();
     }
 
     #[test]

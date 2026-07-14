@@ -207,7 +207,7 @@ async fn pm_create_project_async(
     wave: Option<&str>,
     title: &str,
 ) -> OpsResult<PmResolvedProject> {
-    let wave = resolve_wave(repo, wave)?;
+    let wave = resolve_wave(wave)?;
     let ctx = resolve_context(repo, &wave).await?;
     let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
     if let Some(project) = projects
@@ -400,9 +400,9 @@ fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
     read_wave_config(repo, wave).and_then(|config| config.pm)
 }
 
-fn resolve_wave(repo: &Path, wave: Option<&str>) -> OpsResult<String> {
-    resolve_wave_name(repo, wave)
-        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))
+fn resolve_wave(wave: Option<&str>) -> OpsResult<String> {
+    resolve_wave_name(wave)
+        .ok_or_else(|| OpsError::Message("cannot determine wave; pass --wave <name>".to_string()))
 }
 
 fn parse_provider(value: &str) -> OpsResult<PmProviderKind> {
@@ -808,7 +808,7 @@ async fn pm_init_async(
     options: &PmInitOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmInitResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let wave_dir = repo.join("wave").join(&wave);
     if !wave_dir.is_dir() {
         return Err(OpsError::Message(format!(
@@ -893,7 +893,7 @@ pub(crate) async fn pm_show_async(
     options: &PmShowOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmShowResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let row = load_show_snapshot(repo, &wave, options.refresh, progress).await?;
     let snapshot = decode_snapshot(&wave, &row.payload)?;
     let projects = match options.project.as_deref() {
@@ -1027,7 +1027,7 @@ pub(crate) async fn pm_update_async(
     options: &PmUpdateOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     let result = apply_update(&wave, options.project.as_deref(), &ctx, options, progress).await?;
     progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
@@ -1166,7 +1166,7 @@ async fn pm_status_async(
     _progress: &impl Progress,
 ) -> OpsResult<PmStatusResult> {
     let waves = if let Some(wave) = options.wave.as_deref() {
-        vec![resolve_wave(repo, Some(wave))?]
+        vec![resolve_wave(Some(wave))?]
     } else {
         list_pm_waves(repo)?
     };
@@ -1291,7 +1291,7 @@ async fn pm_sync_async(
 ) -> OpsResult<PmSyncResult> {
     let all_waves = list_local_waves(repo)?;
     let waves = match options.wave.as_deref() {
-        Some(wave) => vec![resolve_wave(repo, Some(wave))?],
+        Some(wave) => vec![resolve_wave(Some(wave))?],
         None => all_waves.clone(),
     };
     let mut actions = Vec::new();
@@ -1424,7 +1424,7 @@ async fn pm_project_archive_async(
     options: &PmProjectArchiveOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmProjectArchiveResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
     let project = find_project(&projects, &wave, &options.project)?;
@@ -1447,7 +1447,7 @@ async fn pm_project_write_async(
     options: &PmProjectWriteOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmProjectWriteResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     let krs = options
         .krs
@@ -1536,7 +1536,7 @@ async fn pm_rename_async(
     options: &PmRenameOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmRenameResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     progress.status(&format!(
         "renaming {} Linear Initiative {} to {}",
@@ -1568,7 +1568,7 @@ async fn pm_task_move_async(
     options: &PmTaskMoveOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmTaskMoveResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
     let project = find_project(&projects, &wave, &options.project)?;

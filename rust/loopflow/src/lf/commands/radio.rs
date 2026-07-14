@@ -7,7 +7,7 @@
 //!
 //! # Targeting
 //! - default: the invoking context's channel — `LFD_CHANNEL` (set by dispatch),
-//!   else `LFD_WAVE_ID`, else the worktree name, which IS the channel name.
+//!   else `LFD_WAVE_ID`.
 //! - `--channel <name>`: any name on the bus. Whoever is tuned in hears it.
 //! - `--parent`: the parent wave's channel, walked through the registry.
 //!
@@ -25,7 +25,7 @@
 
 use anyhow::{anyhow, Result};
 
-use crate::engine::wave_context::{resolve_ambient_channel, AmbientWaveRef};
+use crate::engine::wave_context::{resolve_ambient_channel, AmbientChannelRef};
 use crate::lf::commands::chat::{parent_wave, CliContext};
 use crate::lf::commands::util::message_text;
 use crate::lfd::types::Wave;
@@ -92,22 +92,20 @@ impl AmbientWave {
 }
 
 /// The invoking context: the shared ambient rule (`LFD_CHANNEL`, else
-/// `LFD_WAVE_ID`, else the worktree name), with the wave row resolved when the
-/// registry has it.
+/// `LFD_WAVE_ID`), with the Wave row resolved when the registry has it.
 pub(crate) async fn ambient_wave(context: &CliContext, store: &SharedStore) -> Option<AmbientWave> {
     match resolve_ambient_channel(
         context.env_channel.as_deref(),
         context.env_wave_id.as_deref(),
-        context.repo.as_deref(),
     )? {
-        AmbientWaveRef::Id(id) => {
+        AmbientChannelRef::WaveId(id) => {
             let row = store.get_wave(&id.parse().ok()?).await.ok().flatten()?;
             Some(AmbientWave {
                 channel: wave_channel_name(row.name()),
                 row: Some(row),
             })
         }
-        AmbientWaveRef::Name(name) => {
+        AmbientChannelRef::Channel(name) => {
             let row = store
                 .get_wave_by_name(family_head(&name))
                 .await
@@ -143,7 +141,7 @@ async fn target_channel(
         .ok_or_else(|| {
             anyhow!(
                 "cannot resolve the invoking wave for --parent: no LFD_CHANNEL or \
-             LFD_WAVE_ID in env and no registered wave matches this worktree"
+                 LFD_WAVE_ID in env"
             )
         })?;
     let parent = parent_wave(store, own).await?;

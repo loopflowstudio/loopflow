@@ -452,7 +452,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     );
 
     // Ambient wave context: every run born inside a wave inherits recent chat
-    // and memory. Explicit --wave wins; else env/worktree names the channel.
+    // and memory. Explicit --wave wins; otherwise managed env names the channel.
     // Both resolve through the channel's family head — a hand lives INSIDE its
     // wave's mind. Work-line channels are ephemeral bus topics with no thread
     // and no MEMORY.md of their own; a hand's reports land in the wave's
@@ -462,7 +462,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     let ambient_channel = opts
         .wave
         .clone()
-        .or_else(|| crate::engine::wave_context::resolve_ambient_channel_name(repo_root));
+        .or_else(crate::engine::wave_context::resolve_ambient_channel_name);
     let ambient_wave = ambient_channel
         .as_deref()
         .map(|channel| crate::wave::channel::family_head(channel).to_string());

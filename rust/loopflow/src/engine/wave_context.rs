@@ -7,11 +7,9 @@
 //! resolves → nothing is added (zero tokens, no headers) — flows stay
 //! wave-agnostic.
 //!
-//! Resolution: explicit `--wave` (the caller passes it) >
-//! [`resolve_ambient_wave`] — THE ambient rule, shared with `lf chat`
-//! targeting and run registration: `LFD_WAVE_ID` env first (managed sessions
-//! and Task Sessions), else worktree-root-guarded worktree/branch name
-//! resolution (`ops::util::resolve_wave_name`).
+//! Resolution: explicit `--wave` (the caller passes it) > `LFD_CHANNEL` /
+//! `LFD_WAVE_ID` from a managed session. Repository location cannot identify a
+//! Wave: every Wave and Project operates from the same canonical checkout.
 //!
 //! Read path — reads only, the wave server stays the single writer:
 //! 1. live server: `GET /conversation` at the `wave/<name>/.wave-endpoint`
@@ -44,68 +42,47 @@ pub const WAVE_CHAT_MAX_CHARS: usize = 4_000;
 /// Per-operation timeout for the live-server read (loopback only).
 const LIVE_READ_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// Which wave a process is ambiently inside, before any store lookup.
+/// Which channel a managed process is ambiently inside, before store lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AmbientWaveRef {
+pub enum AmbientChannelRef {
     /// `LFD_WAVE_ID` from the env: the id of a wave row in the shared store.
-    Id(String),
-    /// The worktree/branch-derived wave name of the repo the run executes in.
-    Name(String),
+    WaveId(String),
+    /// `LFD_CHANNEL` from the env: the named channel a managed worker owns.
+    Channel(String),
 }
 
-/// THE ambient-wave rule, in one place — context assembly, `lf chat`/`lf
-/// memory` targeting, and run self-registration all resolve through it so a
-/// run that is context-visible is also registration-visible.
+/// Resolve the Wave owned by a managed process.
 ///
-/// `LFD_WAVE_ID` (set on every managed session; trimmed) wins;
-/// a bare run falls back to the worktree/branch resolution every workflow op
-/// uses — but only when `repo_root` really is the working-tree root. A nested
-/// directory handed in as a "repo" (fixture trees, subdir invocations) must
-/// not inherit the enclosing checkout's wave.
-pub fn resolve_ambient_wave(
-    env_wave_id: Option<&str>,
-    repo_root: Option<&Path>,
-) -> Option<AmbientWaveRef> {
-    if let Some(id) = env_wave_id.map(str::trim).filter(|value| !value.is_empty()) {
-        return Some(AmbientWaveRef::Id(id.to_string()));
-    }
-    let repo_root = repo_root?;
-    if !repo_git_info(repo_root).is_worktree_root {
-        return None;
-    }
-    crate::ops::util::resolve_wave_name(repo_root, None).map(AmbientWaveRef::Name)
+/// Humans choose a Wave explicitly. Managed Wave, Project, and Task processes
+/// inherit `LFD_WAVE_ID` from their launcher.
+pub fn resolve_ambient_wave(env_wave_id: Option<&str>) -> Option<String> {
+    env_wave_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 /// THE ambient-CHANNEL rule: `LFD_CHANNEL` (set on every worker)
-/// wins; else the ambient-wave rule — whose worktree-name arm already yields
-/// the channel name, because the ownership naming makes the worktree basename
-/// minus the repo prefix THE channel name (`repo.goals` → `goals`,
-/// `repo.goals.148e0e02` → `goals.148e0e02`). An env wave id names the wave,
-/// whose channel is its own name.
+/// wins; otherwise the managed process's Wave owns the channel.
 pub fn resolve_ambient_channel(
     env_channel: Option<&str>,
     env_wave_id: Option<&str>,
-    repo_root: Option<&Path>,
-) -> Option<AmbientWaveRef> {
+) -> Option<AmbientChannelRef> {
     if let Some(channel) = env_channel.map(str::trim).filter(|value| !value.is_empty()) {
-        return Some(AmbientWaveRef::Name(channel.to_string()));
+        return Some(AmbientChannelRef::Channel(channel.to_string()));
     }
-    resolve_ambient_wave(env_wave_id, repo_root)
+    resolve_ambient_wave(env_wave_id).map(AmbientChannelRef::WaveId)
 }
 
 /// The channel a run is ambiently inside — [`resolve_ambient_channel`] with
 /// this process's env, id-arm resolved through the store. `None` when no
 /// wave context resolves anywhere.
-pub fn resolve_ambient_channel_name(repo_root: &Path) -> Option<String> {
+pub fn resolve_ambient_channel_name() -> Option<String> {
     let env_channel = std::env::var(crate::lf::session::CHANNEL_ENV).ok();
     let env_wave_id = std::env::var(crate::lf::session::WAVE_ID_ENV).ok();
-    match resolve_ambient_channel(
-        env_channel.as_deref(),
-        env_wave_id.as_deref(),
-        Some(repo_root),
-    )? {
-        AmbientWaveRef::Id(id) => wave_name_for_id(&id),
-        AmbientWaveRef::Name(name) => Some(name),
+    match resolve_ambient_channel(env_channel.as_deref(), env_wave_id.as_deref())? {
+        AmbientChannelRef::WaveId(id) => wave_name_for_id(&id),
+        AmbientChannelRef::Channel(name) => Some(name),
     }
 }
 
@@ -118,57 +95,34 @@ pub fn placed_channel_name(wave_name: &str, run_id: &crate::lfd::id::LfdId) -> S
     )
 }
 
-/// The wave a run is attributed to. A managed session or explicit `--wave` owns
-/// attribution through `LFD_WAVE_ID`; a bare run may use a recognized sibling
-/// wave worktree. Branch-name inference is intentionally excluded: the main
-/// checkout's ordinary branch is not a wave identity.
-pub fn resolve_run_wave_name(repo_root: &Path) -> Option<String> {
-    if let Some(id) = std::env::var(crate::lf::session::WAVE_ID_ENV)
+/// The Wave a managed run is attributed to.
+pub fn resolve_run_wave_name() -> Option<String> {
+    std::env::var(crate::lf::session::WAVE_ID_ENV)
         .ok()
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty())
-    {
-        return wave_name_for_id(&id);
-    }
-    crate::engine::worktrees::wave_name_from_worktree(repo_root)
+        .and_then(|id| wave_name_for_id(&id))
 }
 
-/// What the ambient-wave paths ask git about a repo root.
-#[derive(Debug, Clone)]
-struct RepoGitInfo {
-    /// `repo_root` is the top of a git working tree (not a directory inside
-    /// one, and not outside git entirely).
-    is_worktree_root: bool,
-    /// The main checkout this working tree belongs to; `repo_root` itself
-    /// when it is not a worktree root.
-    origin: PathBuf,
-}
-
-/// One git resolution per repo root per process. Prompt assembly asks "is
-/// this a worktree root?" and "where is the origin?" several times per run
-/// (wave resolution, chat, memory — 6-7 git execs before memoization);
-/// mirrors the Swift side's memoization of the same resolution.
-fn repo_git_info(repo_root: &Path) -> RepoGitInfo {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, RepoGitInfo>>> = OnceLock::new();
+/// Resolve a linked worktree to its canonical checkout once per process.
+fn repo_origin(repo_root: &Path) -> PathBuf {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, PathBuf>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     let mut cache = cache
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     cache
         .entry(repo_root.to_path_buf())
-        .or_insert_with(|| query_repo_git_info(repo_root))
+        .or_insert_with(|| query_repo_origin(repo_root))
         .clone()
 }
 
-/// The single git call behind [`repo_git_info`]: toplevel and common dir in
+/// The single git call behind [`repo_origin`]: toplevel and common dir in
 /// one `rev-parse`. A directory that is not itself a working-tree root
 /// (fixture trees, plain directories) is its own origin — it must not walk
 /// up into an enclosing checkout.
-fn query_repo_git_info(repo_root: &Path) -> RepoGitInfo {
-    let not_a_root = || RepoGitInfo {
-        is_worktree_root: false,
-        origin: repo_root.to_path_buf(),
-    };
+fn query_repo_origin(repo_root: &Path) -> PathBuf {
+    let not_a_root = || repo_root.to_path_buf();
     let Ok(output) = std::process::Command::new("git")
         .arg("-C")
         .arg(repo_root)
@@ -196,13 +150,10 @@ fn query_repo_git_info(repo_root: &Path) -> RepoGitInfo {
     if toplevel != root {
         return not_a_root();
     }
-    RepoGitInfo {
-        is_worktree_root: true,
-        origin: common_dir
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| repo_root.to_path_buf()),
-    }
+    common_dir
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| repo_root.to_path_buf())
 }
 
 /// Map a wave id from the env to its name through the shared store. The
@@ -226,9 +177,9 @@ fn wave_name_for_id(id: &str) -> Option<String> {
 
 /// The origin repo a wave's state lives under: the main checkout when
 /// `repo_root` is a worktree root, `repo_root` itself otherwise (see
-/// [`repo_git_info`] for the guard).
+/// [`repo_origin`] for the guard).
 pub fn wave_origin(repo_root: &Path) -> PathBuf {
-    repo_git_info(repo_root).origin
+    repo_origin(repo_root)
 }
 
 /// The wave's recent conversation, rendered compactly, or `None` when the
@@ -514,66 +465,30 @@ mod tests {
     use crate::wave::journal::{EventKind, Journal, MessageId, MessageOp, Usage};
     use std::io::{Read, Write};
 
-    /// The one rule the three ambient call sites (context assembly, `lf chat`
-    /// targeting, run registration) share: env id first (trimmed), else
-    /// worktree-root-guarded name resolution.
+    /// The one rule the ambient call sites share: managed identity is explicit
+    /// in the process environment.
     #[test]
     fn ambient_rule_env_id_wins_and_is_trimmed() {
         assert_eq!(
-            resolve_ambient_wave(Some(" wave-1 "), None),
-            Some(AmbientWaveRef::Id("wave-1".to_string()))
+            resolve_ambient_wave(Some(" wave-1 ")),
+            Some("wave-1".to_string())
         );
-        // Blank env falls through to the (absent) repo.
-        assert_eq!(resolve_ambient_wave(Some("  "), None), None);
-        assert_eq!(resolve_ambient_wave(None, None), None);
+        assert_eq!(resolve_ambient_wave(Some("  ")), None);
+        assert_eq!(resolve_ambient_wave(None), None);
     }
 
+    /// LFD_CHANNEL wins; otherwise LFD_WAVE_ID identifies the Wave channel.
     #[test]
-    fn ambient_rule_resolves_wave_worktree_but_not_nested_or_bare_dirs() {
-        let repo = loopflow_test_support::TestRepo::new();
-        let worktree = repo.create_wave_worktree("ship");
+    fn ambient_channel_env_wins_then_wave_id() {
         assert_eq!(
-            resolve_ambient_wave(None, Some(&worktree)),
-            Some(AmbientWaveRef::Name("ship".to_string()))
-        );
-
-        // A nested directory handed in as a "repo" must not inherit the
-        // enclosing checkout's wave.
-        let nested = worktree.join("nested");
-        std::fs::create_dir_all(&nested).unwrap();
-        assert_eq!(resolve_ambient_wave(None, Some(&nested)), None);
-
-        // A bare directory outside git resolves nothing.
-        let tmp = tempfile::tempdir().expect("tempdir");
-        assert_eq!(resolve_ambient_wave(None, Some(tmp.path())), None);
-
-        // Env still wins over the worktree.
-        assert_eq!(
-            resolve_ambient_wave(Some("wave-1"), Some(&worktree)),
-            Some(AmbientWaveRef::Id("wave-1".to_string()))
-        );
-    }
-
-    /// The ambient-channel rule: LFD_CHANNEL wins; a work-line worktree's
-    /// name IS its channel; env wave id still resolves the wave channel.
-    #[test]
-    fn ambient_channel_env_wins_then_worktree_name() {
-        assert_eq!(
-            resolve_ambient_channel(Some(" ship.148e "), Some("wave-1"), None),
-            Some(AmbientWaveRef::Name("ship.148e".to_string()))
+            resolve_ambient_channel(Some(" ship.148e "), Some("wave-1")),
+            Some(AmbientChannelRef::Channel("ship.148e".to_string()))
         );
         assert_eq!(
-            resolve_ambient_channel(Some(""), Some("wave-1"), None),
-            Some(AmbientWaveRef::Id("wave-1".to_string()))
+            resolve_ambient_channel(Some(""), Some("wave-1")),
+            Some(AmbientChannelRef::WaveId("wave-1".to_string()))
         );
-
-        let repo = loopflow_test_support::TestRepo::new();
-        let worktree = repo.create_wave_worktree("ship.148e");
-        assert_eq!(
-            resolve_ambient_channel(None, None, Some(&worktree)),
-            Some(AmbientWaveRef::Name("ship.148e".to_string())),
-            "the work-line worktree's name is its channel"
-        );
+        assert_eq!(resolve_ambient_channel(None, None), None);
     }
 
     #[test]

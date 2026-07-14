@@ -403,8 +403,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 vec![wave
                     .clone()
                     .or_else(|| wave_flag.clone())
-                    .or_else(|| crate::ops::util::resolve_wave_name(&repo_root, None))
-                    .ok_or_else(|| anyhow!("cannot determine wave name"))?]
+                    .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?]
             };
             for wave in targets {
                 let result = crate::ops::pm::pm_init(

@@ -48,8 +48,8 @@ use crate::wave::wire::{
 pub fn run(name: &str) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root).unwrap_or_else(|_| repo_root.clone());
-    let wave = resolve_wave_name(&main_repo, Some(name))
-        .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
+    let wave =
+        resolve_wave_name(Some(name)).ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
 
     let (endpoint, token) = resolve_attachment(
         std::env::var(WAVE_SERVER_ENDPOINT_ENV).ok(),

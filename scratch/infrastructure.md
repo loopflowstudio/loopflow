@@ -728,3 +728,32 @@ events remain decodable. This makes the earlier design question concrete: the
 three skills per tier remain because they express the semantic phases; the
 domain runtime, not a skill-authored loop bit or generic YAML construct, owns
 whether the full flow runs again.
+
+## Current reduction: repository location is not Wave identity
+
+Once Waves and Projects share canonical `main`, a directory or branch cannot
+answer “which Wave?” The registry still carried `worktree` and `branch` on each
+Wave, even though current creation wrote empty strings, the HTTP DTO omitted
+them, and the Wave and Project runners already required a clean main checkout.
+The only dedicated Wave-worktree creator had no production caller; its tests
+still exercised creating, moving, and renaming a retired Wave home.
+
+Make ownership match the product:
+
+- a Wave owns a canonical repository, durable chat, memory, cadence, budget,
+  and its Project selection—not a branch or worktree;
+- a Project Session coordinates from clean canonical `main` and owns no
+  checkout;
+- a Task Session is the only domain runtime that acquires an immutable sibling
+  worktree for file-writing delivery;
+- managed Wave, Project, and Task processes receive `LFD_WAVE_ID` and
+  `LFD_CHANNEL` from their launcher;
+- human PM, promotion, chat, and memory commands name their Wave explicitly
+  when they are not already inside managed context.
+
+Delete Wave worktree creation and rename tests, remove branch/worktree from the
+internal Wave type, and leave the two legacy SQLite columns empty until a later
+schema rebuild can remove them safely. Remove branch and directory inference
+from the shared Wave resolver so a command in main fails quickly with `pass
+--wave <name>` rather than silently choosing whichever Wave-shaped branch name
+happens to parse.

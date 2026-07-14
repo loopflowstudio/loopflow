@@ -700,8 +700,6 @@ mod tests {
             goal: "ship-roadmap".to_string(),
             metrics: Vec::new(),
             repo: repo.to_string_lossy().to_string(),
-            worktree: String::new(),
-            branch: String::new(),
             status: WaveStatus::Idle,
             iteration: 0,
             cycle_start_iteration: 0,

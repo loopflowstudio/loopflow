@@ -1,6 +1,6 @@
 use crate::engine::error::GitError;
 use crate::engine::git::{
-    current_branch, get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
+    get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
     is_squash_merged, rev_parse, sync_main, worktree_add, WorktreeBranch,
 };
 use crate::engine::identity::{Timestamp, WaveId};
@@ -93,12 +93,6 @@ pub struct CreateWorktreeResult {
     pub base_commit: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorktreeLease {
-    pub path: PathBuf,
-    pub branch: String,
-}
-
 pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
     let output = Command::new("git")
         .arg("-C")
@@ -151,21 +145,6 @@ pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
         .map(|id| id.dir_component())
         .unwrap_or_else(|| sanitize_fs_component(name));
     dir_for_component(repo, &component)
-}
-
-/// Create a worktree for this wave, or reuse the existing one.
-pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result<WorktreeLease> {
-    let path = worktree_path(main_repo, wave_name);
-    if path.exists() && path.join(".git").exists() {
-        let branch = current_branch(&path)?.unwrap_or_default();
-        return Ok(WorktreeLease { path, branch });
-    }
-
-    let result = create_wave_worktree(main_repo, wave_name, None, true)?;
-    Ok(WorktreeLease {
-        path: result.path,
-        branch: result.branch,
-    })
 }
 
 /// Short run id: the leading 8 hex chars of the run's UUID, tying the
@@ -573,9 +552,11 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
     Ok(states)
 }
 
-/// Create (or reuse) the wave-home worktree: `<repo>.<wave>` on branch
-/// `<user>/<wave>`, off the default branch (or `base` when forking). Waves are
-/// persistent, so the branch carries no stamp.
+/// Create a named sibling worktree on an author-scoped branch.
+///
+/// This is a low-level compatibility helper for release and diagnostic
+/// worktree operations. Wave and Project runtimes always use the canonical
+/// main checkout; Task placement uses [`plan_placement`].
 pub fn create_wave_worktree(
     repo: &Path,
     wave_name: &str,

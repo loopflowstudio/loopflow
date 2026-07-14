@@ -27,8 +27,6 @@ pub(crate) fn make_wave(name: &str, repo: &Path, parent: Option<&LfdId>) -> Wave
         goal: "ship-roadmap".to_string(),
         metrics: Vec::new(),
         repo: repo.display().to_string(),
-        worktree: String::new(),
-        branch: String::new(),
         status: WaveStatus::Idle,
         iteration: 0,
         cycle_start_iteration: 0,

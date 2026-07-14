@@ -12,9 +12,9 @@
 //!
 //! # Targeting
 //! - default: the invoking context's wave — `LFD_CHANNEL` env first (set by
-//!   dispatch), else `LFD_WAVE_ID`, else the worktree name. A dotted name
+//!   dispatch), else `LFD_WAVE_ID`. A dotted name
 //!   resolves to its family head: a hand's channel has no thread to converse
-//!   with. No wave context at all (no env, worktree not wave-shaped) drops the
+//!   with. No managed wave context drops the
 //!   message with exit 0 and one stderr note.
 //! - `--parent`: walk `parent_wave_id` in the registry and post to the parent
 //!   wave's live server; its endpoint rides the parent's WaveAgent session
@@ -47,7 +47,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Result};
 
 use crate::engine::wave_context::{
-    read_endpoint_pointer, resolve_ambient_channel, wave_origin, AmbientWaveRef,
+    read_endpoint_pointer, resolve_ambient_channel, wave_origin, AmbientChannelRef,
 };
 use crate::lf::commands::thread;
 use crate::lf::commands::util::{find_repo_root, message_text};
@@ -330,20 +330,19 @@ pub(crate) async fn resolve_target(
 ) -> Result<Option<ResolvedWave>> {
     let main_repo = repo.map(wave_origin);
 
-    // The invoking context's channel: the shared ambient rule (env
-    // LFD_CHANNEL first, else LFD_WAVE_ID, else the worktree name — which IS
-    // the channel name) — the same resolution context assembly uses. The
+    // The invoking context's channel: the shared ambient rule (LFD_CHANNEL
+    // first, else LFD_WAVE_ID) — the same resolution context assembly uses. The
     // invoking WAVE is the channel's family head.
     let mut own_row: Option<Wave> = None;
     let mut own_name: Option<String> = None;
-    match resolve_ambient_channel(env_channel, env_wave_id, repo) {
-        Some(AmbientWaveRef::Id(id)) => {
+    match resolve_ambient_channel(env_channel, env_wave_id) {
+        Some(AmbientChannelRef::WaveId(id)) => {
             if let (Some(store), Ok(id)) = (store, id.parse()) {
                 own_row = store.get_wave(&id).await?;
             }
             own_name = own_row.as_ref().map(|row| row.name().clone());
         }
-        Some(AmbientWaveRef::Name(name)) => {
+        Some(AmbientChannelRef::Channel(name)) => {
             let head = family_head(&name).to_string();
             if let Some(store) = store {
                 own_row = store.get_wave_by_name(&head).await?;
@@ -368,10 +367,7 @@ pub(crate) async fn resolve_target(
             )
         })?;
         let own = own_row.ok_or_else(|| {
-            anyhow!(
-                "cannot resolve the invoking wave for --parent: no LFD_WAVE_ID \
-                 in env and no registered wave matches this worktree"
-            )
+            anyhow!("cannot resolve the invoking wave for --parent: no LFD_WAVE_ID in env")
         })?;
         let parent = parent_wave(store, &own).await?;
         let name = parent.name().clone();
@@ -494,7 +490,6 @@ mod tests {
     };
     use crate::wave::journal::{EventKind, MessageOp};
     use crate::wave::runtime::InboxItem;
-    use crate::wave::server;
 
     #[test]
     fn interactive_commands_parse_and_everything_else_is_speech() {
@@ -564,31 +559,6 @@ mod tests {
         .expect("wave context");
         assert_eq!(resolved.name, "ship");
         assert_eq!(resolved.endpoint.as_deref(), Some("127.0.0.1:4242"));
-    }
-
-    /// Worktree-name fallback: no env, no store — the `<repo>.<wave>` sibling
-    /// names the wave and the `.wave-endpoint` discovery file supplies the
-    /// endpoint.
-    #[tokio::test]
-    async fn resolve_target_falls_back_to_worktree_name_and_endpoint_file() {
-        let repo = loopflow_test_support::TestRepo::new();
-        let (worktree, _branch) =
-            crate::engine::workspace::ensure_wave_worktree(repo.path(), "ship").expect("worktree");
-        let addr: std::net::SocketAddr = "127.0.0.1:50505".parse().unwrap();
-        server::write_endpoint(repo.path(), "ship", addr).expect("pointer");
-
-        let resolved = resolve_target(
-            &WaveTargetArgs::default(),
-            None,
-            Some(Path::new(&worktree)),
-            None,
-            None,
-        )
-        .await
-        .expect("resolve")
-        .expect("wave context");
-        assert_eq!(resolved.name, "ship");
-        assert_eq!(resolved.endpoint.as_deref(), Some("127.0.0.1:50505"));
     }
 
     /// Publish-to-no-subscriber: no env wave, no registry, and a repo that is

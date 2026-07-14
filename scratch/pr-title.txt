@@ -1,2 +1,0 @@
-task PRs: keep one worktree across serial PRs
-

@@ -60,7 +60,18 @@ pub(crate) async fn start_lf_session_with_env(
     argv: &[String],
     env: &[(&str, &str)],
 ) -> Result<()> {
-    let shell_command = lf_session_shell_command(argv, env);
+    let inherited_context = ["LF_RUN_ID", "LF_PROCESS_ID", "LF_HOME", "LF_DB_PATH"]
+        .into_iter()
+        .filter(|key| !env.iter().any(|(explicit, _)| explicit == key))
+        .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
+        .collect::<Vec<_>>();
+    let mut child_env = env.to_vec();
+    child_env.extend(
+        inherited_context
+            .iter()
+            .map(|(key, value)| (*key, value.as_str())),
+    );
+    let shell_command = lf_session_shell_command(argv, &child_env);
     start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
 }
 
@@ -75,11 +86,11 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_identity = "unset LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION";
+    let clear_context = "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION LF_HOME LF_DB_PATH";
     if env.is_empty() {
-        format!("{clear_identity}; exec {command}")
+        format!("{clear_context}; exec {command}")
     } else {
-        format!("{clear_identity}; exec env {env} {command}")
+        format!("{clear_context}; exec env {env} {command}")
     }
 }
 
@@ -140,7 +151,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION; exec env 'LF_TASK_SESSION_ID'='task-1' 'LF_WAVE_ID'='infra' 'lf' '__task'"
+            "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION LF_HOME LF_DB_PATH; exec env 'LF_TASK_SESSION_ID'='task-1' 'LF_WAVE_ID'='infra' 'lf' '__task'"
         );
     }
 
@@ -152,7 +163,26 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION; exec 'lf' 'wave' 'child'"
+            "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION LF_HOME LF_DB_PATH; exec 'lf' 'wave' 'child'"
+        );
+    }
+
+    #[test]
+    fn lf_session_replaces_tmux_invocation_context() {
+        let argv = vec!["lf".to_string(), "__task".to_string()];
+        let command = lf_session_shell_command(
+            &argv,
+            &[
+                ("LF_RUN_ID", "run-1"),
+                ("LF_PROCESS_ID", "process-1"),
+                ("LF_DB_PATH", "/tmp/current.db"),
+                ("LF_HOME", "/tmp/lf"),
+            ],
+        );
+
+        assert_eq!(
+            command,
+            "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION LF_HOME LF_DB_PATH; exec env 'LF_RUN_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__task'"
         );
     }
 }

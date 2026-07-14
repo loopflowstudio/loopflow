@@ -172,7 +172,7 @@ const COMPLETE_ITEM_MUTATION: &str = r#"mutation CompleteIssue($id: String!, $st
   }
 }"#;
 
-const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowStates($teamId: String!) {
+const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowStates($teamId: ID!) {
   workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "completed" } }) {
     nodes {
       id
@@ -180,7 +180,7 @@ const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowSta
   }
 }"#;
 
-const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowStates($teamId: String!) {
+const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowStates($teamId: ID!) {
   workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "unstarted" } }) {
     nodes {
       id
@@ -980,14 +980,19 @@ mod tests {
             MOVE_ITEM_MUTATION,
             COMPLETE_ITEM_MUTATION,
             CREATE_COMMENT_MUTATION,
-            LIST_COMPLETED_WORKFLOW_STATES_QUERY,
-            LIST_UNSTARTED_WORKFLOW_STATES_QUERY,
         ] {
             assert!(!query.contains(": ID!"));
         }
         assert!(MOVE_ITEM_MUTATION.contains("$projectId: String!"));
         assert!(COMPLETE_ITEM_MUTATION.contains("$stateId: String!"));
         assert!(CREATE_COMMENT_MUTATION.contains("$issueId: String!"));
+    }
+
+    #[test]
+    fn workflow_state_filters_use_linear_team_id() {
+        assert!(CREATE_ITEM_MUTATION.contains("$teamId: String!"));
+        assert!(LIST_COMPLETED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
+        assert!(LIST_UNSTARTED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
     }
 
     #[tokio::test]

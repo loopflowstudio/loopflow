@@ -1532,7 +1532,7 @@ mod tests {
             issue_identifier: "INF-123".to_string(),
             event_id: 7,
             event: crate::task::TaskEventKind::DecisionRequested {
-                decision_id: crate::task::ChildDecisionId::new(),
+                decision_id: crate::child_session::ChildDecisionId::new(),
                 prompt: "Approve the plan?".to_string(),
                 options: vec!["approve".to_string(), "revise".to_string()],
             },

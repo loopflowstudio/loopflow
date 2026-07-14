@@ -6,12 +6,13 @@
 
 use std::time::Duration;
 
+use crate::child_session::{
+    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
+    ChildCommandState, ChildDirective, ChildRef,
+};
 use crate::lfdb::SharedStore;
 use crate::project_session::{ProjectEventKind, ProjectSession, ProjectSessionStatus};
-use crate::task::{
-    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
-    ChildCommandState, ChildDirective, ChildRef, TaskEventKind, TaskSession, TaskSessionStatus,
-};
+use crate::task::{TaskEventKind, TaskSession, TaskSessionStatus};
 
 use super::{OpsError, OpsResult};
 
@@ -471,15 +472,14 @@ mod tests {
 
     use time::OffsetDateTime;
 
+    use crate::child_session::{
+        ChildCommandKind, ChildCommandSource, ChildCommandState, ChildProcess,
+    };
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{Wave, WaveStatus};
     use crate::lfdb::{open_store, StorageConfig};
-    use crate::project_session::{
-        ProjectProcess, ProjectSession, ProjectSessionId, ProjectSessionStatus,
-    };
-    use crate::task::{
-        ChildCommandKind, ChildCommandSource, ChildCommandState, LinearProjectId, LinearProjectRef,
-    };
+    use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+    use crate::task::{LinearProjectId, LinearProjectRef};
 
     use super::{queue_command, ChildSession};
 
@@ -524,12 +524,12 @@ mod tests {
             status_reason: "test project session".to_string(),
             status_at: now,
             iteration: 1,
-            task_event_cursor: 0,
+            observation_cursor: 0,
             state_fingerprint: None,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: active.then(|| "thread-project".to_string()),
-            process: active.then_some(ProjectProcess {
+            process: active.then_some(ChildProcess {
                 generation: 1,
                 pid: None,
                 tmux_name: "lf-project-test".to_string(),

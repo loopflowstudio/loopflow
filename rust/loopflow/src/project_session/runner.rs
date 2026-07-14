@@ -13,17 +13,17 @@ use crate::child_control::{
     absorb_commands as absorb_child_commands, apply_input as apply_child_input,
     take_current_input as take_child_input, ChildTarget, CommandStop, PendingInput,
 };
+use crate::child_session::{
+    unincorporated_directive_version, BoundaryResult, ChildCommand, ChildCommandEffect,
+    ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective,
+    ChildRef, SessionSupervisor,
+};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::lfdb::{open_existing_store, SharedStore};
 use crate::project_session::{
     ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
-    SessionSupervisor,
 };
-use crate::task::{
-    unincorporated_directive_version, ChildCommand, ChildCommandEffect, ChildCommandId,
-    ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective, ChildRef,
-    TaskSessionStatus,
-};
+use crate::task::TaskSessionStatus;
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
@@ -271,13 +271,43 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                         }
                         session.state_fingerprint = Some(outcome.fingerprint);
                         store.update_project_session(&session).await?;
-                        let (commands, stopped) = store.claim_project_commands_or_stop(
-                            &session.id,
-                            generation,
-                            outcome.status,
-                            outcome.reason.clone(),
-                        ).await?;
-                        let commands = filter_new_commands(commands, &mut seen_commands);
+                        let boundary = store
+                            .claim_project_commands_or_stop(
+                                &session.id,
+                                generation,
+                                outcome.status,
+                                outcome.reason.clone(),
+                            )
+                            .await?;
+                        let commands = match boundary {
+                            BoundaryResult::Commands(commands) => {
+                                filter_new_commands(commands, &mut seen_commands)
+                            }
+                            BoundaryResult::Stopped(stopped) => {
+                                let from = session.status;
+                                session = stopped;
+                                let _ = harness.stop().await;
+                                store
+                                    .append_project_event(
+                                        &session.id,
+                                        &ProjectEventKind::StatusChanged {
+                                            from,
+                                            to: session.status,
+                                            reason: session.status_reason.clone(),
+                                        },
+                                    )
+                                    .await?;
+                                if session.status == ProjectSessionStatus::Completed {
+                                    store
+                                        .append_project_event(
+                                            &session.id,
+                                            &ProjectEventKind::Completed { summary },
+                                        )
+                                        .await?;
+                                }
+                                return Ok(());
+                            }
+                        };
                         if !commands.is_empty() {
                             if let Some(stop) = absorb_commands(
                                 &store,
@@ -311,24 +341,9 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                             }
                             continue;
                         }
-                        let from = session.status;
-                        session = stopped.ok_or_else(|| anyhow!("project boundary stopped without state"))?;
-                        let _ = harness.stop().await;
-                        store.append_project_event(
-                            &session.id,
-                            &ProjectEventKind::StatusChanged {
-                                from,
-                                to: session.status,
-                                reason: session.status_reason.clone(),
-                            },
-                        ).await?;
-                        if session.status == ProjectSessionStatus::Completed {
-                            store.append_project_event(
-                                &session.id,
-                                &ProjectEventKind::Completed { summary },
-                            ).await?;
-                        }
-                        return Ok(());
+                        return Err(anyhow!(
+                            "project boundary returned no commands without stopping"
+                        ));
                     }
                     ConversationEvent::Error { code, message } => {
                         return finish_failed(
@@ -711,7 +726,7 @@ async fn consume_task_observations(
         if inserted {
             prompts.push(serde_json::to_string(event)?);
         }
-        session.task_event_cursor = session.task_event_cursor.max(observation.id);
+        session.observation_cursor = session.observation_cursor.max(observation.id);
     }
     Ok(prompts)
 }
@@ -897,18 +912,17 @@ mod tests {
         absorb_commands, apply_input, claim_commands, handle_attachment, take_current_input,
         CommandStop,
     };
+    use crate::child_session::{
+        ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource, ChildCommandState,
+        ChildDecisionId, ChildProcess, ChildRef,
+    };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::Wave;
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
-    use crate::project_session::{
-        ProjectProcess, ProjectSession, ProjectSessionId, ProjectSessionStatus,
-    };
-    use crate::task::{
-        ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource, ChildCommandState,
-        ChildDecisionId, ChildRef, LinearProjectId, LinearProjectRef,
-    };
+    use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+    use crate::task::{LinearProjectId, LinearProjectRef};
 
     struct ScriptedHarness {
         supports_steer: bool,
@@ -997,12 +1011,12 @@ mod tests {
             status_reason: "provider active".to_string(),
             status_at: now,
             iteration: 0,
-            task_event_cursor: 0,
+            observation_cursor: 0,
             state_fingerprint: None,
             agent: provider.to_string(),
             provider: provider.to_string(),
             provider_session_id: Some("provider-session".to_string()),
-            process: Some(ProjectProcess {
+            process: Some(ChildProcess {
                 generation: 1,
                 pid: None,
                 tmux_name: format!("project-{provider}"),

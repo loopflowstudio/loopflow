@@ -2,6 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::child_session::{
+    ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
+    ChildDecisionId, ChildDirective, ChildProcess, ChildRef, SessionSupervisor,
+};
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{get_default_branch, rev_parse};
 use crate::engine::process::{
@@ -13,12 +17,9 @@ use crate::engine::worktrees::{
 use crate::lfd::id::LfdId;
 use crate::lfdb::{open_existing_store, SharedStore, StoreError};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::project_session::SessionSupervisor;
 use crate::task::{
-    ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
-    ChildDecisionId, ChildDirective, ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId,
-    LinearProjectRef, PmWritebackOperation, PmWritebackState, TaskEventKind, TaskSession,
-    TaskSessionStatus,
+    LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
+    PmWritebackState, TaskEventKind, TaskSession, TaskSessionStatus,
 };
 use sha2::{Digest, Sha256};
 
@@ -111,7 +112,7 @@ pub struct TaskSessionSnapshot {
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub process_alive: bool,
-    pub process: Option<crate::task::TaskProcess>,
+    pub process: Option<ChildProcess>,
     pub pull_request: Option<crate::task::PullRequestRef>,
     pub latest_event: Option<crate::task::TaskEvent>,
     pub created_at: time::OffsetDateTime,
@@ -1160,8 +1161,8 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
 #[cfg(test)]
 mod tests {
     use super::{command_source_for_wave, project_context, TaskControlResult};
+    use crate::child_session::ChildCommandSource;
     use crate::lfd::pm::{PmKr, PmProject};
-    use crate::task::ChildCommandSource;
 
     #[test]
     fn task_context_captures_project_definition_and_kr_state() {
@@ -1219,8 +1220,8 @@ mod tests {
             session_id: "ts_example".to_string(),
             command_id: "cc_example".to_string(),
             directive_version: Some(2),
-            state: crate::task::ChildCommandState::Accepted,
-            effect: Some(crate::task::ChildCommandEffect::LiveSteer),
+            state: crate::child_session::ChildCommandState::Accepted,
+            effect: Some(crate::child_session::ChildCommandEffect::LiveSteer),
             incorporated: true,
             generation: Some(2),
             accepted_at: None,

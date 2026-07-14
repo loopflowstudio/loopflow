@@ -8,13 +8,14 @@ use std::collections::VecDeque;
 
 use anyhow::Result;
 
+use crate::child_session::{
+    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandState,
+    ChildDecisionId, ChildRef,
+};
 use crate::harness::Harness;
 use crate::lfdb::SharedStore;
 use crate::project_session::{ProjectEventKind, ProjectSession};
-use crate::task::{
-    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandState,
-    ChildDecisionId, TaskEventKind, TaskSession,
-};
+use crate::task::{TaskEventKind, TaskSession};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ChildTarget<'a> {
@@ -33,12 +34,10 @@ impl ChildTarget<'_> {
             .await?
             .is_some_and(|command| {
                 let targets_match = match (self, &command.target) {
-                    (Self::Project(session), crate::task::ChildRef::Project(session_id)) => {
+                    (Self::Project(session), ChildRef::Project(session_id)) => {
                         &session.id == session_id
                     }
-                    (Self::Task(session), crate::task::ChildRef::Task(session_id)) => {
-                        &session.id == session_id
-                    }
+                    (Self::Task(session), ChildRef::Task(session_id)) => &session.id == session_id,
                     _ => false,
                 };
                 targets_match && command.state == ChildCommandState::Claimed

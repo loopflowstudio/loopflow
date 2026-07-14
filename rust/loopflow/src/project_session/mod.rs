@@ -5,11 +5,12 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::lfd::id::LfdId;
-use crate::task::{
+use crate::child_session::{
     ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId, ChildDirectiveId,
-    DirectiveKind, LinearProjectRef, TaskEventKind, TaskSessionId,
+    ChildProcess, ChildRef, DirectiveKind, SessionSupervisor,
 };
+use crate::lfd::id::LfdId;
+use crate::task::{LinearProjectRef, TaskEventKind, TaskSessionId};
 
 pub mod runner;
 
@@ -74,13 +75,6 @@ pub enum ProjectDataError {
 
 string_id!(ProjectSessionId, "ps_");
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SessionSupervisor {
-    Wave { wave_id: LfdId },
-    Project { session_id: ProjectSessionId },
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -137,14 +131,6 @@ impl FromStr for ProjectSessionStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectProcess {
-    pub generation: u32,
-    pub pid: Option<u32>,
-    pub tmux_name: String,
-    pub started_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectSession {
     pub id: ProjectSessionId,
     pub project: LinearProjectRef,
@@ -158,12 +144,12 @@ pub struct ProjectSession {
     pub status_reason: String,
     pub status_at: OffsetDateTime,
     pub iteration: u32,
-    pub task_event_cursor: i64,
+    pub observation_cursor: i64,
     pub state_fingerprint: Option<String>,
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
-    pub process: Option<ProjectProcess>,
+    pub process: Option<ChildProcess>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
@@ -183,7 +169,7 @@ impl ProjectSession {
             .as_ref()
             .map_or(1, |process| process.generation + 1);
         let now = OffsetDateTime::now_utc();
-        self.process = Some(ProjectProcess {
+        self.process = Some(ChildProcess {
             generation,
             pid: None,
             tmux_name,
@@ -293,13 +279,6 @@ impl ProjectObservation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ChildSessionRef {
-    Project { session_id: ProjectSessionId },
-    Task { session_id: TaskSessionId },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ChildEventPayload {
     Project { event: ProjectEventKind },
     Task { event: TaskEventKind },
@@ -309,7 +288,7 @@ pub enum ChildEventPayload {
 pub struct ObservationOutboxRow {
     pub id: i64,
     pub supervisor: SessionSupervisor,
-    pub source: ChildSessionRef,
+    pub source: ChildRef,
     pub event_id: i64,
     pub payload: ChildEventPayload,
     pub delivered_at: Option<OffsetDateTime>,
@@ -318,14 +297,12 @@ pub struct ObservationOutboxRow {
 #[cfg(test)]
 mod tests {
     use super::{ChildCommandId, ProjectEventKind, ProjectSessionId, ProjectSessionStatus};
-    use crate::task::ChildCommandState;
+    use crate::child_session::ChildCommandState;
 
     #[test]
     fn project_ids_are_prefixed_and_round_trip() {
         let session = ProjectSessionId::new();
-        let command = ChildCommandId::new();
         assert_eq!(ProjectSessionId::parse(session.as_str()).unwrap(), session);
-        assert_eq!(ChildCommandId::parse(command.as_str()).unwrap(), command);
     }
 
     #[test]

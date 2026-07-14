@@ -475,7 +475,8 @@ fn lf_ops_land_leaves_worktree_in_place() {
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
-    let worktree = create_named_worktree(repo.path(), "land", None, false).expect("create worktree");
+    let worktree =
+        create_named_worktree(repo.path(), "land", None, false).expect("create worktree");
 
     fs::write(worktree.path.join("feature.txt"), "feature").expect("write feature file");
     let status = Command::new("git")

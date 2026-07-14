@@ -622,10 +622,7 @@ pub fn create_named_worktree(
     })
 }
 
-pub fn plan_placement(
-    repo: &Path,
-    segment: WorktreeSegment,
-) -> Result<PlacementPlan, GitError> {
+pub fn plan_placement(repo: &Path, segment: WorktreeSegment) -> Result<PlacementPlan, GitError> {
     let default_branch = get_default_branch(repo)?;
     let user = git_user(repo)?;
 
@@ -770,8 +767,8 @@ pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), Gi
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_network_enrichment, plan_placement, worktree_path, PlacementError,
-        PlacementStrategy, WorktreeSegment, WorktreeState,
+        apply_network_enrichment, plan_placement, worktree_path, PlacementError, PlacementStrategy,
+        WorktreeSegment, WorktreeState,
     };
     use std::collections::HashSet;
     use std::path::Path;

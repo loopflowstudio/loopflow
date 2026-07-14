@@ -15,11 +15,12 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::child_session::{ChildRef, SessionSupervisor};
 use crate::lf::output::Colors;
 use crate::lfd::pm::{PmItem, PmKr, PmProject};
 use crate::lfd::types::{AttentionItem, AttentionStatus, LivePrState, Run, RunStatus, Wave};
 use crate::lfdb::{open_existing_store, SharedStore};
-use crate::project_session::{ProjectSession, ProjectSessionStatus, SessionSupervisor};
+use crate::project_session::{ProjectSession, ProjectSessionStatus};
 use crate::task::{TaskSession, TaskSessionStatus};
 use crate::wave::journal::short_id;
 use crate::wave::server::live_endpoint;
@@ -380,7 +381,7 @@ async fn snapshot_project_runtime(
         false
     };
     let pending_observations = store
-        .pending_observations(&crate::project_session::SessionSupervisor::Project {
+        .pending_observations(&SessionSupervisor::Project {
             session_id: project.id.clone(),
         })
         .await
@@ -453,7 +454,7 @@ async fn snapshot_projects(
         details[index].runtime = Some(snapshot_project_runtime(store, project_session).await?);
         details[index].directive = current_directive(
             store,
-            crate::task::ChildRef::Project(project_session.id.clone()),
+            ChildRef::Project(project_session.id.clone()),
             project_session.current_directive_version,
         )
         .await?;
@@ -564,7 +565,7 @@ async fn snapshot_task_detail(
         Some(session) => {
             current_directive(
                 store,
-                crate::task::ChildRef::Task(session.id.clone()),
+                ChildRef::Task(session.id.clone()),
                 session.current_directive_version,
             )
             .await?
@@ -582,7 +583,7 @@ async fn snapshot_task_detail(
 
 async fn current_directive(
     store: &SharedStore,
-    target: crate::task::ChildRef,
+    target: ChildRef,
     version: u32,
 ) -> Result<Option<DirectiveSnapshot>> {
     if version == 0 {

@@ -5,19 +5,21 @@ use std::path::PathBuf;
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
 use time::OffsetDateTime;
 
+use crate::child_session::{
+    BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind,
+    ChildCommandSource, ChildCommandState, ChildDirective, ChildDirectiveId, ChildProcess,
+    ChildRef, DirectiveKind, SessionSupervisor,
+};
 use crate::lfd::id::LfdId;
 use crate::lfdb::rows::now_unix;
 use crate::lfdb::{StoreError, StoreResult};
 use crate::project_session::{
-    ChildEventPayload, ChildSessionRef, ObservationOutboxRow, ProjectEvent, ProjectEventKind,
-    ProjectProcess, ProjectSession, ProjectSessionId, ProjectSessionStatus, SessionSupervisor,
+    ChildEventPayload, ObservationOutboxRow, ProjectEvent, ProjectEventKind, ProjectSession,
+    ProjectSessionId, ProjectSessionStatus,
 };
 use crate::task::{
-    BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind,
-    ChildCommandSource, ChildCommandState, ChildDirective, ChildDirectiveId, ChildRef,
-    DirectiveKind, LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef,
-    PullRequestRef, TaskEvent, TaskEventKind, TaskProcess, TaskSession, TaskSessionId,
-    TaskSessionStatus,
+    LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PullRequestRef, TaskEvent,
+    TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
 };
 
 use super::SqliteStore;
@@ -372,7 +374,7 @@ impl SqliteStore {
         generation: u32,
         stopped_status: TaskSessionStatus,
         reason: &str,
-    ) -> StoreResult<BoundaryResult> {
+    ) -> StoreResult<BoundaryResult<TaskSession>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
         let mut session = transaction
@@ -408,7 +410,7 @@ impl SqliteStore {
             return Err(StoreError::NotFound);
         }
         transaction.commit()?;
-        Ok(BoundaryResult::Stopped(Box::new(session)))
+        Ok(BoundaryResult::Stopped(session))
     }
 
     pub fn accept_child_command(
@@ -525,9 +527,7 @@ impl SqliteStore {
             insert_observation(
                 &transaction,
                 &session.supervisor,
-                &ChildSessionRef::Task {
-                    session_id: session_id.clone(),
-                },
+                &ChildRef::Task(session_id.clone()),
                 event_id,
                 &ChildEventPayload::Task {
                     event: kind.clone(),
@@ -542,9 +542,7 @@ impl SqliteStore {
                     &SessionSupervisor::Wave {
                         wave_id: session.wave_id,
                     },
-                    &ChildSessionRef::Task {
-                        session_id: session_id.clone(),
-                    },
+                    &ChildRef::Task(session_id.clone()),
                     event_id,
                     &ChildEventPayload::Task {
                         event: kind.clone(),
@@ -755,7 +753,7 @@ impl SqliteStore {
         generation: u32,
         stopped_status: ProjectSessionStatus,
         reason: &str,
-    ) -> StoreResult<(Vec<ChildCommand>, Option<ProjectSession>)> {
+    ) -> StoreResult<BoundaryResult<ProjectSession>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
         let mut session = transaction
@@ -778,7 +776,7 @@ impl SqliteStore {
         let commands = read_claimed_child_commands(&transaction, &target, generation)?;
         if !commands.is_empty() {
             transaction.commit()?;
-            return Ok((commands, None));
+            return Ok(BoundaryResult::Commands(commands));
         }
         session.set_status(stopped_status, reason);
         transaction.execute(
@@ -790,7 +788,7 @@ impl SqliteStore {
             ),
         )?;
         transaction.commit()?;
-        Ok((Vec::new(), Some(session)))
+        Ok(BoundaryResult::Stopped(session))
     }
 
     pub fn append_project_event(
@@ -822,9 +820,7 @@ impl SqliteStore {
                 &SessionSupervisor::Wave {
                     wave_id: session.wave_id,
                 },
-                &ChildSessionRef::Project {
-                    session_id: session_id.clone(),
-                },
+                &ChildRef::Project(session_id.clone()),
                 event_id,
                 &ChildEventPayload::Project {
                     event: kind.clone(),
@@ -900,9 +896,7 @@ impl SqliteStore {
             SessionSupervisor::Project {
                 session_id: supervisor_id,
             },
-            ChildSessionRef::Task {
-                session_id: task_id,
-            },
+            ChildRef::Task(task_id),
             ChildEventPayload::Task { event },
         ) = (
             &observation.supervisor,
@@ -1407,7 +1401,7 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
     let process_generation: Option<i64> = row.get(20)?;
     let process_started_at: Option<i64> = row.get(23)?;
     let process = match (process_generation, process_started_at) {
-        (Some(generation), Some(started_at)) => Some(TaskProcess {
+        (Some(generation), Some(started_at)) => Some(ChildProcess {
             generation: generation as u32,
             pid: row.get::<_, Option<i64>>(21)?.map(|pid| pid as u32),
             tmux_name: row.get::<_, Option<String>>(22)?.unwrap_or_default(),
@@ -1588,7 +1582,7 @@ fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.status_reason.clone()),
         Box::new(session.status_at.unix_timestamp()),
         Box::new(i64::from(session.iteration)),
-        Box::new(session.task_event_cursor),
+        Box::new(session.observation_cursor),
         Box::new(session.state_fingerprint.clone()),
         Box::new(session.agent.clone()),
         Box::new(session.provider.clone()),
@@ -1632,7 +1626,7 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
     let process_generation: Option<i64> = row.get(18)?;
     let process_started_at: Option<i64> = row.get(21)?;
     let process = match (process_generation, process_started_at) {
-        (Some(generation), Some(started_at)) => Some(ProjectProcess {
+        (Some(generation), Some(started_at)) => Some(ChildProcess {
             generation: generation as u32,
             pid: row.get::<_, Option<i64>>(19)?.map(|pid| pid as u32),
             tmux_name: row.get::<_, Option<String>>(20)?.unwrap_or_default(),
@@ -1658,7 +1652,7 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
         status_reason: row.get(10)?,
         status_at: crate::lfdb::rows::unix_to_datetime(row.get(11)?),
         iteration: row.get::<_, i64>(12)? as u32,
-        task_event_cursor: row.get(13)?,
+        observation_cursor: row.get(13)?,
         state_fingerprint: row.get(14)?,
         agent: row.get(15)?,
         provider: row.get(16)?,
@@ -1769,17 +1763,17 @@ fn supervisor_columns(supervisor: &SessionSupervisor) -> (&'static str, String) 
     }
 }
 
-fn child_columns(source: &ChildSessionRef) -> (&'static str, String) {
+fn child_columns(source: &ChildRef) -> (&'static str, String) {
     match source {
-        ChildSessionRef::Project { session_id } => ("project", session_id.as_str().to_string()),
-        ChildSessionRef::Task { session_id } => ("task", session_id.as_str().to_string()),
+        ChildRef::Project(session_id) => ("project", session_id.as_str().to_string()),
+        ChildRef::Task(session_id) => ("task", session_id.as_str().to_string()),
     }
 }
 
 fn insert_observation(
     conn: &Connection,
     supervisor: &SessionSupervisor,
-    source: &ChildSessionRef,
+    source: &ChildRef,
     event_id: i64,
     payload: &ChildEventPayload,
     created_at: i64,
@@ -1827,12 +1821,8 @@ fn map_observation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationO
     let source_kind: String = row.get(3)?;
     let source_id: String = row.get(4)?;
     let source = match source_kind.as_str() {
-        "project" => ChildSessionRef::Project {
-            session_id: ProjectSessionId::from_raw(source_id),
-        },
-        "task" => ChildSessionRef::Task {
-            session_id: TaskSessionId::from_raw(source_id),
-        },
+        "project" => ChildRef::Project(ProjectSessionId::from_raw(source_id)),
+        "task" => ChildRef::Task(TaskSessionId::from_raw(source_id)),
         value => {
             return Err(invalid_column(
                 3,

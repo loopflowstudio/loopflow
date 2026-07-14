@@ -1,0 +1,738 @@
+# Center-out architecture review
+
+This is the one working document for reviewing PR #872. It keeps the relevant
+code in view, then records what each type owns, what it accidentally represents,
+and which simplifications follow. Excerpts are intentionally selective; source
+paths are included for the surrounding implementation.
+
+## Product contract under review
+
+```text
+Human ↔ Wave → Project Session → Task Session → PR to main
+                  └────────────→ Task Session → PR to main
+       └───────────────────────→ Task Session → PR to main
+```
+
+- Humans create and talk to Waves.
+- Every Project belongs to one Wave.
+- Every Task belongs to one Project, even when its Wave supervises it directly.
+- Waves choose bets, own chat/memory/cadence, and remain available while their
+  children run.
+- Project Sessions pursue one Project's KRs across Tasks. They own no worktree,
+  branch, PR, permanent memory, cadence, or human conversation.
+- Task Sessions deliver one concrete Linear issue through merge or explicit
+  abandonment. They are the only domain runtime that owns a worktree.
+- `lf wt create` remains a low-level Git primitive. It is not the normal roadmap
+  workflow and should not appear in Wave or Task operating instructions.
+- Wave, Project, and Task are the only durable repeating product lifecycles.
+  Provider workers may cooperate inside a Task worktree; they do not become a
+  fourth planning noun or independently acquire worktrees.
+
+All three lifecycles use the same semantic rhythm:
+
+```text
+clarify → pursue → mutate → deterministic lifecycle decision
+```
+
+The harness runs the skills. The domain controller decides whether the
+lifecycle repeats, waits, blocks, completes, or returns to idle. Skills do not
+write a loop bit.
+
+## Review route
+
+Review from the center outward:
+
+1. `Wave`, `ProjectSession`, and `TaskSession` aggregates.
+2. Shared child identity, commands, directives, decisions, and processes.
+3. Atomic command/event/outbox persistence.
+4. Provider steering and lifecycle runners.
+5. CLI and Wave Chat projections.
+6. Worktree, PR, PM, and external-system boundaries.
+
+The test for every layer is the same: does the API name the real product thing,
+does one owner hold each piece of state, and can an operator explain a failure
+at 2 a.m. without reconstructing implementation history?
+
+## 1. Wave
+
+Source: `rust/loopflow/src/lfd/types/wave.rs`
+
+```rust
+pub struct Wave {
+    pub id: LfdId,
+    pub name: String,
+    pub goal: String,
+    pub metrics: Vec<String>,
+    pub repo: String,
+    pub status: WaveStatus,
+    pub iteration: u32,
+    pub cycle_start_iteration: u32,
+    pub direction: Vec<String>,
+    pub area: Vec<String>,
+    pub paused: bool,
+    pub created_at: Option<OffsetDateTime>,
+    pub workers: u32,
+    pub parent_wave_id: Option<LfdId>,
+}
+```
+
+Status is represented twice:
+
+```rust
+pub fn status(&self) -> WaveStatus {
+    if self.paused {
+        return WaveStatus::Paused;
+    }
+    self.status
+}
+
+pub fn set_status(&mut self, status: WaveStatus) {
+    self.paused = status == WaveStatus::Paused;
+    self.status = status;
+}
+```
+
+The same module still defines a separate execution record:
+
+```rust
+pub struct Run {
+    pub id: LfdId,
+    pub wave_id: LfdId,
+    pub repo: String,
+    pub flow: String,
+    pub task: Option<String>,
+    pub iteration: u32,
+    pub step_index: u32,
+    pub status: RunStatus,
+    pub worktree: String,
+    pub branch: String,
+    // ... ancestry, error, and PR fields
+}
+```
+
+### What is clear
+
+- A Wave has one durable id, one human name, and one canonical repository.
+- Parent Wave identity permits promotion into a durable child Wave without
+  inventing recursive Projects.
+- Wave lifecycle status is intentionally nonterminal.
+
+### What is unclear
+
+- `goal`, `metrics`, `direction`, `area`, `iteration`, and
+  `cycle_start_iteration` mix durable product context with execution-engine
+  bookkeeping. Their current invariants are not visible in the type.
+- `paused` and `status` can disagree because both fields are public. The getter
+  masks the disagreement rather than making it unrepresentable.
+- `workers` says it limits active Runs, while the current product model needs a
+  clear Task worker capacity. The name also collides with provider workers
+  inside a Task.
+- `Run` retains worktree, branch, task, ancestry, and PR identity. If it is only
+  historical flow telemetry, the name and placement make it look like a fourth
+  active runtime beside Wave/Project/Task.
+- No production path creates this `Run` anymore. The remaining code reads old
+  rows, projects them through HTTP/CLI DTOs, and tests the obsolete lifecycle.
+  This is distinct from the current run ledger: `lf runs` groups execution
+  events by a trace `run_id` and remains useful observability.
+- `DEFAULT_WAVE_FLOW = "ship-roadmap"` and `Wave::new(...).goal =
+  "ship-roadmap"` use the same string as both a flow and a goal.
+
+### Review question
+
+What is the minimum durable Wave aggregate after generic Runs stop being a
+product lifecycle? Resolve that before renaming fields individually. The likely
+center is identity, repo, objective, status, cadence/iteration, Task capacity,
+parent, and timestamps; memory/chat/PM bindings remain in their authoritative
+stores rather than being copied into this row.
+
+## 2. Project Session
+
+Sources: `rust/loopflow/src/project_session/mod.rs`,
+`rust/loopflow/src/child_session.rs`
+
+```rust
+pub enum ProjectSessionStatus {
+    Created,
+    Starting,
+    Running,
+    Waiting,
+    Blocked,
+    Failed,
+    Completed,
+    Abandoned,
+}
+
+pub struct ProjectSession {
+    pub id: ProjectSessionId,
+    pub project: LinearProjectRef,
+    pub wave_id: LfdId,
+    pub wave: String,
+    pub repo: String,
+    pub pm_snapshot_synced_at: i64,
+    pub current_directive_version: u32,
+    pub incorporated_directive_version: u32,
+    pub status: ProjectSessionStatus,
+    pub status_reason: String,
+    pub status_at: OffsetDateTime,
+    pub iteration: u32,
+    pub observation_cursor: i64,
+    pub state_fingerprint: Option<String>,
+    pub agent: String,
+    pub provider: String,
+    pub provider_session_id: Option<String>,
+    pub process: Option<ChildProcess>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+```
+
+Process generation is embedded in the aggregate:
+
+```rust
+pub struct ChildProcess {
+    pub generation: u32,
+    pub pid: Option<u32>,
+    pub tmux_name: String,
+    pub started_at: OffsetDateTime,
+}
+```
+
+### What is clear
+
+- The Project Session is the durable pursuit runtime for one Linear Project.
+- `Completed` and `Abandoned` are terminal; `Waiting`, `Blocked`, and `Failed`
+  preserve the same session and provider history.
+- It owns iteration/fingerprint state and a child-observation cursor, but no
+  worktree or delivery object.
+- Directive receipt and directive incorporation are separate facts.
+
+### What is unclear
+
+- `wave_id` and `wave` duplicate Wave identity. The name can drift after a Wave
+  rename unless it is explicitly named as a launch-time label.
+- `repo` duplicates the owning Wave's canonical repo. It may be a useful launch
+  receipt, but its frozen/current semantics are unstated.
+- `project.context` and `pm_snapshot_synced_at` are launch context, while the
+  runner later reads current PM truth. The field names do not distinguish the
+  captured launch receipt from authoritative current Project state.
+- `observation_cursor` now names the outbox coordinate it stores. The existing
+  SQLite column remains `task_event_cursor` for production migration stability;
+  it is an internal storage name rather than the Rust/API contract.
+- A public `status` plus optional `process` permits `Completed + Some(process)`
+  and `Running + None`. Store methods defend some transitions, but the aggregate
+  does not demonstrate the invariant.
+- `state_fingerprint: Option<String>` carries an important no-progress decision
+  in an opaque string without naming what was fingerprinted.
+
+### Review question
+
+Is a Project Session a captured launch receipt plus a small lifecycle state, or
+a local mirror of its Wave and Linear Project? It should be the former. Fields
+that are snapshots should say so; current truth should be resolved by id.
+
+## 3. Task Session
+
+Sources: `rust/loopflow/src/task/mod.rs`,
+`rust/loopflow/src/child_session.rs`
+
+```rust
+pub enum TaskSessionStatus {
+    Created,
+    Starting,
+    Running,
+    Waiting,
+    Submitted,
+    Blocked,
+    Failed,
+    Merged,
+    Abandoned,
+}
+
+pub struct TaskSession {
+    pub id: TaskSessionId,
+    pub issue: LinearIssueRef,
+    pub project: LinearProjectRef,
+    pub pm_snapshot_synced_at: i64,
+    pub pm_snapshot_warning: Option<String>,
+    pub pm_writeback: PmWritebackState,
+    pub wave_id: LfdId,
+    pub wave: String,
+    pub supervisor: SessionSupervisor,
+    pub current_directive_version: u32,
+    pub incorporated_directive_version: u32,
+    pub status: TaskSessionStatus,
+    pub status_reason: String,
+    pub status_at: OffsetDateTime,
+    pub worktree: PathBuf,
+    pub branch: String,
+    pub base_commit: String,
+    pub agent: String,
+    pub provider: String,
+    pub provider_session_id: Option<String>,
+    pub process: Option<ChildProcess>,
+    pub pull_request: Option<PullRequestRef>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+```
+
+```rust
+pub enum PmWritebackState {
+    Current,
+    Pending {
+        operation: PmWritebackOperation,
+        error: String,
+    },
+}
+
+pub struct ChildProcess {
+    pub generation: u32,
+    pub pid: Option<u32>,
+    pub tmux_name: String,
+    pub started_at: OffsetDateTime,
+}
+```
+
+### What is clear
+
+- Linear issue, Project, Wave, immutable placement, provider transcript, PR,
+  and post-merge PM reconciliation have one durable owner.
+- `Submitted` is explicitly nonterminal; review and CI return to the same Task.
+- `Merged` and `Abandoned` are the only terminal states.
+- Delivery can be true while PM writeback remains visibly pending.
+- `supervisor` separates immediate control from root Wave ownership.
+
+### What is unclear
+
+- `wave_id`/`wave`, captured `project`, and PM snapshot fields have the same
+  frozen-versus-current ambiguity as Project Session.
+- Project and Task now use the same `ChildProcess` generation record.
+- Process/status contradictions are representable here too.
+- `pm_snapshot_warning` is durable session data even though it describes a
+  launch-time read warning. Decide whether it is an audit fact or transient UX.
+- `PullRequestRef` records only number and URL; PR lifecycle is inferred from
+  Task status. This is simple if one invariant owns every transition, but the
+  relationship should be explicit in the lifecycle review.
+
+### Review question
+
+The Task aggregate is closest to the desired product model. Use it as the test
+case for shared child mechanics, but do not make Task the namespace owner of
+concepts that Projects use equally.
+
+## 4. Supervision and child identity
+
+Source: `rust/loopflow/src/child_session.rs`
+
+```rust
+pub enum SessionSupervisor {
+    Wave { wave_id: LfdId },
+    Project { session_id: ProjectSessionId },
+}
+
+pub enum ChildRef {
+    Project(ProjectSessionId),
+    Task(TaskSessionId),
+}
+
+```
+
+`ChildRef` now targets commands and directives and identifies Project/Task
+sources in observations. Its Serde shape is the one durable representation.
+
+### Verdict
+
+There is now one child-session reference. `SessionSupervisor`, `ChildRef`,
+`ChildProcess`, commands, directives, decisions, receipts, and the shared
+boundary result live in `child_session`. Project and Task retain their statuses,
+aggregates, events, and lifecycle policy.
+
+This is a concrete simplification, not a generic session framework. It needs no
+trait, provider registry, factory, or public `lf child` command.
+
+## 5. Commands, directives, and decisions
+
+Source: `rust/loopflow/src/child_session.rs`
+
+```rust
+pub enum ChildCommandKind {
+    FollowUp { text: String },
+    Steer { text: String },
+    Interrupt { replacement: Option<String> },
+    Resume { message: Option<String> },
+    Decide {
+        decision_id: ChildDecisionId,
+        choice: String,
+        message: Option<String>,
+    },
+    Abandon { reason: String },
+}
+
+pub enum ChildCommandState {
+    Persisted,
+    Claimed,
+    Accepted,
+    Failed,
+    Superseded,
+}
+
+pub enum ChildCommandEffect {
+    LiveSteer,
+    NextTurn,
+    Replacement,
+    Decision,
+}
+
+pub enum ChildCommandSource {
+    Wave(LfdId),
+    Project(ProjectSessionId),
+    Human,
+    Attachment,
+    System,
+}
+```
+
+```rust
+pub struct ChildDirective {
+    pub id: ChildDirectiveId,
+    pub target: ChildRef,
+    pub version: u32,
+    pub kind: DirectiveKind,
+    pub text: String,
+    pub source: ChildCommandSource,
+    pub command_id: Option<ChildCommandId>,
+    pub issued_at: OffsetDateTime,
+    pub applied_at: Option<OffsetDateTime>,
+    pub incorporated_at: Option<OffsetDateTime>,
+    pub incorporated_summary: Option<String>,
+}
+
+pub struct ChildCommand {
+    pub id: ChildCommandId,
+    pub target: ChildRef,
+    pub source: ChildCommandSource,
+    pub kind: ChildCommandKind,
+    pub state: ChildCommandState,
+    pub effect: Option<ChildCommandEffect>,
+    pub created_at: OffsetDateTime,
+    pub claimed_by_generation: Option<u32>,
+    pub accepted_at: Option<OffsetDateTime>,
+    pub error: Option<String>,
+}
+```
+
+### What is clear
+
+- `follow-up`, `steer`, and `interrupt` encode different human intent rather
+  than exposing provider-specific transport.
+- The receipt says what was durably accepted and how it was applied.
+- A versioned directive separately proves whether later child work incorporated
+  the instruction. Provider acceptance alone is not treated as compliance.
+- Source attribution preserves the Wave → Project → Task responsibility chain
+  and keeps direct human intervention explicit.
+- Decisions reuse durable commands and events instead of introducing a second
+  approval system.
+- Shared commands now live in `child_session`; imports state the actual
+  Project/Task dependency instead of making Task their false owner.
+
+### What is unclear
+
+- Session-id macros remain independently implemented in Child, Project, and
+  Task. They are small but still candidates for a private macro once the error
+  vocabulary is reviewed.
+- `Resume { message }` combines process lifecycle with optional next-turn
+  input. Check every caller for whether it needs one command or an atomic
+  resume-plus-directive operation.
+- `Abandon` is a lifecycle terminal command, while the other variants mostly
+  describe provider input. Keeping one durable command channel is defensible,
+  but the runner—not the harness—must visibly own this distinction.
+
+## 6. Domain events and the observation outbox
+
+Sources: `rust/loopflow/src/project_session/mod.rs`,
+`rust/loopflow/src/task/mod.rs`,
+`rust/loopflow/src/lfdb/sqlite/child_sessions.rs`
+
+Project and Task retain distinct event vocabularies. The shared envelope is:
+
+```rust
+pub enum ChildEventPayload {
+    Project { event: ProjectEventKind },
+    Task { event: TaskEventKind },
+}
+
+pub struct ObservationOutboxRow {
+    pub id: i64,
+    pub supervisor: SessionSupervisor,
+    pub source: ChildRef,
+    pub event_id: i64,
+    pub payload: ChildEventPayload,
+    pub delivered_at: Option<OffsetDateTime>,
+}
+```
+
+Task event and supervisor observation are committed together:
+
+```rust
+let transaction = conn.transaction()?;
+transaction.execute("INSERT INTO task_events ...", params![...])?;
+let event_id = transaction.last_insert_rowid();
+if kind.is_wave_observable() {
+    insert_observation(
+        &transaction,
+        &session.supervisor,
+        &ChildRef::Task(session_id.clone()),
+        event_id,
+        &ChildEventPayload::Task { event: kind.clone() },
+        created_at,
+    )?;
+}
+transaction.commit()?;
+```
+
+Project consumption and acknowledgement are also one transaction:
+
+```rust
+if !exists {
+    transaction.execute("INSERT INTO project_events ...", params![...])?;
+}
+transaction.execute(
+    "UPDATE observation_outbox SET delivered_at=?1 WHERE id=?2 ...",
+    params![now, observation.id],
+)?;
+transaction.execute(
+    "UPDATE project_sessions
+     SET task_event_cursor=MAX(task_event_cursor, ?1) ...",
+    params![observation.id, now, project_session_id.as_str()],
+)?;
+transaction.commit()?;
+```
+
+### What is clear
+
+- The child ledger is authoritative; delivery to a stopped supervisor survives.
+- Task → Project acknowledgement cannot commit without the Project observation.
+- Domain events stay distinct even though delivery mechanics are shared.
+- Raw provider/tool chatter does not become human speech in the Wave journal.
+- The outbox uses the same `ChildRef` as commands and directives.
+
+### What is unclear
+
+- Project-supervised Task events may be delivered both to the Project and
+  directly to the root Wave. Decide which events are root visibility and which
+  should be Project rollups; otherwise Wave Chat can show two narratives.
+- `is_wave_observable` and `is_root_wave_observable` put routing policy on the
+  event enum. That is compact, but the naming hides the immediate-supervisor
+  distinction.
+- The Rust/API field is now `observation_cursor`; the legacy SQLite column name
+  is intentionally left in place until a schema rebuild earns a migration.
+
+## 7. Atomic turn-boundary settlement
+
+Sources: `rust/loopflow/src/child_session.rs`,
+`rust/loopflow/src/lfdb/child_sessions.rs`,
+`rust/loopflow/src/lfdb/sqlite/child_sessions.rs`
+
+Task and Project now expose the same typed result:
+
+```rust
+pub enum BoundaryResult<S> {
+    Commands(Vec<ChildCommand>),
+    Stopped(S),
+}
+
+pub async fn claim_task_commands_or_stop(...)
+    -> StoreResult<BoundaryResult<TaskSession>>;
+pub async fn claim_project_commands_or_stop(
+    ...
+) -> StoreResult<BoundaryResult<ProjectSession>>;
+```
+
+Both SQLite implementations validate the generation, claim unresolved commands,
+return them when present, or transition the session out of an active status in
+the same transaction.
+
+### Verdict
+
+The guarantee and API now match. The generic parameter shares only the
+state-machine result; each domain still chooses its own stopped status, reason,
+events, and next action.
+
+## 8. Provider-neutral steering
+
+Source: `rust/loopflow/src/child_control.rs`
+
+```rust
+pub(crate) enum ChildTarget<'a> {
+    Project(&'a ProjectSession),
+    Task(&'a TaskSession),
+}
+```
+
+The module owns command claiming, live steering, interrupt-and-replace,
+decision delivery, and receipt settlement. It branches on `Harness`
+capabilities, not provider names, then records the outcome in the appropriate
+domain event ledger.
+
+### What is clear
+
+- Provider transport is below durable Loopflow intent.
+- Project and Task runners keep their lifecycle policy.
+- Codex live steer and Claude/OpenCode interrupt-and-resume can report different
+  effects without exposing different public commands.
+
+### What is unclear
+
+- `ChildTarget` borrows the full aggregate mainly to recover id and event kind.
+  After one `ChildRef` exists, test whether a smaller target plus an explicit
+  event write is clearer. Do not add a trait or callback framework merely to
+  remove a `match`.
+- The remaining exact-once limit must stay documented: a process can die after
+  provider acceptance but before the local receipt records acceptance. Local
+  transactions cannot solve provider-side idempotency.
+
+## 9. Public CLI
+
+Source: `rust/loopflow/src/lf/mod.rs`
+
+Project and Task intentionally mirror one another:
+
+```text
+project: start run status follow-up steer interrupt receipt acknowledge
+         decide request-decision wait resume attach abandon promote
+
+task:    start run status follow-up steer interrupt receipt acknowledge
+         decide request-decision wait resume attach abandon
+```
+
+The record-first and free-text APIs are both explicit:
+
+```text
+lf project run <linear-project-id>
+lf project start "make releases boring" --wave infrastructure
+
+lf task run INF-123
+lf task start "add hello-world" --project <linear-project-id>
+```
+
+Low-level worktrees remain available:
+
+```rust
+pub enum WtCommand {
+    /// Create a low-level sibling worktree
+    Create { name: String, plan: bool },
+    Switch { name: String },
+    List { /* ... */ },
+    Prune { /* ... */ },
+    // ...
+}
+```
+
+### Verdict
+
+- Keep explicit `project` and `task` nouns. A generic public child/session
+  command would erase the product distinction to save parser duplication.
+- Keep free text as `start = create Linear record, then run the same lifecycle`.
+- Keep `lf wt create` below Task. Omit it from the normal Wave/Project/Task
+  instructions; document it only as an advanced Git primitive if users need it.
+- Review `run` versus `resume` carefully: `run` is idempotent create-or-return
+  for a domain session; `resume` starts another process generation of the same
+  session. Error messages should teach that distinction consistently.
+
+## 10. Data ownership map
+
+| State | Owner |
+|---|---|
+| Wave identity, objective, cadence, budget, chat selection | Wave registry / Wave journal |
+| Project definition, KRs, Task membership | Linear |
+| Local planning reads | atomic Wave PM snapshot |
+| Project pursuit lifecycle | Project Session + Project event ledger |
+| Task delivery lifecycle | Task Session + Task event ledger |
+| Worktree, branch, base, PR | Task Session only |
+| Child instructions and receipts | `child_commands` |
+| Current direction and incorporation proof | `child_directives` |
+| Supervisor delivery | observation outbox |
+| Provider conversation continuity | provider session id on domain Session |
+| Provider/tmux process lifetime | shared child process generation |
+| Low-level ad hoc worktree | Git/`lf wt`, outside the roadmap hierarchy |
+
+The shipping boundary follows state, not directory alone. The canonical
+checkout on its default branch is the Wave/Project control plane and refuses
+PR delivery. A sibling worktree—or an explicitly selected feature branch in
+the canonical checkout—remains a valid low-level Git surface. This preserves
+`lf wt` without teaching Waves to ship from their homes.
+
+## First simplification slice — implemented
+
+This slice preserves schemas and behavior:
+
+1. `child_session` owns `SessionSupervisor`, one `ChildRef`,
+   `ChildProcess`, child ids, commands, directives, decisions, and generic
+   `BoundaryResult<S>`.
+2. The observation outbox uses `ChildRef`.
+3. Project and Task use `ChildProcess`.
+4. Both boundary methods return `BoundaryResult<S>`.
+5. `TaskSessionStatus`, `ProjectSessionStatus`, both aggregates, both event
+   enums, and both runners remain domain-specific.
+6. The Rust/API field is `observation_cursor`; the existing SQLite column stays
+   stable.
+7. Migration, round-trip, persistence, runner, steering, and delivery tests
+   pass without changing database values. The full Rust suite passes 1,291
+   tests; clippy and `git diff --check` are clean.
+
+This removes false ownership and duplicate representations. It does not create
+a generic lifecycle, generic runner, public `child` noun, or test-only trait.
+
+## Questions to resolve as we move outward
+
+1. Which `Wave` fields are durable domain state, and which survive only because
+   the old generic `Run` engine once owned the lifecycle?
+2. Can the dead Wave `Run` aggregate and its HTTP/CLI projections be removed
+   while retaining the independent execution trace ledger behind `lf runs`?
+3. Should Wave capacity count Task Sessions, live provider processes, or both?
+   What should that field be called?
+4. Are Wave name, repo, Linear context, and snapshot warning intentionally
+   frozen launch receipts on child Sessions? If yes, name them that way.
+5. Which descendant Task events should reach the root Wave directly, and which
+   should arrive only through Project interpretation?
+6. Can Project Session no-progress detection be represented as typed input
+   state rather than an opaque serialized fingerprint?
+7. Is `Resume { message }` one atomic user intent, or two operations joined for
+   convenience?
+8. How does Wave Chat show transport receipt, directive incorporation, decision
+   lineage, provider transcript, worktree, and PR without becoming three
+   separate consoles?
+9. Where should the provider-side exactly-once limitation be visible to an
+   operator retrying a command after a crash?
+
+## Review ledger
+
+### Confirmed
+
+- The Project/Task domain split is real and should remain public.
+- Task is the sole roadmap runtime that owns worktree and PR delivery.
+- Shared steering is durable and provider-neutral, not terminal input.
+- Command acceptance and directive incorporation are different facts.
+- Event + outbox and Project consume + acknowledge transaction boundaries are
+  the correct durability shape.
+- `lf wt create` remains available below the domain workflow.
+- Generic Wave `Run` is a dead product lifecycle; trace `run_id` is a separate,
+  live observability concept.
+- The protected control plane is the canonical checkout on the default branch,
+  not every branch that happens to use the canonical checkout path.
+
+### Implemented code reductions
+
+- One child reference instead of two.
+- One child process type instead of Project/Task copies.
+- One boundary result shape instead of enum versus tuple.
+- Shared child types moved out of the Task namespace.
+- The observation cursor now matches its stored id.
+
+### Held open
+
+- The minimal Wave aggregate and fate of generic `Run`.
+- Frozen launch receipt versus duplicated source-of-truth fields.
+- Root Wave visibility versus Project-owned interpretation of Task events.
+- Whether status/process invariants warrant a stronger runtime-state type or
+  are clearer as explicit validation at persistence boundaries.

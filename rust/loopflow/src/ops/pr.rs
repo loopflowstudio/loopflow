@@ -126,9 +126,11 @@ pub(crate) fn reject_control_plane_delivery(repo: &Path) -> OpsResult<()> {
     let main_repo = main_repo_root(repo)?;
     let checkout = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
     let main_repo = main_repo.canonicalize().unwrap_or(main_repo);
-    if checkout == main_repo {
+    let default_branch = get_default_branch(repo)?;
+    let branch = current_branch(repo)?;
+    if checkout == main_repo && branch.as_deref() == Some(default_branch.as_str()) {
         return Err(OpsError::Message(
-            "the canonical checkout is the Wave/Project control plane and cannot open a PR; create a Linear task and run it with `lf task run <issue-id>`"
+            "the canonical checkout on main is the Wave/Project control plane and cannot open a PR; create a Linear task and run it with `lf task run <issue-id>`"
                 .to_string(),
         ));
     }

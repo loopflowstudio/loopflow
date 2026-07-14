@@ -206,8 +206,8 @@ the current conflict paths; repeat edit/continue until the rebase completes.
 
 ## lf wt
 
-Inspect, switch, and clean Task worktrees. `lf task run <issue-id>` is the only
-command that creates one.
+Inspect, switch, and clean worktrees. Normal roadmap work starts with
+`lf task run <issue-id>`; `lf wt` remains a low-level Git primitive.
 
 ### lf wt switch
 

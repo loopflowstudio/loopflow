@@ -13,13 +13,13 @@ use crate::child_control::{
     absorb_commands as absorb_child_commands, apply_input as apply_child_input, input_is_current,
     ChildTarget, CommandStop, DecisionResolution, PendingInput,
 };
+use crate::child_session::{
+    unincorporated_directive_version, BoundaryResult, ChildCommand, ChildCommandEffect,
+    ChildCommandId, ChildCommandKind, ChildCommandState, ChildDirective, ChildRef,
+};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::lfdb::{open_existing_store, SharedStore};
-use crate::task::{
-    unincorporated_directive_version, BoundaryResult, ChildCommand, ChildCommandEffect,
-    ChildCommandId, ChildCommandKind, ChildCommandState, ChildDirective, ChildRef, TaskEventKind,
-    TaskSession, TaskSessionId, TaskSessionStatus,
-};
+use crate::task::{TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus};
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
@@ -320,7 +320,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 BoundaryResult::Stopped(stopped) => {
                                     let _ = harness.stop().await;
                                     let from = session.status;
-                                    session = *stopped;
+                                    session = stopped;
                                     if !summary.is_empty() {
                                         store.append_task_event(
                                             &session.id,
@@ -557,7 +557,7 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
     };
     let command = ChildCommand::new(
         ChildRef::Task(session.id.clone()),
-        crate::task::ChildCommandSource::Attachment,
+        crate::child_session::ChildCommandSource::Attachment,
         kind,
     );
     let replacement = match &command.kind {
@@ -876,16 +876,18 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{absorb_commands, apply_input, handle_attachment, progress_summary, CommandStop};
+    use crate::child_session::{
+        ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource, ChildCommandState,
+        ChildDecisionId, ChildProcess, ChildRef, SessionSupervisor,
+    };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::Wave;
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource, ChildCommandState,
-        ChildDecisionId, ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId,
-        LinearProjectRef, PmWritebackState, TaskEventKind, TaskProcess, TaskSession, TaskSessionId,
-        TaskSessionStatus,
+        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackState,
+        TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
     };
 
     struct ScriptedHarness {
@@ -976,7 +978,7 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             wave: wave.name().clone(),
-            supervisor: crate::project_session::SessionSupervisor::Wave {
+            supervisor: SessionSupervisor::Wave {
                 wave_id: wave.id().clone(),
             },
             current_directive_version: 0,
@@ -990,7 +992,7 @@ mod tests {
             agent: provider.to_string(),
             provider: provider.to_string(),
             provider_session_id: Some("provider-session".to_string()),
-            process: Some(TaskProcess {
+            process: Some(ChildProcess {
                 generation: 1,
                 pid: None,
                 tmux_name: format!("task-{provider}"),

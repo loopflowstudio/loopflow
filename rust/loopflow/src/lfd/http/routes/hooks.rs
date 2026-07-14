@@ -764,7 +764,7 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             wave: wave.name().to_string(),
-            supervisor: crate::project_session::SessionSupervisor::Wave {
+            supervisor: crate::child_session::SessionSupervisor::Wave {
                 wave_id: wave.id().clone(),
             },
             current_directive_version: 0,

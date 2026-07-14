@@ -1,15 +1,16 @@
 //! Durable Project and Task Sessions: commands, directives, events, and the
 //! observation outbox that links them to their supervisors.
 
+use crate::child_session::{
+    BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId, ChildDirective, ChildRef,
+    SessionSupervisor,
+};
 use crate::lfd::id::LfdId;
 use crate::project_session::{
     ObservationOutboxRow, ProjectEvent, ProjectEventKind, ProjectSession, ProjectSessionId,
-    ProjectSessionStatus, SessionSupervisor,
+    ProjectSessionStatus,
 };
-use crate::task::{
-    BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId, ChildDirective, ChildRef,
-    TaskEvent, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
-};
+use crate::task::{TaskEvent, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus};
 
 use super::{run_sqlite, Store, StoreResult};
 
@@ -170,7 +171,7 @@ impl Store {
         generation: u32,
         stopped_status: TaskSessionStatus,
         reason: &str,
-    ) -> StoreResult<BoundaryResult> {
+    ) -> StoreResult<BoundaryResult<TaskSession>> {
         let session_id = session_id.clone();
         let reason = reason.to_string();
         run_sqlite(&self.sqlite, move |store| {
@@ -371,7 +372,7 @@ impl Store {
         generation: u32,
         stopped_status: ProjectSessionStatus,
         reason: String,
-    ) -> StoreResult<(Vec<ChildCommand>, Option<ProjectSession>)> {
+    ) -> StoreResult<BoundaryResult<ProjectSession>> {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.claim_project_commands_or_stop(&session_id, generation, stopped_status, &reason)

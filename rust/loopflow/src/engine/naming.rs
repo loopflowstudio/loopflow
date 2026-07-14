@@ -87,5 +87,4 @@ mod tests {
     fn sanitize_trims_leading_trailing() {
         assert_eq!(sanitize_for_branch("-foo-"), "foo");
     }
-
 }

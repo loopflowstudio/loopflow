@@ -778,20 +778,22 @@ pub type SharedStore = Arc<Store>;
 mod tests {
     use super::sqlite::SqliteStore;
     use super::{open_store, ForkRun, ForkRunStatus, PmSnapshotRow, RunEventRow, StorageConfig};
+    use crate::child_session::{
+        BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource,
+        ChildCommandState, ChildDecisionId, ChildDirective, ChildProcess, ChildRef,
+        SessionSupervisor,
+    };
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         ChatMemoryBlock, Repo, RepoEdge, RepoId, Run, RunStatus, Summary, Wave, WaveStatus,
         DEFAULT_WAVE_FLOW,
     };
     use crate::project_session::{
-        ChildEventPayload, ChildSessionRef, ProjectEventKind, ProjectProcess, ProjectSession,
-        ProjectSessionId, ProjectSessionStatus, SessionSupervisor,
+        ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
     };
     use crate::task::{
-        BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource,
-        ChildCommandState, ChildDecisionId, ChildDirective, ChildRef, LinearIssueId,
-        LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation, PmWritebackState,
-        TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
+        LinearIssueId, LinearIssueRef, LinearProjectId, LinearProjectRef, PmWritebackOperation,
+        PmWritebackState, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use std::env;
     use std::path::PathBuf;
@@ -864,7 +866,7 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             wave: wave.name().to_string(),
-            supervisor: crate::project_session::SessionSupervisor::Wave {
+            supervisor: SessionSupervisor::Wave {
                 wave_id: wave.id().clone(),
             },
             current_directive_version: 0,
@@ -906,12 +908,12 @@ mod tests {
             status_reason: "project turn active".to_string(),
             status_at: now,
             iteration: 1,
-            task_event_cursor: 0,
+            observation_cursor: 0,
             state_fingerprint: None,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: Some("thread-project".to_string()),
-            process: Some(ProjectProcess {
+            process: Some(ChildProcess {
                 generation: 1,
                 pid: None,
                 tmux_name: "lf-project-test".to_string(),
@@ -1134,7 +1136,7 @@ mod tests {
         assert!(matches!(
             (&observations[0].source, &observations[0].payload),
             (
-                ChildSessionRef::Task { session_id },
+                ChildRef::Task(session_id),
                 ChildEventPayload::Task { event: TaskEventKind::Failed { .. } }
             ) if session_id == &task.id
         ));
@@ -1147,7 +1149,7 @@ mod tests {
         assert!(wave_observations.iter().any(|observation| matches!(
             (&observation.source, &observation.payload),
             (
-                ChildSessionRef::Task { session_id },
+                ChildRef::Task(session_id),
                 ChildEventPayload::Task { event: TaskEventKind::Failed { .. } }
             ) if session_id == &task.id
         )));
@@ -1286,7 +1288,7 @@ mod tests {
         assert!(wave_observations.iter().any(|observation| matches!(
             (&observation.source, &observation.payload),
             (
-                ChildSessionRef::Task { session_id },
+                ChildRef::Task(session_id),
                 ChildEventPayload::Task {
                     event: TaskEventKind::DecisionRequested { .. }
                 }

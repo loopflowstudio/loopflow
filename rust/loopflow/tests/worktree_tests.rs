@@ -180,14 +180,12 @@ fn wt_switch_finds_worktree_by_sibling_name() {
     let result = create_named_worktree(repo.path(), "docs", None, false).expect("create");
 
     let worktrees = list_worktrees(repo.path()).expect("list");
-    let name =
-        sibling_worktree_name_with_main(&result.path, repo.path()).expect("sibling name");
+    let name = sibling_worktree_name_with_main(&result.path, repo.path()).expect("sibling name");
 
     let matches: Vec<_> = worktrees
         .iter()
         .filter(|wt| {
-            sibling_worktree_name_with_main(&wt.path, repo.path()).as_deref()
-                == Some(name.as_str())
+            sibling_worktree_name_with_main(&wt.path, repo.path()).as_deref() == Some(name.as_str())
         })
         .collect();
     assert_eq!(matches.len(), 1);
@@ -223,7 +221,7 @@ fn wt_switch_prefix_matching_is_dot_delimited() {
     assert!(
         matches.is_empty(),
         "prefix matching is dot-delimited, not substring: got {:?}",
-        wave_name
+        matches
     );
 }
 

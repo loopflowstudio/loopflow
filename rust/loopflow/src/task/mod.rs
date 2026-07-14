@@ -6,8 +6,11 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::child_session::{
+    ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId, ChildDirectiveId,
+    ChildProcess, DirectiveKind, SessionSupervisor,
+};
 use crate::lfd::id::LfdId;
-use crate::project_session::SessionSupervisor;
 
 pub mod runner;
 
@@ -71,9 +74,6 @@ pub enum TaskDataError {
 }
 
 string_id!(TaskSessionId, "ts_");
-string_id!(ChildCommandId, "cc_");
-string_id!(ChildDecisionId, "cd_");
-string_id!(ChildDirectiveId, "dir_");
 
 /// Opaque Linear identifier: non-empty, provider-assigned (no prefix grammar of
 /// our own, so distinct from `string_id!`).
@@ -185,14 +185,6 @@ impl FromStr for TaskSessionStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskProcess {
-    pub generation: u32,
-    pub pid: Option<u32>,
-    pub tmux_name: String,
-    pub started_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullRequestRef {
     pub number: u32,
     pub url: String,
@@ -237,7 +229,7 @@ pub struct TaskSession {
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
-    pub process: Option<TaskProcess>,
+    pub process: Option<ChildProcess>,
     pub pull_request: Option<PullRequestRef>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -258,7 +250,7 @@ impl TaskSession {
             .as_ref()
             .map_or(1, |process| process.generation + 1);
         let now = OffsetDateTime::now_utc();
-        self.process = Some(TaskProcess {
+        self.process = Some(ChildProcess {
             generation,
             pid: None,
             tmux_name,
@@ -266,243 +258,6 @@ impl TaskSession {
         });
         self.set_status(TaskSessionStatus::Starting, "task process is starting");
         generation
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ChildCommandKind {
-    FollowUp {
-        text: String,
-    },
-    Steer {
-        text: String,
-    },
-    Interrupt {
-        replacement: Option<String>,
-    },
-    Resume {
-        message: Option<String>,
-    },
-    Decide {
-        decision_id: ChildDecisionId,
-        choice: String,
-        message: Option<String>,
-    },
-    Abandon {
-        reason: String,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ChildCommandState {
-    Persisted,
-    Claimed,
-    Accepted,
-    Failed,
-    Superseded,
-}
-
-impl ChildCommandState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Persisted => "persisted",
-            Self::Claimed => "claimed",
-            Self::Accepted => "accepted",
-            Self::Failed => "failed",
-            Self::Superseded => "superseded",
-        }
-    }
-
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Accepted | Self::Failed | Self::Superseded)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ChildCommandEffect {
-    LiveSteer,
-    NextTurn,
-    Replacement,
-    Decision,
-}
-
-impl ChildCommandEffect {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::LiveSteer => "live_steer",
-            Self::NextTurn => "next_turn",
-            Self::Replacement => "replacement",
-            Self::Decision => "decision",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
-pub enum ChildCommandSource {
-    Wave(LfdId),
-    Project(crate::project_session::ProjectSessionId),
-    Human,
-    Attachment,
-    System,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
-pub enum ChildRef {
-    Project(crate::project_session::ProjectSessionId),
-    Task(TaskSessionId),
-}
-
-impl ChildRef {
-    pub fn target_kind(&self) -> &'static str {
-        match self {
-            Self::Project(_) => "project",
-            Self::Task(_) => "task",
-        }
-    }
-
-    pub fn target_id(&self) -> &str {
-        match self {
-            Self::Project(id) => id.as_str(),
-            Self::Task(id) => id.as_str(),
-        }
-    }
-}
-
-pub(crate) fn unincorporated_directive_version(
-    current_version: u32,
-    incorporated_version: u32,
-) -> Option<u32> {
-    (current_version > incorporated_version).then_some(current_version)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum DirectiveKind {
-    Initial,
-    Replacement,
-    WorkRevised,
-}
-
-impl DirectiveKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Initial => "initial",
-            Self::Replacement => "replacement",
-            Self::WorkRevised => "work_revised",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChildDirective {
-    pub id: ChildDirectiveId,
-    pub target: ChildRef,
-    pub version: u32,
-    pub kind: DirectiveKind,
-    pub text: String,
-    pub source: ChildCommandSource,
-    pub command_id: Option<ChildCommandId>,
-    pub issued_at: OffsetDateTime,
-    pub applied_at: Option<OffsetDateTime>,
-    pub incorporated_at: Option<OffsetDateTime>,
-    pub incorporated_summary: Option<String>,
-}
-
-impl ChildDirective {
-    pub fn initial(target: ChildRef, text: String, source: ChildCommandSource) -> Self {
-        Self {
-            id: ChildDirectiveId::new(),
-            target,
-            version: 1,
-            kind: DirectiveKind::Initial,
-            text,
-            source,
-            command_id: None,
-            issued_at: OffsetDateTime::now_utc(),
-            applied_at: None,
-            incorporated_at: None,
-            incorporated_summary: None,
-        }
-    }
-
-    pub fn replacement(
-        target: ChildRef,
-        version: u32,
-        text: String,
-        source: ChildCommandSource,
-        command_id: ChildCommandId,
-    ) -> Self {
-        Self {
-            id: ChildDirectiveId::new(),
-            target,
-            version,
-            kind: DirectiveKind::Replacement,
-            text,
-            source,
-            command_id: Some(command_id),
-            issued_at: OffsetDateTime::now_utc(),
-            applied_at: None,
-            incorporated_at: None,
-            incorporated_summary: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChildCommand {
-    pub id: ChildCommandId,
-    pub target: ChildRef,
-    pub source: ChildCommandSource,
-    pub kind: ChildCommandKind,
-    pub state: ChildCommandState,
-    pub effect: Option<ChildCommandEffect>,
-    pub created_at: OffsetDateTime,
-    pub claimed_by_generation: Option<u32>,
-    pub accepted_at: Option<OffsetDateTime>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BoundaryResult {
-    Commands(Vec<ChildCommand>),
-    Stopped(Box<TaskSession>),
-}
-
-impl ChildCommand {
-    pub fn new(target: ChildRef, source: ChildCommandSource, kind: ChildCommandKind) -> Self {
-        let effect = match &kind {
-            ChildCommandKind::FollowUp { .. } | ChildCommandKind::Resume { message: Some(_) } => {
-                Some(ChildCommandEffect::NextTurn)
-            }
-            ChildCommandKind::Interrupt {
-                replacement: Some(_),
-            } => Some(ChildCommandEffect::Replacement),
-            ChildCommandKind::Decide { .. } => Some(ChildCommandEffect::Decision),
-            ChildCommandKind::Steer { .. }
-            | ChildCommandKind::Interrupt { replacement: None }
-            | ChildCommandKind::Resume { message: None }
-            | ChildCommandKind::Abandon { .. } => None,
-        };
-        Self {
-            id: ChildCommandId::new(),
-            target,
-            source,
-            kind,
-            state: ChildCommandState::Persisted,
-            effect,
-            created_at: OffsetDateTime::now_utc(),
-            claimed_by_generation: None,
-            accepted_at: None,
-            error: None,
-        }
     }
 }
 
@@ -613,19 +368,15 @@ impl TaskObservation {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChildCommandId, ChildCommandState, ChildDecisionId, PmWritebackOperation, PmWritebackState,
-        TaskEventKind, TaskObservation, TaskSessionId, TaskSessionStatus,
+        ChildCommandId, ChildCommandState, PmWritebackOperation, PmWritebackState, TaskEventKind,
+        TaskObservation, TaskSessionId, TaskSessionStatus,
     };
+    use crate::child_session::ChildDecisionId;
 
     #[test]
     fn task_ids_are_prefixed_and_round_trip() {
         let session = TaskSessionId::new();
-        let command = ChildCommandId::new();
-        let decision = ChildDecisionId::new();
-
         assert_eq!(TaskSessionId::parse(session.as_str()).unwrap(), session);
-        assert_eq!(ChildCommandId::parse(command.as_str()).unwrap(), command);
-        assert_eq!(ChildDecisionId::parse(decision.as_str()).unwrap(), decision);
     }
 
     #[test]
@@ -651,12 +402,6 @@ mod tests {
         assert!(TaskSessionStatus::Abandoned.is_terminal());
         assert!(!TaskSessionStatus::Submitted.is_terminal());
         assert!(!TaskSessionStatus::Failed.is_terminal());
-    }
-
-    #[test]
-    fn a_newer_directive_blocks_the_flow_boundary_until_incorporated() {
-        assert_eq!(super::unincorporated_directive_version(2, 1), Some(2));
-        assert_eq!(super::unincorporated_directive_version(2, 2), None);
     }
 
     #[test]

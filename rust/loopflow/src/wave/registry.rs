@@ -400,7 +400,7 @@ impl StoreObserver {
     }
 
     async fn poll_child_observations(&self) {
-        let supervisor = crate::project_session::SessionSupervisor::Wave {
+        let supervisor = crate::child_session::SessionSupervisor::Wave {
             wave_id: self.wave_id.clone(),
         };
         let observations = match self.store.pending_observations(&supervisor).await {
@@ -413,7 +413,7 @@ impl StoreObserver {
         for observation in observations {
             let should_ack = match (observation.source, observation.payload) {
                 (
-                    crate::project_session::ChildSessionRef::Task { session_id },
+                    crate::child_session::ChildRef::Task(session_id),
                     crate::project_session::ChildEventPayload::Task { event },
                 ) => match self.store.get_task_session(&session_id).await {
                     Ok(Some(session)) => {
@@ -432,7 +432,7 @@ impl StoreObserver {
                     }
                 },
                 (
-                    crate::project_session::ChildSessionRef::Project { session_id },
+                    crate::child_session::ChildRef::Project(session_id),
                     crate::project_session::ChildEventPayload::Project { event },
                 ) => match self.store.get_project_session(&session_id).await {
                     Ok(Some(session)) => {

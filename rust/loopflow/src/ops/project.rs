@@ -2,6 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::child_session::{
+    ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
+    ChildDecisionId, ChildDirective, ChildProcess, ChildRef,
+};
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
 use crate::engine::process::{
@@ -15,10 +19,7 @@ use crate::ops::{ChildReceiptUntil, OpsError, OpsResult};
 use crate::project_session::{
     ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
-use crate::task::{
-    ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
-    ChildDecisionId, ChildDirective, ChildRef, LinearProjectId, LinearProjectRef,
-};
+use crate::task::{LinearProjectId, LinearProjectRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ProjectSessionSnapshot {
@@ -33,13 +34,13 @@ pub struct ProjectSessionSnapshot {
     pub status_reason: String,
     pub status_at: time::OffsetDateTime,
     pub iteration: u32,
-    pub task_event_cursor: i64,
+    pub observation_cursor: i64,
     pub pending_observations: u32,
     pub agent: String,
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub process_alive: bool,
-    pub process: Option<crate::project_session::ProjectProcess>,
+    pub process: Option<ChildProcess>,
     pub latest_event: Option<crate::project_session::ProjectEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
@@ -216,7 +217,7 @@ pub fn project_run(
             status_reason: "Linear Project reserved for pursuit".to_string(),
             status_at: now,
             iteration: 0,
-            task_event_cursor: 0,
+            observation_cursor: 0,
             state_fingerprint: None,
             agent,
             provider,
@@ -502,7 +503,7 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
             .into_iter()
             .last();
         let pending_observations = store
-            .pending_observations(&crate::project_session::SessionSupervisor::Project {
+            .pending_observations(&crate::child_session::SessionSupervisor::Project {
                 session_id: session.id.clone(),
             })
             .await
@@ -520,7 +521,7 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
             status_reason: session.status_reason,
             status_at: session.status_at,
             iteration: session.iteration,
-            task_event_cursor: session.task_event_cursor,
+            observation_cursor: session.observation_cursor,
             pending_observations,
             agent: session.agent,
             provider: session.provider,

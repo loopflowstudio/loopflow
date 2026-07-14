@@ -36,7 +36,6 @@ struct WavesView: View {
     @Environment(\.palette) private var palette
 
     @State private var connectionStore = ConnectionStore()
-    @State private var authProviderStore = AuthProviderStore()
     @State private var repoStates: [String: PortfolioRepoState] = [:]
 
     /// Repos shown in the rail: a live `~/src` scan of main (non-worktree) repos.
@@ -163,7 +162,6 @@ struct WavesView: View {
             ensureRepoStates()
             await syncRepoStates()
             _ = await daemonTask.value
-            await prepareAuth()
             await pollRegistry()
         }
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
@@ -430,7 +428,7 @@ struct WavesView: View {
     private func createWave(repoPath: String, name: String) async throws {
         ensureRepoStates()
         guard let state = repoStates[repoPath] else {
-            throw WaveServiceError.commandFailed("Unknown repo: \(repoPath)")
+            throw PortfolioRepoError.unknownRepo(repoPath)
         }
         try await state.createWave(name: name)
     }
@@ -680,21 +678,6 @@ struct WavesView: View {
         Task.detached {
             try? saveLoopflowState(LoopflowState(selectedRepoPath: selectedRepoPath))
         }
-    }
-
-    /// Provider auth is a poll, not a stream (see `scratch/eventing.md` §5):
-    /// bind the store to a wave service and read the provider list. There is no
-    /// machine-wide auth push in the base model.
-    private func prepareAuth() async {
-        if AppTestMode.current() != nil { return }
-        if connectionStore.mode == .bundled, SharedDaemon.currentConnection == nil {
-            return
-        }
-        let connection = connectionStore.activeConnection
-        let token = connectionStore.token(for: connection)
-        let waveService = WaveService(connection: connection, tokenProvider: { token })
-        authProviderStore.bindService(waveService)
-        await authProviderStore.refresh()
     }
 
     /// Discovery has no stream: re-query the registry on a slow cadence so a

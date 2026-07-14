@@ -25,28 +25,6 @@ struct ContractTests {
         return json
     }
 
-    @Test("wave.json parses through parseWaveFromJSON")
-    func waveFixtureParses() throws {
-        let json = try fixtureJSON("wave.json")
-        let wave = WaveService.parseWaveFromJSON(json)
-
-        #expect(wave.id == "wave_abc123")
-        #expect(wave.name == "engbot")
-        #expect(wave.goal == "ship-roadmap")
-        #expect(wave.status == .running)
-        #expect(wave.direction == ["ux", "clarity"])
-        #expect(wave.area == ["src/"])
-        #expect(wave.parentWaveId == "wave_parent999")
-
-        #expect(wave.repo == "/home/user/project")
-        #expect(wave.iteration == 3)
-
-        // Triggers and crons left the wire in the collapse's organ cut:
-        // absent keys parse as empty.
-        #expect(wave.triggers.isEmpty)
-        #expect(wave.crons.isEmpty)
-    }
-
     @Test("chat_turn.json decodes through the wave chat models")
     func chatTurnFixtureParses() throws {
         let data = try fixtureData("dto/chat_turn.json")

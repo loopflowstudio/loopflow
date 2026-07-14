@@ -11,8 +11,9 @@ import Testing
 struct DTOFixtureTests {
     @Test("session fixture parses palette shape")
     func sessionFixtureParsesPaletteShape() throws {
-        let json = try loadFixture("session.json")
-        let session = try #require(WaveService.parseSessionFromJSON(json))
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let session = try decoder.decode(Session.self, from: loadFixtureData("session.json"))
 
         #expect(session.skill == "ship")
         #expect(session.agent == "codex")

@@ -586,3 +586,10 @@ Linear owns Projects, KRs, and Tasks; the app already reads that hierarchy from
 `lf status`. The Wave row's subtitle now comes from the authored Wave objective
 that `PortfolioRepoState` actually loads, rather than a permanently empty
 legacy README/roadmap cache.
+
+The next seam is the retired `WaveService` façade. It has no successful live
+operation: registry reads moved to `lf --json`, Wave Chat owns its own stream,
+remote mutations throw, catalog/worktree reads return empty, and its last auth
+store has no rendered consumer. Delete the façade and the auth/catalog/worktree
+types that only made those dead endpoints appear supported. Keep wire fixtures
+decoded by their actual DTOs rather than routing them through a service parser.

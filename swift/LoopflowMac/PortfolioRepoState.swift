@@ -3,6 +3,23 @@
 import Loopflow
 import Foundation
 
+enum PortfolioRepoError: LocalizedError {
+    case emptyWaveName
+    case duplicateWave(String)
+    case unknownRepo(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyWaveName:
+            "Wave name is required"
+        case .duplicateWave(let name):
+            "Wave '\(name)' already exists"
+        case .unknownRepo(let path):
+            "Unknown repo: \(path)"
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class PortfolioRepoState {
@@ -43,7 +60,7 @@ final class PortfolioRepoState {
     func createWave(name: String) async throws {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            throw WaveServiceError.commandFailed("Wave name is required")
+            throw PortfolioRepoError.emptyWaveName
         }
 
         let repoURL = repo.url
@@ -53,7 +70,7 @@ final class PortfolioRepoState {
                 .appendingPathComponent(trimmed, isDirectory: true)
             let goalURL = waveDir.appendingPathComponent("GOAL.md", isDirectory: false)
             guard !FileManager.default.fileExists(atPath: goalURL.path) else {
-                throw WaveServiceError.commandFailed("Wave '\(trimmed)' already exists")
+                throw PortfolioRepoError.duplicateWave(trimmed)
             }
             try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
             let goal = "Drive the '\(trimmed)' wave's goal forward.\n"

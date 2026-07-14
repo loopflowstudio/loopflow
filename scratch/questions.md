@@ -17,11 +17,54 @@ Task Sessions will keep relaunching the old `lf` until they are recreated.**
 Verify that against the rollout before resuming; it may want a note in the
 release, not a code change.
 
-Also note: the schema change is an edit to the single baseline
-(`001_initial.sql`), so every existing `loopflow.db` becomes incompatible and
-hits the recreate path. That is by design and matches the store's own convention,
-but it is a **destructive interaction with the 0.11 database rollout** and is the
-first thing to reconcile on resume — not something to discover afterwards.
+### The schema decision is now WRONG and must be redone on resume
+
+Checked against `origin/main` during the pause, and this is the single most
+important thing on this page.
+
+`main` has already landed the migration rollout. The store no longer has one
+editable baseline: it has **release-scoped migrations**
+(`rust/loopflow/src/store/MIGRATIONS.md`, `migrations.rs`), ids of the form
+`{major}.{minor}.{ordinal:03}`, and the baseline has been *renamed* to
+`0.10.001_initial.sql`. The convention states one rule:
+
+> **A shipped migration is never edited, renamed, or deleted.** Repair a shipped
+> schema with a new forward migration.
+
+`check_migrations.py` enforces it in CI *and* in `lf release check` / `lf release
+run`, by diffing every migration against the last release tag.
+
+This branch does the exact thing that rule forbids. Its base (`4fbc980f`) predates
+the rollout, so it still has the old `001_initial.sql`, and W2-130 **edited it in
+place** to add `lf_bin`/`db_path`/`lf_home`/`abandon_*`. The design's decision
+"Edit the baseline, don't add a migration" was correct for the tree it was written
+against and is now false. On resume it becomes:
+
+- Rebase onto `origin/main` (needed anyway — see the contamination note below).
+- Move the five columns into a **new forward migration** in the 0.11 namespace,
+  authored with `uv run python scripts/new_migration.py session_execution_context`
+  and registered in `MIGRATIONS` in id order.
+- Leave `0.10.001_initial.sql` untouched. Delete the in-place edit entirely.
+- Drop the "edit the baseline" decision from the design doc; it is superseded.
+
+The recreate-the-database consequence I feared at the pause **evaporates** under
+the new scheme — a forward migration is exactly how existing `loopflow.db` files
+are supposed to gain columns. The rollout does not conflict with W2-130; it
+*rescues* it.
+
+### This branch is probably what is breaking the live registry right now
+
+The wave thread reports `lf` opening an "incompatible `~/.lf/loopflow.db`" and
+then claiming no owning Wave registry. That is very likely **this branch's doing**:
+`~/.local/bin/lf` is a symlink to `/Users/jack/src/loopflow/local-bin/lf`, a
+mutable binary in the repo. Any build of it carrying this branch's edited baseline
+will fail `validate_baseline` against the real ledger and hard-fail every command
+that opens the store — which is precisely the class of failure W2-130 exists to
+kill, reproduced by W2-130.
+
+Do not "repair" the store. Redoing the schema change as a forward migration
+(above) removes the cause. Until then, `lf` built from this worktree must not be
+pointed at `~/.lf`.
 
 ### Landed at the pause commit
 
@@ -45,8 +88,9 @@ first thing to reconcile on resume — not something to discover afterwards.
 
 ### Next on resume, in order
 
-1. Reconcile the baseline-edit / recreate path with the 0.11 database rollout
-   (above). This gates everything else.
+1. Rebase onto `origin/main` and re-author the schema change as a **forward
+   migration in the 0.11 namespace** (see above). This gates everything else, and
+   it also clears the poisoned base and probably the live-registry breakage.
 2. Write `abandon_intent` at Abandon-queue time in the same transaction as the
    command — the column and every gate reading it exist, but the *writer* does
    not, so the intent gate is currently dead code. **This is the one piece that

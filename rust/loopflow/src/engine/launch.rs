@@ -4,7 +4,6 @@ use crate::engine::agent::AgentConfig;
 use crate::engine::config::{parse_agent, Config};
 use crate::engine::error::CoreError;
 use crate::engine::flow::Skill;
-use crate::engine::fork::merge_directions;
 use crate::engine::prompt::{
     drop_native_instruction_docs, format_claude_system_prompt, format_claude_task_prompt,
     format_prompt, gather_context, Document, DocumentSource, GatherContextOpts, PromptComponents,
@@ -51,6 +50,16 @@ pub struct PreparedLaunchPrompt {
     pub components: PromptComponents,
     pub deduplicated_docs: Vec<Document>,
     pub prompt: String,
+}
+
+fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
+    let mut combined = base.to_vec();
+    for direction in extra {
+        if !combined.contains(direction) {
+            combined.push(direction.clone());
+        }
+    }
+    combined
 }
 
 /// Build context + launch config from canonical launch-prep input.

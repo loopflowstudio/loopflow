@@ -232,68 +232,6 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
 }
 
 #[test]
-fn golden_flows() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    write_flow(
-        repo,
-        "forked",
-        r#"
-- and:
-    branches:
-      - step: { name: implement }
-      - step: { name: polish }
-- and:
-    branches:
-      - step: { name: quick }
-      - step: { name: deep }
-- flow: nested
-"#,
-    );
-
-    let flow = load_flow("forked", repo).unwrap();
-    assert_eq!(flow.items.len(), 3);
-    match &flow.items[0] {
-        Step::And { branches, .. } => {
-            assert_eq!(branches.len(), 2);
-        }
-        _ => panic!("expected and"),
-    }
-    match &flow.items[1] {
-        Step::And { branches, .. } => {
-            assert_eq!(branches.len(), 2);
-        }
-        _ => panic!("expected and"),
-    }
-    match &flow.items[2] {
-        Step::FlowRef(name) => {
-            assert_eq!(name, "nested");
-        }
-        _ => panic!("expected flow ref"),
-    }
-}
-
-#[test]
-fn and_select_is_rejected() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    write_flow(
-        repo,
-        "forked",
-        r#"
-- and:
-    branches:
-      - step: { name: implement }
-    select: all
-"#,
-    );
-
-    let err = load_flow("forked", repo).expect_err("and select should fail");
-    let message = err.to_string();
-    assert!(message.contains("and select modes are not supported"));
-}
-
-#[test]
 fn flow_ref_parses_into_items() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();

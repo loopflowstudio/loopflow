@@ -673,3 +673,22 @@ Teach the one live path instead:
 Documentation should now fail the same architecture test as code: if an
 example can start untracked file-writing work, create a fourth product Session
 kind, or imply a second state owner, delete or rewrite it.
+
+## Current reduction: flows do not create parallel worktrees
+
+The remaining `and:` flow step was an execution model hiding inside the prompt
+language. It forked the current branch into temporary sibling worktrees, ran
+untracked agents in parallel, wrote a transient manifest, invoked a synthesis
+skill, and deleted the worktrees. None of those workers had a Linear Task,
+Task Session, durable controls, review lifetime, or delivery owner.
+
+Remove that step from the language. The one builtin consumer,
+`gstack/review`, already has a complete review skill that owns its specialist
+and cross-model passes, so it needs no outer worktree fork. Parallel shipping
+work is several Tasks; provider workers inside one Task may cooperate in that
+Task's worktree, but they do not mint more branches or worktrees.
+
+Keep the historical `and` playhead enum value only so persisted Wave journals
+remain readable. New flows cannot parse or emit it. The resulting invariant is
+mechanical: outside the explicit diagnostic `lf wt` surface, acquiring a
+file-writing worktree means creating a Task Session first.

@@ -7,8 +7,8 @@ use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
 
 use crate::engine::flow::{
-    build_xor_routing_suffix, load_skill, load_xor_path_items, ConcreteAnd, ConcreteLoop,
-    ConcreteOp, ConcreteSkill, ConcreteStep, ConcreteXor, Skill,
+    build_xor_routing_suffix, load_skill, load_xor_path_items, ConcreteLoop, ConcreteOp,
+    ConcreteSkill, ConcreteStep, ConcreteXor, Skill,
 };
 
 pub const TEMP_XOR_ROUTE_STEP_NAME: &str = "xor-route";
@@ -118,8 +118,6 @@ pub trait SkillExecutor: Send + Sync {
 
     async fn run_op(&self, ops: &ConcreteOp, ctx: ExecutionContext) -> Result<()>;
 
-    async fn run_and(&self, fork: &ConcreteAnd, ctx: ExecutionContext) -> Result<()>;
-
     async fn read_xor_verdict(&self, branch: &ConcreteXor) -> Result<String>;
 }
 
@@ -209,10 +207,6 @@ impl<E: SkillExecutor> FlowEngine<E> {
                 ConcreteStep::Skill(skill) => self.run_concrete_skill(skill, ctx).await,
                 ConcreteStep::Op(ops) => {
                     self.executor.run_op(ops, ctx).await?;
-                    Ok(FlowOutcome::Completed)
-                }
-                ConcreteStep::And(fork) => {
-                    self.executor.run_and(fork, ctx).await?;
                     Ok(FlowOutcome::Completed)
                 }
                 ConcreteStep::Xor(branch) => self.run_xor(branch, cursor, ctx).await,
@@ -445,7 +439,7 @@ pub fn current_skill(
             }
             _ => Ok(None),
         },
-        ConcreteStep::Op(_) | ConcreteStep::And(_) | ConcreteStep::Or(_) => Ok(None),
+        ConcreteStep::Op(_) | ConcreteStep::Or(_) => Ok(None),
     }
 }
 
@@ -461,7 +455,6 @@ pub fn current_flow_parents(
     Ok(match items.get(cursor.index) {
         Some(ConcreteStep::Skill(skill)) => skill.flow_parents.clone(),
         Some(ConcreteStep::Op(ops)) => ops.flow_parents.clone(),
-        Some(ConcreteStep::And(and)) => and.flow_parents.clone(),
         Some(ConcreteStep::Xor(branch)) => branch.flow_parents.clone(),
         Some(ConcreteStep::Or(branch)) => branch.flow_parents.clone(),
         Some(ConcreteStep::Loop(loop_body)) => loop_body.flow_parents.clone(),
@@ -479,7 +472,7 @@ pub fn advance_cursor_after_wait(
     };
 
     match item {
-        ConcreteStep::Skill(_) | ConcreteStep::Op(_) | ConcreteStep::And(_) => {
+        ConcreteStep::Skill(_) | ConcreteStep::Op(_) => {
             cursor.child = None;
             cursor.index += 1;
             Ok(())
@@ -623,14 +616,6 @@ mod tests {
                 .lock()
                 .expect("call mutex")
                 .push(format!("op:{}", ops.item.display_name()));
-            Ok(())
-        }
-
-        async fn run_and(&self, _fork: &ConcreteAnd, _ctx: ExecutionContext) -> Result<()> {
-            self.calls
-                .lock()
-                .expect("call mutex")
-                .push("and".to_string());
             Ok(())
         }
 

@@ -8,7 +8,6 @@ pub mod event;
 pub mod execution;
 pub mod fast_path;
 pub mod flow;
-pub mod fork;
 pub mod git;
 pub mod identity;
 pub mod launch;
@@ -44,9 +43,9 @@ pub use execution::{
 };
 pub use flow::{
     available_flow_names, expand_flow, load_direction, load_flow, load_goal, load_skill,
-    next_action, render_goal, ConcreteAnd, ConcreteAndBranch, ConcreteLoop, ConcreteOp, ConcreteOr,
-    ConcreteSkill, ConcreteStep, ConcreteXor, Direction, Flow, FlowAction, Goal, GoalRenderContext,
-    Op, OrDef, Skill, Step, XorDef, XorPath,
+    next_action, render_goal, ConcreteLoop, ConcreteOp, ConcreteOr, ConcreteSkill, ConcreteStep,
+    ConcreteXor, Direction, Flow, FlowAction, Goal, GoalRenderContext, Op, OrDef, Skill, Step,
+    XorDef, XorPath,
 };
 pub use launch::{
     prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, PreparedLaunchPrompt,

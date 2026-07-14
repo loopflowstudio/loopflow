@@ -46,11 +46,6 @@ impl Skill {
 pub enum Step {
     Skill(Skill),
     Op(Op),
-    And {
-        branches: Vec<Step>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        synthesize: Option<String>,
-    },
     FlowRef(String),
     Xor(XorDef),
     Or(OrDef),
@@ -119,7 +114,6 @@ pub enum FlowAction {
     RunSkill { skill: ConcreteSkill },
     RunOps { ops: ConcreteOp },
     WaitInteractive { skill: ConcreteSkill },
-    And { fork: ConcreteAnd },
     Xor { branch: ConcreteXor },
     Or { branch: ConcreteOr },
     Loop { body: ConcreteLoop },
@@ -152,30 +146,9 @@ pub struct ConcreteSkill {
 impl ConcreteSkill {
     pub fn display_path(&self) -> String {
         let mut parts = self.flow_parents.clone();
-        if let Some(last) = parts.last() {
-            let fork_label = format!("and/{}", self.skill.name);
-            if last == &fork_label {
-                return parts.join(" ");
-            }
-        }
         parts.push(self.skill.name.clone());
         parts.join(" ")
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConcreteAndBranch {
-    pub steps: Vec<ConcreteSkill>,
-    pub flow_parents: Vec<String>,
-    pub label: String,
-    pub directions: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConcreteAnd {
-    pub branches: Vec<ConcreteAndBranch>,
-    pub flow_parents: Vec<String>,
-    pub synthesize: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,7 +175,6 @@ pub struct ConcreteOp {
 pub enum ConcreteStep {
     Skill(ConcreteSkill),
     Op(ConcreteOp),
-    And(ConcreteAnd),
     Xor(ConcreteXor),
     Or(ConcreteOr),
     Loop(ConcreteLoop),
@@ -229,7 +201,6 @@ pub fn next_action(items: &[ConcreteStep], step_index: usize) -> FlowAction {
             }
         }
         ConcreteStep::Op(ops) => FlowAction::RunOps { ops },
-        ConcreteStep::And(fork) => FlowAction::And { fork },
         ConcreteStep::Xor(branch) => FlowAction::Xor { branch },
         ConcreteStep::Or(branch) => FlowAction::Or { branch },
         ConcreteStep::Loop(body) => FlowAction::Loop { body },
@@ -791,9 +762,6 @@ fn parse_flow_mapping_with_options(
     if let Some(flow_value) = map.get(key("flow")) {
         return parse_flow_ref_value(flow_value);
     }
-    if let Some(and_value) = map.get(key("and")) {
-        return parse_and_value(and_value);
-    }
     if let Some(op_value) = map.get(key("op")) {
         return parse_op_value(op_value, "op");
     }
@@ -812,7 +780,7 @@ fn parse_flow_mapping_with_options(
         return parse_loop_value(loop_value);
     }
     Err(LoadError::InvalidFlow(
-        "flow item mapping must include skill, op, flow, and, xor, or, or loop".to_string(),
+        "flow item mapping must include step, op, flow, xor, or, or loop".to_string(),
     ))
 }
 
@@ -870,120 +838,6 @@ fn parse_skill_value(value: &Value) -> Result<Skill, LoadError> {
         }
         _ => Err(LoadError::InvalidFlow(
             "step value must be string or mapping".to_string(),
-        )),
-    }
-}
-
-fn parse_and_value(value: &Value) -> Result<Step, LoadError> {
-    let map = value
-        .as_mapping()
-        .ok_or_else(|| LoadError::InvalidFlow("and must be mapping".to_string()))?;
-
-    // Three formats:
-    // 1. Explicit branches: and: { branches: [...] }
-    // 2. Skill shorthand:    and: { skill: "reduce", drafts: [...] }
-    // 3. Flow shorthand:    and: { flow: "build", drafts: [...] }
-    let branches = if let Some(branches_value) = map.get(key("branches")) {
-        match branches_value {
-            Value::Sequence(seq) => seq
-                .iter()
-                .map(parse_and_branch_item)
-                .collect::<Result<_, _>>()?,
-            _ => {
-                return Err(LoadError::InvalidFlow(
-                    "and branches must be list".to_string(),
-                ))
-            }
-        }
-    } else if let Some(name_value) = map.get(key("step")).or_else(|| map.get(key("flow"))) {
-        let name = name_value
-            .as_str()
-            .ok_or_else(|| LoadError::InvalidFlow("and skill/flow must be string".to_string()))?;
-        parse_and_drafts(map, name)?
-    } else {
-        return Err(LoadError::InvalidFlow(
-            "and must have branches, step+drafts, or flow+drafts".to_string(),
-        ));
-    };
-
-    if map.get(key("select")).is_some() {
-        return Err(LoadError::InvalidFlow(
-            "and select modes are not supported; and always runs all branches".to_string(),
-        ));
-    }
-    if map.get(key("prompt")).is_some() {
-        return Err(LoadError::InvalidFlow(
-            "and prompts are not supported; and always runs all branches".to_string(),
-        ));
-    }
-    let synthesize = map
-        .get(key("synthesize"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-
-    Ok(Step::And {
-        branches,
-        synthesize,
-    })
-}
-
-/// Parse and-drafts for the skill/flow shorthand format.
-fn parse_and_drafts(map: &serde_yaml_ng::Mapping, name: &str) -> Result<Vec<Step>, LoadError> {
-    let drafts = map
-        .get(key("drafts"))
-        .ok_or_else(|| LoadError::InvalidFlow("and with skill/flow requires drafts".to_string()))?;
-    let drafts_seq = drafts
-        .as_sequence()
-        .ok_or_else(|| LoadError::InvalidFlow("and drafts must be list".to_string()))?;
-
-    let mut branches = Vec::new();
-    for draft in drafts_seq {
-        let draft_map = draft
-            .as_mapping()
-            .ok_or_else(|| LoadError::InvalidFlow("and draft must be mapping".to_string()))?;
-        let directions = parse_directions_field(draft_map);
-        branches.push(Step::Skill(Skill {
-            directions,
-            ..Skill::named(name)
-        }));
-    }
-    Ok(branches)
-}
-
-/// Parse an and-branch item. Unlike `parse_flow_item`, this handles
-/// `direction:` as a sibling key for both `skill:` and `flow:` branches.
-fn parse_and_branch_item(value: &Value) -> Result<Step, LoadError> {
-    match value {
-        Value::String(name) => Ok(Step::Skill(Skill::named(name))),
-        Value::Mapping(map) => {
-            let directions = parse_directions_field(map);
-            if let Some(skill_value) = map.get(key("step")) {
-                let mut skill = parse_skill_value(skill_value)?;
-                if !directions.is_empty() && skill.directions.is_empty() {
-                    skill.directions = directions;
-                }
-                return Ok(Step::Skill(skill));
-            }
-            if let Some(flow_value) = map.get(key("flow")) {
-                let name = flow_value.as_str().ok_or_else(|| {
-                    LoadError::InvalidFlow("and branch flow must be string".to_string())
-                })?;
-                return Ok(Step::Skill(Skill {
-                    directions,
-                    ..Skill::named(name)
-                }));
-            }
-            if map.get(key("and")).is_some() {
-                return Err(LoadError::InvalidFlow(
-                    "nested and constructs are not supported".to_string(),
-                ));
-            }
-            Err(LoadError::InvalidFlow(
-                "and branch must have step or flow".to_string(),
-            ))
-        }
-        _ => Err(LoadError::InvalidFlow(
-            "and branch must be string or mapping".to_string(),
         )),
     }
 }
@@ -1333,13 +1187,6 @@ fn expand_with_chain(
                     flow_parents: chain.clone(),
                 }));
             }
-            Step::And {
-                branches,
-                synthesize,
-            } => {
-                let fork = expand_and(branches, synthesize.clone(), repo, &chain, depth)?;
-                items.push(ConcreteStep::And(fork));
-            }
             Step::Xor(branch_def) => {
                 items.push(ConcreteStep::Xor(expand_branch_def(
                     branch_def, repo, &chain,
@@ -1375,71 +1222,6 @@ fn expand_items_with_chain(
     expand_with_chain(&flow, repo, chain.to_vec(), depth)
 }
 
-fn expand_and(
-    branches: &[Step],
-    synthesize: Option<String>,
-    repo: &Path,
-    chain: &[String],
-    depth: usize,
-) -> Result<ConcreteAnd, LoadError> {
-    let branches = branches
-        .iter()
-        .map(|b| expand_and_branch(b, repo, chain, depth))
-        .collect::<Result<_, _>>()?;
-    Ok(ConcreteAnd {
-        branches,
-        flow_parents: chain.to_vec(),
-        synthesize,
-    })
-}
-
-fn expand_and_branch(
-    branch: &Step,
-    repo: &Path,
-    chain: &[String],
-    depth: usize,
-) -> Result<ConcreteAndBranch, LoadError> {
-    match branch {
-        Step::Skill(skill) => {
-            // A skill name in a fork branch might actually reference a flow.
-            // Try loading it as a flow first (same resolution as expand_with_chain).
-            if let Some(branch) = try_expand_skill_as_flow(skill, repo, chain, depth)? {
-                return Ok(branch);
-            }
-            let resolved = resolve_skill_reference(skill, repo);
-            let flow_parents = and_branch_parents(chain, &skill.name);
-            Ok(ConcreteAndBranch {
-                steps: vec![ConcreteSkill {
-                    skill: resolved,
-                    flow_parents: flow_parents.clone(),
-                }],
-                flow_parents,
-                label: skill.name.clone(),
-                directions: skill.directions.clone(),
-            })
-        }
-        Step::FlowRef(name) => {
-            let nested = load_flow(name, repo)?;
-            expand_flow_ref_branch(name, &[], &nested, repo, chain, depth)
-        }
-        Step::Op(_) => Err(LoadError::InvalidFlow(
-            "and branches cannot contain ops items".to_string(),
-        )),
-        Step::And { .. } => Err(LoadError::InvalidFlow(
-            "and branches cannot contain nested and constructs".to_string(),
-        )),
-        Step::Xor(_) => Err(LoadError::InvalidFlow(
-            "and branches cannot contain xor constructs".to_string(),
-        )),
-        Step::Or(_) => Err(LoadError::InvalidFlow(
-            "and branches cannot contain or constructs".to_string(),
-        )),
-        Step::Loop(_) => Err(LoadError::InvalidFlow(
-            "and branches cannot contain loop constructs".to_string(),
-        )),
-    }
-}
-
 /// Check whether a loaded flow is a genuine multi-skill flow vs a single skill
 /// auto-wrapped by `load_flow`. Returns `true` if the flow should be expanded.
 fn is_multi_skill_flow(flow: &Flow, skill_name: &str) -> bool {
@@ -1466,92 +1248,6 @@ fn chain_with(chain: &[String], name: &str) -> Vec<String> {
     let mut nested_chain = chain.to_vec();
     nested_chain.push(name.to_string());
     nested_chain
-}
-
-fn and_branch_parents(chain: &[String], name: &str) -> Vec<String> {
-    chain_with(chain, &format!("and/{name}"))
-}
-
-/// Try to expand a skill name as a flow reference. Returns `Some(branch)` if
-/// the name resolves to a multi-skill flow, `None` if it's just a skill.
-fn try_expand_skill_as_flow(
-    skill: &Skill,
-    repo: &Path,
-    chain: &[String],
-    depth: usize,
-) -> Result<Option<ConcreteAndBranch>, LoadError> {
-    let Some(nested) = try_load_multi_skill_flow(skill, repo, chain) else {
-        return Ok(None);
-    };
-    let branch =
-        expand_flow_ref_branch(&skill.name, &skill.directions, &nested, repo, chain, depth)?;
-    Ok(Some(branch))
-}
-
-/// Expand a flow reference into a multi-skill fork branch.
-fn expand_flow_ref_branch(
-    name: &str,
-    directions: &[String],
-    nested: &Flow,
-    repo: &Path,
-    chain: &[String],
-    depth: usize,
-) -> Result<ConcreteAndBranch, LoadError> {
-    let nested_chain = chain_with(chain, name);
-    let nested_items = expand_with_chain(nested, repo, nested_chain, depth + 1)?;
-    let skills = extract_and_branch_skills(name, &nested_items)?;
-    let flow_parents = and_branch_parents(chain, name);
-    Ok(ConcreteAndBranch {
-        steps: skills,
-        flow_parents,
-        label: name.to_string(),
-        directions: directions.to_vec(),
-    })
-}
-
-/// Extract concrete skills from expanded flow items for an and-branch.
-/// Rejects nested and constructs — only sequential skills are allowed within branches.
-fn extract_and_branch_skills(
-    flow_name: &str,
-    items: &[ConcreteStep],
-) -> Result<Vec<ConcreteSkill>, LoadError> {
-    let mut skills = Vec::new();
-    for item in items {
-        match item {
-            ConcreteStep::Skill(s) => skills.push(s.clone()),
-            ConcreteStep::Op(_) => {
-                return Err(LoadError::InvalidFlow(format!(
-                    "and-branch flow ref '{flow_name}' contains an ops item"
-                )))
-            }
-            ConcreteStep::And(_) => {
-                return Err(LoadError::InvalidFlow(format!(
-                    "and-branch flow ref '{flow_name}' contains a nested and construct"
-                )))
-            }
-            ConcreteStep::Xor(_) => {
-                return Err(LoadError::InvalidFlow(format!(
-                    "and-branch flow ref '{flow_name}' contains a xor construct"
-                )))
-            }
-            ConcreteStep::Or(_) => {
-                return Err(LoadError::InvalidFlow(format!(
-                    "and-branch flow ref '{flow_name}' contains an or construct"
-                )))
-            }
-            ConcreteStep::Loop(_) => {
-                return Err(LoadError::InvalidFlow(format!(
-                    "and-branch flow ref '{flow_name}' contains a loop construct"
-                )))
-            }
-        }
-    }
-    if skills.is_empty() {
-        return Err(LoadError::InvalidFlow(format!(
-            "and-branch flow ref '{flow_name}' expands to zero skills"
-        )));
-    }
-    Ok(skills)
 }
 
 /// Home directory for global lookups. Can be overridden for testing.
@@ -2001,20 +1697,6 @@ Be careful.
                             result.err()
                         );
                     }
-                    ConcreteStep::And(fork) => {
-                        for branch in &fork.branches {
-                            for skill in &branch.steps {
-                                let result = load_skill(&skill.skill.name, tmp.path());
-                                assert!(
-                                    result.is_ok(),
-                                    "builtin flow '{}' and references missing skill '{}': {:?}",
-                                    name,
-                                    skill.skill.name,
-                                    result.err()
-                                );
-                            }
-                        }
-                    }
                     ConcreteStep::Op(ops) => {
                         assert!(
                             !ops.item.command.is_empty(),
@@ -2060,40 +1742,6 @@ Be careful.
     }
 
     #[test]
-    fn parse_and_skill_drafts_shorthand() {
-        let yaml = r#"
-- review
-- and:
-    step: reduce
-    drafts:
-      - direction: infra
-      - direction: ux
-      - direction: ceo
-- publish
-"#;
-        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
-        let items = parse_flow_items(&value).unwrap();
-        assert_eq!(items.len(), 3);
-
-        // Second item should be a Fork with 3 branches
-        match &items[1] {
-            Step::And { branches, .. } => {
-                assert_eq!(branches.len(), 3);
-                for branch in branches {
-                    match branch {
-                        Step::Skill(skill) => {
-                            assert_eq!(skill.name, "reduce");
-                            assert_eq!(skill.directions.len(), 1);
-                        }
-                        _ => panic!("expected Skill branch"),
-                    }
-                }
-            }
-            _ => panic!("expected And item"),
-        }
-    }
-
-    #[test]
     fn parse_skill_mapping_accepts_plural_directions_key() {
         let yaml = r#"
 - step:
@@ -2111,6 +1759,21 @@ Be careful.
             }
             other => panic!("expected Skill, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn retired_and_step_is_rejected() {
+        let yaml = r#"
+- and:
+    branches:
+      - step: implement
+      - step: review
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let error = parse_flow_items(&value).expect_err("and steps are retired");
+        assert!(error
+            .to_string()
+            .contains("flow item mapping must include step, op, flow, xor, or, or loop"));
     }
 
     #[test]
@@ -2258,261 +1921,6 @@ Be careful.
         let items = expand_flow(&flow, repo.path()).unwrap();
         let action = next_action(&items, 0);
         assert!(matches!(action, FlowAction::Complete));
-    }
-
-    #[test]
-    fn parse_and_flow_drafts_shorthand() {
-        let yaml = r#"
-- and:
-    flow: build
-    drafts:
-      - direction: infra
-      - direction: ux
-      - direction: ceo
-"#;
-        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
-        let items = parse_flow_items(&value).unwrap();
-        assert_eq!(items.len(), 1);
-
-        match &items[0] {
-            Step::And { branches, .. } => {
-                assert_eq!(branches.len(), 3);
-                for (i, branch) in branches.iter().enumerate() {
-                    match branch {
-                        Step::Skill(skill) => {
-                            assert_eq!(skill.name, "build");
-                            assert_eq!(skill.directions.len(), 1);
-                        }
-                        _ => panic!("expected Skill branch at index {i}"),
-                    }
-                }
-            }
-            _ => panic!("expected And item"),
-        }
-    }
-
-    #[test]
-    fn parse_and_with_custom_synthesize() {
-        let yaml = r#"
-- and:
-    branches:
-      - step: gstack/pr-review
-      - step: gstack/cso
-      - step: gstack/codex
-    synthesize: gstack/review-synthesize
-"#;
-        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
-        let items = parse_flow_items(&value).unwrap();
-        assert_eq!(items.len(), 1);
-
-        match &items[0] {
-            Step::And {
-                branches,
-                synthesize,
-            } => {
-                assert_eq!(branches.len(), 3);
-                assert_eq!(synthesize.as_deref(), Some("gstack/review-synthesize"));
-            }
-            _ => panic!("expected And item"),
-        }
-    }
-
-    #[test]
-    fn parse_and_without_synthesize_defaults_to_none() {
-        let yaml = r#"
-- and:
-    branches:
-      - step: review
-      - step: cso
-"#;
-        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
-        let items = parse_flow_items(&value).unwrap();
-        match &items[0] {
-            Step::And { synthesize, .. } => {
-                assert!(synthesize.is_none());
-            }
-            _ => panic!("expected And item"),
-        }
-    }
-
-    #[test]
-    fn parse_and_explicit_branches_with_flow_and_skill() {
-        let yaml = r#"
-- and:
-    branches:
-      - flow: build
-        direction: infra
-      - step: review
-        direction: ux
-"#;
-        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
-        let items = parse_flow_items(&value).unwrap();
-        assert_eq!(items.len(), 1);
-
-        match &items[0] {
-            Step::And { branches, .. } => {
-                assert_eq!(branches.len(), 2);
-                // First branch: flow ref "build" with direction "infra"
-                match &branches[0] {
-                    Step::Skill(skill) => {
-                        assert_eq!(skill.name, "build");
-                        assert_eq!(skill.directions, vec!["infra"]);
-                    }
-                    _ => panic!("expected Skill branch"),
-                }
-                // Second branch: skill "review" with direction "ux"
-                match &branches[1] {
-                    Step::Skill(skill) => {
-                        assert_eq!(skill.name, "review");
-                        assert_eq!(skill.directions, vec!["ux"]);
-                    }
-                    _ => panic!("expected Skill branch"),
-                }
-            }
-            _ => panic!("expected And item"),
-        }
-    }
-
-    #[test]
-    fn expand_fork_multi_skill_flow_ref() {
-        let tmp = TempDir::new().unwrap();
-        let flows_dir = tmp.path().join(".lf/flows");
-        let skills_dir = tmp.path().join(".lf/skills");
-        fs::create_dir_all(&flows_dir).unwrap();
-        fs::create_dir_all(&skills_dir).unwrap();
-
-        // Create a multi-skill flow
-        fs::write(
-            flows_dir.join("multi.yaml"),
-            "- skill-a\n- skill-b\n- skill-c\n",
-        )
-        .unwrap();
-        fs::write(skills_dir.join("skill-a.md"), "Skill A").unwrap();
-        fs::write(skills_dir.join("skill-b.md"), "Skill B").unwrap();
-        fs::write(skills_dir.join("skill-c.md"), "Skill C").unwrap();
-
-        let flow = Flow {
-            name: "test".to_string(),
-            items: vec![Step::And {
-                branches: vec![
-                    Step::Skill(Skill {
-                        name: "multi".to_string(),
-                        directions: vec!["infra".to_string()],
-                        ..Skill::named("multi")
-                    }),
-                    Step::Skill(Skill {
-                        name: "multi".to_string(),
-                        directions: vec!["ux".to_string()],
-                        ..Skill::named("multi")
-                    }),
-                ],
-                synthesize: None,
-            }],
-        };
-        let items = expand_flow(&flow, tmp.path()).unwrap();
-        assert_eq!(items.len(), 1);
-
-        match &items[0] {
-            ConcreteStep::And(fork) => {
-                assert_eq!(fork.branches.len(), 2);
-                // Each branch should have 3 skills from the "multi" flow
-                for branch in &fork.branches {
-                    assert_eq!(branch.steps.len(), 3, "branch should have 3 skills");
-                    assert_eq!(branch.steps[0].skill.name, "skill-a");
-                    assert_eq!(branch.steps[1].skill.name, "skill-b");
-                    assert_eq!(branch.steps[2].skill.name, "skill-c");
-                    assert_eq!(branch.label, "multi");
-                }
-                assert_eq!(fork.branches[0].directions, vec!["infra"]);
-                assert_eq!(fork.branches[1].directions, vec!["ux"]);
-            }
-            _ => panic!("expected And item"),
-        }
-    }
-
-    #[test]
-    fn expand_fork_single_skill_unchanged() {
-        let tmp = TempDir::new().unwrap();
-        let skills_dir = tmp.path().join(".lf/skills");
-        fs::create_dir_all(&skills_dir).unwrap();
-        fs::write(skills_dir.join("reduce.md"), "Reduce things.").unwrap();
-
-        let flow = Flow {
-            name: "test".to_string(),
-            items: vec![Step::And {
-                branches: vec![
-                    Step::Skill(Skill {
-                        name: "reduce".to_string(),
-                        directions: vec!["infra".to_string()],
-                        ..Skill::named("reduce")
-                    }),
-                    Step::Skill(Skill {
-                        name: "reduce".to_string(),
-                        directions: vec!["ux".to_string()],
-                        ..Skill::named("reduce")
-                    }),
-                ],
-                synthesize: None,
-            }],
-        };
-        let items = expand_flow(&flow, tmp.path()).unwrap();
-        assert_eq!(items.len(), 1);
-
-        match &items[0] {
-            ConcreteStep::And(fork) => {
-                assert_eq!(fork.branches.len(), 2);
-                // Each branch should have exactly 1 skill
-                for branch in &fork.branches {
-                    assert_eq!(branch.steps.len(), 1, "single-skill branch");
-                    assert_eq!(branch.steps[0].skill.name, "reduce");
-                }
-            }
-            _ => panic!("expected And item"),
-        }
-    }
-
-    #[test]
-    fn expand_fork_rejects_nested_fork_in_flow_ref() {
-        let tmp = TempDir::new().unwrap();
-        let flows_dir = tmp.path().join(".lf/flows");
-        let skills_dir = tmp.path().join(".lf/skills");
-        fs::create_dir_all(&flows_dir).unwrap();
-        fs::create_dir_all(&skills_dir).unwrap();
-
-        // Create a flow that contains an and construct
-        fs::write(
-            flows_dir.join("has-and.yaml"),
-            r#"
-- skill-a
-- and:
-    step: skill-b
-    drafts:
-      - direction: x
-      - direction: y
-"#,
-        )
-        .unwrap();
-        fs::write(skills_dir.join("skill-a.md"), "Skill A").unwrap();
-        fs::write(skills_dir.join("skill-b.md"), "Skill B").unwrap();
-
-        let flow = Flow {
-            name: "test".to_string(),
-            items: vec![Step::And {
-                branches: vec![Step::Skill(Skill {
-                    name: "has-and".to_string(),
-                    directions: vec!["infra".to_string()],
-                    ..Skill::named("has-and")
-                })],
-                synthesize: None,
-            }],
-        };
-        let result = expand_flow(&flow, tmp.path());
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("nested and"),
-            "expected nested and error, got: {err}"
-        );
     }
 
     #[test]

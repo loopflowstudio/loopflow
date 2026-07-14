@@ -69,7 +69,7 @@ Important paths:
 - `rust/loopflow/src/engine/`
 - `rust/loopflow/src/ops/`
 
-The engine owns the common language: prompts, flows, forks, worktrees, built-in
+The engine owns the common language: prompts, flows, worktrees, built-in
 skills, skills, structured replies, and launch behavior. Ops wrap concrete
 side-effectful workflows around git, PRs, PM providers, and release artifacts.
 

@@ -50,20 +50,19 @@ Skills are atomic. Flows are how work actually gets done.
 design → implement → polish
 ```
 
-**Parallel flows** branch and join:
+**Branching flows** choose a path from explicit criteria:
 ```
-design ──┬──> impl-api ──┬──> integrate
-         └──> impl-ui ───┘
-```
-
-**Fork** explores multiple approaches and synthesizes:
-```
-Fork ──┬──> impl (infra) ──┐
-       ├──> impl (ux)    ──┼──> synthesize
-       └──> impl (ceo)   ──┘
+xor ──┬──> fix ──> gate
+      └──> ship
 ```
 
-The synthesizer doesn't just pick a winner—it documents why approaches differed.
+**Looping flows** repeat a bounded body until an exit condition holds:
+```
+loop(code → review, exit: gate)
+```
+
+Parallel implementation is several Linear Tasks. Each Task owns its worktree;
+a flow never creates temporary branches or worktrees.
 
 ---
 

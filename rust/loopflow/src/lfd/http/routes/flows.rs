@@ -128,13 +128,6 @@ fn extract_step_names(items: &[crate::engine::flow::ConcreteStep]) -> Vec<String
             crate::engine::flow::ConcreteStep::Op(ops) => {
                 names.push(ops.item.to_string());
             }
-            crate::engine::flow::ConcreteStep::And(and) => {
-                for branch in &and.branches {
-                    for skill in &branch.steps {
-                        names.push(skill.skill.name.clone());
-                    }
-                }
-            }
             crate::engine::flow::ConcreteStep::Xor(_) => {
                 names.push("[xor]".to_string());
             }

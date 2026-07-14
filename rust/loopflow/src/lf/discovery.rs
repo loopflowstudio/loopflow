@@ -802,10 +802,6 @@ fn extract_skill_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
             {
                 names.push(format!("op: {command}"));
             }
-            if let Some(and) = map.get(serde_yaml_ng::Value::String("and".to_string())) {
-                names.push("[and]".to_string());
-                names.extend(extract_and_preview(and));
-            }
             if let Some(xor) = map.get(serde_yaml_ng::Value::String("xor".to_string())) {
                 names.push("[xor]".to_string());
                 names.extend(extract_branch_preview(xor));
@@ -829,21 +825,6 @@ fn extract_skill_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
             }
         }
         _ => {}
-    }
-
-    names
-}
-
-fn extract_and_preview(value: &serde_yaml_ng::Value) -> Vec<String> {
-    let mut names = extract_branch_preview(value);
-    let serde_yaml_ng::Value::Mapping(map) = value else {
-        return names;
-    };
-
-    if let Some(serde_yaml_ng::Value::String(skill)) =
-        map.get(serde_yaml_ng::Value::String("synthesize".to_string()))
-    {
-        names.push(skill.clone());
     }
 
     names

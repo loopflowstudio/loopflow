@@ -55,6 +55,18 @@ jobs:
       - name: Run Rust tests
         run: cargo nextest run --all
 
+  # Needs the full history: the check compares every migration against the last
+  # release tag, which is how an edited shipped migration is caught before publish.
+  migration-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - name: Verify migration namespaces
+        run: uv run python scripts/check_migrations.py
+
   python-test:
     runs-on: ubuntu-latest
     steps:
@@ -150,6 +162,7 @@ jobs:
       - scratch-clear
       - rust-lint
       - rust-test
+      - migration-check
       - python-test
       - website-test
       - e2e-smoke
@@ -161,6 +174,7 @@ jobs:
           SCRATCH_CLEAR: ${{ needs.scratch-clear.result }}
           RUST_LINT: ${{ needs.rust-lint.result }}
           RUST_TEST: ${{ needs.rust-test.result }}
+          MIGRATION_CHECK: ${{ needs.migration-check.result }}
           PYTHON_TEST: ${{ needs.python-test.result }}
           WEBSITE_TEST: ${{ needs.website-test.result }}
           E2E_SMOKE: ${{ needs.e2e-smoke.result }}
@@ -189,6 +203,7 @@ jobs:
           check_result "scratch-clear" "$SCRATCH_CLEAR"
           check_result "rust-lint" "$RUST_LINT"
           check_result "rust-test" "$RUST_TEST"
+          check_result "migration-check" "$MIGRATION_CHECK"
           check_result "python-test" "$PYTHON_TEST"
           check_result "website-test" "$WEBSITE_TEST"
           check_result "e2e-smoke" "$E2E_SMOKE"

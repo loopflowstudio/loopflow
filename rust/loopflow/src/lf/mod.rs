@@ -547,7 +547,7 @@ pub enum ProjectCommand {
     Receipt {
         command_id: String,
         #[arg(long, value_enum)]
-        until: Option<crate::ops::task::ChildReceiptUntil>,
+        until: Option<crate::ops::ChildReceiptUntil>,
         #[arg(long, default_value = "30s")]
         timeout: String,
         #[arg(long)]
@@ -675,7 +675,7 @@ pub enum TaskCommand {
     Receipt {
         command_id: String,
         #[arg(long, value_enum)]
-        until: Option<crate::ops::task::ChildReceiptUntil>,
+        until: Option<crate::ops::ChildReceiptUntil>,
         #[arg(long, default_value = "30s")]
         timeout: String,
         #[arg(long)]
@@ -1197,7 +1197,7 @@ mod tests {
             receipt.command,
             Some(Commands::Task {
                 cmd: TaskCommand::Receipt {
-                    until: Some(crate::ops::task::ChildReceiptUntil::Incorporated),
+                    until: Some(crate::ops::ChildReceiptUntil::Incorporated),
                     timeout,
                     json: true,
                     ..
@@ -1365,7 +1365,7 @@ mod tests {
             Some(Commands::Project {
                 cmd: ProjectCommand::Receipt {
                     command_id,
-                    until: Some(crate::ops::task::ChildReceiptUntil::Applied),
+                    until: Some(crate::ops::ChildReceiptUntil::Applied),
                     timeout,
                     ..
                 },

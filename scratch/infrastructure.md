@@ -421,3 +421,28 @@ Make the storage model truthful:
 This is shared mechanism, not a fourth product concept. A human still says
 Project or Task; `ChildCommand` exists only where both nouns genuinely use the
 same durable protocol.
+
+## Current reduction: one control submission path
+
+The envelope is shared, but the public Project and Task operations still each
+implement its whole lifecycle: replacement directives, decision idempotency,
+supersession events, inactive relaunch, short receipt waits, incorporation
+waits, and result projection. That is enough duplication to change behavior:
+Project follow-ups wait for provider acceptance while Task follow-ups return as
+soon as the instruction is durable, and an inactive Task can be abandoned
+without spending a provider turn while an inactive Project is relaunched.
+
+Collapse the common protocol behind one private, concrete two-variant target:
+
+- Project and Task wrappers still resolve their own public identity, ownership,
+  liveness, and source attribution;
+- the shared path persists the command/directive, emits the right domain event,
+  relaunches the right session kind, and returns one receipt shape;
+- inactive abandonment settles locally for either kind;
+- follow-up always returns after durable persistence; steering and replacement
+  retain their short convenience wait and durable receipt id;
+- each domain still owns its process launcher, status enum, terminal meaning,
+  and event vocabulary.
+
+Do not expose `child` as a CLI noun. It is the protocol between the three
+product nouns, not a fourth thing a human manages.

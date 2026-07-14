@@ -16,23 +16,19 @@ use crate::lfdb::{open_existing_store, SharedStore, StoreError};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::project_session::SessionSupervisor;
 use crate::task::{
-    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
-    ChildCommandState, ChildDecisionId, ChildDirective, ChildRef, LinearIssueId, LinearIssueRef,
-    LinearProjectId, LinearProjectRef, PmWritebackOperation, PmWritebackState, TaskEventKind,
-    TaskSession, TaskSessionStatus,
+    ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
+    ChildDecisionId, ChildDirective, ChildRef, LinearIssueId, LinearIssueRef, LinearProjectId,
+    LinearProjectRef, PmWritebackOperation, PmWritebackState, TaskEventKind, TaskSession,
+    TaskSessionStatus,
 };
 use sha2::{Digest, Sha256};
+
+use super::ChildReceiptUntil;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskWaitUntil {
     Submitted,
     Terminal,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum ChildReceiptUntil {
-    Applied,
-    Incorporated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -48,6 +44,25 @@ pub struct TaskControlResult {
     pub accepted_at: Option<time::OffsetDateTime>,
     pub incorporated_at: Option<time::OffsetDateTime>,
     pub error: Option<String>,
+}
+
+fn task_control_result(
+    issue_id: String,
+    result: super::child::ChildControlResult,
+) -> TaskControlResult {
+    TaskControlResult {
+        issue_id,
+        session_id: result.session_id,
+        command_id: result.command_id,
+        directive_version: result.directive_version,
+        state: result.state,
+        effect: result.effect,
+        incorporated: result.incorporated,
+        generation: result.generation,
+        accepted_at: result.accepted_at,
+        incorporated_at: result.incorporated_at,
+        error: result.error,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -495,7 +510,7 @@ async fn record_task_failure(
 
 /// Reserve capacity from the owning Wave and start a fresh generation for a
 /// session whose process is no longer active.
-async fn relaunch_inactive_process(
+pub(crate) async fn relaunch_inactive_process(
     store: &SharedStore,
     session: &mut TaskSession,
 ) -> OpsResult<()> {
@@ -838,260 +853,17 @@ fn queue_command(issue: &str, kind: ChildCommandKind) -> OpsResult<TaskControlRe
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
         reconcile_process_liveness(&store, &mut session).await?;
-        if session.status.is_terminal() {
-            return Err(task_error(format!(
-                "task {} is {}; terminal Task Sessions cannot accept commands",
-                session.issue.identifier,
-                session.status.as_str()
-            )));
-        }
-        let command = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            command_source(&session)?,
-            kind,
-        );
-        let wait_for_resolution = !matches!(&command.kind, ChildCommandKind::FollowUp { .. });
-        let replacement = match &command.kind {
-            ChildCommandKind::Steer { text } => Some(text.clone()),
-            ChildCommandKind::Interrupt {
-                replacement: Some(text),
-            } => Some(text.clone()),
-            _ => None,
-        };
-        let (command, created, superseded, directive_event) = if let Some(text) = replacement {
-            let directive = ChildDirective::replacement(
-                ChildRef::Task(session.id.clone()),
-                session.current_directive_version + 1,
-                text,
-                command.source.clone(),
-                command.id.clone(),
-            );
-            let superseded = store
-                .create_child_command_with_directive(&command, &directive)
-                .await
-                .map_err(|error| {
-                    task_error(format!("failed to persist task directive: {error}"))
-                })?;
-            let event = (directive.id, directive.version, directive.kind);
-            session.current_directive_version = directive.version;
-            (command, true, superseded, Some(event))
-        } else if matches!(&command.kind, ChildCommandKind::Decide { .. }) {
-            let (command, created) = store
-                .ensure_child_decision_command(&command)
-                .await
-                .map_err(|error| task_error(format!("failed to persist task decision: {error}")))?;
-            (command, created, Vec::new(), None)
-        } else if matches!(&command.kind, ChildCommandKind::Interrupt { .. }) {
-            let superseded = store
-                .supersede_and_create_child_command(&command)
-                .await
-                .map_err(|error| task_error(format!("failed to persist task command: {error}")))?;
-            (command, true, superseded, None)
-        } else {
-            store
-                .create_child_command(&command)
-                .await
-                .map_err(|error| task_error(format!("failed to persist task command: {error}")))?;
-            (command, true, Vec::new(), None)
-        };
-        if !created {
-            if !command.state.is_terminal() && !session.status.is_process_active() {
-                relaunch_inactive_process(&store, &mut session).await?;
-            }
-            let receipt = resolve_receipt(&store, &command.id, wait_for_resolution).await?;
-            return control_result(&store, &session, &command, receipt).await;
-        }
-        for command_id in superseded {
-            append_command_event(
-                &store,
-                &session,
-                command_id,
-                ChildCommandState::Superseded,
-                None,
-            )
-            .await?;
-        }
-        if let Some((directive_id, version, directive_kind)) = directive_event {
-            store
-                .append_task_event(
-                    &session.id,
-                    &TaskEventKind::DirectiveChanged {
-                        directive_id,
-                        version,
-                        directive_kind,
-                    },
-                )
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
-        }
-        append_command_event(
+        let issue_id = session.issue.identifier.clone();
+        let source = command_source(&session)?;
+        let result = super::child::queue_command(
             &store,
-            &session,
-            command.id.clone(),
-            ChildCommandState::Persisted,
-            command.effect,
+            super::child::ChildSession::Task(Box::new(session)),
+            source,
+            kind,
         )
         .await?;
-        if let ChildCommandKind::Abandon { reason } = &command.kind {
-            if !session.status.is_process_active() {
-                let from = session.status;
-                store
-                    .accept_child_command(&command.id, None)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                append_command_event(
-                    &store,
-                    &session,
-                    command.id.clone(),
-                    ChildCommandState::Accepted,
-                    None,
-                )
-                .await?;
-                session.set_status(
-                    TaskSessionStatus::Abandoned,
-                    format!("Task Session explicitly abandoned: {reason}"),
-                );
-                store
-                    .update_task_session(&session)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                store
-                    .append_task_event(
-                        &session.id,
-                        &TaskEventKind::StatusChanged {
-                            from,
-                            to: TaskSessionStatus::Abandoned,
-                            reason: session.status_reason.clone(),
-                        },
-                    )
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                let receipt = wait_for_command_receipt(&store, &command.id).await?;
-                return control_result(&store, &session, &command, receipt).await;
-            }
-        }
-        if !session.status.is_process_active() {
-            relaunch_inactive_process(&store, &mut session).await?;
-        }
-        let mut receipt = resolve_receipt(&store, &command.id, wait_for_resolution).await?;
-        if matches!(
-            receipt.state,
-            ChildCommandState::Persisted | ChildCommandState::Claimed
-        ) {
-            let current = store
-                .get_task_session(&session.id)
-                .await
-                .map_err(|error| task_error(format!("failed to reread Task Session: {error}")))?
-                .ok_or_else(|| task_error("Task Session disappeared after command persistence"))?;
-            if !current.status.is_process_active() && !current.status.is_terminal() {
-                session = current;
-                relaunch_inactive_process(&store, &mut session).await?;
-                receipt = resolve_receipt(&store, &command.id, wait_for_resolution).await?;
-            }
-        }
-        control_result(&store, &session, &command, receipt).await
+        Ok(task_control_result(issue_id, result))
     })
-}
-
-async fn control_result(
-    store: &SharedStore,
-    session: &TaskSession,
-    command: &ChildCommand,
-    receipt: ChildCommand,
-) -> OpsResult<TaskControlResult> {
-    let directive = store
-        .child_directive_for_command(&command.id)
-        .await
-        .map_err(|error| task_error(format!("failed to read task directive: {error}")))?;
-    Ok(TaskControlResult {
-        issue_id: session.issue.identifier.clone(),
-        session_id: session.id.to_string(),
-        command_id: command.id.to_string(),
-        directive_version: directive.as_ref().map(|directive| directive.version),
-        state: receipt.state,
-        effect: receipt.effect,
-        incorporated: directive
-            .as_ref()
-            .is_some_and(|directive| directive.incorporated_at.is_some()),
-        generation: receipt.claimed_by_generation,
-        accepted_at: receipt.accepted_at,
-        incorporated_at: directive.and_then(|directive| directive.incorporated_at),
-        error: receipt.error,
-    })
-}
-
-async fn resolve_receipt(
-    store: &SharedStore,
-    command_id: &crate::task::ChildCommandId,
-    wait: bool,
-) -> OpsResult<ChildCommand> {
-    if wait {
-        wait_for_command_receipt(store, command_id).await
-    } else {
-        read_command_receipt(store, command_id).await
-    }
-}
-
-async fn wait_for_command_receipt(
-    store: &SharedStore,
-    command_id: &crate::task::ChildCommandId,
-) -> OpsResult<ChildCommand> {
-    Ok(
-        wait_for_command_receipt_until(store, command_id, Duration::from_secs(2))
-            .await?
-            .0,
-    )
-}
-
-async fn wait_for_command_receipt_until(
-    store: &SharedStore,
-    command_id: &crate::task::ChildCommandId,
-    timeout: Duration,
-) -> OpsResult<(ChildCommand, bool)> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let command = read_command_receipt(store, command_id).await?;
-        if command.state.is_terminal() {
-            return Ok((command, false));
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Ok((command, true));
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-}
-
-async fn read_command_receipt(
-    store: &SharedStore,
-    command_id: &crate::task::ChildCommandId,
-) -> OpsResult<ChildCommand> {
-    store
-        .get_child_command(command_id)
-        .await
-        .map_err(|error| task_error(format!("failed to read task command receipt: {error}")))?
-        .ok_or_else(|| task_error(format!("task command {command_id} disappeared")))
-}
-
-async fn append_command_event(
-    store: &SharedStore,
-    session: &TaskSession,
-    command_id: crate::task::ChildCommandId,
-    state: ChildCommandState,
-    effect: Option<ChildCommandEffect>,
-) -> OpsResult<()> {
-    store
-        .append_task_event(
-            &session.id,
-            &TaskEventKind::CommandChanged {
-                command_id,
-                state,
-                effect,
-                error: None,
-            },
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    Ok(())
 }
 
 pub fn task_follow_up(issue: &str, message: String) -> OpsResult<TaskControlResult> {
@@ -1120,9 +892,12 @@ pub fn task_receipt(
     block_on_task(async move {
         let store = task_store().await?;
         let (command, timed_out) = if let Some(until) = until {
-            wait_for_task_receipt_condition(&store, &command_id, until, timeout).await?
+            super::child::wait_for_receipt_condition(&store, &command_id, until, timeout).await?
         } else {
-            (read_command_receipt(&store, &command_id).await?, false)
+            (
+                super::child::read_receipt(&store, &command_id).await?,
+                false,
+            )
         };
         let ChildRef::Task(session_id) = &command.target else {
             return Err(task_error(format!(
@@ -1134,50 +909,12 @@ pub fn task_receipt(
             .await
             .map_err(|error| task_error(format!("failed to read Task Session: {error}")))?
             .ok_or_else(|| task_error(format!("Task Session {session_id} disappeared")))?;
+        let result = super::child::control_result(&store, &command, command.clone()).await?;
         Ok(TaskReceiptRead {
-            receipt: control_result(&store, &session, &command, command.clone()).await?,
+            receipt: task_control_result(session.issue.identifier, result),
             timed_out,
         })
     })
-}
-
-async fn wait_for_task_receipt_condition(
-    store: &SharedStore,
-    command_id: &ChildCommandId,
-    until: ChildReceiptUntil,
-    timeout: Duration,
-) -> OpsResult<(ChildCommand, bool)> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let command = read_command_receipt(store, command_id).await?;
-        if matches!(
-            command.state,
-            ChildCommandState::Failed | ChildCommandState::Superseded
-        ) {
-            return Ok((command, false));
-        }
-        let settled = match until {
-            ChildReceiptUntil::Applied => command.state.is_terminal(),
-            ChildReceiptUntil::Incorporated => store
-                .child_directive_for_command(command_id)
-                .await
-                .map_err(|error| task_error(format!("failed to read task directive: {error}")))?
-                .ok_or_else(|| {
-                    task_error(format!(
-                        "task command {command_id} does not carry a directive to incorporate"
-                    ))
-                })?
-                .incorporated_at
-                .is_some(),
-        };
-        if settled {
-            return Ok((command, false));
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Ok((command, true));
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
 }
 
 pub fn task_decide(

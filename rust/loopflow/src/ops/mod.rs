@@ -1,5 +1,7 @@
 mod abandon;
 mod branches;
+mod child;
+pub use child::ChildReceiptUntil;
 mod commit;
 pub mod cron;
 mod error;

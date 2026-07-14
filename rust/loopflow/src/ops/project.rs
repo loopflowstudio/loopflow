@@ -11,15 +11,13 @@ use crate::engine::process::{
 use crate::lfd::id::LfdId;
 use crate::lfd::types::Wave;
 use crate::lfdb::{open_existing_store, SharedStore, Store};
-use crate::ops::task::ChildReceiptUntil;
-use crate::ops::{OpsError, OpsResult};
+use crate::ops::{ChildReceiptUntil, OpsError, OpsResult};
 use crate::project_session::{
     ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
 use crate::task::{
-    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
-    ChildCommandState, ChildDecisionId, ChildDirective, ChildRef, LinearProjectId,
-    LinearProjectRef,
+    ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
+    ChildDecisionId, ChildDirective, ChildRef, LinearProjectId, LinearProjectRef,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -60,6 +58,25 @@ pub struct ProjectControlResult {
     pub accepted_at: Option<time::OffsetDateTime>,
     pub incorporated_at: Option<time::OffsetDateTime>,
     pub error: Option<String>,
+}
+
+fn project_control_result(
+    project_id: String,
+    result: super::child::ChildControlResult,
+) -> ProjectControlResult {
+    ProjectControlResult {
+        project_id,
+        session_id: result.session_id,
+        command_id: result.command_id,
+        directive_version: result.directive_version,
+        state: result.state,
+        effect: result.effect,
+        incorporated: result.incorporated,
+        generation: result.generation,
+        accepted_at: result.accepted_at,
+        incorporated_at: result.incorporated_at,
+        error: result.error,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -297,7 +314,7 @@ pub fn project_start(
     project_run(&main, &project.project.id, directive)
 }
 
-async fn launch_project_process(
+pub(crate) async fn launch_project_process(
     store: &SharedStore,
     session: &mut ProjectSession,
 ) -> OpsResult<()> {
@@ -546,178 +563,17 @@ fn queue_project_command(project: &str, kind: ChildCommandKind) -> OpsResult<Pro
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
         reconcile_project_liveness(&store, &mut session).await?;
-        if session.status.is_terminal() {
-            return Err(project_error(format!(
-                "Project {} is {}; terminal Project Sessions cannot accept commands",
-                session.project.slug,
-                session.status.as_str()
-            )));
-        }
-        let command = ChildCommand::new(
-            ChildRef::Project(session.id.clone()),
-            project_command_source(&session)?,
-            kind,
-        );
-        let replacement = match &command.kind {
-            ChildCommandKind::Steer { text } => Some(text.clone()),
-            ChildCommandKind::Interrupt {
-                replacement: Some(text),
-            } => Some(text.clone()),
-            _ => None,
-        };
-        let (command, created, superseded, directive_event) = if let Some(text) = replacement {
-            let directive = ChildDirective::replacement(
-                ChildRef::Project(session.id.clone()),
-                session.current_directive_version + 1,
-                text,
-                command.source.clone(),
-                command.id.clone(),
-            );
-            let superseded = store
-                .create_child_command_with_directive(&command, &directive)
-                .await
-                .map_err(|error| project_error(error.to_string()))?;
-            let event = (directive.id, directive.version, directive.kind);
-            session.current_directive_version = directive.version;
-            (command, true, superseded, Some(event))
-        } else if matches!(command.kind, ChildCommandKind::Decide { .. }) {
-            let (command, created) = store
-                .ensure_child_decision_command(&command)
-                .await
-                .map_err(|error| project_error(error.to_string()))?;
-            (command, created, Vec::new(), None)
-        } else if matches!(command.kind, ChildCommandKind::Interrupt { .. }) {
-            let superseded = store
-                .supersede_and_create_child_command(&command)
-                .await
-                .map_err(|error| project_error(error.to_string()))?;
-            (command, true, superseded, None)
-        } else {
-            store
-                .create_child_command(&command)
-                .await
-                .map_err(|error| project_error(error.to_string()))?;
-            (command, true, Vec::new(), None)
-        };
-        if !created {
-            if !command.state.is_terminal() && !session.status.is_process_active() {
-                launch_project_process(&store, &mut session).await?;
-            }
-            let receipt = wait_for_project_receipt(&store, &command.id, Duration::from_secs(2))
-                .await?
-                .0;
-            return project_control_result(&store, &session, &command, receipt).await;
-        }
-        for command_id in superseded {
-            append_project_command_event(
-                &store,
-                &session,
-                command_id,
-                ChildCommandState::Superseded,
-                None,
-            )
-            .await?;
-        }
-        if let Some((directive_id, version, directive_kind)) = directive_event {
-            store
-                .append_project_event(
-                    &session.id,
-                    &ProjectEventKind::DirectiveChanged {
-                        directive_id,
-                        version,
-                        directive_kind,
-                    },
-                )
-                .await
-                .map_err(|error| project_error(error.to_string()))?;
-        }
-        append_project_command_event(
+        let project_id = session.project.id.as_str().to_string();
+        let source = project_command_source(&session)?;
+        let result = super::child::queue_command(
             &store,
-            &session,
-            command.id.clone(),
-            ChildCommandState::Persisted,
-            command.effect,
+            super::child::ChildSession::Project(Box::new(session)),
+            source,
+            kind,
         )
         .await?;
-        if !session.status.is_process_active() {
-            launch_project_process(&store, &mut session).await?;
-        }
-        let receipt = wait_for_project_receipt(&store, &command.id, Duration::from_secs(2))
-            .await?
-            .0;
-        project_control_result(&store, &session, &command, receipt).await
+        Ok(project_control_result(project_id, result))
     })
-}
-
-async fn append_project_command_event(
-    store: &SharedStore,
-    session: &ProjectSession,
-    command_id: ChildCommandId,
-    state: ChildCommandState,
-    effect: Option<ChildCommandEffect>,
-) -> OpsResult<()> {
-    store
-        .append_project_event(
-            &session.id,
-            &ProjectEventKind::CommandChanged {
-                command_id,
-                state,
-                effect,
-                error: None,
-            },
-        )
-        .await
-        .map_err(|error| project_error(error.to_string()))?;
-    Ok(())
-}
-
-async fn project_control_result(
-    store: &SharedStore,
-    session: &ProjectSession,
-    command: &ChildCommand,
-    receipt: ChildCommand,
-) -> OpsResult<ProjectControlResult> {
-    let directive = store
-        .child_directive_for_command(&command.id)
-        .await
-        .map_err(|error| project_error(format!("failed to read Project directive: {error}")))?;
-    Ok(ProjectControlResult {
-        project_id: session.project.id.as_str().to_string(),
-        session_id: session.id.to_string(),
-        command_id: command.id.to_string(),
-        directive_version: directive.as_ref().map(|directive| directive.version),
-        state: receipt.state,
-        effect: receipt.effect,
-        incorporated: directive
-            .as_ref()
-            .is_some_and(|directive| directive.incorporated_at.is_some()),
-        generation: receipt.claimed_by_generation,
-        accepted_at: receipt.accepted_at,
-        incorporated_at: directive.and_then(|directive| directive.incorporated_at),
-        error: receipt.error,
-    })
-}
-
-async fn wait_for_project_receipt(
-    store: &SharedStore,
-    command_id: &ChildCommandId,
-    timeout: Duration,
-) -> OpsResult<(ChildCommand, bool)> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let command = store
-            .get_child_command(command_id)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error(format!("project command {command_id} disappeared")))?;
-        if command.state.is_terminal() {
-            return Ok((command, false));
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Ok((command, true));
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
 }
 
 pub fn project_follow_up(project: &str, message: String) -> OpsResult<ProjectControlResult> {
@@ -947,14 +803,12 @@ pub fn project_receipt(
     block_on_project(async move {
         let store = project_store().await?;
         let (command, timed_out) = if let Some(until) = until {
-            wait_for_project_receipt_condition(&store, &command_id, until, timeout).await?
+            super::child::wait_for_receipt_condition(&store, &command_id, until, timeout).await?
         } else {
-            let command = store
-                .get_child_command(&command_id)
-                .await
-                .map_err(|error| project_error(error.to_string()))?
-                .ok_or_else(|| project_error(format!("project command {command_id} not found")))?;
-            (command, false)
+            (
+                super::child::read_receipt(&store, &command_id).await?,
+                false,
+            )
         };
         let ChildRef::Project(session_id) = &command.target else {
             return Err(project_error(format!(
@@ -966,54 +820,12 @@ pub fn project_receipt(
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error("Project Session disappeared"))?;
+        let result = super::child::control_result(&store, &command, command.clone()).await?;
         Ok(ProjectReceiptRead {
-            receipt: project_control_result(&store, &session, &command, command.clone()).await?,
+            receipt: project_control_result(session.project.id.as_str().to_string(), result),
             timed_out,
         })
     })
-}
-
-async fn wait_for_project_receipt_condition(
-    store: &SharedStore,
-    command_id: &ChildCommandId,
-    until: ChildReceiptUntil,
-    timeout: Duration,
-) -> OpsResult<(ChildCommand, bool)> {
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let command = store
-            .get_child_command(command_id)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error(format!("project command {command_id} disappeared")))?;
-        if matches!(
-            command.state,
-            ChildCommandState::Failed | ChildCommandState::Superseded
-        ) {
-            return Ok((command, false));
-        }
-        let settled = match until {
-            ChildReceiptUntil::Applied => command.state.is_terminal(),
-            ChildReceiptUntil::Incorporated => store
-                .child_directive_for_command(command_id)
-                .await
-                .map_err(|error| project_error(format!("failed to read directive: {error}")))?
-                .ok_or_else(|| {
-                    project_error(format!(
-                        "project command {command_id} does not carry a directive to incorporate"
-                    ))
-                })?
-                .incorporated_at
-                .is_some(),
-        };
-        if settled {
-            return Ok((command, false));
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Ok((command, true));
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
 }
 
 pub fn project_wait(

@@ -189,6 +189,37 @@ struct WaveChatTranscriptTests {
         #expect(view.activity == nil, "a thought is not evidence of work")
     }
 
+    /// Audit restores the prior execution-log shape exactly, which means a
+    /// `.message` item appears once — in its own card. Folding it into the
+    /// prose as well (as the conversation does) would print the same words
+    /// twice, since `auditItems` already carries the card.
+    @Test func auditRendersHarnessProseExactlyOnce() throws {
+        let reporting = try turn(
+            id: "turn-5",
+            text: "Opened the PR.",
+            items: [
+                .message(id: "m0", text: "Waiting on CI.", phase: "task_mutate"),
+                command("c1", "lf pr open"),
+            ]
+        )
+
+        let view = turnPresentation(reporting, audit: true)
+        #expect(view.prose == "Opened the PR.", "the message item is not folded into audit prose")
+        #expect(!view.prose.contains("Waiting on CI."))
+
+        let messageCards = view.auditItems.filter { if case .message = $0 { return true } else { return false } }
+        #expect(messageCards.count == 1, "the message survives as exactly one card")
+
+        // Once in the cards, zero times in the prose: rendered once in total.
+        let proseHits = view.prose.contains("Waiting on CI.") ? 1 : 0
+        #expect(proseHits + messageCards.count == 1)
+
+        // The conversation still reads it as speech — that behavior is preserved.
+        let conversation = turnPresentation(reporting, audit: false)
+        #expect(conversation.prose == "Opened the PR.\n\nWaiting on CI.")
+        #expect(conversation.auditItems.isEmpty)
+    }
+
     /// Decisions and reports are conversation; lifecycle churn is not.
     @Test func decisionsStayAndChurnGoes() {
         #expect(isConversational(childActivity(.decisionRequired)))

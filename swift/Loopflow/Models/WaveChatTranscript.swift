@@ -49,8 +49,10 @@ public struct TurnActivity: Equatable, Sendable {
 
 /// One turn, as a human reads it.
 public struct TurnPresentation: Equatable, Sendable {
-    /// The turn's speech: its streamed text, plus any `.message` items (prose
-    /// the harness emitted as an item rather than as turn text).
+    /// The turn's speech: its streamed text, plus — in the conversation only —
+    /// any `.message` items (prose the harness emitted as an item rather than
+    /// as turn text). In audit those items stay in `auditItems` as their own
+    /// cards and are not folded here, so the words render exactly once.
     public let prose: String
     /// Coalesced evidence, or nil when the turn produced none.
     public let activity: TurnActivity?
@@ -80,8 +82,12 @@ public func turnPresentation(_ turn: ChatTurn, audit: Bool) -> TurnPresentation 
     for item in turn.items {
         switch item {
         case let .message(_, text, _):
-            // Harness prose that arrived as an item. It is speech; it reads
-            // with the turn's text, not as a card.
+            // Harness prose that arrived as an item. In the conversation it is
+            // speech, so it reads with the turn's text rather than as a card.
+            // In audit it stays in its own card and must NOT also be folded
+            // here — audit restores the prior execution-log shape exactly, and
+            // folding would print the same words twice.
+            guard !audit else { continue }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
             prose = prose.isEmpty ? text : prose + "\n\n" + text

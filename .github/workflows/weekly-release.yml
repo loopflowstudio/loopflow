@@ -72,6 +72,11 @@ jobs:
           inject-env-vars: true
           doppler-project: loopflow
           doppler-config: prd
+      # Nothing publishes until the migration set is clean against the last tag:
+      # a shipped migration that was edited would silently rewrite the history of
+      # every database in the wild.
+      - name: Verify migration namespaces
+        run: uv run python scripts/check_migrations.py
       - name: Install lf
         run: |
           set -euo pipefail

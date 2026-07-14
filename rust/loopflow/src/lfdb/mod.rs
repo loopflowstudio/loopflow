@@ -1,7 +1,7 @@
 //! Persistence as shared infrastructure: the machine's registry, written and
 //! read by `lf` directly — `lfd` is one more client, not the owner. This
-//! module owns the sqlite registry, schema migrations, and registry API
-//! ([`Store`] and its per-domain traits).
+//! module owns the sqlite registry, schema migrations, and one concrete
+//! registry API ([`Store`]).
 //!
 //! The persisted domain types still live in `crate::lfd::types` for now; the
 //! type split is a later, non-mechanical skill.
@@ -163,26 +163,6 @@ where
 }
 
 impl Store {
-    pub fn wave_state(&self) -> &dyn WaveStateStore {
-        self
-    }
-
-    pub fn execution(&self) -> &dyn ExecutionStore {
-        self
-    }
-
-    pub fn tokens(&self) -> &dyn TokenStore {
-        self
-    }
-
-    pub fn repos(&self) -> &dyn RepoStore {
-        self
-    }
-
-    pub fn admin(&self) -> &dyn StoreAdmin {
-        self
-    }
-
     pub async fn put_pm_snapshot(&self, snapshot: PmSnapshotRow) -> StoreResult<()> {
         run_sqlite(&self.sqlite, move |store| store.put_pm_snapshot(&snapshot)).await
     }
@@ -841,33 +821,40 @@ impl Store {
     }
 
     pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
-        WaveStateStore::list_waves(self, repo).await
+        let repo = repo.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| store.list_waves(repo.as_deref())).await
     }
 
     /// A chord's contents: the waves whose `parent_wave_id` is `parent`,
     /// ordered by creation.
     pub async fn list_child_waves(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
-        WaveStateStore::children_of(self, parent).await
+        let parent = parent.clone();
+        run_sqlite(&self.sqlite, move |store| store.list_child_waves(&parent)).await
     }
 
     pub async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
-        WaveStateStore::get_wave(self, wave_id).await
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.get_wave(&wave_id)).await
     }
 
     pub async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
-        WaveStateStore::get_wave_by_name(self, name).await
+        let name = name.to_string();
+        run_sqlite(&self.sqlite, move |store| store.get_wave_by_name(&name)).await
     }
 
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
-        WaveStateStore::create_wave(self, wave).await
+        let wave = wave.clone();
+        run_sqlite(&self.sqlite, move |store| store.create_wave(&wave)).await
     }
 
     pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
-        WaveStateStore::update_wave(self, wave).await
+        let wave = wave.clone();
+        run_sqlite(&self.sqlite, move |store| store.update_wave(&wave)).await
     }
 
     pub async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
-        WaveStateStore::delete_wave(self, wave_id).await
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
     }
 
     pub async fn list_runs(
@@ -875,38 +862,53 @@ impl Store {
         wave_id: Option<&LfdId>,
         limit: Option<u32>,
     ) -> StoreResult<Vec<Run>> {
-        WaveStateStore::list_runs(self, wave_id, limit).await
+        let wave_id = wave_id.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_runs(wave_id.as_ref(), limit)
+        })
+        .await
     }
 
+    /// Non-terminal runs plus runs that ended at or after `ended_since` —
+    /// the push bridge's bounded working set.
     pub async fn list_runs_active_or_ended_since(
         &self,
         ended_since: time::OffsetDateTime,
     ) -> StoreResult<Vec<Run>> {
-        WaveStateStore::list_runs_active_or_ended_since(self, ended_since).await
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_runs_active_or_ended_since(ended_since)
+        })
+        .await
     }
 
     pub async fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>> {
-        WaveStateStore::get_run(self, run_id).await
+        let run_id = run_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.get_run(&run_id)).await
     }
 
     pub async fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
-        WaveStateStore::get_active_run(self, wave_id).await
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.get_active_run(&wave_id)).await
     }
 
     pub async fn count_active_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        WaveStateStore::count_active_runs(self, wave_id).await
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.count_active_runs(&wave_id)).await
     }
 
     pub async fn get_latest_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
-        WaveStateStore::get_latest_run(self, wave_id).await
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.get_latest_run(&wave_id)).await
     }
 
     pub async fn create_run(&self, run: &Run) -> StoreResult<()> {
-        WaveStateStore::create_run(self, run).await
+        let run = run.clone();
+        run_sqlite(&self.sqlite, move |store| store.create_run(&run)).await
     }
 
     pub async fn update_run(&self, run: &Run) -> StoreResult<()> {
-        WaveStateStore::update_run(self, run).await
+        let run = run.clone();
+        run_sqlite(&self.sqlite, move |store| store.update_run(&run)).await
     }
 
     pub async fn get_live_pr_state(
@@ -914,11 +916,19 @@ impl Store {
         repo_id: &str,
         pr_number: u32,
     ) -> StoreResult<Option<LivePullRequestState>> {
-        WaveStateStore::get_live_pr_state(self, repo_id, pr_number).await
+        let repo_id = repo_id.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.get_live_pr_state(&repo_id, pr_number)
+        })
+        .await
     }
 
     pub async fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
-        WaveStateStore::upsert_live_pr_state(self, state).await
+        let state = state.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.upsert_live_pr_state(&state)
+        })
+        .await
     }
 
     pub async fn list_attention_items(
@@ -926,14 +936,21 @@ impl Store {
         status: Option<AttentionStatus>,
         kind: Option<AttentionKind>,
     ) -> StoreResult<Vec<AttentionItem>> {
-        WaveStateStore::list_attention_items(self, status, kind).await
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_attention_items(status, kind)
+        })
+        .await
     }
 
     pub async fn get_attention_item(
         &self,
         attention_id: &LfdId,
     ) -> StoreResult<Option<AttentionItem>> {
-        WaveStateStore::get_attention_item(self, attention_id).await
+        let attention_id = attention_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.get_attention_item(&attention_id)
+        })
+        .await
     }
 
     pub async fn find_attention_item_for_run(
@@ -941,86 +958,136 @@ impl Store {
         run_id: &LfdId,
         kind: AttentionKind,
     ) -> StoreResult<Option<AttentionItem>> {
-        WaveStateStore::find_attention_item_for_run(self, run_id, kind).await
+        let run_id = run_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.find_attention_item_for_run(&run_id, kind)
+        })
+        .await
     }
 
     pub async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
-        WaveStateStore::upsert_attention_item(self, item).await
+        let item = item.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.upsert_attention_item(&item)
+        })
+        .await
     }
 
     pub async fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32> {
-        WaveStateStore::delete_attention_item(self, attention_id).await
+        let attention_id = attention_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.delete_attention_item(&attention_id)
+        })
+        .await
     }
 
     pub async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
-        WaveStateStore::get_summary(self, wave_id).await
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.get_summary(&wave_id)).await
     }
 
     pub async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
-        WaveStateStore::upsert_summary(self, summary).await
+        let summary = summary.clone();
+        run_sqlite(&self.sqlite, move |store| store.upsert_summary(&summary)).await
     }
 
     pub async fn list_chat_memory_blocks(
         &self,
         wave_id: &LfdId,
     ) -> StoreResult<Vec<ChatMemoryBlock>> {
-        WaveStateStore::list_chat_memory_blocks(self, wave_id).await
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_chat_memory_blocks(&wave_id)
+        })
+        .await
     }
 
     pub async fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
-        WaveStateStore::upsert_chat_memory_block(self, block).await
+        let block = block.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.upsert_chat_memory_block(&block)
+        })
+        .await
     }
 
     pub async fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
-        WaveStateStore::delete_chat_memory_block(self, wave_id, name).await
+        let wave_id = wave_id.clone();
+        let name = name.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.delete_chat_memory_block(&wave_id, &name)
+        })
+        .await
     }
 
     pub async fn list_chat_messages(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMessage>> {
-        WaveStateStore::list_chat_messages(self, wave_id).await
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_chat_messages(&wave_id)
+        })
+        .await
     }
 
     pub async fn create_chat_message(&self, message: &ChatMessage) -> StoreResult<()> {
-        WaveStateStore::create_chat_message(self, message).await
+        let message = message.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.create_chat_message(&message)
+        })
+        .await
     }
 
     pub async fn list_repos(&self) -> StoreResult<Vec<Repo>> {
-        RepoStore::list_repos(self).await
+        run_sqlite(&self.sqlite, |store| store.list_repos()).await
     }
 
     pub async fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>> {
-        RepoStore::get_repo(self, path).await
+        let path = path.to_string();
+        run_sqlite(&self.sqlite, move |store| store.get_repo(&path)).await
     }
 
     pub async fn upsert_repo(&self, repo: &Repo) -> StoreResult<()> {
-        RepoStore::upsert_repo(self, repo).await
+        let repo = repo.clone();
+        run_sqlite(&self.sqlite, move |store| store.upsert_repo(&repo)).await
     }
 
     pub async fn delete_repo(&self, path: &str) -> StoreResult<()> {
-        RepoStore::delete_repo(self, path).await
+        let path = path.to_string();
+        run_sqlite(&self.sqlite, move |store| store.delete_repo(&path)).await
     }
 
     pub async fn get_repo_by_repo_id(&self, repo_id: &RepoId) -> StoreResult<Option<Repo>> {
-        RepoStore::get_repo_by_repo_id(self, repo_id).await
+        let repo_id = repo_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.get_repo_by_repo_id(&repo_id)
+        })
+        .await
     }
 
     pub async fn list_edges(&self) -> StoreResult<Vec<RepoEdge>> {
-        RepoStore::list_edges(self).await
+        run_sqlite(&self.sqlite, |store| store.list_edges()).await
     }
 
     pub async fn add_edge(&self, edge: &RepoEdge) -> StoreResult<()> {
-        RepoStore::add_edge(self, edge).await
+        let edge = edge.clone();
+        run_sqlite(&self.sqlite, move |store| store.add_edge(&edge)).await
     }
 
     pub async fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()> {
-        RepoStore::remove_edge(self, parent_id, child_id).await
+        let parent_id = parent_id.clone();
+        let child_id = child_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.remove_edge(&parent_id, &child_id)
+        })
+        .await
     }
 
     pub async fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
-        RepoStore::children(self, repo_id).await
+        let repo_id = repo_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.children(&repo_id)).await
     }
 
     pub async fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
-        RepoStore::parents(self, repo_id).await
+        let repo_id = repo_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.parents(&repo_id)).await
     }
 
     pub async fn list_fork_runs(
@@ -1028,27 +1095,48 @@ impl Store {
         run_id: &LfdId,
         step_index: u32,
     ) -> StoreResult<Vec<ForkRun>> {
-        ExecutionStore::list_fork_runs(self, run_id, step_index).await
+        let run_id = run_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_fork_runs(&run_id, step_index)
+        })
+        .await
     }
 
     pub async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
-        ExecutionStore::upsert_fork_run(self, fork_run).await
+        let fork_run = fork_run.clone();
+        run_sqlite(&self.sqlite, move |store| store.upsert_fork_run(&fork_run)).await
+    }
+
+    pub async fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>> {
+        run_sqlite(&self.sqlite, |store| store.list_orphaned_fork_runs()).await
     }
 
     pub async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
-        ExecutionStore::delete_fork_runs(self, run_id, step_index).await
+        let run_id = run_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.delete_fork_runs(&run_id, step_index)
+        })
+        .await
     }
 
     pub async fn fail_orphaned_runs(&self) -> StoreResult<u32> {
-        ExecutionStore::fail_orphaned_runs(self).await
+        run_sqlite(&self.sqlite, |store| store.fail_orphaned_runs()).await
     }
 
     pub async fn create_control_session(&self, session: &Session) -> StoreResult<()> {
-        ControlSessionStore::create_session(self, session).await
+        let session = session.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.create_control_session(&session)
+        })
+        .await
     }
 
     pub async fn get_control_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
-        ControlSessionStore::get_session(self, session_id).await
+        let session_id = session_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.get_control_session(&session_id)
+        })
+        .await
     }
 
     pub async fn list_control_sessions(
@@ -1056,7 +1144,12 @@ impl Store {
         wave_id: Option<&LfdId>,
         statuses: Option<&[SessionStatus]>,
     ) -> StoreResult<Vec<Session>> {
-        ControlSessionStore::list_sessions(self, wave_id, statuses).await
+        let wave_id = wave_id.cloned();
+        let statuses = statuses.map(|values| values.to_vec());
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_control_sessions(wave_id.as_ref(), statuses.as_deref())
+        })
+        .await
     }
 
     /// This wave's live sessions plus sessions completed at or after
@@ -1067,7 +1160,11 @@ impl Store {
         wave_id: &LfdId,
         completed_since: i64,
     ) -> StoreResult<Vec<Session>> {
-        ControlSessionStore::list_recent_sessions(self, wave_id, completed_since).await
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.list_recent_control_sessions(&wave_id, completed_since)
+        })
+        .await
     }
 
     /// The wave's live brain, if any: a non-terminal `WaveAgent` session —
@@ -1093,7 +1190,7 @@ impl Store {
     /// daemon in the path. The writer later marks the row terminal via
     /// [`Store::update_control_session`].
     pub async fn register_session(&self, session: &Session) -> StoreResult<()> {
-        ControlSessionStore::create_session(self, session).await
+        self.create_control_session(session).await
     }
 
     /// Live sessions grouped under one worktree, keyed by the worktree
@@ -1121,133 +1218,56 @@ impl Store {
         &self,
         run_id: &LfdId,
     ) -> StoreResult<Option<Session>> {
-        ControlSessionStore::get_active_session_for_run(self, run_id).await
+        let run_id = run_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.get_active_control_session_for_run(&run_id)
+        })
+        .await
     }
 
     pub async fn update_control_session(&self, session: &Session) -> StoreResult<()> {
-        ControlSessionStore::update_session(self, session).await
+        let session = session.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.update_control_session(&session)
+        })
+        .await
     }
 
     pub async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>> {
-        TokenStore::get_provider_token(self, provider).await
+        let provider = provider.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.get_provider_token(&provider)
+        })
+        .await
     }
 
     pub async fn upsert_provider_token(&self, token: &ProviderToken) -> StoreResult<()> {
-        TokenStore::upsert_provider_token(self, token).await
+        let token = token.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.upsert_provider_token(&token)
+        })
+        .await
     }
 
     pub async fn delete_provider_token(&self, provider: &str) -> StoreResult<()> {
-        TokenStore::delete_provider_token(self, provider).await
+        let provider = provider.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.delete_provider_token(&provider)
+        })
+        .await
     }
 
     pub async fn list_provider_tokens(&self) -> StoreResult<Vec<ProviderToken>> {
-        TokenStore::list_provider_tokens(self).await
+        run_sqlite(&self.sqlite, |store| store.list_provider_tokens()).await
     }
 
     pub async fn health_check(&self) -> StoreResult<()> {
-        StoreAdmin::health_check(self).await
+        run_sqlite(&self.sqlite, |store| store.health_check()).await
     }
 
     pub async fn schema_version(&self) -> StoreResult<String> {
-        StoreAdmin::schema_version(self).await
+        run_sqlite(&self.sqlite, |store| store.schema_version()).await
     }
-}
-
-#[async_trait::async_trait]
-pub trait WaveStateStore: Send + Sync {
-    async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>>;
-    async fn children_of(&self, parent: &LfdId) -> StoreResult<Vec<Wave>>;
-    async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>>;
-    async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>>;
-    async fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
-    async fn update_wave(&self, wave: &Wave) -> StoreResult<()>;
-    async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
-
-    async fn list_runs(&self, wave_id: Option<&LfdId>, limit: Option<u32>)
-        -> StoreResult<Vec<Run>>;
-    /// Non-terminal runs plus runs that ended at or after `ended_since` —
-    /// the push bridge's working set, so it never scans the whole terminal
-    /// history.
-    async fn list_runs_active_or_ended_since(
-        &self,
-        ended_since: time::OffsetDateTime,
-    ) -> StoreResult<Vec<Run>>;
-    async fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>>;
-    async fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>>;
-    async fn count_active_runs(&self, wave_id: &LfdId) -> StoreResult<u32>;
-    async fn get_latest_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>>;
-    async fn create_run(&self, run: &Run) -> StoreResult<()>;
-    async fn update_run(&self, run: &Run) -> StoreResult<()>;
-    async fn get_live_pr_state(
-        &self,
-        repo_id: &str,
-        pr_number: u32,
-    ) -> StoreResult<Option<LivePullRequestState>>;
-    async fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()>;
-    async fn list_attention_items(
-        &self,
-        status: Option<AttentionStatus>,
-        kind: Option<AttentionKind>,
-    ) -> StoreResult<Vec<AttentionItem>>;
-    async fn get_attention_item(&self, attention_id: &LfdId) -> StoreResult<Option<AttentionItem>>;
-    async fn find_attention_item_for_run(
-        &self,
-        run_id: &LfdId,
-        kind: AttentionKind,
-    ) -> StoreResult<Option<AttentionItem>>;
-    async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()>;
-    async fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32>;
-    async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>>;
-    async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()>;
-
-    async fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>>;
-    async fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()>;
-    async fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()>;
-
-    async fn list_chat_messages(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMessage>>;
-    async fn create_chat_message(&self, message: &ChatMessage) -> StoreResult<()>;
-}
-
-#[async_trait::async_trait]
-pub trait RepoStore: Send + Sync {
-    async fn list_repos(&self) -> StoreResult<Vec<Repo>>;
-    async fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>>;
-    async fn upsert_repo(&self, repo: &Repo) -> StoreResult<()>;
-    async fn delete_repo(&self, path: &str) -> StoreResult<()>;
-    async fn get_repo_by_repo_id(&self, repo_id: &RepoId) -> StoreResult<Option<Repo>>;
-    async fn list_edges(&self) -> StoreResult<Vec<RepoEdge>>;
-    async fn add_edge(&self, edge: &RepoEdge) -> StoreResult<()>;
-    async fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()>;
-    async fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>>;
-    async fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>>;
-}
-
-#[async_trait::async_trait]
-pub trait ExecutionStore: Send + Sync {
-    async fn list_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>>;
-    async fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>>;
-    async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()>;
-    async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32>;
-
-    async fn fail_orphaned_runs(&self) -> StoreResult<u32>;
-}
-
-#[async_trait::async_trait]
-pub trait ControlSessionStore: Send + Sync {
-    async fn create_session(&self, session: &Session) -> StoreResult<()>;
-    async fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>>;
-    async fn list_sessions(
-        &self,
-        wave_id: Option<&LfdId>,
-        statuses: Option<&[SessionStatus]>,
-    ) -> StoreResult<Vec<Session>>;
-    async fn list_recent_sessions(
-        &self,
-        wave_id: &LfdId,
-        completed_since: i64,
-    ) -> StoreResult<Vec<Session>>;
-    async fn get_active_session_for_run(&self, run_id: &LfdId) -> StoreResult<Option<Session>>;
-    async fn update_session(&self, session: &Session) -> StoreResult<()>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1289,527 +1309,6 @@ pub struct ProviderToken {
     pub login: Option<String>,
     pub updated_at: i64,
     pub credential_type: CredentialType,
-}
-
-#[async_trait::async_trait]
-pub trait TokenStore: Send + Sync {
-    async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>>;
-    async fn upsert_provider_token(&self, token: &ProviderToken) -> StoreResult<()>;
-    async fn delete_provider_token(&self, provider: &str) -> StoreResult<()>;
-    async fn list_provider_tokens(&self) -> StoreResult<Vec<ProviderToken>>;
-}
-
-#[async_trait::async_trait]
-pub trait StoreAdmin: Send + Sync {
-    async fn health_check(&self) -> StoreResult<()>;
-    async fn schema_version(&self) -> StoreResult<String>;
-}
-
-#[async_trait::async_trait]
-impl WaveStateStore for Store {
-    async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
-        let waves = {
-            let repo = repo.map(str::to_string);
-            run_sqlite(&self.sqlite, move |store| store.list_waves(repo.as_deref())).await
-        }?;
-        Ok(waves)
-    }
-
-    async fn children_of(&self, parent: &LfdId) -> StoreResult<Vec<Wave>> {
-        let parent = parent.clone();
-        run_sqlite(&self.sqlite, move |store| store.list_child_waves(&parent)).await
-    }
-
-    async fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.get_wave(&wave_id)).await
-    }
-
-    async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
-        let name = name.to_string();
-        run_sqlite(&self.sqlite, move |store| store.get_wave_by_name(&name)).await
-    }
-
-    async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
-        {
-            let wave = wave.clone();
-            run_sqlite(&self.sqlite, move |store| store.create_wave(&wave)).await
-        }
-    }
-
-    async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
-        {
-            let wave = wave.clone();
-            run_sqlite(&self.sqlite, move |store| store.update_wave(&wave)).await
-        }
-    }
-
-    async fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
-        {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
-        }
-    }
-
-    async fn list_runs(
-        &self,
-        wave_id: Option<&LfdId>,
-        limit: Option<u32>,
-    ) -> StoreResult<Vec<Run>> {
-        {
-            let wave_id = wave_id.cloned();
-            run_sqlite(&self.sqlite, move |store| {
-                store.list_runs(wave_id.as_ref(), limit)
-            })
-            .await
-        }
-    }
-
-    async fn list_runs_active_or_ended_since(
-        &self,
-        ended_since: time::OffsetDateTime,
-    ) -> StoreResult<Vec<Run>> {
-        {
-            run_sqlite(&self.sqlite, move |store| {
-                store.list_runs_active_or_ended_since(ended_since)
-            })
-            .await
-        }
-    }
-
-    async fn get_run(&self, run_id: &LfdId) -> StoreResult<Option<Run>> {
-        {
-            let run_id = run_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.get_run(&run_id)).await
-        }
-    }
-
-    async fn get_active_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
-        {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.get_active_run(&wave_id)).await
-        }
-    }
-
-    async fn count_active_runs(&self, wave_id: &LfdId) -> StoreResult<u32> {
-        {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.count_active_runs(&wave_id)).await
-        }
-    }
-
-    async fn get_latest_run(&self, wave_id: &LfdId) -> StoreResult<Option<Run>> {
-        {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.get_latest_run(&wave_id)).await
-        }
-    }
-
-    async fn create_run(&self, run: &Run) -> StoreResult<()> {
-        {
-            let run = run.clone();
-            run_sqlite(&self.sqlite, move |store| store.create_run(&run)).await
-        }
-    }
-
-    async fn update_run(&self, run: &Run) -> StoreResult<()> {
-        {
-            let run = run.clone();
-            run_sqlite(&self.sqlite, move |store| store.update_run(&run)).await
-        }
-    }
-
-    async fn get_live_pr_state(
-        &self,
-        repo_id: &str,
-        pr_number: u32,
-    ) -> StoreResult<Option<LivePullRequestState>> {
-        {
-            let repo_id = repo_id.to_string();
-            run_sqlite(&self.sqlite, move |store| {
-                store.get_live_pr_state(&repo_id, pr_number)
-            })
-            .await
-        }
-    }
-
-    async fn upsert_live_pr_state(&self, state: &LivePullRequestState) -> StoreResult<()> {
-        {
-            let state = state.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.upsert_live_pr_state(&state)
-            })
-            .await
-        }
-    }
-
-    async fn list_attention_items(
-        &self,
-        status: Option<AttentionStatus>,
-        kind: Option<AttentionKind>,
-    ) -> StoreResult<Vec<AttentionItem>> {
-        {
-            run_sqlite(&self.sqlite, move |store| {
-                store.list_attention_items(status, kind)
-            })
-            .await
-        }
-    }
-
-    async fn get_attention_item(&self, attention_id: &LfdId) -> StoreResult<Option<AttentionItem>> {
-        {
-            let attention_id = attention_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.get_attention_item(&attention_id)
-            })
-            .await
-        }
-    }
-
-    async fn find_attention_item_for_run(
-        &self,
-        run_id: &LfdId,
-        kind: AttentionKind,
-    ) -> StoreResult<Option<AttentionItem>> {
-        {
-            let run_id = run_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.find_attention_item_for_run(&run_id, kind)
-            })
-            .await
-        }
-    }
-
-    async fn upsert_attention_item(&self, item: &AttentionItem) -> StoreResult<()> {
-        {
-            let item = item.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.upsert_attention_item(&item)
-            })
-            .await
-        }
-    }
-
-    async fn delete_attention_item(&self, attention_id: &LfdId) -> StoreResult<u32> {
-        {
-            let attention_id = attention_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.delete_attention_item(&attention_id)
-            })
-            .await
-        }
-    }
-
-    async fn get_summary(&self, wave_id: &LfdId) -> StoreResult<Option<Summary>> {
-        {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.get_summary(&wave_id)).await
-        }
-    }
-
-    async fn upsert_summary(&self, summary: &Summary) -> StoreResult<()> {
-        {
-            let summary = summary.clone();
-            run_sqlite(&self.sqlite, move |store| store.upsert_summary(&summary)).await
-        }
-    }
-
-    async fn list_chat_memory_blocks(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMemoryBlock>> {
-        {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.list_chat_memory_blocks(&wave_id)
-            })
-            .await
-        }
-    }
-
-    async fn upsert_chat_memory_block(&self, block: &ChatMemoryBlock) -> StoreResult<()> {
-        {
-            let block = block.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.upsert_chat_memory_block(&block)
-            })
-            .await
-        }
-    }
-
-    async fn delete_chat_memory_block(&self, wave_id: &LfdId, name: &str) -> StoreResult<()> {
-        {
-            let wave_id = wave_id.clone();
-            let name = name.to_string();
-            run_sqlite(&self.sqlite, move |store| {
-                store.delete_chat_memory_block(&wave_id, &name)
-            })
-            .await
-        }
-    }
-
-    async fn list_chat_messages(&self, wave_id: &LfdId) -> StoreResult<Vec<ChatMessage>> {
-        {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.list_chat_messages(&wave_id)
-            })
-            .await
-        }
-    }
-
-    async fn create_chat_message(&self, message: &ChatMessage) -> StoreResult<()> {
-        {
-            let message = message.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.create_chat_message(&message)
-            })
-            .await
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl RepoStore for Store {
-    async fn list_repos(&self) -> StoreResult<Vec<Repo>> {
-        {
-            run_sqlite(&self.sqlite, |store| store.list_repos()).await
-        }
-    }
-
-    async fn get_repo(&self, path: &str) -> StoreResult<Option<Repo>> {
-        {
-            let path = path.to_string();
-            run_sqlite(&self.sqlite, move |store| store.get_repo(&path)).await
-        }
-    }
-
-    async fn upsert_repo(&self, repo: &Repo) -> StoreResult<()> {
-        {
-            let repo = repo.clone();
-            run_sqlite(&self.sqlite, move |store| store.upsert_repo(&repo)).await
-        }
-    }
-
-    async fn delete_repo(&self, path: &str) -> StoreResult<()> {
-        {
-            let path = path.to_string();
-            run_sqlite(&self.sqlite, move |store| store.delete_repo(&path)).await
-        }
-    }
-
-    async fn get_repo_by_repo_id(&self, repo_id: &RepoId) -> StoreResult<Option<Repo>> {
-        {
-            let repo_id = repo_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.get_repo_by_repo_id(&repo_id)
-            })
-            .await
-        }
-    }
-
-    async fn list_edges(&self) -> StoreResult<Vec<RepoEdge>> {
-        {
-            run_sqlite(&self.sqlite, |store| store.list_edges()).await
-        }
-    }
-
-    async fn add_edge(&self, edge: &RepoEdge) -> StoreResult<()> {
-        {
-            let edge = edge.clone();
-            run_sqlite(&self.sqlite, move |store| store.add_edge(&edge)).await
-        }
-    }
-
-    async fn remove_edge(&self, parent_id: &RepoId, child_id: &RepoId) -> StoreResult<()> {
-        {
-            let parent_id = parent_id.clone();
-            let child_id = child_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.remove_edge(&parent_id, &child_id)
-            })
-            .await
-        }
-    }
-
-    async fn children(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
-        {
-            let repo_id = repo_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.children(&repo_id)).await
-        }
-    }
-
-    async fn parents(&self, repo_id: &RepoId) -> StoreResult<Vec<Repo>> {
-        {
-            let repo_id = repo_id.clone();
-            run_sqlite(&self.sqlite, move |store| store.parents(&repo_id)).await
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl ExecutionStore for Store {
-    async fn list_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>> {
-        {
-            let run_id = run_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.list_fork_runs(&run_id, step_index)
-            })
-            .await
-        }
-    }
-
-    async fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()> {
-        {
-            let fork_run = fork_run.clone();
-            run_sqlite(&self.sqlite, move |store| store.upsert_fork_run(&fork_run)).await
-        }
-    }
-
-    async fn list_orphaned_fork_runs(&self) -> StoreResult<Vec<ForkRun>> {
-        {
-            run_sqlite(&self.sqlite, |store| store.list_orphaned_fork_runs()).await
-        }
-    }
-
-    async fn delete_fork_runs(&self, run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
-        {
-            let run_id = run_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.delete_fork_runs(&run_id, step_index)
-            })
-            .await
-        }
-    }
-
-    async fn fail_orphaned_runs(&self) -> StoreResult<u32> {
-        {
-            run_sqlite(&self.sqlite, |store| store.fail_orphaned_runs()).await
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl ControlSessionStore for Store {
-    async fn create_session(&self, session: &Session) -> StoreResult<()> {
-        {
-            let session = session.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.create_control_session(&session)
-            })
-            .await
-        }
-    }
-
-    async fn get_session(&self, session_id: &LfdId) -> StoreResult<Option<Session>> {
-        {
-            let session_id = session_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.get_control_session(&session_id)
-            })
-            .await
-        }
-    }
-
-    async fn list_sessions(
-        &self,
-        wave_id: Option<&LfdId>,
-        statuses: Option<&[SessionStatus]>,
-    ) -> StoreResult<Vec<Session>> {
-        {
-            let wave_id = wave_id.cloned();
-            let statuses = statuses.map(|values| values.to_vec());
-            run_sqlite(&self.sqlite, move |store| {
-                store.list_control_sessions(wave_id.as_ref(), statuses.as_deref())
-            })
-            .await
-        }
-    }
-
-    async fn list_recent_sessions(
-        &self,
-        wave_id: &LfdId,
-        completed_since: i64,
-    ) -> StoreResult<Vec<Session>> {
-        {
-            let wave_id = wave_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.list_recent_control_sessions(&wave_id, completed_since)
-            })
-            .await
-        }
-    }
-
-    async fn get_active_session_for_run(&self, run_id: &LfdId) -> StoreResult<Option<Session>> {
-        {
-            let run_id = run_id.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.get_active_control_session_for_run(&run_id)
-            })
-            .await
-        }
-    }
-
-    async fn update_session(&self, session: &Session) -> StoreResult<()> {
-        {
-            let session = session.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.update_control_session(&session)
-            })
-            .await
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl TokenStore for Store {
-    async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>> {
-        {
-            let provider = provider.to_string();
-            run_sqlite(&self.sqlite, move |store| {
-                store.get_provider_token(&provider)
-            })
-            .await
-        }
-    }
-
-    async fn upsert_provider_token(&self, token: &ProviderToken) -> StoreResult<()> {
-        {
-            let token = token.clone();
-            run_sqlite(&self.sqlite, move |store| {
-                store.upsert_provider_token(&token)
-            })
-            .await
-        }
-    }
-
-    async fn delete_provider_token(&self, provider: &str) -> StoreResult<()> {
-        {
-            let provider = provider.to_string();
-            run_sqlite(&self.sqlite, move |store| {
-                store.delete_provider_token(&provider)
-            })
-            .await
-        }
-    }
-
-    async fn list_provider_tokens(&self) -> StoreResult<Vec<ProviderToken>> {
-        {
-            run_sqlite(&self.sqlite, |store| store.list_provider_tokens()).await
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl StoreAdmin for Store {
-    async fn health_check(&self) -> StoreResult<()> {
-        {
-            run_sqlite(&self.sqlite, |store| store.health_check()).await
-        }
-    }
-
-    async fn schema_version(&self) -> StoreResult<String> {
-        {
-            run_sqlite(&self.sqlite, |store| store.schema_version()).await
-        }
-    }
 }
 
 pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
@@ -1860,10 +1359,7 @@ pub type SharedStore = Arc<Store>;
 #[cfg(test)]
 mod tests {
     use super::sqlite::SqliteStore;
-    use super::{
-        open_store, ExecutionStore, ForkRun, ForkRunStatus, PmSnapshotRow, RunEventRow,
-        StorageConfig,
-    };
+    use super::{open_store, ForkRun, ForkRunStatus, PmSnapshotRow, RunEventRow, StorageConfig};
     use crate::lfd::id::LfdId;
     use crate::lfd::types::{
         ChatMemoryBlock, Repo, RepoEdge, RepoId, Run, RunStatus, Summary, Wave, WaveStatus,

@@ -363,29 +363,30 @@ opens PRs, and merges code, so it requires an explicit human-authorized run.
 Until that gate runs, keep the provider acceptance window and live UX quality
 as evidence gaps—not reasons to invent more architecture.
 
-## Current reduction: make the outbox the one child-to-Wave path
+## Current reduction: one concrete store
 
-Provider control is now one private implementation shared by Project and Task
-Sessions. Their runners retain checkout, convergence, observation, PR, and PM
-policy; follow-up, steer, interrupt, decide, and receipt settlement cannot
-drift by domain.
+Project and Task events now nudge the same durable outbox drain. The live Wave
+receives both immediately; a stopped Wave catches up on serve. No child may
+select a payload or write the Wave journal.
 
-The next fault is the return path. Both child kinds commit observable events
-and an outbox row in one transaction, but only Tasks have an immediate HTTP
-door into the Wave. That door accepts a Task event id and resolves the ledger
-again, duplicating the outbox observer. Project events wait for the ten-second
-poll. The asymmetry makes Project supervision feel slower precisely where the
-Wave needs to remain in control.
+The persistence facade still carries an older form of speculative
+flexibility. `WaveStateStore`, `RepoStore`, `ExecutionStore`,
+`ControlSessionStore`, `TokenStore`, and `StoreAdmin` each have exactly one
+implementation: `Store`. Nothing consumes their trait objects. Every public
+inherent method calls its own trait method, which then copies owned arguments
+and calls SQLite. This doubles the API surface and hides the actual owner
+without providing substitution, isolation, or a test seam.
 
-Use the outbox as the only authority:
+Collapse it:
 
-- replace the Task-specific event door with one bodyless child-observation
-  nudge;
-- have the live Wave drain every pending Project/Task outbox row through the
-  same typed, idempotent observer;
-- issue the same best-effort nudge after observable Project and Task events;
-- let a stopped Wave do nothing—the durable rows drain on its next serve;
-- delete the Task-only wire DTO and direct ledger lookup.
+- keep `Store` as the one asynchronous registry API;
+- move each `spawn_blocking` SQLite call into the corresponding inherent
+  method;
+- expose the one trait-only operation (`list_orphaned_fork_runs`) directly;
+- delete six traits, six impl blocks, and five unused trait-object accessors;
+- retain `SqliteStore` as the synchronous implementation detail and preserve
+  every transaction boundary and query unchanged.
 
-This is not a generic execution API. It is a wake signal over already-durable
-facts, and it cannot inject prose or choose an event payload.
+This reduction is intentionally orthogonal to Wave/Project/Task persistence.
+It removes an abstraction with no second implementation before splitting the
+remaining modules by real ownership.

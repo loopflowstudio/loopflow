@@ -1206,10 +1206,6 @@ One private macro shares mechanics without sharing identity:
 
 ```rust
 uuid_id!(WaveId);
-uuid_id!(ControlSessionId);
-uuid_id!(AttentionId);
-uuid_id!(SummaryId);
-uuid_id!(ChatMessageId);
 uuid_id!(RunId);
 uuid_id!(ProcessId);
 ```
@@ -1230,14 +1226,6 @@ pub struct Wave {
     pub created_at: Option<OffsetDateTime>,
 }
 
-pub struct Session {
-    pub id: ControlSessionId,
-    pub wave_id: WaveId,
-    pub run_id: Option<RunId>,
-    pub parent_session_id: Option<ControlSessionId>,
-    // ...
-}
-
 pub struct TraceCaptureContext {
     pub run_id: RunId,
     pub process_id: ProcessId,
@@ -1246,10 +1234,10 @@ pub struct TraceCaptureContext {
 ```
 
 Wave references on Project Sessions, Task Sessions, supervisors, command
-sources, summaries, attention, chat, and store APIs all use `WaveId`.
-Attention, summary, chat-message, control-session, trace-run, and process
-identities use their corresponding types. Raw database row decoding constructs
-the exact type at the storage boundary.
+sources, and store APIs all use `WaveId`. Trace runs and processes use `RunId`
+and `ProcessId`. Raw database row decoding constructs the exact type at the
+storage boundary. Generic control sessions, attention, summaries, and stored
+chat messages are deleted rather than receiving new ids.
 
 The existing `engine::identity::WaveId` is not a Wave id. It becomes a flat
 `WorktreeName`: one author plus one `WorktreeSegment`, projected as
@@ -1321,3 +1309,97 @@ Fresh-schema tests prove every live store path. Compile-time type separation is
 demonstrated by APIs accepting concrete ids; do not add compile-fail test
 infrastructure solely for this refactor. `scratch/review.md` remains the only
 scratch file.
+
+## Product correction — `lf wave` and Task workspaces
+
+The public Wave command names the product object, not its listener
+implementation:
+
+```text
+lf wave <name> [--force]
+```
+
+This replaces `lf serve <name>` without an alias. The per-Wave listener and
+resident pair remain the runtime implementation. Rewrite active docs, built-in
+skills, scripts, Swift launchers, errors, examples, and tests around `lf wave`.
+Historical release records and Wave memory may retain `lfd` or `lf serve` when
+they are describing the system that existed at that time; current product
+guidance may not.
+
+The Mac reduction must preserve the Task workspace as a first-class product
+surface. Every Task Session already owns the exact inputs:
+
+```rust
+pub struct TaskSession {
+    pub id: TaskSessionId,
+    pub worktree: PathBuf,
+    pub branch: String,
+    pub base_commit: String,
+    // ...
+}
+```
+
+Selecting a Task should expose:
+
+```text
+Task
+├── status, direction, supervisor, and PR
+├── changes
+│   ├── changed-file list and diff summary
+│   ├── per-file patch
+│   └── current full-file view/open
+└── terminals
+    ├── one or more embedded Ghostty shells
+    └── Open in Warp
+```
+
+Keep the existing terminal multiplexing machinery: multiple live Ghostty
+surfaces, terminal ordering/selection, and tmux-backed shell lifecycle are
+useful product infrastructure. Retype its records around the Task rather than
+restoring the generic Run/Session hierarchy:
+
+```swift
+struct TaskTerminal: Identifiable, Sendable, Hashable {
+    let id: String
+    let taskSessionId: String
+    let issueIdentifier: String
+    let worktree: String
+    let tmuxName: String
+}
+```
+
+The terminal multiplexer is presentation state. It may preserve several shells
+for a Task and switch among them, but it does not own Task status, provider
+history, worktree identity, or completion. `TaskSession` remains the durable
+domain owner. External Warp opens the same `worktree`; it does not create a
+separate session record.
+
+Task-wide inspection belongs behind Task-shaped `lf` reads rather than Swift
+reconstructing git semantics:
+
+```text
+lf task changes INF-123 --json
+lf task diff INF-123 [path] --json
+lf task file INF-123 <path> --json
+```
+
+Changes compare the Task worktree with its recorded `base_commit` and include
+committed, staged, unstaged, and untracked work. Per-file reads validate that
+the requested relative path remains inside the Task worktree. Large or binary
+files are reported truthfully instead of being forced into text JSON.
+
+### Final vocabulary gate
+
+Before handoff, search all active product surfaces for the deleted design:
+
+```text
+task_capacity
+lfd / lfdb / LFD_*
+lf serve
+generic Run/Session workspace language
+```
+
+Rewrite or delete every active hit in source, current docs, README, website,
+built-in skills, scripts, examples, fixtures, and tests. Keep only explicitly
+historical release notes and Wave memory, where rewriting would falsify the
+record.

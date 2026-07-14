@@ -10,8 +10,8 @@ use crate::child_session::{
     ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
     ChildCommandState, ChildDirective, ChildRef,
 };
-use crate::store::SharedStore;
 use crate::project_session::{ProjectEventKind, ProjectSession, ProjectSessionStatus};
+use crate::store::SharedStore;
 use crate::task::{TaskEventKind, TaskSession, TaskSessionStatus};
 
 use super::{OpsError, OpsResult};
@@ -492,10 +492,10 @@ mod tests {
         ChildCommandKind, ChildCommandSource, ChildCommandState, ChildProcessGeneration,
     };
     use crate::id::WaveId;
-    use crate::wave::Wave;
-    use crate::store::{open_store, StorageConfig};
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
     use crate::session_context::{LinearProjectId, LinearProjectSnapshot};
+    use crate::store::{open_store, StorageConfig};
+    use crate::wave::Wave;
 
     use super::{queue_command, ChildSession};
 

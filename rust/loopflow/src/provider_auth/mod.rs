@@ -2,9 +2,8 @@
 //! providers, token extraction from vendor CLI artifacts, and store-direct
 //! persistence into store provider tokens.
 //!
-//! Shared home — called in-process by `lf auth` and wrapped by the daemon's
-//! HTTP routes. Must not depend on daemon (`lfd`) types; auth lifecycle
-//! notifications go through [`AuthEventSink`]. Auth is poll-only in the base
+//! Shared home — called in-process by `lf auth`. Auth lifecycle notifications
+//! go through [`AuthEventSink`]. Auth is poll-only in the base
 //! wave model (see `scratch/eventing.md` §5), so both the CLI and the HTTP
 //! routes pass [`no_event_sink`] — the store write is the record; a caller
 //! reads it back by querying the provider list.
@@ -37,10 +36,10 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::store::{CredentialType, ProviderToken, SharedStore};
 use crate::provider_auth::credential_socket::{
     AuthStartResponse, CredentialSocketClient, CredentialSocketError,
 };
+use crate::store::{CredentialType, ProviderToken, SharedStore};
 
 const AUTH_URL_TIMEOUT: Duration = Duration::from_secs(20);
 const AUTH_URL_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -793,7 +792,7 @@ impl ProviderAuthService {
         debug!(provider = %provider, ?status, "broker check_status result (no stored token)");
 
         // If the CLI reports Active but we have no stored token, auto-persist it.
-        // This handles providers where the user logged in outside of lfd
+        // This handles providers where the user logged in outside Loopflow
         // (e.g., `doppler login` in a terminal).
         if matches!(&status, AuthStatus::Active { .. }) {
             if let Some(store) = &self.store {
@@ -3582,7 +3581,7 @@ mod tests {
     async fn provider_env_vars_includes_opencode_zen_token_for_opencode_harness() {
         let tmp = tempdir().expect("tempdir");
         let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
-            tmp.path().join("lfd.db"),
+            tmp.path().join("loopflow.db"),
         ))
         .await
         .expect("open sqlite store");
@@ -3746,7 +3745,7 @@ mod tests {
     async fn provider_env_vars_returns_correct_vars_for_mixed_credential_types() {
         let tmp = tempdir().expect("tempdir");
         let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
-            tmp.path().join("lfd.db"),
+            tmp.path().join("loopflow.db"),
         ))
         .await
         .expect("open sqlite store");

@@ -20,9 +20,9 @@ struct WavesView: View {
 
     /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
     /// window). Collapsed to its main worktree for reads — the on-disk `wave/`
-    /// dir holds quick-launch templates that live on main by design, and lfd owns
-    /// the real waves. The `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched
-    /// checkout AS-IS instead (see `resolveLaunchRepo`).
+    /// dir holds quick-launch templates that live on main by design. The
+    /// `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS
+    /// instead (see `resolveLaunchRepo`).
     var initialRepoPath: String? = nil
 
     @Environment(\.palette) private var palette
@@ -34,7 +34,7 @@ struct WavesView: View {
     @State private var repos: [PortfolioRepo] = []
 
     /// Authored waves discovered on disk per repo path: `<repo>/wave/<name>/GOAL.md`.
-    /// Merged with lfd's running waves so not-yet-launched waves are still listed.
+    /// Merged with registered waves so not-yet-launched waves are still listed.
     @State private var authoredWavesByRepo: [String: [AuthoredWaveSnapshot]] = [:]
     @State private var plansByWaveKey: [String: WavePlan] = [:]
 
@@ -44,11 +44,11 @@ struct WavesView: View {
     @State private var didApplyInitialRepo = false
     @State private var didRestoreStickyRepo = false
 
-    /// Synthetic id prefix for an authored-on-disk wave that lfd hasn't created yet.
+    /// Synthetic id prefix for an authored Wave without a registry row yet.
     private static let authoredIdPrefix = "authored:"
 
-    /// All waves across every repo: lfd's running waves merged with waves authored
-    /// on disk that lfd hasn't created yet.
+    /// All waves across every repo: registry rows merged with Waves authored on
+    /// disk that have not been served yet.
     private var allWaves: [WaveViewModel] {
         repos.flatMap { mergedWaves(for: $0) }
     }
@@ -425,11 +425,11 @@ struct WavesView: View {
 
     /// Resolve the launch-provided repo into its (read path, main path, rail label).
     /// Production reads the collapsed main worktree — the on-disk `wave/` dir is
-    /// quick-launch templates that live on main by design, and lfd is the authority
-    /// for real waves. The `LOOPFLOW_DEV_WAVE_REPO` dev override (set by loopflow-dev
-    /// on `run` / `run-debug`) instead reads the launched checkout AS-IS, so a dev
-    /// launch enumerates its own worktree's waves. The rail label is always the
-    /// collapsed main-repo name, so the rail stays clean and worktree-free.
+    /// quick-launch templates that live on main by design. The
+    /// `LOOPFLOW_DEV_WAVE_REPO` dev override (set by loopflow-dev on `run` /
+    /// `run-debug`) instead reads the launched checkout AS-IS, so a dev launch
+    /// enumerates its own worktree's waves. The rail label is always the collapsed
+    /// main-repo name, so the rail stays clean and worktree-free.
     private nonisolated static func resolveLaunchRepo(_ initialPath: String) -> (path: String, mainPath: String, displayName: String) {
         let scanner = RepoScanner()
         let dev = ProcessInfo.processInfo.environment["LOOPFLOW_DEV_WAVE_REPO"]
@@ -477,7 +477,7 @@ struct WavesView: View {
                 } else {
                     // Dev override: the launched worktree stands in for its main
                     // repo. Drop the scanned main row so the worktree is the sole
-                    // row (reads its own wave/ dir + lfd), labeled with the main name.
+                    // row (reads its own wave/ dir + registry), labeled with the main name.
                     result.removeAll { $0.path == launch.mainPath || $0.path == launch.path }
                     result.append(PortfolioRepo(
                         path: launch.path,
@@ -492,7 +492,7 @@ struct WavesView: View {
 
     /// Enumerate each rail repo's authored waves — `<repo>/wave/<name>/GOAL.md`
     /// directories — off the main thread, so the list can offer them as launchable
-    /// rows before lfd has created them.
+    /// rows before they have a registry entry.
     private func refreshAuthoredWaves() async {
         if AppTestMode.current() != nil { return }
         let paths = repos.map(\.path)
@@ -646,7 +646,7 @@ struct WavesView: View {
 
 
 /// Minimal create-wave flow: pick a target repo, name the wave, submit. Creates
-/// the wave against the repo's lfd via `PortfolioRepoState.createWave`.
+/// the Wave files through `PortfolioRepoState.createWave`.
 private struct CreateWaveSheet: View {
     let repos: [PortfolioRepo]
     let initialRepoPath: String?

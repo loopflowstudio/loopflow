@@ -99,7 +99,6 @@ pub struct ProjectSession {
     #[serde(rename = "wave")]
     pub wave_name: String,
     /// Canonical Wave checkout used as the read-only Project control plane.
-    #[serde(rename = "repo")]
     pub control_repo: String,
     pub pm_snapshot_synced_at: i64,
     pub current_directive_version: u32,
@@ -109,7 +108,6 @@ pub struct ProjectSession {
     pub status_at: OffsetDateTime,
     pub iteration: u32,
     pub observation_cursor: i64,
-    #[serde(rename = "state_fingerprint")]
     pub last_state_fingerprint: Option<String>,
     pub agent: String,
     pub provider: String,

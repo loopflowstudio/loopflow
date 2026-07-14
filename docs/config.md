@@ -145,26 +145,6 @@ Full content of files modified on the current branch.
 
 Use `--diff-files` when the agent needs complete file bodies, not just line changes. Combine with `--diff` when the exact patch also matters.
 
-### Summaries
-
-Token-limited overviews of large directories. Configure paths and budget:
-
-```yaml
-summary_tokens: 25000
-
-summaries:
-  - path: src
-  - path: lib
-    tokens: 5000
-```
-
-Summaries are daemon-managed context (`lfd`) for wave runs, not direct `lf` flags.
-
-| | |
-|---|---|
-| **CLI (`lf`)** | none |
-| **Daemon (`lfd`)** | auto-refreshed for waves |
-
 ### Clipboard
 
 Paste content (errors, stack traces, context) into the prompt.
@@ -220,7 +200,8 @@ Default model for all skills.
 
 Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for specific models.
 
-Gemini is supported for direct `lf` commands. Session-based features (waves, `lfd`) require `claude`, `codex`, or `opencode`.
+Gemini is supported for direct `lf` commands. Wave, Project, and Task Sessions
+require `claude`, `codex`, or `opencode`.
 
 OpenCode passes model strings through to its own provider system:
 
@@ -317,23 +298,6 @@ the main repo as an extra writable directory. This keeps normal agent
 permissions, but lets Git write the linked worktree index under
 `<main>/.git/worktrees/<worktree>/` when the agent stages, commits, rebases, or
 runs mechanical `lf` commands.
-
-### Autoprune
-
-Automatically remove worktrees when their PRs merge. Requires `lfd` daemon running.
-
-| | |
-|---|---|
-| **Config** | `autoprune: true` |
-| **Default** | `false` |
-
-With options:
-
-```yaml
-autoprune:
-  enabled: true
-  poll_interval_seconds: 60  # default
-```
 
 ### Session Launch
 

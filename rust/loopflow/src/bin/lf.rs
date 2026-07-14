@@ -1021,7 +1021,7 @@ fn main() -> anyhow::Result<()> {
     let explicit_wave = cli
         .wave
         .as_deref()
-        .map(loopflow::lf::session::resolve_explicit_wave)
+        .map(loopflow::engine::wave_context::resolve_explicit_wave)
         .transpose()?;
     if let Some(wave) = &explicit_wave {
         cli.wave = Some(wave.name().to_string());
@@ -1029,29 +1029,19 @@ fn main() -> anyhow::Result<()> {
     // One resolved wave identity drives prompt context, registry attribution,
     // journaling, and every child process. An explicit wave is also the
     // default bus channel for this invocation.
-    let _explicit_wave_env = explicit_wave
-        .as_ref()
-        .map(|wave| EnvGuard::set(loopflow::lf::session::WAVE_ID_ENV, wave.id().to_string()));
-    let _explicit_channel_env = explicit_wave
-        .as_ref()
-        .map(|wave| EnvGuard::set(loopflow::lf::session::CHANNEL_ENV, wave.name().to_string()));
+    let _explicit_wave_env = explicit_wave.as_ref().map(|wave| {
+        EnvGuard::set(
+            loopflow::engine::wave_context::WAVE_ID_ENV,
+            wave.id().to_string(),
+        )
+    });
+    let _explicit_channel_env = explicit_wave.as_ref().map(|wave| {
+        EnvGuard::set(
+            loopflow::engine::wave_context::CHANNEL_ENV,
+            wave.name().to_string(),
+        )
+    });
     debug!(?cli, "parsed CLI arguments");
-
-    // Inside a wave context, agent-launching runs register themselves as lfd
-    // sessions; every other command still flips LF_SESSION_ID to "inherited"
-    // for its children (see lf::session for the env contract).
-    let registration = match run_label(&cli) {
-        Some(skill) => loopflow::lf::session::register_run(
-            &skill,
-            cli.model.as_deref().unwrap_or("lf"),
-            &raw_args,
-            explicit_wave.as_ref(),
-        ),
-        None => {
-            loopflow::lf::session::mark_child_sessions_inherited();
-            None
-        }
-    };
 
     let result = if cli.list {
         in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
@@ -1111,8 +1101,8 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Cron { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
             }
-            Some(Commands::Serve { name, force }) => {
-                in_repo_runtime(&args, |_| loopflow::wave::serve(name, *force))
+            Some(Commands::Wave { name, force }) => {
+                in_repo_runtime(&args, |_| loopflow::wave::run(name, *force))
             }
             Some(Commands::Stop { name }) => in_repo_runtime(&args, |_| loopflow::wave::stop(name)),
             Some(Commands::Resident { name }) => {
@@ -1254,62 +1244,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    if let Some(registration) = registration {
-        registration.complete(if result.is_ok() { 0 } else { 1 });
-    }
     result
-}
-
-/// Session label for agent-launching invocations. Utility commands return
-/// `None`; `lf serve` also returns `None` because its lifecycle owner registers
-/// the WaveAgent row.
-fn run_label(cli: &Cli) -> Option<String> {
-    if cli.list {
-        return None;
-    }
-    match &cli.command {
-        Some(Commands::Inline { .. }) => Some("inline".to_string()),
-        Some(Commands::Flow { name, .. }) | Some(Commands::Skill { name, .. }) => {
-            Some(name.clone())
-        }
-        Some(Commands::External(args)) => args
-            .first()
-            .map(|skill| skill.trim_end_matches(':').to_string()),
-        None => Some("interactive".to_string()),
-        Some(Commands::Pr { .. })
-        | Some(Commands::Wt { .. })
-        | Some(Commands::Rebase { .. })
-        | Some(Commands::Commit { .. })
-        | Some(Commands::Auth { .. })
-        | Some(Commands::Release { .. })
-        | Some(Commands::Pm { .. })
-        | Some(Commands::SyncSkills { .. })
-        | Some(Commands::Cron { .. })
-        | Some(Commands::Serve { .. })
-        | Some(Commands::Stop { .. })
-        | Some(Commands::Resident { .. })
-        | Some(Commands::FlowStep { .. })
-        | Some(Commands::Usage { .. })
-        | Some(Commands::Context { .. })
-        | Some(Commands::Tokens { .. })
-        | Some(Commands::Doctor { .. })
-        | Some(Commands::Ls { .. })
-        | Some(Commands::Status { .. })
-        | Some(Commands::Runs { .. })
-        | Some(Commands::Trace { .. })
-        | Some(Commands::Chat { .. })
-        | Some(Commands::Radio { .. })
-        | Some(Commands::RetiredSub { .. })
-        | Some(Commands::Memory { .. })
-        | Some(Commands::Ssh { .. })
-        | Some(Commands::Task { .. })
-        | Some(Commands::TaskRunner { .. })
-        | Some(Commands::ProjectRunner { .. }) => None,
-        Some(Commands::Project {
-            cmd: ProjectCommand::Promote { .. },
-        }) => Some("project-promote".to_string()),
-        Some(Commands::Project { .. }) => None,
-    }
 }
 
 #[cfg(test)]
@@ -1405,17 +1340,17 @@ mod tests {
     /// Serving a mind is its own command. Nothing about the ambient
     /// environment can turn one of these into the other.
     #[test]
-    fn serve_and_resident_are_distinct_entrypoints() {
-        let served = Cli::try_parse_from(["lf", "serve", "goals"]).unwrap();
+    fn wave_and_resident_are_distinct_entrypoints() {
+        let served = Cli::try_parse_from(["lf", "wave", "goals"]).unwrap();
         assert!(matches!(
             served.command,
-            Some(Commands::Serve { name, force: false }) if name == "goals"
+            Some(Commands::Wave { name, force: false }) if name == "goals"
         ));
 
-        let forced = Cli::try_parse_from(["lf", "serve", "goals", "--force"]).unwrap();
+        let forced = Cli::try_parse_from(["lf", "wave", "goals", "--force"]).unwrap();
         assert!(matches!(
             forced.command,
-            Some(Commands::Serve { force: true, .. })
+            Some(Commands::Wave { force: true, .. })
         ));
 
         let stopped = Cli::try_parse_from(["lf", "stop", "goals"]).unwrap();
@@ -1433,22 +1368,22 @@ mod tests {
         ));
     }
 
-    /// `wave` became `serve`. The parser can't reject it outright — the
+    /// `serve` is retired. The parser can't reject it outright — the
     /// `external_subcommand` catch-all claims any unmatched verb — so the
     /// property that actually holds is that it no longer names a built-in
     /// command. The exec door denies `External` on top of that.
     #[test]
-    fn old_wave_surface_is_no_longer_a_builtin_command() {
-        let cli = Cli::try_parse_from(["lf", "wave", "goals"]).expect("falls through to external");
+    fn old_serve_surface_is_no_longer_a_builtin_command() {
+        let cli = Cli::try_parse_from(["lf", "serve", "goals"]).expect("falls through to external");
         assert!(
-            matches!(cli.command, Some(Commands::External(parts)) if parts[0] == "wave"),
-            "`wave` survives only as an external verb, not a wave command"
+            matches!(cli.command, Some(Commands::External(parts)) if parts[0] == "serve"),
+            "`serve` survives only as an external verb, not a built-in"
         );
         assert!(matches!(
-            Cli::try_parse_from(["lf", "serve", "goals"])
+            Cli::try_parse_from(["lf", "wave", "goals"])
                 .expect("the replacement")
                 .command,
-            Some(Commands::Serve { .. })
+            Some(Commands::Wave { .. })
         ));
     }
 

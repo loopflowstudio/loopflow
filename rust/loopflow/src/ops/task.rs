@@ -15,11 +15,11 @@ use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
 use crate::id::WaveId;
-use crate::store::{open_existing_store, SharedStore, StoreError};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::session_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
 };
+use crate::store::{open_existing_store, SharedStore, StoreError};
 use crate::task::{
     PmWritebackOperation, PmWritebackState, TaskEventKind, TaskSession, TaskSessionStatus,
 };
@@ -156,7 +156,7 @@ fn command_source(session: &TaskSession) -> OpsResult<ChildCommandSource> {
             return Err(task_error("ambient Project Session id is not valid UTF-8"))
         }
     }
-    let ambient = match std::env::var(crate::lf::session::WAVE_ID_ENV) {
+    let ambient = match std::env::var(crate::engine::wave_context::WAVE_ID_ENV) {
         Ok(value) => Some(
             WaveId::parse(&value)
                 .map_err(|error| task_error(format!("invalid ambient Wave id: {error}")))?,
@@ -237,7 +237,7 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
         .map_err(|error| task_error(error.to_string()))?;
     let plan = plan_placement(&main_repo, segment)
         .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
-    if plan.strategy != PlacementStrategy::CreateRoot {
+    if plan.strategy != PlacementStrategy::Create {
         return Err(task_error(format!(
             "task worktree or branch already exists without a Task Session: {} ({})",
             plan.worktree_path.display(),
@@ -558,7 +558,10 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
     ];
     let generation_text = generation.to_string();
     let environment = [
-        (crate::lf::session::WAVE_ID_ENV, session.wave_id.as_str()),
+        (
+            crate::engine::wave_context::WAVE_ID_ENV,
+            session.wave_id.as_str(),
+        ),
         ("LF_TASK_SESSION_ID", session.id.as_str()),
         ("LF_TASK_GENERATION", generation_text.as_str()),
     ];

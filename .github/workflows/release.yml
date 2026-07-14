@@ -40,11 +40,11 @@ jobs:
         with:
           shared-key: release-${{ matrix.target }}
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} -p loopflow
+        run: cargo build --release --target ${{ matrix.target }} -p loopflow --bin lf
       - name: Package
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../lf-${{ matrix.target }}.tar.gz lf lfd
+          tar czf ../../../lf-${{ matrix.target }}.tar.gz lf
       - uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.target }}
@@ -191,7 +191,7 @@ jobs:
             version="latest"
 
             usage() {
-              echo "Usage: install.sh [--version <X>] [--no-interactive] [VERSION]" >&2
+              echo "Usage: install.sh [--version <X>] [VERSION]" >&2
             }
 
             while [ $# -gt 0 ]; do
@@ -211,9 +211,6 @@ jobs:
                   exit 1
                   ;;
                 --version=*) version="${1#--version=}"; shift ;;
-                # Accepted for back-compat: this installer only fetches binaries
-                # and is already non-interactive. Provider onboarding is `lfd install`.
-                --no-interactive) shift ;;
                 -*) echo "Unknown option: $1" >&2; usage; exit 1 ;;
                 *) version="$1"; shift ;;
               esac
@@ -244,14 +241,12 @@ jobs:
             fi
             tar -xzf "$tarball" -C "$tmpdir"
 
-            for bin in lf lfd; do
-              src="$tmpdir/$bin"
-              dst="$install_dir/$bin"
-              tmp="$install_dir/.${bin}.tmp.$$"
-              cp "$src" "$tmp"
-              chmod +x "$tmp"
-              mv -f "$tmp" "$dst"
-            done
+            src="$tmpdir/lf"
+            dst="$install_dir/lf"
+            tmp="$install_dir/.lf.tmp.$$"
+            cp "$src" "$tmp"
+            chmod +x "$tmp"
+            mv -f "$tmp" "$dst"
 
             echo "Installed to $install_dir/lf"
 
@@ -299,23 +294,3 @@ jobs:
             echo "$output"
             exit 1
           fi
-
-  publish-pypi:
-    needs: [build-dmg]
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-          fetch-depth: 0
-      - uses: astral-sh/setup-uv@v7
-      - name: Build package
-        run: uv build
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist/
-          skip-existing: true

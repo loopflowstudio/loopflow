@@ -7,37 +7,14 @@ title: Troubleshooting
 
 Common issues and solutions.
 
-## `lfd` is not running
+## A Wave is not running
 
-**Symptom:** GitHub webhooks, HTTP registry reads, or host credential refreshes
-stop working, or `curl http://127.0.0.1:2486/health` fails.
-
-The Loopflow app does not require `lfd`. It invokes its bundled `lf` and talks
-to each served Wave directly. Diagnose the Wave separately with:
+The Loopflow app invokes its bundled `lf` and talks directly to each Wave.
+Inspect the selected Wave, then start it in the foreground:
 
 ```bash
 lf status <wave> --json
-lf serve <wave>
-```
-
-If you use the optional `lfd` host service, check whether it is installed:
-
-Check if installed:
-
-```bash
-launchctl list | grep lfd
-```
-
-Reinstall:
-
-```bash
-lfd install
-```
-
-Run in foreground to debug:
-
-```bash
-lfd serve
+lf wave <wave>
 ```
 
 ## Task Session stops advancing
@@ -152,4 +129,4 @@ If an agent CLI is missing, install that vendor's CLI and rerun `lf init`.
 
 ## See Also
 
-[Configuration](config.md) · [Waves](waves.md) · [`lfd` reference](lfd.md)
+[Configuration](config.md) · [Waves](waves.md)

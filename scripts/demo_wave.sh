@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# demo_wave.sh — guided live demo of the wave (`lf serve`), two processes:
+# demo_wave.sh — guided live demo of the Wave (`lf wave`), two processes:
 # the LISTENER (journal pens, doors, supervisor — vendor-free) and the
-# RESIDENT it spawns (`lf __resident`, with private server env, running from
+# RESIDENT it spawns (`lf __resident`, with private listener env, running from
 # the clean canonical checkout).
 #
 # Walks the Wave surface against a throwaway repo: boot + discovery (both
@@ -163,7 +163,7 @@ git -C "$DEMO_REPO" add -A
 git -C "$DEMO_REPO" commit -qm "seed demo wave"
 say "repo: $DEMO_REPO"
 say "wave: wave/$WAVE/GOAL.md (maintain TODO.md, one small improvement per pass)"
-say "note: the server registers a '$WAVE' wave row in this machine's registry (~/.lf)"
+say "note: the Wave registers a '$WAVE' row in this machine's registry (~/.lf)"
 
 ENDPOINT_FILE="$DEMO_REPO/wave/$WAVE/.wave-endpoint"
 JOURNAL="$DEMO_REPO/.lf/journal/waves/$WAVE/journal.jsonl"
@@ -172,13 +172,13 @@ pause
 
 # ---------- launch --------------------------------------------------------
 
-hr "launch · lf serve $WAVE (detached tmux: $TMUX_SESSION)"
-tmux new-session -d -s "$TMUX_SESSION" -c "$DEMO_REPO" "$LF_BIN loop $WAVE"
+hr "launch · lf wave $WAVE (detached tmux: $TMUX_SESSION)"
+tmux new-session -d -s "$TMUX_SESSION" -c "$DEMO_REPO" "$LF_BIN wave $WAVE"
 say "one command, two processes: the listener boots, then spawns the resident"
 say "the listener and resident both narrate into the same pane."
 say "watch it live in another terminal:  tmux attach -r -t $TMUX_SESSION"
 poll "endpoint published ($ENDPOINT_FILE)" 90 test -s "$ENDPOINT_FILE" || {
-    warn "server never published its endpoint; last tmux output:"
+    warn "Wave listener never published its endpoint; last tmux output:"
     tmux capture-pane -p -t "$TMUX_SESSION" | tail -20
     exit 1
 }
@@ -272,9 +272,9 @@ pause
 
 # ---------- act 6: restart, thread intact -------------------------------------
 
-hr "act 6 · restart the server mid-conversation"
+hr "act 6 · restart the Wave mid-conversation"
 TURNS_BEFORE="$(curl -sf "http://$ADDR/health" | jq -r .turns)"
-say "turns before restart: $TURNS_BEFORE — Ctrl-C the server, boot a new one"
+say "turns before restart: $TURNS_BEFORE — Ctrl-C the Wave, boot a new one"
 tmux send-keys -t "$TMUX_SESSION" C-c
 poll "endpoint removed on shutdown" 30 sh -c "! test -e '$ENDPOINT_FILE'" || true
 tmux send-keys -t "$TMUX_SESSION" "$LF_BIN wave $WAVE" Enter
@@ -305,10 +305,10 @@ if [[ -z "$ORPHANS" ]]; then
 else
     warn "orphaned codex pids: $ORPHANS"
 fi
-if ! pgrep -f "lf serve $WAVE" >/dev/null 2>&1; then
+if ! pgrep -f "lf wave $WAVE" >/dev/null 2>&1; then
     ok "no orphaned resident (the listener SIGTERMs its tenant on shutdown)"
 else
-    warn "Loop process still running: $(pgrep -f "lf serve $WAVE")"
+    warn "Wave process still running: $(pgrep -f "lf wave $WAVE")"
 fi
 journal_types
 say "demo repo kept for inspection: $DEMO_REPO"

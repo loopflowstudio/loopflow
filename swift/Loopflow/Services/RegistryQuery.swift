@@ -1,8 +1,8 @@
 // RegistryQuery — discovery and history as `lf` queries over the machine
-// registry (`lfdb`), not a streaming center.
+// registry store, not a streaming center.
 //
 // The wave model has no telemetry hub (see `scratch/eventing.md`): durable
-// facts — which waves exist (running and stopped), their work, and attention
+// facts — which waves exist (running and stopped) and their work
 // — are QUERIES against the shared SQLite ledger, served by the daemonless `lf`
 // CLI. Live motion is a per-wave SSE stream (`WaveChatConnection`), never this.
 //
@@ -51,16 +51,14 @@ public struct RegistryQuery: Sendable {
         return waves.filter { $0.repo.normalizedFilePath == target }
     }
 
-    /// One wave's Project/Task work and attention, plus the live loop state
-    /// when a server is answering.
-    public func status(wave: String, waveId: String, cwd: String?) async throws
+    /// One wave's Project/Task work, plus the live loop state when its resident
+    /// is answering.
+    public func status(wave: String, cwd: String?) async throws
         -> WaveStatusResult {
         let stdout = try await run(["status", wave, "--json"], cwd)
         let snapshot = try Self.decode(WaveStatusSnapshot.self, from: stdout)
-        let attention = snapshot.attention.map { $0.toItem(waveId: waveId) }
         return WaveStatusResult(
             workMap: WaveWorkMap(objective: snapshot.wave.goal, projects: snapshot.projects),
-            attention: attention,
             loopState: snapshot.loopState
         )
     }
@@ -203,7 +201,6 @@ struct WaveSnapshot: Decodable {
     let paused: Bool
     let goal: String
     let repo: String
-    let taskCapacity: Int
     let activeTasks: Int
     let activeProjects: Int
     let live: Bool
@@ -213,7 +210,6 @@ struct WaveSnapshot: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, status, paused, goal, repo, live, endpoint
-        case taskCapacity = "task_capacity"
         case activeTasks = "active_tasks"
         case activeProjects = "active_projects"
         case createdAt = "created_at"
@@ -236,43 +232,10 @@ struct WaveStatusSnapshot: Decodable {
     let wave: WaveSnapshot
     let loopState: String?
     let projects: [WaveProjectWork]
-    let attention: [AttentionSnapshot]
 
     enum CodingKeys: String, CodingKey {
-        case wave, projects, attention
+        case wave, projects
         case loopState = "loop_state"
-    }
-}
-
-/// One attention item under `lf status`. Mirrors Rust `AttentionSnapshot`.
-struct AttentionSnapshot: Decodable {
-    let id: String
-    let kind: String
-    let status: String
-    let title: String
-    let summary: String
-    let runId: String?
-    let surfacedAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case id, kind, status, title, summary
-        case runId = "run_id"
-        case surfacedAt = "surfaced_at"
-    }
-
-    func toItem(waveId: String) -> AttentionItem {
-        let attentionKind = AttentionKind(rawValue: kind) ?? .interactive
-        return AttentionItem(
-            id: id,
-            waveId: waveId,
-            runId: runId,
-            kind: attentionKind,
-            status: AttentionStatus(rawValue: status) ?? .surfaced,
-            title: title,
-            summary: summary,
-            context: AttentionItem.context(kind: attentionKind, json: [:]),
-            surfacedAt: RegistrySnapshotDate.parse(surfacedAt) ?? Date()
-        )
     }
 }
 
@@ -375,17 +338,6 @@ public struct DoctorCheck: Decodable, Sendable, Identifiable {
     public let name: String
     public let status: String
     public let detail: String
-}
-
-private enum RegistrySnapshotDate {
-    /// Parse an RFC3339 timestamp (with or without fractional seconds), the
-    /// grain the `lf` snapshots emit.
-    static func parse(_ value: String?) -> Date? {
-        guard let value, !value.isEmpty else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
-    }
 }
 
 /// A directory or file in the codebase, weighted by the tokens a model pays to

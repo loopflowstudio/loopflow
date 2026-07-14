@@ -13,8 +13,8 @@ use crate::child_session::{
     ChildDecisionId, ChildRef,
 };
 use crate::harness::Harness;
-use crate::store::SharedStore;
 use crate::project_session::{ProjectEventKind, ProjectSessionId};
+use crate::store::SharedStore;
 use crate::task::{TaskEventKind, TaskSessionId};
 
 #[derive(Debug, Clone, Copy)]

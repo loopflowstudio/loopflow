@@ -192,7 +192,6 @@ private struct WavePlanView: View {
         do {
             let snapshot = try await RegistryQueryLocal.shared.status(
                 wave: wave.name,
-                waveId: wave.id,
                 cwd: repoPath
             )
             workMap = snapshot.workMap

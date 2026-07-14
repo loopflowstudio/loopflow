@@ -193,97 +193,25 @@ fn wt_switch_finds_worktree_by_sibling_name() {
 }
 
 #[test]
-fn wt_switch_prefix_matching_is_dot_delimited() {
-    // Simulate a worktree whose directory has a timestamp suffix (e.g. repo.waves.1772406404)
-    // by creating a worktree with a dotted name.
+fn wt_switch_prefers_exact_branch_match_over_sibling_name() {
     let repo = TestRepo::new();
-    let result = create_named_worktree(repo.path(), "waves", None, false).expect("create");
-    let worktree_name =
-        sibling_worktree_name_with_main(&result.path, repo.path()).expect("sibling name");
-    assert_eq!(worktree_name, "waves");
-
-    // The worktree name should be "waves". Searching for "wav" must NOT match.
-    let worktrees = list_worktrees(repo.path()).expect("list");
-    let prefix = "wav";
-    let matches: Vec<_> = worktrees
-        .iter()
-        .filter(|wt| {
-            let wt_name = sibling_worktree_name_with_main(&wt.path, repo.path());
-            wt_name.as_deref() == Some(prefix)
-                || wt_name
-                    .as_ref()
-                    .map(|n| n.starts_with(&format!("{prefix}.")))
-                    .unwrap_or(false)
-        })
-        .collect();
-    // "wav" doesn't start with "wav." — it should NOT match "waves" via prefix
-    // (prefix matching is on dot boundaries, not arbitrary substrings)
-    assert!(
-        matches.is_empty(),
-        "prefix matching is dot-delimited, not substring: got {:?}",
-        matches
-    );
-}
-
-#[test]
-fn wt_switch_finds_timestamped_worktree_by_short_name() {
-    let repo = TestRepo::new();
-    // Create worktree — the directory will be <repo>.waves
-    let result = create_named_worktree(repo.path(), "waves", None, false).expect("create");
-
-    // Manually rename it to simulate a timestamped directory: <repo>.waves.1772406404
-    let timestamped = result.path.with_file_name(format!(
-        "{}.1772406404",
-        result.path.file_name().unwrap().to_string_lossy()
-    ));
-    worktree_move(repo.path(), &result.path, &timestamped).expect("move");
-
-    let worktrees = list_worktrees(repo.path()).expect("list");
-    let wave_name =
-        sibling_worktree_name_with_main(&timestamped, repo.path()).expect("sibling name");
-    assert_eq!(wave_name, "waves.1772406404");
-
-    // Exact match: "waves.1772406404" should find it
-    let exact: Vec<_> = worktrees
-        .iter()
-        .filter(|wt| {
-            sibling_worktree_name_with_main(&wt.path, repo.path()).as_deref()
-                == Some("waves.1772406404")
-        })
-        .collect();
-    assert_eq!(exact.len(), 1);
-
-    // Prefix match: "waves" should find it via starts_with("waves.")
-    let prefix: Vec<_> = worktrees
-        .iter()
-        .filter(|wt| {
-            let n = sibling_worktree_name_with_main(&wt.path, repo.path());
-            n.as_ref().map(|n| n.starts_with("waves.")).unwrap_or(false)
-        })
-        .collect();
-    assert_eq!(prefix.len(), 1);
-}
-
-#[test]
-fn wt_switch_prefers_exact_branch_match_over_wave_name_path() {
-    let repo = TestRepo::new();
-    let old_branch = "jack.chord-model.20260316_1856";
-    let new_branch = "jack.chord-model.20260318_0010";
-    let old_path = repo.path().parent().expect("repo parent").join(format!(
-        "{}.chord-model.20260316_1856",
+    let exact_branch = "jack/feature";
+    let other_branch = "jack/other";
+    let exact_path = repo.path().parent().expect("repo parent").join(format!(
+        "{}.feature-exact",
         repo.path().file_name().expect("repo dir").to_string_lossy()
     ));
-    let new_path = repo.path().parent().expect("repo parent").join(format!(
-        "{}.chord-model",
+    let sibling_path = repo.path().parent().expect("repo parent").join(format!(
+        "{}.feature",
         repo.path().file_name().expect("repo dir").to_string_lossy()
     ));
 
-    add_worktree(repo.path(), &old_path, old_branch);
-    add_worktree(repo.path(), &new_path, new_branch);
+    add_worktree(repo.path(), &exact_path, exact_branch);
+    add_worktree(repo.path(), &sibling_path, other_branch);
 
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["wt", "switch", old_branch])
+        .args(["wt", "switch", exact_branch])
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
@@ -299,7 +227,7 @@ fn wt_switch_prefers_exact_branch_match_over_wave_name_path() {
     );
     assert_eq!(
         fs::canonicalize(target).expect("canonicalize directive target"),
-        fs::canonicalize(old_path).expect("canonicalize old path")
+        fs::canonicalize(exact_path).expect("canonicalize exact path")
     );
 }
 

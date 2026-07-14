@@ -22,7 +22,7 @@ lf debug -c                       # fix it
 
 ```bash
 # author wave/engbot/GOAL.md, then:
-lf serve engbot       # start the wave agent (Ctrl-C to stop)
+lf wave engbot        # start the Wave (Ctrl-C to stop)
 tmux ls              # live Wave, Project, and Task Sessions
 tmux attach -r -t <name>  # inspect one work
 ```
@@ -83,14 +83,9 @@ a flow never creates temporary branches or worktrees.
 A wave is a named agent with a goal. Everything that defines its durable
 operating context — goal, memory, routing judgment, crons — is authored in the
 repo. Projects and concrete tasks live in Linear. Crons live in `GOAL.md`
-frontmatter and are fired by the wave's resident loop. lfd serves wave
-status and live sessions to clients.
+frontmatter and are fired by the Wave's resident loop.
 
 ```markdown
----
-task_capacity: 2
----
-
 ## Objective
 
 Make first-run onboarding self-explanatory.
@@ -248,4 +243,4 @@ Every skill sees your agent doc (`AGENTS.md` / `CLAUDE.md` / `STYLE.md`), `LOOPF
 
 ## Reference
 
-[`lf` commands](lf.md) · [`lf` operations](ops.md) · [`lfd` commands](lfd.md) · [Configuration](config.md)
+[`lf` commands](lf.md) · [`lf` operations](ops.md) · [Configuration](config.md)

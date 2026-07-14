@@ -167,18 +167,16 @@ struct WaveChatConnectionTests {
         #expect(WaveMessageOp.interrupt.rawValue == "interrupt")
     }
 
-    // MARK: - Real wire frame
+    // MARK: - Current wire frame
 
-    @Test("a captured real assistant-turn SSE frame decodes and renders")
-    func realAssistantFrameDecodes() throws {
-        // Captured verbatim from a live `lf serve goals` server on 2026-07-04
-        // (then served on /conversation/stream; the same turn frames now ride
-        // GET /events): a completed assistant turn with four command items,
-        // one failed.
+    @Test("a current assistant-turn SSE frame decodes and renders")
+    func currentAssistantFrameDecodes() throws {
+        // A completed Wave turn about one Project-owned Task Session. Four
+        // command items exercise the live renderer, including one failure.
         let conn = connection()
         var parser = SSEFrameParser()
         var frames: [SSEFrameParser.Frame] = []
-        let stream = "event: state\ndata: turning\n\nevent: turn\ndata: \(realTurnFrame)\n\n"
+        let stream = "event: state\ndata: turning\n\nevent: turn\ndata: \(currentTurnFrame)\n\n"
         for byte in stream.utf8 {
             if let frame = parser.consume(byte) { frames.append(frame) }
         }
@@ -194,7 +192,7 @@ struct WaveChatConnectionTests {
         #expect(turn.id == "turn-101")
         #expect(turn.role == .assistant)
         #expect(turn.status == .completed)
-        #expect(turn.text.hasPrefix("This supersedes the kickoff design"))
+        #expect(turn.text.hasPrefix("Project runtime-simplification is pursuing Task INF-872"))
         #expect(turn.createdAtDate != nil)
         #expect(turn.from == nil, "explicit null decodes as absent")
         #expect(turn.items.count == 4)
@@ -202,10 +200,10 @@ struct WaveChatConnectionTests {
             Issue.record("expected a command item")
             return
         }
-        #expect(command.count == 1)
-        #expect(cwd == "/Users/jack/src/loopflow.goals")
+        #expect(command == ["gh", "pr", "checks", "912"])
+        #expect(cwd == "/Users/jack/src/loopflow.infrastructure.inf-872")
         #expect(status == .failed)
-        #expect(output?.contains("worker capacity") == true)
+        #expect(output?.contains("build is still pending") == true)
         #expect(exitCode == 1)
     }
 }
@@ -260,8 +258,8 @@ struct SSEFrameParserTests {
     }
 }
 
-/// A complete, unedited `turn` frame payload from a live wave server.
-private let realTurnFrame = #"{"id":"turn-101","role":"assistant","text":"This supersedes the kickoff design in an important way: the flow must avoid interactive `design` or it will park headlessly. I’m recording the corrected shape and writing it back to Asana from the wave root, then I’ll try the stacked implementation dispatch again.\nMemory and Asana are updated; the worker session still exists, but the registry may have cleared if the process exited inside tmux. I’m using the queue as the authority for whether the stacked implementation can start.\nCaptured the corrected review-design result in memory and wrote it back to Asana.\n\nThe important correction is now durable: `greenfield` must be `scaffold -> implement -> run -> gate`, not `scaffold -> design -> ...`, because interactive `design` parks in headless flow execution.\n\nTried to start the stacked implementation worker on commit `7c64bcef1`, but the queue still reports `goals` at worker capacity `1/1`. No new worker launched.","status":"completed","items":[{"type":"command","id":"call_KgomG7XIADii2YrIuFuCY8nL","command":["/bin/zsh -lc \"tmux list-sessions | rg 'lf-jack-heart-goals|148e0e02|68a936f3'\""],"cwd":"/Users/jack/src/loopflow.goals","status":"completed","output":"lf-jack-heart-goals-20260704_1626-68a936f3-25ac-4daf-9579-6206602def88: 1 windows (created Sat Jul  4 16:26:19 2026)\n","exit_code":0,"duration_ms":0},{"type":"command","id":"call_YgukOJma1DKNLCnfcKXxjQgU","command":["/bin/zsh -lc 'lf memory add \"2026-07-04 worker review-design result for Asana 1216257471904678: reshaped scratch/prove-the-language.md at commit 7c64bcef1 after checking actual code. Fixed real design defect: greenfield flow must not chain interactive design because headless flows park on interactive skills (flow.rs:272 -> WaitInteractive). Correct flow is scaffold -> implement -> run -> gate, with scaffold seeding scratch/<branch>.md directly from GOAL. Done gates split: deterministic CI registry test proves scaffold/run/greenfield resolve and greenfield expands with zero interactive skills; manual one-shot probe covers the paid agentic build. Metric is binary: probe dir .lf/skills/ must stay empty.\"'"],"cwd":"/Users/jack/src/loopflow.goals","status":"completed","output":"memory fact added for wave 'goals': 2026-07-04 worker review-design result for Asana 1216257471904678: reshaped scratch/prove-the-language.md at commit 7c64bcef1 after checking actual code. Fixed real design defect: greenfield flow must not chain interactive design because headless flows park on interactive skills (flow.rs:272 -> WaitInteractive). Correct flow is scaffold -> implement -> run -> gate, with scaffold seeding scratch/<branch>.md directly from GOAL. Done gates split: deterministic CI registry test proves scaffold/run/greenfield resolve and greenfield expands with zero interactive skills; manual one-shot probe covers the paid agentic build. Metric is binary: probe dir .lf/skills/ must stay empty.\n","exit_code":0,"duration_ms":0},{"type":"command","id":"call_EeLYzG54t0Z7M3fiEuqw96TA","command":["/bin/zsh -lc \"lf op pm update --wave goals --id 1216257471904678 --title \\\"Prove the language — three reference builds from goals\\\" --notes \\\"Review-design landed in worker run 148e0e02 at commit 7c64bcef1. It corrected the implementation plan against actual flow behavior: headless flows park on interactive design skills, so the greenfield flow must be scaffold -> implement -> run -> gate, with scaffold seeding scratch/<branch>.md from GOAL. Deterministic gate: registry test proves scaffold/run/greenfield resolve and greenfield expands with zero interactive skills. Manual one-shot probe remains outside cargo test. Binary metric: the probe dir's .lf/skills/ stays empty.\\\"\""],"cwd":"/Users/jack/src/loopflow.goals","status":"completed","output":"goals: updated task 1216257471904678\n","exit_code":0,"duration_ms":1186},{"type":"command","id":"call_dTTuy9oEf1I3oPAhYs4W3NSw","command":["/bin/zsh -lc \"lf q worker run goals --flow build --stack 148e0e02-06c3-4657-9040-68c02249dc9f --task \\\"Implement the accepted review-design plan for Asana 1216257471904678 from scratch/prove-the-language.md, building on commit 7c64bcef1. Scope: add first-class builtin scaffold and run prompt skills registered through build.rs; add a greenfield flow that expands to scaffold -> implement -> run -> gate with zero interactive skills; add the deterministic registry test proving scaffold/run/greenfield resolve and greenfield contains no WaitInteractive skills; add scripts/prove_language_cli.sh as a manual one-shot probe from an empty temp dir and a tiny GOAL.md, with the binary success metric that the probe dir's .lf/skills/ remains empty. Do not include the interactive design skill. Keep integrate/server and platform-build/rams/mobile probes deferred. Use lf op pm update --wave goals for write-back.\\\"\""],"cwd":"/Users/jack/src/loopflow.goals","status":"failed","output":"Error: wave 'goals' already at worker capacity (1/1)\n","exit_code":1,"duration_ms":0}],"created_at":"2026-07-04T23:35:42.657239Z","from":null}"#
+/// A complete `turn` frame using the current Wave → Project → Task vocabulary.
+private let currentTurnFrame = #"{"id":"turn-101","role":"assistant","text":"Project runtime-simplification is pursuing Task INF-872. The Task Session is running in its worktree and opened PR #912. Focused Swift tests passed; the required build check is still pending, so the Task remains submitted.","status":"completed","items":[{"type":"command","id":"call_status","command":["lf","status","infrastructure","--json"],"cwd":"/Users/jack/src/loopflow.infrastructure","status":"completed","output":"INF-872 · running · Task Session ts_872\n","exit_code":0,"duration_ms":81},{"type":"command","id":"call_diff","command":["git","diff","--stat","origin/main...HEAD"],"cwd":"/Users/jack/src/loopflow.infrastructure.inf-872","status":"completed","output":"2 files changed, 18 insertions(+), 6 deletions(-)\n","exit_code":0,"duration_ms":34},{"type":"command","id":"call_test","command":["swift","test","--package-path","swift","--filter","RegistryQueryTests"],"cwd":"/Users/jack/src/loopflow.infrastructure.inf-872","status":"completed","output":"9 tests passed\n","exit_code":0,"duration_ms":2140},{"type":"command","id":"call_checks","command":["gh","pr","checks","912"],"cwd":"/Users/jack/src/loopflow.infrastructure.inf-872","status":"failed","output":"build is still pending\n","exit_code":1,"duration_ms":417}],"created_at":"2026-07-13T20:00:00Z","from":null,"body":null,"activity":null}"#
 
 // Composer verb selection: the smallest honest mapping from (loop state, has
 // text) to what the primary/secondary buttons do. The view renders this

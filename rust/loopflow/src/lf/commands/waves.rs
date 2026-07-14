@@ -14,11 +14,11 @@ use serde::{Deserialize, Serialize};
 use crate::child_session::{ChildRef, DirectiveKind, SessionSupervisor};
 use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject};
-use crate::store::{open_existing_store, SharedStore};
 use crate::project_session::{ProjectSession, ProjectSessionStatus};
+use crate::store::{open_existing_store, SharedStore};
 use crate::task::{TaskSession, TaskSessionStatus};
-use crate::wave::Wave;
 use crate::wave::server::live_endpoint;
+use crate::wave::Wave;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -648,7 +648,7 @@ fn next_move_for_task(
 /// errors). Kept minimal — `lf status` with no arg is a convenience, not the
 /// resolution surface `lf chat`/`lf radio sub` own.
 fn ambient_wave() -> Option<String> {
-    std::env::var(crate::lf::session::WAVE_ID_ENV)
+    std::env::var(crate::engine::wave_context::WAVE_ID_ENV)
         .ok()
         .filter(|value| !value.is_empty())
 }
@@ -958,15 +958,6 @@ mod tests {
                     pull_request: None,
                 }],
             }],
-            attention: vec![AttentionSnapshot {
-                id: "att-1".into(),
-                kind: "interactive".into(),
-                status: "surfaced".into(),
-                title: "needs a human".into(),
-                summary: "review the design".into(),
-                run_id: Some("run-1".into()),
-                surfaced_at: "2026-07-06T00:00:00Z".into(),
-            }],
         };
         let value: serde_json::Value = serde_json::to_value(&status).expect("serialize");
         assert_eq!(value["wave"]["name"], "goals");
@@ -980,6 +971,5 @@ mod tests {
             value["projects"][0]["tasks"][0]["runtime"],
             serde_json::Value::Null
         );
-        assert_eq!(value["attention"][0]["kind"], "interactive");
     }
 }

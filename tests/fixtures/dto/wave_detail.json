@@ -6,7 +6,6 @@
     "paused": false,
     "goal": "Make releases boring.",
     "repo": "/src/loopflow",
-    "task_capacity": 2,
     "active_tasks": 1,
     "active_projects": 1,
     "live": true,
@@ -52,7 +51,7 @@
             "id": "issue-1",
             "identifier": "INF-123",
             "name": "Surface nightly failures",
-            "description": "Create one focused attention item.",
+            "description": "Surface one focused failure.",
             "rank": 1,
             "completed": false,
             "assignee": "user-1"
@@ -99,6 +98,5 @@
         }
       ]
     }
-  ],
-  "attention": []
+  ]
 }

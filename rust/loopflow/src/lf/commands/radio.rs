@@ -28,10 +28,10 @@ use anyhow::{anyhow, Result};
 use crate::engine::wave_context::{resolve_ambient_channel, AmbientChannelRef};
 use crate::lf::commands::chat::{parent_wave, CliContext};
 use crate::lf::commands::util::message_text;
-use crate::wave::Wave;
 use crate::store::SharedStore;
 use crate::wave::channel::family_head;
 use crate::wave::runtime::wave_channel_name;
+use crate::wave::Wave;
 
 pub fn run_pub(
     text_args: &[String],

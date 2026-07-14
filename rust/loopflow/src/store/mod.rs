@@ -3,8 +3,7 @@
 use std::path::{Component, PathBuf};
 use std::sync::Arc;
 
-use crate::control_session::{Session, SessionStatus};
-use crate::id::{ControlSessionId, WaveId};
+use crate::id::WaveId;
 use crate::wave::Wave;
 mod child_sessions;
 pub mod migrations;
@@ -13,7 +12,7 @@ pub mod sqlite;
 mod token_crypto;
 
 /// One row of the machine-grain run ledger (`run_events`): a lifecycle event
-/// for a run, flow, or skill, written directly by `lf` (and by `lfd`) into the
+/// for a run, flow, or skill, written directly by `lf` into the
 /// local store. Token/cost fields are cumulative snapshots populated on skill
 /// boundaries and terminal run events when the stream reported them.
 #[derive(Debug, Clone, PartialEq)]
@@ -274,106 +273,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
     }
 
-    pub async fn create_control_session(&self, session: &Session) -> StoreResult<()> {
-        let session = session.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.create_control_session(&session)
-        })
-        .await
-    }
-
-    pub async fn get_control_session(
-        &self,
-        session_id: &ControlSessionId,
-    ) -> StoreResult<Option<Session>> {
-        let session_id = session_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.get_control_session(&session_id)
-        })
-        .await
-    }
-
-    pub async fn list_control_sessions(
-        &self,
-        wave_id: Option<&WaveId>,
-        statuses: Option<&[SessionStatus]>,
-    ) -> StoreResult<Vec<Session>> {
-        let wave_id = wave_id.cloned();
-        let statuses = statuses.map(|values| values.to_vec());
-        run_sqlite(&self.sqlite, move |store| {
-            store.list_control_sessions(wave_id.as_ref(), statuses.as_deref())
-        })
-        .await
-    }
-
-    /// This wave's live sessions plus sessions completed at or after
-    /// `completed_since` (unix seconds) — a poller's working set, bounded
-    /// regardless of how much terminal history the wave accumulates.
-    pub async fn list_recent_control_sessions(
-        &self,
-        wave_id: &WaveId,
-        completed_since: i64,
-    ) -> StoreResult<Vec<Session>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.list_recent_control_sessions(&wave_id, completed_since)
-        })
-        .await
-    }
-
-    /// The wave's live brain, if any: a non-terminal `WaveAgent` session —
-    /// a self-registered `lf serve` listener. One-brain enforcement keys on
-    /// this single fact.
-    pub async fn live_wave_agent_session(&self, wave_id: &WaveId) -> StoreResult<Option<Session>> {
-        let sessions = self
-            .list_control_sessions(
-                Some(wave_id),
-                Some(crate::control_session::LIVE_SESSION_STATUSES),
-            )
-            .await?;
-        Ok(sessions
-            .into_iter()
-            .find(|session| session.session_use == crate::control_session::SessionUse::WaveAgent))
-    }
-
-    /// Record a session in the run registry. The db IS the registry: `lf`
-    /// writes its own row here directly — self-registered flow runs, the
-    /// `lf serve` listener's WaveAgent row, placed `lf` runs — no
-    /// daemon in the path. The writer later marks the row terminal via
-    /// [`Store::update_control_session`].
-    pub async fn register_session(&self, session: &Session) -> StoreResult<()> {
-        self.create_control_session(session).await
-    }
-
-    /// Live sessions grouped under one worktree, keyed by the worktree
-    /// directory's basename (`<repo>.<wave>`, `<repo>.<wave>.<id>`, ...):
-    /// everything currently running in that tree, whoever launched it.
-    pub async fn active_sessions_by_worktree(
-        &self,
-        worktree_name: &str,
-    ) -> StoreResult<Vec<Session>> {
-        let sessions = self
-            .list_control_sessions(None, Some(crate::control_session::LIVE_SESSION_STATUSES))
-            .await?;
-        Ok(sessions
-            .into_iter()
-            .filter(|session| {
-                std::path::Path::new(&session.cwd)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    == Some(worktree_name)
-            })
-            .collect())
-    }
-
-    pub async fn update_control_session(&self, session: &Session) -> StoreResult<()> {
-        let session = session.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.update_control_session(&session)
-        })
-        .await
-    }
-
     pub async fn get_provider_token(&self, provider: &str) -> StoreResult<Option<ProviderToken>> {
         let provider = provider.to_string();
         run_sqlite(&self.sqlite, move |store| {
@@ -490,8 +389,7 @@ mod tests {
         ChildCommandState, ChildDecisionId, ChildDirective, ChildProcessGeneration, ChildRef,
         SessionSupervisor,
     };
-    use crate::id::LfdId;
-    use crate::lfd::types::{ChatMemoryBlock, Repo, RepoEdge, RepoId, Summary, Wave};
+    use crate::id::WaveId;
     use crate::project_session::{
         ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
     };
@@ -502,12 +400,13 @@ mod tests {
         PmWritebackOperation, PmWritebackState, TaskEventKind, TaskSession, TaskSessionId,
         TaskSessionStatus,
     };
+    use crate::wave::Wave;
     use std::env;
     use std::path::PathBuf;
     use time::OffsetDateTime;
 
     fn make_wave(repo: &str) -> Wave {
-        let id = LfdId::new();
+        let id = WaveId::new();
         Wave::new(id.clone(), format!("wave-{id}"), repo.to_string())
     }
 
@@ -607,10 +506,10 @@ mod tests {
             "Fix the parser before the docs".to_string(),
             ChildCommandSource::Wave(wave.id().clone()),
         );
-        assert!(store
-            .reserve_task_session_with_directive(&task, &task_initial, 2)
+        store
+            .reserve_task_session_with_directive(&task, &task_initial)
             .await
-            .unwrap());
+            .unwrap();
         assert_eq!(store.child_directives(&task_target).await.unwrap().len(), 1);
         let stale_task = task.clone();
 
@@ -1113,26 +1012,12 @@ mod tests {
         second.issue.identifier = "INF-124".to_string();
         second.worktree = PathBuf::from("/repo.inf-124");
         second.branch = "jack/inf-124".to_string();
-        assert!(!store.reserve_task_session(&second, 1).await.unwrap());
+        store.reserve_task_session(&second).await.unwrap();
         assert!(store
             .get_task_session_by_issue("INF-124")
             .await
             .unwrap()
-            .is_none());
-    }
-
-    #[tokio::test]
-    async fn zero_task_capacity_refuses_the_first_task() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let task = make_task_session(&wave);
-
-        assert!(!store.reserve_task_session(&task, 0).await.unwrap());
-        assert!(store.get_task_session(&task.id).await.unwrap().is_none());
+            .is_some());
     }
 
     #[tokio::test]
@@ -1255,7 +1140,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_process_resume_reserves_wave_capacity_once() {
+    async fn task_process_resume_reserves_each_session_generation_once() {
         let dir = tempfile::tempdir().unwrap();
         let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
             .await
@@ -1270,14 +1155,14 @@ mod tests {
         let mut first_resume = session.clone();
         assert_eq!(first_resume.begin_generation("task-one".to_string()), 1);
         assert!(store
-            .reserve_task_process(&first_resume, TaskSessionStatus::Waiting, 1)
+            .reserve_task_process(&first_resume, TaskSessionStatus::Waiting)
             .await
             .unwrap());
 
         let mut racing_resume = session.clone();
         racing_resume.begin_generation("task-one".to_string());
         assert!(!store
-            .reserve_task_process(&racing_resume, TaskSessionStatus::Waiting, 1)
+            .reserve_task_process(&racing_resume, TaskSessionStatus::Waiting)
             .await
             .unwrap());
 
@@ -1286,11 +1171,11 @@ mod tests {
         second.issue.identifier = "INF-124".to_string();
         second.worktree = PathBuf::from("/repo.inf-124");
         second.branch = "jack/inf-124".to_string();
-        second.set_status(TaskSessionStatus::Waiting, "waiting for capacity");
+        second.set_status(TaskSessionStatus::Waiting, "waiting for work");
         store.create_task_session(&second).await.unwrap();
         second.begin_generation("task-two".to_string());
-        assert!(!store
-            .reserve_task_process(&second, TaskSessionStatus::Waiting, 1)
+        assert!(store
+            .reserve_task_process(&second, TaskSessionStatus::Waiting)
             .await
             .unwrap());
 
@@ -1304,205 +1189,14 @@ mod tests {
         store.create_wave(&wave).await.expect("create wave");
         assert!(store.get_wave(wave.id()).await.expect("get wave").is_some());
 
-        wave.task_capacity = 2;
+        wave.repo = "/repo-updated".to_string();
         store.update_wave(&wave).await.expect("update wave");
         let loaded = store
             .get_wave(wave.id())
             .await
             .expect("get wave")
             .expect("wave exists");
-        assert_eq!(loaded.repo(), "/repo");
-        assert_eq!(loaded.task_capacity, 2);
-
-        let repo = Repo {
-            path: "/tmp/repo".to_string(),
-            repo_id: RepoId::parse("loopflowstudio/repo").expect("repo id"),
-            name: "repo".to_string(),
-            added_at: OffsetDateTime::now_utc(),
-        };
-        store.upsert_repo(&repo).await.expect("upsert repo");
-        assert_eq!(
-            store
-                .list_repos()
-                .await
-                .expect("list repos")
-                .first()
-                .map(|entry| entry.path.clone()),
-            Some(repo.path.clone())
-        );
-        assert!(store
-            .get_repo(&repo.path)
-            .await
-            .expect("get repo")
-            .is_some());
-        store
-            .delete_repo(&repo.path)
-            .await
-            .expect("delete repo registration");
-        assert!(store
-            .get_repo(&repo.path)
-            .await
-            .expect("repo removed")
-            .is_none());
-
-        let parent = Repo {
-            path: "/tmp/parent".to_string(),
-            repo_id: RepoId::parse("loopflowstudio/parent").expect("parent repo id"),
-            name: "parent".to_string(),
-            added_at: OffsetDateTime::now_utc(),
-        };
-        let child = Repo {
-            path: "/tmp/child".to_string(),
-            repo_id: RepoId::parse("loopflowstudio/child").expect("child repo id"),
-            name: "child".to_string(),
-            added_at: OffsetDateTime::now_utc(),
-        };
-        store
-            .upsert_repo(&parent)
-            .await
-            .expect("upsert parent repo");
-        store.upsert_repo(&child).await.expect("upsert child repo");
-        assert!(store
-            .get_repo_by_repo_id(&parent.repo_id)
-            .await
-            .expect("get by repo id")
-            .is_some());
-        store
-            .add_edge(&RepoEdge {
-                parent_repo_id: parent.repo_id.clone(),
-                child_repo_id: child.repo_id.clone(),
-            })
-            .await
-            .expect("add edge");
-        assert_eq!(store.list_edges().await.expect("list edges").len(), 1);
-        assert_eq!(
-            store
-                .children(&parent.repo_id)
-                .await
-                .expect("list children")
-                .len(),
-            1
-        );
-        assert_eq!(
-            store
-                .parents(&child.repo_id)
-                .await
-                .expect("list parents")
-                .len(),
-            1
-        );
-        store
-            .delete_repo(&parent.path)
-            .await
-            .expect("delete parent repo");
-        assert!(store
-            .list_edges()
-            .await
-            .expect("list edges after delete")
-            .is_empty());
-
-        let summary = Summary {
-            id: LfdId::new(),
-            wave_id: wave.id().clone(),
-            content: "summary".to_string(),
-            source_hash: "abc".to_string(),
-            token_budget: 100,
-            agent: "claude-code".to_string(),
-            created_at: Some(OffsetDateTime::now_utc()),
-        };
-        store
-            .upsert_summary(&summary)
-            .await
-            .expect("upsert summary");
-        assert!(store
-            .get_summary(wave.id())
-            .await
-            .expect("get summary")
-            .is_some());
-
-        // Upsert replaces on same wave_id
-        let updated_summary = Summary {
-            id: LfdId::new(),
-            wave_id: wave.id().clone(),
-            content: "# Updated summary".to_string(),
-            source_hash: "def456".to_string(),
-            token_budget: 10000,
-            agent: "claude-code".to_string(),
-            created_at: Some(OffsetDateTime::now_utc()),
-        };
-        store
-            .upsert_summary(&updated_summary)
-            .await
-            .expect("upsert updated summary");
-        let reloaded = store
-            .get_summary(wave.id())
-            .await
-            .expect("get updated summary")
-            .expect("summary should exist");
-        assert_eq!(reloaded.content, "# Updated summary");
-        assert_eq!(reloaded.source_hash, "def456");
-
-        // Chat memory block CRUD
-        let block_a = ChatMemoryBlock {
-            wave_id: wave.id().clone(),
-            name: "preferences".to_string(),
-            content: "Keep responses concise.".to_string(),
-            position: 1,
-            updated_at: Some(OffsetDateTime::now_utc()),
-        };
-        let block_b = ChatMemoryBlock {
-            wave_id: wave.id().clone(),
-            name: "project-context".to_string(),
-            content: "Repo uses Rust + Swift.".to_string(),
-            position: 0,
-            updated_at: Some(OffsetDateTime::now_utc()),
-        };
-        store
-            .upsert_chat_memory_block(&block_a)
-            .await
-            .expect("upsert block a");
-        store
-            .upsert_chat_memory_block(&block_b)
-            .await
-            .expect("upsert block b");
-        let blocks = store
-            .list_chat_memory_blocks(wave.id())
-            .await
-            .expect("list blocks");
-        assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].name, "project-context");
-        assert_eq!(blocks[1].name, "preferences");
-
-        let block_a_updated = ChatMemoryBlock {
-            content: "Prefer bullet points.".to_string(),
-            position: 2,
-            ..block_a
-        };
-        store
-            .upsert_chat_memory_block(&block_a_updated)
-            .await
-            .expect("upsert updated block");
-        let blocks = store
-            .list_chat_memory_blocks(wave.id())
-            .await
-            .expect("list blocks after update");
-        let updated = blocks
-            .iter()
-            .find(|block| block.name == "preferences")
-            .expect("updated memory block should exist");
-        assert_eq!(updated.content, "Prefer bullet points.");
-        assert_eq!(updated.position, 2);
-
-        store
-            .delete_chat_memory_block(wave.id(), "project-context")
-            .await
-            .expect("delete block");
-        let blocks = store
-            .list_chat_memory_blocks(wave.id())
-            .await
-            .expect("list blocks after delete");
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].name, "preferences");
+        assert_eq!(loaded.repo(), "/repo-updated");
 
         store.delete_wave(wave.id()).await.expect("delete wave");
         assert!(store
@@ -1514,7 +1208,7 @@ mod tests {
 
     #[tokio::test]
     async fn sqlite_store_basic_suite() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
         let config = StorageConfig::sqlite(db_path);
         let store = super::open_store(&config).await.expect("store should open");
         run_store_basic_suite(&store).await;
@@ -1525,7 +1219,7 @@ mod tests {
     // leaf wave returns none. This is the ancestry the WaveAgentTree needs.
     #[tokio::test]
     async fn sqlite_wave_ancestry_and_children() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
         let config = StorageConfig::sqlite(db_path);
         let store = super::open_store(&config).await.expect("store should open");
 
@@ -1601,7 +1295,7 @@ mod tests {
 
     #[tokio::test]
     async fn pm_snapshot_replacement_is_atomic_per_wave() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
         let store = open_store(&StorageConfig::sqlite(db_path.clone()))
             .await
             .expect("store should open");
@@ -1636,7 +1330,7 @@ mod tests {
 
     #[test]
     fn a_closed_vocabulary_rejects_an_unknown_node() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
         let store = SqliteStore::new(&db_path).expect("store should open");
         let row = event_row("bad-node", 0, "task", "started");
         let error = store
@@ -1645,36 +1339,9 @@ mod tests {
         assert!(error.to_string().contains("CHECK constraint failed"));
     }
 
-    #[test]
-    fn store_open_rejects_a_recorded_migration_with_a_drifted_ledger() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
-        {
-            let conn = rusqlite::Connection::open(&db_path).expect("open sqlite db");
-            conn.execute_batch(
-                "CREATE TABLE schema_migrations (
-                     version TEXT PRIMARY KEY,
-                     applied_at INTEGER NOT NULL
-                 );
-                 CREATE TABLE run_events (run_id TEXT NOT NULL);",
-            )
-            .unwrap();
-            for migration in super::migrations::migrations() {
-                conn.execute(
-                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, 0)",
-                    rusqlite::params![migration.version],
-                )
-                .unwrap();
-            }
-        }
-
-        let error = SqliteStore::new(&db_path)
-            .expect_err("a ledger that lies about migration 057 must fail open");
-        assert!(error.to_string().contains("process_id"));
-    }
-
     #[tokio::test]
     async fn sqlite_health_check_succeeds() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
         let config = StorageConfig::sqlite(db_path);
         let store = super::open_store(&config).await.expect("store should open");
 
@@ -1683,7 +1350,7 @@ mod tests {
 
     #[tokio::test]
     async fn provider_token_round_trip() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
         let config = StorageConfig::sqlite(db_path);
         let store = super::open_store(&config).await.expect("store should open");
 
@@ -1791,7 +1458,7 @@ mod tests {
 
     #[tokio::test]
     async fn provider_tokens_are_encrypted_at_rest_in_sqlite() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
         let config = StorageConfig::sqlite(db_path.clone());
         let store = super::open_store(&config).await.expect("store should open");
         let token = super::ProviderToken {
@@ -1829,7 +1496,7 @@ mod tests {
 
     #[tokio::test]
     async fn sqlite_open_migrates_existing_plaintext_provider_tokens() {
-        let db_path = env::temp_dir().join(format!("lfd-test-{}.db", LfdId::new()));
+        let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
         {
             let conn = rusqlite::Connection::open(&db_path).expect("open sqlite db");
             super::migrations::apply_sqlite(&conn).expect("apply migrations");

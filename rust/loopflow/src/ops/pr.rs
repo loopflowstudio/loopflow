@@ -767,11 +767,11 @@ mod tests {
 
     #[test]
     fn parse_generated_pr_copy_accepts_plain_json() {
-        let raw = r###"{"title":"docs: tighten lfd docs","body":"## Try it!"}"###;
+        let raw = r###"{"title":"docs: tighten wave docs","body":"## Try it!"}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
-                title: "docs: tighten lfd docs".to_string(),
+                title: "docs: tighten wave docs".to_string(),
                 body: "## Try it!".to_string(),
             })
         );
@@ -780,12 +780,12 @@ mod tests {
     #[test]
     fn parse_generated_pr_copy_ignores_non_json_braces_around_reply() {
         let raw = r###"warning: telemetry payload {ignored=true}
-{"title":"docs: tighten lfd docs","body":"## Try it!\n- run tests"}
+{"title":"docs: tighten wave docs","body":"## Try it!\n- run tests"}
 info: done {ok=true}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
-                title: "docs: tighten lfd docs".to_string(),
+                title: "docs: tighten wave docs".to_string(),
                 body: "## Try it!\n- run tests".to_string(),
             })
         );
@@ -794,12 +794,12 @@ info: done {ok=true}"###;
     #[test]
     fn parse_generated_pr_copy_handles_braces_inside_body_strings() {
         let raw = r###"preface
-{"title":"docs: tighten lfd docs","body":"Use {native|container} and keep JSON like {\"a\":1}."}
+{"title":"docs: tighten wave docs","body":"Use {native|container} and keep JSON like {\"a\":1}."}
 trailer"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
-                title: "docs: tighten lfd docs".to_string(),
+                title: "docs: tighten wave docs".to_string(),
                 body: "Use {native|container} and keep JSON like {\"a\":1}.".to_string(),
             })
         );
@@ -829,11 +829,11 @@ lf pm init
 {"title":"...","body":"..."}
 No markdown fences.
 
-{"title":"lfd: ship algedonic signals with repair backoff","body":"## Usage\n\nRun the demo."}"###;
+{"title":"wave: ship algedonic signals with repair backoff","body":"## Usage\n\nRun the demo."}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
-                title: "lfd: ship algedonic signals with repair backoff".to_string(),
+                title: "wave: ship algedonic signals with repair backoff".to_string(),
                 body: "## Usage\n\nRun the demo.".to_string(),
             })
         );
@@ -842,7 +842,7 @@ No markdown fences.
     #[test]
     fn parse_generated_pr_copy_handles_literal_newlines_in_body() {
         let raw = r###"codex
-{"title":"lfd: ship algedonic signals with repair backoff","body":"## Usage
+{"title":"wave: ship algedonic signals with repair backoff","body":"## Usage
 
 ```bash
 cargo test repair_chain
@@ -854,7 +854,7 @@ Repairs now back off before escalating."}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
-                title: "lfd: ship algedonic signals with repair backoff".to_string(),
+                title: "wave: ship algedonic signals with repair backoff".to_string(),
                 body: "## Usage\n\n```bash\ncargo test repair_chain\n```\n\n## Summary\n\nRepairs now back off before escalating.".to_string(),
             })
         );

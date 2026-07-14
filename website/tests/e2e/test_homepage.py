@@ -50,7 +50,7 @@ def test_products_section(homepage: Page):
     assert section.is_visible()
     assert section.locator(".product-card").count() == 2
     assert section.locator("h3", has_text="Loopflow").is_visible()
-    assert section.locator("h3", has_text="Server").is_visible()
+    assert section.locator("h3", has_text="CLI").is_visible()
 
 
 def test_no_legacy_homepage_sections(homepage: Page):

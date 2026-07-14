@@ -52,7 +52,7 @@ anyhow = "1"
 ctrlc = { version = "3", features = ["termination"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# --- Dependencies from lfd ---
+# --- Runtime dependencies ---
 async-trait = "0.1"
 aes-gcm = "0.10"
 axum = { version = "0.8", features = ["ws"] }

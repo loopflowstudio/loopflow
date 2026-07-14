@@ -153,7 +153,7 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let store = SqliteStore::new(&home.path().join("lfd.db")).unwrap();
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let events = store.list_run_events_since(0).unwrap();
     let run_id = events
         .iter()

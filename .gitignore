@@ -11,7 +11,7 @@ swift/*.xcodeproj/
 dist/
 swift/dist/
 
-# Per-worktree local build (lf, lfd, Loopflow.app) — see scripts/install.py
+# Per-worktree local build (lf, Loopflow.app) — see scripts/install.py
 local-bin/
 
 # Claude Code (personal state)

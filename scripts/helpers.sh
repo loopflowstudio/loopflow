@@ -277,9 +277,6 @@ loopflow_dispatch() {
         layout-pick)
             loopflow_open_layout
             ;;
-        up)
-            tmux send-keys "'$LOOPFLOW_DIR/scripts/lfd-up.sh'" Enter
-            ;;
         help)
             loopflow_show_help
             ;;
@@ -308,7 +305,6 @@ prefix+$prefix+o  open logs
 prefix+$prefix+p  open PR
 prefix+$prefix+n  create worktree
 prefix+$prefix+d  land PR
-prefix+$prefix+u  start/bootstrap
 prefix+$prefix+w  pick wave
 prefix+$prefix+L  pick layout
 prefix+$prefix+?  this help
@@ -318,6 +314,6 @@ EOF
     if loopflow_has_popup; then
         tmux display-popup -w 40 -h 15 -E "cat '$help_file'; read -n 1"
     else
-        loopflow_display "prefix+$prefix+{r,s,o,p,n,d,u,w,L,?} — use ? in popup-capable tmux 3.2+"
+        loopflow_display "prefix+$prefix+{r,s,o,p,n,d,w,L,?} — use ? in popup-capable tmux 3.2+"
     fi
 }

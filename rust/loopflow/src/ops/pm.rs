@@ -13,17 +13,17 @@ use futures_util::future::try_join_all;
 
 use crate::engine::config::load_config_or_default;
 use crate::engine::wave_config::{read_wave_config, update_wave_goal_config, WavePmConfig};
+use crate::ops::error::{OpsError, OpsResult};
+use crate::ops::progress::Progress;
+use crate::ops::util::resolve_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::{
     PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmProject, PmProviderKind, PmResult, PmWave,
 };
-use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store};
-use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::progress::Progress;
-use crate::ops::util::resolve_wave_name;
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
+use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -486,7 +486,7 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
 
     let store = open_store(&storage_config_from_env()?)
         .await
-        .map_err(|err| OpsError::Message(format!("failed to open lfd credential store: {err}")))?;
+        .map_err(|err| OpsError::Message(format!("failed to open credential store: {err}")))?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     resolve_pm_token_from_store(provider, &store, now, |provider, token| async move {
         refresh_stored_provider_token(provider, &token).await
@@ -573,7 +573,7 @@ fn forwarded_pm_token(provider: PmProviderKind) -> Option<String> {
 
 fn storage_config_from_env() -> OpsResult<crate::store::StorageConfig> {
     crate::store::storage_config_from_env()
-        .map_err(|err| OpsError::Message(format!("failed to resolve lfd credential store: {err}")))
+        .map_err(|err| OpsError::Message(format!("failed to resolve credential store: {err}")))
 }
 
 fn pm_repo_key(repo: &Path) -> String {
@@ -1735,8 +1735,8 @@ fn pm_to_ops(err: PmError) -> OpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pm::test_server::{self, json_response, QueuedResponse};
     use crate::ops::NullProgress;
+    use crate::pm::test_server::{self, json_response, QueuedResponse};
     use axum::http::StatusCode;
     use serde_json::json;
 

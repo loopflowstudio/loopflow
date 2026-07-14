@@ -31,7 +31,7 @@ def _extract_installer() -> str:
 
 
 def _write_stubs(stub_dir: Path) -> None:
-    """Stub curl (logs args, fakes the download) and tar (drops lf/lfd)."""
+    """Stub curl (logs args, fakes the download) and tar (drops lf)."""
     stub_dir.mkdir(parents=True, exist_ok=True)
     curl = stub_dir / "curl"
     curl.write_text(
@@ -47,7 +47,7 @@ def _write_stubs(stub_dir: Path) -> None:
         "#!/bin/sh\n"
         'dir=""; prev=""\n'
         'for a in "$@"; do [ "$prev" = "-C" ] && dir="$a"; prev="$a"; done\n'
-        '[ -n "$dir" ] && { echo x > "$dir/lf"; echo x > "$dir/lfd"; }\n'
+        '[ -n "$dir" ] && echo x > "$dir/lf"\n'
         "exit 0\n"
     )
     for f in (curl, tar):
@@ -88,15 +88,12 @@ def test_installer_syntax_is_valid(installer: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_no_interactive_is_not_read_as_version(
-    installer: Path, env: dict[str, str], tmp_path: Path
+def test_removed_no_interactive_flag_fails_clearly(
+    installer: Path, env: dict[str, str]
 ) -> None:
-    """Regression: `--no-interactive` once became `v--no-interactive` -> 404."""
     result = _run(installer, ["--no-interactive"], env)
-    assert result.returncode == 0, result.stderr
-    log = (tmp_path / "curl.log").read_text()
-    assert "v--no-interactive" not in log
-    assert "releases/latest/download" in log
+    assert result.returncode != 0
+    assert "Unknown option" in result.stderr
 
 
 def test_positional_version_builds_versioned_url(

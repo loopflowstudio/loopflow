@@ -140,7 +140,7 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 ## Running Waves and Tasks
 
 ```bash
-lf serve designer                                  # start the named mind
+lf wave designer                                   # start the named Wave
 lf stop designer                                   # stop its listener and resident
 lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
 lf task run DES-123 --directive "fix the parser before the docs"
@@ -153,7 +153,7 @@ lf task wait DES-123
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
-`lf serve <name>` starts the durable Wave mind and persistent playhead. A Task
+`lf wave <name>` starts the durable Wave listener, resident, and persistent playhead. A Task
 Session starts only after its Linear task exists, owns one immutable worktree
 and provider transcript, and remains resumable through review and merge.
 `lf task attach` exposes a writable prompt that records structured commands;
@@ -162,7 +162,7 @@ terminal bytes never drive the provider directly.
 ## Speaking to Waves
 
 Two wires, not one. The **thread** is the human surface: durable, replayed,
-owned by a served mind. The **bus** is how agents call to each other: a table in
+owned by a running Wave. The **bus** is how agents call to each other: a table in
 the shared store, ephemeral, no server in the path.
 
 ```bash
@@ -181,7 +181,7 @@ lf memory update < MEMORY.md                # replace it from stdin
 | `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays and follows while typed lines post, `/status` reads health, and `/quit` leaves. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
 | `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 
-Managed sessions default to their invoking Wave through `LFD_WAVE_ID`. From a
+Managed sessions default to their invoking Wave through `LF_WAVE_ID`. From a
 human shell, pass `--wave`; repository location does not identify one of the
 Waves sharing `main`.
 
@@ -207,13 +207,13 @@ A subscription is a prefix, so `lf radio sub infra` hears the whole family.
 | Command | What it does |
 |---------|--------------|
 | `lf radio pub [TEXT]` | Broadcast one frame on a channel. An INSERT into the shared store, so it works with no wave running; reads stdin when TEXT is omitted. No channel resolves, or no store on this machine — the broadcast drops with exit 0 |
-| `lf radio sub [CHANNEL] [--json]` | Tune in to a channel and its descendants until killed. Never opens a socket — the served mind need not exist |
+| `lf radio sub [CHANNEL] [--json]` | Tune in to a channel and its descendants until killed. Never opens a socket — the Wave need not be running |
 
 Broadcast, not delivery. `lf radio sub` tunes in at the head and hears only what is
 said while it listens: nothing is replayed, and a frame published to a channel
 nobody was on is gone. A frame survives one hour, then the sweeper takes it —
 the bus is a wire, and `lf runs` plus the merged PR are the records of record. A
-served mind is the one durable subscriber: it polls from a saved cursor, so it
+running Wave is the one durable subscriber: it polls from a saved cursor, so it
 catches its hands' reports across a restart, and when a frame aged out before it
 woke, the miss is announced in its thread rather than passed over in silence.
 

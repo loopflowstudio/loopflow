@@ -19,10 +19,10 @@ use crate::child_session::{
     ChildRef, SessionSupervisor,
 };
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
-use crate::store::{open_existing_store, SharedStore};
 use crate::project_session::{
     ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
+use crate::store::{open_existing_store, SharedStore};
 use crate::task::TaskSessionStatus;
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
@@ -940,10 +940,10 @@ mod tests {
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
     use crate::id::WaveId;
-    use crate::wave::Wave;
-    use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
     use crate::session_context::{LinearProjectId, LinearProjectSnapshot};
+    use crate::store::{open_store, SharedStore, StorageConfig};
+    use crate::wave::Wave;
 
     struct ScriptedHarness {
         supports_steer: bool,

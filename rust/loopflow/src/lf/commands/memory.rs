@@ -350,6 +350,6 @@ mod tests {
         )
         .await
         .expect_err("no server");
-        assert!(err.to_string().contains("no live server"), "{err}");
+        assert!(err.to_string().contains("no live listener"), "{err}");
     }
 }

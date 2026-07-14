@@ -2,7 +2,7 @@
 import SwiftUI
 import Loopflow
 
-/// WaveChat: the live conversation with a running `lf serve <name>`. Discovers the
+/// WaveChat: the live conversation with a running `lf wave <name>`. Discovers the
 /// wave's chat server through its `.wave-endpoint` pointer, replays + streams the
 /// thread over SSE, and posts messages back through the composer. The composer is
 /// verb-aware — Send while idle, Steer / Interrupt & Send / Interrupt while a turn
@@ -319,7 +319,7 @@ struct WaveChatView: View {
     // MARK: - Not running (start the wave)
     //
     // The wave is a detached tmux session, launched here through the same door
-    // as a terminal: `lf serve <name>` at the wave's repo. Quitting Loopflow
+    // as a terminal: `lf wave <name>` at the wave's repo. Quitting Loopflow
     // never touches it. After a launch, the connection's 1s endpoint poll picks
     // the wave up on its own — this view just waits for the phase to move.
 
@@ -363,7 +363,7 @@ struct WaveChatView: View {
         .padding()
     }
 
-    /// Launch `lf serve` detached, then wait for the endpoint poll to attach.
+    /// Launch `lf wave` detached, then wait for the endpoint poll to attach.
     /// The launch itself is quick (tmux returns immediately); the wave server
     /// takes a few seconds to publish its endpoint.
     private func startWave() {
@@ -581,7 +581,7 @@ private struct ChildControlActivityCard: View {
 /// The not-running hint, with the launch command as inline code so `lf` can't
 /// be misread as "If". Plain-string fallback only if markdown parsing fails.
 func waveStartHint(waveName: String) -> AttributedString {
-    let markdown = "Start it here, or run `lf serve \(waveName)` in a terminal — "
+    let markdown = "Start it here, or run `lf wave \(waveName)` in a terminal — "
         + "its conversation appears here live."
     return (try? AttributedString(markdown: markdown))
         ?? AttributedString(markdown.replacingOccurrences(of: "`", with: ""))

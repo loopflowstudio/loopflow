@@ -262,7 +262,7 @@ for required_key in (
     "homepage.capabilities.items",
     "homepage.building_blocks.items",
     "homepage.products.loopflow",
-    "homepage.products.server",
+    "homepage.products.cli",
 ):
     _require_content_path(required_key)
 
@@ -289,7 +289,6 @@ DOCS_NAV = [
     # Reference
     ("lf", "lf"),
     ("lf ops", "ops"),
-    ("lfd", "lfd"),
     ("Config", "config"),
     ("Troubleshooting", "troubleshooting"),
 ]
@@ -312,7 +311,7 @@ curl -fsSL https://loopflow.studio/install.sh | sh && lf init
 lf <skill>           Run a skill (design, implement, review, etc.)
 lf debug -c         Fix error from clipboard
 lf pr open          Create PR from current branch
-lf serve X           Start wave X's server (its resident loop)
+lf wave X            Start Wave X's resident loop
 lf chat -w X "..."  Post into wave X's thread
 lf project run ID   Start or resume one Linear Project Session
 lf task start "X" --project ID   Create a Linear Task, then run its Session
@@ -337,10 +336,9 @@ Roadmap: the wave's work queue, provider-backed (e.g. Linear).
 
 ## Docs
 /docs              Overview and quick start
-/docs/waves        Waves, Projects, Tasks, memory, and Task capacity
+/docs/waves        Waves, Projects, Tasks, and memory
 /docs/lf           lf command reference
 /docs/ops          lf operations reference
-/docs/lfd          lfd (daemon) reference
 /docs/config       Configuration options
 
 ## Configuration
@@ -602,9 +600,9 @@ def build_homepage():
     building_blocks = BUILDING_BLOCKS_CONTENT["items"]
 
     loopflow_product = PRODUCTS_CONTENT["loopflow"]
-    server_product = PRODUCTS_CONTENT["server"]
-    server_terminal_lines = [
-        (line["type"], line["content"]) for line in server_product["terminal_lines"]
+    cli_product = PRODUCTS_CONTENT["cli"]
+    cli_terminal_lines = [
+        (line["type"], line["content"]) for line in cli_product["terminal_lines"]
     ]
 
     video_src = VIDEO_CONTENT.get("src") or None
@@ -685,11 +683,11 @@ def build_homepage():
                             note=loopflow_product.get("note"),
                         ),
                         ProductCard(
-                            server_product["name"],
-                            server_product["description"],
-                            server_product["details"],
-                            TerminalBlock(server_terminal_lines),
-                            note=server_product.get("note"),
+                            cli_product["name"],
+                            cli_product["description"],
+                            cli_product["details"],
+                            TerminalBlock(cli_terminal_lines),
+                            note=cli_product.get("note"),
                         ),
                         cls="two-products",
                     ),

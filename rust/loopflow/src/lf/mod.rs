@@ -3,7 +3,6 @@ use clap::{Args, Parser, Subcommand};
 pub mod commands;
 pub mod discovery;
 pub mod output;
-pub mod session;
 
 #[derive(Parser, Debug, Default)]
 #[command(name = "lf")]
@@ -200,11 +199,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: CronCommand,
     },
-    /// Serve a mind: boot its listener, thread, and residency. Steerable.
+    /// Run a Wave's listener, thread, and residency. Steerable.
     ///
     /// By convention this is the wave loop's entrypoint — a served mind is one
     /// you can chat with while it runs.
-    Serve {
+    Wave {
         /// Wave name
         name: String,
         /// Take over even if another live wave session is registered
@@ -217,7 +216,7 @@ pub enum Commands {
         name: String,
     },
     /// Internal: the resident body a listener spawns for its own wave. Never
-    /// booted by hand — `lf serve` owns the listener half.
+    /// booted by hand — `lf wave` owns the listener half.
     #[command(name = "__resident", hide = true)]
     Resident {
         /// Wave name

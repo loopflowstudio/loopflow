@@ -410,13 +410,13 @@ fn ledger_db_path() -> PathBuf {
 #[cfg(test)]
 fn ledger_db_path() -> PathBuf {
     if let Ok(home) = std::env::var("LF_HOME") {
-        return PathBuf::from(home).join("lfd.db");
+        return PathBuf::from(home).join("loopflow.db");
     }
     static TEST_HOME: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
     TEST_HOME
         .get_or_init(|| tempfile::TempDir::new().expect("test ledger home"))
         .path()
-        .join("lfd.db")
+        .join("loopflow.db")
 }
 
 fn node_name(node: LfNode) -> &'static str {
@@ -938,7 +938,7 @@ mod tests {
             .expect("ledger")
             .create_wave(&wave)
             .expect("explicit wave row");
-        std::env::set_var(crate::lf::session::WAVE_ID_ENV, wave.id().as_str());
+        std::env::set_var(crate::engine::wave_context::WAVE_ID_ENV, wave.id().as_str());
 
         emit(
             &worktree,
@@ -962,7 +962,7 @@ mod tests {
             .list_run_events_since(0)
             .expect("events");
         assert_eq!(events[0].wave.as_deref(), Some("context"));
-        std::env::remove_var(crate::lf::session::WAVE_ID_ENV);
+        std::env::remove_var(crate::engine::wave_context::WAVE_ID_ENV);
     }
 
     #[test]

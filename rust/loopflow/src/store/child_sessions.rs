@@ -25,7 +25,10 @@ impl Store {
 
     pub async fn reserve_task_session(&self, session: &TaskSession) -> StoreResult<()> {
         let session = session.clone();
-        run_sqlite(&self.sqlite, move |store| store.reserve_task_session(&session)).await
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_task_session(&session)
+        })
+        .await
     }
 
     pub async fn reserve_task_session_with_directive(

@@ -7,14 +7,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::id::WaveId;
-use crate::wave::Wave;
 use crate::store::{open_store, SharedStore, StorageConfig};
 use crate::wave::runtime::{InboxItem, WaveRuntime};
 use crate::wave::server;
+use crate::wave::Wave;
 
 pub(crate) async fn temp_store(dir: &Path) -> SharedStore {
     Arc::new(
-        open_store(&StorageConfig::sqlite(dir.join("lfd.db")))
+        open_store(&StorageConfig::sqlite(dir.join("loopflow.db")))
             .await
             .expect("open sqlite store"),
     )
@@ -41,6 +41,7 @@ pub(crate) async fn boot_server(
     let inbox_rx = runtime.subscribe_inbox();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    server::write_endpoint(origin, wave, addr).expect("write endpoint pointer");
     let app = server::router(
         runtime.clone(),
         server::ResidentDoor::new("test-token"),

@@ -889,14 +889,14 @@ mod tests {
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
     use crate::id::WaveId;
-    use crate::wave::Wave;
-    use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
     };
+    use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
         PmWritebackState, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
     };
+    use crate::wave::Wave;
 
     struct ScriptedHarness {
         supports_steer: bool,

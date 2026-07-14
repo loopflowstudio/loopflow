@@ -6,10 +6,10 @@ use time::OffsetDateTime;
 
 use crate::engine::platform::open_url;
 use crate::lf::AuthCommand;
-use crate::store::{open_store, CredentialType, ProviderToken, SharedStore};
 use crate::provider_auth::{
     no_event_sink, AuthStatus, Provider, ProviderAuthService, ProviderAuthSnapshot,
 };
+use crate::store::{open_store, CredentialType, ProviderToken, SharedStore};
 
 const AUTH_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(180);
 const AUTH_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -134,10 +134,10 @@ async fn local_auth_service() -> Result<ProviderAuthService> {
 
 async fn local_store() -> Result<SharedStore> {
     let cfg = crate::store::storage_config_from_env()
-        .context("failed to resolve local lfd credential store")?;
+        .context("failed to resolve local credential store")?;
     let store = open_store(&cfg)
         .await
-        .map_err(|err| anyhow!("failed to open local lfd credential store: {err}"))?;
+        .map_err(|err| anyhow!("failed to open local credential store: {err}"))?;
     Ok(Arc::new(store))
 }
 
@@ -268,8 +268,8 @@ fn format_relative_delta(seconds: i64) -> String {
 mod tests {
     use time::OffsetDateTime;
 
-    use crate::store::CredentialType;
     use crate::provider_auth::{AuthStatus, Provider, ProviderAuthSnapshot};
+    use crate::store::CredentialType;
 
     use super::{format_relative_delta, format_snapshot};
 

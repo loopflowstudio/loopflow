@@ -147,7 +147,7 @@ For Loopflow:
 When something is wrong, don't just tell them—give them a button to fix it. Empty states, error states, and disconnected states should all offer the next skill.
 
 For Loopflow:
-- "Connect lfd" not "lfd not connected"
+- "Connect Linear" not "Linear unavailable"
 - "Create workspace" not "No workspaces found"
 - "Install Claude Code" not "Claude Code not found"
 - Every error should have a recovery action adjacent to it
@@ -206,7 +206,7 @@ From Cursor and Stripe:
 From loopflowstudio existing patterns:
 
 - Status badges per worktree (design, implement, review, polish)
-- Real-time updates via daemon socket
+- Real-time updates from the selected Wave listener
 - History queryable per worktree
 - Live output streaming
 

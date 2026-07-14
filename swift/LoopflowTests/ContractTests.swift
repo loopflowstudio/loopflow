@@ -109,8 +109,7 @@ struct ContractTests {
 
     @Test("post_message_response.json decodes through PostMessageResponse")
     func postMessageResponseFixtureParses() throws {
-        // Pins `POST /messages` → `{turn, state}` against Rust's
-        // dto_fixtures; a drifted turn shape or state name fails both.
+        // Pins `POST /messages` → `{turn, state}` for the Mac client.
         let data = try fixtureData("dto/post_message_response.json")
         let posted = try JSONDecoder().decode(PostMessageResponse.self, from: data)
 
@@ -134,10 +133,8 @@ struct ContractTests {
 
     @Test("wave_loop_states.json pins the shared SSE state vocabulary")
     func loopStateVocabularyPinned() throws {
-        // The same fixture Rust's dto_fixtures checks against LoopState::name;
-        // a renamed state fails both languages. Swift still deliberately drops
-        // unknown names off the stream (see WaveChatConnectionTests) — this
-        // pins the vocabulary, not the tolerance.
+        // Swift deliberately drops unknown names off the stream (see
+        // WaveChatConnectionTests); this pins the vocabulary, not the tolerance.
         let json = try fixtureJSON("dto/wave_loop_states.json")
         let names = try #require(json["states"] as? [String])
         #expect(names.map { WaveLoopState(rawValue: $0) } == [.idle, .turning, .interrupting, .failed])

@@ -81,7 +81,7 @@ pub(crate) async fn follow(wave: Option<&str>, json: bool) -> Result<()> {
             waiting_note_shown = false;
         } else if !waiting_note_shown {
             eprintln!(
-                "wave '{}' has no live server; waiting (start one with `lf serve {}`)",
+                "wave '{}' has no live listener; waiting (start one with `lf wave {}`)",
                 resolved.name, resolved.name
             );
             waiting_note_shown = true;

@@ -1,5 +1,0 @@
-CREATE TABLE IF NOT EXISTS repos (
-    path TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    added_at BIGINT NOT NULL
-);

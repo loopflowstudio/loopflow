@@ -75,7 +75,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_identity = "unset LF_SESSION_INHERITED LF_SESSION_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION";
+    let clear_identity = "unset LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION";
     if env.is_empty() {
         format!("{clear_identity}; exec {command}")
     } else {
@@ -140,19 +140,19 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_SESSION_INHERITED LF_SESSION_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION; exec env 'LF_TASK_SESSION_ID'='task-1' 'LF_WAVE_ID'='infra' 'lf' '__task'"
+            "unset LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION; exec env 'LF_TASK_SESSION_ID'='task-1' 'LF_WAVE_ID'='infra' 'lf' '__task'"
         );
     }
 
     #[test]
     fn lf_session_without_explicit_identity_does_not_inherit_its_parent() {
-        let argv = vec!["lf".to_string(), "serve".to_string(), "child".to_string()];
+        let argv = vec!["lf".to_string(), "wave".to_string(), "child".to_string()];
 
         let command = lf_session_shell_command(&argv, &[]);
 
         assert_eq!(
             command,
-            "unset LF_SESSION_INHERITED LF_SESSION_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION; exec 'lf' 'serve' 'child'"
+            "unset LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_TASK_SESSION_ID LF_TASK_GENERATION; exec 'lf' 'wave' 'child'"
         );
     }
 }

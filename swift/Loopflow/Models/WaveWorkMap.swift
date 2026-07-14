@@ -182,16 +182,13 @@ public struct PullRequestSnapshot: Decodable, Sendable, Hashable {
 
 public struct WaveStatusResult: Sendable {
     public let workMap: WaveWorkMap
-    public let attention: [AttentionItem]
     public let loopState: String?
 
     public init(
         workMap: WaveWorkMap,
-        attention: [AttentionItem],
         loopState: String?
     ) {
         self.workMap = workMap
-        self.attention = attention
         self.loopState = loopState
     }
 }

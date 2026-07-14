@@ -1,4 +1,4 @@
-name: Regression (weekly auto-release)
+name: Release (weekly)
 
 on:
   schedule:

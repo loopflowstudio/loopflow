@@ -20,7 +20,7 @@ memory; selects a Project before creating or selecting the next Task; starts
 one durable Task Session; and folds the linked result back into memory.
 
 ```bash
-lf serve shipper            # start the wave agent
+lf wave shipper             # start the Wave
 tmux ls                    # detached Wave, Project, and Task processes
 lf task attach INF-123     # audited writable task control prompt
 ```
@@ -53,7 +53,7 @@ The Wave stays directly steerable while several independent tasks run. Task
 events enter its inbox as typed observations and wake it once. Decision answers,
 review feedback, and CI repair resume the same Task Session and provider history.
 
-Waves are independent by default. Humans steer a served mind with `lf chat`;
+Waves are independent by default. Humans steer a running Wave with `lf chat`;
 agents report on its bus with `lf radio pub --channel <name> "…"`, even while the
 wave sleeps.
 
@@ -64,7 +64,6 @@ Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter
 ```markdown
 <!-- wave/shipper/GOAL.md -->
 ---
-task_capacity: 2
 crons:
   - flow: sync
     schedule: "0 0 0 1 * * *"
@@ -85,39 +84,21 @@ Clarify the portfolio, direct the next Project or Task, and judge the evidence.
 
 Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due mid-turn fires at the next turn boundary; occurrences older than 24 hours are missed, not replayed.
 
-Use `task_capacity: 0` in `GOAL.md` for Waves that coordinate without starting
-Task Sessions, including cron-only observers:
-
-```markdown
-<!-- wave/governance/GOAL.md -->
----
-task_capacity: 0
-crons:
-  - flow: govern-identity
-    schedule: "0 0 0 * * Sun *"
-  - flow: govern-coordination
-    schedule: "0 0 0 * * * *"
----
-
-Keep governance checks current and actionable.
-```
-
 ---
 
 ## Quick Start
 
 ```bash
-lf serve <name>
+lf wave <name>
 ```
 
 Open the repository in Loopflow to see the Wave conversation and Project →
-Task work map. Install `lfd` only when you need webhook ingress, HTTP registry
-reads, or host-level credential refresh.
+Task work map.
 
 ## Managing Waves
 
 ```bash
-lf serve <name>          # start the wave agent (Ctrl-C to stop)
+lf wave <name>           # start the Wave (Ctrl-C to stop)
 lf project attach <id>  # audited Project control prompt
 lf task attach INF-123  # audited Task control prompt
 ```
@@ -130,4 +111,4 @@ To remove a wave, stop it, then delete `wave/<name>/`.
 
 ## Reference
 
-[`lfd` commands](lfd.md) · [Configuration](config.md) · [Troubleshooting](troubleshooting.md)
+[Configuration](config.md) · [Troubleshooting](troubleshooting.md)

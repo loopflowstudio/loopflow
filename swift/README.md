@@ -14,7 +14,7 @@ machine registry.
 
 Create a Wave with the `+` button. The app writes `GOAL.md` and `MEMORY.md`
 in the repository's main checkout. Selecting a Wave opens Wave Chat; sending a
-message launches or reconnects to `lf serve`, then streams that Wave's turns.
+message launches or reconnects to `lf wave`, then streams that Wave's turns.
 The detail pane reads Projects, Tasks, decisions, PR delivery, and attention
 from `lf status --json`.
 
@@ -53,8 +53,8 @@ application target.
 
 `./dev` uses Swift Package Manager and installs to a stable application path
 so macOS permissions survive rebuilds. The app queries `lf` directly and starts
-only the selected Wave's `lf serve` process; it has no private machine-wide
-daemon or remote-connection mode.
+only the selected Wave's `lf wave` process; it has no machine-wide service or
+remote-connection mode.
 
 | Command | What it does |
 | --- | --- |
@@ -84,7 +84,7 @@ Keep `Package.swift` and `project.yml` in sync.
 ## Shared-library boundary
 
 - Keep Foundation/SwiftUI models and reusable views in `Loopflow`.
-- Keep AppKit, Carbon, process launching, and bundled-daemon ownership in
+- Keep AppKit, Carbon, process launching, and bundled-`lf` ownership in
   `LoopflowMac`.
 - Prefer whole platform files over inline `#if` branches.
 - Gate platform dependencies explicitly in `Package.swift`.

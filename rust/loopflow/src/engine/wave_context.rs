@@ -13,7 +13,7 @@
 //!
 //! Read path — reads only, the wave server stays the single writer:
 //! 1. live server: `GET /conversation` at the `wave/<name>/.wave-endpoint`
-//!    discovery pointer (the same file `lf serve` publishes);
+//!    discovery pointer (the same file `lf wave` publishes);
 //! 2. no live server: a read-only fold over the wave's journal
 //!    ([`crate::wave::journal::read_events`] — never truncates, never
 //!    creates);
@@ -34,6 +34,12 @@ use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::id::{RunId, WaveId};
 use crate::wave::journal::{fold_thread, journal_path, read_events};
 use crate::wave::server::endpoint_path;
+use crate::wave::Wave;
+
+/// The durable Wave attributed to this process.
+pub const WAVE_ID_ENV: &str = "LF_WAVE_ID";
+/// The Wave or child channel this process speaks on by default.
+pub const CHANNEL_ENV: &str = "LF_CHANNEL";
 
 /// Turns included in `<lf:wave-chat-recent>` (the newest are kept).
 pub const WAVE_CHAT_RECENT_TURNS: usize = 12;
@@ -79,8 +85,8 @@ pub fn resolve_ambient_channel(
 /// this process's env, id-arm resolved through the store. `None` when no
 /// wave context resolves anywhere.
 pub fn resolve_ambient_channel_name() -> Option<String> {
-    let env_channel = std::env::var(crate::lf::session::CHANNEL_ENV).ok();
-    let env_wave_id = std::env::var(crate::lf::session::WAVE_ID_ENV).ok();
+    let env_channel = std::env::var(CHANNEL_ENV).ok();
+    let env_wave_id = std::env::var(WAVE_ID_ENV).ok();
     match resolve_ambient_channel(env_channel.as_deref(), env_wave_id.as_deref())? {
         AmbientChannelRef::WaveId(id) => wave_name_for_id(&id),
         AmbientChannelRef::Channel(name) => Some(name),
@@ -98,11 +104,37 @@ pub fn placed_channel_name(wave_name: &str, run_id: &RunId) -> String {
 
 /// The Wave a managed run is attributed to.
 pub fn resolve_run_wave_name() -> Option<String> {
-    std::env::var(crate::lf::session::WAVE_ID_ENV)
+    std::env::var(WAVE_ID_ENV)
         .ok()
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty())
         .and_then(|id| wave_name_for_id(&id))
+}
+
+/// Resolve a top-level `--wave` to the durable Wave row used by prompt,
+/// journal, and child-process attribution.
+pub fn resolve_explicit_wave(name: &str) -> anyhow::Result<Wave> {
+    let name = crate::ops::util::normalize_wave_name(name)
+        .ok_or_else(|| anyhow::anyhow!("--wave requires a non-empty wave name"))?;
+    let lookup_name = name.clone();
+    let lookup = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("current-thread runtime always builds");
+        runtime.block_on(async move {
+            let store = crate::store::open_existing_store()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("no wave registry on this machine"))?;
+            store
+                .get_wave_by_name(&lookup_name)
+                .await
+                .map_err(|error| anyhow::anyhow!("failed to read wave registry: {error}"))
+        })
+    })
+    .join()
+    .map_err(|_| anyhow::anyhow!("failed to resolve explicit wave '{name}'"))??;
+    lookup.ok_or_else(|| anyhow::anyhow!("wave '{name}' not found"))
 }
 
 /// Resolve a linked worktree to its canonical checkout once per process.
@@ -694,7 +726,7 @@ mod tests {
     async fn child_memory_walks_parent_scope_while_chat_stays_local() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
-            tmp.path().join("lfd.db"),
+            tmp.path().join("loopflow.db"),
         ))
         .await
         .unwrap();

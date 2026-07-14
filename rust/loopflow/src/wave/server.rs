@@ -341,9 +341,8 @@ struct ServerState {
 /// poller when this server is registered — `GET /resident/context` freshens
 /// it before serving. `supervisor` lets the attach door stand the respawn
 /// ladder down (`None` in tests without a supervisor).
-/// Request-body ceiling for the wave routes — parity with the machine lfd's
-/// `http_security.max_json_body_bytes` default (1 MiB). Loopback + token gate
-/// this, but an unbounded body is a needless same-user allocation.
+/// Request-body ceiling for the wave routes. Loopback + token gate this, but
+/// an unbounded body is a needless same-user allocation.
 const MAX_BODY_BYTES: usize = 1_048_576;
 
 pub fn router(
@@ -435,14 +434,14 @@ async fn resident_attach_handler(
     // refuses the attach naming it — a second resident would split-brain the
     // wire. A dead/absent seat is free (takeover after a crash rides the same
     // door; the supervisor's own seat probe frees a dead pid on its cadence).
-    // `--force` is `lf serve`'s boot flag, not the door's business.
+    // `--force` is `lf wave`'s boot flag, not the door's business.
     if let Some(seated) = state.resident.seat_pid() {
         if seated != body.pid && process_alive(seated).await {
             return Err((
                 StatusCode::CONFLICT,
                 format!(
                     "wave '{}' already has a live resident on the seat (pid {seated}); \
-                     stop it before attaching, or use `lf serve <name> --force` to take over",
+                     stop it before attaching, or use `lf wave <name> --force` to take over",
                     state.runtime.name()
                 ),
             ));

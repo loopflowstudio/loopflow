@@ -11,7 +11,7 @@ struct BundledDaemonPathTests {
     // macOS GUI apps inherit this when launched from the Dock or Finder.
     private static let guiPath = "/usr/bin:/bin:/usr/sbin:/sbin"
 
-    @Test("tmux resolves under the enriched PATH a GUI-launched daemon would see")
+    @Test("tmux resolves under the enriched PATH a GUI-launched resident would see")
     func tmuxResolvesUnderEnrichedPath() throws {
         guard isToolInstalledSomewhere("tmux") else { return }
 

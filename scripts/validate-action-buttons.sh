@@ -28,9 +28,7 @@ echo ""
 
 run_check "cargo fmt" cargo fmt --all -- --check
 run_check "cargo clippy" cargo clippy --all-targets -- -D warnings
-run_check "cargo test (skip docker)" cargo test --all \
-    -- --skip lfd::executor::docker::tests::docker_startup_lost_agent_does_not_flip_terminal_run_wave_status \
-       --skip lfd::executor::docker::tests::docker_startup_rehydrates_running_agents_and_cleans_orphans
+run_check "cargo test" cargo test --all
 run_check "python tests" uv run pytest python/tests/ -q
 run_check "swift tests" swift test --package-path swift
 

@@ -3,10 +3,9 @@
 
     install.py local            # build this worktree into local-bin/
     install.py local --use      # promote this worktree onto PATH and /Applications
-    install.py local --service  # also install/restart lfd as a launchd service
     install.py local --skip swift
     install.py local -n         # dry run
-    install.py refresh          # pull default branch, rebuild lf/lfd, install to PATH
+    install.py refresh          # pull default branch, rebuild lf, install to PATH
 
 Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
 """
@@ -36,7 +35,7 @@ LEGACY_APP_NAME = "Concerto"
 # SwiftPM executable product; the library owns the bare `Loopflow` name, so the
 # app binary is built as `LoopflowMac` and renamed to APP_NAME inside the bundle.
 SWIFT_APP_PRODUCT = "LoopflowMac"
-BUILD_STAGES = ("wheel", "cargo", "swift")
+BUILD_STAGES = ("cargo", "swift")
 
 
 # --- Bundle spec (single source of truth for Loopflow.app layout) ---
@@ -163,20 +162,15 @@ def _refresh_default_branch(repo: Path = ROOT) -> None:
 # --- Builds ---
 
 
-def _build_wheel() -> None:
-    typer.echo("Building wheel...")
-    _run_or_raise(["uv", "build", "--wheel"], "wheel", cwd=ROOT)
-
-
 def _build_binaries() -> None:
-    typer.echo("Building lf/lfd (cargo release)...")
+    typer.echo("Building lf (cargo release)...")
     _run_or_raise(["cargo", "build", "-p", "loopflow", "--release"], "cargo", cwd=ROOT)
 
 
 def _build_cli_binaries() -> None:
-    typer.echo("Building lf/lfd (cargo release)...")
+    typer.echo("Building lf (cargo release)...")
     _run_or_raise(
-        ["cargo", "build", "--release", "-p", "loopflow", "--bin", "lf", "--bin", "lfd"],
+        ["cargo", "build", "--release", "-p", "loopflow", "--bin", "lf"],
         "cargo",
         cwd=ROOT,
     )
@@ -191,7 +185,7 @@ def _build_loopflow() -> None:
 
 
 def _run_parallel_builds(skip: set[str]) -> None:
-    stages = {"wheel": _build_wheel, "cargo": _build_binaries, "swift": _build_loopflow}
+    stages = {"cargo": _build_binaries, "swift": _build_loopflow}
     active = {name: fn for name, fn in stages.items() if name not in skip}
     if not active:
         typer.echo("All build stages skipped.")
@@ -287,30 +281,16 @@ def _resolve_install_dir() -> Path:
     return DEFAULT_INSTALL_DIR
 
 
-def _install_wheel() -> None:
-    wheels = sorted((ROOT / "dist").glob("loopflow-*.whl"))
-    if not wheels:
-        raise StageError("no wheel found in dist/")
-    wheel = str(wheels[-1])
-
-    typer.echo("Installing wheel into local venv...")
-    _run_or_raise(["uv", "pip", "install", "--force-reinstall", wheel], "pip")
-
-    typer.echo("Installing wheel as global tool...")
-    _run_or_raise(["uv", "tool", "install", "--force", "--reinstall", wheel], "tool")
-
-
 def _stage_binaries(local_bin: Path) -> None:
-    """Copy freshly built lf/lfd into this worktree's local-bin/."""
+    """Copy freshly built lf into this worktree's local-bin/."""
     _install_cli_binaries(local_bin)
 
 
 def _install_cli_binaries(install_dir: Path) -> None:
-    """Atomically copy freshly built lf/lfd into install_dir."""
+    """Atomically copy freshly built lf into install_dir."""
     install_dir.mkdir(parents=True, exist_ok=True)
     built = ROOT / "target" / "release"
-    for name in ("lf", "lfd"):
-        _atomic_install(built / name, install_dir / name)
+    _atomic_install(built / "lf", install_dir / "lf")
 
 
 def _sync_skills(lf_bin: Path) -> None:
@@ -336,15 +316,14 @@ def _sync_skills(lf_bin: Path) -> None:
 def _promote(local_bin: Path, install_dir: Path, applications_dir: Path = APPLICATIONS_DIR) -> None:
     """Make this worktree's build the active one.
 
-    Symlinks lf/lfd from the resolved bin dir to local-bin/ (so rebuilds take
+    Symlinks lf from the resolved bin dir to local-bin/ (so rebuilds take
     effect with no extra skill) and copies Loopflow.app into /Applications.
     """
     install_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("lf", "lfd"):
-        link = install_dir / name
-        if link.is_symlink() or link.exists():
-            link.unlink()
-        link.symlink_to(local_bin / name)
+    link = install_dir / "lf"
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    link.symlink_to(local_bin / "lf")
 
     app_dst = applications_dir / f"{APP_NAME}.app"
     if app_dst.exists():
@@ -486,49 +465,22 @@ def _verify_bundle_signature(spec: BundleSpec) -> None:
             typer.echo(f"  [codesign] {line}")
 
 
-# --- Service management ---
-
-
-def _restart_lfd() -> None:
-    label = "com.loopflow.lfd"
-    plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
-
-    lfd_bin = shutil.which("lfd")
-    if lfd_bin:
-        typer.echo("Reinstalling lfd service (updates PATH)...")
-        result = subprocess.run([lfd_bin, "install"], capture_output=True, text=True, timeout=15)
-        if result.returncode == 0:
-            typer.echo("lfd service restarted.")
-            return
-        typer.echo(f"lfd install failed, falling back to launchctl: {result.stderr.strip()}")
-
-    if not plist.exists():
-        typer.echo(f"lfd launchd plist not found at {plist}, skipping restart.", err=True)
-        return
-
-    typer.echo("Restarting lfd via launchctl...")
-    subprocess.run(["launchctl", "unload", str(plist)], capture_output=True, timeout=10)
-    subprocess.run(["launchctl", "load", str(plist)], capture_output=True, timeout=10)
-    typer.echo("lfd restarted.")
-
-
 # --- Reporting ---
 
 
 def _report_path_collisions(install_dir: Path) -> None:
-    for name in ("lf", "lfd"):
-        found = shutil.which(name)
-        if not found:
-            continue
-        resolved = Path(found)
-        expected = install_dir / name
-        typer.echo(f"{name}: {resolved}")
-        if resolved != expected:
-            typer.echo(
-                f"Note: {name} resolves to {resolved}, not {expected}. "
-                f"Add {install_dir} to PATH to use the freshly installed binary.",
-                err=True,
-            )
+    found = shutil.which("lf")
+    if not found:
+        return
+    resolved = Path(found)
+    expected = install_dir / "lf"
+    typer.echo(f"lf: {resolved}")
+    if resolved != expected:
+        typer.echo(
+            f"Note: lf resolves to {resolved}, not {expected}. "
+            f"Add {install_dir} to PATH to use the freshly installed binary.",
+            err=True,
+        )
 
 
 # --- Commands ---
@@ -548,10 +500,10 @@ def refresh(
         False, "--no-pull", help="Build the current checkout without pulling"
     ),
     install_dir: Path | None = typer.Option(
-        None, "--install-dir", help="Install lf/lfd here instead of the resolved local bin dir"
+        None, "--install-dir", help="Install lf here instead of the resolved local bin dir"
     ),
 ) -> None:
-    """Pull the default branch, rebuild lf/lfd, and install them locally."""
+    """Pull the default branch, rebuild lf, and install it locally."""
     resolved_install_dir = install_dir.expanduser() if install_dir else _resolve_install_dir()
 
     try:
@@ -565,35 +517,26 @@ def refresh(
         raise typer.Exit(code=1) from exc
 
     typer.echo(f"installed: {resolved_install_dir / 'lf'}")
-    for name in ("lf", "lfd"):
-        result = subprocess.run([str(resolved_install_dir / name), "--version"], text=True)
-        if result.returncode != 0:
-            raise typer.Exit(code=result.returncode)
+    result = subprocess.run([str(resolved_install_dir / "lf"), "--version"], text=True)
+    if result.returncode != 0:
+        raise typer.Exit(code=result.returncode)
 
 
 @app.command()
 def local(
     use: bool = typer.Option(
-        False, "--use", help="Promote this build: symlink lf/lfd onto PATH and install the app"
+        False, "--use", help="Promote this build: symlink lf onto PATH and install the app"
     ),
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
-    service: bool = typer.Option(
-        False, "--service", help="Install/restart lfd as a launchd service (implies --use)"
-    ),
     skip: list[str] = typer.Option(
         [], "--skip", help=f"Skip a build stage ({'|'.join(BUILD_STAGES)}); repeatable"
     ),
 ) -> None:
     """Build this worktree into local-bin/; --use makes it the active build."""
-    use = use or service
     skip_set = set(skip)
     unknown = skip_set - set(BUILD_STAGES)
     if unknown:
         raise typer.BadParameter(f"unknown --skip values: {', '.join(sorted(unknown))}")
-
-    # The wheel is a global tool; only build it when promoting.
-    if not use:
-        skip_set.add("wheel")
 
     spec = default_bundle_spec()
     install_dir = _resolve_install_dir()
@@ -602,19 +545,13 @@ def local(
     if dry_run:
         planned = [s for s in BUILD_STAGES if s not in skip_set] or ["(nothing)"]
         typer.echo(f"Would build in parallel: {', '.join(planned)}")
-        typer.echo(f"Would stage lf/lfd + {spec.app_path.name} (v{version}) into {LOCAL_BIN}")
+        typer.echo(f"Would stage lf + {spec.app_path.name} (v{version}) into {LOCAL_BIN}")
         executable_names = ", ".join(path.name for path in spec.executables)
         typer.echo(f"  Contents/MacOS/: {executable_names}")
         if use:
-            typer.echo(f"Would promote: symlink lf/lfd into {install_dir}")
+            typer.echo(f"Would promote: symlink lf into {install_dir}")
             typer.echo(f"Would install {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
-            typer.echo("Would install wheel with uv pip install + uv tool install")
             typer.echo("Would sync skills into ~/.claude/skills and ~/.agents/skills")
-            typer.echo(
-                "Would install/restart lfd service"
-                if service
-                else "Would skip lfd service install/restart (pass --service to enable)"
-            )
         else:
             typer.echo("Would not promote (pass --use to symlink onto PATH and install the app)")
         return
@@ -623,26 +560,18 @@ def local(
     try:
         _run_parallel_builds(skip_set)
 
-        typer.echo(f"Staging lf/lfd + {APP_NAME}.app (v{version}) into {LOCAL_BIN}...")
+        typer.echo(f"Staging lf + {APP_NAME}.app (v{version}) into {LOCAL_BIN}...")
         _stage_binaries(LOCAL_BIN)
         _install_loopflow(spec, version)
         typer.echo(f"Built {spec.app_path}")
 
         if use:
-            typer.echo("Installing wheel...")
-            _install_wheel()
-            typer.echo("Wheel installed.")
-
-            typer.echo(f"Promoting this worktree (symlinking lf/lfd into {install_dir})...")
+            typer.echo(f"Promoting this worktree (symlinking lf into {install_dir})...")
             _promote(LOCAL_BIN, install_dir)
             typer.echo(f"Installed {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
             _report_path_collisions(install_dir)
             _sync_skills(install_dir / "lf")
 
-            if service:
-                _restart_lfd()
-            else:
-                typer.echo("Skipping lfd service install/restart. Pass --service to enable.")
         else:
             typer.echo(f"\nBuilt into {LOCAL_BIN}. Run with --use to make it the active build.")
     except StageError as exc:

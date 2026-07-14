@@ -11,8 +11,6 @@ use crate::child_session::{
     ChildProcessGeneration, ChildRef, DirectiveKind, SessionSupervisor,
 };
 use crate::id::WaveId;
-use crate::store::rows::now_unix;
-use crate::store::{StoreError, StoreResult};
 use crate::project_session::{
     ChildEventPayload, ObservationOutboxRow, ProjectEvent, ProjectEventKind, ProjectSession,
     ProjectSessionId, ProjectSessionStatus,
@@ -20,6 +18,8 @@ use crate::project_session::{
 use crate::session_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
 };
+use crate::store::rows::now_unix;
+use crate::store::{StoreError, StoreResult};
 use crate::task::{
     PullRequestRef, TaskEvent, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
 };
@@ -937,7 +937,7 @@ impl SqliteStore {
         )?;
         transaction.execute(
             "UPDATE project_sessions
-             SET task_event_cursor=MAX(task_event_cursor, ?1), updated_at=?2
+             SET observation_cursor=MAX(observation_cursor, ?1), updated_at=?2
              WHERE id=?3",
             params![observation.id, now, project_session_id.as_str()],
         )?;
@@ -1084,12 +1084,12 @@ const TASK_SESSION_INSERT: &str = "INSERT INTO task_sessions (
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
-    pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id,
+    pm_writeback_json, supervisor_kind, supervisor_id,
     current_directive_version, incorporated_directive_version
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-    ?29, ?30, ?31, ?32, ?33, ?34, ?35
+    ?29, ?30, ?31, ?32, ?33, ?34
 )";
 const TASK_SESSION_COLUMNS: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
@@ -1098,7 +1098,7 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
-    pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id,
+    pm_writeback_json, supervisor_kind, supervisor_id,
     current_directive_version, incorporated_directive_version
     FROM task_sessions";
 const TASK_SESSION_SELECT: &str = "SELECT
@@ -1108,7 +1108,7 @@ const TASK_SESSION_SELECT: &str = "SELECT
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
-    pm_snapshot_warning, pm_writeback_json, supervisor_kind, supervisor_id,
+    pm_writeback_json, supervisor_kind, supervisor_id,
     current_directive_version, incorporated_directive_version
     FROM task_sessions WHERE id = ?1";
 const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
@@ -1119,10 +1119,10 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     provider_session_id=?20, process_generation=?21, process_pid=?22,
     process_tmux_name=?23, process_started_at=?24, pr_number=?25,
     pr_url=?26, created_at=?27, updated_at=?28,
-    pm_snapshot_synced_at=?29, pm_snapshot_warning=?30,
-    pm_writeback_json=?31, supervisor_kind=?32, supervisor_id=?33,
-    current_directive_version=MAX(current_directive_version, ?34),
-    incorporated_directive_version=MAX(incorporated_directive_version, ?35)
+    pm_snapshot_synced_at=?29, pm_writeback_json=?30,
+    supervisor_kind=?31, supervisor_id=?32,
+    current_directive_version=MAX(current_directive_version, ?33),
+    incorporated_directive_version=MAX(incorporated_directive_version, ?34)
     WHERE id=?1";
 const CHILD_COMMAND_COLUMNS: &str = "SELECT
     id, target_kind, session_id, source_json, kind_json, created_at,
@@ -1345,9 +1345,6 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.created_at.unix_timestamp()),
         Box::new(session.updated_at.unix_timestamp()),
         Box::new(session.pm_snapshot_synced_at),
-        // Legacy column retained until the next table rebuild. Freshness is
-        // represented by the captured synced_at timestamp; hard-stale reads fail.
-        Box::new(None::<String>),
         Box::new(
             serde_json::to_string(&session.pm_writeback)
                 .expect("Task Session PM writeback state must serialize"),
@@ -1417,22 +1414,22 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
             context: row.get(8)?,
         },
         pm_snapshot_synced_at: row.get(28)?,
-        pm_writeback: serde_json::from_str(&row.get::<_, String>(30)?)
-            .map_err(|error| invalid_column(30, error))?,
+        pm_writeback: serde_json::from_str(&row.get::<_, String>(29)?)
+            .map_err(|error| invalid_column(29, error))?,
         wave_id: row.get(9)?,
         wave_name: row.get(10)?,
-        supervisor: match row.get::<_, String>(31)?.as_str() {
+        supervisor: match row.get::<_, String>(30)?.as_str() {
             "wave" => SessionSupervisor::Wave {
-                wave_id: row.get(32)?,
+                wave_id: row.get(31)?,
             },
             "project" => SessionSupervisor::Project {
                 session_id: crate::project_session::ProjectSessionId::from_raw(
-                    row.get::<_, String>(32)?,
+                    row.get::<_, String>(31)?,
                 ),
             },
             value => {
                 return Err(invalid_column(
-                    31,
+                    30,
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
                         format!("unknown Task Session supervisor kind {value:?}"),
@@ -1440,8 +1437,8 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
                 ))
             }
         },
-        current_directive_version: row.get::<_, i64>(33)? as u32,
-        incorporated_directive_version: row.get::<_, i64>(34)? as u32,
+        current_directive_version: row.get::<_, i64>(32)? as u32,
+        incorporated_directive_version: row.get::<_, i64>(33)? as u32,
         status,
         status_reason: row.get(12)?,
         status_at: crate::store::rows::unix_to_datetime(row.get(13)?),
@@ -1512,9 +1509,9 @@ fn map_task_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
 
 const PROJECT_SESSION_INSERT: &str = "INSERT INTO project_sessions (
     id, project_id, project_slug, project_name, project_context,
-    wave_id, wave_name, repo, pm_snapshot_synced_at, status,
-    status_reason, status_at, iteration, task_event_cursor,
-    state_fingerprint, agent, provider, provider_session_id,
+    wave_id, wave_name, control_repo, pm_snapshot_synced_at, status,
+    status_reason, status_at, iteration, observation_cursor,
+    last_state_fingerprint, agent, provider, provider_session_id,
     process_generation, process_pid, process_tmux_name,
     process_started_at, created_at, updated_at,
     current_directive_version, incorporated_directive_version
@@ -1525,25 +1522,25 @@ const PROJECT_SESSION_INSERT: &str = "INSERT INTO project_sessions (
 )";
 const PROJECT_SESSION_COLUMNS: &str = "SELECT
     id, project_id, project_slug, project_name, project_context,
-    wave_id, wave_name, repo, pm_snapshot_synced_at, status,
-    status_reason, status_at, iteration, task_event_cursor, state_fingerprint,
+    wave_id, wave_name, control_repo, pm_snapshot_synced_at, status,
+    status_reason, status_at, iteration, observation_cursor, last_state_fingerprint,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, created_at, updated_at,
     current_directive_version, incorporated_directive_version
     FROM project_sessions";
 const PROJECT_SESSION_SELECT: &str = "SELECT
     id, project_id, project_slug, project_name, project_context,
-    wave_id, wave_name, repo, pm_snapshot_synced_at, status,
-    status_reason, status_at, iteration, task_event_cursor, state_fingerprint,
+    wave_id, wave_name, control_repo, pm_snapshot_synced_at, status,
+    status_reason, status_at, iteration, observation_cursor, last_state_fingerprint,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, created_at, updated_at,
     current_directive_version, incorporated_directive_version
     FROM project_sessions WHERE id=?1";
 const PROJECT_SESSION_UPDATE: &str = "UPDATE project_sessions SET
     project_id=?2, project_slug=?3, project_name=?4, project_context=?5,
-    wave_id=?6, wave_name=?7, repo=?8, pm_snapshot_synced_at=?9,
+    wave_id=?6, wave_name=?7, control_repo=?8, pm_snapshot_synced_at=?9,
     status=?10, status_reason=?11, status_at=?12, iteration=?13,
-    task_event_cursor=?14, state_fingerprint=?15, agent=?16, provider=?17,
+    observation_cursor=?14, last_state_fingerprint=?15, agent=?16, provider=?17,
     provider_session_id=?18, process_generation=?19, process_pid=?20,
     process_tmux_name=?21, process_started_at=?22, created_at=?23,
     updated_at=?24,

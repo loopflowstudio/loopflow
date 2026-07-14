@@ -55,7 +55,6 @@ def _stage_build_artifacts(root: Path) -> None:
     cargo_rel = root / "target" / "release"
     cargo_rel.mkdir(parents=True)
     _write_fake_macho(cargo_rel / "lf")
-    _write_fake_macho(cargo_rel / "lfd")
 
 
 def _make_spec(root: Path) -> install.BundleSpec:
@@ -114,7 +113,6 @@ def test_install_loopflow_bundles_only_the_lf_helper(
 
     assert (spec.macos_dir / "Loopflow").exists()
     assert (spec.macos_dir / "lf").exists()
-    assert not (spec.macos_dir / "lfd").exists()
 
     stamped = plistlib.loads((spec.contents_dir / "Info.plist").read_bytes())
     assert stamped["CFBundleShortVersionString"] == "9.9.9"
@@ -169,7 +167,7 @@ def test_install_loopflow_fails_when_codesign_verify_fails(
 def test_stage_binaries_errors_on_missing_cargo_output(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Silent-skip regression: if cargo didn't produce lf/lfd, staging into
+    """Silent-skip regression: if cargo didn't produce lf, staging into
     local-bin/ must refuse to claim success.
     """
     monkeypatch.setattr(install, "ROOT", tmp_path / "repo")
@@ -204,14 +202,12 @@ def test_promote_uses_worktree_build_and_replaces_installed_app(tmp_path: Path) 
     local_bin = tmp_path / "local-bin"
     local_bin.mkdir()
     (local_bin / "lf").write_text("lf")
-    (local_bin / "lfd").write_text("lfd")
     (local_bin / "Loopflow.app" / "Contents").mkdir(parents=True)
     (local_bin / "Loopflow.app" / "Contents" / "marker").write_text("new app")
 
     install_dir = tmp_path / "bin"
     install_dir.mkdir()
     (install_dir / "lf").write_text("old lf")
-    (install_dir / "lfd").write_text("old lfd")
 
     applications = tmp_path / "Applications"
     (applications / "Loopflow.app").mkdir(parents=True)
@@ -222,8 +218,6 @@ def test_promote_uses_worktree_build_and_replaces_installed_app(tmp_path: Path) 
 
     assert (install_dir / "lf").is_symlink()
     assert (install_dir / "lf").readlink() == local_bin / "lf"
-    assert (install_dir / "lfd").is_symlink()
-    assert (install_dir / "lfd").readlink() == local_bin / "lfd"
     assert (applications / "Loopflow.app" / "Contents" / "marker").read_text() == "new app"
     assert not (applications / "Loopflow.app" / "old").exists()
     assert not (applications / "Concerto.app").exists()

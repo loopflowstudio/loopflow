@@ -2,7 +2,7 @@
 //! scheduled by events, publishing through the wire.
 //!
 //! This runs inside the resident process (the internal half of
-//! `lf serve <name>`,
+//! `lf wave <name>`,
 //! see [`crate::wave::resident`]) — never in the listener. A turn is one
 //! `wave` flow (clarify, pursue, then mutate) played through the live Harness
 //! boundary. Phases reuse one provider session while the resident lives;

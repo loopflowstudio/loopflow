@@ -145,7 +145,7 @@ mod tests {
 
     async fn temp_store(dir: &std::path::Path) -> SharedStore {
         Arc::new(
-            open_store(&StorageConfig::sqlite(dir.join("lfd.db")))
+            open_store(&StorageConfig::sqlite(dir.join("loopflow.db")))
                 .await
                 .expect("open sqlite store"),
         )
@@ -291,7 +291,7 @@ mod tests {
             .publish_bus("ship.a".into(), "ship.a".into(), "stale report".into())
             .await
             .expect("publish");
-        age_whole_bus(&tmp.path().join("lfd.db"), BUS_WINDOW_SECS + 60);
+        age_whole_bus(&tmp.path().join("loopflow.db"), BUS_WINDOW_SECS + 60);
 
         let listener = BusListener::new(runtime.clone(), store.clone());
         listener.attach().await.expect("attach");

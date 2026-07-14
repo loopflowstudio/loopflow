@@ -3,10 +3,8 @@ import Testing
 
 @testable import Loopflow
 
-/// Wire-shape fixture tests for DTOs mirrored across Rust / Python / Swift.
-///
-/// Each fixture under tests/fixtures/dto/ is parsed here and in the Rust and
-/// Python test suites. If any mirror drifts, one of the three fails.
+/// Wire-shape fixtures for the `lf` and per-Wave listener contracts consumed by
+/// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
     @Test("wave detail fixture preserves Project and Task identity")
@@ -20,6 +18,7 @@ struct DTOFixtureTests {
         #expect(detail.projects[0].directive?.version == 1)
         #expect(detail.projects[0].tasks[0].directive?.version == 2)
         #expect(detail.projects[0].tasks[0].directive?.incorporatedAt != nil)
+        #expect(detail.projects[0].tasks[0].runtime?.worktree == "/src/loopflow.infrastructure.task")
         #expect(detail.projects[0].tasks[1].runtime == nil)
     }
 

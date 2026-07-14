@@ -9,7 +9,7 @@ usage() {
 Usage: pull-local-bin.sh [--repo PATH] [--install-dir PATH] [--no-pull]
 
 Compatibility wrapper around scripts/install.py refresh. Pulls the default branch,
-builds release lf/lfd, and installs them into the local bin directory.
+builds release lf, and installs it into the local bin directory.
 USAGE
 }
 

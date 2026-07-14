@@ -13,7 +13,7 @@ const COST_WIDTH: usize = 10;
 
 /// Print a repo x provider table of token usage and cost, with per-provider
 /// and grand-total rollups. Reads the local run ledger directly — the same
-/// store `lf runs` and `lf trace` read, and no running `lfd` required.
+/// store read by `lf runs` and `lf trace`.
 ///
 /// `--json` emits one row per *boundary* instead: what each skill, and each
 /// terminal run, actually spent. That is the grain the dashboard groups by —

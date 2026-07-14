@@ -1,12 +1,11 @@
 use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, sync_main};
-use crate::engine::identity::WaveId;
+use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
     create_from_placement_plan, list_worktrees, main_repo_root, plan_placement,
-    sibling_worktree_name, sibling_worktree_name_with_main, worktree_path, PlacementStrategy,
-    WorktreeSegment,
+    sibling_worktree_name, sibling_worktree_name_with_main, PlacementStrategy, WorktreeSegment,
 };
 use crate::engine::{
     prepare_launch_prompt, sync_skills, ContextSourceOverrides, LaunchPromptInput,
@@ -192,7 +191,6 @@ pub fn run_rebase(
                     "op": "rebase",
                     "branch": plan.branch,
                     "base_ref": plan.base_ref,
-                    "stack_parent": plan.stack_parent,
                     "class": rebase_class_name(&plan.class),
                     "strategy": rebase_strategy_name(&plan.strategy),
                     "unique_commits": plan.unique_commits,
@@ -220,9 +218,6 @@ pub fn run_rebase(
 fn print_rebase_plan(plan: &crate::ops::RebasePlan) {
     println!("branch: {}", plan.branch);
     println!("base: {}", plan.base_ref);
-    if let Some(parent) = plan.stack_parent.as_deref() {
-        println!("stack_parent: {parent}");
-    }
     println!("class: {}", rebase_class_name(&plan.class));
     println!("strategy: {}", rebase_strategy_name(&plan.strategy));
     println!("unique_commits: {}", plan.unique_commits);
@@ -1003,7 +998,7 @@ fn print_placement_plan(plan: &crate::engine::worktrees::PlacementPlan) {
 
 fn placement_strategy_name(strategy: &PlacementStrategy) -> &'static str {
     match strategy {
-        PlacementStrategy::CreateRoot => "create_root",
+        PlacementStrategy::Create => "create",
         PlacementStrategy::CheckoutExisting => "checkout_existing",
         PlacementStrategy::UseExistingWorktree => "use_existing_worktree",
     }
@@ -1048,48 +1043,30 @@ fn wt_switch(name: &str) -> Result<()> {
     {
         exact_branch_match
     } else {
-        // Path-guessing only applies to a bare sibling/dir name. A full `user/…`
-        // branch spec must resolve via an exact branch match (handled above) or
-        // the sibling-name match below — never by landing in whatever worktree
-        // happens to occupy the guessed directory.
-        let target = worktree_path(&main_repo, name);
-        if target.exists() && !name.contains('/') {
-            target
+        let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
+        let mut matches = worktrees
+            .into_iter()
+            .filter(|wt| {
+                let wt_name = sibling_worktree_name_with_main(&wt.path, &main_repo);
+                let parsed = wt
+                    .branch
+                    .as_deref()
+                    .and_then(|branch| WorktreeName::parse(branch, &user));
+                wt_name.as_deref() == Some(name)
+                    || wt
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy() == name)
+                        .unwrap_or(false)
+                    || parsed.as_ref().map(|id| id.name() == name).unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+        if matches.len() == 1 {
+            matches.remove(0).path
+        } else if matches.is_empty() {
+            return Err(anyhow!("no worktree found for '{}'", name));
         } else {
-            let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
-            let mut matches = worktrees
-                .into_iter()
-                .filter(|wt| {
-                    let wt_name = sibling_worktree_name_with_main(&wt.path, &main_repo);
-                    // Match an identity leaf or root name too, so `fix-auth` finds
-                    // the `…bugs.fix-auth…` worktree without the full chain.
-                    let id = wt
-                        .branch
-                        .as_deref()
-                        .and_then(|branch| WaveId::parse(branch, &user));
-                    wt_name.as_deref() == Some(name)
-                        || wt_name
-                            .as_ref()
-                            .map(|n| n.starts_with(&format!("{name}.")))
-                            .unwrap_or(false)
-                        || wt
-                            .path
-                            .file_name()
-                            .map(|n| n.to_string_lossy() == name)
-                            .unwrap_or(false)
-                        || id
-                            .as_ref()
-                            .map(|id| id.leaf() == name || id.wave_name() == name)
-                            .unwrap_or(false)
-                })
-                .collect::<Vec<_>>();
-            if matches.len() == 1 {
-                matches.remove(0).path
-            } else if matches.is_empty() {
-                return Err(anyhow!("no worktree found for '{}'", name));
-            } else {
-                return Err(anyhow!("multiple worktrees match '{}'", name));
-            }
+            return Err(anyhow!("multiple worktrees match '{}'", name));
         }
     };
 
@@ -1119,12 +1096,9 @@ fn wt_list(format: Option<&str>) -> Result<()> {
     let c = Colors::new();
     let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
 
-    // Collect display info for all worktrees. `depth`/`sort_key` come from the
-    // branch's WaveId chain so children render indented under their parents.
+    // Collect one flat display row per worktree.
     struct Row {
-        depth: usize,
         label: String,
-        stamp: Option<String>,
         sort_key: String,
         is_current: bool,
         is_main: bool,
@@ -1140,19 +1114,14 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         .iter()
         .map(|wt| {
             let is_main = wt.branch.as_deref() == Some(&default_branch);
-            let id = wt
+            let parsed = wt
                 .branch
                 .as_deref()
-                .and_then(|branch| WaveId::parse(branch, &user));
-            let (depth, label, stamp, sort_key) = if is_main {
-                (0, default_branch.clone(), None, String::new())
-            } else if let Some(id) = &id {
-                (
-                    id.depth(),
-                    id.leaf().to_string(),
-                    id.timestamp().map(str::to_string),
-                    id.chain_str(),
-                )
+                .and_then(|branch| WorktreeName::parse(branch, &user));
+            let (label, sort_key) = if is_main {
+                (default_branch.clone(), String::new())
+            } else if let Some(name) = &parsed {
+                (name.name().to_string(), name.name().to_string())
             } else {
                 let name = sibling_worktree_name(&wt.path).unwrap_or_else(|| {
                     wt.path
@@ -1160,7 +1129,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_else(|| "?".to_string())
                 });
-                (1, name.clone(), None, name)
+                (name.clone(), name)
             };
             let is_current = wt.path == repo_root;
             let diff_stat = if is_main {
@@ -1169,9 +1138,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
                 wt_diff_stat(&main_repo, wt.branch.as_deref(), &default_branch)
             };
             Row {
-                depth,
                 label,
-                stamp,
                 sort_key,
                 is_current,
                 is_main,
@@ -1185,17 +1152,10 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         })
         .collect();
 
-    // Main first (empty key), then a pre-order tree walk by chain.
+    // Main first (empty key), then alphabetical flat names.
     rows.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
 
-    // Displayed name = indent (one level per stacked tier) + leaf + worker stamp.
-    let display_name = |row: &Row| -> String {
-        let indent = "  ".repeat(row.depth.saturating_sub(1));
-        match &row.stamp {
-            Some(ts) => format!("{indent}{} {ts}", row.label),
-            None => format!("{indent}{}", row.label),
-        }
-    };
+    let display_name = |row: &Row| row.label.clone();
     let max_name = column_width("", rows.iter().map(display_name));
 
     for row in &rows {

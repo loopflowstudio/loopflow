@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use crate::pm::{PmItem, PmProject};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::pm::{PmRefresh, PmShowOptions, PmShowResult, PmUpdateOptions};
+use crate::pm::{PmItem, PmProject};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTask {

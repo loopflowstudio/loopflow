@@ -129,7 +129,10 @@ mod tests {
 
     #[test]
     fn filesystem_components_are_flat_and_safe() {
-        assert_eq!(sanitize_fs_component("feature/new*wave"), "feature-new-wave");
+        assert_eq!(
+            sanitize_fs_component("feature/new*wave"),
+            "feature-new-wave"
+        );
         assert_eq!(sanitize_fs_component("../.."), "wave");
     }
 

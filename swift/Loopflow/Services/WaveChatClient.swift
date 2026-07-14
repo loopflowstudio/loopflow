@@ -1,6 +1,6 @@
 import Foundation
 
-// Live client for a wave's chat server. A running `lf serve <name>` publishes its
+// Live client for a wave's chat server. A running `lf wave <name>` publishes its
 // loopback address to `wave/<name>/.wave-endpoint`; this client discovers it,
 // consumes the unified `GET /events` SSE stream (turn + state + memory frames,
 // thread replay on connect), and posts messages back. When the pointer file is
@@ -319,7 +319,7 @@ public final class WaveChatConnection {
         do {
             upsert(try decoder.decode(ChatTurn.self, from: json))
         } catch {
-            LoggingService.lfd("wave chat: dropped turn frame (\(error)): \(data.prefix(200))")
+            LoggingService.wave("wave chat: dropped turn frame (\(error)): \(data.prefix(200))")
             assertionFailure("wave chat turn frame failed to decode: \(error)")
         }
     }

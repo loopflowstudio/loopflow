@@ -53,7 +53,7 @@ can finish independently; never hand the whole seed to another agent, and never
 delegate the one blocker between you and completion. Resolve that blocker
 inline.
 
-`lf task`, `lf serve`, `lf project`, and `lf pm` are orchestration tools. Use
+`lf task`, `lf wave`, `lf project`, and `lf pm` are orchestration tools. Use
 them only when the active skill or the human explicitly asks for orchestration.
 Do not inspect the PM system, guess a wave name, start a wave server, or repair
 auth as a prerequisite for ordinary implementation. If explicitly requested

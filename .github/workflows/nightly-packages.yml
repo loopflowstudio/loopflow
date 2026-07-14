@@ -2,18 +2,13 @@ name: Packages (nightly)
 
 on:
   schedule:
-    # 09:00 UTC daily — after the regression tier has had a chance to catch
-    # live-daemon failures, before US work hours.
+    # 09:00 UTC daily — before US work hours.
     - cron: "0 9 * * *"
   workflow_dispatch:
   workflow_call:
 
 jobs:
-  regression:
-    uses: ./.github/workflows/regression-daily.yml
-
   native-packages:
-    needs: regression
     strategy:
       fail-fast: false
       matrix:
@@ -37,19 +32,18 @@ jobs:
         with:
           shared-key: nightly-packages-${{ matrix.target }}
       - name: Build package binaries
-        run: cargo build --release --target ${{ matrix.target }} -p loopflow --bin lf --bin lfd
+        run: cargo build --release --target ${{ matrix.target }} -p loopflow --bin lf
       - name: Package binaries
         run: |
           set -euo pipefail
           cd target/${{ matrix.target }}/release
-          tar czf ../../../lf-${{ matrix.target }}.tar.gz lf lfd
+          tar czf ../../../lf-${{ matrix.target }}.tar.gz lf
       - name: Smoke test package
         run: |
           set -euo pipefail
           mkdir package-smoke
           tar -xzf lf-${{ matrix.target }}.tar.gz -C package-smoke
           package-smoke/lf --version
-          package-smoke/lfd --version
       - uses: actions/upload-artifact@v7
         with:
           name: nightly-${{ matrix.target }}

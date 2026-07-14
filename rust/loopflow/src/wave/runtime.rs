@@ -32,8 +32,8 @@ use tokio::sync::broadcast;
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
-use crate::security::sanitize_fs_component;
 use crate::project_session::ProjectObservation;
+use crate::security::sanitize_fs_component;
 use crate::task::TaskObservation;
 use crate::wave::channel::matches_prefix;
 use crate::wave::journal::{
@@ -81,8 +81,7 @@ pub enum ChannelRole {
 
 /// A wave's primary channel name: the sanitized filesystem form of its name.
 /// Worktree basenames — and therefore child channel names — derive from it
-/// (`web/ui` mints `web-ui` worktrees and `web-ui.<run>` channels; see
-/// `lfd::security::sanitize_fs_component`).
+/// (`web/ui` mints `web-ui` worktrees and `web-ui.<run>` channels).
 pub fn wave_channel_name(wave: &str) -> String {
     sanitize_fs_component(wave)
 }

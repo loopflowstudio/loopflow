@@ -3,9 +3,8 @@ use crate::engine::git::{
     get_default_branch, has_commits_beyond, is_ancestor, is_clean_ignoring_scratch,
     is_squash_merged, rev_parse, sync_main, worktree_add, WorktreeBranch,
 };
-use crate::engine::identity::WaveId;
+use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
-use crate::security::sanitize_fs_component;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -24,8 +23,7 @@ impl WorktreeSegment {
         if trimmed.is_empty() {
             return Err(PlacementError::EmptySegment);
         }
-        // Dots are the chain separator; a dot in a single segment is a user
-        // mistake to surface, not something to silently join.
+        // Keep the sibling suffix and branch leaf unambiguous and shell-safe.
         if trimmed.contains('.') {
             return Err(PlacementError::DotsReserved(trimmed.to_string()));
         }
@@ -40,7 +38,7 @@ impl WorktreeSegment {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlacementStrategy {
-    CreateRoot,
+    Create,
     CheckoutExisting,
     UseExistingWorktree,
 }
@@ -48,10 +46,8 @@ pub enum PlacementStrategy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PlacementPlan {
     pub base_ref: String,
-    pub parent_branch: Option<String>,
     pub branch: String,
     pub worktree_path: PathBuf,
-    pub stack_depth: usize,
     pub strategy: PlacementStrategy,
 }
 
@@ -59,9 +55,7 @@ pub struct PlacementPlan {
 pub enum PlacementError {
     #[error("worktree segment cannot be empty")]
     EmptySegment,
-    #[error(
-        "\"{0}\" is not a worktree segment. Dots are reserved for identity ancestry. Use a hyphen."
-    )]
+    #[error("\"{0}\" is not a flat worktree name. Use a hyphen instead of a dot.")]
     DotsReserved(String),
 }
 
@@ -114,8 +108,8 @@ pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
 
 /// The worktree directory for an identity: `<parent>/<repo>.<dir_component>`.
 /// The `/`-scoped branch never reaches disk — only the flat dir component does.
-pub fn worktree_dir(repo: &Path, id: &WaveId) -> PathBuf {
-    dir_for_component(repo, &id.dir_component())
+pub fn worktree_dir(repo: &Path, id: &WorktreeName) -> PathBuf {
+    dir_for_component(repo, id.dir_component())
 }
 
 fn dir_for_component(repo: &Path, component: &str) -> PathBuf {
@@ -130,14 +124,13 @@ fn dir_for_component(repo: &Path, component: &str) -> PathBuf {
         .join(format!("{repo_name}.{component}"))
 }
 
-/// The worktree directory for a name in any surface form — wave name, branch, or
-/// dir component. Liberal on input via [`WaveId::parse`], falling back to a
-/// sanitized component when the name isn't a valid identity.
+/// The worktree directory for a branch or local name. Invalid flat names use a
+/// neutral fallback; callers that create worktrees validate the segment first.
 pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
     let user = git_user(repo).unwrap_or_else(|_| "user".to_string());
-    let component = WaveId::parse(name, &user)
-        .map(|id| id.dir_component())
-        .unwrap_or_else(|| sanitize_fs_component(name));
+    let component = WorktreeName::parse(name, &user)
+        .map(|id| id.dir_component().to_string())
+        .unwrap_or_else(|| "worktree".to_string());
     dir_for_component(repo, &component)
 }
 
@@ -546,9 +539,13 @@ pub fn create_named_worktree(
     }
 
     let user = git_user(repo)?;
-    let id = WaveId::for_wave(&user, name).ok_or_else(|| GitError::CommandFailed {
+    let segment = WorktreeSegment::parse(name).map_err(|error| GitError::CommandFailed {
         command: "git worktree add".to_string(),
-        stderr: format!("invalid worktree name: {name}"),
+        stderr: error.to_string(),
+    })?;
+    let id = WorktreeName::new(&user, segment).ok_or_else(|| GitError::CommandFailed {
+        command: "git worktree add".to_string(),
+        stderr: format!("invalid worktree author: {user}"),
     })?;
     let branch = id.branch();
     let worktree_path = worktree_dir(repo, &id);
@@ -625,13 +622,13 @@ pub fn plan_placement(repo: &Path, segment: WorktreeSegment) -> Result<Placement
     let default_branch = get_default_branch(repo)?;
     let user = git_user(repo)?;
 
-    let id = WaveId::wave(&user, segment);
+    let id = WorktreeName::new(&user, segment).ok_or_else(|| GitError::CommandFailed {
+        command: "git worktree add".to_string(),
+        stderr: format!("invalid worktree author: {user}"),
+    })?;
     let base_ref = default_branch;
-    let parent_branch = None;
-
     let branch = id.branch();
     let planned_path = worktree_dir(repo, &id);
-    let stack_depth = id.depth();
 
     let existing_worktree_path =
         list_porcelain(repo)?
@@ -645,15 +642,13 @@ pub fn plan_placement(repo: &Path, segment: WorktreeSegment) -> Result<Placement
     {
         PlacementStrategy::CheckoutExisting
     } else {
-        PlacementStrategy::CreateRoot
+        PlacementStrategy::Create
     };
 
     Ok(PlacementPlan {
         base_ref,
-        parent_branch,
         branch,
         worktree_path: existing_worktree_path.unwrap_or(planned_path),
-        stack_depth,
         strategy,
     })
 }
@@ -666,7 +661,7 @@ pub fn create_from_placement_plan(
         PlacementStrategy::UseExistingWorktree => Ok(CreateWorktreeResult {
             path: plan.worktree_path.clone(),
             branch: plan.branch.clone(),
-            base_branch: plan.parent_branch.clone(),
+            base_branch: None,
             base_commit: None,
         }),
         PlacementStrategy::CheckoutExisting => {
@@ -688,11 +683,11 @@ pub fn create_from_placement_plan(
             Ok(CreateWorktreeResult {
                 path: plan.worktree_path.clone(),
                 branch: plan.branch.clone(),
-                base_branch: plan.parent_branch.clone(),
+                base_branch: None,
                 base_commit: None,
             })
         }
-        PlacementStrategy::CreateRoot => {
+        PlacementStrategy::Create => {
             if plan.worktree_path.exists() {
                 return Err(GitError::CommandFailed {
                     command: "git worktree add".to_string(),
@@ -705,11 +700,6 @@ pub fn create_from_placement_plan(
                     stderr: format!("branch exists without worktree: {}", plan.branch),
                 });
             }
-            let base_commit = if plan.parent_branch.is_some() {
-                rev_parse(repo, &plan.base_ref).ok()
-            } else {
-                None
-            };
             worktree_add(
                 repo,
                 &plan.worktree_path,
@@ -722,8 +712,8 @@ pub fn create_from_placement_plan(
             Ok(CreateWorktreeResult {
                 path: plan.worktree_path.clone(),
                 branch: plan.branch.clone(),
-                base_branch: plan.parent_branch.clone(),
-                base_commit,
+                base_branch: None,
+                base_commit: None,
             })
         }
     }
@@ -801,9 +791,9 @@ mod tests {
     }
 
     #[test]
-    fn worktree_path_uses_wave_fallback_for_empty_sanitized_component() {
+    fn worktree_path_uses_neutral_fallback_for_invalid_flat_name() {
         let path = worktree_path(Path::new("/tmp/repo"), "../..");
-        assert_eq!(path, Path::new("/tmp/repo.wave"));
+        assert_eq!(path, Path::new("/tmp/repo.worktree"));
     }
 
     #[test]
@@ -863,15 +853,13 @@ mod tests {
     }
 
     #[test]
-    fn main_placement_creates_root_branch() {
+    fn main_placement_creates_flat_branch() {
         let repo = init_repo();
         let segment = WorktreeSegment::parse("child").unwrap();
         let plan = plan_placement(repo.path(), segment).expect("plan task worktree");
 
         assert_eq!(plan.branch, "tester/child");
         assert_eq!(plan.base_ref, "main");
-        assert_eq!(plan.parent_branch, None);
-        assert_eq!(plan.stack_depth, 1);
-        assert_eq!(plan.strategy, PlacementStrategy::CreateRoot);
+        assert_eq!(plan.strategy, PlacementStrategy::Create);
     }
 }

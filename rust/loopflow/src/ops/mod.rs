@@ -1,5 +1,4 @@
 mod abandon;
-mod branches;
 mod child;
 pub use child::ChildReceiptUntil;
 mod commit;
@@ -19,10 +18,6 @@ pub mod trace;
 pub(crate) mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
-pub use branches::{
-    list_branch_candidates, prune_branches, BranchCandidate, BranchFilterOptions,
-    BranchListOptions, BranchPruneOptions,
-};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub use cron::{
     add_cron, default_launch_agents_dir, list_crons, parse_schedule, remove_cron, resolve_lf_path,

@@ -3,8 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
-use crate::control_session::{Session, SessionStatus, SessionUse};
-use crate::id::{ControlSessionId, WaveId};
+use crate::id::WaveId;
 use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{BusMessage, PmSnapshotRow, RunEventRow, StoreError, StoreResult};
@@ -270,47 +269,6 @@ impl SqliteStore {
         )?;
         Ok(())
     }
-
-    fn map_control_session_row(row: &rusqlite::Row<'_>) -> Result<Session, rusqlite::Error> {
-        let argv_text: String = row.get(8)?;
-        let env_text: String = row.get(9)?;
-        let argv: Vec<String> = serde_json::from_str(&argv_text).map_err(|err| {
-            rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(err))
-        })?;
-        let env = serde_json::from_str(&env_text).map_err(|err| {
-            rusqlite::Error::FromSqlConversionFailure(9, rusqlite::types::Type::Text, Box::new(err))
-        })?;
-        let session_use_text: String = row.get(4)?;
-        let session_use = SessionUse::try_from(session_use_text.as_str()).map_err(|err| {
-            rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(err))
-        })?;
-        Ok(Session {
-            id: row.get(0)?,
-            wave_id: row.get(1)?,
-            run_id: row.get(2)?,
-            parent_session_id: row.get(3)?,
-            session_use,
-            skill: row.get(5)?,
-            agent: row.get(6)?,
-            cwd: row.get(7)?,
-            argv,
-            env,
-            source: row.get(10)?,
-            tmux_name: row.get(11)?,
-            status: SessionStatus::from_i32(row.get::<_, i64>(12)? as i32),
-            completion_token: row.get(13)?,
-            created_at: crate::store::rows::unix_to_datetime(row.get(14)?),
-            attached_at: row
-                .get::<_, Option<i64>>(15)?
-                .map(crate::store::rows::unix_to_datetime),
-            started_at: row
-                .get::<_, Option<i64>>(16)?
-                .map(crate::store::rows::unix_to_datetime),
-            completed_at: row
-                .get::<_, Option<i64>>(17)?
-                .map(crate::store::rows::unix_to_datetime),
-        })
-    }
 }
 
 fn validate_run_events_schema(conn: &Connection) -> StoreResult<()> {
@@ -416,180 +374,6 @@ impl SqliteStore {
         Ok(tokens)
     }
 
-    const TERMINAL_SESSION_COLS: &str =
-        "id, wave_id, run_id, parent_session_id, session_use, skill, agent, cwd, argv, env, source, tmux_name, status, \
-         completion_token, created_at, attached_at, started_at, completed_at";
-
-    pub fn create_control_session(&self, session: &Session) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            &format!(
-                "INSERT INTO terminal_sessions ({}) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
-                Self::TERMINAL_SESSION_COLS
-            ),
-            params![
-                session.id,
-                session.wave_id,
-                session.run_id,
-                session.parent_session_id,
-                session.session_use.as_str(),
-                session.skill,
-                session.agent,
-                session.cwd,
-                serde_json::to_string(&session.argv)?,
-                serde_json::to_string(&session.env)?,
-                session.source,
-                session.tmux_name,
-                session.status.as_i32() as i64,
-                session.completion_token,
-                session.created_at.unix_timestamp(),
-                session.attached_at.map(|dt| dt.unix_timestamp()),
-                session.started_at.map(|dt| dt.unix_timestamp()),
-                session.completed_at.map(|dt| dt.unix_timestamp()),
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn get_control_session(
-        &self,
-        session_id: &ControlSessionId,
-    ) -> StoreResult<Option<Session>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(&format!(
-            "SELECT {} FROM terminal_sessions WHERE id = ?1",
-            Self::TERMINAL_SESSION_COLS
-        ))?;
-        let row = stmt
-            .query_row(params![session_id], Self::map_control_session_row)
-            .optional()?;
-        Ok(row)
-    }
-
-    pub fn list_control_sessions(
-        &self,
-        wave_id: Option<&WaveId>,
-        statuses: Option<&[SessionStatus]>,
-    ) -> StoreResult<Vec<Session>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut sql = format!(
-            "SELECT {} FROM terminal_sessions",
-            Self::TERMINAL_SESSION_COLS
-        );
-        let mut predicates = Vec::new();
-        let mut params: Vec<Box<dyn ToSql>> = Vec::new();
-
-        if let Some(wave_id) = wave_id {
-            predicates.push(format!("wave_id = ?{}", params.len() + 1));
-            params.push(Box::new(wave_id.clone()));
-        }
-        if let Some(statuses) = statuses {
-            let placeholders = statuses
-                .iter()
-                .enumerate()
-                .map(|(index, _)| format!("?{}", params.len() + index + 1))
-                .collect::<Vec<_>>();
-            predicates.push(format!("status IN ({})", placeholders.join(", ")));
-            params.extend(
-                statuses
-                    .iter()
-                    .map(|status| Box::new(status.as_i32() as i64) as Box<dyn ToSql>),
-            );
-        }
-        if !predicates.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&predicates.join(" AND "));
-        }
-        sql.push_str(" ORDER BY created_at ASC");
-
-        let mut stmt = conn.prepare(&sql)?;
-        let param_refs: Vec<&dyn ToSql> = params.iter().map(|value| value.as_ref()).collect();
-        let mut rows = stmt.query(param_refs.as_slice())?;
-        let mut sessions = Vec::new();
-        while let Some(row) = rows.next()? {
-            sessions.push(Self::map_control_session_row(row)?);
-        }
-        Ok(sessions)
-    }
-
-    /// Live sessions plus sessions completed at or after `completed_since`
-    /// (unix seconds) — bounded however much terminal history accumulates.
-    pub fn list_recent_control_sessions(
-        &self,
-        wave_id: &WaveId,
-        completed_since: i64,
-    ) -> StoreResult<Vec<Session>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(&format!(
-            "SELECT {} FROM terminal_sessions \
-             WHERE wave_id = ?1 AND (status IN (?2, ?3, ?4) OR completed_at >= ?5) \
-             ORDER BY created_at ASC",
-            Self::TERMINAL_SESSION_COLS
-        ))?;
-        let mut rows = stmt.query(params![
-            wave_id,
-            SessionStatus::Pending.as_i32() as i64,
-            SessionStatus::Attached.as_i32() as i64,
-            SessionStatus::Running.as_i32() as i64,
-            completed_since,
-        ])?;
-        let mut sessions = Vec::new();
-        while let Some(row) = rows.next()? {
-            sessions.push(Self::map_control_session_row(row)?);
-        }
-        Ok(sessions)
-    }
-
-    pub fn update_control_session(&self, session: &Session) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let updated = conn.execute(
-            "UPDATE terminal_sessions
-             SET wave_id = ?2,
-                 run_id = ?3,
-                 parent_session_id = ?4,
-                 session_use = ?5,
-                 skill = ?6,
-                 agent = ?7,
-                 cwd = ?8,
-                 argv = ?9,
-                 env = ?10,
-                 source = ?11,
-                 tmux_name = ?12,
-                 status = ?13,
-                 completion_token = ?14,
-                 created_at = ?15,
-                 attached_at = ?16,
-                 started_at = ?17,
-                 completed_at = ?18
-             WHERE id = ?1",
-            params![
-                session.id,
-                session.wave_id,
-                session.run_id,
-                session.parent_session_id,
-                session.session_use.as_str(),
-                session.skill,
-                session.agent,
-                session.cwd,
-                serde_json::to_string(&session.argv)?,
-                serde_json::to_string(&session.env)?,
-                session.source,
-                session.tmux_name,
-                session.status.as_i32() as i64,
-                session.completion_token,
-                session.created_at.unix_timestamp(),
-                session.attached_at.map(|dt| dt.unix_timestamp()),
-                session.started_at.map(|dt| dt.unix_timestamp()),
-                session.completed_at.map(|dt| dt.unix_timestamp()),
-            ],
-        )?;
-        if updated == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
     pub fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         self.read_waves(repo)
     }
@@ -640,14 +424,9 @@ impl SqliteStore {
 
     pub fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "DELETE FROM terminal_sessions WHERE wave_id = ?1",
-            params![wave_id],
-        )?;
         conn.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
         Ok(())
     }
-
 
     // The agent bus (`bus_messages`): `lf radio pub` publishes, every subscriber
     // polls forward from an id cursor. No process is in the path.

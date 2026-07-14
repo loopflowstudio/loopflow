@@ -39,7 +39,6 @@ impl RepoId {
             .map(|(_, name)| name)
             .unwrap_or(&self.0)
     }
-
 }
 
 impl fmt::Display for RepoId {

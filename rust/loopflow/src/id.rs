@@ -82,22 +82,22 @@ macro_rules! uuid_id {
             fn column_result(
                 value: rusqlite::types::ValueRef<'_>,
             ) -> rusqlite::types::FromSqlResult<Self> {
-                value.as_str()?.parse().map_err(|error| {
-                    rusqlite::types::FromSqlError::Other(Box::new(error))
-                })
+                value
+                    .as_str()?
+                    .parse()
+                    .map_err(|error| rusqlite::types::FromSqlError::Other(Box::new(error)))
             }
         }
     };
 }
 
 uuid_id!(WaveId);
-uuid_id!(ControlSessionId);
 uuid_id!(RunId);
 uuid_id!(ProcessId);
 
 #[cfg(test)]
 mod tests {
-    use super::{ControlSessionId, ProcessId, RunId, WaveId};
+    use super::{ProcessId, RunId, WaveId};
 
     #[test]
     fn ids_round_trip_as_uuid_strings() {
@@ -105,7 +105,6 @@ mod tests {
         let encoded = serde_json::to_string(&wave).unwrap();
         assert_eq!(serde_json::from_str::<WaveId>(&encoded).unwrap(), wave);
 
-        let _session = ControlSessionId::new();
         let _run = RunId::new();
         let _process = ProcessId::new();
     }

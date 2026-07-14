@@ -38,10 +38,6 @@ homepage:
       - label: "A wave"
         filename: "wave/auth/GOAL.md"
         content: |
-          ---
-          task_capacity: 2
-          ---
-
           ## Objective
 
           Unify authentication. Each loop, pick the next gap — duplicate token
@@ -95,17 +91,17 @@ homepage:
         - "Stay creative — interactive sessions where you play the lead part, not approve permissions"
         - "Arrange the symphony — create, configure, and launch waves visually"
         - "Maintain focus — easily find where your attention is most needed"
-    server:
-      name: "Server"
-      note: "CLI and daemon"
-      description: "Manage prompts and context with the CLI. Run waves remotely with the daemon."
+    cli:
+      name: "CLI"
+      note: "One local command"
+      description: "Manage prompts, context, Waves, Projects, and Tasks with `lf`."
       details:
-        - "lf — context management for waves, skills, directions, and memory"
-        - "lfd — long-running daemon, natively or in containers"
-        - "Authentication built in — WorkOS OAuth via Loopflow Studio"
+        - "Run one resident Wave process with its own listener and memory"
+        - "Keep Project and Task lifecycle state in local SQLite"
+        - "Connect provider accounts directly with `lf auth`"
       terminal_lines:
         - type: "command"
-          content: "lf serve billing"
+          content: "lf wave billing"
         - type: "output"
           content: "wave agent · reading GOAL.md + MEMORY.md"
         - type: "output"

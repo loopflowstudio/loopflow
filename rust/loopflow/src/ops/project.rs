@@ -13,13 +13,13 @@ use crate::engine::process::{
     tmux_session_slug,
 };
 use crate::id::WaveId;
-use crate::wave::Wave;
-use crate::store::{open_existing_store, SharedStore, Store};
 use crate::ops::{ChildReceiptUntil, OpsError, OpsResult};
 use crate::project_session::{
     ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
 use crate::session_context::{LinearProjectId, LinearProjectSnapshot};
+use crate::store::{open_existing_store, SharedStore, Store};
+use crate::wave::Wave;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ProjectSessionSnapshot {
@@ -115,7 +115,7 @@ fn block_on_project<T>(future: impl std::future::Future<Output = OpsResult<T>>) 
 
 async fn project_store() -> OpsResult<SharedStore> {
     open_existing_store().await.map(Arc::new).ok_or_else(|| {
-        project_error("no Loopflow registry on this machine; serve the owning Wave first")
+        project_error("no Loopflow registry on this machine; start the owning Wave first")
     })
 }
 
@@ -372,7 +372,10 @@ pub(crate) async fn launch_project_process(
     ];
     let generation_text = generation.to_string();
     let environment = [
-        (crate::lf::session::WAVE_ID_ENV, session.wave_id.as_str()),
+        (
+            crate::engine::wave_context::WAVE_ID_ENV,
+            session.wave_id.as_str(),
+        ),
         ("LF_PROJECT_SESSION_ID", session.id.as_str()),
         ("LF_PROJECT_GENERATION", generation_text.as_str()),
     ];
@@ -542,7 +545,7 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
 }
 
 fn project_command_source(session: &ProjectSession) -> OpsResult<ChildCommandSource> {
-    match std::env::var(crate::lf::session::WAVE_ID_ENV) {
+    match std::env::var(crate::engine::wave_context::WAVE_ID_ENV) {
         Ok(value) => {
             let wave_id = WaveId::parse(&value)
                 .map_err(|error| project_error(format!("invalid ambient Wave id: {error}")))?;
@@ -1009,7 +1012,7 @@ async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> O
     Ok(())
 }
 
-/// Promotion grants residency, so it boots a listener with `lf serve`. The
+/// Promotion grants residency, so it boots a listener with `lf wave`. The
 /// child is spawned through tmux, which inherits the promoting
 /// pass's environment (`WAVE_SERVER_ENDPOINT`, `RESIDENT_TOKEN`). Naming the
 /// listener explicitly is what keeps that inheritance from deciding which half
@@ -1017,7 +1020,7 @@ async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> O
 fn residency_argv(executable: &Path, wave: &str) -> Vec<String> {
     vec![
         executable.display().to_string(),
-        "serve".to_string(),
+        "wave".to_string(),
         wave.to_string(),
     ]
 }
@@ -1090,22 +1093,22 @@ mod tests {
     #[test]
     fn promotion_spawns_a_listener_not_a_batch_loop() {
         let argv = residency_argv(Path::new("/opt/lf"), "release-stability");
-        assert_eq!(argv, ["/opt/lf", "serve", "release-stability"]);
+        assert_eq!(argv, ["/opt/lf", "wave", "release-stability"]);
 
         let full = std::iter::once("lf".to_string()).chain(argv.into_iter().skip(1));
         assert!(
             matches!(
                 Cli::try_parse_from(full).expect("promotion argv parses").command,
-                Some(Commands::Serve { name, force: false }) if name == "release-stability"
+                Some(Commands::Wave { name, force: false }) if name == "release-stability"
             ),
-            "what promotion spawns must parse as the serve entrypoint"
+            "what promotion spawns must parse as the Wave entrypoint"
         );
     }
 
     #[tokio::test]
     async fn link_parent_registers_the_promoted_wave_as_a_child() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(tmp.path().join("lfd.db")))
+        let store = open_store(&StorageConfig::sqlite(tmp.path().join("loopflow.db")))
             .await
             .unwrap();
         let parent = Wave::new(

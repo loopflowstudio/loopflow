@@ -27,7 +27,7 @@ final class PortfolioRepoState {
 
     private let repoPath: String
     /// Local discovery via `lf ls` (see `RegistryQuery`). `nil` means this
-    /// platform cannot read the registry yet; there is no lfd HTTP fallback.
+    /// platform cannot read the registry yet; there is no HTTP fallback.
     private let registryQuery: RegistryQuery?
 
     private(set) var waves: [WaveViewModel] = []
@@ -44,7 +44,7 @@ final class PortfolioRepoState {
         self.registryQuery = registryQuery
     }
 
-    /// Author a Wave before it is served. `lf serve` later registers the
+    /// Author a Wave before it is served. `lf wave` later registers the
     /// coordination row; GOAL.md and MEMORY.md remain the authored objective
     /// and durable learning.
     ///

@@ -1,8 +1,8 @@
-// Launches and probes the local `lf serve <name>` process backing a WaveChat pane.
+// Launches and probes the local `lf wave <name>` process backing a WaveChat pane.
 //
 // Loopflow is a viewer, never a participant: launching a wave is the human's act
 // through the same door as a terminal — a detached tmux session running
-// `lf serve <name>` with the wave's repo as cwd. The session belongs to tmux, not
+// `lf wave <name>` with the wave's repo as cwd. The session belongs to tmux, not
 // to Loopflow; quitting the app never kills a wave.
 
 #if os(macOS)
@@ -41,7 +41,7 @@ enum LocalWaveAgentLauncher {
         ) != nil
     }
 
-    /// Start `lf serve <name>` in a detached tmux session so it outlives Loopflow.
+    /// Start `lf wave <name>` in a detached tmux session so it outlives Loopflow.
     /// Refuses when the wave already has a tmux session or a live endpoint —
     /// the server enforces one brain per wave; we just avoid the doomed spawn.
     ///
@@ -137,14 +137,14 @@ enum LocalWaveAgentLauncher {
     }
 
     /// The detached tmux invocation: session named after the wave, cwd at the
-    /// wave's repo, running `lf serve <name>`.
+    /// wave's repo, running `lf wave <name>`.
     static func waveLaunchCommand(
         lfPath: String,
         sessionName: String,
         repoPath: String,
         waveName: String
     ) -> [String] {
-        ["tmux", "new-session", "-d", "-s", sessionName, "-c", repoPath, lfPath, "serve", waveName]
+        ["tmux", "new-session", "-d", "-s", sessionName, "-c", repoPath, lfPath, "wave", waveName]
     }
 
     /// Candidate lf binaries in trust order: the lf bundled inside Loopflow.app,
@@ -175,14 +175,14 @@ enum LocalWaveAgentLauncher {
     }
 
     /// First candidate that has both wave lifecycle commands. Resolving `lf`
-    /// from PATH can find a build that predates `serve` or `stop`; treating an
+    /// from PATH can find a build that predates `wave` or `stop`; treating an
     /// unknown lifecycle verb as a skill would launch the wrong work, so every
     /// candidate is capability-probed before it's trusted.
     ///
-    /// The probe is `lf help serve`, NOT `lf serve --help`: lf's arg reorderer
-    /// treats an unknown `serve` as a skill name, so `lf serve --help` prints the
+    /// The probe is `lf help wave`, NOT `lf wave --help`: lf's arg reorderer
+    /// treats an unknown `wave` as a skill name, so `lf wave --help` prints the
     /// root help and exits 0 even on a build without the subcommand. `lf help
-    /// serve` exits 0 only when the subcommand exists, and clap answers it without touching
+    /// wave` exits 0 only when the subcommand exists, and clap answers it without touching
     /// any wave state. The same holds for `lf help stop`.
     static func resolveWaveCapableLf(
         originRepo: String,
@@ -218,13 +218,13 @@ enum LocalWaveAgentLauncher {
         }
         throw WaveLaunchError.noUsableLf(
             "No lf with the wave lifecycle commands. Rejected (each failed "
-                + "`lf help serve` or `lf help stop`): " + candidates.joined(separator: ", ")
+                + "`lf help wave` or `lf help stop`): " + candidates.joined(separator: ", ")
         )
     }
 
     /// Help probes parse without touching wave state.
     static func hasWaveCommands(lfPath: String) -> Bool {
-        run([lfPath, "help", "serve"])?.status == 0
+        run([lfPath, "help", "wave"])?.status == 0
             && run([lfPath, "help", "stop"])?.status == 0
     }
 
@@ -243,9 +243,9 @@ enum LocalWaveAgentLauncher {
 
     /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
-    /// facts by shelling the daemonless `lf` over `lfdb`, not by streaming a
-    /// center. Resolves the same serve-capable `lf` the launcher trusts (a build
-    /// old enough to lack `lf serve` also lacks these verbs), then execs it with
+    /// facts by shelling the daemonless `lf` over the local store, not by streaming
+    /// a center. Resolves the same wave-capable `lf` the launcher trusts (a build
+    /// old enough to lack `lf wave` also lacks these verbs), then execs it with
     /// the enriched GUI PATH. Throws on a spawn failure or a non-zero exit.
     static func queryLf(_ subargs: [String], cwd: String?) throws -> String {
         let origin = cwd.map(WaveOrigin.resolve) ?? FileManager.default.currentDirectoryPath
@@ -291,7 +291,7 @@ enum LocalWaveAgentLauncher {
         guard let result = run(args, cwd: cwd) else { return nil }
         guard result.status == 0 else {
             guard logFailure else { return nil }
-            LoggingService.lfd(
+            LoggingService.wave(
                 "command failed: \(args.joined(separator: " ")) \(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
             )
             return nil

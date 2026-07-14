@@ -17,15 +17,11 @@
 //!   with. No managed wave context drops the
 //!   message with exit 0 and one stderr note.
 //! - `--parent`: walk `parent_wave_id` in the registry and post to the parent
-//!   wave's live server; its endpoint rides the parent's WaveAgent session
-//!   row, so cross-repo parents resolve through the store, not the
-//!   filesystem. A root wave errors (the human fall-through arrives with
-//!   Decisions).
+//!   Wave's listener. The parent row resolves its repository and Wave-owned
+//!   endpoint pointer. A root Wave errors.
 //!
 //! # Endpoint resolution
-//! The wave's live WaveAgent session row carries `LF_WAVE_ENDPOINT`; when the
-//! store has no row (unregistered server, no registry on this machine), the
-//! local `wave/<name>/.wave-endpoint` discovery file is the fallback. A
+//! The local `wave/<name>/.wave-endpoint` discovery file names the listener. A
 //! resolvable wave with no live server is a clear error — a dead wave's mail
 //! bounces, it doesn't vanish; queuing for offline waves is future work.
 //!
@@ -52,10 +48,10 @@ use crate::engine::wave_context::{
 use crate::lf::commands::thread;
 use crate::lf::commands::util::{find_repo_root, message_text};
 use crate::lf::WaveTargetArgs;
-use crate::wave::Wave;
 use crate::store::{open_existing_store, SharedStore};
 use crate::wave::channel::family_head;
-use crate::wave::journal::{EventKind, Journal, MessageId, MessageOp};
+use crate::wave::journal::MessageOp;
+use crate::wave::Wave;
 
 pub fn run(text_args: &[String], follow: bool, steer: bool, target: &WaveTargetArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
@@ -245,30 +241,6 @@ pub(crate) async fn nudge_child_observations(wave: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Record one Task lifecycle fact in the owning Wave's durable conversation.
-/// A live Wave receives the normal message request so it wakes once; a stopped
-/// Wave receives the same journal row directly and replays it on next serve.
-pub(crate) async fn post_to_wave(wave: &Wave, text: &str) -> Result<bool> {
-    if wave.repo().is_empty() {
-        bail!("wave {:?} has no registered repository", wave.name());
-    }
-    if let Some(endpoint) =
-        crate::wave::server::live_endpoint(Path::new(wave.repo()), wave.name()).await
-    {
-        post_message(&endpoint, text, false).await?;
-        return Ok(true);
-    }
-    let path = crate::wave::journal::journal_path(Path::new(wave.repo()), wave.name());
-    let (mut journal, _) = Journal::open(&path)?;
-    journal.append(|seq| EventKind::UserMessage {
-        id: MessageId(format!("msg-{seq}")),
-        op: MessageOp::Message,
-        text: text.to_string(),
-        from: None,
-    });
-    Ok(false)
-}
-
 /// What the process can see: the registry (if this machine has one), the repo
 /// the command runs in, and the wave env. Gathered once at the edge so the
 /// resolution logic below stays a pure function of its inputs.
@@ -284,10 +256,10 @@ impl CliContext {
         Self {
             store: open_existing_store().await.map(Arc::new),
             repo: find_repo_root().ok(),
-            env_wave_id: std::env::var(crate::lf::session::WAVE_ID_ENV)
+            env_wave_id: std::env::var(crate::engine::wave_context::WAVE_ID_ENV)
                 .ok()
                 .filter(|value| !value.is_empty()),
-            env_channel: std::env::var(crate::lf::session::CHANNEL_ENV)
+            env_channel: std::env::var(crate::engine::wave_context::CHANNEL_ENV)
                 .ok()
                 .filter(|value| !value.is_empty()),
         }
@@ -308,7 +280,7 @@ impl ResolvedWave {
     pub fn require_endpoint(&self) -> Result<String> {
         self.endpoint.clone().ok_or_else(|| {
             anyhow!(
-                "wave '{name}' has no live server — serve one with `lf serve {name}`. \
+                "wave '{name}' has no live listener — start one with `lf wave {name}`. \
                  (Queuing for offline waves is not implemented yet.)",
                 name = self.name
             )
@@ -363,7 +335,7 @@ pub(crate) async fn resolve_target(
         let store = store.ok_or_else(|| {
             anyhow!(
                 "--parent needs the run registry to walk the wave tree, \
-                 and this machine has none (~/.lf/lfd.db)"
+                 and this machine has none (~/.lf/loopflow.db)"
             )
         })?;
         let own = own_row.ok_or_else(|| {
@@ -389,12 +361,8 @@ pub(crate) async fn resolve_target(
         }
     };
 
-    // Endpoint: the live WaveAgent session row carries it; the local
-    // discovery file is the fallback when the store has no row.
+    // Listener presence is the Wave-owned discovery pointer.
     let mut endpoint = None;
-    if let (Some(store), Some(row)) = (store, &target_row) {
-        endpoint = crate::wave::registry::wave_server_endpoint(store, row.id()).await?;
-    }
     let repo_root = target_row
         .as_ref()
         .map(|row| PathBuf::from(row.repo()))
@@ -447,7 +415,7 @@ pub(crate) async fn post_json(
         .await
         .map_err(|err| {
             anyhow!(
-                "wave server at {endpoint} is not answering ({err}) — is `lf serve` still running?"
+                "wave listener at {endpoint} is not answering ({err}) — is `lf wave` still running?"
             )
         })?;
     let status = response.status();
@@ -464,7 +432,7 @@ pub(crate) async fn get_json(endpoint: &str, path: &str) -> Result<serde_json::V
         .await
         .map_err(|err| {
             anyhow!(
-                "wave server at {endpoint} is not answering ({err}) — is `lf serve` still running?"
+                "wave listener at {endpoint} is not answering ({err}) — is `lf wave` still running?"
             )
         })?;
     let status = response.status();
@@ -478,16 +446,8 @@ pub(crate) async fn get_json(endpoint: &str, path: &str) -> Result<serde_json::V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
-
-    use time::OffsetDateTime;
 
     use crate::lf::commands::fixtures::{boot_server, make_wave, temp_store};
-    use crate::control_session::{
-        Session, SessionStatus, SessionUse, WAVE_SERVER_ENDPOINT_ENV, WAVE_SERVER_PID_ENV,
-        WAVE_SERVER_SOURCE,
-    };
-    use crate::id::ControlSessionId;
     use crate::wave::journal::{EventKind, MessageOp};
     use crate::wave::runtime::InboxItem;
 
@@ -502,54 +462,20 @@ mod tests {
         assert_eq!(parse_command("deploy"), Command::Unknown);
     }
 
-    /// A live wave_server WaveAgent row carrying `endpoint` in its env — the
-    /// shape `lf serve` registers (see crate::wave::registry).
-    fn live_server_session(wave: &Wave, endpoint: &str) -> Session {
-        let now = OffsetDateTime::now_utc();
-        Session {
-            id: ControlSessionId::new(),
-            wave_id: wave.id().clone(),
-            run_id: None,
-            parent_session_id: None,
-            session_use: SessionUse::WaveAgent,
-            skill: "loop".to_string(),
-            agent: "lf".to_string(),
-            cwd: "/tmp/repo.ship".to_string(),
-            argv: vec![
-                "lf".to_string(),
-                "serve".to_string(),
-                wave.name().to_string(),
-            ],
-            env: BTreeMap::from([
-                (WAVE_SERVER_ENDPOINT_ENV.to_string(), endpoint.to_string()),
-                (
-                    WAVE_SERVER_PID_ENV.to_string(),
-                    std::process::id().to_string(),
-                ),
-            ]),
-            source: WAVE_SERVER_SOURCE.to_string(),
-            tmux_name: String::new(),
-            status: SessionStatus::Running,
-            attached_at: None,
-            started_at: Some(now),
-            completed_at: None,
-            created_at: now,
-            completion_token: None,
-        }
-    }
-
-    /// Env-context targeting: LF_WAVE_ID names the wave; the endpoint comes
-    /// off its live WaveAgent session row in the store.
+    /// Env-context targeting: LF_WAVE_ID names the Wave; its endpoint comes
+    /// from the Wave-owned discovery pointer.
     #[tokio::test]
-    async fn resolve_target_uses_env_wave_and_registry_endpoint() {
+    async fn resolve_target_uses_env_wave_and_discovery_endpoint() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let wave = make_wave("ship", tmp.path(), None);
         store.create_wave(&wave).await.expect("seed wave");
-        store
-            .register_session(&live_server_session(&wave, "127.0.0.1:4242"))
-            .await
-            .expect("seed brain");
+        std::fs::create_dir_all(tmp.path().join("wave/ship")).expect("wave dir");
+        std::fs::write(
+            crate::wave::server::endpoint_path(tmp.path(), "ship"),
+            "127.0.0.1:4242",
+        )
+        .expect("endpoint pointer");
 
         let resolved = resolve_target(
             &WaveTargetArgs::default(),
@@ -607,13 +533,9 @@ mod tests {
         let store = temp_store(tmp.path()).await;
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(&origin).unwrap();
-        let (addr, runtime, mut inbox) = boot_server(&origin, "ship").await;
+        let (_addr, runtime, mut inbox) = boot_server(&origin, "ship").await;
         let wave = make_wave("ship", &origin, None);
         store.create_wave(&wave).await.expect("seed wave");
-        store
-            .register_session(&live_server_session(&wave, &addr))
-            .await
-            .expect("seed brain");
 
         let context = CliContext {
             store: Some(store),
@@ -652,13 +574,9 @@ mod tests {
         let store = temp_store(tmp.path()).await;
         let origin = tmp.path().join("repo");
         std::fs::create_dir_all(&origin).unwrap();
-        let (addr, runtime, mut inbox) = boot_server(&origin, "ship").await;
+        let (_addr, runtime, mut inbox) = boot_server(&origin, "ship").await;
         let wave = make_wave("ship", &origin, None);
         store.create_wave(&wave).await.expect("seed wave");
-        store
-            .register_session(&live_server_session(&wave, &addr))
-            .await
-            .expect("seed brain");
 
         let context = CliContext {
             store: Some(store),
@@ -702,10 +620,6 @@ mod tests {
         store.create_wave(&parent).await.expect("seed parent");
         let child = make_wave("concerto", tmp.path(), Some(parent.id()));
         store.create_wave(&child).await.expect("seed child");
-        store
-            .register_session(&live_server_session(&parent, &addr))
-            .await
-            .expect("seed parent brain");
 
         let resolved = resolve_target(
             &WaveTargetArgs {
@@ -807,10 +721,6 @@ mod tests {
         let (addr, _runtime, _inbox) = boot_server(&origin, "ship").await;
         let wave = make_wave("ship", &origin, None);
         store.create_wave(&wave).await.expect("seed wave");
-        store
-            .register_session(&live_server_session(&wave, &addr))
-            .await
-            .expect("seed brain");
 
         let resolved = resolve_target(
             &WaveTargetArgs {
@@ -850,9 +760,9 @@ mod tests {
         .expect("wave context");
         let err = resolved.require_endpoint().expect_err("no server");
         let message = err.to_string();
-        assert!(message.contains("no live server"), "{message}");
-        // `lf serve` is the only public Wave lifecycle entrypoint.
-        assert!(message.contains("lf serve ship"), "{message}");
+        assert!(message.contains("no live listener"), "{message}");
+        // `lf wave` is the public Wave lifecycle entrypoint.
+        assert!(message.contains("lf wave ship"), "{message}");
         assert!(message.contains("not implemented yet"), "{message}");
     }
 }

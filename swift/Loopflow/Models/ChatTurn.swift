@@ -1,8 +1,8 @@
 import Foundation
 
 // Wire models for a wave's live conversation, mirroring the Rust types the wave
-// chat server serves (`lfd::conversations::turns::ChatTurn` +
-// `lfd::conversations::types::ConversationItem`). snake_case on the wire; every
+// chat server serves (`chat::turns::ChatTurn` + `chat::types::ConversationItem`).
+// snake_case on the wire; every
 // field is required or explicitly Optional — no defaults masking absent fields,
 // so the Rust and Swift shapes stay in lockstep (see CLAUDE.md "DTOs").
 

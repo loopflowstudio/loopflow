@@ -9,10 +9,10 @@ use std::process::Command;
 
 const KEY_BYTES: usize = 32;
 const NONCE_BYTES: usize = 12;
-const KEYCHAIN_SERVICE: &str = "loopflow.lfd.provider-token-key";
+const KEYCHAIN_SERVICE: &str = "loopflow.provider-token-key";
 const KEYCHAIN_ACCOUNT: &str = "default";
 #[cfg(target_os = "linux")]
-const SECRET_TOOL_LABEL: &str = "Loopflow LFD Provider Token Key";
+const SECRET_TOOL_LABEL: &str = "Loopflow Provider Token Key";
 
 static CACHED_KEY: OnceCell<[u8; KEY_BYTES]> = OnceCell::new();
 
@@ -284,7 +284,8 @@ fn fallback_key_path() -> PathBuf {
 
 #[cfg(not(test))]
 fn fallback_key_path() -> PathBuf {
-    env_key_path_override().unwrap_or_else(|| crate::store::lf_home_dir().join("provider-token.key"))
+    env_key_path_override()
+        .unwrap_or_else(|| crate::store::lf_home_dir().join("provider-token.key"))
 }
 
 fn env_key_path_override() -> Option<PathBuf> {

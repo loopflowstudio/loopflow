@@ -1,6 +1,43 @@
 # Open questions — W2-130
 
-## PAUSED 2026-07-14 for the Loopflow 0.11 binary/database rollout
+## RESUMED 2026-07-14 after the rollout; this slice is submitted
+
+Rebased onto `origin/main` (poisoned base gone), schema re-authored as a forward
+migration, first supervisor-safety slice landed and verified. What shipped, and
+what is deliberately left:
+
+**Shipped:** pinned execution context (+ unpinned Sessions refuse to launch);
+durable abandon intent written with the command; `supervisor_restart_bar` honored
+at every launch gate; submitted-with-open-PR barred from supervisor restart with
+the W2-129 sequence as a regression; interrupt never launches; `BEGIN IMMEDIATE`
+on child-session writes; debug builds default to `~/.lf-dev`.
+
+**Corrections to the pause notes below:** the migration namespace is **0.10.002**,
+not 0.11 — `scripts/new_migration.py` namespaces by the *package* version (0.10.1)
+and the convention forbids an id ahead of it. And the fear that the schema change
+would force every database to recreate is **dead**: verified against a real
+pre-migration copy of the live registry, it upgrades and gains all five columns.
+
+**The live-registry breakage was ours, and it is now provably prevented.** While
+this branch was under test, its own `cargo test` run applied the unreleased
+`0.10.002` to `~/.lf/loopflow.db` at 19:41:20 — a worktree build writing the real
+ledger, which is failure #2 of this very design reproducing inside its own fix.
+The `~/.lf-dev` default closes it; re-running the store suite now leaves the live
+db untouched (verified: migration count unchanged).
+
+**Still open, in order** (each is its own slice, none blocks this PR):
+
+1. Move 5's remainder: `task run` finishes partial creation; BUSY vs UNIQUE split.
+2. Move 6: one-writer lease — launch-gate liveness probe, generation reaping,
+   harness process-group kill, no `self.child` overwrite. This is the W2-132
+   two-writer race and is the largest remaining piece.
+3. Move 7: base placement on `origin/main`; `lf pr open` range check.
+4. Move 4: honest reads (`lf status` batched tmux probe).
+5. The 4 live Task Sessions predate the pin, so they carry no execution context and
+   will refuse to relaunch with an actionable message. That is correct and
+   deliberate — but it means **they must be abandoned and re-run, not resumed.**
+
+## PAUSED 2026-07-14 for the Loopflow 0.11 binary/database rollout (historical)
 
 Paused at a durable boundary by the Wave. Worktree, branch, and provider history
 preserved; no PR opened. `cargo build --all-targets`, `cargo clippy`, `cargo fmt`,

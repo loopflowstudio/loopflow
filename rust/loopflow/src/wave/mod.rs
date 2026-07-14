@@ -55,6 +55,7 @@ pub(crate) mod memory;
 pub mod playhead;
 
 pub(crate) mod registry;
+pub use registry::reconcile_wave_servers;
 pub mod resident;
 pub mod runtime;
 pub mod server;

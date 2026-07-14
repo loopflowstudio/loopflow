@@ -19,26 +19,18 @@ def _load(name: str) -> dict:
 
 
 class TestDTOFixtures:
-    def test_session_fixture_pins_palette_shape(self):
+    def test_session_fixture_pins_process_registry_shape(self):
         session = Session.model_validate(_load("session.json"))
         assert session.object == "session"
         assert session.skill == "ship"
         assert session.agent == "codex"
-        assert session.source == "palette"
-        assert session.session_use == "palette"
+        assert session.source == "lf_cli"
+        assert session.session_use == "worker"
         assert session.status == "running"
         assert session.run_id is None
         assert session.parent_session_id is None
-        assert session.argv == [
-            "lf",
-            "ship",
-            "--no-direction",
-            "-w",
-            "Desktop",
-            "-m",
-            "codex",
-        ]
-        assert session.env["LFD_SESSION_ID"] == session.id
+        assert session.argv == ["lf", "ship", "--wave", "Desktop"]
+        assert session.env == {}
 
     def test_session_fixture_requires_argv_and_env(self):
         payload = _load("session.json")
@@ -47,12 +39,3 @@ class TestDTOFixtures:
 
         with pytest.raises(ValidationError):
             Session.model_validate(payload)
-
-    def test_create_session_request_fixture_has_required_keys(self):
-        request = _load("create_session_request.json")
-        assert request == {
-            "wave_id": "lfdwave_01HNX7XYZ0AZ1B2C3D4E5F6G7H",
-            "flow": "ship",
-            "worktree": "/tmp/repo.Desktop",
-            "agent": "codex",
-        }

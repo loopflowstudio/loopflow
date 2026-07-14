@@ -107,17 +107,8 @@ class Session(BaseModel):
     completed_at: Optional[datetime]
 
 
-class SessionConnectionInfo(BaseModel):
-    kind: str
-    session_name: str
-    host: str
-    cwd: str
-    status: str
-
-
 class WaveAgentTreeSession(BaseModel):
     session: Session
-    connection: Optional[SessionConnectionInfo]
 
 
 class WaveAgentTree(BaseModel):

@@ -11,21 +11,8 @@ use tokio_util::sync::CancellationToken;
 use loopflow::lfd::config::LfdConfig;
 use loopflow::lfd::http::HttpState;
 use loopflow::lfd::security::path_within_root_planned;
-use loopflow::lfd::session_supervisor::SessionSupervisor;
 use loopflow::lfdb::{migrate_store, open_store, SharedStore, StorageConfig};
 use loopflow::provider_auth::ProviderAuthService;
-
-fn env_flag(name: &str) -> bool {
-    std::env::var(name)
-        .ok()
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(false)
-}
 
 fn maybe_spawn_parent_watch() {
     let Some(parent_pid) = std::env::var("LFD_PARENT_PID")
@@ -126,11 +113,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let ci_failure_cache = Arc::new(Mutex::new(std::collections::HashSet::new()));
-    let session_supervisor = SessionSupervisor::new(store.clone());
-
-    // Boot registry hygiene: runs left mid-flight by a dead daemon are
-    // failed, and terminal sessions whose tmux sessions exited while lfd was
-    // down are closed.
+    // Boot registry hygiene: runs left mid-flight by a dead daemon are failed,
+    // and crashed Wave servers are removed from one-brain enforcement.
     match store.fail_orphaned_runs().await {
         Ok(count) if count > 0 => {
             tracing::info!(count, "cleaned up orphaned runs from previous lfd");
@@ -139,15 +123,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(err) => tracing::warn!(error = %err, "orphaned run cleanup failed"),
     }
 
-    match session_supervisor.reconcile_sessions().await {
+    match loopflow::wave::reconcile_wave_servers(&store).await {
         Ok(completed) if completed > 0 => {
-            tracing::info!(
-                count = completed,
-                "reconciled terminal sessions whose tmux sessions exited while lfd was down"
-            );
+            tracing::info!(count = completed, "reconciled crashed wave servers");
         }
         Ok(_) => {}
-        Err(err) => tracing::warn!(error = %err, "terminal session reconcile failed"),
+        Err(err) => tracing::warn!(error = %err, "wave server reconcile failed"),
     }
 
     // The one surviving background loop: provider token refresh. The push
@@ -157,34 +138,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let token_refresh_handle =
         loopflow::lfd::triggers::spawn_token_refresh(store.clone(), cancel.clone());
 
-    if env_flag("LFD_DISABLE_WORKTREE_JANITOR") {
-        tracing::info!("startup worktree janitor disabled by LFD_DISABLE_WORKTREE_JANITOR");
-    } else {
-        let repo_roots = store
-            .list_waves(None)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|wave| PathBuf::from(wave.repo()))
-            .collect::<Vec<_>>();
-        match session_supervisor.run_worktree_janitor(&repo_roots).await {
-            Ok(report) => {
-                if report.removed > 0 || report.errors > 0 {
-                    tracing::info!(
-                        removed = report.removed,
-                        active = report.active,
-                        errors = report.errors,
-                        "startup worktree janitor finished"
-                    );
-                }
-            }
-            Err(err) => tracing::warn!(error = %err, "startup worktree janitor failed"),
-        }
-    }
-
     let http_state = HttpState {
         store: store.clone(),
-        session_supervisor: Arc::new(session_supervisor),
         provider_auth: ProviderAuthService::new(store.clone()),
         auth: auth_provider,
         started_at: time::OffsetDateTime::now_utc(),

@@ -616,3 +616,30 @@ daemon/workspace screens. The registry DTO may decode its complete wire shape,
 but the app's `Wave` projection should contain only what a live view owns:
 identity, repository, goal kind, and rolled-up status. Project/KR context stays
 in `WavePlan`; live child state stays in the work map.
+
+## Current reduction: the process registry is observation, not execution
+
+The app cleanup exposed a server-side bypass. The shared `sessions` table still
+earns its place as low-level process attribution and as the Wave server's
+one-brain registry. Its public HTTP API did more: `POST /sessions` accepted an
+arbitrary flow, agent, and worktree, launched it in tmux, and exposed attach,
+start, complete, and cancel mutations. That was the retired palette/exec model
+under a more neutral noun. It let a caller create file-writing execution
+without a Linear Task and made `lfd` a dispatcher even while the architecture
+claimed it dispatched no work.
+
+Make that boundary literal:
+
+- `/v0/sessions` and `/v0/sessions/{id}` remain read-only process-registry
+  queries;
+- Wave/Project/Task commands own every lifecycle mutation and durable control;
+- `lfd` no longer launches palette flows, owns tmux sessions, or returns tmux
+  connection instructions;
+- the old generic-run worktree janitor disappears with the worktree shapes it
+  recognized; Task cleanup remains part of the Task delivery lifecycle;
+- lfd boot only reconciles crashed self-registered Wave servers, colocated
+  with the Wave registry code that owns one-brain enforcement.
+
+This leaves the word `Session` in two honest places: Project/Task Session is a
+durable domain runtime, while the lfd session row is explicitly a technical
+process record. The latter is not creatable or steerable as a product object.

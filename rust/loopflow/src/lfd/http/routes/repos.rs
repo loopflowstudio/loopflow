@@ -407,7 +407,6 @@ mod tests {
     use crate::lfd::auth::{AuthFailureThrottle, AuthProvider};
     use crate::lfd::config::{GitHubConfig, HttpSecurityConfig};
     use crate::lfd::id::LfdId;
-    use crate::lfd::session_supervisor::SessionSupervisor;
     use crate::lfd::types::{RepoId, WaveStatus};
     use crate::lfdb::{open_store, SharedStore, StorageConfig};
     use crate::provider_auth::ProviderAuthService;
@@ -424,13 +423,10 @@ mod tests {
                 .await
                 .expect("open sqlite store"),
         );
-        let session_supervisor = Arc::new(SessionSupervisor::new(store.clone()));
-
         let provider_auth = ProviderAuthService::new(store.clone());
 
         HttpState {
             store,
-            session_supervisor,
             provider_auth,
             auth: AuthProvider::Bearer {
                 session_token: secrecy::SecretString::from("test-token".to_string()),

@@ -181,9 +181,12 @@ curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.flows[] | {name, catego
 curl -s "$LFD_ADDR/v0/catalog?repo=$(pwd)" | jq '.result.skills[] | select(.name=="gate")'
 ```
 
-`/v0/catalog` returns the resolved flow + skill catalog that Loopflow uses for the **Flows** tab. Pass `repo=/path/to/repo` to merge builtin definitions with repo-local `.lf/flows/*.yaml` and `.lf/skills/*.md` overrides. Omit `repo` to inspect the builtin catalog only.
+`/v0/catalog` returns the resolved flow + skill catalog. Pass
+`repo=/path/to/repo` to merge builtin definitions with repo-local
+`.lf/flows/*.yaml` and `.lf/skills/*.md` overrides. Omit `repo` to inspect the
+builtin catalog only.
 
-## Sessions API
+## Inspect the process registry
 
 List live sessions:
 
@@ -191,34 +194,9 @@ List live sessions:
 curl -s "$LFD_ADDR/v0/sessions?active_only=true" | jq '.data[] | {id, wave_id, skill, source, status, tmux_name}'
 ```
 
-Create a palette session:
-
-```bash
-curl -s -X POST "$LFD_ADDR/v0/sessions" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"wave_id\": \"lfdwave_abc\",
-    \"flow\": \"ship-roadmap\",
-    \"worktree\": \"$(pwd)\",
-    \"agent\": \"codex\"
-  }"
-```
-
-Attach to the tmux session:
-
-```bash
-curl -s -X POST "$LFD_ADDR/v0/sessions/<session_id>/attach"
-```
-
-Cancel the session:
-
-```bash
-curl -s -X POST "$LFD_ADDR/v0/sessions/<session_id>/cancel"
-```
-
-The attach endpoint marks the session attached and returns tmux connection
-info. Use `tmux ls` and `tmux attach -r -t <name>` for read-only inspection;
-steering goes through the wave thread so it remains journaled.
+This endpoint is read-only. Start and steer work through `lf project` and
+`lf task`; the registry records Wave servers and attributed `lf` invocations
+for observation and one-brain enforcement.
 
 ## GitHub webhooks
 

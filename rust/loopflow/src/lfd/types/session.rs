@@ -26,14 +26,6 @@ pub const WAVE_SERVER_ENDPOINT_ENV: &str = "LF_WAVE_ENDPOINT";
 /// session reconciliation to detect a crashed server.
 pub const WAVE_SERVER_PID_ENV: &str = "LF_WAVE_SERVER_PID";
 
-/// Build a human-readable tmux session name from the branch name.
-///
-/// Tmux session names cannot contain dots or colons, so those are replaced
-/// with hyphens.
-pub fn tmux_session_name(branch: &str) -> String {
-    format!("lf-{}", branch.replace(['.', ':'], "-"))
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
@@ -189,34 +181,6 @@ impl Session {
         )
     }
 
-    pub fn attach(&mut self) -> bool {
-        if self.status.is_terminal() {
-            return false;
-        }
-        let mut changed = false;
-        if self.status == SessionStatus::Pending {
-            self.status = SessionStatus::Attached;
-            changed = true;
-        }
-        if self.attached_at.is_none() {
-            self.attached_at = Some(OffsetDateTime::now_utc());
-            changed = true;
-        }
-        changed
-    }
-
-    pub fn start(&mut self) -> bool {
-        if self.status.is_terminal() {
-            return false;
-        }
-        if self.attached_at.is_none() {
-            self.attached_at = Some(OffsetDateTime::now_utc());
-        }
-        self.status = SessionStatus::Running;
-        self.started_at = Some(OffsetDateTime::now_utc());
-        true
-    }
-
     pub fn complete(&mut self, exit_code: i32) -> bool {
         if self.status.is_terminal() {
             return false;
@@ -266,29 +230,9 @@ mod tests {
     }
 
     #[test]
-    fn attach_marks_pending_sessions_attached() {
-        let mut session = session(SessionStatus::Pending);
-
-        assert!(session.attach());
-        assert_eq!(session.status, SessionStatus::Attached);
-        assert!(session.attached_at.is_some());
-    }
-
-    #[test]
-    fn start_auto_attaches_session() {
-        let mut session = session(SessionStatus::Pending);
-
-        assert!(session.start());
-        assert_eq!(session.status, SessionStatus::Running);
-        assert!(session.attached_at.is_some());
-        assert!(session.started_at.is_some());
-    }
-
-    #[test]
-    fn sessions_do_not_restart_or_complete_twice() {
+    fn terminal_sessions_do_not_complete_or_cancel_twice() {
         let mut session = session(SessionStatus::Succeeded);
 
-        assert!(!session.start());
         assert!(!session.complete(1));
         assert!(!session.cancel());
     }

@@ -32,9 +32,9 @@ Execution engine
 Local CLI                 Daemon
   lf                        lfd
   rust/.../lf               rust/.../lfd
-  rust/.../ops              HTTP read surface, sessions,
+  rust/.../ops              HTTP read surface, registry,
                             webhook Task reconciliation,
-                            worktree janitor, token refresh
+                            token refresh
         |                        |
         v                        v
 Git/PR/PM ops             Clients
@@ -87,7 +87,6 @@ Important paths:
 - `rust/loopflow/src/lfd/http/`
 - `rust/loopflow/src/lfdb/`
 - `rust/loopflow/src/lfd/triggers/` (token refresh — the one surviving loop)
-- `rust/loopflow/src/lfd/session_supervisor.rs` (worktree janitor)
 - `rust/loopflow/src/lfd/types/`
 
 `lfd` uses sqlite and a local capability token. The old container service path

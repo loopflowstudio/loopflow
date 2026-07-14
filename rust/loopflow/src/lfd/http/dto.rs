@@ -213,42 +213,8 @@ pub fn session_dto(session: Session) -> SessionDto {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CreateSessionRequestDto {
-    pub wave_id: String,
-    pub flow: String,
-    pub worktree: String,
-    pub agent: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateSessionResponseDto {
-    pub session: SessionDto,
-    pub connection: SessionConnectionInfoDto,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SessionConnectionInfoDto {
-    pub kind: String,
-    pub session_name: String,
-    pub host: String,
-    pub cwd: String,
-    pub status: String,
-}
-
-pub fn session_connection_info_dto(session: &Session, host: String) -> SessionConnectionInfoDto {
-    SessionConnectionInfoDto {
-        kind: "tmux".to_string(),
-        session_name: session.tmux_name.clone(),
-        host,
-        cwd: session.cwd.clone(),
-        status: session.status.as_str().to_string(),
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct WaveAgentTreeSessionDto {
     pub session: SessionDto,
-    pub connection: Option<SessionConnectionInfoDto>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

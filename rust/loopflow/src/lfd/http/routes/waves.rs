@@ -1,5 +1,4 @@
 use axum::extract::{Path, Query, State};
-use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
@@ -9,11 +8,10 @@ use time::OffsetDateTime;
 use tokio::process::Command as TokioCommand;
 use tracing::warn;
 
-use super::session_controls::connection_host;
 use crate::engine::wave_config::update_wave_agent_config;
 use crate::lfd::http::dto::{
-    session_connection_info_dto, session_dto, DeletedResourceResponse, ListResponse,
-    StopWaveResponse, WaveAgentTreeDto, WaveAgentTreeSessionDto, WaveDto,
+    session_dto, DeletedResourceResponse, ListResponse, StopWaveResponse, WaveAgentTreeDto,
+    WaveAgentTreeSessionDto, WaveDto,
 };
 use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id, ApiError};
 use crate::lfd::http::state::HttpState;
@@ -248,7 +246,6 @@ pub async fn delete_wave_handler(
 
 pub async fn get_wave_agent_tree_handler(
     State(state): State<HttpState>,
-    headers: HeaderMap,
     Path(wave_id): Path<String>,
     Query(query): Query<GetWaveAgentTreeQuery>,
 ) -> ApiResult<WaveAgentTreeDto> {
@@ -280,14 +277,8 @@ pub async fn get_wave_agent_tree_handler(
         .await
         .map_err(map_store_error)?
         .into_iter()
-        .map(|session| {
-            let connection = session
-                .is_tmux_backed()
-                .then(|| session_connection_info_dto(&session, connection_host(&headers)));
-            WaveAgentTreeSessionDto {
-                session: session_dto(session),
-                connection,
-            }
+        .map(|session| WaveAgentTreeSessionDto {
+            session: session_dto(session),
         })
         .collect();
 
@@ -457,7 +448,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_wave_agent_tree_returns_sessions_with_connection() {
+    async fn get_wave_agent_tree_returns_attributed_sessions() {
         let state = test_http_state().await;
         let repo = tempdir().expect("tempdir");
         init_git_repo(repo.path());
@@ -480,7 +471,6 @@ mod tests {
 
         let Json(response) = get_wave_agent_tree_handler(
             State(state.clone()),
-            HeaderMap::new(),
             Path(wave.id().to_string()),
             Query(GetWaveAgentTreeQuery {
                 active_only: Some(true),
@@ -501,13 +491,6 @@ mod tests {
         assert_eq!(
             child_node.session.parent_session_id.as_deref(),
             Some(parent.id.as_str())
-        );
-        assert_eq!(
-            child_node
-                .connection
-                .as_ref()
-                .map(|connection| connection.session_name.as_str()),
-            Some("lf-worker")
         );
     }
 
@@ -542,7 +525,6 @@ mod tests {
 
         let Json(response) = get_wave_agent_tree_handler(
             State(state.clone()),
-            HeaderMap::new(),
             Path(chord.id().to_string()),
             Query(GetWaveAgentTreeQuery {
                 active_only: Some(true),

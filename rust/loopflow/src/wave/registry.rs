@@ -14,8 +14,8 @@
 //!   server — closed on the spot; a surviving live brain is a refusal naming
 //!   it, unless `force` takes over (kill the recorded pid / tmux session,
 //!   cancel the row). Graceful shutdown and Ctrl-C mark the row terminal;
-//!   lfd's session reconciliation (pid probe on `wave_server` rows) covers a
-//!   crash, and so does the boot-time probe of the next `lf serve`.
+//!   [`reconcile_wave_servers`] covers a crash at lfd boot, and so does the
+//!   boot-time probe of the next `lf serve`.
 //!
 //! - **Observation.** [`StoreObserver`] drains typed Project and Task
 //!   observations addressed to this wave. Child ledgers and the SQLite outbox
@@ -268,6 +268,38 @@ pub async fn live_brain_after_probe(
     Ok(live)
 }
 
+/// Close every live `wave_server` row whose recorded process has died.
+///
+/// `lfd` calls this once at boot. It does not launch or supervise work; the
+/// registry cleanup only keeps one-brain enforcement from keying on a crashed
+/// server that never reached graceful deregistration.
+///
+/// # Errors
+///
+/// Returns a store error when sessions cannot be read or a reconciled row
+/// cannot be persisted.
+pub async fn reconcile_wave_servers(store: &SharedStore) -> StoreResult<u32> {
+    let sessions = store
+        .list_control_sessions(None, Some(LIVE_SESSION_STATUSES))
+        .await?;
+    let mut completed = 0;
+    for mut session in sessions {
+        if session.source != WAVE_SERVER_SOURCE {
+            continue;
+        }
+        let alive = match wave_server_pid(&session) {
+            Some(pid) => process_alive(pid).await,
+            None => false,
+        };
+        if !alive && session.complete(1) {
+            store.update_control_session(&session).await?;
+            tracing::info!(session_id = %session.id, "closed crashed wave server session");
+            completed += 1;
+        }
+    }
+    Ok(completed)
+}
+
 fn wave_server_pid(session: &Session) -> Option<u32> {
     if session.source != WAVE_SERVER_SOURCE {
         return None;
@@ -301,9 +333,9 @@ pub async fn wave_server_endpoint(
 pub(crate) async fn process_alive(pid: u32) -> bool {
     Command::new("kill")
         .args(["-0", &pid.to_string()])
-        .status()
+        .output()
         .await
-        .is_ok_and(|status| status.success())
+        .is_ok_and(|output| output.status.success())
 }
 
 /// Run a registry future from a synchronous context (the Ctrl-C hook's
@@ -680,6 +712,44 @@ mod tests {
             .expect("live lookup")
             .expect("new brain live");
         assert_eq!(live.id, *registration.session_id());
+    }
+
+    #[tokio::test]
+    async fn lfd_boot_reconciles_only_crashed_wave_servers() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let wave = make_wave("ship");
+        store.create_wave(&wave).await.expect("seed wave");
+        let crashed = server_session(&wave, 4_000_000);
+        let live = server_session(&wave, std::process::id());
+        store
+            .register_session(&crashed)
+            .await
+            .expect("seed crashed server");
+        store
+            .register_session(&live)
+            .await
+            .expect("seed live server");
+
+        assert_eq!(reconcile_wave_servers(&store).await.unwrap(), 1);
+        assert_eq!(
+            store
+                .get_control_session(&crashed.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            SessionStatus::Failed
+        );
+        assert_eq!(
+            store
+                .get_control_session(&live.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            SessionStatus::Running
+        );
     }
 
     #[tokio::test]

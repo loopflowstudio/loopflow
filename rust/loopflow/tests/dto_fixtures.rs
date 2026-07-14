@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use loopflow::chat::turns::{ChatRole, ChatTurn, ChildActivityKind, ChildControlActivity};
 use loopflow::chat::types::{ConversationItem, Lifecycle};
 use loopflow::lf::commands::waves::WaveDetailSnapshot;
-use loopflow::lfd::http::dto::{CreateSessionRequestDto, SessionDto, WaveDto};
+use loopflow::lfd::http::dto::{SessionDto, WaveDto};
 use loopflow::wave::playhead::StepOutcome;
 use loopflow::wave::state::LoopState;
 use loopflow::wave::wire::{
@@ -83,19 +83,19 @@ fn wave_detail_fixture_preserves_the_native_work_hierarchy() {
 }
 
 #[test]
-fn session_fixture_pins_palette_shape() {
+fn session_fixture_pins_process_registry_shape() {
     let session = load_fixture("session.json");
     assert_eq!(session["object"], "session");
     let session: SessionDto =
         serde_json::from_value(session).expect("session fixture should parse");
     assert_eq!(session.skill, "ship");
     assert_eq!(session.agent, "codex");
-    assert_eq!(session.source, "palette");
-    assert_eq!(session.session_use, "palette");
+    assert_eq!(session.source, "lf_cli");
+    assert_eq!(session.session_use, "worker");
     assert_eq!(session.status, "running");
     assert_eq!(session.run_id, None);
     assert_eq!(session.parent_session_id, None);
-    assert!(session.argv.contains(&"-m".to_string()));
+    assert!(session.argv.contains(&"--wave".to_string()));
 }
 
 #[test]
@@ -155,16 +155,6 @@ fn child_control_activity_fixture_pins_structured_motion() {
     assert_eq!(activity.directive_version, Some(2));
     assert_eq!(activity.effect.as_deref(), Some("live_steer"));
     assert_eq!(serde_json::to_value(activity).unwrap(), value);
-}
-
-#[test]
-fn create_session_request_fixture_pins_required_fields() {
-    let request: CreateSessionRequestDto =
-        serde_json::from_value(load_fixture("create_session_request.json"))
-            .expect("create request fixture should parse");
-    assert_eq!(request.flow, "ship");
-    assert_eq!(request.worktree, "/tmp/repo.Desktop");
-    assert_eq!(request.agent, "codex");
 }
 
 /// `POST /messages` response — `{turn, state}` (wave/server.rs

@@ -79,32 +79,12 @@ pub fn router(state: HttpState) -> Router {
             "/repos/{owner}/{repo}/parents",
             get(repos::list_parents_handler),
         )
-        .route(
-            "/sessions",
-            get(session_controls::list_sessions_handler)
-                .post(session_controls::create_session_handler),
-        )
+        .route("/sessions", get(session_controls::list_sessions_handler))
         .route(
             "/sessions/current",
             get(session_controls::current_session_handler),
         )
         .route("/sessions/{id}", get(session_controls::get_session_handler))
-        .route(
-            "/sessions/{id}/attach",
-            post(session_controls::attach_session_handler),
-        )
-        .route(
-            "/sessions/{id}/start",
-            post(session_controls::start_session_handler),
-        )
-        .route(
-            "/sessions/{id}/complete",
-            post(session_controls::complete_session_handler),
-        )
-        .route(
-            "/sessions/{id}/cancel",
-            post(session_controls::cancel_session_handler),
-        )
         .route("/attention", get(attention::list_attention_handler))
         .route(
             "/attention/history",
@@ -354,6 +334,33 @@ mod tests {
             payload["error"]["message"],
             serde_json::Value::String("request body too large".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn process_registry_has_no_generic_execution_mutation() {
+        let app = router(routes::test_helpers::test_http_state().await);
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let _server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve app");
+        });
+
+        let response = reqwest::Client::new()
+            .post(format!("http://{addr}/v0/sessions"))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({
+                "wave_id": "wave_example",
+                "flow": "implement",
+                "worktree": "/tmp/repo",
+                "agent": "codex"
+            }))
+            .send()
+            .await
+            .expect("request");
+
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
     }
 
     #[tokio::test]

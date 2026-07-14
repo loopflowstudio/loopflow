@@ -2,7 +2,7 @@
 // registry (`lfdb`), not a streaming center.
 //
 // The wave model has no telemetry hub (see `scratch/eventing.md`): durable
-// facts — which waves exist (running and stopped), a wave's runs, its attention
+// facts — which waves exist (running and stopped), their work, and attention
 // — are QUERIES against the shared SQLite ledger, served by the daemonless `lf`
 // CLI. Live motion is a per-wave SSE stream (`WaveChatConnection`), never this.
 //
@@ -51,18 +51,14 @@ public struct RegistryQuery: Sendable {
         return waves.filter { $0.repo.normalizedFilePath == target }
     }
 
-    /// One wave's runs and attention (its durable history from the ledger),
-    /// plus the live loop state when a server is answering. Feeds `RunStore`
-    /// and `AttentionStore` for the focused wave.
+    /// One wave's Project/Task work and attention, plus the live loop state
+    /// when a server is answering.
     public func status(wave: String, waveId: String, cwd: String?) async throws
         -> WaveStatusResult {
         let stdout = try await run(["status", wave, "--json"], cwd)
         let snapshot = try Self.decode(WaveStatusSnapshot.self, from: stdout)
-        let repo = snapshot.wave.repo
-        let runs = snapshot.runs.map { $0.toRun(waveId: waveId, repo: repo) }
         let attention = snapshot.attention.map { $0.toItem(waveId: waveId) }
         return WaveStatusResult(
-            runs: runs,
             workMap: WaveWorkMap(objective: snapshot.wave.goal, projects: snapshot.projects),
             attention: attention,
             loopState: snapshot.loopState
@@ -284,35 +280,6 @@ struct RunSnapshot: Decodable {
         case prTitle = "pr_title"
     }
 
-    func toRun(waveId: String, repo: String) -> Run {
-        let pr: PullRequest? = prURL
-            .flatMap { URL(string: $0) }
-            .map {
-                PullRequest(
-                    url: $0,
-                    number: nil,
-                    state: prState.flatMap(PRState.init(rawValue:)),
-                    title: prTitle,
-                    branch: nil
-                )
-            }
-        return Run(
-            id: id,
-            waveId: waveId,
-            flow: flow,
-            task: task,
-            repo: repo,
-            status: RunStatus(lfToken: status),
-            stepIndex: stepIndex,
-            worktree: worktree.isEmpty ? nil : worktree,
-            branch: branch.isEmpty ? nil : branch,
-            error: error,
-            pr: pr,
-            startedAt: RegistrySnapshotDate.parse(startedAt),
-            endedAt: RegistrySnapshotDate.parse(endedAt),
-            createdAt: RegistrySnapshotDate.parse(startedAt)
-        )
-    }
 }
 
 /// One attention item under `lf status`. Mirrors Rust `AttentionSnapshot`.

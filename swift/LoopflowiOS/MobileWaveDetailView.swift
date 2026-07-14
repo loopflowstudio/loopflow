@@ -100,7 +100,6 @@ struct MobileWaveDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             outputBuffer.startStreaming(waveId: wave.id)
-            repoState.loadRuns(for: wave.id)
             repoState.loadWaveContent(for: wave.id)
             sessionState.configureClientContext(compact: horizontalSizeClass == .compact)
             await sessionState.onAppear()

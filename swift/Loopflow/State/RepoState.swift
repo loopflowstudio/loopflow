@@ -93,7 +93,6 @@ public final class RepoState {
     // Wave state — delegated to WaveStore
     public let waveStore = WaveStore()
     public let attentionStore = AttentionStore()
-    public let runStore = RunStore()
     public let worktreeStore = WorktreeStore()
     public let terminalWorkspaceStore = TerminalWorkspaceStore()
     public let multiplexerStore = MultiplexerStore()
@@ -368,56 +367,6 @@ public final class RepoState {
             )
         ])
 
-        // Populate mock runs for waves with history
-        let mockRuns: [Run] = [
-            Run(
-                id: "run-1",
-                waveId: "mock-wave-1",
-                flow: "build",
-                area: "src/auth",
-                repo: repo,
-                direction: [],
-                status: .completed,
-                iteration: 1,
-                branch: "wave-auth-feature",
-                currentStep: "gate",
-                pr: PullRequest(url: URL(string: "https://github.com/example/repo/pull/42")!, number: 42, state: .merged, title: "Add auth middleware"),
-                startedAt: Date().addingTimeInterval(-7200),
-                endedAt: Date().addingTimeInterval(-6600),
-                createdAt: Date().addingTimeInterval(-7200)
-            ),
-            Run(
-                id: "run-2",
-                waveId: "mock-wave-1",
-                flow: "build",
-                area: "src/auth",
-                repo: repo,
-                direction: [],
-                status: .completed,
-                iteration: 2,
-                branch: "wave-auth-feature",
-                currentStep: "gate",
-                pr: PullRequest(url: URL(string: "https://github.com/example/repo/pull/45")!, number: 45, state: .open, title: "Add OAuth token refresh"),
-                startedAt: Date().addingTimeInterval(-3600),
-                endedAt: Date().addingTimeInterval(-3000),
-                createdAt: Date().addingTimeInterval(-3600)
-            ),
-            Run(
-                id: "run-3",
-                waveId: "mock-wave-1",
-                flow: "build",
-                area: "src/auth",
-                repo: repo,
-                direction: [],
-                status: .running,
-                iteration: 3,
-                branch: "wave-auth-feature",
-                currentStep: "implement",
-                startedAt: Date().addingTimeInterval(-300),
-                createdAt: Date().addingTimeInterval(-300)
-            ),
-        ]
-        runStore.setRuns(for: "mock-wave-1", mockRuns)
     }
 
     public func configureMockWavesEmpty() {
@@ -503,9 +452,6 @@ public final class RepoState {
             let loaded = try await registryQuery.waves(repoPath: url.path)
             applyConnectedSnapshot(loaded)
             preloadWaveContent(for: waves)
-            if let selectedWaveId {
-                loadStatus(for: selectedWaveId)
-            }
             updateConnectionState(.connected)
         } catch {
             LoggingService.model("refreshRegistrySnapshot: error=\(error.localizedDescription)")
@@ -581,7 +527,6 @@ public final class RepoState {
             for wave in waves {
                 let status = try await statusSnapshot(for: wave.id)
                 items.append(contentsOf: status.attention)
-                runStore.setRuns(for: wave.id, status.runs)
             }
             attentionStore.setAll(items)
         } catch {
@@ -671,19 +616,6 @@ public final class RepoState {
             attachTerminalPane(to: session)
         }
         loadWaveContent(for: session.waveId)
-        loadRuns(for: session.waveId)
-    }
-
-    public func loadRuns(for waveId: String) {
-        loadStatus(for: waveId)
-    }
-
-    public func loadStatus(for waveId: String) {
-        Task {
-            guard let status = try? await statusSnapshot(for: waveId) else { return }
-            runStore.setRuns(for: waveId, status.runs)
-            attentionStore.setAll(status.attention)
-        }
     }
 
     private func statusSnapshot(for waveId: String) async throws -> WaveStatusResult {
@@ -691,7 +623,6 @@ public final class RepoState {
               let wave = waveStore.wave(for: waveId)
         else {
             return WaveStatusResult(
-                runs: [],
                 workMap: WaveWorkMap(objective: "", projects: []),
                 attention: [],
                 loopState: nil
@@ -809,7 +740,6 @@ public final class RepoState {
         do {
             try await waveService.deleteWave(wave.id)
             waveStore.commitMutation(wave.id)
-            runStore.clear(for: wave.id)
             outputBuffer?.clearOutput(for: wave.id)
             await refreshFlowsAsync()
         } catch {

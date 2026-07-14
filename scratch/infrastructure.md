@@ -446,3 +446,29 @@ Collapse the common protocol behind one private, concrete two-variant target:
 
 Do not expose `child` as a CLI noun. It is the protocol between the three
 product nouns, not a fourth thing a human manages.
+
+## Current reduction: remove the app's phantom Run history
+
+The Mac now presents the product hierarchy directly: Project/Task state sits
+beside Wave Chat, child observations render in the conversation, and selecting
+an item prepares a message to the Wave. Under that surface, `RepoState` still
+maintains a per-Wave `RunStore` populated from `lf status`. No production view
+reads it. The iOS detail view and terminal focusing path still request it, tests
+still defend its 50-row cache, and every five-second attention refresh spends
+time constructing rich `Run` objects only to discard them.
+
+Delete that competing projection:
+
+- `lf status` still decodes its required `runs` wire field, but the app does not
+  reinterpret those rows as a second work hierarchy;
+- Wave Chat uses its streamed playhead for the active Wave turn;
+- the work map owns Project/Task runtime and delivery state;
+- `lf runs` remains the separate machine activity/usage ledger where a generic
+  execution timeline is actually the product;
+- `RepoState` keeps attention and terminal sessions, but no invisible Run
+  cache or dead load/clear lifecycle.
+
+This does not delete the internal `Run` type yet. Legacy Wave/session APIs still
+carry it. It removes the unused product projection first, so a later pass can
+judge those remaining uses from evidence rather than preserving a cache that
+made them look live.

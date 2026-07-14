@@ -1,6 +1,5 @@
-// RegistryQuery decodes the `lf ls/status/runs --json` wire snapshots (the Rust
-// query types) and maps them onto the app models the stores hold. The runner is
-// injected, so these exercise the parse + mapping without spawning `lf`.
+// RegistryQuery decodes the `lf ls/status/runs --json` wire snapshots. The
+// runner is injected, so these exercise parsing without spawning `lf`.
 
 import Foundation
 import Testing
@@ -48,8 +47,8 @@ struct RegistryQueryTests {
     }
 
 
-    @Test("lf status maps runs and attention onto the wave")
-    func statusMapsRunsAndAttention() async throws {
+    @Test("lf status maps the work hierarchy and attention onto the wave")
+    func statusMapsWorkAndAttention() async throws {
         let json = """
         {
           "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"active_tasks":1,"active_projects":1,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
@@ -78,12 +77,6 @@ struct RegistryQueryTests {
 
         let result = try await query.status(wave: "goals", waveId: "wave-1", cwd: nil)
         #expect(result.loopState == "turning")
-        #expect(result.runs.map(\.id) == ["run-1"])
-        #expect(result.runs[0].waveId == "wave-1")
-        #expect(result.runs[0].status == .running)
-        #expect(result.runs[0].stepIndex == 2)
-        #expect(result.runs[0].pr?.state == .draft)
-        #expect(result.runs[0].pr?.title == "Wire it")
         #expect(result.workMap.projects[0].project.slug == "developer-efficiency")
         #expect(result.workMap.projects[0].runtime?.status == "waiting")
         #expect(result.workMap.projects[0].tasks[0].task.identifier == "INF-123")
@@ -91,33 +84,6 @@ struct RegistryQueryTests {
         #expect(result.attention.map(\.id) == ["att-1"])
         #expect(result.attention[0].waveId == "wave-1")
         #expect(result.attention[0].kind == .interactive)
-    }
-
-    @Test("lf status preserves completed and unknown run statuses")
-    func statusPreservesRunStatuses() async throws {
-        let json = """
-        {
-          "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
-          "mind":null,
-          "projects":[],
-          "runs":[
-            {"id":"run-1","flow":"implement","task":null,"step_index":0,"status":"completed","branch":"b","worktree":"/wt","started_at":"2026-07-06T00:00:00Z","ended_at":null,"error":null,"pr_url":null,"pr_state":null,"pr_title":null},
-            {"id":"run-2","flow":"gate","task":null,"step_index":0,"status":"new-token","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null,"pr_state":null,"pr_title":null}
-          ],
-          "tasks":[],
-          "attention":[]
-        }
-        """
-        let query = RegistryQuery { _, _ in json }
-
-        let result = try await query.status(wave: "goals", waveId: "wave-1", cwd: nil)
-
-        #expect(result.runs[0].status == .completed)
-        #expect(result.runs[0].area == nil)
-        #expect(result.runs[0].createdAt != nil)
-        #expect(result.runs[1].status == .unknown("new-token"))
-        #expect(result.runs[1].status.displayName == "Unknown: new-token")
-        #expect(result.runs[1].createdAt == nil)
     }
 
     @Test("lf runs decodes the ledger window")

@@ -161,18 +161,15 @@ public struct TaskDeliverySnapshot: Decodable, Sendable, Hashable {
 }
 
 public struct WaveStatusResult: Sendable {
-    public let runs: [Run]
     public let workMap: WaveWorkMap
     public let attention: [AttentionItem]
     public let loopState: String?
 
     public init(
-        runs: [Run],
         workMap: WaveWorkMap,
         attention: [AttentionItem],
         loopState: String?
     ) {
-        self.runs = runs
         self.workMap = workMap
         self.attention = attention
         self.loopState = loopState

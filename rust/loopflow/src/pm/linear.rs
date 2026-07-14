@@ -172,6 +172,9 @@ const COMPLETE_ITEM_MUTATION: &str = r#"mutation CompleteIssue($id: String!, $st
   }
 }"#;
 
+// The workflow-state filters compare against Linear's `IDComparator`, so the
+// team variable is `ID!` here even though `issueCreate`/`projectCreate` take
+// the same team id as `String!` on their input types.
 const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowStates($teamId: ID!) {
   workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "completed" } }) {
     nodes {
@@ -979,26 +982,34 @@ mod tests {
     use axum::http::StatusCode;
     use serde_json::json;
 
+    /// Linear takes the same id as two different types depending on position:
+    /// `String!` on mutation input fields, `ID!` inside a filter, which compares
+    /// through `IDComparator`. Either one spelled wrong is a 400 at runtime —
+    /// `lf pm task done` failed to close an issue on exactly this — so pin both.
     #[test]
-    fn issue_mutations_use_linear_string_ids() {
+    fn linear_ids_match_their_position() {
         for query in [
             UPDATE_ITEM_MUTATION,
             MOVE_ITEM_MUTATION,
             COMPLETE_ITEM_MUTATION,
             CREATE_COMMENT_MUTATION,
         ] {
-            assert!(!query.contains(": ID!"));
+            assert!(!query.contains(": ID!"), "mutation inputs take String!");
         }
         assert!(MOVE_ITEM_MUTATION.contains("$projectId: String!"));
         assert!(COMPLETE_ITEM_MUTATION.contains("$stateId: String!"));
         assert!(CREATE_COMMENT_MUTATION.contains("$issueId: String!"));
-    }
-
-    #[test]
-    fn workflow_state_filters_use_linear_team_id() {
         assert!(CREATE_ITEM_MUTATION.contains("$teamId: String!"));
-        assert!(LIST_COMPLETED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
-        assert!(LIST_UNSTARTED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
+
+        for query in [
+            LIST_COMPLETED_WORKFLOW_STATES_QUERY,
+            LIST_UNSTARTED_WORKFLOW_STATES_QUERY,
+        ] {
+            assert!(
+                query.contains("$teamId: ID!"),
+                "workflow-state filters take ID!"
+            );
+        }
     }
 
     #[tokio::test]

@@ -156,15 +156,89 @@ public struct PullRequestSnapshot: Decodable, Sendable, Hashable {
     public let url: URL
 }
 
+/// A reading from `lf status`, or the reason there is none. Mirrors Rust
+/// `Evidence<T>` (`lf/commands/waves.rs`): "we looked and found nothing" and "we
+/// could not look" are different facts, and a surface that renders them the same
+/// is lying. `truncated` says a cap hid older items.
+public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Sendable, Hashable {
+    case available(items: [Item], truncated: Bool)
+    case unavailable(reason: String)
+
+    enum CodingKeys: String, CodingKey {
+        case state, items, truncated, reason
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let state = try container.decode(String.self, forKey: .state)
+        switch state {
+        case "ok":
+            self = .available(
+                items: try container.decode([Item].self, forKey: .items),
+                truncated: try container.decode(Bool.self, forKey: .truncated)
+            )
+        case "unavailable":
+            self = .unavailable(reason: try container.decode(String.self, forKey: .reason))
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .state,
+                in: container,
+                debugDescription: "unknown evidence state '\(state)'"
+            )
+        }
+    }
+
+    /// What was read. Empty for `unavailable` — callers that render must check
+    /// the case, not this, or they turn a broken source into a quiet zero.
+    public var items: [Item] {
+        if case let .available(items, _) = self { return items }
+        return []
+    }
+
+    public var unavailableReason: String? {
+        if case let .unavailable(reason) = self { return reason }
+        return nil
+    }
+}
+
+public enum WaveAttentionKind: String, Decodable, Sendable, Hashable {
+    case project
+    case task
+}
+
+/// One Session waiting on somebody. Mirrors Rust `AttentionItem`. `ageSeconds`
+/// is nil when the Session's timestamp cannot be read — an unknown age is never
+/// a zero one.
+public struct WaveAttentionItem: Decodable, Sendable, Hashable, Identifiable {
+    public let kind: WaveAttentionKind
+    public let id: String
+    public let subject: String
+    public let owner: WorkNextMoveOwner
+    public let reason: String
+    public let since: String
+    public let ageSeconds: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case kind, id, subject, owner, reason, since
+        case ageSeconds = "age_secs"
+    }
+}
+
 public struct WaveStatusResult: Sendable {
     public let workMap: WaveWorkMap
     public let loopState: String?
+    public let runs: WorkEvidence<RunLedgerEntry>
+    public let attention: WorkEvidence<WaveAttentionItem>
 
     public init(
         workMap: WaveWorkMap,
-        loopState: String?
+        loopState: String?,
+        runs: WorkEvidence<RunLedgerEntry>,
+        attention: WorkEvidence<WaveAttentionItem>
     ) {
         self.workMap = workMap
         self.loopState = loopState
+        self.runs = runs
+        self.attention = attention
     }
 }

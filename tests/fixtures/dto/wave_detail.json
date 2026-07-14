@@ -98,5 +98,45 @@
         }
       ]
     }
-  ]
+  ],
+  "runs": {
+    "state": "ok",
+    "truncated": false,
+    "items": [
+      {
+        "id": "proc-1",
+        "run_id": "run-1",
+        "process_id": "proc-1",
+        "parent_process_id": null,
+        "repo": "/src/loopflow",
+        "wave": "infrastructure",
+        "label": "task run INF-123",
+        "status": "ok",
+        "started": 1784052000,
+        "ended": 1784052600,
+        "input_tokens": 12000,
+        "output_tokens": 3000,
+        "cache_read_tokens": 8000,
+        "cost_usd": 0.42,
+        "duration_secs": 600.0,
+        "provider": "codex",
+        "model": "gpt-5"
+      }
+    ]
+  },
+  "attention": {
+    "state": "ok",
+    "truncated": false,
+    "items": [
+      {
+        "kind": "task",
+        "id": "ts_22222222222222222222222222222222",
+        "subject": "INF-123",
+        "owner": "review",
+        "reason": "waiting for review",
+        "since": "2026-07-13T19:00:00Z",
+        "age_secs": 7200
+      }
+    ]
+  }
 }

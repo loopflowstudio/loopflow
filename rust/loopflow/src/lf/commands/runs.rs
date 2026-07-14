@@ -327,35 +327,75 @@ fn print_recorded_event(event: &crate::trace::RecordedConversationEvent) {
 }
 
 /// One run folded out of the ledger — the shape `lf runs` prints and
-/// `lf runs --json` emits. Wire type consumed by Loopflow: every field required
-/// or explicitly Optional, no serde defaults. `started`/`ended` are unix seconds
-/// (the ledger's grain).
-#[derive(Debug, serde::Serialize)]
-struct RunLedgerEntry {
+/// `lf runs --json` emits, and the `runs` evidence in `lf status`. Wire type
+/// consumed by Loopflow: every field required or explicitly Optional, no serde
+/// defaults. `started`/`ended` are unix seconds (the ledger's grain).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RunLedgerEntry {
     /// The process is the run's identity here; `id` is the key Loopflow keys on.
-    id: String,
-    run_id: String,
-    process_id: String,
-    parent_process_id: Option<String>,
-    repo: Option<String>,
-    wave: Option<String>,
-    label: String,
-    status: String,
-    started: i64,
-    ended: Option<i64>,
-    input_tokens: i64,
-    output_tokens: i64,
-    cache_read_tokens: i64,
-    cost_usd: Option<f64>,
-    duration_secs: Option<f64>,
-    provider: Option<String>,
-    model: Option<String>,
+    pub id: String,
+    pub run_id: String,
+    pub process_id: String,
+    pub parent_process_id: Option<String>,
+    pub repo: Option<String>,
+    pub wave: Option<String>,
+    pub label: String,
+    pub status: String,
+    pub started: i64,
+    pub ended: Option<i64>,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cost_usd: Option<f64>,
+    pub duration_secs: Option<f64>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
 }
 
 impl RunLedgerEntry {
     fn total_tokens(&self) -> i64 {
         self.input_tokens + self.output_tokens
     }
+
+    /// A run the ledger never saw finish.
+    pub fn is_active(&self) -> bool {
+        self.ended.is_none()
+    }
+}
+
+/// The runs one wave produced, newest first, plus whether the window's cap hid
+/// older ones. Same ledger and same fold as `lf runs` — `lf status` differs only
+/// in the filter, so the two surfaces cannot disagree about a run.
+///
+/// An active run is never dropped by the cap: what the wave is doing right now
+/// outranks what it did.
+pub(crate) fn wave_runs(wave: &str) -> Result<(Vec<RunLedgerEntry>, bool)> {
+    let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
+    let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
+    let events = store
+        .list_run_events_since(since)
+        .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
+
+    let mut runs = summarize(&events);
+    runs.retain(|run| run.wave.as_deref() == Some(wave));
+    runs.sort_by_key(|run| std::cmp::Reverse(run.started));
+
+    let truncated = runs.len() > MAX_RUNS;
+    if truncated {
+        let active = runs.iter().filter(|run| run.is_active()).count();
+        let mut budget = MAX_RUNS.saturating_sub(active);
+        runs.retain(|run| {
+            if run.is_active() {
+                return true;
+            }
+            if budget == 0 {
+                return false;
+            }
+            budget -= 1;
+            true
+        });
+    }
+    Ok((runs, truncated))
 }
 
 fn summarize(events: &[RunEventRow]) -> Vec<RunLedgerEntry> {

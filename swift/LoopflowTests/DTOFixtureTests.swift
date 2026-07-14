@@ -20,6 +20,12 @@ struct DTOFixtureTests {
         #expect(detail.projects[0].tasks[0].directive?.incorporatedAt != nil)
         #expect(detail.projects[0].tasks[0].runtime?.worktree == "/src/loopflow.infrastructure.task")
         #expect(detail.projects[0].tasks[1].runtime == nil)
+        #expect(detail.runs.items[0].runId == "run-1")
+        #expect(detail.runs.items[0].status == "ok")
+        #expect(detail.attention.items[0].subject == "INF-123")
+        #expect(detail.attention.items[0].owner == .review)
+        #expect(detail.attention.items[0].reason == "waiting for review")
+        #expect(detail.attention.items[0].ageSeconds == 7200)
     }
 
     @Test("child control activity preserves typed command evidence")

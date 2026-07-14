@@ -1,10 +1,15 @@
 //! `lf ls` and `lf status` — read the wave registry (`store`).
 //!
 //! `lf ls` lists every durable Wave registry row and projects authored policy
-//! from `GOAL.md` plus current listener presence. `lf status <wave>` adds the
-//! Wave's Project/Task hierarchy and live loop state. Both are
-//! read-only; `--json` is the dashboard contract. A stopped Wave remains
-//! visible, inert, and restartable.
+//! from `GOAL.md` plus current listener presence. `lf status [wave]` adds the
+//! Wave's Project/Task hierarchy, the runs it has produced, what is waiting on
+//! somebody, and live loop state; with no argument it reports the Wave this
+//! process is running inside. Both are read-only; `--json` is the dashboard
+//! contract. A stopped Wave remains visible, inert, and restartable.
+//!
+//! Evidence the machine could not read stays [`Evidence::Unavailable`] — an
+//! audit surface that renders "I could not look" as "nothing happened" is worse
+//! than one that says nothing at all.
 
 use std::path::Path;
 
@@ -12,6 +17,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::child_session::{ChildRef, DirectiveKind, ObservationRecipient};
+use crate::lf::commands::runs::RunLedgerEntry;
 use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject};
 use crate::project_session::{ProjectSession, ProjectSessionStatus};
@@ -72,8 +78,9 @@ pub struct WaveSnapshot {
     pub parent_wave_id: Option<String>,
 }
 
-/// `lf status <wave>` snapshot: native work hierarchy and — when a
-/// server is live — loop state. Wire type; no defaults.
+/// `lf status <wave>` snapshot: native work hierarchy, the wave's runs, what
+/// needs attention, and — when a server is live — loop state. Wire type; no
+/// defaults.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
@@ -82,6 +89,69 @@ pub struct WaveDetailSnapshot {
     /// serving dormant.
     pub loop_state: Option<String>,
     pub projects: Vec<ProjectDetailSnapshot>,
+    /// This wave's runs from the local ledger, newest first.
+    pub runs: Evidence<RunLedgerEntry>,
+    /// Work whose next move belongs to someone other than itself.
+    pub attention: Evidence<AttentionItem>,
+}
+
+/// A reading, or the reason there is none. "We looked and found nothing" and
+/// "we could not look" are different facts, and an audit surface that renders
+/// them the same is lying — so the wire says which.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Evidence<T> {
+    /// The source answered. `truncated` says a cap hid older items, so a full
+    /// page never reads as "that was all there was".
+    Ok { items: Vec<T>, truncated: bool },
+    /// The source could not be read. Never rendered as emptiness.
+    Unavailable { reason: String },
+}
+
+impl<T> Evidence<T> {
+    fn complete(items: Vec<T>) -> Self {
+        Self::Ok {
+            items,
+            truncated: false,
+        }
+    }
+
+    fn from_result(result: Result<(Vec<T>, bool)>) -> Self {
+        match result {
+            Ok((items, truncated)) => Self::Ok { items, truncated },
+            Err(error) => Self::Unavailable {
+                reason: error.to_string(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttentionKind {
+    Project,
+    Task,
+}
+
+/// One Session waiting on somebody. Derived from the durable Session registry —
+/// every field traces to a recorded state, none is inferred.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttentionItem {
+    pub kind: AttentionKind,
+    /// Session id — the drill-down key.
+    pub id: String,
+    /// Project slug or Task identifier.
+    pub subject: String,
+    /// Who has to move next.
+    pub owner: NextMoveOwner,
+    /// Why, in the Session's own recorded words — or the audit finding when the
+    /// Session's record and the machine disagree.
+    pub reason: String,
+    /// RFC3339 time the Session entered this state; empty when unrecorded.
+    pub since: String,
+    /// How long it has been waiting. `null` when `since` cannot be read — an
+    /// unknown age is never a zero one.
+    pub age_secs: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,7 +181,7 @@ pub struct PmTaskSummary {
     pub assignee: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NextMoveOwner {
     Human,
@@ -207,22 +277,14 @@ pub fn ls(json: bool) -> Result<()> {
     })
 }
 
-/// `lf status <wave>` — one wave's work hierarchy and loop.
+/// `lf status [wave]` — one wave's work hierarchy, runs, attention, and loop.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
-    let name = wave
-        .map(str::to_string)
-        .or_else(ambient_wave)
-        .ok_or_else(|| anyhow!("no wave given and none in context; pass a wave name"))?;
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
             return no_registry(json, "null");
         };
-        let wave = store
-            .get_wave_by_name(&name)
-            .await
-            .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
-            .ok_or_else(|| anyhow!("wave '{name}' is not in the registry"))?;
+        let wave = resolve_status_wave(&store, wave).await?;
         let snapshot = snapshot_wave(&store, &wave).await?;
         let loop_state = match &snapshot.endpoint {
             Some(endpoint) => loop_state(endpoint).await,
@@ -237,7 +299,14 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .await
             .map_err(|err| anyhow!("failed to read Task Sessions: {err}"))?;
         let projects = snapshot_projects(&store, &wave, stored_projects, stored_tasks).await?;
+        let attention = Evidence::complete(attention(
+            &projects,
+            now(),
+            Liveness::probe(crate::ops::util::command_exists("tmux")),
+        ));
         let status = WaveDetailSnapshot {
+            runs: Evidence::from_result(crate::lf::commands::runs::wave_runs(wave.name())),
+            attention,
             wave: snapshot,
             loop_state,
             projects,
@@ -249,6 +318,149 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         }
         Ok(())
     })
+}
+
+/// The wave `lf status` is about: the name the caller typed, else the wave this
+/// process is running inside.
+async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Result<Wave> {
+    if let Some(name) = requested {
+        return store
+            .get_wave_by_name(name)
+            .await
+            .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
+            .ok_or_else(|| anyhow!("wave '{name}' is not in the registry"));
+    }
+    let ambient = ambient_wave()
+        .ok_or_else(|| anyhow!("no wave given and none in context; pass a wave name"))?;
+    // `LF_WAVE_ID` carries the durable wave *id*. Read it as one — a name lookup
+    // is the fallback so a hand-set `LF_WAVE_ID=<name>` still works.
+    if let Ok(id) = ambient.parse::<crate::id::WaveId>() {
+        if let Some(wave) = store
+            .get_wave(&id)
+            .await
+            .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
+        {
+            return Ok(wave);
+        }
+    }
+    store
+        .get_wave_by_name(&ambient)
+        .await
+        .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
+        .ok_or_else(|| {
+            anyhow!(
+                "ambient wave '{ambient}' ({}) is not in this machine's registry; the context is stale — pass a wave name",
+                crate::engine::wave_context::WAVE_ID_ENV
+            )
+        })
+}
+
+/// Whether this machine can tell a live Session process from a dead one. Without
+/// tmux there is no way to look, and `process_alive: false` means "unknown", not
+/// "gone" — a surface that reports the difference as a finding is inventing one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Liveness {
+    Observable,
+    Unknowable,
+}
+
+impl Liveness {
+    fn probe(tmux_installed: bool) -> Self {
+        if tmux_installed {
+            Self::Observable
+        } else {
+            Self::Unknowable
+        }
+    }
+
+    /// A Session that records a live process the machine looked for and did not
+    /// find.
+    fn is_gone(self, claims_process: bool, process_alive: bool) -> bool {
+        self == Self::Observable && claims_process && !process_alive
+    }
+}
+
+/// What in this wave is waiting on somebody. Two rules, both read straight off
+/// the Session registry:
+///
+/// 1. the Session's next move belongs to someone other than itself, or
+/// 2. the Session's record claims a live process the machine cannot find — the
+///    kind of disagreement an audit surface exists to show.
+///
+/// Plan rows with no Session are not attention: an unstarted backlog item is not
+/// waiting on you.
+fn attention(
+    projects: &[ProjectDetailSnapshot],
+    now: time::OffsetDateTime,
+    liveness: Liveness,
+) -> Vec<AttentionItem> {
+    let mut items = Vec::new();
+    for project in projects {
+        if let Some(runtime) = &project.runtime {
+            let dead = liveness.is_gone(runtime.status.is_process_active(), runtime.process_alive);
+            let self_owned = matches!(project.next_move.owner, NextMoveOwner::Project);
+            if dead || !(self_owned || runtime.status.is_terminal()) {
+                items.push(AttentionItem {
+                    kind: AttentionKind::Project,
+                    id: runtime.session_id.clone(),
+                    subject: project.project.slug.clone(),
+                    owner: if dead {
+                        NextMoveOwner::Wave
+                    } else {
+                        project.next_move.owner
+                    },
+                    reason: attention_reason(dead, runtime.status.as_str(), &runtime.reason),
+                    since: runtime.status_at.clone(),
+                    age_secs: age_secs(&runtime.status_at, now),
+                });
+            }
+        }
+        for task in &project.tasks {
+            let Some(runtime) = &task.runtime else {
+                continue;
+            };
+            let dead = liveness.is_gone(runtime.status.is_process_active(), runtime.process_alive);
+            if !dead && matches!(task.next_move.owner, NextMoveOwner::Task) {
+                continue;
+            }
+            if !dead && runtime.status.is_terminal() {
+                continue;
+            }
+            items.push(AttentionItem {
+                kind: AttentionKind::Task,
+                id: runtime.session_id.clone(),
+                subject: task.task.identifier.clone(),
+                owner: if dead {
+                    NextMoveOwner::Wave
+                } else {
+                    task.next_move.owner
+                },
+                reason: attention_reason(dead, runtime.status.as_str(), &runtime.reason),
+                since: runtime.status_at.clone(),
+                age_secs: age_secs(&runtime.status_at, now),
+            });
+        }
+    }
+    items.sort_by_key(|item| std::cmp::Reverse(item.age_secs));
+    items
+}
+
+fn attention_reason(dead: bool, status: &str, recorded: &str) -> String {
+    if dead {
+        format!("process is gone but the Session still records '{status}'")
+    } else {
+        recorded.to_string()
+    }
+}
+
+fn age_secs(since: &str, now: time::OffsetDateTime) -> Option<i64> {
+    let since =
+        time::OffsetDateTime::parse(since, &time::format_description::well_known::Rfc3339).ok()?;
+    Some((now - since).whole_seconds().max(0))
+}
+
+fn now() -> time::OffsetDateTime {
+    time::OffsetDateTime::now_utc()
 }
 
 /// Build the registry snapshot for one wave, probing its discovery endpoint
@@ -635,12 +847,13 @@ fn next_move_for_task(status: TaskSessionStatus, reason: &str) -> NextMove {
     }
 }
 
-/// The invoking context's wave: `LF_WAVE_ID` env, else `None` (the caller
+/// The invoking context's wave id: `LF_WAVE_ID`, else `None` (the caller
 /// errors). Kept minimal — `lf status` with no arg is a convenience, not the
 /// resolution surface `lf chat`/`lf radio sub` own.
 fn ambient_wave() -> Option<String> {
     std::env::var(crate::engine::wave_context::WAVE_ID_ENV)
         .ok()
+        .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
 
@@ -762,6 +975,78 @@ fn print_status(status: &WaveDetailSnapshot) {
                 );
             }
         }
+    }
+    print_attention(&status.attention);
+    print_runs(&status.runs);
+}
+
+fn print_attention(attention: &Evidence<AttentionItem>) {
+    match attention {
+        Evidence::Unavailable { reason } => println!("  attention unavailable: {reason}"),
+        Evidence::Ok { items, .. } if items.is_empty() => println!("  attention  nothing waiting"),
+        Evidence::Ok { items, .. } => {
+            println!("  attention");
+            for item in items {
+                println!(
+                    "    {subject:<14}  {owner:<8}  {age:>7}  {reason}",
+                    subject = truncate(&item.subject, 14),
+                    owner = owner_label(&item.owner),
+                    age = item
+                        .age_secs
+                        .map(format_age)
+                        .unwrap_or_else(|| "-".to_string()),
+                    reason = item.reason,
+                );
+            }
+        }
+    }
+}
+
+fn print_runs(runs: &Evidence<RunLedgerEntry>) {
+    match runs {
+        Evidence::Unavailable { reason } => println!("  runs unavailable: {reason}"),
+        Evidence::Ok { items, .. } if items.is_empty() => {
+            println!("  runs       none in the ledger window")
+        }
+        Evidence::Ok { items, truncated } => {
+            println!("  runs");
+            for run in items {
+                println!(
+                    "    {label:<24}  {status:<8}  {age:>7} ago",
+                    label = truncate(&run.label, 24),
+                    status = run.status,
+                    age = format_age(now().unix_timestamp() - run.started),
+                );
+            }
+            if *truncated {
+                println!("    (older runs beyond the window cap are not shown)");
+            }
+        }
+    }
+}
+
+fn owner_label(owner: &NextMoveOwner) -> &'static str {
+    match owner {
+        NextMoveOwner::Human => "human",
+        NextMoveOwner::Wave => "wave",
+        NextMoveOwner::Project => "project",
+        NextMoveOwner::Task => "task",
+        NextMoveOwner::Review => "review",
+        NextMoveOwner::Ci => "ci",
+        NextMoveOwner::External => "external",
+    }
+}
+
+fn format_age(secs: i64) -> String {
+    let secs = secs.max(0);
+    if secs >= 86_400 {
+        format!("{}d", secs / 86_400)
+    } else if secs >= 3600 {
+        format!("{}h", secs / 3600)
+    } else if secs >= 60 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{secs}s")
     }
 }
 
@@ -912,6 +1197,8 @@ mod tests {
                 parent_wave_id: None,
             },
             loop_state: None,
+            runs: Evidence::complete(Vec::new()),
+            attention: Evidence::complete(Vec::new()),
             projects: vec![ProjectDetailSnapshot {
                 project: PmProjectSummary {
                     id: "project-1".into(),
@@ -962,5 +1249,238 @@ mod tests {
             value["projects"][0]["tasks"][0]["runtime"],
             serde_json::Value::Null
         );
+        // The promised evidence is present, and an empty reading says so
+        // explicitly rather than going missing.
+        assert_eq!(value["runs"]["state"], "ok");
+        assert_eq!(value["runs"]["items"], serde_json::json!([]));
+        assert_eq!(value["runs"]["truncated"], false);
+        assert_eq!(value["attention"]["state"], "ok");
+    }
+
+    /// "We could not read the ledger" must never reach a client as "this wave
+    /// has no runs".
+    #[test]
+    fn unavailable_evidence_is_a_state_not_an_empty_list() {
+        let runs: Evidence<RunLedgerEntry> =
+            Evidence::from_result(Err(anyhow!("run ledger unavailable: disk is gone")));
+        let value = serde_json::to_value(&runs).expect("serialize");
+        assert_eq!(value["state"], "unavailable");
+        assert_eq!(value["reason"], "run ledger unavailable: disk is gone");
+        assert!(value.get("items").is_none());
+    }
+
+    fn at(offset_secs: i64) -> String {
+        format_time(now() - time::Duration::seconds(offset_secs)).expect("format")
+    }
+
+    fn project_detail(
+        slug: &str,
+        runtime: Option<ProjectRuntimeSnapshot>,
+        next_move: NextMove,
+        tasks: Vec<TaskDetailSnapshot>,
+    ) -> ProjectDetailSnapshot {
+        ProjectDetailSnapshot {
+            project: PmProjectSummary {
+                id: format!("{slug}-id"),
+                slug: slug.to_string(),
+                name: slug.to_string(),
+                summary: String::new(),
+                definition: String::new(),
+                krs: Vec::new(),
+            },
+            runtime,
+            directive: None,
+            next_move,
+            tasks,
+        }
+    }
+
+    fn task_detail(
+        identifier: &str,
+        runtime: Option<TaskRuntimeSnapshot>,
+        next_move: NextMove,
+    ) -> TaskDetailSnapshot {
+        TaskDetailSnapshot {
+            task: PmTaskSummary {
+                id: format!("{identifier}-id"),
+                identifier: identifier.to_string(),
+                name: identifier.to_string(),
+                description: String::new(),
+                rank: 1,
+                completed: false,
+                assignee: None,
+            },
+            runtime,
+            directive: None,
+            next_move,
+            pull_request: None,
+        }
+    }
+
+    fn task_runtime(
+        status: TaskSessionStatus,
+        reason: &str,
+        status_at: String,
+        process_alive: bool,
+    ) -> TaskRuntimeSnapshot {
+        TaskRuntimeSnapshot {
+            session_id: format!("ts_{}", status.as_str()),
+            project_session_id: "ps_1".to_string(),
+            status,
+            reason: reason.to_string(),
+            status_at,
+            worktree: "/repo".to_string(),
+            branch: "b".to_string(),
+            provider: "claude".to_string(),
+            process_alive,
+        }
+    }
+
+    #[test]
+    fn attention_reports_work_waiting_on_someone_else_with_its_reason_and_age() {
+        let projects = vec![project_detail(
+            "auditability",
+            None,
+            NextMove {
+                owner: NextMoveOwner::Wave,
+                reason: "Project is ready to start".into(),
+            },
+            vec![
+                task_detail(
+                    "W2-133",
+                    Some(task_runtime(
+                        TaskSessionStatus::Running,
+                        "pursuing the design",
+                        at(60),
+                        true,
+                    )),
+                    NextMove {
+                        owner: NextMoveOwner::Task,
+                        reason: "pursuing the design".into(),
+                    },
+                ),
+                task_detail(
+                    "W2-129",
+                    Some(task_runtime(
+                        TaskSessionStatus::Submitted,
+                        "PR is open",
+                        at(7200),
+                        false,
+                    )),
+                    NextMove {
+                        owner: NextMoveOwner::Review,
+                        reason: "PR is open".into(),
+                    },
+                ),
+            ],
+        )];
+
+        let items = attention(&projects, now(), Liveness::Observable);
+
+        // The unstarted Project is a backlog row, not something waiting on you;
+        // the running Task owns its own next move.
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.subject.as_str())
+                .collect::<Vec<_>>(),
+            ["W2-129"]
+        );
+        assert_eq!(items[0].owner, NextMoveOwner::Review);
+        assert_eq!(items[0].reason, "PR is open");
+        assert!(items[0].age_secs.expect("age") >= 7200);
+    }
+
+    /// A Session claiming a live process the machine cannot find is exactly what
+    /// an audit surface exists to show — not a running Task.
+    #[test]
+    fn a_session_whose_process_is_gone_needs_attention_and_says_so() {
+        let projects = vec![project_detail(
+            "auditability",
+            None,
+            NextMove {
+                owner: NextMoveOwner::Wave,
+                reason: "Project is ready to start".into(),
+            },
+            vec![task_detail(
+                "W2-130",
+                Some(task_runtime(
+                    TaskSessionStatus::Running,
+                    "implementing",
+                    at(300),
+                    false,
+                )),
+                NextMove {
+                    owner: NextMoveOwner::Task,
+                    reason: "implementing".into(),
+                },
+            )],
+        )];
+
+        let items = attention(&projects, now(), Liveness::Observable);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].owner, NextMoveOwner::Wave);
+        assert_eq!(
+            items[0].reason,
+            "process is gone but the Session still records 'running'"
+        );
+        assert!(items[0].age_secs.expect("age") >= 300);
+    }
+
+    /// Without tmux the machine cannot look for the process, and "I could not
+    /// look" must not be reported as "it is gone".
+    #[test]
+    fn a_machine_that_cannot_see_processes_reports_no_dead_process_findings() {
+        let projects = vec![project_detail(
+            "auditability",
+            None,
+            NextMove {
+                owner: NextMoveOwner::Wave,
+                reason: "Project is ready to start".into(),
+            },
+            vec![task_detail(
+                "W2-130",
+                Some(task_runtime(
+                    TaskSessionStatus::Running,
+                    "implementing",
+                    at(300),
+                    false,
+                )),
+                NextMove {
+                    owner: NextMoveOwner::Task,
+                    reason: "implementing".into(),
+                },
+            )],
+        )];
+
+        assert!(attention(&projects, now(), Liveness::Unknowable).is_empty());
+    }
+
+    #[test]
+    fn a_merged_task_is_done_not_waiting() {
+        let projects = vec![project_detail(
+            "auditability",
+            None,
+            NextMove {
+                owner: NextMoveOwner::Wave,
+                reason: "Project is ready to start".into(),
+            },
+            vec![task_detail(
+                "W2-100",
+                Some(task_runtime(
+                    TaskSessionStatus::Merged,
+                    "merged",
+                    at(10),
+                    false,
+                )),
+                NextMove {
+                    owner: NextMoveOwner::Project,
+                    reason: "merged".into(),
+                },
+            )],
+        )];
+
+        assert!(attention(&projects, now(), Liveness::Observable).is_empty());
     }
 }

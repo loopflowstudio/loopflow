@@ -65,7 +65,9 @@ struct RegistryQueryTests {
               "next_move":{"owner":"task","reason":"provider turn is active"},
               "pull_request":null
             }]
-          }]
+          }],
+          "runs":{"state":"ok","truncated":false,"items":[{"id":"span-1","run_id":"abc","process_id":"span-1","parent_process_id":null,"repo":"/src/loopflow","wave":"goals","label":"pm sync","status":"ok","started":100,"ended":110,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":800,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus"}]},
+          "attention":{"state":"ok","truncated":false,"items":[{"kind":"task","id":"ts_2","subject":"INF-124","owner":"review","reason":"PR is open","since":"2026-07-06T00:00:00Z","age_secs":7200}]}
         }
         """
         let query = RegistryQuery { args, _ in
@@ -81,6 +83,32 @@ struct RegistryQueryTests {
         #expect(result.workMap.projects[0].tasks[0].runtime?.projectSessionId == "ps_1")
         #expect(result.workMap.projects[0].tasks[0].runtime?.worktree == "/task-wt")
         #expect(result.workMap.projects[0].tasks[0].runtime?.branch == "jack/inf-123")
+        #expect(result.runs.items[0].label == "pm sync")
+        #expect(result.attention.items[0].subject == "INF-124")
+        #expect(result.attention.items[0].owner == .review)
+        #expect(result.attention.items[0].ageSeconds == 7200)
+    }
+
+    /// Unreadable evidence must reach the surface as its reason, never as an
+    /// empty list — a broken ledger is not a quiet wave.
+    @Test("lf status keeps unavailable evidence unavailable")
+    func statusKeepsUnavailableEvidence() async throws {
+        let json = """
+        {
+          "wave":{"id":"goals","name":"goals","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-a","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
+          "loop_state":null,
+          "projects":[],
+          "runs":{"state":"unavailable","reason":"run ledger unavailable: disk is gone"},
+          "attention":{"state":"ok","truncated":false,"items":[]}
+        }
+        """
+        let query = RegistryQuery { _, _ in json }
+
+        let result = try await query.status(wave: "goals", cwd: nil)
+        #expect(result.runs.unavailableReason == "run ledger unavailable: disk is gone")
+        #expect(result.runs.items.isEmpty)
+        #expect(result.attention.unavailableReason == nil)
+        #expect(result.attention.items.isEmpty)
     }
 
     @Test("Task workspace queries preserve paths and binary/truncation evidence")

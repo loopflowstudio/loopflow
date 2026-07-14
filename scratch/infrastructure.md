@@ -574,3 +574,15 @@ paths therefore describe an application that no longer runs.
 Move the test-mode parser into a small Mac type, keep `SharedDaemon` as the
 reachable bundled-daemon owner, and delete `RepoState`. The app now has one
 orchestrator per repository and one source for its Wave/Project/Task view.
+
+Delete the caches that only `RepoState` owned as part of the same architectural
+collapse: `WaveStore`, `AttentionStore`, `WorktreeStore`, and `OutputBuffer`.
+The live Mac paths already hold their small projections directly. Local
+notifications also had no remaining producer, so startup no longer asks for a
+permission the product cannot use.
+
+The same pass removes the local roadmap parser and `WaveContent` projection.
+Linear owns Projects, KRs, and Tasks; the app already reads that hierarchy from
+`lf status`. The Wave row's subtitle now comes from the authored Wave objective
+that `PortfolioRepoState` actually loads, rather than a permanently empty
+legacy README/roadmap cache.

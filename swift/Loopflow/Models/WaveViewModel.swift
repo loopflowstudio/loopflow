@@ -3,18 +3,15 @@ import SwiftUI
 
 public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var api: Wave
-    public var content: WaveContent?
     public var plan: WavePlan?
     public var pid: Int?
 
     public init(
         api: Wave,
-        content: WaveContent? = nil,
         plan: WavePlan? = nil,
         pid: Int? = nil
     ) {
         self.api = api
-        self.content = content
         self.plan = plan
         self.pid = pid
     }
@@ -81,10 +78,9 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         return area.first.map { $0 == "." ? "root" : $0 } ?? "root"
     }
 
-    /// First line of the vision section — the tagline.
-    public var visionTagline: String? {
-        guard let vision = content?.vision else { return nil }
-        let firstLine = vision.components(separatedBy: .newlines)
+    public var objectiveTagline: String? {
+        guard let objective = plan?.objective else { return nil }
+        let firstLine = objective.components(separatedBy: .newlines)
             .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }?
             .trimmingCharacters(in: .whitespaces)
         return firstLine

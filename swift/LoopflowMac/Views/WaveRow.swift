@@ -37,12 +37,12 @@ struct WaveRow: View {
             .lineLimit(1)
             .accessibilityIdentifier("wave-name-row")
 
-            if let tagline = wave.visionTagline {
+            if let tagline = wave.objectiveTagline {
                 Text(tagline)
                     .font(Typography.caption())
                     .foregroundStyle(.white.opacity(0.5))
                     .lineLimit(1)
-                    .accessibilityIdentifier("wave-vision")
+                    .accessibilityIdentifier("wave-objective")
             }
         }
         .padding(.horizontal, 12)

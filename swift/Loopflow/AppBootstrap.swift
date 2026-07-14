@@ -81,13 +81,7 @@ enum AppFontRegistration {
     }
 }
 
-/// Cross-platform app startup: register fonts and request notification
-/// authorization. Platform-specific startup (PATH enrichment, bundled daemon,
-/// tmux cleanup on macOS) lives in each app target's entry point.
+/// Register bundled fonts before the app renders.
 public func bootstrapLoopflowApp() {
     AppFontRegistration.registerBundledFonts()
-    guard !AppRuntime.isAutomatedTest else { return }
-    Task {
-        try? await NotificationService.shared.requestAuthorization()
-    }
 }

@@ -1259,6 +1259,7 @@ fn main() -> anyhow::Result<()> {
                 }
             },
             Some(Commands::RetiredSub { .. }) => unreachable!("retired sub cannot parse"),
+            Some(Commands::RetiredOp { .. }) => unreachable!("retired op cannot parse"),
             Some(Commands::Memory { cmd, target }) => {
                 loopflow::lf::commands::memory::run(cmd.as_ref(), target)
             }
@@ -1437,6 +1438,37 @@ mod tests {
                 .command,
             Some(Commands::Wave { .. })
         ));
+    }
+
+    /// The `lf op` namespace is retired, and a caller who still types it hears
+    /// where the operation went. `op next` is the one with nowhere to go: the
+    /// ephemeral rotation it drove was deleted, not renamed.
+    #[test]
+    fn retired_op_namespace_names_its_replacement() {
+        let removed = Cli::try_parse_from(["lf", "op", "next"])
+            .expect_err("`lf op next` cannot parse")
+            .to_string();
+        assert!(
+            removed.contains("no replacement") && removed.contains("lf task run"),
+            "`lf op next` should state the removal and how work is dispatched now: {removed}"
+        );
+
+        let landed = Cli::try_parse_from(["lf", "op", "land"])
+            .expect_err("`lf op land` cannot parse")
+            .to_string();
+        assert!(
+            landed.contains("`lf pr land`"),
+            "`lf op land` should name `lf pr land`: {landed}"
+        );
+
+        // Bare `lf op` has no verb to map, so it falls to the namespace line.
+        let bare = Cli::try_parse_from(["lf", "op"])
+            .expect_err("bare `lf op` cannot parse")
+            .to_string();
+        assert!(
+            bare.contains("top-level"),
+            "bare `lf op` should say the operations are top-level: {bare}"
+        );
     }
 
     #[test]

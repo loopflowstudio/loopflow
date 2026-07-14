@@ -116,9 +116,11 @@ pub struct WaveSnapshot {
   production schema. Persistence writes neutral values and no domain API reads
   them. A future table rebuild may remove them, but a migration solely for
   aesthetic purity would add risk without changing ownership.
-- CLI and lfd projection currently each assemble objective, pause, and listener
-  presence. The rule is the same and small; consolidate only if the two
-  contracts start to diverge.
+- `lf status` and the `lfd` HTTP API currently build separate Wave JSON
+  responses from the same registry, `GOAL.md`, and listener-health facts. The
+  rule is small; if both contracts remain public, share the read assembly when
+  they diverge. If the Mac no longer needs the HTTP form, delete that projection
+  instead of abstracting over two consumers.
 
 ### Reduced in code
 
@@ -1050,3 +1052,151 @@ The stopped-interrupt regression test and clippy pass.
 ### Held open
 
 - Wave Chat control-source lineage and visual hierarchy.
+
+## Next reduction design — typed identity and a clean registry
+
+> “This should probably be LfId now right?”
+>
+> “Get rid of LfdId anywhere? Or make all the Id types subclass LfId?”
+>
+> “Definitely the kind of thing I want you to find and clear up.”
+
+### What to build
+
+Delete `LfdId` as a domain type. Give each durable concept an incompatible UUID
+newtype, rename the branch/worktree naming type that currently occupies
+`WaveId`, remove the unused Wave Task-capacity policy, and replace the historical
+SQLite migration chain with one schema describing only the product that exists
+now.
+
+This is an infrastructure-only reduction. JSON and SQLite continue to carry the
+same UUID strings, but old databases and old clients are explicitly unsupported.
+
+### The demo
+
+`rg '\bLfdId\b|task_capacity|stack_parent|StackParentOpen' rust/loopflow/src`
+returns no product code. A fresh `lfd.db` opens, Wave/Project/Task status and
+control tests pass, `lf wt list` is flat, and `lf rebase --plan` targets main
+unless the caller supplies `--onto`.
+
+### Data structures
+
+One private macro shares mechanics without sharing identity:
+
+```rust
+uuid_id!(WaveId);
+uuid_id!(ControlSessionId);
+uuid_id!(AttentionId);
+uuid_id!(SummaryId);
+uuid_id!(ChatMessageId);
+uuid_id!(RunId);
+uuid_id!(ProcessId);
+```
+
+Each generated type owns `new`, `parse`, `as_str`, `Display`, `FromStr`, Serde,
+and SQLite conversion. There is no public `LfId` base type: Rust newtypes are
+the type boundary, and the macro is the only shared implementation. Existing
+prefixed Project/Task/command/directive/decision ids stay unchanged.
+
+The mapping is semantic:
+
+```rust
+pub struct Wave {
+    pub id: WaveId,
+    pub parent_wave_id: Option<WaveId>,
+    pub name: String,
+    pub repo: String,
+    pub created_at: Option<OffsetDateTime>,
+}
+
+pub struct Session {
+    pub id: ControlSessionId,
+    pub wave_id: WaveId,
+    pub run_id: Option<RunId>,
+    pub parent_session_id: Option<ControlSessionId>,
+    // ...
+}
+
+pub struct TraceCaptureContext {
+    pub run_id: RunId,
+    pub process_id: ProcessId,
+    // ...
+}
+```
+
+Wave references on Project Sessions, Task Sessions, supervisors, command
+sources, summaries, attention, chat, and store APIs all use `WaveId`.
+Attention, summary, chat-message, control-session, trace-run, and process
+identities use their corresponding types. Raw database row decoding constructs
+the exact type at the storage boundary.
+
+The existing `engine::identity::WaveId` is not a Wave id. It becomes a flat
+`WorktreeName`: one author plus one `WorktreeSegment`, projected as
+`user/name` remotely and `<repo>.<name>` locally. Delete recursive chain,
+timestamp, worker, subwave, parent, depth, and lineage APIs. Consequences:
+
+- `lf wt list` is flat; it does not reconstruct a tree from dotted names.
+- `lf wt switch` matches exact branch, sibling suffix, or flat worktree name.
+- placement has no `parent_branch` or `stack_depth` fields.
+- rebase has no `StackParentOpen`, `RebaseOntoParent`, `stack_parent`,
+  `merged_parent`, or name-derived parent fork point. Its implicit base is
+  `origin/<default-branch>`; `--onto` is the only alternate base.
+- branch filtering does not infer Wave ownership from a branch name. Remove a
+  `--wave` filter if it has no remaining source of true Wave identity.
+
+Wave Task capacity disappears completely:
+
+```rust
+pub struct Wave {
+    // no task_capacity
+}
+```
+
+Remove it from `GOAL.md` parsing, registration, Rust/Python/Swift DTOs, fixtures,
+docs, and launch errors. Task creation still transactionally reserves one Task
+Session and one current process generation, so duplicate writers remain
+impossible. There is no cross-Task concurrency limit until measured demand
+justifies one.
+
+### SQLite baseline
+
+Replace the ordered repair history with one `001_initial.sql` built from the
+current live store contract. Delete every later migration and every migration
+test whose only purpose is upgrading an older schema. The baseline must omit
+dead generic-run, queue, stack, live-PR cache, legacy Wave, and Task-capacity
+columns/tables rather than recreating them with neutral values.
+
+Keep `schema_migrations` only if the store still needs a marker for future
+forward migrations. Opening an existing incompatible database should fail with
+one direct instruction to delete/recreate it; do not attempt repair, silently
+accept an unknown migration history, or retain compatibility columns. Fresh
+in-memory and on-disk database tests are the contract.
+
+### Key constraints
+
+- Preserve UUID string serialization; this is a type refactor, not a new id
+  encoding.
+- Do not introduce `LfId`, a trait, dynamic dispatch, or conversion paths
+  between unrelated ids.
+- Do not give `WaveId` implicit conversions to run/session/process ids.
+- Keep Project/Task/child prefixed ids in their existing domain modules unless
+  moving them removes a real dependency cycle.
+- `lf wt` remains a supported low-level primitive, but none of its naming state
+  represents Wave, Project, Task, worker, or supervision identity.
+- Delete compatibility code instead of adapting it to the baseline.
+
+### Done when
+
+```text
+cargo fmt --check
+cargo test -p loopflow
+cargo clippy -p loopflow --all-targets -- -D warnings
+swift test --package-path swift
+uv run pytest python/tests
+git diff --check
+```
+
+Fresh-schema tests prove every live store path. Compile-time type separation is
+demonstrated by APIs accepting concrete ids; do not add compile-fail test
+infrastructure solely for this refactor. `scratch/review.md` remains the only
+scratch file.

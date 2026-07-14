@@ -272,6 +272,24 @@ mod tests {
     }
 
     #[test]
+    fn build_is_one_bounded_pass_without_delivery() {
+        let flow = get_builtin_flow("build").expect("build flow");
+        for step in [
+            "kickoff",
+            "review-design",
+            "implement",
+            "compress",
+            "lint",
+            "gate",
+        ] {
+            assert!(flow.contains(&format!("- {step}")));
+        }
+        assert!(!flow.contains("loop:"));
+        assert!(!flow.contains("deploy"));
+        assert!(!flow.contains("pr land"));
+    }
+
+    #[test]
     fn generic_execution_skills_never_infer_a_wave_or_require_pm() {
         for name in ["implement", "gate", "qa", "research", "rebase"] {
             let skill = get_builtin_skill(name).expect("generic skill");

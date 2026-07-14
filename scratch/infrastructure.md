@@ -698,3 +698,33 @@ playhead accepted it, but both execution paths failed with “not yet
 implemented,” and no builtin used it. Remove the false capability instead of
 documenting a future. Retain its historical playhead kind beside `and` only for
 journal decoding; executable branching is the one implemented `xor:` model.
+
+## Current reduction: flows are bounded passes
+
+The last generic execution loop lived in flow YAML. Only `build` used it: its
+`loop:` node repeated code/review turns until a gate router selected `done`.
+Wave, Project, and Task already use the stronger model the product needs. Each
+loads one three-stage flow, finishes that bounded iteration, then lets its
+domain controller inspect authoritative state before choosing repeat, wait,
+block, complete, or a later wakeup.
+
+Make that the language boundary:
+
+- a flow is one ordered, bounded pass of skills, ops, and one-of routing;
+- the Wave runtime repeats on messages, child observations, crons, and cadence;
+- the Project runtime repeats only while KR/Task state makes another judgment
+  pass actionable;
+- the Task runtime repeats only while worktree, PR, review, or directive state
+  makes another delivery pass actionable.
+
+Rewrite `build` as one kickoff → design review → implement → compress → lint →
+review → gate pass. It neither repeats nor lands; the explicit `ship` and
+`deploy` flows own delivery. A human can invoke another bounded pass, but the
+flow engine no longer decides by itself to spend another provider turn.
+
+Delete `loop:` parsing, expansion, rendering, execution, cursor persistence,
+and tests. Retain the historical playhead `Loop` value only so old Wave journal
+events remain decodable. This makes the earlier design question concrete: the
+three skills per tier remain because they express the semantic phases; the
+domain runtime, not a skill-authored loop bit or generic YAML construct, owns
+whether the full flow runs again.

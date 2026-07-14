@@ -267,7 +267,7 @@ Flows can include mechanical ops items directly:
 
 | Flow | Skills |
 |------|-------|
-| `build` | kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy |
+| `build` | kickoff → review-design → implement → compress → lint → xor(demo, code-review) → gate |
 | `build-or-silent` | xor(build, silence) |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `queue` | compress → update-wave → gate |

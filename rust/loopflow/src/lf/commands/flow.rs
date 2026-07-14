@@ -1,7 +1,7 @@
 use crate::engine::flow::load_xor_path_items;
 use crate::engine::{
-    expand_flow, xor_verdict_path, ConcreteLoop, ConcreteStep, ConcreteXor, ExecutionContext,
-    ExecutionSkill, Flow, FlowEngine, FlowOutcome, FlowProgress, SkillExecutor, SkillOutcome,
+    expand_flow, xor_verdict_path, ConcreteStep, ConcreteXor, ExecutionContext, ExecutionSkill,
+    Flow, FlowEngine, FlowOutcome, FlowProgress, SkillExecutor, SkillOutcome,
     TEMP_XOR_ROUTE_STEP_NAME,
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
@@ -136,7 +136,6 @@ fn render_pipeline_item(item: &ConcreteStep, repo: &Path) -> Result<Vec<String>>
         ConcreteStep::Xor(branch) => {
             render_branch_item("xor", branch, TEMP_XOR_ROUTE_STEP_NAME, repo)
         }
-        ConcreteStep::Loop(loop_def) => render_loop_pipeline(loop_def, repo),
     }
 }
 
@@ -181,54 +180,6 @@ fn render_branch_pipeline(
     }
 
     Ok(lines)
-}
-
-fn render_loop_pipeline(loop_def: &ConcreteLoop, repo: &Path) -> Result<Vec<String>> {
-    let mut lines = vec!["loop".to_string()];
-
-    let mut body_lines = Vec::new();
-    for item in &loop_def.steps {
-        body_lines.extend(render_pipeline_item(item, repo)?);
-    }
-    lines.extend(prefix_nested_lines(&body_lines));
-
-    let router = loop_def
-        .exit
-        .router
-        .as_deref()
-        .unwrap_or(TEMP_XOR_ROUTE_STEP_NAME);
-    let mut exit_lines = vec![format!("[exit via {router}]")];
-    let mut keys: Vec<&String> = loop_def.exit.paths.keys().collect();
-    keys.sort();
-    for (index, key) in keys.into_iter().enumerate() {
-        let path = loop_def
-            .exit
-            .paths
-            .get(key)
-            .expect("loop exit path key collected from map should exist");
-        let nested_items = load_xor_path_items(path, repo)?;
-        let nested = render_pipeline_lines(&nested_items, repo)?;
-        let branch_prefix = tree_prefix(index, loop_def.exit.paths.len());
-        if nested.is_empty() {
-            let outcome = if key == "done" { "continue" } else { "restart" };
-            exit_lines.push(format!("{branch_prefix} {key} → {outcome}"));
-            continue;
-        }
-
-        let nested_chain = nested.join(" → ");
-        exit_lines.push(format!("{branch_prefix} {key} → {nested_chain}"));
-    }
-
-    lines.extend(prefix_nested_lines(&exit_lines));
-    Ok(lines)
-}
-
-fn prefix_nested_lines(lines: &[String]) -> Vec<String> {
-    lines
-        .iter()
-        .enumerate()
-        .map(|(index, line)| format!("{} {line}", tree_prefix(index, lines.len())))
-        .collect()
 }
 
 fn tree_prefix(index: usize, total: usize) -> &'static str {

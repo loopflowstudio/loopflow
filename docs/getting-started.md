@@ -116,10 +116,13 @@ Chain skills manually, or use a named flow (a flow is a sequence of steps; each 
 
 ```bash
 lf design && lf implement && lf gate    # manual chain
-lf build                                # full design → code → demo/review → deploy loop
+lf build                                # one design → code → demo/review → gate pass
 ```
 
-Flows automate the handoffs. `build` runs kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy.
+Flows automate handoffs within one bounded pass. `build` runs kickoff →
+review-design → implement → compress → lint → demo/review → gate. Use `ship` or
+`deploy` for the explicit delivery workflow. Repetition belongs to Wave,
+Project, and Task runtimes.
 
 ### Custom skills
 

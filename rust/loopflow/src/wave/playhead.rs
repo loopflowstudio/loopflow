@@ -37,7 +37,6 @@ impl StepPlan {
                     .unwrap_or_else(|| "xor-route".to_string()),
                 StepKind::Xor,
             ),
-            ConcreteStep::Loop(_) => ("loop".to_string(), StepKind::Loop),
         };
         Self { name, kind }
     }

@@ -48,7 +48,6 @@ pub enum Step {
     Op(Op),
     FlowRef(String),
     Xor(XorDef),
-    Loop(LoopDef),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -84,12 +83,6 @@ pub struct XorDef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LoopDef {
-    pub steps: Vec<Step>,
-    pub exit: XorDef,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct XorPath {
     pub flow: Option<String>,
     pub skill: Option<String>,
@@ -106,7 +99,6 @@ pub enum FlowAction {
     RunOps { ops: ConcreteOp },
     WaitInteractive { skill: ConcreteSkill },
     Xor { branch: ConcreteXor },
-    Loop { body: ConcreteLoop },
     Complete,
 }
 
@@ -149,13 +141,6 @@ pub struct ConcreteXor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConcreteLoop {
-    pub steps: Vec<ConcreteStep>,
-    pub exit: ConcreteXor,
-    pub flow_parents: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConcreteOp {
     pub item: Op,
     pub flow_parents: Vec<String>,
@@ -166,7 +151,6 @@ pub enum ConcreteStep {
     Skill(ConcreteSkill),
     Op(ConcreteOp),
     Xor(ConcreteXor),
-    Loop(ConcreteLoop),
 }
 
 #[derive(Debug, Clone)]
@@ -191,7 +175,6 @@ pub fn next_action(items: &[ConcreteStep], step_index: usize) -> FlowAction {
         }
         ConcreteStep::Op(ops) => FlowAction::RunOps { ops },
         ConcreteStep::Xor(branch) => FlowAction::Xor { branch },
-        ConcreteStep::Loop(body) => FlowAction::Loop { body },
     }
 }
 
@@ -707,18 +690,11 @@ fn key(s: &str) -> Value {
 }
 
 fn parse_flow_items(value: &Value) -> Result<Vec<Step>, LoadError> {
-    parse_flow_items_with_options(value, true)
-}
-
-fn parse_flow_items_with_options(value: &Value, allow_loop: bool) -> Result<Vec<Step>, LoadError> {
     match value {
-        Value::Sequence(seq) => seq
-            .iter()
-            .map(|item| parse_flow_item_with_options(item, allow_loop))
-            .collect(),
+        Value::Sequence(seq) => seq.iter().map(parse_flow_item).collect(),
         Value::Mapping(map) => {
             if let Some(skills) = map.get(key("steps")) {
-                return parse_flow_items_with_options(skills, allow_loop);
+                return parse_flow_items(skills);
             }
             Err(LoadError::InvalidFlow(
                 "flow root must be a list".to_string(),
@@ -730,20 +706,17 @@ fn parse_flow_items_with_options(value: &Value, allow_loop: bool) -> Result<Vec<
     }
 }
 
-fn parse_flow_item_with_options(value: &Value, allow_loop: bool) -> Result<Step, LoadError> {
+fn parse_flow_item(value: &Value) -> Result<Step, LoadError> {
     match value {
         Value::String(name) => Ok(Step::Skill(Skill::named(name))),
-        Value::Mapping(map) => parse_flow_mapping_with_options(map, allow_loop),
+        Value::Mapping(map) => parse_flow_mapping(map),
         _ => Err(LoadError::InvalidFlow(
             "flow item must be string or mapping".to_string(),
         )),
     }
 }
 
-fn parse_flow_mapping_with_options(
-    map: &serde_yaml_ng::Mapping,
-    allow_loop: bool,
-) -> Result<Step, LoadError> {
+fn parse_flow_mapping(map: &serde_yaml_ng::Mapping) -> Result<Step, LoadError> {
     if let Some(skill_value) = map.get(key("step")) {
         return Ok(Step::Skill(parse_skill_value(skill_value)?));
     }
@@ -756,16 +729,8 @@ fn parse_flow_mapping_with_options(
     if let Some(xor_value) = map.get(key("xor")) {
         return parse_xor_value(xor_value);
     }
-    if let Some(loop_value) = map.get(key("loop")) {
-        if !allow_loop {
-            return Err(LoadError::InvalidFlow(
-                "nested loop constructs are not supported".to_string(),
-            ));
-        }
-        return parse_loop_value(loop_value);
-    }
     Err(LoadError::InvalidFlow(
-        "flow item mapping must include step, op, flow, xor, or loop".to_string(),
+        "flow item mapping must include step, op, flow, or xor".to_string(),
     ))
 }
 
@@ -895,40 +860,6 @@ fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, Loa
     let router = parse_optional_string(map, "router");
 
     Ok(XorDef { router, paths })
-}
-
-fn parse_loop_value(value: &Value) -> Result<Step, LoadError> {
-    let map = value
-        .as_mapping()
-        .ok_or_else(|| LoadError::InvalidFlow("loop must be mapping".to_string()))?;
-
-    let skills_value = map
-        .get(key("steps"))
-        .ok_or_else(|| LoadError::InvalidFlow("loop must have skills".to_string()))?;
-    let skills = parse_flow_items_with_options(skills_value, false)?;
-    if skills.is_empty() {
-        return Err(LoadError::InvalidFlow(
-            "loop must have at least one skill".to_string(),
-        ));
-    }
-
-    let exit_value = map
-        .get(key("exit"))
-        .ok_or_else(|| LoadError::InvalidFlow("loop must have exit".to_string()))?;
-    let exit_map = exit_value
-        .as_mapping()
-        .ok_or_else(|| LoadError::InvalidFlow("loop exit must be mapping".to_string()))?;
-    let exit = parse_xor_def(exit_map, "loop exit")?;
-    if !exit.paths.contains_key("done") {
-        return Err(LoadError::InvalidFlow(
-            "loop exit must include a 'done' path".to_string(),
-        ));
-    }
-
-    Ok(Step::Loop(LoopDef {
-        steps: skills,
-        exit,
-    }))
 }
 
 /// Validate that flows referenced by xor paths can be loaded and expanded.
@@ -1170,31 +1101,10 @@ fn expand_with_chain(
                     branch_def, repo, &chain,
                 )?));
             }
-            Step::Loop(loop_def) => {
-                let skills = expand_items_with_chain(&loop_def.steps, repo, &chain, depth)?;
-                items.push(ConcreteStep::Loop(ConcreteLoop {
-                    steps: skills,
-                    exit: expand_branch_def(&loop_def.exit, repo, &chain)?,
-                    flow_parents: chain.clone(),
-                }));
-            }
         }
     }
 
     Ok(items)
-}
-
-fn expand_items_with_chain(
-    flow_items: &[Step],
-    repo: &Path,
-    chain: &[String],
-    depth: usize,
-) -> Result<Vec<ConcreteStep>, LoadError> {
-    let flow = Flow {
-        name: chain.last().cloned().unwrap_or_else(|| "flow".to_string()),
-        items: flow_items.to_vec(),
-    };
-    expand_with_chain(&flow, repo, chain.to_vec(), depth)
 }
 
 /// Check whether a loaded flow is a genuine multi-skill flow vs a single skill
@@ -1691,14 +1601,6 @@ Be careful.
                             }
                         }
                     }
-                    ConcreteStep::Loop(loop_item) => {
-                        // Loop body skills are validated during expansion
-                        assert!(
-                            !loop_item.steps.is_empty(),
-                            "builtin flow '{}' has empty loop body",
-                            name
-                        );
-                    }
                 }
             }
         }
@@ -1736,7 +1638,7 @@ Be careful.
         let error = parse_flow_items(&value).expect_err("and steps are retired");
         assert!(error
             .to_string()
-            .contains("flow item mapping must include step, op, flow, xor, or loop"));
+            .contains("flow item mapping must include step, op, flow, or xor"));
     }
 
     #[test]
@@ -1752,7 +1654,24 @@ Be careful.
         let error = parse_flow_items(&value).expect_err("or steps are not supported");
         assert!(error
             .to_string()
-            .contains("flow item mapping must include step, op, flow, xor, or loop"));
+            .contains("flow item mapping must include step, op, flow, or xor"));
+    }
+
+    #[test]
+    fn generic_loop_step_is_rejected() {
+        let yaml = r#"
+- loop:
+    steps: [implement]
+    exit:
+      paths:
+        done:
+          description: "Done"
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let error = parse_flow_items(&value).expect_err("generic loops are retired");
+        assert!(error
+            .to_string()
+            .contains("flow item mapping must include step, op, flow, or xor"));
     }
 
     #[test]

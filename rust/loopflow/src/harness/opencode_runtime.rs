@@ -18,7 +18,7 @@ pub struct OpenCodeReapReport {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct OpenCodeServerEntry {
     opencode_pid: u32,
-    owner_lfd_pid: u32,
+    owner_loopflow_pid: u32,
 }
 
 pub(crate) fn register_opencode_server(opencode_pid: u32) -> Result<()> {
@@ -45,13 +45,13 @@ fn registry_path() -> PathBuf {
 fn register_opencode_server_at_path(
     path: &Path,
     opencode_pid: u32,
-    owner_lfd_pid: u32,
+    owner_loopflow_pid: u32,
 ) -> Result<()> {
     let mut entries = read_registry_entries(path)?;
     entries.retain(|entry| entry.opencode_pid != opencode_pid);
     entries.push(OpenCodeServerEntry {
         opencode_pid,
-        owner_lfd_pid,
+        owner_loopflow_pid,
     });
     write_registry_entries(path, &entries)
 }
@@ -84,7 +84,7 @@ fn reap_orphaned_opencode_servers_at_path(
 
     let mut retained = Vec::with_capacity(entries.len());
     for entry in entries {
-        if owner_pid_alive(entry.owner_lfd_pid) {
+        if owner_pid_alive(entry.owner_loopflow_pid) {
             retained.push(entry);
             continue;
         }
@@ -98,7 +98,7 @@ fn reap_orphaned_opencode_servers_at_path(
         } else {
             tracing::warn!(
                 opencode_pid = entry.opencode_pid,
-                owner_lfd_pid = entry.owner_lfd_pid,
+                owner_loopflow_pid = entry.owner_loopflow_pid,
                 "failed to terminate orphaned OpenCode server"
             );
             report.errors += 1;
@@ -203,10 +203,10 @@ mod tests {
         root.join("runtime").join("opencode-servers.json")
     }
 
-    fn entry(opencode_pid: u32, owner_lfd_pid: u32) -> OpenCodeServerEntry {
+    fn entry(opencode_pid: u32, owner_loopflow_pid: u32) -> OpenCodeServerEntry {
         OpenCodeServerEntry {
             opencode_pid,
-            owner_lfd_pid,
+            owner_loopflow_pid,
         }
     }
 

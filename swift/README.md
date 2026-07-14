@@ -18,6 +18,10 @@ message launches or reconnects to `lf wave`, then streams that Wave's turns.
 The detail pane reads Projects, Tasks, decisions, PR delivery, and attention
 from `lf status --json`.
 
+Select a Task, then open its workspace to review changed files, per-file
+patches, or current contents. The same sheet keeps multiple embedded
+Ghostty/tmux shells for that Task and can open its worktree in Warp.
+
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
 codebase tree, and registry health.
 
@@ -27,8 +31,12 @@ codebase tree, and registry health.
   send/steer/interrupt behavior.
 - **Projects and Tasks** appear in the Wave work map. Linear owns their planning
   identity; Loopflow's registry owns their runtime state.
-- **Task Sessions** own implementation worktrees and PR delivery. Waves and
-  Projects remain control-plane processes in the main checkout.
+- **Task Sessions** own implementation worktrees and PR delivery. Every Task
+  reports through its Project Session; the Wave retains root inspection and
+  override. Waves and Projects remain control-plane processes in main.
+- **Task workspace presentation** reads `lf task changes/diff/file --json` and
+  keys terminal tabs by Task Session id. It owns neither Git comparison rules
+  nor Task lifecycle.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf ls/status/runs/usage/doctor/tokens --json`; the app does not maintain a
   second roadmap or lifecycle database.
@@ -39,6 +47,7 @@ codebase tree, and registry health.
 
 - `LoopflowMac/Views/WavesView.swift` — repository rail and Wave selection
 - `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat plus Project/Task work
+- `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `Loopflow/Services/WaveChatClient.swift` — per-Wave event and message client

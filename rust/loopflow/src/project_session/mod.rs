@@ -12,7 +12,7 @@ use time::OffsetDateTime;
 
 use crate::child_session::{
     prefixed_uuid_id, ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId,
-    ChildDirectiveId, ChildProcessGeneration, ChildRef, DirectiveKind, SessionSupervisor,
+    ChildDirectiveId, ChildProcessGeneration, ChildRef, DirectiveKind, ObservationRecipient,
 };
 use crate::id::WaveId;
 use crate::session_context::ProjectLaunchReceipt;
@@ -268,7 +268,7 @@ pub enum ChildEventPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservationOutboxRow {
     pub id: i64,
-    pub supervisor: SessionSupervisor,
+    pub recipient: ObservationRecipient,
     pub source: ChildRef,
     pub event_id: i64,
     pub payload: ChildEventPayload,

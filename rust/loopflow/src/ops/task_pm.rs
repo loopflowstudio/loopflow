@@ -143,11 +143,6 @@ pub fn create_and_load_task(
     title: &str,
     marker: &str,
 ) -> OpsResult<ResolvedTask> {
-    // TODO(product-pm): main's `pm_create_task_idempotent` refreshes the snapshot
-    // internally and returns `Err` if that refresh fails, so it cannot yet report
-    // "issue committed, refresh pending" as a recoverable outcome. When the PM
-    // mutation API surfaces that distinction, restore the committed-but-pending
-    // branch that reports the created id without failing the whole call.
     let result = crate::ops::pm::pm_create_task_idempotent(
         repo,
         wave,
@@ -156,6 +151,12 @@ pub fn create_and_load_task(
         marker,
         &crate::ops::NullProgress,
     )?;
+    if let Err(error) = load_wave(repo, wave, PmRefresh::Force) {
+        return Err(OpsError::Message(format!(
+            "Linear task {} is committed, but the local wave/{wave} snapshot could not refresh: {error}. No new Task Session or worktree was created. Run `lf pm sync --wave {wave}`, then `lf task run {}`. Retrying `lf task start` is also safe because the Linear task carries an idempotency marker.",
+            result.id, result.id
+        )));
+    }
     resolve_task(repo, &result.id, PmRefresh::Never)
 }
 

@@ -58,7 +58,7 @@
           },
           "runtime": {
             "session_id": "ts_22222222222222222222222222222222",
-            "supervisor": {"kind": "project", "session_id": "ps_11111111111111111111111111111111"},
+            "project_session_id": "ps_11111111111111111111111111111111",
             "status": "submitted",
             "reason": "waiting for review",
             "status_at": "2026-07-13T19:00:00Z",

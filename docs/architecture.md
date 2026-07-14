@@ -6,15 +6,17 @@ title: Architecture
 # Architecture
 
 ```text
-Human / Loopflow app
-    ├── lf commands ───────────────────────┐
-    └── Wave Chat ── per-Wave listener     │
-                                           ▼
-                                  local SQLite store
-                                      │          │
-                             Project Session  Task Session
-                                                   │
-                                          worktree + PR to main
+Human ── Wave Chat ──▶ Wave
+                       │ selects and directs
+                       ▼
+                 Project Session
+                       │ supervises
+                       ▼
+                   Task Session ──▶ worktree + PR to main
+                       │
+                       └──────────▶ diff/file/terminal inspector
+
+Wave ─ ─ ─ ─ root inspection and override ─ ─ ─ ─ ─ ┘
 ```
 
 `lf` is the machine-wide command and JSON interface. `lf wave <name>` is the
@@ -31,14 +33,42 @@ cadence, memory, and project selection. There is no global service.
 | Directive | local store | Preserve child direction and incorporation proof |
 | Trace | local store + `~/.lf/traces` | Record agent launch and conversation evidence |
 
-Every Project belongs to one Wave. Every Task belongs to one Project. Only a
-Task Session owns a worktree, branch, and pull request.
+Every Project belongs to one Wave. Every Task belongs to one Project and one
+durable Project Session. Only a Task Session owns a worktree, branch, and pull
+request.
+
+There is one supervision path: Wave → Project Session → Task Session. The Wave
+retains root authority to inspect or override any descendant, but that command
+source does not bypass or replace the Task's Project Session. Loopflow creates
+no default Project. Free-text `lf task start` requires `--project`, creates the
+Linear issue, ensures the Project Session, then creates the Task Session and
+worktree. `lf task run` does the same for an existing Linear issue. A newly
+reserved Project Session does not block Task launch on another provider turn;
+the Task's first consequential event wakes it through the observation outbox.
+
+Free-text Project and Task starts verify the owning Wave before mutating
+Linear. They refresh the PM snapshot before creating local runtime state; a
+post-commit refresh failure reports the committed id and leaves no Session or
+worktree created by that attempt to reconcile.
+
+Wave and Project turns run from the clean canonical main checkout as a control
+plane. They read, decide, and create or steer children there; repository edits
+belong to Task worktrees. Commands fail before provider launch when that main
+checkout is dirty or the caller is in another checkout.
 
 ## CLI and engine
 
 `lf` resolves skills and flows, assembles context, starts provider CLIs, and
 exposes local domain commands. The engine owns reusable prompt execution and
 Git primitives; Wave, Project, and Task controllers own lifecycle decisions.
+
+Each controller runs one bounded `clarify → pursue → mutate` flow. The three
+skills remain separate because they have separate jobs; no skill owns a loop
+bit. After the pass, the domain controller inspects durable truth. A Task
+continues, waits for review, or ends on merge/abandonment. A Project repeats,
+waits on Tasks, blocks on no progress, or completes when every current KR
+holds. A Wave returns to its resident idle state and wakes on human input,
+cadence, or child observations.
 
 Important paths:
 
@@ -68,6 +98,11 @@ lf wave infrastructure
 One Wave process serves replay, live turns, and health for that Wave. The Mac
 app connects directly to the selected Wave while reading current registry,
 Project, and Task state through its bundled `lf`.
+
+Selecting a Task opens its worktree inspector. `lf task changes/diff/file`
+owns Git and path semantics; Swift renders those typed snapshots and keeps
+Task-scoped Ghostty/tmux terminals as presentation state. The terminal
+multiplexer never owns Task lifecycle or worktree identity.
 
 Project and Task Sessions are explicit child processes. They share the local
 store and durable control channel; they do not call a global HTTP API.

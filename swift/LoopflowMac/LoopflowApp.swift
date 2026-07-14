@@ -9,6 +9,22 @@ private func enrichProcessPathForGUILaunch() {
     setenv("PATH", enriched, 1)
 }
 
+@MainActor
+private enum TaskTerminalCleanup {
+    private static var observer: NSObjectProtocol?
+
+    static func install() {
+        guard observer == nil else { return }
+        observer = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            TmuxSessionRegistry.shared.killAllSynchronously()
+        }
+    }
+}
+
 @main
 struct LoopflowApp: App {
     @State private var portfolioService = PortfolioService()
@@ -20,9 +36,7 @@ struct LoopflowApp: App {
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
-        atexit {
-            TmuxSessionRegistry.shared.killAllSynchronously()
-        }
+        TaskTerminalCleanup.install()
         bootstrapLoopflowApp()
         // Enrich our own process PATH before any children spawn, so tools launched
         // by Wave launchers can find tmux, git, and agent CLIs that live in

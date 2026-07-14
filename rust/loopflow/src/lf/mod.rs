@@ -624,7 +624,7 @@ pub enum ProjectCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
-    /// Start or return the one Task Session for an existing Linear task
+    /// Ensure its Project Session, then start or return the existing Linear task
     Run {
         issue: String,
         #[arg(long)]
@@ -632,7 +632,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Create a Linear task first, then start its Task Session
+    /// Create a Linear task, ensure its Project Session, then start its Task Session
     Start {
         title: String,
         #[arg(short = 'p', long = "project")]
@@ -720,7 +720,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Ask the immediate supervisor to choose while preserving this Task Session
+    /// Ask the Task's Project Session to choose while preserving this Task Session
     RequestDecision {
         issue: String,
         prompt: String,

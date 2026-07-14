@@ -88,7 +88,7 @@ public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
 
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let sessionId: String
-    public let supervisor: WorkController
+    public let projectSessionId: String
     public let status: TaskSessionStatus
     public let reason: String
     public let statusAt: String
@@ -98,8 +98,9 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let processAlive: Bool
 
     enum CodingKeys: String, CodingKey {
-        case supervisor, status, reason, worktree, branch, provider
+        case status, reason, worktree, branch, provider
         case sessionId = "session_id"
+        case projectSessionId = "project_session_id"
         case statusAt = "status_at"
         case processAlive = "process_alive"
     }
@@ -111,31 +112,6 @@ public enum ProjectSessionStatus: String, Decodable, Sendable, Hashable {
 
 public enum TaskSessionStatus: String, Decodable, Sendable, Hashable {
     case created, starting, running, waiting, submitted, blocked, failed, merged, abandoned
-}
-
-public enum WorkController: Decodable, Sendable, Hashable {
-    case wave(id: String)
-    case project(sessionId: String)
-
-    private enum Kind: String, Decodable {
-        case wave, project
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case kind
-        case waveId = "wave_id"
-        case sessionId = "session_id"
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        switch try values.decode(Kind.self, forKey: .kind) {
-        case .wave:
-            self = .wave(id: try values.decode(String.self, forKey: .waveId))
-        case .project:
-            self = .project(sessionId: try values.decode(String.self, forKey: .sessionId))
-        }
-    }
 }
 
 public struct WorkDirectiveSnapshot: Decodable, Sendable, Hashable {

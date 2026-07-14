@@ -24,7 +24,7 @@ struct WaveDetailPane: View {
     @State private var selection: WaveWorkSelection?
     @State private var prefill: WaveComposerPrefill?
     @State private var workRefresh: UInt64 = 0
-    @StateObject private var terminalStore = TaskTerminalStore()
+    @StateObject private var terminalStore = TaskTerminalStore.shared
 
     var body: some View {
         VStack(spacing: 0) {

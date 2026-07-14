@@ -118,10 +118,10 @@ impl StoreObserver {
     }
 
     async fn poll_child_observations(&self) {
-        let supervisor = crate::child_session::SessionSupervisor::Wave {
+        let recipient = crate::child_session::ObservationRecipient::Wave {
             wave_id: self.wave_id.clone(),
         };
-        let observations = match self.store.pending_observations(&supervisor).await {
+        let observations = match self.store.pending_observations(&recipient).await {
             Ok(observations) => observations,
             Err(error) => {
                 tracing::debug!(%error, "wave observer child outbox read failed");

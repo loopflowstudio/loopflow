@@ -268,8 +268,7 @@ CREATE TABLE task_sessions (
     updated_at INTEGER NOT NULL,
     pm_snapshot_synced_at INTEGER NOT NULL,
     pm_writeback_json TEXT NOT NULL,
-    supervisor_kind TEXT NOT NULL CHECK (supervisor_kind IN ('wave', 'project')),
-    supervisor_id TEXT NOT NULL,
+    project_session_id TEXT NOT NULL REFERENCES project_sessions(id) ON DELETE RESTRICT,
     current_directive_version INTEGER NOT NULL,
     incorporated_directive_version INTEGER NOT NULL
 );
@@ -310,18 +309,18 @@ CREATE INDEX idx_child_commands_pending
 
 CREATE TABLE observation_outbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    supervisor_kind TEXT NOT NULL CHECK (supervisor_kind IN ('wave', 'project')),
-    supervisor_id TEXT NOT NULL,
+    recipient_kind TEXT NOT NULL CHECK (recipient_kind IN ('wave', 'project')),
+    recipient_id TEXT NOT NULL,
     source_kind TEXT NOT NULL CHECK (source_kind IN ('project', 'task')),
     source_id TEXT NOT NULL,
     event_id INTEGER NOT NULL,
     payload_json TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     delivered_at INTEGER,
-    UNIQUE(supervisor_kind, supervisor_id, source_kind, source_id, event_id)
+    UNIQUE(recipient_kind, recipient_id, source_kind, source_id, event_id)
 );
 CREATE INDEX idx_observation_outbox_pending
-    ON observation_outbox(supervisor_kind, supervisor_id, delivered_at, id);
+    ON observation_outbox(recipient_kind, recipient_id, delivered_at, id);
 
 CREATE TABLE child_directives (
     id TEXT PRIMARY KEY,

@@ -126,6 +126,22 @@ async fn owning_wave(store: &SharedStore, session: &ProjectSession) -> OpsResult
         .ok_or_else(|| project_error(format!("owning Wave {} is not registered", session.wave_id)))
 }
 
+pub(crate) fn require_registered_wave(wave: &str) -> OpsResult<Wave> {
+    let wave = wave.to_string();
+    block_on_project(async move {
+        project_store()
+            .await?
+            .get_wave_by_name(&wave)
+            .await
+            .map_err(|error| project_error(format!("failed to read owning Wave: {error}")))?
+            .ok_or_else(|| {
+                project_error(format!(
+                    "owning Wave {wave:?} is not registered; start it with `lf wave {wave}` first"
+                ))
+            })
+    })
+}
+
 pub fn project_run(
     repo: &Path,
     project_id: &str,
@@ -175,7 +191,23 @@ pub fn project_run(
 
     let resolved =
         crate::ops::task_pm::resolve_project(&repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    let config = load_config_or_default(Some(&repo));
+    let mut session = reserve_project_session(&repo, resolved, directive)?;
+    if session.status.is_terminal() || session.status.is_process_active() {
+        return Ok(session);
+    }
+    block_on_project(async move {
+        let store = project_store().await?;
+        launch_project_process(&store, &mut session).await?;
+        wait_until_project_running(&store, &session.id).await
+    })
+}
+
+pub(crate) fn reserve_project_session(
+    repo: &Path,
+    resolved: crate::ops::task_pm::ResolvedProject,
+    directive: Option<String>,
+) -> OpsResult<ProjectSession> {
+    let config = load_config_or_default(Some(repo));
     let agent = config.agent.as_deref().unwrap_or("codex");
     let (provider, _) = parse_agent(agent);
     let agent = agent.to_string();
@@ -206,7 +238,7 @@ pub fn project_run(
             })?;
         let now = time::OffsetDateTime::now_utc();
         let context = crate::ops::task::project_context(&resolved.project);
-        let mut session = ProjectSession {
+        let session = ProjectSession {
             id: ProjectSessionId::new(),
             launch: ProjectLaunchReceipt {
                 project: LinearProjectSnapshot {
@@ -265,9 +297,24 @@ pub fn project_run(
             )
             .await
             .map_err(|error| project_error(error.to_string()))?;
-        launch_project_process(&store, &mut session).await?;
-        wait_until_project_running(&store, &session.id).await
+        Ok(session)
     })
+}
+
+pub(crate) fn ensure_project_session_for_task(
+    repo: &Path,
+    resolved: crate::ops::task_pm::ResolvedProject,
+) -> OpsResult<ProjectSession> {
+    let session = reserve_project_session(repo, resolved, None)?;
+    if session.status.is_terminal() {
+        return Err(project_error(format!(
+            "cannot start a Task under {}: Project Session {} is {}; create or select an active Project",
+            session.launch.project.slug,
+            session.id,
+            session.status.as_str()
+        )));
+    }
+    Ok(session)
 }
 
 fn normalize_directive(directive: Option<String>) -> OpsResult<Option<String>> {
@@ -319,7 +366,18 @@ pub fn project_start(
     directive: Option<String>,
 ) -> OpsResult<ProjectSession> {
     let main = ensure_clean_main(repo, "Project start")?;
-    let project = crate::ops::pm::pm_create_project(&main, wave, title)?;
+    let wave = crate::ops::resolve_wave_name(wave)
+        .ok_or_else(|| project_error("cannot determine wave; pass --wave <name>"))?;
+    require_registered_wave(&wave)?;
+    let project = crate::ops::pm::pm_create_project(&main, Some(&wave), title)?;
+    if let Err(error) =
+        crate::ops::task_pm::load_wave(&main, &wave, crate::ops::pm::PmRefresh::Force)
+    {
+        return Err(project_error(format!(
+            "Linear Project {} is committed, but the local wave/{wave} snapshot could not refresh: {error}. No new Project Session was created. Run `lf pm sync --wave {wave}`, then `lf project run {}`. Retrying `lf project start` is also safe because Project titles are reconciled before creation.",
+            project.project.id, project.project.id
+        )));
+    }
     project_run(&main, &project.project.id, directive)
 }
 
@@ -516,7 +574,7 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
             .into_iter()
             .last();
         let pending_observations = store
-            .pending_observations(&crate::child_session::SessionSupervisor::Project {
+            .pending_observations(&crate::child_session::ObservationRecipient::Project {
                 session_id: session.id.clone(),
             })
             .await

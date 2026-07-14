@@ -11,7 +11,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::child_session::{ChildRef, DirectiveKind, SessionSupervisor};
+use crate::child_session::{ChildRef, DirectiveKind, ObservationRecipient};
 use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject};
 use crate::project_session::{ProjectSession, ProjectSessionStatus};
@@ -154,7 +154,7 @@ pub struct ProjectRuntimeSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRuntimeSnapshot {
     pub session_id: String,
-    pub supervisor: SessionSupervisor,
+    pub project_session_id: String,
     pub status: TaskSessionStatus,
     pub reason: String,
     pub status_at: String,
@@ -314,7 +314,7 @@ async fn snapshot_task_runtime(task: &TaskSession) -> TaskRuntimeSnapshot {
     };
     TaskRuntimeSnapshot {
         session_id: task.id.to_string(),
-        supervisor: task.supervisor.clone(),
+        project_session_id: task.project_session_id.to_string(),
         status: task.status,
         reason: task.status_reason.clone(),
         status_at: format_time(task.status_at).unwrap_or_default(),
@@ -340,7 +340,7 @@ async fn snapshot_project_runtime(
         false
     };
     let pending_observations = store
-        .pending_observations(&SessionSupervisor::Project {
+        .pending_observations(&ObservationRecipient::Project {
             session_id: project.id.clone(),
         })
         .await
@@ -497,9 +497,7 @@ async fn snapshot_task_detail(
         None => None,
     };
     let next_move = match session {
-        Some(session) => {
-            next_move_for_task(session.status, &session.status_reason, &session.supervisor)
-        }
+        Some(session) => next_move_for_task(session.status, &session.status_reason),
         None if item.completed => NextMove {
             owner: NextMoveOwner::Project,
             reason: "Linear Task is complete".to_string(),
@@ -620,21 +618,13 @@ fn next_move_for_project(status: ProjectSessionStatus, reason: &str) -> NextMove
     }
 }
 
-fn next_move_for_task(
-    status: TaskSessionStatus,
-    reason: &str,
-    supervisor: &SessionSupervisor,
-) -> NextMove {
-    let controller = match supervisor {
-        SessionSupervisor::Wave { .. } => NextMoveOwner::Wave,
-        SessionSupervisor::Project { .. } => NextMoveOwner::Project,
-    };
+fn next_move_for_task(status: TaskSessionStatus, reason: &str) -> NextMove {
     let owner = match status {
         TaskSessionStatus::Created | TaskSessionStatus::Starting | TaskSessionStatus::Running => {
             NextMoveOwner::Task
         }
         TaskSessionStatus::Waiting | TaskSessionStatus::Blocked | TaskSessionStatus::Failed => {
-            controller
+            NextMoveOwner::Project
         }
         TaskSessionStatus::Submitted => NextMoveOwner::Review,
         TaskSessionStatus::Merged | TaskSessionStatus::Abandoned => NextMoveOwner::Project,

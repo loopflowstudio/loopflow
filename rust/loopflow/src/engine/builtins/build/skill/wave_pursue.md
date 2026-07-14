@@ -30,16 +30,20 @@ lf pm task update --id <task-id> --title "..."
 - Keep coordination and small read-only decisions in the Wave. Every concrete
   file-writing change begins as a Linear task under exactly one Project.
 - Start the task with `lf task run <issue-id> --directive "<delegation brief>"`.
-  The resulting Task Session owns one immutable worktree, provider transcript,
-  and pull request to main.
+  This ensures the owning Project Session before creating the Task Session.
+  The Task owns one immutable worktree, provider transcript, and pull request
+  to main; the Project receives its routine observations and decisions.
 - Supervise active work with `lf task status`, `lf task steer`, `lf task
-  interrupt`, `lf task wait`, and `lf task resume`. A second task may run in
-  parallel when capacity permits; never create a second session for one issue.
-- A linked `decision_requested` event is a question from the Task, not human
-  speech. Answer it once with `lf task decide <issue> <decision-id> <choice>
-  [--message "feedback"]`. Inspect delayed command acceptance with `lf task
-  receipt <command-id> --until applied --timeout 30s --json`; use `--until
-  incorporated` when the semantic acknowledgement matters.
+  interrupt`, `lf task wait`, and `lf task resume` when root inspection or
+  override is needed. This never replaces the Task's Project Session.
+  Independent tasks may run in parallel; never create a second session for one
+  issue.
+- A linked Project `decision_requested` event may be an escalation of a Task
+  question; it is not human speech. Answer it once with `lf project decide
+  <project> <decision-id> <choice> [--message "feedback"]`. Inspect delayed Task
+  command acceptance with `lf task receipt <command-id> --until applied
+  --timeout 30s --json`; use `--until incorporated` when the semantic
+  acknowledgement matters.
 - Use `lf project run <linear-project-id> --directive "<delegation brief>"` to
   create or resume the Project's durable pursuit session. It sleeps while
   supervised Tasks run and wakes from their typed observations. Projects never

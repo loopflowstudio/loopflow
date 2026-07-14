@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::child_session::{
     ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState,
-    ChildDecisionId, ChildDirective, ChildProcessGeneration, ChildRef, SessionSupervisor,
+    ChildDecisionId, ChildDirective, ChildProcessGeneration, ChildRef,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{get_default_branch, rev_parse};
@@ -96,7 +96,7 @@ pub struct TaskSessionSnapshot {
     pub pm_snapshot_synced_at: i64,
     pub pm_writeback: crate::task::PmWritebackState,
     pub wave: String,
-    pub supervisor: SessionSupervisor,
+    pub project_session_id: String,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
     pub status: TaskSessionStatus,
@@ -205,18 +205,13 @@ fn command_source(session: &TaskSession) -> OpsResult<ChildCommandSource> {
                 crate::project_session::ProjectSessionId::parse(&value).map_err(|error| {
                     task_error(format!("invalid ambient Project Session id: {error}"))
                 })?;
-            return match &session.supervisor {
-                SessionSupervisor::Project { session_id } if session_id == &project_id => {
-                    Ok(ChildCommandSource::Project(project_id))
-                }
-                SessionSupervisor::Project { session_id } => Err(task_error(format!(
-                    "Project Session {project_id} cannot control Task {}; its supervisor is {session_id}",
-                    session.launch.issue.identifier
-                ))),
-                SessionSupervisor::Wave { .. } => Err(task_error(format!(
-                    "Project Session {project_id} cannot control directly supervised Task {}",
-                    session.launch.issue.identifier
-                ))),
+            return if session.project_session_id == project_id {
+                Ok(ChildCommandSource::Project(project_id))
+            } else {
+                Err(task_error(format!(
+                    "Project Session {project_id} cannot control Task {}; its Project Session is {}",
+                    session.launch.issue.identifier, session.project_session_id
+                )))
             };
         }
         Err(std::env::VarError::NotPresent) => {}
@@ -310,6 +305,15 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
         get_default_branch(&main_repo).map_err(|error| task_error(error.to_string()))?;
     let base_commit = rev_parse(&main_repo, &default_branch)
         .map_err(|error| task_error(format!("failed to resolve task base: {error}")))?;
+    let project_session = crate::ops::project::ensure_project_session_for_task(
+        &main_repo,
+        crate::ops::task_pm::ResolvedProject {
+            snapshot: resolved.snapshot.clone(),
+            project: resolved.project.clone(),
+        },
+    )?;
+    let project_session_id = task_project_session_id(&project_session)?;
+    let wave_id = project_session.wave_id.clone();
     let config = load_config_or_default(Some(&main_repo));
     let agent = config.agent.as_deref().unwrap_or("claude:opus");
     let (provider, _) = parse_agent(agent);
@@ -330,18 +334,7 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
         {
             return Ok(existing);
         }
-        let wave = store
-            .get_wave_by_name(&resolved.snapshot.wave)
-            .await
-            .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
-            .ok_or_else(|| {
-                task_error(format!(
-                    "owning Wave {:?} is not registered",
-                    resolved.snapshot.wave
-                ))
-            })?;
         let now = time::OffsetDateTime::now_utc();
-        let supervisor = task_supervisor(&store, wave.id(), &resolved.project.id).await?;
         let mut session = TaskSession {
             id: crate::task::TaskSessionId::new(),
             launch: TaskLaunchReceipt {
@@ -361,8 +354,8 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
                 },
                 pm_snapshot_synced_at: resolved.snapshot.synced_at,
             },
-            wave_id: wave.id().clone(),
-            supervisor,
+            wave_id,
+            project_session_id,
             current_directive_version: 1,
             incorporated_directive_version: 0,
             pm_writeback: PmWritebackState::Current,
@@ -438,39 +431,24 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
     })
 }
 
-async fn task_supervisor(
-    store: &SharedStore,
-    wave_id: &WaveId,
-    project_id: &str,
-) -> OpsResult<SessionSupervisor> {
+fn task_project_session_id(
+    project: &crate::project_session::ProjectSession,
+) -> OpsResult<crate::project_session::ProjectSessionId> {
     match std::env::var("LF_PROJECT_SESSION_ID") {
         Ok(value) => {
             let session_id =
                 crate::project_session::ProjectSessionId::parse(&value).map_err(|error| {
                     task_error(format!("invalid ambient Project Session id: {error}"))
                 })?;
-            let project = store
-                .get_project_session(&session_id)
-                .await
-                .map_err(|error| {
-                    task_error(format!("failed to read ambient Project Session: {error}"))
-                })?
-                .ok_or_else(|| {
-                    task_error(format!(
-                        "ambient Project Session {session_id} does not exist"
-                    ))
-                })?;
-            if &project.wave_id != wave_id || project.launch.project.id.as_str() != project_id {
+            if session_id != project.id {
                 return Err(task_error(format!(
-                    "Project Session {session_id} cannot supervise a Task outside Wave {}/Project {}",
-                    project.wave_id, project.launch.project.slug
+                    "Project Session {session_id} cannot supervise a Task under Project Session {}",
+                    project.id
                 )));
             }
-            Ok(SessionSupervisor::Project { session_id })
+            Ok(session_id)
         }
-        Err(std::env::VarError::NotPresent) => Ok(SessionSupervisor::Wave {
-            wave_id: wave_id.clone(),
-        }),
+        Err(std::env::VarError::NotPresent) => Ok(project.id.clone()),
         Err(std::env::VarError::NotUnicode(_)) => {
             Err(task_error("ambient Project Session id is not valid UTF-8"))
         }
@@ -499,6 +477,8 @@ pub fn task_start(
         .map_err(|error| task_error(error.to_string()))?;
     let project =
         crate::ops::task_pm::resolve_project(&main, project_id, crate::ops::pm::PmRefresh::Auto)?;
+    crate::ops::project::require_registered_wave(&project.snapshot.wave)
+        .map_err(|error| task_error(error.to_string()))?;
     let marker = format!(
         "<!-- loopflow-task-start:{} -->",
         hex::encode(Sha256::digest(
@@ -858,7 +838,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             pm_snapshot_synced_at: session.launch.pm_snapshot_synced_at,
             pm_writeback: session.pm_writeback,
             wave: wave.name().to_string(),
-            supervisor: session.supervisor,
+            project_session_id: session.project_session_id.to_string(),
             current_directive_version: session.current_directive_version,
             incorporated_directive_version: session.incorporated_directive_version,
             status: session.status,

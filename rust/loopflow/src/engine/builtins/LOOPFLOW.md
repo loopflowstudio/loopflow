@@ -2,8 +2,8 @@
 
 You are running inside loopflow. Loopflow owns git, worktrees, delegation, and
 release plumbing. Route those operations through `lf`, not around it. Doing them
-by hand breaks the machinery loopflow relies on: worktree naming, merge queue
-behavior, wave rotation, and context inheritance.
+by hand breaks the machinery loopflow relies on: worktree placement, release
+state, and session context.
 
 ## Git, Worktrees, GitHub -> `lf`
 

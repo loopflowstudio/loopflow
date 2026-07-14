@@ -12,9 +12,10 @@ use time::OffsetDateTime;
 
 use crate::child_session::{
     prefixed_uuid_id, ChildCommandEffect, ChildCommandId, ChildCommandState, ChildDecisionId,
-    ChildDirectiveId, ChildProcessGeneration, DirectiveKind, SessionSupervisor,
+    ChildDirectiveId, ChildProcessGeneration, DirectiveKind,
 };
 use crate::id::WaveId;
+use crate::project_session::ProjectSessionId;
 use crate::session_context::TaskLaunchReceipt;
 
 pub mod runner;
@@ -124,7 +125,9 @@ pub struct TaskSession {
     pub pm_writeback: PmWritebackState,
     /// Root ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
-    pub supervisor: SessionSupervisor,
+    /// Required runtime parent. Every Task reports through one durable Project
+    /// Session; its Wave retains root inspection and override authority.
+    pub project_session_id: ProjectSessionId,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
     pub status: TaskSessionStatus,
@@ -173,13 +176,6 @@ impl TaskSession {
             return Err(TaskDataError::InvalidInvariant(
                 "incorporated directive version exceeds current direction".to_string(),
             ));
-        }
-        if let SessionSupervisor::Wave { wave_id } = &self.supervisor {
-            if wave_id != &self.wave_id {
-                return Err(TaskDataError::InvalidInvariant(
-                    "direct Wave supervisor does not match root Wave ownership".to_string(),
-                ));
-            }
         }
         Ok(())
     }
@@ -262,7 +258,8 @@ pub enum TaskEventKind {
 }
 
 impl TaskEventKind {
-    pub fn is_wave_observable(&self) -> bool {
+    /// Whether the event crosses the required Task → Project boundary.
+    pub fn is_project_observable(&self) -> bool {
         match self {
             Self::Started | Self::Progress { .. } => false,
             Self::CommandChanged { state, .. } => state.is_terminal(),
@@ -274,7 +271,7 @@ impl TaskEventKind {
     /// Routine decisions stay at the immediate Project boundary; a Project
     /// escalates by emitting its own `DecisionRequested` event.
     pub fn is_root_wave_observable(&self) -> bool {
-        self.is_wave_observable()
+        self.is_project_observable()
             && !matches!(
                 self,
                 Self::DecisionRequested { .. } | Self::DecisionResolved { .. }
@@ -323,14 +320,13 @@ mod tests {
         ChildCommandId, ChildCommandState, PmWritebackOperation, PmWritebackState, PullRequestRef,
         TaskEventKind, TaskObservation, TaskSession, TaskSessionId, TaskSessionStatus,
     };
-    use crate::child_session::{ChildDecisionId, SessionSupervisor};
+    use crate::child_session::ChildDecisionId;
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
         TaskLaunchReceipt,
     };
 
     fn task_session() -> TaskSession {
-        let wave_id = crate::id::WaveId::new();
         let now = time::OffsetDateTime::now_utc();
         TaskSession {
             id: TaskSessionId::new(),
@@ -350,8 +346,8 @@ mod tests {
                 pm_snapshot_synced_at: 1,
             },
             pm_writeback: PmWritebackState::Current,
-            wave_id: wave_id.clone(),
-            supervisor: SessionSupervisor::Wave { wave_id },
+            wave_id: crate::id::WaveId::new(),
+            project_session_id: crate::project_session::ProjectSessionId::new(),
             current_directive_version: 1,
             incorporated_directive_version: 0,
             status: TaskSessionStatus::Created,
@@ -403,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn wave_observes_command_outcomes_not_transport_chatter() {
+    fn project_observes_command_outcomes_not_transport_chatter() {
         let event = |state| TaskEventKind::CommandChanged {
             command_id: ChildCommandId::new(),
             state,
@@ -411,12 +407,12 @@ mod tests {
             error: None,
         };
 
-        assert!(!event(ChildCommandState::Persisted).is_wave_observable());
-        assert!(!event(ChildCommandState::Claimed).is_wave_observable());
-        assert!(!event(ChildCommandState::Delivering).is_wave_observable());
-        assert!(event(ChildCommandState::Accepted).is_wave_observable());
-        assert!(event(ChildCommandState::Failed).is_wave_observable());
-        assert!(event(ChildCommandState::Uncertain).is_wave_observable());
+        assert!(!event(ChildCommandState::Persisted).is_project_observable());
+        assert!(!event(ChildCommandState::Claimed).is_project_observable());
+        assert!(!event(ChildCommandState::Delivering).is_project_observable());
+        assert!(event(ChildCommandState::Accepted).is_project_observable());
+        assert!(event(ChildCommandState::Failed).is_project_observable());
+        assert!(event(ChildCommandState::Uncertain).is_project_observable());
     }
 
     #[test]
@@ -432,8 +428,8 @@ mod tests {
             message: None,
         };
 
-        assert!(requested.is_wave_observable());
-        assert!(resolved.is_wave_observable());
+        assert!(requested.is_project_observable());
+        assert!(resolved.is_project_observable());
         assert!(!requested.is_root_wave_observable());
         assert!(!resolved.is_root_wave_observable());
         assert!(TaskEventKind::Failed {
@@ -481,7 +477,7 @@ mod tests {
     }
 
     #[test]
-    fn task_session_rejects_impossible_process_writeback_and_supervisor_state() {
+    fn task_session_rejects_impossible_process_and_writeback_state() {
         let mut session = task_session();
         session.status = TaskSessionStatus::Running;
         assert!(session.validate().is_err());
@@ -490,12 +486,6 @@ mod tests {
         session.pm_writeback = PmWritebackState::Pending {
             operation: PmWritebackOperation::CompleteTask,
             error: "too early".to_string(),
-        };
-        assert!(session.validate().is_err());
-
-        session.pm_writeback = PmWritebackState::Current;
-        session.supervisor = SessionSupervisor::Wave {
-            wave_id: crate::id::WaveId::new(),
         };
         assert!(session.validate().is_err());
     }

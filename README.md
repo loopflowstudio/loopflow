@@ -57,8 +57,15 @@ whole thread. Humans use `lf chat`; agents broadcast with `lf radio pub`; `lf
 memory` curates retained facts. A running Wave folds family reports into its
 thread with attribution. Outside any wave a publish prints a short drop note
 and exits 0, so the verbs are safe in every prompt. See
-`rust/loopflow/src/wave/README.md` for the wire contract, and
-`scripts/demo_wave.sh` for the guided demo.
+`rust/loopflow/src/wave/README.md` for the wire contract. Inspect a live
+Wave/Project/Task hierarchy and open the app with:
+
+```bash
+uv run python scripts/demo_sessions.py infrastructure --task INF-123 --app
+```
+
+Add `--start-wave`, `--sync`, or `--start-task` only when you intend their
+provider, Linear, or worktree side effects.
 
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 
@@ -85,9 +92,24 @@ and merge. Every Task PR targets `main`.
 
 Task Sessions inherit the Wave objective, curated memory, Project definition,
 and KRs. Typed, idempotent Task observations keep the Wave informed without
-copying raw tool chatter into its thread. Tasks can pause on a durable decision
-request; the owning Wave answers it in the same Task Session and provider
-transcript.
+copying raw tool chatter into its thread. Every Task reports through the one
+Project Session for its Linear Project and asks that Project for routine
+decisions. The owning Wave can inspect or override any Task as root authority,
+without becoming a second supervision path. Loopflow does not invent a default
+Project; `task start` requires one and `task run` resolves one from the issue.
+
+Inspect the Task's actual workspace without reconstructing Git state in a
+client:
+
+```bash
+lf task changes INF-123
+lf task diff INF-123 src/parser.rs
+lf task file INF-123 src/parser.rs
+```
+
+The Mac Task inspector uses the same reads for its changed-file list, patch,
+and current-file views. It also opens multiple embedded Ghostty/tmux shells or
+the same worktree in Warp.
 
 Run an existing Linear Project or task:
 

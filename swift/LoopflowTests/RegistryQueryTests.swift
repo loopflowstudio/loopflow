@@ -60,7 +60,7 @@ struct RegistryQueryTests {
             "next_move":{"owner":"project","reason":"supervised Tasks are active"},
             "tasks":[{
               "task":{"id":"issue-1","identifier":"INF-123","name":"Wire it","description":"","rank":1,"completed":false,"assignee":null},
-              "runtime":{"session_id":"ts_1","supervisor":{"kind":"wave","wave_id":"wave-1"},"status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","worktree":"/task-wt","branch":"jack/inf-123","provider":"codex","process_alive":true},
+              "runtime":{"session_id":"ts_1","project_session_id":"ps_1","status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","worktree":"/task-wt","branch":"jack/inf-123","provider":"codex","process_alive":true},
               "directive":null,
               "next_move":{"owner":"task","reason":"provider turn is active"},
               "pull_request":null
@@ -78,7 +78,7 @@ struct RegistryQueryTests {
         #expect(result.workMap.projects[0].project.slug == "developer-efficiency")
         #expect(result.workMap.projects[0].runtime?.status == .waiting)
         #expect(result.workMap.projects[0].tasks[0].task.identifier == "INF-123")
-        #expect(result.workMap.projects[0].tasks[0].runtime?.supervisor == .wave(id: "wave-1"))
+        #expect(result.workMap.projects[0].tasks[0].runtime?.projectSessionId == "ps_1")
         #expect(result.workMap.projects[0].tasks[0].runtime?.worktree == "/task-wt")
         #expect(result.workMap.projects[0].tasks[0].runtime?.branch == "jack/inf-123")
     }

@@ -62,6 +62,9 @@ after it:
 ```bash
 lf task run DES-123 --json                           # durable Task Session
 lf task status DES-123 --json                        # same identity and worktree
+lf task changes DES-123 --json                       # committed + working changes
+lf task diff DES-123 src/parser.rs --json            # one file's Task patch
+lf task file DES-123 src/parser.rs --json            # current worktree contents
 lf pm --wave designer show                           # normalized onto `show`
 lf pm task --wave designer create --title "Fix it"  # normalized onto `create`
 lf commit -m "explain the change"                   # -m remains commit-local
@@ -137,11 +140,12 @@ lf ship -w feature-branch
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
-## Running Waves and Tasks
+## Running Waves, Projects, and Tasks
 
 ```bash
 lf wave designer                                   # start the named Wave
 lf stop designer                                   # stop its listener and resident
+lf project run <linear-project-id>                  # durable Project Session
 lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
 lf task run DES-123 --directive "fix the parser before the docs"
 lf task steer DES-123 "rename the flag"
@@ -153,9 +157,12 @@ lf task wait DES-123
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
-`lf wave <name>` starts the durable Wave listener, resident, and persistent playhead. A Task
-Session starts only after its Linear task exists, owns one immutable worktree
-and provider transcript, and remains resumable through review and merge.
+`lf wave <name>` starts the durable Wave listener, resident, and persistent
+playhead. A Project Session pursues one Linear Project's KRs without a
+worktree. Every Task requires that Project Session; `task start/run` ensures it
+before reserving the Task. The Task starts only after its Linear issue exists,
+owns one immutable worktree and provider transcript, and remains resumable
+through review and merge.
 `lf task attach` exposes a writable prompt that records structured commands;
 terminal bytes never drive the provider directly.
 

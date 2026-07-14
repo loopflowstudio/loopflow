@@ -903,14 +903,15 @@ mod tests {
     use super::{absorb_commands, apply_input, handle_attachment, progress_summary, CommandStop};
     use crate::child_session::{
         ChildCommand, ChildCommandEffect, ChildCommandKind, ChildCommandSource, ChildCommandState,
-        ChildDecisionId, ChildProcessGeneration, ChildRef, SessionSupervisor,
+        ChildDecisionId, ChildProcessGeneration, ChildRef,
     };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Capabilities, Harness};
     use crate::id::WaveId;
+    use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
-        TaskLaunchReceipt,
+        ProjectLaunchReceipt, TaskLaunchReceipt,
     };
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
@@ -987,6 +988,35 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let now = OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp())
             .unwrap();
+        let project_snapshot = LinearProjectSnapshot {
+            id: LinearProjectId::new(format!("project-{provider}")).unwrap(),
+            slug: "control".to_string(),
+            name: "Control".to_string(),
+            prompt_context: "Provider-neutral control".to_string(),
+        };
+        let project = ProjectSession {
+            id: ProjectSessionId::new(),
+            launch: ProjectLaunchReceipt {
+                project: project_snapshot.clone(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            current_directive_version: 0,
+            incorporated_directive_version: 0,
+            status: ProjectSessionStatus::Created,
+            status_reason: "reserved".to_string(),
+            status_at: now,
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: provider.to_string(),
+            provider: provider.to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_project_session(&project).await.unwrap();
         let session = TaskSession {
             id: TaskSessionId::new(),
             launch: TaskLaunchReceipt {
@@ -996,19 +1026,12 @@ mod tests {
                     title: "Conformance".to_string(),
                     description: "Exercise provider-neutral control".to_string(),
                 },
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new(format!("project-{provider}")).unwrap(),
-                    slug: "control".to_string(),
-                    name: "Control".to_string(),
-                    prompt_context: "Provider-neutral control".to_string(),
-                },
+                project: project_snapshot,
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
-            supervisor: SessionSupervisor::Wave {
-                wave_id: wave.id().clone(),
-            },
+            project_session_id: project.id,
             current_directive_version: 0,
             incorporated_directive_version: 0,
             status: TaskSessionStatus::Running,

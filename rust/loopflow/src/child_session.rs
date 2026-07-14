@@ -1,6 +1,6 @@
 //! Durable control shared by Project and Task Sessions.
 //!
-//! This module owns typed child identity, supervisor attribution, process
+//! This module owns typed child identity, control attribution, process
 //! generations, commands, directives, decisions, and observation envelopes.
 //! Project and Task keep their own lifecycle states, events, runners, and
 //! public CLI nouns; there is no generic child lifecycle.
@@ -91,7 +91,7 @@ prefixed_uuid_id!(
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SessionSupervisor {
+pub enum ObservationRecipient {
     Wave { wave_id: WaveId },
     Project { session_id: ProjectSessionId },
 }

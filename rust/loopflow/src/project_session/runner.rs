@@ -17,7 +17,7 @@ use crate::child_control::{
 use crate::child_session::{
     unincorporated_directive_version, BoundaryResult, ChildCommand, ChildCommandEffect,
     ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective,
-    ChildRef, SessionSupervisor,
+    ChildRef, ObservationRecipient,
 };
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
 use crate::project_session::{
@@ -671,10 +671,7 @@ async fn inspect_outcome(
         .into_iter()
         .filter(|task| {
             task.launch.project.id.as_str() == session.launch.project.id.as_str()
-                && matches!(
-                    &task.supervisor,
-                    SessionSupervisor::Project { session_id } if session_id == &session.id
-                )
+                && task.project_session_id == session.id
         })
         .collect::<Vec<_>>();
     let pm_tasks = resolved
@@ -738,10 +735,10 @@ async fn consume_task_observations(
     store: &SharedStore,
     session: &mut ProjectSession,
 ) -> Result<Vec<String>> {
-    let supervisor = SessionSupervisor::Project {
+    let recipient = ObservationRecipient::Project {
         session_id: session.id.clone(),
     };
-    let observations = store.pending_observations(&supervisor).await?;
+    let observations = store.pending_observations(&recipient).await?;
     let mut prompts = Vec::new();
     for observation in observations {
         let event = match &observation.payload {

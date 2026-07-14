@@ -1,9 +1,9 @@
 //! Durable Project and Task Sessions: commands, directives, events, and the
-//! observation outbox that links them to their supervisors.
+//! observation outbox that links each event to its next responsible recipient.
 
 use crate::child_session::{
     BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId, ChildDirective, ChildRef,
-    SessionSupervisor,
+    ObservationRecipient,
 };
 use crate::id::WaveId;
 use crate::project_session::{
@@ -248,28 +248,20 @@ impl Store {
             store.append_task_event(&write_session_id, &write_kind)
         })
         .await?;
-        if kind.is_wave_observable() {
+        if kind.is_project_observable() {
             if let Some(session) = self.get_task_session(&session_id).await? {
-                let nudge_wave = match &session.supervisor {
-                    SessionSupervisor::Wave { .. } => true,
-                    SessionSupervisor::Project {
-                        session_id: project_session_id,
-                    } => {
-                        if let Err(error) =
-                            crate::ops::project::wake_project_session(project_session_id).await
-                        {
-                            tracing::debug!(
-                                %error,
-                                %session_id,
-                                project_session_id = %project_session_id,
-                                event_id = event.id,
-                                "Task observation wake failed; Project lifecycle touch will retry"
-                            );
-                        }
-                        kind.is_root_wave_observable()
-                    }
-                };
-                if nudge_wave {
+                if let Err(error) =
+                    crate::ops::project::wake_project_session(&session.project_session_id).await
+                {
+                    tracing::debug!(
+                        %error,
+                        %session_id,
+                        project_session_id = %session.project_session_id,
+                        event_id = event.id,
+                        "Task observation wake failed; Project lifecycle touch will retry"
+                    );
+                }
+                if kind.is_root_wave_observable() {
                     match self.get_wave(&session.wave_id).await? {
                         Some(wave) => {
                             if let Err(error) =
@@ -463,11 +455,11 @@ impl Store {
 
     pub async fn pending_observations(
         &self,
-        supervisor: &SessionSupervisor,
+        recipient: &ObservationRecipient,
     ) -> StoreResult<Vec<ObservationOutboxRow>> {
-        let supervisor = supervisor.clone();
+        let recipient = recipient.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.pending_observations(&supervisor)
+            store.pending_observations(&recipient)
         })
         .await
     }

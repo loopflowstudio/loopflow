@@ -8,7 +8,7 @@ use time::OffsetDateTime;
 use crate::child_session::{
     BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind,
     ChildCommandSource, ChildCommandState, ChildDirective, ChildDirectiveId,
-    ChildProcessGeneration, ChildRef, DirectiveKind, SessionSupervisor,
+    ChildProcessGeneration, ChildRef, DirectiveKind, ObservationRecipient,
 };
 use crate::id::WaveId;
 use crate::project_session::{
@@ -33,6 +33,7 @@ impl SqliteStore {
     pub fn insert_task_session(&self, session: &TaskSession) -> StoreResult<()> {
         validate_task_session(session)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
+        validate_task_project_session(&conn, session)?;
         let parameters = task_session_params(session);
         conn.execute(
             TASK_SESSION_INSERT,
@@ -45,6 +46,7 @@ impl SqliteStore {
         validate_task_session(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
+        validate_task_project_session(&transaction, session)?;
         let parameters = task_session_params(session);
         transaction.execute(
             TASK_SESSION_INSERT,
@@ -63,6 +65,7 @@ impl SqliteStore {
         ensure_directive_target(directive, "task", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
+        validate_task_project_session(&transaction, session)?;
         let parameters = task_session_params(session);
         transaction.execute(
             TASK_SESSION_INSERT,
@@ -76,6 +79,7 @@ impl SqliteStore {
     pub fn update_task_session(&self, session: &TaskSession) -> StoreResult<()> {
         validate_task_session(session)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
+        validate_task_project_session(&conn, session)?;
         let parameters = task_session_params(session);
         let changed = conn.execute(
             TASK_SESSION_UPDATE,
@@ -571,7 +575,7 @@ impl SqliteStore {
             ],
         )?;
         let event_id = transaction.last_insert_rowid();
-        if kind.is_wave_observable() {
+        if kind.is_project_observable() {
             let session = transaction.query_row(
                 TASK_SESSION_SELECT,
                 params![session_id.as_str()],
@@ -579,7 +583,9 @@ impl SqliteStore {
             )?;
             insert_observation(
                 &transaction,
-                &session.supervisor,
+                &ObservationRecipient::Project {
+                    session_id: session.project_session_id.clone(),
+                },
                 &ChildRef::Task(session_id.clone()),
                 event_id,
                 &ChildEventPayload::Task {
@@ -587,12 +593,10 @@ impl SqliteStore {
                 },
                 created_at,
             )?;
-            if matches!(session.supervisor, SessionSupervisor::Project { .. })
-                && kind.is_root_wave_observable()
-            {
+            if kind.is_root_wave_observable() {
                 insert_observation(
                     &transaction,
-                    &SessionSupervisor::Wave {
+                    &ObservationRecipient::Wave {
                         wave_id: session.wave_id,
                     },
                     &ChildRef::Task(session_id.clone()),
@@ -881,7 +885,7 @@ impl SqliteStore {
             )?;
             insert_observation(
                 &transaction,
-                &SessionSupervisor::Wave {
+                &ObservationRecipient::Wave {
                     wave_id: session.wave_id,
                 },
                 &ChildRef::Project(session_id.clone()),
@@ -922,15 +926,15 @@ impl SqliteStore {
 
     pub fn pending_observations(
         &self,
-        supervisor: &SessionSupervisor,
+        recipient: &ObservationRecipient,
     ) -> StoreResult<Vec<ObservationOutboxRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let (kind, id) = supervisor_columns(supervisor);
+        let (kind, id) = recipient_columns(recipient);
         let mut statement = conn.prepare(
-            "SELECT id, supervisor_kind, supervisor_id, source_kind, source_id,
+            "SELECT id, recipient_kind, recipient_id, source_kind, source_id,
                     event_id, payload_json, delivered_at
              FROM observation_outbox
-             WHERE supervisor_kind=?1 AND supervisor_id=?2 AND delivered_at IS NULL
+             WHERE recipient_kind=?1 AND recipient_id=?2 AND delivered_at IS NULL
              ORDER BY id",
         )?;
         let rows = statement.query_map(params![kind, id], map_observation_row)?;
@@ -957,13 +961,13 @@ impl SqliteStore {
         observation: &ObservationOutboxRow,
     ) -> StoreResult<bool> {
         let (
-            SessionSupervisor::Project {
-                session_id: supervisor_id,
+            ObservationRecipient::Project {
+                session_id: recipient_id,
             },
             ChildRef::Task(task_id),
             ChildEventPayload::Task { event },
         ) = (
-            &observation.supervisor,
+            &observation.recipient,
             &observation.source,
             &observation.payload,
         )
@@ -972,9 +976,9 @@ impl SqliteStore {
                 "Project Session can consume only supervised Task observations".to_string(),
             ));
         };
-        if supervisor_id != project_session_id {
+        if recipient_id != project_session_id {
             return Err(StoreError::InvalidData(format!(
-                "observation {} belongs to Project Session {supervisor_id}",
+                "observation {} belongs to Project Session {recipient_id}",
                 observation.id
             )));
         }
@@ -1165,6 +1169,29 @@ fn validate_task_session(session: &TaskSession) -> StoreResult<()> {
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
+fn validate_task_project_session(conn: &Connection, session: &TaskSession) -> StoreResult<()> {
+    let owner = conn
+        .query_row(
+            "SELECT project_id, wave_id FROM project_sessions WHERE id=?1",
+            params![session.project_session_id.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    let Some((project_id, wave_id)) = owner else {
+        return Err(StoreError::InvalidData(format!(
+            "Task Session {} requires Project Session {}",
+            session.id, session.project_session_id
+        )));
+    };
+    if project_id != session.launch.project.id.as_str() || wave_id != session.wave_id.as_str() {
+        return Err(StoreError::InvalidData(format!(
+            "Project Session {} does not own Task {}/{}",
+            session.project_session_id, session.wave_id, session.launch.project.slug
+        )));
+    }
+    Ok(())
+}
+
 fn validate_project_session(session: &ProjectSession) -> StoreResult<()> {
     session
         .validate()
@@ -1178,12 +1205,12 @@ const TASK_SESSION_INSERT: &str = "INSERT INTO task_sessions (
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
-    pm_writeback_json, supervisor_kind, supervisor_id,
+    pm_writeback_json, project_session_id,
     current_directive_version, incorporated_directive_version
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-    ?28, ?29, ?30, ?31, ?32, ?33
+    ?28, ?29, ?30, ?31, ?32
 )";
 const TASK_SESSION_COLUMNS: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
@@ -1192,7 +1219,7 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
-    pm_writeback_json, supervisor_kind, supervisor_id,
+    pm_writeback_json, project_session_id,
     current_directive_version, incorporated_directive_version
     FROM task_sessions";
 const TASK_SESSION_SELECT: &str = "SELECT
@@ -1202,7 +1229,7 @@ const TASK_SESSION_SELECT: &str = "SELECT
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
     created_at, updated_at, pm_snapshot_synced_at,
-    pm_writeback_json, supervisor_kind, supervisor_id,
+    pm_writeback_json, project_session_id,
     current_directive_version, incorporated_directive_version
     FROM task_sessions WHERE id = ?1";
 const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
@@ -1214,9 +1241,9 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     process_tmux_name=?22, process_started_at=?23, pr_number=?24,
     pr_url=?25, created_at=?26, updated_at=?27,
     pm_snapshot_synced_at=?28, pm_writeback_json=?29,
-    supervisor_kind=?30, supervisor_id=?31,
-    current_directive_version=MAX(current_directive_version, ?32),
-    incorporated_directive_version=MAX(incorporated_directive_version, ?33)
+    project_session_id=?30,
+    current_directive_version=MAX(current_directive_version, ?31),
+    incorporated_directive_version=MAX(incorporated_directive_version, ?32)
     WHERE id=?1";
 const CHILD_COMMAND_COLUMNS: &str = "SELECT
     id, target_kind, session_id, source_json, kind_json, created_at,
@@ -1442,14 +1469,7 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
             serde_json::to_string(&session.pm_writeback)
                 .expect("Task Session PM writeback state must serialize"),
         ),
-        Box::new(match &session.supervisor {
-            SessionSupervisor::Wave { .. } => "wave".to_string(),
-            SessionSupervisor::Project { .. } => "project".to_string(),
-        }),
-        Box::new(match &session.supervisor {
-            SessionSupervisor::Wave { wave_id } => wave_id.as_str().to_string(),
-            SessionSupervisor::Project { session_id } => session_id.as_str().to_string(),
-        }),
+        Box::new(session.project_session_id.as_str().to_string()),
         Box::new(i64::from(session.current_directive_version)),
         Box::new(i64::from(session.incorporated_directive_version)),
     ]
@@ -1512,27 +1532,9 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
         pm_writeback: serde_json::from_str(&row.get::<_, String>(28)?)
             .map_err(|error| invalid_column(28, error))?,
         wave_id: row.get(9)?,
-        supervisor: match row.get::<_, String>(29)?.as_str() {
-            "wave" => SessionSupervisor::Wave {
-                wave_id: row.get(30)?,
-            },
-            "project" => SessionSupervisor::Project {
-                session_id: crate::project_session::ProjectSessionId::from_raw(
-                    row.get::<_, String>(30)?,
-                ),
-            },
-            value => {
-                return Err(invalid_column(
-                    29,
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("unknown Task Session supervisor kind {value:?}"),
-                    ),
-                ))
-            }
-        },
-        current_directive_version: row.get::<_, i64>(31)? as u32,
-        incorporated_directive_version: row.get::<_, i64>(32)? as u32,
+        project_session_id: ProjectSessionId::from_raw(row.get::<_, String>(29)?),
+        current_directive_version: row.get::<_, i64>(30)? as u32,
+        incorporated_directive_version: row.get::<_, i64>(31)? as u32,
         status,
         status_reason: row.get(11)?,
         status_at: crate::store::rows::unix_to_datetime(row.get(12)?),
@@ -1830,10 +1832,12 @@ fn map_project_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectEve
     })
 }
 
-fn supervisor_columns(supervisor: &SessionSupervisor) -> (&'static str, String) {
-    match supervisor {
-        SessionSupervisor::Wave { wave_id } => ("wave", wave_id.as_str().to_string()),
-        SessionSupervisor::Project { session_id } => ("project", session_id.as_str().to_string()),
+fn recipient_columns(recipient: &ObservationRecipient) -> (&'static str, String) {
+    match recipient {
+        ObservationRecipient::Wave { wave_id } => ("wave", wave_id.as_str().to_string()),
+        ObservationRecipient::Project { session_id } => {
+            ("project", session_id.as_str().to_string())
+        }
     }
 }
 
@@ -1846,22 +1850,22 @@ fn child_columns(source: &ChildRef) -> (&'static str, String) {
 
 fn insert_observation(
     conn: &Connection,
-    supervisor: &SessionSupervisor,
+    recipient: &ObservationRecipient,
     source: &ChildRef,
     event_id: i64,
     payload: &ChildEventPayload,
     created_at: i64,
 ) -> StoreResult<()> {
-    let (supervisor_kind, supervisor_id) = supervisor_columns(supervisor);
+    let (recipient_kind, recipient_id) = recipient_columns(recipient);
     let (source_kind, source_id) = child_columns(source);
     conn.execute(
         "INSERT OR IGNORE INTO observation_outbox (
-            supervisor_kind, supervisor_id, source_kind, source_id,
+            recipient_kind, recipient_id, source_kind, source_id,
             event_id, payload_json, created_at, delivered_at
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
         params![
-            supervisor_kind,
-            supervisor_id,
+            recipient_kind,
+            recipient_id,
             source_kind,
             source_id,
             event_id,
@@ -1873,11 +1877,11 @@ fn insert_observation(
 }
 
 fn map_observation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationOutboxRow> {
-    let supervisor_kind: String = row.get(1)?;
-    let supervisor_id: String = row.get(2)?;
-    let supervisor = match supervisor_kind.as_str() {
-        "wave" => SessionSupervisor::Wave {
-            wave_id: WaveId::parse(&supervisor_id).map_err(|error| {
+    let recipient_kind: String = row.get(1)?;
+    let recipient_id: String = row.get(2)?;
+    let recipient = match recipient_kind.as_str() {
+        "wave" => ObservationRecipient::Wave {
+            wave_id: WaveId::parse(&recipient_id).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(
                     2,
                     rusqlite::types::Type::Text,
@@ -1885,15 +1889,15 @@ fn map_observation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationO
                 )
             })?,
         },
-        "project" => SessionSupervisor::Project {
-            session_id: ProjectSessionId::from_raw(supervisor_id),
+        "project" => ObservationRecipient::Project {
+            session_id: ProjectSessionId::from_raw(recipient_id),
         },
         value => {
             return Err(invalid_column(
                 1,
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("unknown observation supervisor {value:?}"),
+                    format!("unknown observation recipient {value:?}"),
                 ),
             ))
         }
@@ -1917,7 +1921,7 @@ fn map_observation_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationO
         .map_err(|error| invalid_column(6, error))?;
     Ok(ObservationOutboxRow {
         id: row.get(0)?,
-        supervisor,
+        recipient,
         source,
         event_id: row.get(5)?,
         payload,

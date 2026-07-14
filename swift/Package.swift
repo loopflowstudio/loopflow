@@ -26,40 +26,17 @@ let package = Package(
                 .copy("Fonts")
             ]
         ),
-        .binaryTarget(
-            name: "GhosttyKit",
-            url: "https://bin.loopflow.studio/GhosttyKit-4c83872.xcframework.zip",
-            checksum: "b0e75385d69477d92f673962f2361642b1a22b228ad249036cbef53c0788a74d"
-        ),
         .executableTarget(
             name: "LoopflowMac",
-            dependencies: [
-                "Loopflow",
-                .target(
-                    name: "GhosttyKit",
-                    condition: .when(platforms: [.macOS])
-                ),
-            ],
+            dependencies: ["Loopflow"],
             path: "LoopflowMac",
             exclude: [
                 "Info.plist",
                 "Loopflow.sdef",
                 "Loopflow.entitlements",
-                "UX_DESIGN.md",
                 "AppIcon.icns",
                 "logo.svg",
                 "dmg-background.png",
-                "Services/Ghostty/README.md",
-            ],
-            swiftSettings: [
-                .define("GHOSTTY_ENABLED", .when(platforms: [.macOS])),
-            ],
-            linkerSettings: [
-                .linkedFramework("Carbon", .when(platforms: [.macOS])),
-                .linkedFramework("QuartzCore", .when(platforms: [.macOS])),
-                .linkedFramework("Metal", .when(platforms: [.macOS])),
-                .linkedFramework("IOKit", .when(platforms: [.macOS])),
-                .linkedLibrary("c++", .when(platforms: [.macOS])),
             ]
         ),
         .testTarget(

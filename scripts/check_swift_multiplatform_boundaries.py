@@ -17,7 +17,6 @@ MAC_ONLY_IMPORTS = {
     "ApplicationServices",
     "IOKit",
     "Metal",
-    "GhosttyKit",
 }
 
 # The shared library must build on every platform; the per-platform app targets

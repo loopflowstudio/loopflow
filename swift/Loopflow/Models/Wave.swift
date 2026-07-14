@@ -92,52 +92,6 @@ public enum WaveStatus: String, Sendable, Codable {
     }
 }
 
-/// An interactive session running in the embedded terminal.
-public struct InteractiveSession: Sendable, Identifiable {
-    public let id: String
-    public let waveId: String
-    public let skill: String
-    public let worktreePath: String
-    public let prompt: String?
-    public let startedAt: Date
-
-    public init(
-        id: String = UUID().uuidString,
-        waveId: String,
-        skill: String,
-        worktreePath: String,
-        prompt: String? = nil,
-        startedAt: Date = Date()
-    ) {
-        self.id = id
-        self.waveId = waveId
-        self.skill = skill
-        self.worktreePath = worktreePath
-        self.prompt = prompt
-        self.startedAt = startedAt
-    }
-
-    /// Build the shell command to run this session.
-    /// Runs the skill, then auto-commits and pushes when the agent exits.
-    public var command: String {
-        var cmd = "lf \(skill)"
-        if let prompt = prompt {
-            cmd += " \(shellEscape(prompt))"
-        }
-        cmd += " && lf commit --push"
-        return cmd
-    }
-}
-
-/// Shell-escape a string for bash/zsh by wrapping in single quotes.
-public func shellEscape(_ string: String) -> String {
-    // For bash/zsh: wrap in single quotes, escape internal single quotes
-    // 'foo' -> 'foo'
-    // foo's -> 'foo'\''s'
-    let escaped = string.replacingOccurrences(of: "'", with: "'\\''")
-    return "'\(escaped)'"
-}
-
 public struct WaveCron: Sendable, Hashable, Codable, Identifiable {
     public let id: String
     public var flow: String

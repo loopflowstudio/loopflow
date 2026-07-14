@@ -22,8 +22,8 @@ struct LoopflowApp: App {
         NSWindow.allowsAutomaticWindowTabbing = false
         bootstrapLoopflowApp()
         // Enrich our own process PATH before any children spawn, so tools launched
-        // through Ghostty surfaces and `--noprofile --norc` shells can find tmux,
-        // git, and agent CLIs that live in Homebrew or ~/.local/bin.
+        // by Wave launchers can find tmux, git, and agent CLIs that live in
+        // Homebrew or ~/.local/bin.
         enrichProcessPathForGUILaunch()
     }
 
@@ -72,20 +72,8 @@ struct LoopflowApp: App {
         }
         .defaultSize(width: 1180, height: 860)
 
-        Window("Terminal Test", id: "terminal-test") {
-            TerminalTestWindow()
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
-        }
-        .defaultSize(width: 800, height: 600)
-
         .commands {
             CommandGroup(after: .appSettings) {
-                Toggle("Beta Features", isOn: Binding(
-                    get: { Flags.beta },
-                    set: { Flags.setBeta($0) }
-                ))
-                Divider()
                 Picker("Appearance", selection: Binding(
                     get: { appearanceMode },
                     set: { appearanceMode = $0 }
@@ -130,13 +118,6 @@ struct LoopflowApp: App {
                     openRepoPanel()
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
-            }
-
-            CommandMenu("Debug") {
-                Button("Terminal Test") {
-                    openWindow(id: "terminal-test")
-                }
-                .keyboardShortcut("t", modifiers: [.command, .shift])
             }
         }
     }

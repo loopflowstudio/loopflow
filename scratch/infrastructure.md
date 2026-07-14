@@ -602,3 +602,10 @@ unused daemon without making queries or chat remote. Remove both modes, their
 HTTP/TLS/token machinery, and the private daemon. The app now starts no
 machine-wide service: it queries the local registry and launches `lf serve`
 only for the Wave the human opens.
+
+That also retires the embedded-terminal build boundary. Ghostty remains only a
+debug window after Wave Chat becomes the product surface, yet every Swift build
+still downloads its binary framework and links terminal-only dependencies.
+Remove the debug terminal, Ghostty package, no-op beta toggle, unused CLI
+installer, and the Flow/Skill/generic Session models that have no rendered or
+runtime consumer. The Mac app should compile from the same nouns it exposes.

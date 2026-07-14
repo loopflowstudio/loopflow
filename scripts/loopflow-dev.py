@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Development commands for Loopflow (Swift app) and GhosttyKit.
+"""Development commands for the Loopflow Swift app.
 
 Usage:
     uv run python scripts/loopflow-dev.py <command>
@@ -9,7 +9,7 @@ Commands:
     build           Build the app
     test            Build and run tests
     run             Build and launch the app
-    run-debug       Build and run with stdout visible (default: bundled lfd only)
+    run-debug       Build and run with stdout visible
     run-debug --with-lfd
                     Also run one-shot local lfd from this branch (for daemon debugging)
     release         Build release .app and .dmg (delegates to release-loopflow.py)
@@ -21,8 +21,6 @@ Commands:
     agent-image     Build the Docker agent image
 
     screenshots     Generate app screenshots
-    ghostty-build   Build GhosttyKit xcframework locally
-    ghostty-update  Build, upload to R2, and update Package.swift
 
 Streaming logs (long-running commands):
     ~/.lf/logs/dev/<repo>.lfd.log
@@ -30,7 +28,6 @@ Streaming logs (long-running commands):
 """
 
 import argparse
-import json
 import os
 import shutil
 import signal
@@ -45,19 +42,15 @@ from typing import TextIO
 
 REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
-GHOSTTY_DIR = REPO_ROOT / "vendor" / "ghostty"
 DEV_APP = Path.home() / "Applications" / "Loopflow Dev.app"
-# Dev build runs under its own bundle id so it never shares connection settings
-# (UserDefaults/keychain) with the installed Loopflow. Worktree dev stays on the
-# local bundled lfd; the installed app keeps its own (e.g. Mac Mini) connection.
+# Dev build runs under its own bundle id so it keeps preferences separate from
+# the installed Loopflow app.
 DEV_BUNDLE_ID = "com.loopflow.mac.dev"
 # Stable self-signed identity used to sign dev builds. Ad-hoc signing (`--sign -`)
 # yields a fresh cdhash every build, so the keychain ACL that "Always Allow"
-# creates for the connection token never matches the next build and macOS
-# re-prompts. A persistent identity keeps the cdhash constant so the ACL sticks.
+# stays stable across builds and macOS keeps previously granted permissions.
 DEV_SIGNING_IDENTITY = "Loopflow Dev"
 LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
-R2_URL = "https://bin.loopflow.studio"
 ENV_SETUP = REPO_ROOT / ".lf" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LFD_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.lfd.log"
@@ -166,7 +159,6 @@ def run_app_bundle_with_log(
 def _stop_loopflow_app(app_path: Path) -> None:
     """Quit Loopflow Dev, falling back to killing the app if a modal blocks quit."""
     executable = app_path / "Contents" / "MacOS" / "Loopflow"
-    bundled_lfd = app_path / "Contents" / "MacOS" / "lfd"
 
     run(["osascript", "-e", 'tell application id "com.loopflow.mac" to quit'], check=False)
     if _wait_for_process_exit(str(executable), timeout_seconds=3):
@@ -174,7 +166,6 @@ def _stop_loopflow_app(app_path: Path) -> None:
 
     print("App did not quit cleanly; forcing shutdown...")
     run(["pkill", "-f", str(executable)], check=False)
-    run(["pkill", "-f", f"{bundled_lfd} serve"], check=False)
     _wait_for_process_exit(str(executable), timeout_seconds=2)
 
 
@@ -223,10 +214,6 @@ def _resolve_lfd_sqlite_path(db_path: str) -> Path:
     return Path.home() / ".lf" / candidate
 
 
-def _bundled_lfd_sqlite_path() -> Path:
-    return Path.home() / "Library" / "Application Support" / "Loopflow" / "lfd" / "loopflow.db"
-
-
 def _remove_sqlite_database(db_path: Path) -> None:
     removed_any = False
     for suffix in ("", "-wal", "-shm"):
@@ -239,7 +226,6 @@ def _remove_sqlite_database(db_path: Path) -> None:
 
 
 def _reset_run_debug_databases(with_lfd: bool) -> None:
-    _remove_sqlite_database(_bundled_lfd_sqlite_path())
     if with_lfd:
         db_path = os.environ.get("LFD_DB_PATH", f"lfd-{REPO_ROOT.name}.db")
         _remove_sqlite_database(_resolve_lfd_sqlite_path(db_path))
@@ -333,8 +319,8 @@ def cmd_run() -> int:
         return result.returncode
 
     _install_dev_app()
-    # Dev launches read this checkout's wave/ dir + lfd AS-IS (LOOPFLOW_DEV_WAVE_REPO);
-    # a plain production launch leaves it unset and reads the main worktree.
+    # Dev launches read this checkout's wave/ dir as-is; a plain production
+    # launch leaves the override unset and reads the main worktree.
     run(
         [
             "open",
@@ -351,17 +337,13 @@ def cmd_run() -> int:
 
 
 def _print_run_debug_checklist() -> None:
-    """Print the manual review path for terminal embedding and workspace routing."""
+    """Print the manual review path for Wave Chat and work supervision."""
     print("Review checklist:")
-    print("  1. Select a waiting wave: default view should stay on Work, not terminal takeover.")
-    print("  2. Open Terminal tab only when that wave has an active terminal session.")
-    print("  3. Switch between two waiting waves: each terminal tab should keep its own surface.")
-    print("  4. Exit terminal with status 0: wave should resume in lfd.")
-    print(
-        "  5. Exit terminal non-zero or stop session: "
-        "wave should fail and surface should disappear."
-    )
-    print("  6. Deselect all waves: repo-wide attention queue should still be the fallback.")
+    print("  1. Select a Wave: its conversation and work map should agree on identity.")
+    print("  2. Send while idle: Wave Chat should launch or reconnect to `lf serve`.")
+    print("  3. Send while turning: the composer should expose Steer and Interrupt & Send.")
+    print("  4. Verify Projects, Tasks, decisions, and PR delivery refresh from `lf status`.")
+    print("  5. Switch Waves: each conversation should retain its own endpoint and playhead.")
 
 
 def cmd_run_debug(with_lfd: bool = False, repo: Path = REPO_ROOT) -> int:
@@ -413,7 +395,7 @@ def cmd_run_debug(with_lfd: bool = False, repo: Path = REPO_ROOT) -> int:
         DEV_APP,
         LOOPFLOW_STREAM_LOG,
         args=["--repo", str(repo)],
-        # Dev launches read the launched checkout's wave/ dir + lfd AS-IS; a plain
+        # Dev launches read the launched checkout's wave/ dir as-is; a plain
         # production launch leaves this unset and reads the main worktree.
         env={"LOOPFLOW_DEV_WAVE_REPO": str(repo)},
     )
@@ -849,192 +831,24 @@ def _apply_dev_identity(plist: Path) -> None:
 
 def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:
     if profile == "release":
-        cargo_cmd = ["cargo", "build", "--locked", "--release", "--bin", "lf", "--bin", "lfd"]
+        cargo_cmd = ["cargo", "build", "--locked", "--release", "--bin", "lf"]
         bin_dir = REPO_ROOT / "target" / "release"
     else:
-        cargo_cmd = ["cargo", "build", "--locked", "--bin", "lf", "--bin", "lfd"]
+        cargo_cmd = ["cargo", "build", "--locked", "--bin", "lf"]
         bin_dir = REPO_ROOT / "target" / "debug"
 
     result = run(cargo_cmd, cwd=REPO_ROOT, check=False)
     if result.returncode != 0:
-        raise RuntimeError("Failed to build bundled lf/lfd binaries")
+        raise RuntimeError("Failed to build bundled lf binary")
 
-    for binary in ("lf", "lfd"):
+    for binary in ("lf",):
         source = bin_dir / binary
         if not source.exists():
             raise RuntimeError(f"Missing built binary: {source}")
         shutil.copy(source, app_macos_dir / binary)
 
 
-# --- Ghostty commands ---
-
-
-def cmd_ghostty_build() -> int:
-    """Build GhosttyKit xcframework locally."""
-    print("=== Building Ghostty for Loopflow ===")
-
-    # Check zig
-    result = run_capture(["zig", "version"])
-    if result.returncode != 0:
-        print("Error: Zig not found. Install with: brew install zig")
-        return 1
-    print(f"Using Zig {result.stdout.strip()}")
-
-    # Check metal toolchain
-    result = run_capture(["xcrun", "-sdk", "macosx", "metal", "--version"])
-    if result.returncode != 0:
-        print("Metal toolchain not found. Downloading...")
-        run(["xcodebuild", "-downloadComponent", "MetalToolchain"])
-
-    # Clone if needed
-    if not GHOSTTY_DIR.exists():
-        print("Cloning Ghostty...")
-        GHOSTTY_DIR.parent.mkdir(parents=True, exist_ok=True)
-        result = run(
-            [
-                "git",
-                "clone",
-                "--depth",
-                "1",
-                "https://github.com/ghostty-org/ghostty.git",
-                str(GHOSTTY_DIR),
-            ],
-            check=False,
-        )
-        if result.returncode != 0:
-            return result.returncode
-
-    # Build
-    print("Building Ghostty...")
-    result = run(["zig", "build", "-Doptimize=ReleaseFast"], cwd=GHOSTTY_DIR, check=False)
-    if result.returncode != 0:
-        return result.returncode
-
-    # Verify
-    xcfw = GHOSTTY_DIR / "macos" / "GhosttyKit.xcframework"
-    if not xcfw.exists():
-        xcfw = GHOSTTY_DIR / "zig-out" / "frameworks" / "GhosttyKit.xcframework"
-
-    if xcfw.exists():
-        print(f"Success: {xcfw}")
-        return 0
-    else:
-        print("Error: GhosttyKit.xcframework not found")
-        return 1
-
-
-def _load_r2_credentials() -> tuple[str, str, str] | None:
-    """Load R2 credentials from Doppler, falling back to env."""
-    # Prefer Doppler — env vars may be stale from old shell sessions
-    try:
-        result = run_capture(
-            [
-                "doppler",
-                "secrets",
-                "download",
-                "--no-file",
-                "--project",
-                "loopflow",
-                "--config",
-                "prd",
-            ]
-        )
-        if result.returncode == 0:
-            secrets = json.loads(result.stdout)
-            account_id = secrets.get("R2_ACCOUNT_ID", "").strip()
-            access_key = secrets.get("R2_ACCESS_KEY_ID", "").strip()
-            secret_key = secrets.get("R2_SECRET_ACCESS_KEY", "").strip()
-            if all([account_id, access_key, secret_key]):
-                return account_id, access_key, secret_key
-    except FileNotFoundError:
-        pass
-
-    # Fall back to env
-    account_id = os.environ.get("R2_ACCOUNT_ID", "").strip()
-    access_key = os.environ.get("R2_ACCESS_KEY_ID", "").strip()
-    secret_key = os.environ.get("R2_SECRET_ACCESS_KEY", "").strip()
-    if all([account_id, access_key, secret_key]):
-        return account_id, access_key, secret_key
-
-    print(
-        "R2 credentials not found in Doppler or env "
-        "(R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)"
-    )
-    return None
-
-
-def cmd_ghostty_update() -> int:
-    """Build GhosttyKit, upload to R2, and update Package.swift."""
-    # Build first
-    result = cmd_ghostty_build()
-    if result != 0:
-        return result
-
-    # Get commit
-    result = run_capture(["git", "rev-parse", "--short", "HEAD"], cwd=GHOSTTY_DIR)
-    commit = result.stdout.strip()
-    print(f"Ghostty commit: {commit}")
-
-    # Find xcframework
-    xcfw = GHOSTTY_DIR / "macos" / "GhosttyKit.xcframework"
-    if not xcfw.exists():
-        xcfw = GHOSTTY_DIR / "zig-out" / "frameworks" / "GhosttyKit.xcframework"
-
-    # Create zip
-    zip_name = f"GhosttyKit-{commit}.xcframework.zip"
-    zip_path = Path(tempfile.gettempdir()) / zip_name
-    print(f"Creating {zip_path}...")
-    if zip_path.exists():
-        zip_path.unlink()
-    run(["zip", "-r", str(zip_path), "GhosttyKit.xcframework"], cwd=xcfw.parent)
-
-    # Compute checksum
-    result = run_capture(["swift", "package", "compute-checksum", str(zip_path)])
-    checksum = result.stdout.strip()
-    print(f"Checksum: {checksum}")
-
-    # Upload to R2
-    print("Uploading to R2...")
-    try:
-        import boto3
-    except ImportError:
-        print("boto3 required: uv pip install boto3")
-        return 1
-
-    r2_env = _load_r2_credentials()
-    if not r2_env:
-        return 1
-    account_id, access_key, secret_key = r2_env
-
-    client = boto3.client(
-        "s3",
-        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        region_name="auto",
-    )
-    client.upload_file(
-        str(zip_path),
-        "bin",
-        zip_name,
-        ExtraArgs={
-            "ContentType": "application/zip",
-            "CacheControl": "public, max-age=31536000, immutable",
-        },
-    )
-    print(f"Uploaded to {R2_URL}/{zip_name}")
-
-    # Update Package.swift
-    url = f"{R2_URL}/{zip_name}"
-    _update_package_swift(url, checksum)
-
-    print()
-    print(f"Done! GhosttyKit updated to {commit}")
-    print("Run 'swift package resolve' to download the new version")
-    print()
-    print("Optionally remove vendor/ghostty to save disk space:")
-    print(f"  rm -rf {GHOSTTY_DIR}")
-    return 0
+# --- Screenshots ---
 
 
 def cmd_screenshots() -> int:
@@ -1047,27 +861,6 @@ def cmd_screenshots() -> int:
     return result.returncode
 
 
-def _update_package_swift(url: str, checksum: str) -> None:
-    """Update Package.swift with new URL and checksum."""
-    import re
-
-    package_swift = SWIFT_DIR / "Package.swift"
-    print(f"Updating {package_swift}...")
-    content = package_swift.read_text()
-
-    content = re.sub(
-        r'(\.binaryTarget\([^)]*url:\s*")[^"]*(")',
-        rf"\g<1>{url}\2",
-        content,
-    )
-    content = re.sub(
-        r'(\.binaryTarget\([^)]*checksum:\s*")[^"]*(")',
-        rf"\g<1>{checksum}\2",
-        content,
-    )
-    package_swift.write_text(content)
-
-
 # --- Main ---
 
 
@@ -1076,7 +869,7 @@ COMMANDS = {
     "build": (cmd_build, "Build the app"),
     "test": (cmd_test, "Build and run tests"),
     "run": (cmd_run, "Build and launch the app"),
-    "run-debug": (cmd_run_debug, "Build and run with stdout visible (bundled lfd default)"),
+    "run-debug": (cmd_run_debug, "Build and run with stdout visible"),
     "release": (cmd_release, "Build release .app and .dmg"),
     "clean": (cmd_clean, "Remove dev app and reset permissions"),
     "xcode": (cmd_xcode, "Open in Xcode"),
@@ -1084,14 +877,12 @@ COMMANDS = {
     "lfd": (cmd_lfd, "Stop local lfd and run from this branch (-k for preflight kill)"),
     "agent-image": (cmd_agent_image, "Build the Docker agent image"),
     "screenshots": (cmd_screenshots, "Generate app screenshots"),
-    "ghostty-build": (cmd_ghostty_build, "Build GhosttyKit xcframework locally"),
-    "ghostty-update": (cmd_ghostty_update, "Build, upload to R2, update Package.swift"),
 }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Development commands for Loopflow and GhosttyKit",
+        description="Development commands for Loopflow",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", metavar="command")
@@ -1106,16 +897,10 @@ def main() -> int:
                 help="Aggressive preflight kill (default also kills port 2486 listeners)",
             )
         if name == "run-debug":
-            mode_group = sub.add_mutually_exclusive_group()
-            mode_group.add_argument(
+            sub.add_argument(
                 "--with-lfd",
                 action="store_true",
                 help="Also run one-shot lfd lifecycle from this branch",
-            )
-            mode_group.add_argument(
-                "--no-lfd",
-                action="store_true",
-                help="Run UI only (default; bundled lfd managed by Loopflow)",
             )
             sub.add_argument(
                 "--repo",

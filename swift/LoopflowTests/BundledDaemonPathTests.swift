@@ -74,14 +74,11 @@ struct BundledDaemonPathTests {
         #expect(once.contains("/opt/homebrew/bin"))
     }
 
-    // Reproduces the Ghostty failure mode: once a surface is opened, Ghostty
-    // spawns `/usr/bin/login -flp ... /bin/bash --noprofile --norc -c 'exec -l tmux ...'`.
-    // The `--noprofile --norc` flags mean bash doesn't resource any login files,
-    // so PATH comes entirely from Loopflow's own process environment. Under the
-    // bare GUI PATH, `exec -l tmux` fails with "tmux: not found"; under our
-    // enriched env it resolves.
+    // A non-interactive shell does not read user profiles, so PATH comes from
+    // Loopflow's process environment. Prove local launch commands inherit the
+    // enriched path.
     @Test("bash --noprofile --norc -c 'exec tmux' works with enriched env, fails with bare GUI env")
-    func ghosttyStyleBashExecReproducesAndFixes() throws {
+    func nonInteractiveShellResolvesTmux() throws {
         guard isToolInstalledSomewhere("tmux") else { return }
 
         let guiEnv = ["PATH": Self.guiPath]
@@ -91,7 +88,7 @@ struct BundledDaemonPathTests {
             args: ["--noprofile", "--norc", "-c", "exec tmux -V"],
             env: guiEnv
         )
-        #expect(bare.exit != 0, "expected bare GUI env to fail under Ghostty-style bash invocation")
+        #expect(bare.exit != 0, "expected the bare GUI environment to miss tmux")
 
         let enriched = try spawnAndWait(
             "/bin/bash",

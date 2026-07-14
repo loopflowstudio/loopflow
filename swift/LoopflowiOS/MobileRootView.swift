@@ -165,7 +165,7 @@ private struct ConnectionBanner: View {
             .padding(.horizontal, Spacing.lg)
             .padding(.top, Spacing.xs)
             .transition(.move(edge: .top).combined(with: .opacity))
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: bannerIcon != nil)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: bannerIcon)
         }
     }
 

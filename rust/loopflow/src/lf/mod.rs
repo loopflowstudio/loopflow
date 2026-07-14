@@ -545,7 +545,7 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Start or resume the one durable Session for an existing Linear Project
+    /// Start or resume the current Session for an existing Linear Project
     Run {
         /// Linear Project UUID or unique slug
         project_id: String,
@@ -556,6 +556,7 @@ pub enum ProjectCommand {
     },
     /// Show durable Project Session state and reconcile process liveness
     Status {
+        /// Linear Project UUID, unique slug, or historical Project Session id
         project_id: String,
         #[arg(long)]
         json: bool,

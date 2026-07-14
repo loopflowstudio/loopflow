@@ -158,11 +158,13 @@ lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
 `lf wave <name>` starts the durable Wave listener, resident, and persistent
-playhead. A Project Session pursues one Linear Project's KRs without a
-worktree. Every Task requires that Project Session; `task start/run` ensures it
-before reserving the Task. The Task starts only after its Linear issue exists,
-owns one stable worktree and provider transcript, and remains resumable through
-serial PRs, review, and explicit completion.
+playhead. A Project Session pursues one Linear Project's KRs without a worktree.
+Each Project has at most one current Session; terminal Sessions remain readable
+history and the next pursuit creates a successor. Every Task requires the
+current Project Session; `task start/run` ensures it before reserving the Task.
+The Task starts only after its Linear issue exists, owns one stable worktree and
+provider transcript, and remains resumable through serial PRs, review, and
+explicit completion.
 `lf task attach` exposes a writable prompt that records structured commands;
 terminal bytes never drive the provider directly.
 

@@ -136,10 +136,12 @@ interrupt with replacement advance the version; `follow-up` does not replace
 current intent. A receipt distinguishes provider application from explicit
 child incorporation.
 
-`lf project run` starts one durable KR-pursuit session with no branch or
-worktree. It creates and supervises Task Sessions, stops while only child
-progress can change the answer, and resumes from typed Task observations. The
-Wave stays directly steerable while Project and Task Sessions run.
+`lf project run` starts or resumes the current durable KR-pursuit Session with
+no branch or worktree. Completing or abandoning it preserves that history; the
+next run creates one successor for the same Linear Project. It creates and
+supervises Task Sessions, stops while only child progress can change the answer,
+and resumes from typed Task observations. The Wave stays directly steerable
+while Project and Task Sessions run.
 
 Inspect exactly what an agent received and what Loopflow observed:
 

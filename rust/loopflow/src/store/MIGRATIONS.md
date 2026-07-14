@@ -1,13 +1,18 @@
 # Schema migrations
 
 ```bash
-uv run python scripts/new_migration.py add_wave_colour   # writes 0.10.002_add_wave_colour.sql
+uv run python scripts/new_migration.py add_wave_colour
 uv run python scripts/check_migrations.py                # what CI and the release run
 ```
 
 Write the SQL, paste the printed entry at the end of `MIGRATIONS` in
 `migrations.rs`, and you are done. The store applies every migration a database
 has not seen, in id order, exactly once.
+
+The runner temporarily disables foreign-key actions around the transaction so a
+SQLite table rebuild cannot cascade-delete child history. It runs
+`PRAGMA foreign_key_check` before commit and restores enforcement afterward; a
+migration that leaves a dangling reference rolls back as one unit.
 
 ## The one rule
 

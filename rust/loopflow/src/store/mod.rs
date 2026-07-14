@@ -522,6 +522,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn terminal_project_history_keeps_one_current_successor() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+
+        let mut predecessor = make_project_session(&wave);
+        predecessor.set_status(ProjectSessionStatus::Abandoned, "legacy Session ended");
+        store.create_project_session(&predecessor).await.unwrap();
+
+        let mut successor = make_project_session(&wave);
+        successor.status = ProjectSessionStatus::Created;
+        successor.status_reason = format!("successor to {}", predecessor.id);
+        successor.latest_process = None;
+        successor.provider_session_id = None;
+        successor.created_at += time::Duration::SECOND;
+        successor.updated_at = successor.created_at;
+        store.create_project_session(&successor).await.unwrap();
+
+        assert_eq!(
+            store
+                .get_project_session_by_project("developer-efficiency")
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            successor.id
+        );
+        assert_eq!(
+            store
+                .get_project_session_by_project(predecessor.id.as_str())
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            predecessor.id
+        );
+        assert_eq!(
+            store
+                .list_project_sessions(Some(wave.id()))
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let mut parallel = successor.clone();
+        parallel.id = ProjectSessionId::new();
+        assert!(store.create_project_session(&parallel).await.is_err());
+    }
+
+    #[tokio::test]
     async fn child_directives_reserve_replace_and_incorporate_atomically() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))

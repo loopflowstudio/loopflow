@@ -27,6 +27,8 @@ pub struct ProjectSessionSnapshot {
     pub project_slug: String,
     pub project_name: String,
     pub session_id: String,
+    pub predecessor_session_id: Option<String>,
+    pub successor_session_id: Option<String>,
     pub wave: String,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
@@ -150,33 +152,37 @@ pub fn project_run(
     let directive = normalize_directive(directive)?;
     if let Some(existing) = block_on_project(async {
         let store = project_store().await?;
-        let mut existing = store
+        let Some(mut existing) = store
             .get_project_session_by_project(project_id)
             .await
-            .map_err(|error| project_error(format!("failed to read Project Session: {error}")))?;
-        if let Some(session) = &mut existing {
-            reconcile_project_liveness(&store, session).await?;
-            if let Some(requested) = directive.as_deref() {
-                let current = store
-                    .child_directives(&ChildRef::Project(session.id.clone()))
-                    .await
-                    .map_err(|error| project_error(error.to_string()))?
-                    .into_iter()
-                    .find(|value| value.version == session.current_directive_version)
-                    .ok_or_else(|| project_error("Project Session has no current directive"))?;
-                if current.text != requested {
-                    return Err(project_error(format!(
-                        "Project {} already exists with directive v{}; use `lf project steer {} <new-direction>` to replace it",
-                        session.launch.project.slug,
-                        current.version,
-                        session.launch.project.slug,
-                    )));
-                }
+            .map_err(|error| project_error(format!("failed to read Project Session: {error}")))?
+        else {
+            return Ok(None);
+        };
+        reconcile_project_liveness(&store, &mut existing).await?;
+        if existing.status.is_terminal() {
+            return Ok(None);
+        }
+        if let Some(requested) = directive.as_deref() {
+            let current = store
+                .child_directives(&ChildRef::Project(existing.id.clone()))
+                .await
+                .map_err(|error| project_error(error.to_string()))?
+                .into_iter()
+                .find(|value| value.version == existing.current_directive_version)
+                .ok_or_else(|| project_error("Project Session has no current directive"))?;
+            if current.text != requested {
+                return Err(project_error(format!(
+                    "Project {} already exists with directive v{}; use `lf project steer {} <new-direction>` to replace it",
+                    existing.launch.project.slug,
+                    current.version,
+                    existing.launch.project.slug,
+                )));
             }
         }
-        Ok(existing)
+        Ok(Some(existing))
     })? {
-        if existing.status.is_terminal() || existing.status.is_process_active() {
+        if existing.status.is_process_active() {
             return Ok(existing);
         }
         return block_on_project(async move {
@@ -219,12 +225,14 @@ pub(crate) fn reserve_project_session(
     });
     block_on_project(async move {
         let store = project_store().await?;
-        if let Some(existing) = store
+        let predecessor = store
             .get_project_session_by_project(&resolved.project.id)
             .await
-            .map_err(|error| project_error(format!("failed to read Project Session: {error}")))?
-        {
-            return Ok(existing);
+            .map_err(|error| project_error(format!("failed to read Project Session: {error}")))?;
+        if let Some(existing) = &predecessor {
+            if !existing.status.is_terminal() {
+                return Ok(existing.clone());
+            }
         }
         let wave = store
             .get_wave_by_name(&resolved.snapshot.wave)
@@ -254,7 +262,10 @@ pub(crate) fn reserve_project_session(
             current_directive_version: 1,
             incorporated_directive_version: 0,
             status: ProjectSessionStatus::Created,
-            status_reason: "Linear Project reserved for pursuit".to_string(),
+            status_reason: predecessor.as_ref().map_or_else(
+                || "Linear Project reserved for pursuit".to_string(),
+                |previous| format!("Project pursuit succeeds terminal Session {}", previous.id),
+            ),
             status_at: now,
             iteration: 0,
             observation_cursor: 0,
@@ -285,7 +296,9 @@ pub(crate) fn reserve_project_session(
                 .await
                 .map_err(|read_error| project_error(read_error.to_string()))?
             {
-                return Ok(existing);
+                if !existing.status.is_terminal() && existing.id != session.id {
+                    return Ok(existing);
+                }
             }
             return Err(project_error(format!(
                 "failed to reserve Project Session: {error}"
@@ -601,11 +614,36 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
             .await
             .map_err(|error| project_error(error.to_string()))?
             .len() as u32;
+        let mut history = store
+            .list_project_sessions(Some(wave.id()))
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .into_iter()
+            .filter(|candidate| candidate.launch.project.id == session.launch.project.id)
+            .collect::<Vec<_>>();
+        history.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then(left.id.as_str().cmp(right.id.as_str()))
+        });
+        let position = history
+            .iter()
+            .position(|candidate| candidate.id == session.id)
+            .ok_or_else(|| project_error("Project Session disappeared from its own history"))?;
+        let predecessor_session_id = position
+            .checked_sub(1)
+            .and_then(|index| history.get(index))
+            .map(|candidate| candidate.id.to_string());
+        let successor_session_id = history
+            .get(position + 1)
+            .map(|candidate| candidate.id.to_string());
         Ok(ProjectSessionSnapshot {
             project_id: session.launch.project.id.as_str().to_string(),
             project_slug: session.launch.project.slug,
             project_name: session.launch.project.name,
             session_id: session.id.to_string(),
+            predecessor_session_id,
+            successor_session_id,
             wave: wave.name().to_string(),
             current_directive_version: session.current_directive_version,
             incorporated_directive_version: session.incorporated_directive_version,

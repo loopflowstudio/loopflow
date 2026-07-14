@@ -1053,6 +1053,127 @@ The stopped-interrupt regression test and clippy pass.
 
 - Wave Chat control-source lineage and visual hierarchy.
 
+## Product reset design — no `lfd`
+
+> “I’m not sure we need lfd at all right now.”
+>
+> “We might want to figure out what we want to actually use in the product
+> right now or next/first.”
+>
+> “Aggressively reduce and perhaps eliminate lfd as a notion. I do think we’ll
+> have one, but we shouldn’t build around it until we actually need it.”
+
+### What the product uses now
+
+```text
+Human / Mac
+    ├── lf commands ─────────────────────┐
+    └── Wave Chat ── live Wave listener  │
+                                         ▼
+                              local SQLite store
+                                  │          │
+                         Project Session  Task Session
+                                               │
+                                      worktree + PR to main
+```
+
+- `lf` is the one machine-wide command and JSON API.
+- The local store coordinates durable Wave, Project Session, Task Session,
+  command, event, PM-snapshot, credential, and trace state without a daemon.
+- `lf serve <wave>` is the resident product process. Its per-Wave local HTTP
+  listener exists because the Mac and resident need live messages and SSE.
+- Project and Task Sessions are explicitly launched child processes. They use
+  the store; they do not call a global server.
+- The Mac reads current state by invoking `lf --json` and connects directly to
+  the selected Wave listener for chat.
+- `lf auth` runs provider/browser authentication directly. Linear refreshes its
+  OAuth grant before PM access. `gh` and provider CLIs own their own auth.
+- Task runner/status already reconcile open or merged PR state through `gh`.
+  Merge correctness does not require a webhook daemon.
+
+### What to delete
+
+Delete the `lfd` binary and the assumption that Loopflow needs one global HTTP
+service. This includes:
+
+- install/start/stop/status service plumbing and self-hosted `lfd` deployment;
+- the `/v0` HTTP router, DTOs, auth middleware, read APIs, remote smoke clients,
+  and active docs;
+- GitHub webhook ingress and its radio-command bridge;
+- the background provider-token refresh loop (refresh on use instead);
+- global health/metrics for a process that no longer exists;
+- remote-execution claims with no Project/Task transport behind them;
+- `lfd`-specific config, session token, onboarding, observability, and security
+  shells that have no remaining caller.
+
+The read API has no current product consumer. The only non-test `/v0/waves`
+caller is a private-host verification probe; it can disappear with that host
+surface. Repos, sessions, attention, flows, catalog, and providers have no
+non-test caller. Tests and docs that exercise an otherwise unused API do not
+justify keeping it.
+
+### What to keep, under its real owner
+
+Deleting the daemon does not mean deleting useful libraries that happen to sit
+under `lfd/` today:
+
+| Current owner | Surviving owner |
+|---|---|
+| `lfd::pm` | PM domain module used by `lf pm`, Waves, Projects, Tasks, and Mac snapshots |
+| `lfdb` | local `store` module; default `~/.lf/loopflow.db`, override `LF_DB_PATH` |
+| `lfd::types::Wave` | Wave domain |
+| provider tokens and credential types | provider-auth/store boundary |
+| repo identity and edges | store/repository domain if still consumed |
+| path/token redaction helpers | root security module only when a live caller remains |
+
+Do not move an orphan merely to remove the namespace. Prove a non-test caller
+or delete it. `Summary`, legacy chat-message/memory tables, generic control
+sessions, and attention records each get the same audit before receiving a new
+home or a new typed id.
+
+Rename daemon-derived ambient variables with no compatibility aliases:
+
+```text
+LFD_WAVE_ID       → LF_WAVE_ID
+LFD_SESSION_ID    → LF_SESSION_ID
+LFD_CHANNEL       → LF_CHANNEL
+LFD_DB_PATH       → LF_DB_PATH
+```
+
+Project/Task-specific environment variables retain their domain names.
+
+### What comes next
+
+1. Finish the local Human → Wave → Project → Task → PR product and Wave Chat
+   inspector/steering UX on this smaller runtime.
+2. Dogfood real multi-Task Projects and learn which continuous machine-level
+   behavior is missing.
+3. Only then design a remote transport or machine agent around named Project,
+   Task, auth, and observation operations. Do not resurrect arbitrary exec or a
+   generic read API as the starting point.
+
+### Constraints
+
+- Keep the per-Wave listener; it is part of Wave residency, not `lfd`.
+- Keep daemonless SQLite transactions and one-writer worktree ownership.
+- Remove webhook acceleration without weakening truth: runner/status/wait must
+  still observe merge and reconcile Linear.
+- On-use token refresh is the correctness path. Losing pre-emptive background
+  refresh may make the first PM operation slower, but not incorrect.
+- No compatibility aliases, old database upgrade path, or dormant remote API.
+- Active docs, install scripts, release automation, Python, Swift, fixtures,
+  and log categories must describe the surviving product.
+
+### Done when
+
+- The Rust crate has no `lfd` binary or module and no `lfdb` module name.
+- `rg '\blfd\b|LFD_'` finds only deliberately retained historical release
+  artifacts, if any; no active source, test, script, or documentation depends
+  on them.
+- `lf`, Wave serve/chat, PM, Project Session, Task Session, auth, trace, and
+  fresh-store gates pass with no global daemon running.
+- The repository is net-negative by a meaningful margin.
+
 ## Next reduction design — typed identity and a clean registry
 
 > “This should probably be LfId now right?”
@@ -1075,7 +1196,7 @@ same UUID strings, but old databases and old clients are explicitly unsupported.
 ### The demo
 
 `rg '\bLfdId\b|task_capacity|stack_parent|StackParentOpen' rust/loopflow/src`
-returns no product code. A fresh `lfd.db` opens, Wave/Project/Task status and
+returns no product code. A fresh `loopflow.db` opens, Wave/Project/Task status and
 control tests pass, `lf wt list` is flat, and `lf rebase --plan` targets main
 unless the caller supplies `--onto`.
 

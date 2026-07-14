@@ -263,6 +263,11 @@ pub(crate) fn reserve_project_session(
             provider,
             provider_session_id: None,
             latest_process: None,
+            execution: Some(
+                crate::engine::process::pinned_execution_context()
+                    .map_err(|error| project_error(error.to_string()))?,
+            ),
+            abandon_intent: None,
             created_at: now,
             updated_at: now,
         };
@@ -385,6 +390,17 @@ pub(crate) async fn launch_project_process(
     store: &SharedStore,
     session: &mut ProjectSession,
 ) -> OpsResult<()> {
+    // Resolve the pinned context first: a Session that cannot name its own binary
+    // is not launchable at all, so say that before probing git or reserving a
+    // generation it will never use.
+    let execution = session.execution.clone().ok_or_else(|| {
+        project_error(format!(
+            "Project {} predates pinned execution context and cannot be relaunched safely; \
+             abandon it and pursue the Linear project again to create a Session that records \
+             its own `lf` and database",
+            session.launch.project.slug
+        ))
+    })?;
     // Re-check at the launch boundary: commands and observations can wake a
     // stopped Project long after its initial reservation.
     let wave = owning_wave(store, session).await?;
@@ -429,14 +445,17 @@ pub(crate) async fn launch_project_process(
         .await
         .map_err(|error| project_error(error.to_string()))?;
 
+    // argv[0] and the store come from the Session, never from this process.
     let argv = vec![
-        resolve_lf_binary().to_string_lossy().to_string(),
+        execution.lf_bin.to_string_lossy().to_string(),
         "__project".to_string(),
         session.id.to_string(),
         "--generation".to_string(),
         generation.to_string(),
     ];
     let generation_text = generation.to_string();
+    let db_path = execution.db_path.to_string_lossy().to_string();
+    let lf_home = execution.lf_home.to_string_lossy().to_string();
     let environment = [
         (
             crate::engine::wave_context::WAVE_ID_ENV,
@@ -444,6 +463,8 @@ pub(crate) async fn launch_project_process(
         ),
         ("LF_PROJECT_SESSION_ID", session.id.as_str()),
         ("LF_PROJECT_GENERATION", generation_text.as_str()),
+        ("LF_DB_PATH", db_path.as_str()),
+        ("LF_HOME", lf_home.as_str()),
     ];
     if let Err(error) =
         start_lf_session_with_env(&tmux_name, Path::new(wave.repo()), &argv, &environment).await
@@ -956,7 +977,14 @@ pub(crate) async fn wake_project_session(session_id: &ProjectSessionId) -> OpsRe
         .await
         .map_err(|error| project_error(error.to_string()))?
         .ok_or_else(|| project_error(format!("Project Session {session_id} not found")))?;
-    if !session.status.is_process_active() && !session.status.is_terminal() {
+    // A wake is a supervisor restart: a Task observation arrived and the Project
+    // may want to judge it. That is never a reason to revive a Project whose end
+    // was already decided.
+    if let Some(bar) = session.supervisor_restart_bar() {
+        tracing::info!(project_session = %session_id, "not waking Project Session: {bar}");
+        return Ok(());
+    }
+    if !session.status.is_process_active() {
         launch_project_process(&store, &mut session).await?;
     }
     Ok(())

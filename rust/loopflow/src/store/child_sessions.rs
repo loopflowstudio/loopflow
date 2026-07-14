@@ -2,8 +2,8 @@
 //! observation outbox that links each event to its next responsible recipient.
 
 use crate::child_session::{
-    BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId, ChildDirective, ChildRef,
-    ObservationRecipient,
+    AbandonIntent, BoundaryResult, ChildCommand, ChildCommandEffect, ChildCommandId,
+    ChildDirective, ChildRef, ObservationRecipient,
 };
 use crate::id::WaveId;
 use crate::project_session::{
@@ -95,6 +95,19 @@ impl Store {
         let command = command.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.insert_child_command(&command)
+        })
+        .await
+    }
+
+    pub async fn create_child_abandon_command(
+        &self,
+        command: &ChildCommand,
+        intent: &AbandonIntent,
+    ) -> StoreResult<()> {
+        let command = command.clone();
+        let intent = intent.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.insert_child_abandon_command(&command, &intent)
         })
         .await
     }

@@ -10,9 +10,7 @@ use crate::child_session::{
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{get_default_branch, rev_parse};
-use crate::engine::process::{
-    resolve_lf_binary, start_lf_session_with_env, tmux_session_exists, tmux_session_slug,
-};
+use crate::engine::process::{start_lf_session_with_env, tmux_session_exists, tmux_session_slug};
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
@@ -370,6 +368,11 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
             provider_session_id: None,
             latest_process: None,
             pull_request: None,
+            execution: Some(
+                crate::engine::process::pinned_execution_context()
+                    .map_err(|error| task_error(error.to_string()))?,
+            ),
+            abandon_intent: None,
             created_at: now,
             updated_at: now,
         };
@@ -543,6 +546,16 @@ pub(crate) async fn relaunch_inactive_process(
 }
 
 async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> OpsResult<()> {
+    // Resolve the pinned context before reserving anything: a Session that cannot
+    // name its own binary must not burn a generation discovering that.
+    let execution = session.execution.clone().ok_or_else(|| {
+        task_error(format!(
+            "Task {} predates pinned execution context and cannot be relaunched safely; \
+             abandon it and run the Linear task again to create a Session that records \
+             its own `lf` and database",
+            session.launch.issue.identifier
+        ))
+    })?;
     let tmux_name = format!(
         "lf-task-{}-{}",
         tmux_session_slug(&session.launch.issue.identifier),
@@ -592,14 +605,19 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
         .await
         .map_err(|error| task_error(error.to_string()))?;
 
+    // argv[0] and the store come from the Session, never from this process:
+    // whoever queued the command does not get to choose the child's binary or
+    // its database.
     let argv = vec![
-        resolve_lf_binary().to_string_lossy().to_string(),
+        execution.lf_bin.to_string_lossy().to_string(),
         "__task".to_string(),
         session.id.to_string(),
         "--generation".to_string(),
         generation.to_string(),
     ];
     let generation_text = generation.to_string();
+    let db_path = execution.db_path.to_string_lossy().to_string();
+    let lf_home = execution.lf_home.to_string_lossy().to_string();
     let environment = [
         (
             crate::engine::wave_context::WAVE_ID_ENV,
@@ -607,6 +625,8 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
         ),
         ("LF_TASK_SESSION_ID", session.id.as_str()),
         ("LF_TASK_GENERATION", generation_text.as_str()),
+        ("LF_DB_PATH", db_path.as_str()),
+        ("LF_HOME", lf_home.as_str()),
     ];
     if let Err(error) =
         start_lf_session_with_env(&tmux_name, &session.worktree, &argv, &environment).await

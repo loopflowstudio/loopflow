@@ -35,10 +35,11 @@ before anything is cut. Same script, both paths.
 0.10.001_initial.sql
  │  │  │   └── name — part of the identity, so a rename is a break
  │  │  └────── ordinal, three digits, restarting in each namespace
- └──┴───────── namespace: the Loopflow major.minor that first ships it
+ └──┴───────── namespace: package major.minor when authored
 ```
 
-- Patch releases append into the current namespace; a minor bump starts a new one.
+- Patch releases append into the current namespace; after a minor bump,
+  subsequent migrations start a new one.
   `0.11.001` and `0.12.001` are distinct migrations.
 - Order is the numeric tuple `(major, minor, ordinal)`, never a string sort —
   `0.9.001` precedes `0.10.001`, which lexical order would invert.

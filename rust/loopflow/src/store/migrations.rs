@@ -9,7 +9,7 @@ use crate::store::{StoreError, StoreResult};
 
 /// A migration's release-scoped identity: `{major}.{minor}.{ordinal:03}`.
 ///
-/// The namespace is the Loopflow major.minor that first ships the migration;
+/// The namespace is the package major.minor when the migration is authored;
 /// patch releases append into the same namespace. Ordering is the numeric tuple,
 /// never a string sort — `0.9.001` precedes `0.10.001`, which lexical order
 /// would invert.

@@ -405,8 +405,8 @@ async fn snapshot_projects(
     for project_session in &project_sessions {
         let index = project_index(
             &details,
-            project_session.project.id.as_str(),
-            &project_session.project.slug,
+            project_session.launch.project.id.as_str(),
+            &project_session.launch.project.slug,
         )?;
         details[index].next_move =
             next_move_for_project(project_session.status, &project_session.status_reason);
@@ -429,7 +429,8 @@ async fn snapshot_projects(
         })?;
         let index = project_index(&details, project_slug, project_slug)?;
         let runtime_session = task_sessions.iter().find(|session| {
-            session.issue.id.as_str() == item.id || session.issue.identifier == item.identifier
+            session.launch.issue.id.as_str() == item.id
+                || session.launch.issue.identifier == item.identifier
         });
         details[index]
             .tasks
@@ -439,23 +440,23 @@ async fn snapshot_projects(
     for task_session in &task_sessions {
         let project_index = project_index(
             &details,
-            task_session.project.id.as_str(),
-            &task_session.project.slug,
+            task_session.launch.project.id.as_str(),
+            &task_session.launch.project.slug,
         )?;
         if details[project_index].tasks.iter().any(|task| {
-            task.task.id == task_session.issue.id.as_str()
-                || task.task.identifier == task_session.issue.identifier
+            task.task.id == task_session.launch.issue.id.as_str()
+                || task.task.identifier == task_session.launch.issue.identifier
         }) {
             continue;
         }
         let task = PmItem {
-            id: task_session.issue.id.as_str().to_string(),
-            identifier: task_session.issue.identifier.clone(),
-            name: task_session.issue.title.clone(),
-            description: task_session.issue.description.clone(),
+            id: task_session.launch.issue.id.as_str().to_string(),
+            identifier: task_session.launch.issue.identifier.clone(),
+            name: task_session.launch.issue.title.clone(),
+            description: task_session.launch.issue.description.clone(),
             rank: u32::MAX,
             completed: task_session.status.is_terminal(),
-            project: Some(task_session.project.slug.clone()),
+            project: Some(task_session.launch.project.slug.clone()),
             assignee: None,
         };
         details[project_index]

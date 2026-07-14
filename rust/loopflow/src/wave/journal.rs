@@ -861,12 +861,12 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             }
             EventKind::TaskObserved { observation } => {
                 let message = task_observation_message(observation);
-                let mut turn = ChatTurn::user(format!("turn-{}", event.seq), String::new());
-                turn.created_at = event.at_rfc3339();
-                turn.from = Some("task".to_string());
-                turn.activity = Some(crate::chat::turns::ChildControlActivity::from_task(
-                    observation,
-                ));
+                let turn = ChatTurn::child_activity(
+                    format!("turn-{}", event.seq),
+                    event.at_rfc3339(),
+                    "task".to_string(),
+                    crate::chat::turns::ChildControlActivity::from_task(observation),
+                );
                 turns.push(turn);
                 if !consumed_messages.contains(&message.id) {
                     pending_messages.push(message.clone());
@@ -876,12 +876,12 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             }
             EventKind::ProjectObserved { observation } => {
                 let message = project_observation_message(observation);
-                let mut turn = ChatTurn::user(format!("turn-{}", event.seq), String::new());
-                turn.created_at = event.at_rfc3339();
-                turn.from = Some("project".to_string());
-                turn.activity = Some(crate::chat::turns::ChildControlActivity::from_project(
-                    observation,
-                ));
+                let turn = ChatTurn::child_activity(
+                    format!("turn-{}", event.seq),
+                    event.at_rfc3339(),
+                    "project".to_string(),
+                    crate::chat::turns::ChildControlActivity::from_project(observation),
+                );
                 turns.push(turn);
                 if !consumed_messages.contains(&message.id) {
                     pending_messages.push(message.clone());
@@ -1073,6 +1073,7 @@ mod tests {
             session_id: crate::task::TaskSessionId::from_raw("ts_example"),
             issue_identifier: "INF-123".to_string(),
             event_id: 42,
+            control_source: None,
             event: crate::task::TaskEventKind::Failed {
                 error: "provider stopped".to_string(),
                 resumable: true,

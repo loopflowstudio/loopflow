@@ -31,6 +31,7 @@ impl SqliteStore {
     // and lifecycle events share one sqlite transaction boundary.
 
     pub fn insert_task_session(&self, session: &TaskSession) -> StoreResult<()> {
+        validate_task_session(session)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         let parameters = task_session_params(session);
         conn.execute(
@@ -41,6 +42,7 @@ impl SqliteStore {
     }
 
     pub fn reserve_task_session(&self, session: &TaskSession) -> StoreResult<()> {
+        validate_task_session(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
         let parameters = task_session_params(session);
@@ -57,6 +59,7 @@ impl SqliteStore {
         session: &TaskSession,
         directive: &ChildDirective,
     ) -> StoreResult<()> {
+        validate_task_session(session)?;
         ensure_directive_target(directive, "task", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
@@ -71,6 +74,7 @@ impl SqliteStore {
     }
 
     pub fn update_task_session(&self, session: &TaskSession) -> StoreResult<()> {
+        validate_task_session(session)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         let parameters = task_session_params(session);
         let changed = conn.execute(
@@ -88,6 +92,7 @@ impl SqliteStore {
         session: &TaskSession,
         expected_status: TaskSessionStatus,
     ) -> StoreResult<bool> {
+        validate_task_session(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
         let current_status: String = transaction.query_row(
@@ -399,7 +404,7 @@ impl SqliteStore {
         let changed = transaction.execute(
             "UPDATE child_commands
              SET state = 'accepted', effect = ?1, accepted_at = ?2, error = NULL
-             WHERE id = ?3 AND state IN ('persisted', 'claimed')",
+             WHERE id = ?3 AND state IN ('persisted', 'claimed', 'delivering')",
             params![
                 effect.map(ChildCommandEffect::as_str),
                 accepted_at,
@@ -432,6 +437,79 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn mark_child_command_delivering(
+        &self,
+        command_id: &ChildCommandId,
+        effect: ChildCommandEffect,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE child_commands SET state='delivering', effect=?1
+             WHERE id=?2 AND state='claimed'",
+            params![effect.as_str(), command_id.as_str()],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::InvalidData(format!(
+                "child command {command_id} is not claimed"
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn mark_stale_child_deliveries_uncertain(
+        &self,
+        target: &ChildRef,
+        generation: u32,
+    ) -> StoreResult<Vec<ChildCommand>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let mut commands = {
+            let mut statement = transaction.prepare(&format!(
+                "{CHILD_COMMAND_COLUMNS}
+                 WHERE target_kind=?1 AND session_id=?2 AND state='delivering'
+                   AND claimed_by_generation<>?3
+                 ORDER BY created_at, id"
+            ))?;
+            let rows = statement.query_map(
+                params![
+                    target.target_kind(),
+                    target.target_id(),
+                    i64::from(generation)
+                ],
+                map_child_command_row,
+            )?;
+            let mut commands = Vec::new();
+            for row in rows {
+                commands.push(row?);
+            }
+            commands
+        };
+        if commands.is_empty() {
+            transaction.commit()?;
+            return Ok(commands);
+        }
+        let error = "provider delivery outcome is unknown after process restart; inspect the child transcript before retrying";
+        transaction.execute(
+            "UPDATE child_commands
+             SET state='uncertain',
+                 error=?4
+             WHERE target_kind=?1 AND session_id=?2 AND state='delivering'
+               AND claimed_by_generation<>?3",
+            params![
+                target.target_kind(),
+                target.target_id(),
+                i64::from(generation),
+                error
+            ],
+        )?;
+        for command in &mut commands {
+            command.state = ChildCommandState::Uncertain;
+            command.error = Some(error.to_string());
+        }
+        transaction.commit()?;
+        Ok(commands)
+    }
+
     pub fn set_child_command_effect(
         &self,
         command_id: &ChildCommandId,
@@ -461,7 +539,7 @@ impl SqliteStore {
         let changed = conn.execute(
             "UPDATE child_commands
              SET state = 'failed', effect = COALESCE(?1, effect), error = ?2
-             WHERE id = ?3 AND state IN ('persisted', 'claimed')",
+             WHERE id = ?3 AND state IN ('claimed', 'delivering')",
             params![
                 effect.map(ChildCommandEffect::as_str),
                 error,
@@ -573,6 +651,7 @@ impl SqliteStore {
     // process/receipt shape as Task Sessions but deliberately own no worktree.
 
     pub fn insert_project_session(&self, session: &ProjectSession) -> StoreResult<()> {
+        validate_project_session(session)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             PROJECT_SESSION_INSERT,
@@ -590,6 +669,7 @@ impl SqliteStore {
         session: &ProjectSession,
         directive: &ChildDirective,
     ) -> StoreResult<()> {
+        validate_project_session(session)?;
         ensure_directive_target(directive, "project", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
@@ -604,6 +684,7 @@ impl SqliteStore {
     }
 
     pub fn update_project_session(&self, session: &ProjectSession) -> StoreResult<()> {
+        validate_project_session(session)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
             PROJECT_SESSION_UPDATE,
@@ -624,6 +705,7 @@ impl SqliteStore {
         session: &ProjectSession,
         expected_status: ProjectSessionStatus,
     ) -> StoreResult<bool> {
+        validate_project_session(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction()?;
         let changed = transaction.execute(
@@ -1077,9 +1159,21 @@ impl SqliteStore {
     }
 }
 
+fn validate_task_session(session: &TaskSession) -> StoreResult<()> {
+    session
+        .validate()
+        .map_err(|error| StoreError::InvalidData(error.to_string()))
+}
+
+fn validate_project_session(session: &ProjectSession) -> StoreResult<()> {
+    session
+        .validate()
+        .map_err(|error| StoreError::InvalidData(error.to_string()))
+}
+
 const TASK_SESSION_INSERT: &str = "INSERT INTO task_sessions (
     id, issue_id, issue_identifier, issue_title, issue_description,
-    project_id, project_slug, project_name, project_context, wave_id, wave_name,
+    project_id, project_slug, project_name, project_prompt_context, wave_id,
     status, status_reason, status_at, worktree, branch, base_commit,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
@@ -1087,13 +1181,13 @@ const TASK_SESSION_INSERT: &str = "INSERT INTO task_sessions (
     pm_writeback_json, supervisor_kind, supervisor_id,
     current_directive_version, incorporated_directive_version
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-    ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-    ?29, ?30, ?31, ?32, ?33, ?34
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+    ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
+    ?28, ?29, ?30, ?31, ?32, ?33
 )";
 const TASK_SESSION_COLUMNS: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
-    project_id, project_slug, project_name, project_context, wave_id, wave_name,
+    project_id, project_slug, project_name, project_prompt_context, wave_id,
     status, status_reason, status_at, worktree, branch, base_commit,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
@@ -1103,7 +1197,7 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
     FROM task_sessions";
 const TASK_SESSION_SELECT: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
-    project_id, project_slug, project_name, project_context, wave_id, wave_name,
+    project_id, project_slug, project_name, project_prompt_context, wave_id,
     status, status_reason, status_at, worktree, branch, base_commit,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, pr_number, pr_url,
@@ -1113,16 +1207,16 @@ const TASK_SESSION_SELECT: &str = "SELECT
     FROM task_sessions WHERE id = ?1";
 const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
-    project_id=?6, project_slug=?7, project_name=?8, project_context=?9,
-    wave_id=?10, wave_name=?11, status=?12, status_reason=?13, status_at=?14,
-    worktree=?15, branch=?16, base_commit=?17, agent=?18, provider=?19,
-    provider_session_id=?20, process_generation=?21, process_pid=?22,
-    process_tmux_name=?23, process_started_at=?24, pr_number=?25,
-    pr_url=?26, created_at=?27, updated_at=?28,
-    pm_snapshot_synced_at=?29, pm_writeback_json=?30,
-    supervisor_kind=?31, supervisor_id=?32,
-    current_directive_version=MAX(current_directive_version, ?33),
-    incorporated_directive_version=MAX(incorporated_directive_version, ?34)
+    project_id=?6, project_slug=?7, project_name=?8, project_prompt_context=?9,
+    wave_id=?10, status=?11, status_reason=?12, status_at=?13,
+    worktree=?14, branch=?15, base_commit=?16, agent=?17, provider=?18,
+    provider_session_id=?19, process_generation=?20, process_pid=?21,
+    process_tmux_name=?22, process_started_at=?23, pr_number=?24,
+    pr_url=?25, created_at=?26, updated_at=?27,
+    pm_snapshot_synced_at=?28, pm_writeback_json=?29,
+    supervisor_kind=?30, supervisor_id=?31,
+    current_directive_version=MAX(current_directive_version, ?32),
+    incorporated_directive_version=MAX(incorporated_directive_version, ?33)
     WHERE id=?1";
 const CHILD_COMMAND_COLUMNS: &str = "SELECT
     id, target_kind, session_id, source_json, kind_json, created_at,
@@ -1287,16 +1381,15 @@ fn insert_child_command(conn: &Connection, command: &ChildCommand) -> StoreResul
 fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
     vec![
         Box::new(session.id.as_str().to_string()),
-        Box::new(session.issue.id.as_str().to_string()),
-        Box::new(session.issue.identifier.clone()),
-        Box::new(session.issue.title.clone()),
-        Box::new(session.issue.description.clone()),
-        Box::new(session.project.id.as_str().to_string()),
-        Box::new(session.project.slug.clone()),
-        Box::new(session.project.name.clone()),
-        Box::new(session.project.context.clone()),
+        Box::new(session.launch.issue.id.as_str().to_string()),
+        Box::new(session.launch.issue.identifier.clone()),
+        Box::new(session.launch.issue.title.clone()),
+        Box::new(session.launch.issue.description.clone()),
+        Box::new(session.launch.project.id.as_str().to_string()),
+        Box::new(session.launch.project.slug.clone()),
+        Box::new(session.launch.project.name.clone()),
+        Box::new(session.launch.project.prompt_context.clone()),
         Box::new(session.wave_id.clone()),
-        Box::new(session.wave_name.clone()),
         Box::new(session.status.as_str().to_string()),
         Box::new(session.status_reason.clone()),
         Box::new(session.status_at.unix_timestamp()),
@@ -1344,7 +1437,7 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         ),
         Box::new(session.created_at.unix_timestamp()),
         Box::new(session.updated_at.unix_timestamp()),
-        Box::new(session.pm_snapshot_synced_at),
+        Box::new(session.launch.pm_snapshot_synced_at),
         Box::new(
             serde_json::to_string(&session.pm_writeback)
                 .expect("Task Session PM writeback state must serialize"),
@@ -1375,23 +1468,23 @@ fn task_command_datetime(index: usize, value: i64) -> rusqlite::Result<time::Off
 }
 
 fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession> {
-    let status_text: String = row.get(11)?;
+    let status_text: String = row.get(10)?;
     let status = status_text
         .parse()
-        .map_err(|error| invalid_column(11, error))?;
-    let process_generation: Option<i64> = row.get(20)?;
-    let process_started_at: Option<i64> = row.get(23)?;
+        .map_err(|error| invalid_column(10, error))?;
+    let process_generation: Option<i64> = row.get(19)?;
+    let process_started_at: Option<i64> = row.get(22)?;
     let process = match (process_generation, process_started_at) {
         (Some(generation), Some(started_at)) => Some(ChildProcessGeneration {
             generation: generation as u32,
-            pid: row.get::<_, Option<i64>>(21)?.map(|pid| pid as u32),
-            tmux_name: row.get::<_, Option<String>>(22)?.unwrap_or_default(),
+            pid: row.get::<_, Option<i64>>(20)?.map(|pid| pid as u32),
+            tmux_name: row.get::<_, Option<String>>(21)?.unwrap_or_default(),
             started_at: crate::store::rows::unix_to_datetime(started_at),
         }),
         _ => None,
     };
-    let pr_number: Option<i64> = row.get(24)?;
-    let pr_url: Option<String> = row.get(25)?;
+    let pr_number: Option<i64> = row.get(23)?;
+    let pr_url: Option<String> = row.get(24)?;
     let pull_request = match (pr_number, pr_url) {
         (Some(number), Some(url)) => Some(PullRequestRef {
             number: number as u32,
@@ -1401,35 +1494,36 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
     };
     Ok(TaskSession {
         id: TaskSessionId::from_raw(row.get::<_, String>(0)?),
-        issue: LinearIssueSnapshot {
-            id: LinearIssueId::from_raw(row.get::<_, String>(1)?),
-            identifier: row.get(2)?,
-            title: row.get(3)?,
-            description: row.get(4)?,
+        launch: crate::session_context::TaskLaunchReceipt {
+            issue: LinearIssueSnapshot {
+                id: LinearIssueId::from_raw(row.get::<_, String>(1)?),
+                identifier: row.get(2)?,
+                title: row.get(3)?,
+                description: row.get(4)?,
+            },
+            project: LinearProjectSnapshot {
+                id: LinearProjectId::from_raw(row.get::<_, String>(5)?),
+                slug: row.get(6)?,
+                name: row.get(7)?,
+                prompt_context: row.get(8)?,
+            },
+            pm_snapshot_synced_at: row.get(27)?,
         },
-        project: LinearProjectSnapshot {
-            id: LinearProjectId::from_raw(row.get::<_, String>(5)?),
-            slug: row.get(6)?,
-            name: row.get(7)?,
-            context: row.get(8)?,
-        },
-        pm_snapshot_synced_at: row.get(28)?,
-        pm_writeback: serde_json::from_str(&row.get::<_, String>(29)?)
-            .map_err(|error| invalid_column(29, error))?,
+        pm_writeback: serde_json::from_str(&row.get::<_, String>(28)?)
+            .map_err(|error| invalid_column(28, error))?,
         wave_id: row.get(9)?,
-        wave_name: row.get(10)?,
-        supervisor: match row.get::<_, String>(30)?.as_str() {
+        supervisor: match row.get::<_, String>(29)?.as_str() {
             "wave" => SessionSupervisor::Wave {
-                wave_id: row.get(31)?,
+                wave_id: row.get(30)?,
             },
             "project" => SessionSupervisor::Project {
                 session_id: crate::project_session::ProjectSessionId::from_raw(
-                    row.get::<_, String>(31)?,
+                    row.get::<_, String>(30)?,
                 ),
             },
             value => {
                 return Err(invalid_column(
-                    30,
+                    29,
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
                         format!("unknown Task Session supervisor kind {value:?}"),
@@ -1437,21 +1531,21 @@ fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession
                 ))
             }
         },
-        current_directive_version: row.get::<_, i64>(32)? as u32,
-        incorporated_directive_version: row.get::<_, i64>(33)? as u32,
+        current_directive_version: row.get::<_, i64>(31)? as u32,
+        incorporated_directive_version: row.get::<_, i64>(32)? as u32,
         status,
-        status_reason: row.get(12)?,
-        status_at: crate::store::rows::unix_to_datetime(row.get(13)?),
-        worktree: PathBuf::from(row.get::<_, String>(14)?),
-        branch: row.get(15)?,
-        base_commit: row.get(16)?,
-        agent: row.get(17)?,
-        provider: row.get(18)?,
-        provider_session_id: row.get(19)?,
+        status_reason: row.get(11)?,
+        status_at: crate::store::rows::unix_to_datetime(row.get(12)?),
+        worktree: PathBuf::from(row.get::<_, String>(13)?),
+        branch: row.get(14)?,
+        base_commit: row.get(15)?,
+        agent: row.get(16)?,
+        provider: row.get(17)?,
+        provider_session_id: row.get(18)?,
         latest_process: process,
         pull_request,
-        created_at: crate::store::rows::unix_to_datetime(row.get(26)?),
-        updated_at: crate::store::rows::unix_to_datetime(row.get(27)?),
+        created_at: crate::store::rows::unix_to_datetime(row.get(25)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(26)?),
     })
 }
 
@@ -1508,56 +1602,54 @@ fn map_task_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
 }
 
 const PROJECT_SESSION_INSERT: &str = "INSERT INTO project_sessions (
-    id, project_id, project_slug, project_name, project_context,
-    wave_id, wave_name, control_repo, pm_snapshot_synced_at, status,
+    id, project_id, project_slug, project_name, project_prompt_context,
+    wave_id, pm_snapshot_synced_at, status,
     status_reason, status_at, iteration, observation_cursor,
     last_state_fingerprint, agent, provider, provider_session_id,
     process_generation, process_pid, process_tmux_name,
     process_started_at, created_at, updated_at,
     current_directive_version, incorporated_directive_version
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-    ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24,
-    ?25, ?26
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+    ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22,
+    ?23, ?24
 )";
 const PROJECT_SESSION_COLUMNS: &str = "SELECT
-    id, project_id, project_slug, project_name, project_context,
-    wave_id, wave_name, control_repo, pm_snapshot_synced_at, status,
+    id, project_id, project_slug, project_name, project_prompt_context,
+    wave_id, pm_snapshot_synced_at, status,
     status_reason, status_at, iteration, observation_cursor, last_state_fingerprint,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, created_at, updated_at,
     current_directive_version, incorporated_directive_version
     FROM project_sessions";
 const PROJECT_SESSION_SELECT: &str = "SELECT
-    id, project_id, project_slug, project_name, project_context,
-    wave_id, wave_name, control_repo, pm_snapshot_synced_at, status,
+    id, project_id, project_slug, project_name, project_prompt_context,
+    wave_id, pm_snapshot_synced_at, status,
     status_reason, status_at, iteration, observation_cursor, last_state_fingerprint,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, created_at, updated_at,
     current_directive_version, incorporated_directive_version
     FROM project_sessions WHERE id=?1";
 const PROJECT_SESSION_UPDATE: &str = "UPDATE project_sessions SET
-    project_id=?2, project_slug=?3, project_name=?4, project_context=?5,
-    wave_id=?6, wave_name=?7, control_repo=?8, pm_snapshot_synced_at=?9,
-    status=?10, status_reason=?11, status_at=?12, iteration=?13,
-    observation_cursor=?14, last_state_fingerprint=?15, agent=?16, provider=?17,
-    provider_session_id=?18, process_generation=?19, process_pid=?20,
-    process_tmux_name=?21, process_started_at=?22, created_at=?23,
-    updated_at=?24,
-    current_directive_version=MAX(current_directive_version, ?25),
-    incorporated_directive_version=MAX(incorporated_directive_version, ?26)
+    project_id=?2, project_slug=?3, project_name=?4, project_prompt_context=?5,
+    wave_id=?6, pm_snapshot_synced_at=?7, status=?8,
+    status_reason=?9, status_at=?10, iteration=?11,
+    observation_cursor=?12, last_state_fingerprint=?13, agent=?14, provider=?15,
+    provider_session_id=?16, process_generation=?17, process_pid=?18,
+    process_tmux_name=?19, process_started_at=?20, created_at=?21,
+    updated_at=?22,
+    current_directive_version=MAX(current_directive_version, ?23),
+    incorporated_directive_version=MAX(incorporated_directive_version, ?24)
     WHERE id=?1";
 fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
     vec![
         Box::new(session.id.as_str().to_string()),
-        Box::new(session.project.id.as_str().to_string()),
-        Box::new(session.project.slug.clone()),
-        Box::new(session.project.name.clone()),
-        Box::new(session.project.context.clone()),
+        Box::new(session.launch.project.id.as_str().to_string()),
+        Box::new(session.launch.project.slug.clone()),
+        Box::new(session.launch.project.name.clone()),
+        Box::new(session.launch.project.prompt_context.clone()),
         Box::new(session.wave_id.clone()),
-        Box::new(session.wave_name.clone()),
-        Box::new(session.control_repo.clone()),
-        Box::new(session.pm_snapshot_synced_at),
+        Box::new(session.launch.pm_snapshot_synced_at),
         Box::new(session.status.as_str().to_string()),
         Box::new(session.status_reason.clone()),
         Box::new(session.status_at.unix_timestamp()),
@@ -1599,47 +1691,47 @@ fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
 }
 
 fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectSession> {
-    let status_text: String = row.get(9)?;
+    let status_text: String = row.get(7)?;
     let status = status_text
         .parse()
-        .map_err(|error| invalid_column(9, error))?;
-    let process_generation: Option<i64> = row.get(18)?;
-    let process_started_at: Option<i64> = row.get(21)?;
+        .map_err(|error| invalid_column(7, error))?;
+    let process_generation: Option<i64> = row.get(16)?;
+    let process_started_at: Option<i64> = row.get(19)?;
     let process = match (process_generation, process_started_at) {
         (Some(generation), Some(started_at)) => Some(ChildProcessGeneration {
             generation: generation as u32,
-            pid: row.get::<_, Option<i64>>(19)?.map(|pid| pid as u32),
-            tmux_name: row.get::<_, Option<String>>(20)?.unwrap_or_default(),
+            pid: row.get::<_, Option<i64>>(17)?.map(|pid| pid as u32),
+            tmux_name: row.get::<_, Option<String>>(18)?.unwrap_or_default(),
             started_at: crate::store::rows::unix_to_datetime(started_at),
         }),
         _ => None,
     };
     Ok(ProjectSession {
         id: ProjectSessionId::from_raw(row.get::<_, String>(0)?),
-        project: LinearProjectSnapshot {
-            id: LinearProjectId::from_raw(row.get::<_, String>(1)?),
-            slug: row.get(2)?,
-            name: row.get(3)?,
-            context: row.get(4)?,
+        launch: crate::session_context::ProjectLaunchReceipt {
+            project: LinearProjectSnapshot {
+                id: LinearProjectId::from_raw(row.get::<_, String>(1)?),
+                slug: row.get(2)?,
+                name: row.get(3)?,
+                prompt_context: row.get(4)?,
+            },
+            pm_snapshot_synced_at: row.get(6)?,
         },
         wave_id: row.get(5)?,
-        wave_name: row.get(6)?,
-        control_repo: row.get(7)?,
-        pm_snapshot_synced_at: row.get(8)?,
-        current_directive_version: row.get::<_, i64>(24)? as u32,
-        incorporated_directive_version: row.get::<_, i64>(25)? as u32,
+        current_directive_version: row.get::<_, i64>(22)? as u32,
+        incorporated_directive_version: row.get::<_, i64>(23)? as u32,
         status,
-        status_reason: row.get(10)?,
-        status_at: crate::store::rows::unix_to_datetime(row.get(11)?),
-        iteration: row.get::<_, i64>(12)? as u32,
-        observation_cursor: row.get(13)?,
-        last_state_fingerprint: row.get(14)?,
-        agent: row.get(15)?,
-        provider: row.get(16)?,
-        provider_session_id: row.get(17)?,
+        status_reason: row.get(8)?,
+        status_at: crate::store::rows::unix_to_datetime(row.get(9)?),
+        iteration: row.get::<_, i64>(10)? as u32,
+        observation_cursor: row.get(11)?,
+        last_state_fingerprint: row.get(12)?,
+        agent: row.get(13)?,
+        provider: row.get(14)?,
+        provider_session_id: row.get(15)?,
         latest_process: process,
-        created_at: crate::store::rows::unix_to_datetime(row.get(22)?),
-        updated_at: crate::store::rows::unix_to_datetime(row.get(23)?),
+        created_at: crate::store::rows::unix_to_datetime(row.get(20)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(21)?),
     })
 }
 
@@ -1692,9 +1784,11 @@ fn parse_command_state(value: &str, index: usize) -> rusqlite::Result<ChildComma
     match value {
         "persisted" => Ok(ChildCommandState::Persisted),
         "claimed" => Ok(ChildCommandState::Claimed),
+        "delivering" => Ok(ChildCommandState::Delivering),
         "accepted" => Ok(ChildCommandState::Accepted),
         "failed" => Ok(ChildCommandState::Failed),
         "superseded" => Ok(ChildCommandState::Superseded),
+        "uncertain" => Ok(ChildCommandState::Uncertain),
         value => Err(invalid_column(
             index,
             std::io::Error::new(

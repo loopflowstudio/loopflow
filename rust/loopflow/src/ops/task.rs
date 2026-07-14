@@ -1,4 +1,6 @@
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -17,12 +19,13 @@ use crate::engine::worktrees::{
 use crate::id::WaveId;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::session_context::{
-    LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+    LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot, TaskLaunchReceipt,
 };
 use crate::store::{open_existing_store, SharedStore, StoreError};
 use crate::task::{
     PmWritebackOperation, PmWritebackState, TaskEventKind, TaskSession, TaskSessionStatus,
 };
+use crate::wave::Wave;
 use sha2::{Digest, Sha256};
 
 use super::ChildReceiptUntil;
@@ -106,12 +109,69 @@ pub struct TaskSessionSnapshot {
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub process_alive: bool,
-    #[serde(rename = "process")]
     pub latest_process: Option<ChildProcessGeneration>,
     pub pull_request: Option<crate::task::PullRequestRef>,
     pub latest_event: Option<crate::task::TaskEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TaskChangedFile {
+    pub path: String,
+    pub committed: bool,
+    pub staged: bool,
+    pub unstaged: bool,
+    pub untracked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TaskChangesSnapshot {
+    pub issue_identifier: String,
+    pub session_id: String,
+    pub base_commit: String,
+    pub head_commit: String,
+    pub files: Vec<TaskChangedFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TaskDiffSnapshot {
+    pub issue_identifier: String,
+    pub session_id: String,
+    pub path: Option<String>,
+    pub patch: String,
+    pub binary: bool,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TaskFileSnapshot {
+    pub issue_identifier: String,
+    pub session_id: String,
+    pub path: String,
+    pub content: Option<String>,
+    pub binary: bool,
+    pub size_bytes: u64,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TaskWorkspace<'a> {
+    issue_identifier: &'a str,
+    session_id: &'a crate::task::TaskSessionId,
+    worktree: &'a Path,
+    base_commit: &'a str,
+}
+
+impl<'a> From<&'a TaskSession> for TaskWorkspace<'a> {
+    fn from(session: &'a TaskSession) -> Self {
+        Self {
+            issue_identifier: &session.launch.issue.identifier,
+            session_id: &session.id,
+            worktree: &session.worktree,
+            base_commit: &session.base_commit,
+        }
+    }
 }
 
 fn task_error(message: impl Into<String>) -> OpsError {
@@ -126,8 +186,16 @@ fn block_on_task<T>(future: impl std::future::Future<Output = OpsResult<T>>) -> 
 
 async fn task_store() -> OpsResult<SharedStore> {
     open_existing_store().await.map(Arc::new).ok_or_else(|| {
-        task_error("no Loopflow registry on this machine; serve the owning Wave first")
+        task_error("no Loopflow registry on this machine; start the owning Wave first")
     })
+}
+
+async fn owning_wave(store: &SharedStore, session: &TaskSession) -> OpsResult<Wave> {
+    store
+        .get_wave(&session.wave_id)
+        .await
+        .map_err(|error| task_error(format!("failed to read owning Wave: {error}")))?
+        .ok_or_else(|| task_error(format!("owning Wave {} is not registered", session.wave_id)))
 }
 
 fn command_source(session: &TaskSession) -> OpsResult<ChildCommandSource> {
@@ -143,11 +211,11 @@ fn command_source(session: &TaskSession) -> OpsResult<ChildCommandSource> {
                 }
                 SessionSupervisor::Project { session_id } => Err(task_error(format!(
                     "Project Session {project_id} cannot control Task {}; its supervisor is {session_id}",
-                    session.issue.identifier
+                    session.launch.issue.identifier
                 ))),
                 SessionSupervisor::Wave { .. } => Err(task_error(format!(
                     "Project Session {project_id} cannot control directly supervised Task {}",
-                    session.issue.identifier
+                    session.launch.issue.identifier
                 ))),
             };
         }
@@ -166,24 +234,18 @@ fn command_source(session: &TaskSession) -> OpsResult<ChildCommandSource> {
             return Err(task_error("ambient Wave id is not valid UTF-8"))
         }
     };
-    command_source_for_wave(
-        ambient,
-        &session.wave_id,
-        &session.issue.identifier,
-        &session.wave_name,
-    )
+    command_source_for_wave(ambient, &session.wave_id, &session.launch.issue.identifier)
 }
 
 fn command_source_for_wave(
     ambient: Option<WaveId>,
     owning_wave_id: &WaveId,
     issue_identifier: &str,
-    owning_wave: &str,
 ) -> OpsResult<ChildCommandSource> {
     match ambient {
         Some(wave_id) if &wave_id == owning_wave_id => Ok(ChildCommandSource::Wave(wave_id)),
         Some(wave_id) => Err(task_error(format!(
-            "Wave {wave_id} cannot control Task {issue_identifier} owned by wave/{owning_wave}"
+            "Wave {wave_id} cannot control Task {issue_identifier} owned by Wave {owning_wave_id}"
         ))),
         None => Ok(ChildCommandSource::Human),
     }
@@ -218,9 +280,9 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
                 if current.text != requested {
                     return Err(task_error(format!(
                         "Task {} already exists with directive v{}; use `lf task steer {} <new-direction>` to replace it",
-                        session.issue.identifier,
+                        session.launch.issue.identifier,
                         current.version,
-                        session.issue.identifier,
+                        session.launch.issue.identifier,
                     )));
                 }
             }
@@ -282,27 +344,28 @@ pub fn task_run(repo: &Path, issue: &str, directive: Option<String>) -> OpsResul
         let supervisor = task_supervisor(&store, wave.id(), &resolved.project.id).await?;
         let mut session = TaskSession {
             id: crate::task::TaskSessionId::new(),
-            issue: LinearIssueSnapshot {
-                id: LinearIssueId::new(resolved.item.id.clone())
-                    .map_err(|error| task_error(error.to_string()))?,
-                identifier: resolved.item.identifier.clone(),
-                title: resolved.item.name.clone(),
-                description: resolved.item.description.clone(),
-            },
-            project: LinearProjectSnapshot {
-                id: LinearProjectId::new(resolved.project.id.clone())
-                    .map_err(|error| task_error(error.to_string()))?,
-                slug: resolved.project.slug.clone(),
-                name: resolved.project.name.clone(),
-                context: project_context(&resolved.project),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new(resolved.item.id.clone())
+                        .map_err(|error| task_error(error.to_string()))?,
+                    identifier: resolved.item.identifier.clone(),
+                    title: resolved.item.name.clone(),
+                    description: resolved.item.description.clone(),
+                },
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new(resolved.project.id.clone())
+                        .map_err(|error| task_error(error.to_string()))?,
+                    slug: resolved.project.slug.clone(),
+                    name: resolved.project.name.clone(),
+                    prompt_context: project_context(&resolved.project),
+                },
+                pm_snapshot_synced_at: resolved.snapshot.synced_at,
             },
             wave_id: wave.id().clone(),
             supervisor,
             current_directive_version: 1,
             incorporated_directive_version: 0,
-            pm_snapshot_synced_at: resolved.snapshot.synced_at,
             pm_writeback: PmWritebackState::Current,
-            wave_name: resolved.snapshot.wave.clone(),
             status: TaskSessionStatus::Created,
             status_reason: "Linear task reserved before placement".to_string(),
             status_at: now,
@@ -397,10 +460,10 @@ async fn task_supervisor(
                         "ambient Project Session {session_id} does not exist"
                     ))
                 })?;
-            if &project.wave_id != wave_id || project.project.id.as_str() != project_id {
+            if &project.wave_id != wave_id || project.launch.project.id.as_str() != project_id {
                 return Err(task_error(format!(
-                    "Project Session {session_id} cannot supervise a Task outside {}/{}",
-                    project.wave_name, project.project.slug
+                    "Project Session {session_id} cannot supervise a Task outside Wave {}/Project {}",
+                    project.wave_id, project.launch.project.slug
                 )));
             }
             Ok(SessionSupervisor::Project { session_id })
@@ -502,7 +565,7 @@ pub(crate) async fn relaunch_inactive_process(
 async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> OpsResult<()> {
     let tmux_name = format!(
         "lf-task-{}-{}",
-        tmux_session_slug(&session.issue.identifier),
+        tmux_session_slug(&session.launch.issue.identifier),
         &session.id.as_str()[3..11]
     );
     let from = session.status;
@@ -525,13 +588,13 @@ async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> 
         if current.status.is_terminal() {
             return Err(task_error(format!(
                 "task {} became {}; terminal Task Sessions cannot start a process",
-                current.issue.identifier,
+                current.launch.issue.identifier,
                 current.status.as_str()
             )));
         }
         return Err(task_error(format!(
             "task {} changed from {} to {} during process reservation; retry the command",
-            current.issue.identifier,
+            current.launch.issue.identifier,
             from.as_str(),
             current.status.as_str()
         )));
@@ -599,14 +662,14 @@ async fn wait_until_running(
             } else {
                 Err(task_error(format!(
                     "task {} did not start: {}",
-                    session.issue.identifier, session.status_reason
+                    session.launch.issue.identifier, session.status_reason
                 )))
             };
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(task_error(format!(
                 "task {} process did not report running within 10 seconds",
-                session.issue.identifier
+                session.launch.issue.identifier
             )));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -648,7 +711,7 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
         if session.status == TaskSessionStatus::Merged
             && matches!(session.pm_writeback, PmWritebackState::Pending { .. })
         {
-            retry_pm_writeback(&mut session).await;
+            retry_pm_writeback(&store, &mut session).await;
             store
                 .update_task_session(&session)
                 .await
@@ -668,7 +731,7 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
                         TaskSessionStatus::Merged,
                         format!("pull request #{} merged", pr.number),
                     );
-                    reconcile_pm_writeback(&mut session).await;
+                    reconcile_pm_writeback(&store, &mut session).await;
                     TaskEventKind::Completed {
                         pull_request,
                         summary: "merge observed by task status".to_string(),
@@ -720,30 +783,44 @@ fn writeback_state(result: OpsResult<()>) -> PmWritebackState {
     }
 }
 
-pub(crate) async fn reconcile_pm_writeback(session: &mut TaskSession) {
+pub(crate) async fn reconcile_pm_writeback(store: &SharedStore, session: &mut TaskSession) {
     let Some(pull_request) = session.pull_request.as_ref() else {
+        return;
+    };
+    let Ok(wave) = owning_wave(store, session).await else {
+        session.pm_writeback = PmWritebackState::Pending {
+            operation: PmWritebackOperation::CompleteTask,
+            error: format!("owning Wave {} is not registered", session.wave_id),
+        };
         return;
     };
     session.pm_writeback = writeback_state(
         crate::ops::task_pm::complete_task(
             &session.worktree,
-            &session.wave_name,
-            session.issue.id.as_str(),
+            wave.name(),
+            session.launch.issue.id.as_str(),
             &pull_request.url,
         )
         .await,
     );
 }
 
-async fn retry_pm_writeback(session: &mut TaskSession) {
+async fn retry_pm_writeback(store: &SharedStore, session: &mut TaskSession) {
     let Some(pull_request) = session.pull_request.as_ref() else {
+        return;
+    };
+    let Ok(wave) = owning_wave(store, session).await else {
+        session.pm_writeback = PmWritebackState::Pending {
+            operation: PmWritebackOperation::CompleteTask,
+            error: format!("owning Wave {} is not registered", session.wave_id),
+        };
         return;
     };
     session.pm_writeback = writeback_state(
         crate::ops::task_pm::retry_complete_task(
             &session.worktree,
-            &session.wave_name,
-            session.issue.id.as_str(),
+            wave.name(),
+            session.launch.issue.id.as_str(),
             &pull_request.url,
         )
         .await,
@@ -755,6 +832,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
     let session = session.clone();
     block_on_task(async move {
         let store = task_store().await?;
+        let wave = owning_wave(&store, &session).await?;
         let process_alive = if session.status.is_process_active() {
             match session.latest_process.as_ref() {
                 Some(process) => tmux_session_exists(&process.tmux_name)
@@ -772,14 +850,14 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             .into_iter()
             .last();
         Ok(TaskSessionSnapshot {
-            issue_id: session.issue.id.as_str().to_string(),
-            issue_identifier: session.issue.identifier,
+            issue_id: session.launch.issue.id.as_str().to_string(),
+            issue_identifier: session.launch.issue.identifier,
             session_id: session.id.to_string(),
-            project_id: session.project.id.as_str().to_string(),
-            project: session.project.slug,
-            pm_snapshot_synced_at: session.pm_snapshot_synced_at,
+            project_id: session.launch.project.id.as_str().to_string(),
+            project: session.launch.project.slug,
+            pm_snapshot_synced_at: session.launch.pm_snapshot_synced_at,
             pm_writeback: session.pm_writeback,
-            wave: session.wave_name,
+            wave: wave.name().to_string(),
             supervisor: session.supervisor,
             current_directive_version: session.current_directive_version,
             incorporated_directive_version: session.incorporated_directive_version,
@@ -802,6 +880,244 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
     })
 }
 
+pub fn task_changes(issue: &str) -> OpsResult<TaskChangesSnapshot> {
+    let session = task_status(issue)?;
+    changes_snapshot(TaskWorkspace::from(&session))
+}
+
+fn changes_snapshot(workspace: TaskWorkspace<'_>) -> OpsResult<TaskChangesSnapshot> {
+    let mut files = BTreeMap::<String, TaskChangedFile>::new();
+    record_changed_paths(
+        workspace.worktree,
+        &[
+            "diff",
+            "--name-only",
+            "-z",
+            &format!("{}..HEAD", workspace.base_commit),
+        ],
+        &mut files,
+        |file| file.committed = true,
+    )?;
+    record_changed_paths(
+        workspace.worktree,
+        &["diff", "--cached", "--name-only", "-z"],
+        &mut files,
+        |file| file.staged = true,
+    )?;
+    record_changed_paths(
+        workspace.worktree,
+        &["diff", "--name-only", "-z"],
+        &mut files,
+        |file| file.unstaged = true,
+    )?;
+    record_changed_paths(
+        workspace.worktree,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+        &mut files,
+        |file| file.untracked = true,
+    )?;
+    let head_commit = git_output(workspace.worktree, &["rev-parse", "HEAD"])?
+        .trim()
+        .to_string();
+    Ok(TaskChangesSnapshot {
+        issue_identifier: workspace.issue_identifier.to_string(),
+        session_id: workspace.session_id.to_string(),
+        base_commit: workspace.base_commit.to_string(),
+        head_commit,
+        files: files.into_values().collect(),
+    })
+}
+
+pub fn task_diff(issue: &str, path: Option<&str>) -> OpsResult<TaskDiffSnapshot> {
+    let session = task_status(issue)?;
+    diff_snapshot(TaskWorkspace::from(&session), path)
+}
+
+fn diff_snapshot(workspace: TaskWorkspace<'_>, path: Option<&str>) -> OpsResult<TaskDiffSnapshot> {
+    const MAX_PATCH_BYTES: usize = 1_000_000;
+
+    let relative = path.map(validate_task_relative_path).transpose()?;
+    let mut args = vec![
+        "diff".to_string(),
+        "--no-ext-diff".to_string(),
+        "--no-color".to_string(),
+        workspace.base_commit.to_string(),
+        "--".to_string(),
+    ];
+    if let Some(path) = &relative {
+        args.push(path.clone());
+    }
+    let mut patch = git_output_owned(workspace.worktree, &args)?;
+    let untracked = untracked_paths(workspace.worktree)?;
+    let include_untracked = untracked
+        .into_iter()
+        .filter(|candidate| relative.as_ref().is_none_or(|path| path == candidate));
+    for path in include_untracked {
+        let output = Command::new("git")
+            .current_dir(workspace.worktree)
+            .args(["diff", "--no-index", "--no-color", "--", "/dev/null", &path])
+            .output()
+            .map_err(|error| {
+                task_error(format!("failed to diff untracked file {path}: {error}"))
+            })?;
+        if !output.status.success() && output.status.code() != Some(1) {
+            return Err(task_error(format!(
+                "failed to diff untracked file {path}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        patch.extend_from_slice(&output.stdout);
+    }
+    let truncated = patch.len() > MAX_PATCH_BYTES;
+    if truncated {
+        patch.truncate(MAX_PATCH_BYTES);
+    }
+    let patch = String::from_utf8_lossy(&patch).into_owned();
+    let binary = patch.contains("Binary files ") || patch.contains("GIT binary patch");
+    Ok(TaskDiffSnapshot {
+        issue_identifier: workspace.issue_identifier.to_string(),
+        session_id: workspace.session_id.to_string(),
+        path: relative,
+        patch,
+        binary,
+        truncated,
+    })
+}
+
+pub fn task_file(issue: &str, path: &str) -> OpsResult<TaskFileSnapshot> {
+    let session = task_status(issue)?;
+    file_snapshot(TaskWorkspace::from(&session), path)
+}
+
+fn file_snapshot(workspace: TaskWorkspace<'_>, path: &str) -> OpsResult<TaskFileSnapshot> {
+    const MAX_FILE_BYTES: usize = 1_000_000;
+
+    let relative = validate_task_relative_path(path)?;
+    let root = workspace
+        .worktree
+        .canonicalize()
+        .map_err(|error| task_error(format!("cannot resolve Task worktree: {error}")))?;
+    let absolute = root
+        .join(&relative)
+        .canonicalize()
+        .map_err(|error| task_error(format!("cannot open Task file {relative:?}: {error}")))?;
+    if !absolute.starts_with(&root) || !absolute.is_file() {
+        return Err(task_error(format!(
+            "Task file {relative:?} does not resolve to a file inside the Task worktree"
+        )));
+    }
+    let bytes = std::fs::read(&absolute)
+        .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))?;
+    let size_bytes = bytes.len() as u64;
+    let binary = bytes.iter().take(8_192).any(|byte| *byte == 0);
+    let truncated = bytes.len() > MAX_FILE_BYTES;
+    let visible = &bytes[..bytes.len().min(MAX_FILE_BYTES)];
+    let content = (!binary).then(|| String::from_utf8_lossy(visible).into_owned());
+    Ok(TaskFileSnapshot {
+        issue_identifier: workspace.issue_identifier.to_string(),
+        session_id: workspace.session_id.to_string(),
+        path: relative,
+        content,
+        binary,
+        size_bytes,
+        truncated,
+    })
+}
+
+fn validate_task_relative_path(path: &str) -> OpsResult<String> {
+    let path = Path::new(path);
+    if path.as_os_str().is_empty() || path.is_absolute() {
+        return Err(task_error(
+            "Task paths must stay relative to the Task worktree",
+        ));
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(value) => normalized.push(value),
+            Component::CurDir => {}
+            _ => {
+                return Err(task_error(
+                    "Task paths must stay relative to the Task worktree",
+                ))
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err(task_error("Task paths must name a file"));
+    }
+    Ok(normalized.to_string_lossy().to_string())
+}
+
+fn record_changed_paths(
+    worktree: &Path,
+    args: &[&str],
+    files: &mut BTreeMap<String, TaskChangedFile>,
+    mark: impl Fn(&mut TaskChangedFile),
+) -> OpsResult<()> {
+    for path in nul_paths(&git_output_bytes(worktree, args)?) {
+        let file = files.entry(path.clone()).or_insert(TaskChangedFile {
+            path,
+            committed: false,
+            staged: false,
+            unstaged: false,
+            untracked: false,
+        });
+        mark(file);
+    }
+    Ok(())
+}
+
+fn untracked_paths(worktree: &Path) -> OpsResult<Vec<String>> {
+    Ok(nul_paths(&git_output_bytes(
+        worktree,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+    )?))
+}
+
+fn nul_paths(output: &[u8]) -> Vec<String> {
+    output
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect()
+}
+
+fn git_output(worktree: &Path, args: &[&str]) -> OpsResult<String> {
+    Ok(String::from_utf8_lossy(&git_output_bytes(worktree, args)?).into_owned())
+}
+
+fn git_output_bytes(worktree: &Path, args: &[&str]) -> OpsResult<Vec<u8>> {
+    let output = Command::new("git")
+        .current_dir(worktree)
+        .args(args)
+        .output()
+        .map_err(|error| task_error(format!("failed to run git {}: {error}", args.join(" "))))?;
+    if !output.status.success() {
+        return Err(task_error(format!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(output.stdout)
+}
+
+fn git_output_owned(worktree: &Path, args: &[String]) -> OpsResult<Vec<u8>> {
+    let output = Command::new("git")
+        .current_dir(worktree)
+        .args(args)
+        .output()
+        .map_err(|error| task_error(format!("failed to run git diff: {error}")))?;
+    if !output.status.success() {
+        return Err(task_error(format!(
+            "git diff failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(output.stdout)
+}
+
 fn queue_command(issue: &str, kind: ChildCommandKind) -> OpsResult<TaskControlResult> {
     block_on_task(async move {
         let store = task_store().await?;
@@ -811,7 +1127,7 @@ fn queue_command(issue: &str, kind: ChildCommandKind) -> OpsResult<TaskControlRe
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
         reconcile_process_liveness(&store, &mut session).await?;
-        let issue_id = session.issue.identifier.clone();
+        let issue_id = session.launch.issue.identifier.clone();
         let source = command_source(&session)?;
         let result = super::child::queue_command(
             &store,
@@ -869,7 +1185,7 @@ pub fn task_receipt(
             .ok_or_else(|| task_error(format!("Task Session {session_id} disappeared")))?;
         let result = super::child::control_result(&store, &command, command.clone()).await?;
         Ok(TaskReceiptRead {
-            receipt: task_control_result(session.issue.identifier, result),
+            receipt: task_control_result(session.launch.issue.identifier, result),
             timed_out,
         })
     })
@@ -989,7 +1305,7 @@ pub fn task_request_decision(
                 _ => None,
             }) {
                 return Ok(TaskDecisionResult {
-                    issue_id: session.issue.identifier.clone(),
+                    issue_id: session.launch.issue.identifier.clone(),
                     session_id: session.id.to_string(),
                     decision_id: decision_id.to_string(),
                     resolved: true,
@@ -999,7 +1315,7 @@ pub fn task_request_decision(
             }
             if !wait || Instant::now() >= deadline {
                 return Ok(TaskDecisionResult {
-                    issue_id: session.issue.identifier.clone(),
+                    issue_id: session.launch.issue.identifier.clone(),
                     session_id: session.id.to_string(),
                     decision_id: decision_id.to_string(),
                     resolved: false,
@@ -1096,7 +1412,7 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
     if !session.status.is_process_active() {
         return Err(task_error(format!(
             "task {} is {}; resume it before attaching",
-            session.issue.identifier,
+            session.launch.issue.identifier,
             session.status.as_str()
         )));
     }
@@ -1118,9 +1434,56 @@ pub fn task_attach(issue: &str) -> OpsResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{command_source_for_wave, project_context, TaskControlResult};
+    use std::path::Path;
+    use std::process::Command;
+
+    use super::{
+        changes_snapshot, command_source_for_wave, diff_snapshot, file_snapshot, project_context,
+        TaskControlResult, TaskWorkspace,
+    };
     use crate::child_session::ChildCommandSource;
     use crate::pm::{PmKr, PmProject};
+    use crate::task::TaskSessionId;
+
+    fn git(repo: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn changed_workspace() -> (tempfile::TempDir, String, TaskSessionId) {
+        let repo = tempfile::tempdir().expect("create temp repo");
+        git(repo.path(), &["init", "-b", "main"]);
+        git(repo.path(), &["config", "user.name", "Loopflow Test"]);
+        git(
+            repo.path(),
+            &["config", "user.email", "loopflow@example.com"],
+        );
+        std::fs::write(repo.path().join("tracked.txt"), "base\n").expect("write base");
+        git(repo.path(), &["add", "tracked.txt"]);
+        git(repo.path(), &["commit", "-m", "base"]);
+        let base = git(repo.path(), &["rev-parse", "HEAD"]);
+
+        std::fs::write(repo.path().join("committed.txt"), "committed\n")
+            .expect("write committed file");
+        git(repo.path(), &["add", "committed.txt"]);
+        git(repo.path(), &["commit", "-m", "task commit"]);
+        std::fs::write(repo.path().join("tracked.txt"), "staged\n").expect("write staged");
+        git(repo.path(), &["add", "tracked.txt"]);
+        std::fs::write(repo.path().join("tracked.txt"), "unstaged\n").expect("write unstaged");
+        std::fs::write(repo.path().join("untracked.txt"), "untracked\n").expect("write untracked");
+
+        (repo, base, TaskSessionId::new())
+    }
 
     #[test]
     fn task_context_captures_project_definition_and_kr_state() {
@@ -1154,19 +1517,14 @@ mod tests {
         let wave_id = crate::id::WaveId::new();
 
         assert!(matches!(
-            command_source_for_wave(Some(wave_id.clone()), &wave_id, "INF-123", "infrastructure")
-                .unwrap(),
+            command_source_for_wave(Some(wave_id.clone()), &wave_id, "INF-123").unwrap(),
             ChildCommandSource::Wave(_)
         ));
-        assert!(command_source_for_wave(
-            Some(crate::id::WaveId::new()),
-            &wave_id,
-            "INF-123",
-            "infrastructure"
-        )
-        .is_err());
+        assert!(
+            command_source_for_wave(Some(crate::id::WaveId::new()), &wave_id, "INF-123").is_err()
+        );
         assert_eq!(
-            command_source_for_wave(None, &wave_id, "INF-123", "infrastructure").unwrap(),
+            command_source_for_wave(None, &wave_id, "INF-123").unwrap(),
             ChildCommandSource::Human
         );
     }
@@ -1203,5 +1561,70 @@ mod tests {
                 "error": null,
             })
         );
+    }
+
+    #[test]
+    fn task_workspace_reports_committed_staged_unstaged_and_untracked_files() {
+        let (repo, base, session_id) = changed_workspace();
+        let workspace = TaskWorkspace {
+            issue_identifier: "INF-123",
+            session_id: &session_id,
+            worktree: repo.path(),
+            base_commit: &base,
+        };
+
+        let snapshot = changes_snapshot(workspace).expect("inspect task changes");
+        let committed = snapshot
+            .files
+            .iter()
+            .find(|file| file.path == "committed.txt")
+            .expect("committed file");
+        assert!(committed.committed);
+        let tracked = snapshot
+            .files
+            .iter()
+            .find(|file| file.path == "tracked.txt")
+            .expect("tracked file");
+        assert!(tracked.staged && tracked.unstaged);
+        let untracked = snapshot
+            .files
+            .iter()
+            .find(|file| file.path == "untracked.txt")
+            .expect("untracked file");
+        assert!(untracked.untracked);
+
+        let patch = diff_snapshot(workspace, None).expect("inspect task diff");
+        assert!(patch.patch.contains("committed.txt"));
+        assert!(patch.patch.contains("tracked.txt"));
+        assert!(patch.patch.contains("untracked.txt"));
+
+        let untracked_patch =
+            diff_snapshot(workspace, Some("./untracked.txt")).expect("inspect one file");
+        assert_eq!(untracked_patch.path.as_deref(), Some("untracked.txt"));
+        assert!(untracked_patch.patch.contains("+untracked"));
+    }
+
+    #[test]
+    fn task_file_reads_only_files_inside_the_task_worktree() {
+        let (repo, base, session_id) = changed_workspace();
+        let workspace = TaskWorkspace {
+            issue_identifier: "INF-123",
+            session_id: &session_id,
+            worktree: repo.path(),
+            base_commit: &base,
+        };
+
+        let file = file_snapshot(workspace, "./tracked.txt").expect("read task file");
+        assert_eq!(file.path, "tracked.txt");
+        assert_eq!(file.content.as_deref(), Some("unstaged\n"));
+        assert!(file_snapshot(workspace, "../outside.txt").is_err());
+
+        #[cfg(unix)]
+        {
+            let outside = tempfile::NamedTempFile::new().expect("outside file");
+            std::os::unix::fs::symlink(outside.path(), repo.path().join("outside-link"))
+                .expect("create outside symlink");
+            assert!(file_snapshot(workspace, "outside-link").is_err());
+        }
     }
 }

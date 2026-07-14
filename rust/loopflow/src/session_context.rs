@@ -58,5 +58,20 @@ pub struct LinearProjectSnapshot {
     pub slug: String,
     pub name: String,
     /// Definition and proof-shaped KRs captured when the child Session starts.
-    pub context: String,
+    pub prompt_context: String,
+}
+
+/// Immutable Linear evidence captured when a Project Session starts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectLaunchReceipt {
+    pub project: LinearProjectSnapshot,
+    pub pm_snapshot_synced_at: i64,
+}
+
+/// Immutable Linear evidence captured before a Task worktree is created.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskLaunchReceipt {
+    pub issue: LinearIssueSnapshot,
+    pub project: LinearProjectSnapshot,
+    pub pm_snapshot_synced_at: i64,
 }

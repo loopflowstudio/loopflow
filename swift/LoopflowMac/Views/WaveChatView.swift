@@ -14,6 +14,7 @@ struct WaveChatView: View {
     let waveName: String
     let prefill: WaveComposerPrefill?
     let onSelectChild: (WaveWorkSelection) -> Void
+    let onChildActivity: () -> Void
 
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -71,6 +72,9 @@ struct WaveChatView: View {
             guard let value else { return }
             composerText = value.text
             composerFocused = true
+        }
+        .onChange(of: connection?.turns.last?.activity?.id) { _, activityId in
+            if activityId != nil { onChildActivity() }
         }
         .confirmationDialog(
             "Stop \(waveName)?",
@@ -522,7 +526,11 @@ private struct ChildControlActivityCard: View {
             Button(action: select) {
                 HStack(alignment: .top, spacing: Spacing.md) {
                     Image(systemName: icon)
-                        .foregroundStyle(activity.kind == .failed ? Color.statusError : palette.accent)
+                        .foregroundStyle(
+                            activity.kind == .failed || activity.kind == .controlUncertain
+                                ? Color.statusError
+                                : palette.accent
+                        )
                         .frame(width: 18)
                     VStack(alignment: .leading, spacing: Spacing.xxs) {
                         Text("\(activity.subjectId) · \(activity.title)")
@@ -537,6 +545,11 @@ private struct ChildControlActivityCard: View {
                         }
                         if let version = activity.directiveVersion {
                             Text("directive v\(version)\(activity.effect.map { " · \($0.rawValue)" } ?? "")")
+                                .font(Typography.caption(10))
+                                .foregroundStyle(palette.textSecondary)
+                        }
+                        if let source = activity.source {
+                            Text("Directed by \(source.label)")
                                 .font(Typography.caption(10))
                                 .foregroundStyle(palette.textSecondary)
                         }
@@ -573,6 +586,7 @@ private struct ChildControlActivityCard: View {
         case .pullRequestOpened: "arrow.triangle.pull"
         case .completed: "checkmark.seal.fill"
         case .failed: "exclamationmark.triangle.fill"
+        case .controlUncertain: "questionmark.diamond.fill"
         case .stateChanged, .controlApplied: "circle.dotted"
         }
     }

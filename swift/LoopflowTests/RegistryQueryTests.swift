@@ -83,6 +83,44 @@ struct RegistryQueryTests {
         #expect(result.workMap.projects[0].tasks[0].runtime?.branch == "jack/inf-123")
     }
 
+    @Test("Task workspace queries preserve paths and binary/truncation evidence")
+    func taskWorkspaceQueriesDecode() async throws {
+        let query = RegistryQuery { args, cwd in
+            #expect(cwd == "/tmp/repo")
+            switch args {
+            case ["task", "changes", "INF-123", "--json"]:
+                return #"{"issue_identifier":"INF-123","session_id":"ts_1","base_commit":"abc","head_commit":"def","files":[{"path":"src/parser.rs","committed":true,"staged":false,"unstaged":true,"untracked":false}]}"#
+            case ["task", "diff", "INF-123", "src/parser.rs", "--json"]:
+                return #"{"issue_identifier":"INF-123","session_id":"ts_1","path":"src/parser.rs","patch":"@@ -1 +1 @@","binary":false,"truncated":false}"#
+            case ["task", "file", "INF-123", "src/parser.rs", "--json"]:
+                return #"{"issue_identifier":"INF-123","session_id":"ts_1","path":"src/parser.rs","content":"fn parse() {}\n","binary":false,"size_bytes":14,"truncated":false}"#
+            default:
+                throw RegistryQueryError("unexpected argv: \(args)")
+            }
+        }
+
+        let changes = try await query.taskChanges(issue: "INF-123", cwd: "/tmp/repo")
+        #expect(changes.sessionId == "ts_1")
+        #expect(changes.files[0].path == "src/parser.rs")
+        #expect(changes.files[0].committed && changes.files[0].unstaged)
+
+        let diff = try await query.taskDiff(
+            issue: "INF-123",
+            path: "src/parser.rs",
+            cwd: "/tmp/repo"
+        )
+        #expect(diff.patch == "@@ -1 +1 @@")
+        #expect(!diff.binary && !diff.truncated)
+
+        let file = try await query.taskFile(
+            issue: "INF-123",
+            path: "src/parser.rs",
+            cwd: "/tmp/repo"
+        )
+        #expect(file.content == "fn parse() {}\n")
+        #expect(file.sizeBytes == 14)
+    }
+
     @Test("lf runs decodes the ledger window")
     func runsDecode() async throws {
         let json = """

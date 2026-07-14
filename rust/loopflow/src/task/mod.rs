@@ -15,7 +15,7 @@ use crate::child_session::{
     ChildDirectiveId, ChildProcessGeneration, DirectiveKind, SessionSupervisor,
 };
 use crate::id::WaveId;
-use crate::session_context::{LinearIssueSnapshot, LinearProjectSnapshot};
+use crate::session_context::TaskLaunchReceipt;
 
 pub mod runner;
 
@@ -25,6 +25,8 @@ pub enum TaskDataError {
     InvalidId(String),
     #[error("invalid task session status: {0}")]
     InvalidStatus(String),
+    #[error("invalid task session: {0}")]
+    InvalidInvariant(String),
 }
 
 prefixed_uuid_id!(
@@ -117,13 +119,11 @@ pub enum PmWritebackState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSession {
     pub id: TaskSessionId,
-    pub issue: LinearIssueSnapshot,
-    pub project: LinearProjectSnapshot,
-    pub pm_snapshot_synced_at: i64,
+    /// Immutable PM evidence captured before placement.
+    pub launch: TaskLaunchReceipt,
     pub pm_writeback: PmWritebackState,
+    /// Root ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
-    #[serde(rename = "wave")]
-    pub wave_name: String,
     pub supervisor: SessionSupervisor,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
@@ -138,7 +138,6 @@ pub struct TaskSession {
     pub provider: String,
     pub provider_session_id: Option<String>,
     /// Latest launch generation, retained after that process exits.
-    #[serde(rename = "process")]
     pub latest_process: Option<ChildProcessGeneration>,
     pub pull_request: Option<PullRequestRef>,
     pub created_at: OffsetDateTime,
@@ -146,6 +145,45 @@ pub struct TaskSession {
 }
 
 impl TaskSession {
+    pub fn validate(&self) -> Result<(), TaskDataError> {
+        if self.status.is_process_active() && self.latest_process.is_none() {
+            return Err(TaskDataError::InvalidInvariant(format!(
+                "{} requires a latest process generation",
+                self.status.as_str()
+            )));
+        }
+        if matches!(
+            self.status,
+            TaskSessionStatus::Submitted | TaskSessionStatus::Merged
+        ) && self.pull_request.is_none()
+        {
+            return Err(TaskDataError::InvalidInvariant(format!(
+                "{} requires a pull request",
+                self.status.as_str()
+            )));
+        }
+        if matches!(self.pm_writeback, PmWritebackState::Pending { .. })
+            && self.status != TaskSessionStatus::Merged
+        {
+            return Err(TaskDataError::InvalidInvariant(
+                "pending PM completion is valid only after merge".to_string(),
+            ));
+        }
+        if self.incorporated_directive_version > self.current_directive_version {
+            return Err(TaskDataError::InvalidInvariant(
+                "incorporated directive version exceeds current direction".to_string(),
+            ));
+        }
+        if let SessionSupervisor::Wave { wave_id } = &self.supervisor {
+            if wave_id != &self.wave_id {
+                return Err(TaskDataError::InvalidInvariant(
+                    "direct Wave supervisor does not match root Wave ownership".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn set_status(&mut self, status: TaskSessionStatus, reason: impl Into<String>) {
         let now = OffsetDateTime::now_utc();
         self.status = status;
@@ -257,6 +295,7 @@ pub struct TaskObservation {
     pub session_id: TaskSessionId,
     pub issue_identifier: String,
     pub event_id: i64,
+    pub control_source: Option<crate::child_session::ChildCommandSource>,
     pub event: TaskEventKind,
 }
 
@@ -266,11 +305,14 @@ impl TaskObservation {
     }
 
     pub fn prompt(&self) -> String {
-        let event = serde_json::to_string(&self.event)
-            .expect("TaskEventKind always serializes to structured JSON");
+        let payload = serde_json::to_string(&serde_json::json!({
+            "control_source": self.control_source,
+            "event": self.event,
+        }))
+        .expect("Task observation always serializes to structured JSON");
         format!(
             "<task_observation session_id=\"{}\" issue=\"{}\" event_id=\"{}\">\n{}\n</task_observation>",
-            self.session_id, self.issue_identifier, self.event_id, event
+            self.session_id, self.issue_identifier, self.event_id, payload
         )
     }
 }
@@ -278,10 +320,55 @@ impl TaskObservation {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChildCommandId, ChildCommandState, PmWritebackOperation, PmWritebackState, TaskEventKind,
-        TaskObservation, TaskSessionId, TaskSessionStatus,
+        ChildCommandId, ChildCommandState, PmWritebackOperation, PmWritebackState, PullRequestRef,
+        TaskEventKind, TaskObservation, TaskSession, TaskSessionId, TaskSessionStatus,
     };
-    use crate::child_session::ChildDecisionId;
+    use crate::child_session::{ChildDecisionId, SessionSupervisor};
+    use crate::session_context::{
+        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+        TaskLaunchReceipt,
+    };
+
+    fn task_session() -> TaskSession {
+        let wave_id = crate::id::WaveId::new();
+        let now = time::OffsetDateTime::now_utc();
+        TaskSession {
+            id: TaskSessionId::new(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new("issue-1").unwrap(),
+                    identifier: "INF-123".to_string(),
+                    title: "Ship it".to_string(),
+                    description: String::new(),
+                },
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new("project-1").unwrap(),
+                    slug: "runtime".to_string(),
+                    name: "Runtime".to_string(),
+                    prompt_context: "Definition".to_string(),
+                },
+                pm_snapshot_synced_at: 1,
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave_id.clone(),
+            supervisor: SessionSupervisor::Wave { wave_id },
+            current_directive_version: 1,
+            incorporated_directive_version: 0,
+            status: TaskSessionStatus::Created,
+            status_reason: "created".to_string(),
+            status_at: now,
+            worktree: "/tmp/task".into(),
+            branch: "task/inf-123".to_string(),
+            base_commit: "abc".to_string(),
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            pull_request: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
 
     #[test]
     fn task_ids_are_prefixed_and_round_trip() {
@@ -295,6 +382,7 @@ mod tests {
             session_id: TaskSessionId::from_raw("ts_example"),
             issue_identifier: "INF-123".to_string(),
             event_id: 42,
+            control_source: None,
             event: super::TaskEventKind::Failed {
                 error: "provider stopped".to_string(),
                 resumable: true,
@@ -325,8 +413,10 @@ mod tests {
 
         assert!(!event(ChildCommandState::Persisted).is_wave_observable());
         assert!(!event(ChildCommandState::Claimed).is_wave_observable());
+        assert!(!event(ChildCommandState::Delivering).is_wave_observable());
         assert!(event(ChildCommandState::Accepted).is_wave_observable());
         assert!(event(ChildCommandState::Failed).is_wave_observable());
+        assert!(event(ChildCommandState::Uncertain).is_wave_observable());
     }
 
     #[test]
@@ -368,5 +458,45 @@ mod tests {
                 "error": "offline"
             })
         );
+    }
+
+    #[test]
+    fn submitted_and_merged_tasks_require_their_one_pull_request() {
+        let mut session = task_session();
+        session.status = TaskSessionStatus::Submitted;
+        assert!(session.validate().is_err());
+
+        session.pull_request = Some(PullRequestRef {
+            number: 872,
+            url: "https://github.com/loopflowstudio/loopflow/pull/872".to_string(),
+        });
+        assert!(session.validate().is_ok());
+
+        session.status = TaskSessionStatus::Merged;
+        session.pm_writeback = PmWritebackState::Pending {
+            operation: PmWritebackOperation::CompleteTask,
+            error: "Linear is offline".to_string(),
+        };
+        assert!(session.validate().is_ok());
+    }
+
+    #[test]
+    fn task_session_rejects_impossible_process_writeback_and_supervisor_state() {
+        let mut session = task_session();
+        session.status = TaskSessionStatus::Running;
+        assert!(session.validate().is_err());
+
+        session.status = TaskSessionStatus::Waiting;
+        session.pm_writeback = PmWritebackState::Pending {
+            operation: PmWritebackOperation::CompleteTask,
+            error: "too early".to_string(),
+        };
+        assert!(session.validate().is_err());
+
+        session.pm_writeback = PmWritebackState::Current;
+        session.supervisor = SessionSupervisor::Wave {
+            wave_id: crate::id::WaveId::new(),
+        };
+        assert!(session.validate().is_err());
     }
 }

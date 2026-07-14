@@ -17,7 +17,7 @@ use crate::ops::{ChildReceiptUntil, OpsError, OpsResult};
 use crate::project_session::{
     ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
 };
-use crate::session_context::{LinearProjectId, LinearProjectSnapshot};
+use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
 use crate::store::{open_existing_store, SharedStore, Store};
 use crate::wave::Wave;
 
@@ -40,7 +40,6 @@ pub struct ProjectSessionSnapshot {
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub process_alive: bool,
-    #[serde(rename = "process")]
     pub latest_process: Option<ChildProcessGeneration>,
     pub latest_event: Option<crate::project_session::ProjectEvent>,
     pub created_at: time::OffsetDateTime,
@@ -119,6 +118,14 @@ async fn project_store() -> OpsResult<SharedStore> {
     })
 }
 
+async fn owning_wave(store: &SharedStore, session: &ProjectSession) -> OpsResult<Wave> {
+    store
+        .get_wave(&session.wave_id)
+        .await
+        .map_err(|error| project_error(format!("failed to read owning Wave: {error}")))?
+        .ok_or_else(|| project_error(format!("owning Wave {} is not registered", session.wave_id)))
+}
+
 pub fn project_run(
     repo: &Path,
     project_id: &str,
@@ -144,9 +151,9 @@ pub fn project_run(
                 if current.text != requested {
                     return Err(project_error(format!(
                         "Project {} already exists with directive v{}; use `lf project steer {} <new-direction>` to replace it",
-                        session.project.slug,
+                        session.launch.project.slug,
                         current.version,
-                        session.project.slug,
+                        session.launch.project.slug,
                     )));
                 }
             }
@@ -201,17 +208,17 @@ pub fn project_run(
         let context = crate::ops::task::project_context(&resolved.project);
         let mut session = ProjectSession {
             id: ProjectSessionId::new(),
-            project: LinearProjectSnapshot {
-                id: LinearProjectId::new(resolved.project.id.clone())
-                    .map_err(|error| project_error(error.to_string()))?,
-                slug: resolved.project.slug,
-                name: resolved.project.name,
-                context,
+            launch: ProjectLaunchReceipt {
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new(resolved.project.id.clone())
+                        .map_err(|error| project_error(error.to_string()))?,
+                    slug: resolved.project.slug,
+                    name: resolved.project.name,
+                    prompt_context: context,
+                },
+                pm_snapshot_synced_at: resolved.snapshot.synced_at,
             },
             wave_id: wave.id().clone(),
-            wave_name: resolved.snapshot.wave,
-            control_repo: repo.display().to_string(),
-            pm_snapshot_synced_at: resolved.snapshot.synced_at,
             current_directive_version: 1,
             incorporated_directive_version: 0,
             status: ProjectSessionStatus::Created,
@@ -237,7 +244,7 @@ pub fn project_run(
             .await
         {
             if let Some(existing) = store
-                .get_project_session_by_project(session.project.id.as_str())
+                .get_project_session_by_project(session.launch.project.id.as_str())
                 .await
                 .map_err(|read_error| project_error(read_error.to_string()))?
             {
@@ -322,10 +329,11 @@ pub(crate) async fn launch_project_process(
 ) -> OpsResult<()> {
     // Re-check at the launch boundary: commands and observations can wake a
     // stopped Project long after its initial reservation.
-    ensure_clean_main(Path::new(&session.control_repo), "Project turn")?;
+    let wave = owning_wave(store, session).await?;
+    ensure_clean_main(Path::new(wave.repo()), "Project turn")?;
     let tmux_name = format!(
         "lf-project-{}-{}",
-        tmux_session_slug(&session.project.slug),
+        tmux_session_slug(&session.launch.project.slug),
         &session.id.as_str()[3..11]
     );
     let from = session.status;
@@ -379,13 +387,8 @@ pub(crate) async fn launch_project_process(
         ("LF_PROJECT_SESSION_ID", session.id.as_str()),
         ("LF_PROJECT_GENERATION", generation_text.as_str()),
     ];
-    if let Err(error) = start_lf_session_with_env(
-        &tmux_name,
-        Path::new(&session.control_repo),
-        &argv,
-        &environment,
-    )
-    .await
+    if let Err(error) =
+        start_lf_session_with_env(&tmux_name, Path::new(wave.repo()), &argv, &environment).await
     {
         let reason = format!("project process launch failed: {error}");
         session.set_status(ProjectSessionStatus::Failed, reason.clone());
@@ -425,14 +428,14 @@ async fn wait_until_project_running(
             } else {
                 Err(project_error(format!(
                     "Project {} did not start: {}",
-                    session.project.slug, session.status_reason
+                    session.launch.project.slug, session.status_reason
                 )))
             };
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(project_error(format!(
                 "Project {} did not become running within 10s",
-                session.project.slug
+                session.launch.project.slug
             )));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -495,6 +498,7 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
     let session = session.clone();
     block_on_project(async move {
         let store = project_store().await?;
+        let wave = owning_wave(&store, &session).await?;
         let process_alive = if session.status.is_process_active() {
             match session.latest_process.as_ref() {
                 Some(process) => tmux_session_exists(&process.tmux_name)
@@ -519,11 +523,11 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
             .map_err(|error| project_error(error.to_string()))?
             .len() as u32;
         Ok(ProjectSessionSnapshot {
-            project_id: session.project.id.as_str().to_string(),
-            project_slug: session.project.slug,
-            project_name: session.project.name,
+            project_id: session.launch.project.id.as_str().to_string(),
+            project_slug: session.launch.project.slug,
+            project_name: session.launch.project.name,
             session_id: session.id.to_string(),
-            wave: session.wave_name,
+            wave: wave.name().to_string(),
             current_directive_version: session.current_directive_version,
             incorporated_directive_version: session.incorporated_directive_version,
             status: session.status,
@@ -551,8 +555,8 @@ fn project_command_source(session: &ProjectSession) -> OpsResult<ChildCommandSou
                 .map_err(|error| project_error(format!("invalid ambient Wave id: {error}")))?;
             if wave_id != session.wave_id {
                 return Err(project_error(format!(
-                    "Wave {wave_id} cannot control Project {} owned by wave/{}",
-                    session.project.slug, session.wave_name
+                    "Wave {wave_id} cannot control Project {} owned by Wave {}",
+                    session.launch.project.slug, session.wave_id
                 )));
             }
             Ok(ChildCommandSource::Wave(wave_id))
@@ -573,7 +577,7 @@ fn queue_project_command(project: &str, kind: ChildCommandKind) -> OpsResult<Pro
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project Session exists for {project:?}")))?;
         reconcile_project_liveness(&store, &mut session).await?;
-        let project_id = session.project.id.as_str().to_string();
+        let project_id = session.launch.project.id.as_str().to_string();
         let source = project_command_source(&session)?;
         let result = super::child::queue_command(
             &store,
@@ -703,7 +707,7 @@ pub fn project_request_decision(
             .map_err(|error| project_error(error.to_string()))?;
         if !wait {
             return Ok(ProjectDecisionResult {
-                project_id: session.project.id.as_str().to_string(),
+                project_id: session.launch.project.id.as_str().to_string(),
                 session_id: session.id.to_string(),
                 decision_id: decision_id.to_string(),
                 resolved: false,
@@ -728,7 +732,7 @@ pub fn project_request_decision(
                 });
             if let Some((choice, message)) = resolution {
                 return Ok(ProjectDecisionResult {
-                    project_id: session.project.id.as_str().to_string(),
+                    project_id: session.launch.project.id.as_str().to_string(),
                     session_id: session.id.to_string(),
                     decision_id: decision_id.to_string(),
                     resolved: true,
@@ -738,7 +742,7 @@ pub fn project_request_decision(
             }
             if tokio::time::Instant::now() >= deadline {
                 return Ok(ProjectDecisionResult {
-                    project_id: session.project.id.as_str().to_string(),
+                    project_id: session.launch.project.id.as_str().to_string(),
                     session_id: session.id.to_string(),
                     decision_id: decision_id.to_string(),
                     resolved: false,
@@ -832,7 +836,7 @@ pub fn project_receipt(
             .ok_or_else(|| project_error("Project Session disappeared"))?;
         let result = super::child::control_result(&store, &command, command.clone()).await?;
         Ok(ProjectReceiptRead {
-            receipt: project_control_result(session.project.id.as_str().to_string(), result),
+            receipt: project_control_result(session.launch.project.id.as_str().to_string(), result),
             timed_out,
         })
     })
@@ -865,16 +869,16 @@ pub fn project_attach(project: &str) -> OpsResult<()> {
     let process = session.latest_process.ok_or_else(|| {
         project_error(format!(
             "Project {} has no process; run `lf project resume {}` first",
-            session.project.slug,
-            session.project.id.as_str()
+            session.launch.project.slug,
+            session.launch.project.id.as_str()
         ))
     })?;
     if !session.status.is_process_active() {
         return Err(project_error(format!(
             "Project {} is {}; run `lf project resume {}` first",
-            session.project.slug,
+            session.launch.project.slug,
             session.status.as_str(),
-            session.project.id.as_str()
+            session.launch.project.id.as_str()
         )));
     }
     let status = std::process::Command::new("tmux")

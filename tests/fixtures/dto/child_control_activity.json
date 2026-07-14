@@ -9,6 +9,7 @@
   "directive_version": null,
   "command_id": "cc_33333333333333333333333333333333",
   "effect": "live_steer",
+  "source": {"kind": "wave", "id": "11111111-1111-4111-8111-111111111111"},
   "decision_id": null,
   "options": []
 }

@@ -23,6 +23,8 @@ struct WaveDetailPane: View {
     @Environment(\.palette) private var palette
     @State private var selection: WaveWorkSelection?
     @State private var prefill: WaveComposerPrefill?
+    @State private var workRefresh: UInt64 = 0
+    @StateObject private var terminalStore = TaskTerminalStore()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,7 +36,9 @@ struct WaveDetailPane: View {
                     wave: wave,
                     repoPath: repoPath,
                     selection: $selection,
-                    onTellWave: tellWave
+                    refreshSignal: workRefresh,
+                    onTellWave: tellWave,
+                    terminalStore: terminalStore
                 )
                 .frame(minWidth: 230, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
 
@@ -42,7 +46,8 @@ struct WaveDetailPane: View {
                     repoPath: repoPath,
                     waveName: wave.name,
                     prefill: prefill,
-                    onSelectChild: { selection = $0 }
+                    onSelectChild: { selection = $0 },
+                    onChildActivity: { workRefresh &+= 1 }
                 )
                     .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -93,7 +98,9 @@ private struct WavePlanView: View {
     let wave: WaveViewModel
     let repoPath: String
     @Binding var selection: WaveWorkSelection?
+    let refreshSignal: UInt64
     let onTellWave: (WaveWorkSelection) -> Void
+    @ObservedObject var terminalStore: TaskTerminalStore
 
     @Environment(\.palette) private var palette
     @State private var workMap: WaveWorkMap?
@@ -110,7 +117,9 @@ private struct WavePlanView: View {
                     WaveWorkInspector(
                         selection: selection,
                         workMap: workMap,
-                        onTellWave: onTellWave
+                        repoPath: repoPath,
+                        onTellWave: onTellWave,
+                        terminalStore: terminalStore
                     )
                 }
             }
@@ -121,9 +130,10 @@ private struct WavePlanView: View {
         .task(id: identity) {
             while !Task.isCancelled {
                 await refreshWorkMap()
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(30))
             }
         }
+        .task(id: refreshSignal) { await refreshWorkMap() }
     }
 
     private var objective: some View {
@@ -352,9 +362,12 @@ private struct WaveTaskWorkView: View {
 private struct WaveWorkInspector: View {
     let selection: WaveWorkSelection
     let workMap: WaveWorkMap
+    let repoPath: String
     let onTellWave: (WaveWorkSelection) -> Void
+    @ObservedObject var terminalStore: TaskTerminalStore
 
     @Environment(\.palette) private var palette
+    @State private var showsTaskWorkspace = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -391,11 +404,25 @@ private struct WaveWorkInspector: View {
                     location: task.runtime.map { "\($0.worktree)\n\($0.branch)" },
                     pullRequest: task.pullRequest
                 )
+                if task.runtime != nil {
+                    Button("Open Task workspace") { showsTaskWorkspace = true }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                }
             }
         }
         .padding(Spacing.md)
         .background(palette.surfaceMuted)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        .sheet(isPresented: $showsTaskWorkspace) {
+            if let task {
+                TaskWorkspaceView(
+                    task: task,
+                    repoPath: repoPath,
+                    terminalStore: terminalStore
+                )
+            }
+        }
     }
 
     private var project: WaveProjectWork? {

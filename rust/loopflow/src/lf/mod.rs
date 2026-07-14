@@ -648,6 +648,26 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// List files changed from this Task's recorded base commit
+    Changes {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show this Task's patch, optionally limited to one changed file
+    Diff {
+        issue: String,
+        path: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read one file from this Task's worktree
+    File {
+        issue: String,
+        path: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Queue an audited instruction for exactly the next provider turn
     FollowUp {
         issue: String,
@@ -1149,6 +1169,42 @@ mod tests {
         };
         assert_eq!(issue, "INF-123");
         assert!(json);
+    }
+
+    #[test]
+    fn task_workspace_commands_address_the_task_then_optional_file() {
+        let changes = Cli::try_parse_from(["lf", "task", "changes", "INF-123", "--json"])
+            .expect("parse task changes");
+        assert!(matches!(
+            changes.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Changes { issue, json: true }
+            }) if issue == "INF-123"
+        ));
+
+        let diff =
+            Cli::try_parse_from(["lf", "task", "diff", "INF-123", "src/parser.rs", "--json"])
+                .expect("parse task diff");
+        assert!(matches!(
+            diff.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Diff {
+                    issue,
+                    path: Some(path),
+                    json: true,
+                }
+            }) if issue == "INF-123" && path == "src/parser.rs"
+        ));
+
+        let file =
+            Cli::try_parse_from(["lf", "task", "file", "INF-123", "src/parser.rs", "--json"])
+                .expect("parse task file");
+        assert!(matches!(
+            file.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::File { issue, path, json: true }
+            }) if issue == "INF-123" && path == "src/parser.rs"
+        ));
     }
 
     #[test]

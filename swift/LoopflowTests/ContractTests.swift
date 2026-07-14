@@ -107,6 +107,27 @@ struct ContractTests {
         #expect(unattributed.from == nil)
     }
 
+    @Test("child activity cannot masquerade as an ordinary conversation turn")
+    func childActivityEnvelopeIsChecked() throws {
+        let activity = try fixtureJSON("dto/child_control_activity.json")
+        let invalid: [String: Any] = [
+            "id": "turn-activity",
+            "role": "user",
+            "text": "ordinary prose cannot share the activity envelope",
+            "status": "completed",
+            "items": [],
+            "created_at": "2026-07-13T20:00:00Z",
+            "from": "Task INF-123",
+            "body": NSNull(),
+            "activity": activity,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: invalid)
+
+        #expect(throws: ChatTurnError.self) {
+            try JSONDecoder().decode(ChatTurn.self, from: data)
+        }
+    }
+
     @Test("post_message_response.json decodes through PostMessageResponse")
     func postMessageResponseFixtureParses() throws {
         // Pins `POST /messages` → `{turn, state}` for the Mac client.

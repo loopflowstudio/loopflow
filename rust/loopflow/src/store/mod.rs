@@ -395,10 +395,10 @@ mod tests {
     };
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+        ProjectLaunchReceipt, TaskLaunchReceipt,
     };
     use crate::task::{
-        PmWritebackOperation, PmWritebackState, TaskEventKind, TaskSession, TaskSessionId,
-        TaskSessionStatus,
+        PmWritebackState, TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::wave::Wave;
     use std::env;
@@ -415,22 +415,23 @@ mod tests {
             .expect("current unix time");
         TaskSession {
             id: TaskSessionId::new(),
-            issue: LinearIssueSnapshot {
-                id: LinearIssueId::new("issue-uuid").unwrap(),
-                identifier: "INF-123".to_string(),
-                title: "Add hello world".to_string(),
-                description: "Ship one command".to_string(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new("issue-uuid").unwrap(),
+                    identifier: "INF-123".to_string(),
+                    title: "Add hello world".to_string(),
+                    description: "Ship one command".to_string(),
+                },
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new("project-uuid").unwrap(),
+                    slug: "developer-efficiency".to_string(),
+                    name: "Developer Efficiency".to_string(),
+                    prompt_context: "Definition:\nKeep local work fast.".to_string(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
             },
-            project: LinearProjectSnapshot {
-                id: LinearProjectId::new("project-uuid").unwrap(),
-                slug: "developer-efficiency".to_string(),
-                name: "Developer Efficiency".to_string(),
-                context: "Definition:\nKeep local work fast.".to_string(),
-            },
-            pm_snapshot_synced_at: now.unix_timestamp(),
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
-            wave_name: wave.name().to_string(),
             supervisor: SessionSupervisor::Wave {
                 wave_id: wave.id().clone(),
             },
@@ -457,16 +458,16 @@ mod tests {
             .expect("current unix time");
         ProjectSession {
             id: ProjectSessionId::new(),
-            project: LinearProjectSnapshot {
-                id: LinearProjectId::new("project-uuid").unwrap(),
-                slug: "developer-efficiency".to_string(),
-                name: "Developer Efficiency".to_string(),
-                context: "Definition:\nKeep local work fast.".to_string(),
+            launch: ProjectLaunchReceipt {
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new("project-uuid").unwrap(),
+                    slug: "developer-efficiency".to_string(),
+                    name: "Developer Efficiency".to_string(),
+                    prompt_context: "Definition:\nKeep local work fast.".to_string(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            wave_name: wave.name().to_string(),
-            control_repo: wave.repo().to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
             current_directive_version: 0,
             incorporated_directive_version: 0,
             status: ProjectSessionStatus::Running,
@@ -827,8 +828,8 @@ mod tests {
 
         let mut direct = make_task_session(&wave);
         direct.id = TaskSessionId::new();
-        direct.issue.id = LinearIssueId::new("direct-issue").unwrap();
-        direct.issue.identifier = "INF-124".to_string();
+        direct.launch.issue.id = LinearIssueId::new("direct-issue").unwrap();
+        direct.launch.issue.identifier = "INF-124".to_string();
         direct.worktree = PathBuf::from("/repo.inf-124");
         direct.branch = "jack/inf-124".to_string();
         store.create_task_session(&direct).await.unwrap();
@@ -869,11 +870,7 @@ mod tests {
             .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
-        let mut session = make_task_session(&wave);
-        session.pm_writeback = PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
-            error: "Linear unavailable".to_string(),
-        };
+        let session = make_task_session(&wave);
         store.create_task_session(&session).await.unwrap();
 
         let loaded = store
@@ -1008,8 +1005,8 @@ mod tests {
         );
 
         let mut second = make_task_session(&wave);
-        second.issue.id = LinearIssueId::new("issue-two").unwrap();
-        second.issue.identifier = "INF-124".to_string();
+        second.launch.issue.id = LinearIssueId::new("issue-two").unwrap();
+        second.launch.issue.identifier = "INF-124".to_string();
         second.worktree = PathBuf::from("/repo.inf-124");
         second.branch = "jack/inf-124".to_string();
         store.reserve_task_session(&second).await.unwrap();
@@ -1018,6 +1015,50 @@ mod tests {
             .await
             .unwrap()
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn provider_delivery_is_never_replayed_after_an_ambiguous_crash() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let session = make_task_session(&wave);
+        store.create_task_session(&session).await.unwrap();
+        let target = ChildRef::Task(session.id.clone());
+        let command = ChildCommand::new(
+            target.clone(),
+            ChildCommandSource::Human,
+            ChildCommandKind::Steer {
+                text: "change direction".to_string(),
+            },
+        );
+        store.create_child_command(&command).await.unwrap();
+        store.claim_child_commands(&target, 1).await.unwrap();
+        store
+            .mark_child_command_delivering(&command.id, ChildCommandEffect::LiveSteer)
+            .await
+            .unwrap();
+
+        assert!(store
+            .claim_child_commands(&target, 2)
+            .await
+            .unwrap()
+            .is_empty());
+        let uncertain = store
+            .mark_stale_child_deliveries_uncertain(&target, 2)
+            .await
+            .unwrap();
+        assert_eq!(uncertain.len(), 1);
+        assert_eq!(uncertain[0].state, ChildCommandState::Uncertain);
+        assert!(uncertain[0].state.is_terminal());
+        assert!(store
+            .mark_stale_child_deliveries_uncertain(&target, 3)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
@@ -1067,8 +1108,8 @@ mod tests {
         );
 
         let mut without_command = make_task_session(&wave);
-        without_command.issue.id = LinearIssueId::new("other-issue").unwrap();
-        without_command.issue.identifier = "INF-124".to_string();
+        without_command.launch.issue.id = LinearIssueId::new("other-issue").unwrap();
+        without_command.launch.issue.identifier = "INF-124".to_string();
         without_command.worktree = PathBuf::from("/repo.inf-124");
         without_command.branch = "jack/inf-124".to_string();
         without_command.begin_generation("task-b".to_string());
@@ -1167,8 +1208,8 @@ mod tests {
             .unwrap());
 
         let mut second = make_task_session(&wave);
-        second.issue.id = LinearIssueId::new("issue-two").unwrap();
-        second.issue.identifier = "INF-124".to_string();
+        second.launch.issue.id = LinearIssueId::new("issue-two").unwrap();
+        second.launch.issue.identifier = "INF-124".to_string();
         second.worktree = PathBuf::from("/repo.inf-124");
         second.branch = "jack/inf-124".to_string();
         second.set_status(TaskSessionStatus::Waiting, "waiting for work");

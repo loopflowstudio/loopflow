@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::child_control::{
     absorb_commands as absorb_child_commands, apply_input as apply_child_input, input_is_current,
-    ChildTarget, CommandStop, DecisionResolution, PendingInput,
+    reconcile_stale_deliveries, ChildTarget, CommandStop, DecisionResolution, PendingInput,
 };
 use crate::child_session::{
     unincorporated_directive_version, BoundaryResult, ChildCommand, ChildCommandEffect,
@@ -23,6 +23,7 @@ use crate::task::{TaskEventKind, TaskSession, TaskSessionId, TaskSessionStatus};
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
+use crate::wave::Wave;
 
 pub async fn run_task_session(session_id: TaskSessionId, generation: u32) -> Result<()> {
     let result = run_task_session_inner(session_id.clone(), generation).await;
@@ -30,6 +31,13 @@ pub async fn run_task_session(session_id: TaskSessionId, generation: u32) -> Res
         record_unhandled_failure(&session_id, generation, error).await;
     }
     result
+}
+
+async fn owning_wave(store: &SharedStore, session: &TaskSession) -> Result<Wave> {
+    store
+        .get_wave(&session.wave_id)
+        .await?
+        .ok_or_else(|| anyhow!("owning Wave {} is not registered", session.wave_id))
 }
 
 async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> Result<()> {
@@ -42,6 +50,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
         .get_task_session(&session_id)
         .await?
         .ok_or_else(|| anyhow!("Task Session {session_id} not found"))?;
+    let wave = owning_wave(&store, &session).await?;
     let recorded_generation = session
         .latest_process
         .as_ref()
@@ -52,6 +61,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
             recorded_generation
         );
     }
+    reconcile_stale_deliveries(&store, ChildTarget::Task(&session.id), generation).await?;
 
     if let Some(process) = &mut session.latest_process {
         process.pid = Some(std::process::id());
@@ -68,7 +78,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
         .await?;
 
     let (mut flow, _) = Playhead::new(QueuedInvocation::load(&session.worktree, "task")?);
-    let prepared = prepare_task_flow_step(&store, &mut session, &flow).await?;
+    let prepared = prepare_task_flow_step(&store, &mut session, wave.name(), &flow).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
@@ -131,7 +141,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
     });
     println!(
         "task {}> attached; /status, /interrupt [message], /detach, or type an instruction",
-        session.issue.identifier
+        session.launch.issue.identifier
     );
     let mut command_poll = tokio::time::interval(Duration::from_millis(200));
     command_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -216,8 +226,13 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 continue 'runner;
                             }
                             if !flow_iteration_completed && status != Lifecycle::Interrupted {
-                                let prepared =
-                                    prepare_task_flow_step(&store, &mut session, &flow).await?;
+                                let prepared = prepare_task_flow_step(
+                                    &store,
+                                    &mut session,
+                                    wave.name(),
+                                    &flow,
+                                )
+                                .await?;
                                 start_task_flow_turn(
                                     &store,
                                     &mut session,
@@ -263,7 +278,8 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 };
                                 session.pull_request = Some(pull_request);
                                 if pr.state == "merged" {
-                                    crate::ops::task::reconcile_pm_writeback(&mut session).await;
+                                    crate::ops::task::reconcile_pm_writeback(&store, &mut session)
+                                        .await;
                                     (
                                         TaskSessionStatus::Merged,
                                         format!("pull request #{} merged", pr.number),
@@ -285,6 +301,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                     let prepared = prepare_task_flow_step(
                                         &store,
                                         &mut session,
+                                        wave.name(),
                                         &flow,
                                     )
                                     .await?;
@@ -382,8 +399,13 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
                                 .await;
                             }
                             if resume_requested && pending.is_empty() {
-                                let prepared =
-                                    prepare_task_flow_step(&store, &mut session, &flow).await?;
+                                let prepared = prepare_task_flow_step(
+                                    &store,
+                                    &mut session,
+                                    wave.name(),
+                                    &flow,
+                                )
+                                .await?;
                                 start_task_flow_turn(
                                     &store,
                                     &mut session,
@@ -423,6 +445,7 @@ async fn run_task_session_inner(session_id: TaskSessionId, generation: u32) -> R
 async fn prepare_task_flow_step(
     store: &SharedStore,
     session: &mut TaskSession,
+    wave_name: &str,
     flow: &Playhead,
 ) -> Result<crate::lf::commands::run::PreparedHarnessTurn> {
     let latest = store
@@ -462,13 +485,9 @@ async fn prepare_task_flow_step(
         step.step
     );
     store.update_task_session(session).await?;
-    let seed = task_seed(session, directive);
-    let mut prepared = crate::lf::commands::run::prepare_harness_turn(
-        &step.step,
-        &seed,
-        &session.wave_name,
-        None,
-    )?;
+    let seed = task_seed(session, wave_name, directive);
+    let mut prepared =
+        crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
     prepared.config.agent = Some(session.agent.clone());
     Ok(prepared)
 }
@@ -540,7 +559,7 @@ async fn handle_attachment(store: &SharedStore, session: &TaskSession, line: Str
     if line == "/status" {
         println!(
             "{}  {}  {}",
-            session.issue.identifier,
+            session.launch.issue.identifier,
             session.status.as_str(),
             session.status_reason
         );
@@ -840,20 +859,20 @@ async fn finish_command_stop(
     }
 }
 
-fn task_seed(session: &TaskSession, directive: &ChildDirective) -> String {
+fn task_seed(session: &TaskSession, wave_name: &str, directive: &ChildDirective) -> String {
     format!(
         "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf task acknowledge {identifier} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask Session: {session_id}\nWorktree: {worktree}\nBase commit: {base_commit}\nDelivery: one pull request targeting main. The runner plays clarify, pursue, and mutate through this same provider session, then decides whether the whole Task flow repeats. Opening the PR submits the task; completion is merge or explicit abandonment.",
-        identifier = session.issue.identifier,
-        title = session.issue.title,
-        description = session.issue.description,
-        project = session.project.name,
-        project_id = session.project.id.as_str(),
-        project_context = session.project.context,
+        identifier = session.launch.issue.identifier,
+        title = session.launch.issue.title,
+        description = session.launch.issue.description,
+        project = session.launch.project.name,
+        project_id = session.launch.project.id.as_str(),
+        project_context = session.launch.project.prompt_context,
         directive_version = directive.version,
         directive_kind = directive.kind.as_str(),
         directive_text = directive.text,
-        snapshot_synced_at = session.pm_snapshot_synced_at,
-        wave = session.wave_name,
+        snapshot_synced_at = session.launch.pm_snapshot_synced_at,
+        wave = wave_name,
         session_id = session.id,
         worktree = session.worktree.display(),
         base_commit = session.base_commit,
@@ -891,6 +910,7 @@ mod tests {
     use crate::id::WaveId;
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
+        TaskLaunchReceipt,
     };
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
@@ -969,22 +989,23 @@ mod tests {
             .unwrap();
         let session = TaskSession {
             id: TaskSessionId::new(),
-            issue: LinearIssueSnapshot {
-                id: LinearIssueId::new(format!("issue-{provider}")).unwrap(),
-                identifier: format!("{provider}-123"),
-                title: "Conformance".to_string(),
-                description: "Exercise provider-neutral control".to_string(),
+            launch: TaskLaunchReceipt {
+                issue: LinearIssueSnapshot {
+                    id: LinearIssueId::new(format!("issue-{provider}")).unwrap(),
+                    identifier: format!("{provider}-123"),
+                    title: "Conformance".to_string(),
+                    description: "Exercise provider-neutral control".to_string(),
+                },
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new(format!("project-{provider}")).unwrap(),
+                    slug: "control".to_string(),
+                    name: "Control".to_string(),
+                    prompt_context: "Provider-neutral control".to_string(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
             },
-            project: LinearProjectSnapshot {
-                id: LinearProjectId::new(format!("project-{provider}")).unwrap(),
-                slug: "control".to_string(),
-                name: "Control".to_string(),
-                context: "Provider-neutral control".to_string(),
-            },
-            pm_snapshot_synced_at: now.unix_timestamp(),
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
-            wave_name: wave.name().to_string(),
             supervisor: SessionSupervisor::Wave {
                 wave_id: wave.id().clone(),
             },

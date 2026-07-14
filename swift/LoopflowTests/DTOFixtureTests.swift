@@ -32,6 +32,7 @@ struct DTOFixtureTests {
         #expect(activity.kind == .controlApplied)
         #expect(activity.directiveVersion == nil)
         #expect(activity.effect == .liveSteer)
+        #expect(activity.source == .wave(id: "11111111-1111-4111-8111-111111111111"))
     }
 
     private func loadFixture(_ name: String, sourceFile: String = #filePath) throws -> [String: Any] {

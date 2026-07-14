@@ -114,7 +114,7 @@ struct AttemptFailurePresentationTests {
 
     @Test("a bodyless failed turn stays a neutral legacy failure")
     func bodylessFailureHasNoAttemptProjection() {
-        let turn = ChatTurn(
+        let turn = try! ChatTurn(
             id: "turn-legacy",
             role: .assistant,
             text: "",
@@ -165,7 +165,7 @@ struct AttemptFailurePresentationTests {
     }
 
     private func turn(_ id: String, _ status: Lifecycle, body: BodyProvenance) -> ChatTurn {
-        ChatTurn(
+        try! ChatTurn(
             id: id,
             role: .assistant,
             text: "",

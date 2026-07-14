@@ -186,6 +186,30 @@ impl Store {
         .await
     }
 
+    pub async fn mark_child_command_delivering(
+        &self,
+        command_id: &ChildCommandId,
+        effect: ChildCommandEffect,
+    ) -> StoreResult<()> {
+        let command_id = command_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.mark_child_command_delivering(&command_id, effect)
+        })
+        .await
+    }
+
+    pub async fn mark_stale_child_deliveries_uncertain(
+        &self,
+        target: &ChildRef,
+        generation: u32,
+    ) -> StoreResult<Vec<ChildCommand>> {
+        let target = target.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.mark_stale_child_deliveries_uncertain(&target, generation)
+        })
+        .await
+    }
+
     pub async fn set_child_command_effect(
         &self,
         command_id: &ChildCommandId,
@@ -246,16 +270,26 @@ impl Store {
                     }
                 };
                 if nudge_wave {
-                    if let Err(error) =
-                        crate::lf::commands::chat::nudge_child_observations(&session.wave_name)
-                            .await
-                    {
-                        tracing::debug!(
-                            %error,
+                    match self.get_wave(&session.wave_id).await? {
+                        Some(wave) => {
+                            if let Err(error) =
+                                crate::lf::commands::chat::nudge_child_observations(wave.name())
+                                    .await
+                            {
+                                tracing::debug!(
+                                    %error,
+                                    %session_id,
+                                    event_id = event.id,
+                                    "live Task observation delivery failed; Wave observer will retry"
+                                );
+                            }
+                        }
+                        None => tracing::error!(
+                            wave_id = %session.wave_id,
                             %session_id,
                             event_id = event.id,
-                            "live Task observation delivery failed; Wave observer will retry"
-                        );
+                            "Task observation cannot nudge its missing owning Wave"
+                        ),
                     }
                 }
             }
@@ -390,15 +424,25 @@ impl Store {
         .await?;
         if kind.is_wave_observable() {
             if let Some(session) = self.get_project_session(&session_id).await? {
-                if let Err(error) =
-                    crate::lf::commands::chat::nudge_child_observations(&session.wave_name).await
-                {
-                    tracing::debug!(
-                        %error,
+                match self.get_wave(&session.wave_id).await? {
+                    Some(wave) => {
+                        if let Err(error) =
+                            crate::lf::commands::chat::nudge_child_observations(wave.name()).await
+                        {
+                            tracing::debug!(
+                                %error,
+                                %session_id,
+                                event_id = event.id,
+                                "live Project observation delivery failed; Wave observer will retry"
+                            );
+                        }
+                    }
+                    None => tracing::error!(
+                        wave_id = %session.wave_id,
                         %session_id,
                         event_id = event.id,
-                        "live Project observation delivery failed; Wave observer will retry"
-                    );
+                        "Project observation cannot nudge its missing owning Wave"
+                    ),
                 }
             }
         }

@@ -20,6 +20,9 @@ struct LoopflowApp: App {
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
+        atexit {
+            TmuxSessionRegistry.shared.killAllSynchronously()
+        }
         bootstrapLoopflowApp()
         // Enrich our own process PATH before any children spawn, so tools launched
         // by Wave launchers can find tmux, git, and agent CLIs that live in

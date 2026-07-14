@@ -24,7 +24,14 @@ pub(crate) enum ChildTarget<'a> {
 }
 
 impl ChildTarget<'_> {
-    async fn command_is_claimed(
+    fn as_ref(self) -> ChildRef {
+        match self {
+            Self::Project(id) => ChildRef::Project(id.clone()),
+            Self::Task(id) => ChildRef::Task(id.clone()),
+        }
+    }
+
+    async fn command_is_deliverable(
         self,
         store: &SharedStore,
         command_id: &ChildCommandId,
@@ -40,9 +47,46 @@ impl ChildTarget<'_> {
                     (Self::Task(target_id), ChildRef::Task(command_id)) => target_id == command_id,
                     _ => false,
                 };
-                targets_match && command.state == ChildCommandState::Claimed
+                targets_match
+                    && matches!(
+                        command.state,
+                        ChildCommandState::Claimed | ChildCommandState::Delivering
+                    )
             });
         Ok(claimed)
+    }
+
+    async fn begin_delivery(
+        self,
+        store: &SharedStore,
+        command_id: ChildCommandId,
+        effect: ChildCommandEffect,
+    ) -> Result<()> {
+        let command = store
+            .get_child_command(&command_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("child command {command_id} disappeared"))?;
+        match command.state {
+            ChildCommandState::Claimed => {
+                store
+                    .mark_child_command_delivering(&command_id, effect)
+                    .await?;
+                self.record_command_changed(
+                    store,
+                    command_id,
+                    ChildCommandState::Delivering,
+                    Some(effect),
+                    None,
+                )
+                .await
+            }
+            ChildCommandState::Delivering => Ok(()),
+            state => anyhow::bail!(
+                "child command {} cannot begin provider delivery from {}",
+                command.id,
+                state.as_str()
+            ),
+        }
     }
 
     async fn record_claimed(
@@ -212,7 +256,7 @@ pub(crate) async fn input_is_current(
     input: &PendingInput,
 ) -> Result<bool> {
     match &input.command_id {
-        Some(command_id) => target.command_is_claimed(store, command_id).await,
+        Some(command_id) => target.command_is_deliverable(store, command_id).await,
         None => Ok(true),
     }
 }
@@ -226,7 +270,7 @@ pub(crate) async fn absorb_commands(
     pending: &mut VecDeque<PendingInput>,
 ) -> Result<Option<CommandStop>> {
     for command in commands {
-        if !target.command_is_claimed(store, &command.id).await? {
+        if !target.command_is_deliverable(store, &command.id).await? {
             continue;
         }
         target
@@ -355,6 +399,11 @@ pub(crate) async fn apply_input(
     harness: &mut dyn Harness,
     input: PendingInput,
 ) -> Result<()> {
+    if let Some(command_id) = input.command_id.as_ref() {
+        target
+            .begin_delivery(store, command_id.clone(), input.effect)
+            .await?;
+    }
     if let Err(error) = harness.send_input(&input.text).await {
         if let Some(command_id) = input.command_id {
             target
@@ -385,11 +434,38 @@ async fn interrupt_harness(
     if !turn_active {
         return Ok(());
     }
+    if let Some(effect) = effect {
+        target
+            .begin_delivery(store, command_id.clone(), effect)
+            .await?;
+    }
     if let Err(error) = harness.interrupt().await {
         target
             .fail_command(store, command_id, effect, &error.to_string())
             .await?;
         return Err(error);
+    }
+    Ok(())
+}
+
+pub(crate) async fn reconcile_stale_deliveries(
+    store: &SharedStore,
+    target: ChildTarget<'_>,
+    generation: u32,
+) -> Result<()> {
+    let commands = store
+        .mark_stale_child_deliveries_uncertain(&target.as_ref(), generation)
+        .await?;
+    for command in commands {
+        target
+            .record_command_changed(
+                store,
+                command.id,
+                ChildCommandState::Uncertain,
+                command.effect,
+                command.error,
+            )
+            .await?;
     }
     Ok(())
 }

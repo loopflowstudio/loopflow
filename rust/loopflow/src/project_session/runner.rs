@@ -11,7 +11,8 @@ use tokio::sync::mpsc;
 use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::child_control::{
     absorb_commands as absorb_child_commands, apply_input as apply_child_input,
-    take_current_input as take_child_input, ChildTarget, CommandStop, PendingInput,
+    reconcile_stale_deliveries, take_current_input as take_child_input, ChildTarget, CommandStop,
+    PendingInput,
 };
 use crate::child_session::{
     unincorporated_directive_version, BoundaryResult, ChildCommand, ChildCommandEffect,
@@ -27,6 +28,7 @@ use crate::task::TaskSessionStatus;
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
 };
+use crate::wave::Wave;
 
 pub async fn run_project_session(session_id: ProjectSessionId, generation: u32) -> Result<()> {
     let result = run_project_session_inner(session_id.clone(), generation).await;
@@ -34,6 +36,13 @@ pub async fn run_project_session(session_id: ProjectSessionId, generation: u32) 
         record_unhandled_failure(&session_id, generation, error).await;
     }
     result
+}
+
+async fn owning_wave(store: &SharedStore, session: &ProjectSession) -> Result<Wave> {
+    store
+        .get_wave(&session.wave_id)
+        .await?
+        .ok_or_else(|| anyhow!("owning Wave {} is not registered", session.wave_id))
 }
 
 async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32) -> Result<()> {
@@ -46,6 +55,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
         .get_project_session(&session_id)
         .await?
         .ok_or_else(|| anyhow!("Project Session {session_id} not found"))?;
+    let wave = owning_wave(&store, &session).await?;
     if session
         .latest_process
         .as_ref()
@@ -54,6 +64,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
     {
         anyhow::bail!("Project Session {session_id} generation {generation} is not current");
     }
+    reconcile_stale_deliveries(&store, ChildTarget::Project(&session.id), generation).await?;
     if let Some(process) = &mut session.latest_process {
         process.pid = Some(std::process::id());
     }
@@ -69,11 +80,9 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
         .await?;
 
     let observations = consume_task_observations(&store, &mut session).await?;
-    let (mut flow, _) = Playhead::new(QueuedInvocation::load(
-        Path::new(&session.control_repo),
-        "project",
-    )?);
-    let prepared = prepare_project_flow_step(&store, &mut session, &flow, &observations).await?;
+    let (mut flow, _) = Playhead::new(QueuedInvocation::load(Path::new(wave.repo()), "project")?);
+    let prepared =
+        prepare_project_flow_step(&store, &mut session, &wave, &flow, &observations).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
@@ -118,7 +127,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
     });
     println!(
         "project {}> attached; /status, /interrupt [message], /detach, or type an instruction",
-        session.project.slug
+        session.launch.project.slug
     );
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -163,7 +172,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                             return finish_failed(&store, &mut session, harness.as_mut(), "provider turn failed").await;
                         }
                         if let Err(error) =
-                            verify_control_plane_checkout(Path::new(&session.control_repo))
+                            verify_control_plane_checkout(Path::new(wave.repo()))
                         {
                             return finish_failed(
                                 &store,
@@ -183,7 +192,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                         flow_turn_active = false;
                         if let Some(input) = take_current_input(&store, &session, &mut pending).await? {
                             if resume_interrupted_flow {
-                                open_project_flow_body(&mut flow, &session)?;
+                                open_project_flow_body(&mut flow, wave.repo())?;
                                 flow_turn_active = true;
                             }
                             apply_input(&store, &session, harness.as_mut(), input).await?;
@@ -209,6 +218,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                             let prepared = prepare_project_flow_step(
                                 &store,
                                 &mut session,
+                                &wave,
                                 &flow,
                                 &[],
                             )
@@ -242,7 +252,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                         session.current_directive_version = latest.current_directive_version;
                         session.incorporated_directive_version =
                             latest.incorporated_directive_version;
-                        let mut outcome = inspect_outcome(&store, &session).await?;
+                        let mut outcome = inspect_outcome(&store, &session, &wave).await?;
                         if status == Lifecycle::Interrupted {
                             outcome.status = ProjectSessionStatus::Waiting;
                             outcome.reason = "Project flow step interrupted; waiting for resume or another instruction".to_string();
@@ -264,6 +274,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                             let prepared = prepare_project_flow_step(
                                 &store,
                                 &mut session,
+                                &wave,
                                 &flow,
                                 &[],
                             )
@@ -335,6 +346,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
                                 let prepared = prepare_project_flow_step(
                                     &store,
                                     &mut session,
+                                    &wave,
                                     &flow,
                                     &[],
                                 )
@@ -381,6 +393,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, generation: u32
 async fn prepare_project_flow_step(
     store: &SharedStore,
     session: &mut ProjectSession,
+    wave: &Wave,
     flow: &Playhead,
     observations: &[String],
 ) -> Result<crate::lf::commands::run::PreparedHarnessTurn> {
@@ -421,28 +434,21 @@ async fn prepare_project_flow_step(
         step.step
     );
     store.update_project_session(session).await?;
-    let seed = project_seed(session, directive, observations);
-    let mut prepared = crate::lf::commands::run::prepare_harness_turn(
-        &step.step,
-        &seed,
-        &session.wave_name,
-        None,
-    )?;
+    let seed = project_seed(session, wave.name(), directive, observations);
+    let mut prepared =
+        crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave.name(), None)?;
     prepared.config.agent = Some(session.agent.clone());
     Ok(prepared)
 }
 
-fn open_project_flow_body(flow: &mut Playhead, session: &ProjectSession) -> Result<()> {
+fn open_project_flow_body(flow: &mut Playhead, control_repo: &str) -> Result<()> {
     let step = flow
         .current()
         .ok_or_else(|| anyhow!("Project flow has no current step"))?;
     if step.kind != StepKind::Skill {
         anyhow::bail!("Project flow step {} is not a skill", step.step);
     }
-    flow.start_body(BodyProvenance::for_step(
-        &step,
-        Path::new(&session.control_repo),
-    ))?;
+    flow.start_body(BodyProvenance::for_step(&step, Path::new(control_repo)))?;
     Ok(())
 }
 
@@ -453,7 +459,8 @@ async fn start_project_flow_turn(
     flow: &mut Playhead,
     prepared: crate::lf::commands::run::PreparedHarnessTurn,
 ) -> Result<()> {
-    open_project_flow_body(flow, session)?;
+    let wave = owning_wave(store, session).await?;
+    open_project_flow_body(flow, wave.repo())?;
     apply_input(
         store,
         session,
@@ -504,7 +511,7 @@ async fn handle_attachment(
     if line == "/status" {
         println!(
             "{}  {}  {}",
-            session.project.slug,
+            session.launch.project.slug,
             session.status.as_str(),
             session.status_reason
         );
@@ -642,9 +649,13 @@ struct ProjectOutcome {
     fingerprint: String,
 }
 
-async fn inspect_outcome(store: &SharedStore, session: &ProjectSession) -> Result<ProjectOutcome> {
-    let repo = session.control_repo.clone();
-    let project_id = session.project.id.as_str().to_string();
+async fn inspect_outcome(
+    store: &SharedStore,
+    session: &ProjectSession,
+    wave: &Wave,
+) -> Result<ProjectOutcome> {
+    let repo = wave.repo().to_string();
+    let project_id = session.launch.project.id.as_str().to_string();
     let resolved = tokio::task::spawn_blocking(move || {
         crate::ops::task_pm::resolve_project(
             std::path::Path::new(&repo),
@@ -659,7 +670,7 @@ async fn inspect_outcome(store: &SharedStore, session: &ProjectSession) -> Resul
         .await?
         .into_iter()
         .filter(|task| {
-            task.project.id.as_str() == session.project.id.as_str()
+            task.launch.project.id.as_str() == session.launch.project.id.as_str()
                 && matches!(
                     &task.supervisor,
                     SessionSupervisor::Project { session_id } if session_id == &session.id
@@ -670,7 +681,7 @@ async fn inspect_outcome(store: &SharedStore, session: &ProjectSession) -> Resul
         .snapshot
         .items
         .iter()
-        .filter(|item| item.project.as_deref() == Some(session.project.slug.as_str()))
+        .filter(|item| item.project.as_deref() == Some(session.launch.project.slug.as_str()))
         .collect::<Vec<_>>();
     let fingerprint_payload = serde_json::json!({
         "project": resolved.project,
@@ -887,6 +898,7 @@ async fn record_unhandled_failure(
 
 fn project_seed(
     session: &ProjectSession,
+    wave_name: &str,
     directive: &ChildDirective,
     observations: &[String],
 ) -> String {
@@ -897,16 +909,16 @@ fn project_seed(
     };
     format!(
         "Advance Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\nCurrent directive v{directive_version} ({directive_kind}):\n{directive_text}\n\nAcknowledge this direction before continuing with `lf project acknowledge {project_id} --directive {directive_version} --summary \"<how the plan changed>\"`.\n\nProject Session: {session_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThe runner plays clarify, pursue, and mutate through this same provider session before it checks authoritative Project and Task state. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Task Sessions. Do not edit repository files from the Wave home. Return concise phase evidence; the runner decides complete, wait, repeat, or block after the whole flow.",
-        name = session.project.name,
-        project_id = session.project.id.as_str(),
-        wave = session.wave_name,
-        context = session.project.context,
+        name = session.launch.project.name,
+        project_id = session.launch.project.id.as_str(),
+        wave = wave_name,
+        context = session.launch.project.prompt_context,
         directive_version = directive.version,
         directive_kind = directive.kind.as_str(),
         directive_text = directive.text,
         session_id = session.id,
         iteration = session.iteration + 1,
-        synced_at = session.pm_snapshot_synced_at,
+        synced_at = session.launch.pm_snapshot_synced_at,
     )
 }
 
@@ -941,7 +953,7 @@ mod tests {
     use crate::harness::{Capabilities, Harness};
     use crate::id::WaveId;
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
-    use crate::session_context::{LinearProjectId, LinearProjectSnapshot};
+    use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::wave::Wave;
 
@@ -1016,16 +1028,16 @@ mod tests {
             .unwrap();
         let session = ProjectSession {
             id: ProjectSessionId::new(),
-            project: LinearProjectSnapshot {
-                id: LinearProjectId::new(format!("project-{provider}")).unwrap(),
-                slug: "control".to_string(),
-                name: "Control".to_string(),
-                context: "Provider-neutral control".to_string(),
+            launch: ProjectLaunchReceipt {
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new(format!("project-{provider}")).unwrap(),
+                    slug: "control".to_string(),
+                    name: "Control".to_string(),
+                    prompt_context: "Provider-neutral control".to_string(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            wave_name: wave.name().to_string(),
-            control_repo: "/repo".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
             current_directive_version: 0,
             incorporated_directive_version: 0,
             status: ProjectSessionStatus::Running,

@@ -580,7 +580,7 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
         };
         println!(
             "{}  {}  {}\n  session: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
-            session.issue.identifier,
+            session.launch.issue.identifier,
             session.status.as_str(),
             session.provider,
             session.id,
@@ -625,7 +625,7 @@ fn print_project_session(
     } else {
         println!(
             "{}  {}  {}\n  session: {}\n  iteration: {}\n  reason: {}",
-            session.project.slug,
+            session.launch.project.slug,
             session.status.as_str(),
             session.provider,
             session.id,
@@ -855,6 +855,58 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Status { issue, json } => {
             let session = loopflow::ops::task::task_status(issue)?;
             print_task_session(&session, *json)
+        }
+        TaskCommand::Changes { issue, json } => {
+            let snapshot = loopflow::ops::task::task_changes(issue)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            } else if snapshot.files.is_empty() {
+                println!("{} has no changes from its recorded base", issue);
+            } else {
+                for file in snapshot.files {
+                    let mut states = Vec::new();
+                    if file.committed {
+                        states.push("committed");
+                    }
+                    if file.staged {
+                        states.push("staged");
+                    }
+                    if file.unstaged {
+                        states.push("unstaged");
+                    }
+                    if file.untracked {
+                        states.push("untracked");
+                    }
+                    println!("{}\t{}", states.join(","), file.path);
+                }
+            }
+            Ok(())
+        }
+        TaskCommand::Diff { issue, path, json } => {
+            let snapshot = loopflow::ops::task::task_diff(issue, path.as_deref())?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            } else {
+                print!("{}", snapshot.patch);
+                if snapshot.truncated {
+                    eprintln!("\n[diff truncated at 1 MB]");
+                }
+            }
+            Ok(())
+        }
+        TaskCommand::File { issue, path, json } => {
+            let snapshot = loopflow::ops::task::task_file(issue, path)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            } else if snapshot.binary {
+                anyhow::bail!("{} is binary", snapshot.path);
+            } else {
+                print!("{}", snapshot.content.as_deref().unwrap_or_default());
+                if snapshot.truncated {
+                    eprintln!("\n[file truncated at 1 MB]");
+                }
+            }
+            Ok(())
         }
         TaskCommand::FollowUp {
             issue,

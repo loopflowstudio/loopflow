@@ -14,7 +14,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::child_session::ChildCommandEffect;
+use crate::child_session::{ChildCommandEffect, ChildCommandState};
 use crate::project_session::{ProjectEventKind, ProjectObservation};
 use crate::task::{TaskEventKind, TaskObservation};
 use crate::wave::playhead::{now_rfc3339, BodyProvenance};
@@ -39,6 +39,7 @@ pub enum ChildActivitySubject {
 pub enum ChildActivityKind {
     StateChanged,
     ControlApplied,
+    ControlUncertain,
     Directed,
     Incorporated,
     DecisionRequired,
@@ -60,6 +61,7 @@ pub struct ChildControlActivity {
     pub directive_version: Option<u32>,
     pub command_id: Option<String>,
     pub effect: Option<ChildCommandEffect>,
+    pub source: Option<crate::child_session::ChildCommandSource>,
     pub decision_id: Option<String>,
     pub options: Vec<String>,
 }
@@ -78,6 +80,7 @@ impl ChildControlActivity {
             directive_version: fields.directive_version,
             command_id: fields.command_id,
             effect: fields.effect,
+            source: observation.control_source.clone(),
             decision_id: fields.decision_id,
             options: fields.options,
         }
@@ -96,6 +99,7 @@ impl ChildControlActivity {
             directive_version: fields.directive_version,
             command_id: fields.command_id,
             effect: fields.effect,
+            source: observation.control_source.clone(),
             decision_id: fields.decision_id,
             options: fields.options,
         }
@@ -106,7 +110,7 @@ impl ChildControlActivity {
 ///
 /// Wire type consumed by Loopflow. Every field is required (no serde defaults):
 /// the same shape round-trips through Rust and Swift.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ChatTurn {
     /// Stable within the wave journal across restarts: `"turn-1"`, `"turn-2"`, …
     pub id: String,
@@ -131,6 +135,16 @@ pub struct ChatTurn {
     pub activity: Option<ChildControlActivity>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ChatTurnError {
+    #[error("child activity entries cannot also carry prose, items, or a provider body")]
+    MixedActivity,
+    #[error("child activity entries must be completed attributed user-side entries")]
+    InvalidActivityEnvelope,
+    #[error("human turns must be completed and cannot carry provider items or a body")]
+    InvalidHumanTurn,
+}
+
 impl ChatTurn {
     /// A completed `user` turn carrying a human message.
     pub fn user(id: String, text: String) -> Self {
@@ -145,6 +159,46 @@ impl ChatTurn {
             body: None,
             activity: None,
         }
+    }
+
+    pub fn child_activity(
+        id: String,
+        created_at: String,
+        from: String,
+        activity: ChildControlActivity,
+    ) -> Self {
+        Self {
+            id,
+            role: ChatRole::User,
+            text: String::new(),
+            status: Lifecycle::Completed,
+            items: Vec::new(),
+            created_at,
+            from: Some(from),
+            body: None,
+            activity: Some(activity),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ChatTurnError> {
+        if self.activity.is_some() {
+            if !self.text.is_empty() || !self.items.is_empty() || self.body.is_some() {
+                return Err(ChatTurnError::MixedActivity);
+            }
+            if self.role != ChatRole::User
+                || self.status != Lifecycle::Completed
+                || self.from.is_none()
+            {
+                return Err(ChatTurnError::InvalidActivityEnvelope);
+            }
+        } else if self.role == ChatRole::User
+            && (self.status != Lifecycle::Completed
+                || !self.items.is_empty()
+                || self.body.is_some())
+        {
+            return Err(ChatTurnError::InvalidHumanTurn);
+        }
+        Ok(())
     }
 
     /// The one turn-growth rule every projection shares: `Message` prose
@@ -185,6 +239,41 @@ impl ChatTurn {
     }
 }
 
+impl<'de> Deserialize<'de> for ChatTurn {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            id: String,
+            role: ChatRole,
+            text: String,
+            status: Lifecycle,
+            items: Vec<ConversationItem>,
+            created_at: String,
+            from: Option<String>,
+            body: Option<BodyProvenance>,
+            activity: Option<ChildControlActivity>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let turn = Self {
+            id: wire.id,
+            role: wire.role,
+            text: wire.text,
+            status: wire.status,
+            items: wire.items,
+            created_at: wire.created_at,
+            from: wire.from,
+            body: wire.body,
+            activity: wire.activity,
+        };
+        turn.validate().map_err(serde::de::Error::custom)?;
+        Ok(turn)
+    }
+}
+
 struct ActivityFields {
     kind: ChildActivityKind,
     title: String,
@@ -213,7 +302,7 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
             command_id: Some(command_id.to_string()),
             effect: *effect,
             ..activity(
-                ChildActivityKind::ControlApplied,
+                control_activity_kind(*state),
                 &format!("Control {}", state.as_str()),
                 error.as_deref().unwrap_or_default(),
             )
@@ -290,7 +379,7 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
             command_id: Some(command_id.to_string()),
             effect: *effect,
             ..activity(
-                ChildActivityKind::ControlApplied,
+                control_activity_kind(*state),
                 &format!("Control {}", state.as_str()),
                 error.as_deref().unwrap_or_default(),
             )
@@ -359,6 +448,14 @@ fn activity(kind: ChildActivityKind, title: &str, summary: &str) -> ActivityFiel
     }
 }
 
+fn control_activity_kind(state: ChildCommandState) -> ChildActivityKind {
+    if state == ChildCommandState::Uncertain {
+        ChildActivityKind::ControlUncertain
+    } else {
+        ChildActivityKind::ControlApplied
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,6 +484,36 @@ mod tests {
         value.as_object_mut().expect("object").remove("from");
         let decoded: ChatTurn = serde_json::from_value(value).expect("deserialize");
         assert_eq!(decoded.from, None);
+    }
+
+    #[test]
+    fn child_activity_envelope_rejects_mixed_conversation_content() {
+        let activity = ChildControlActivity {
+            id: "task-ts_example-1".to_string(),
+            subject: ChildActivitySubject::Task,
+            subject_id: "INF-123".to_string(),
+            session_id: "ts_example".to_string(),
+            kind: ChildActivityKind::StateChanged,
+            title: "Task started".to_string(),
+            summary: String::new(),
+            directive_version: None,
+            command_id: None,
+            effect: None,
+            source: None,
+            decision_id: None,
+            options: Vec::new(),
+        };
+        let turn = ChatTurn::child_activity(
+            "turn-activity".to_string(),
+            "2026-07-13T20:00:00Z".to_string(),
+            "Task INF-123".to_string(),
+            activity,
+        );
+        let mut value = serde_json::to_value(turn).expect("serialize activity turn");
+        value["text"] = serde_json::Value::String("mixed prose".to_string());
+
+        let error = serde_json::from_value::<ChatTurn>(value).expect_err("reject mixed activity");
+        assert!(error.to_string().contains("cannot also carry prose"));
     }
 
     #[test]
@@ -435,6 +562,7 @@ mod tests {
             session_id: crate::task::TaskSessionId::new(),
             issue_identifier: "INF-123".to_string(),
             event_id: 9,
+            control_source: None,
             event: TaskEventKind::DecisionRequested {
                 decision_id: decision_id.clone(),
                 prompt: "Which parser mode?".to_string(),
@@ -451,10 +579,14 @@ mod tests {
     #[test]
     fn command_activity_keeps_the_applied_effect() {
         let command_id = crate::child_session::ChildCommandId::new();
+        let wave_id = crate::id::WaveId::new();
         let observation = TaskObservation {
             session_id: crate::task::TaskSessionId::new(),
             issue_identifier: "INF-123".to_string(),
             event_id: 10,
+            control_source: Some(crate::child_session::ChildCommandSource::Wave(
+                wave_id.clone(),
+            )),
             event: TaskEventKind::CommandChanged {
                 command_id: command_id.clone(),
                 state: crate::child_session::ChildCommandState::Accepted,
@@ -468,5 +600,30 @@ mod tests {
         assert_eq!(activity.command_id.as_deref(), Some(command_id.as_str()));
         assert_eq!(activity.effect, Some(ChildCommandEffect::LiveSteer));
         assert_eq!(activity.directive_version, None);
+        assert_eq!(
+            activity.source,
+            Some(crate::child_session::ChildCommandSource::Wave(wave_id))
+        );
+    }
+
+    #[test]
+    fn ambiguous_provider_delivery_is_visibly_uncertain() {
+        let observation = TaskObservation {
+            session_id: crate::task::TaskSessionId::new(),
+            issue_identifier: "INF-123".to_string(),
+            event_id: 11,
+            control_source: Some(crate::child_session::ChildCommandSource::System),
+            event: TaskEventKind::CommandChanged {
+                command_id: crate::child_session::ChildCommandId::new(),
+                state: ChildCommandState::Uncertain,
+                effect: None,
+                error: Some("provider delivery outcome is unknown".to_string()),
+            },
+        };
+
+        let activity = ChildControlActivity::from_task(&observation);
+        assert_eq!(activity.kind, ChildActivityKind::ControlUncertain);
+        assert_eq!(activity.title, "Control uncertain");
+        assert!(activity.summary.contains("unknown"));
     }
 }

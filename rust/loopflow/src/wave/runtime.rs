@@ -849,6 +849,8 @@ impl WaveRuntime {
     /// Push a turn into the thread cache and broadcast it live. The journal
     /// events for the turn must already be appended (same lock).
     fn commit_locked(&self, inner: &mut Inner, turn: ChatTurn) -> ChatTurn {
+        turn.validate()
+            .expect("Wave thread entries must satisfy the ChatTurn wire invariant");
         if turn.role == ChatRole::Assistant {
             inner.last_assistant_turn_id = Some(turn.id.clone());
         }
@@ -926,12 +928,12 @@ impl WaveRuntime {
         let event = inner.journal.append(|_| EventKind::TaskObserved {
             observation: observation.clone(),
         });
-        let mut turn = ChatTurn::user(format!("turn-{}", event.seq), String::new());
-        turn.created_at = event.at_rfc3339();
-        turn.from = Some("task".to_string());
-        turn.activity = Some(crate::chat::turns::ChildControlActivity::from_task(
-            &observation,
-        ));
+        let turn = ChatTurn::child_activity(
+            format!("turn-{}", event.seq),
+            event.at_rfc3339(),
+            "task".to_string(),
+            crate::chat::turns::ChildControlActivity::from_task(&observation),
+        );
         self.commit_locked(&mut inner, turn);
         inner.messages.insert(pending.id.clone(), pending.clone());
         inner.tasks.insert(pending.id.clone(), observation.clone());
@@ -950,12 +952,12 @@ impl WaveRuntime {
         let event = inner.journal.append(|_| EventKind::ProjectObserved {
             observation: observation.clone(),
         });
-        let mut turn = ChatTurn::user(format!("turn-{}", event.seq), String::new());
-        turn.created_at = event.at_rfc3339();
-        turn.from = Some("project".to_string());
-        turn.activity = Some(crate::chat::turns::ChildControlActivity::from_project(
-            &observation,
-        ));
+        let turn = ChatTurn::child_activity(
+            format!("turn-{}", event.seq),
+            event.at_rfc3339(),
+            "project".to_string(),
+            crate::chat::turns::ChildControlActivity::from_project(&observation),
+        );
         self.commit_locked(&mut inner, turn);
         inner.messages.insert(pending.id.clone(), pending.clone());
         inner
@@ -1530,6 +1532,7 @@ mod tests {
             session_id: crate::task::TaskSessionId::from_raw("ts_example"),
             issue_identifier: "INF-123".to_string(),
             event_id: 7,
+            control_source: None,
             event: crate::task::TaskEventKind::DecisionRequested {
                 decision_id: crate::child_session::ChildDecisionId::new(),
                 prompt: "Approve the plan?".to_string(),
@@ -1568,6 +1571,7 @@ mod tests {
             session_id: crate::project_session::ProjectSessionId::from_raw("ps_example"),
             project: "developer-efficiency".to_string(),
             event_id: 8,
+            control_source: None,
             event: crate::project_session::ProjectEventKind::Completed {
                 summary: "all KRs hold".to_string(),
             },

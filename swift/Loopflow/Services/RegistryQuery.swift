@@ -63,6 +63,36 @@ public struct RegistryQuery: Sendable {
         )
     }
 
+    /// Files changed by one Task, classified across commits, index, worktree,
+    /// and untracked state relative to the Task Session's recorded base.
+    public func taskChanges(issue: String, cwd: String?) async throws -> TaskChangesSnapshot {
+        let stdout = try await run(["task", "changes", issue, "--json"], cwd)
+        return try Self.decode(TaskChangesSnapshot.self, from: stdout)
+    }
+
+    /// One Task's complete patch, or the patch for a selected changed file.
+    public func taskDiff(
+        issue: String,
+        path: String?,
+        cwd: String?
+    ) async throws -> TaskDiffSnapshot {
+        var args = ["task", "diff", issue]
+        if let path { args.append(path) }
+        args.append("--json")
+        let stdout = try await run(args, cwd)
+        return try Self.decode(TaskDiffSnapshot.self, from: stdout)
+    }
+
+    /// Current contents of one file, constrained to the Task worktree.
+    public func taskFile(
+        issue: String,
+        path: String,
+        cwd: String?
+    ) async throws -> TaskFileSnapshot {
+        let stdout = try await run(["task", "file", issue, path, "--json"], cwd)
+        return try Self.decode(TaskFileSnapshot.self, from: stdout)
+    }
+
     /// The recent-run window across every wave on the machine — the ledger the
     /// live `op` frames mirror. A process timeline, not a second work hierarchy.
     public func recentRuns() async throws -> [RunLedgerEntry] {

@@ -15,7 +15,7 @@ use crate::child_session::{
     ChildDirectiveId, ChildProcessGeneration, ChildRef, DirectiveKind, SessionSupervisor,
 };
 use crate::id::WaveId;
-use crate::session_context::LinearProjectSnapshot;
+use crate::session_context::ProjectLaunchReceipt;
 use crate::task::{TaskEventKind, TaskSessionId};
 
 pub mod runner;
@@ -26,6 +26,8 @@ pub enum ProjectDataError {
     InvalidId(String),
     #[error("invalid project-session status: {0}")]
     InvalidStatus(String),
+    #[error("invalid project session: {0}")]
+    InvalidInvariant(String),
 }
 
 prefixed_uuid_id!(
@@ -93,14 +95,10 @@ impl FromStr for ProjectSessionStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectSession {
     pub id: ProjectSessionId,
-    /// Linear Project context captured when this pursuit session was created.
-    pub project: LinearProjectSnapshot,
+    /// Immutable PM evidence from before the first Project turn.
+    pub launch: ProjectLaunchReceipt,
+    /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
-    #[serde(rename = "wave")]
-    pub wave_name: String,
-    /// Canonical Wave checkout used as the read-only Project control plane.
-    pub control_repo: String,
-    pub pm_snapshot_synced_at: i64,
     pub current_directive_version: u32,
     pub incorporated_directive_version: u32,
     pub status: ProjectSessionStatus,
@@ -113,13 +111,27 @@ pub struct ProjectSession {
     pub provider: String,
     pub provider_session_id: Option<String>,
     /// Latest launch generation, retained after that process exits.
-    #[serde(rename = "process")]
     pub latest_process: Option<ChildProcessGeneration>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
 
 impl ProjectSession {
+    pub fn validate(&self) -> Result<(), ProjectDataError> {
+        if self.status.is_process_active() && self.latest_process.is_none() {
+            return Err(ProjectDataError::InvalidInvariant(format!(
+                "{} requires a latest process generation",
+                self.status.as_str()
+            )));
+        }
+        if self.incorporated_directive_version > self.current_directive_version {
+            return Err(ProjectDataError::InvalidInvariant(
+                "incorporated directive version exceeds current direction".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn set_status(&mut self, status: ProjectSessionStatus, reason: impl Into<String>) {
         let now = OffsetDateTime::now_utc();
         self.status = status;
@@ -224,6 +236,7 @@ pub struct ProjectObservation {
     pub session_id: ProjectSessionId,
     pub project: String,
     pub event_id: i64,
+    pub control_source: Option<crate::child_session::ChildCommandSource>,
     pub event: ProjectEventKind,
 }
 
@@ -233,11 +246,14 @@ impl ProjectObservation {
     }
 
     pub fn prompt(&self) -> String {
-        let event = serde_json::to_string(&self.event)
-            .expect("ProjectEventKind always serializes to structured JSON");
+        let payload = serde_json::to_string(&serde_json::json!({
+            "control_source": self.control_source,
+            "event": self.event,
+        }))
+        .expect("Project observation always serializes to structured JSON");
         format!(
             "<project_observation session_id=\"{}\" project=\"{}\" event_id=\"{}\">\n{}\n</project_observation>",
-            self.session_id, self.project, self.event_id, event
+            self.session_id, self.project, self.event_id, payload
         )
     }
 }
@@ -261,8 +277,42 @@ pub struct ObservationOutboxRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChildCommandId, ProjectEventKind, ProjectSessionId, ProjectSessionStatus};
+    use super::{
+        ChildCommandId, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
+    };
     use crate::child_session::ChildCommandState;
+    use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
+
+    fn project_session() -> ProjectSession {
+        let now = time::OffsetDateTime::now_utc();
+        ProjectSession {
+            id: ProjectSessionId::new(),
+            launch: ProjectLaunchReceipt {
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new("project-1").unwrap(),
+                    slug: "runtime".to_string(),
+                    name: "Runtime".to_string(),
+                    prompt_context: "Definition".to_string(),
+                },
+                pm_snapshot_synced_at: 1,
+            },
+            wave_id: crate::id::WaveId::new(),
+            current_directive_version: 1,
+            incorporated_directive_version: 0,
+            status: ProjectSessionStatus::Created,
+            status_reason: "created".to_string(),
+            status_at: now,
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
 
     #[test]
     fn project_ids_are_prefixed_and_round_trip() {
@@ -288,7 +338,20 @@ mod tests {
 
         assert!(!event(ChildCommandState::Persisted).is_wave_observable());
         assert!(!event(ChildCommandState::Claimed).is_wave_observable());
+        assert!(!event(ChildCommandState::Delivering).is_wave_observable());
         assert!(event(ChildCommandState::Accepted).is_wave_observable());
         assert!(event(ChildCommandState::Failed).is_wave_observable());
+        assert!(event(ChildCommandState::Uncertain).is_wave_observable());
+    }
+
+    #[test]
+    fn project_session_rejects_impossible_process_and_directive_state() {
+        let mut session = project_session();
+        session.status = ProjectSessionStatus::Running;
+        assert!(session.validate().is_err());
+
+        session.status = ProjectSessionStatus::Waiting;
+        session.incorporated_directive_version = 2;
+        assert!(session.validate().is_err());
     }
 }

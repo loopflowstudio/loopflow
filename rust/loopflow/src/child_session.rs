@@ -138,9 +138,13 @@ pub enum ChildCommandKind {
 pub enum ChildCommandState {
     Persisted,
     Claimed,
+    /// Provider delivery has begun. A process crash from here is ambiguous.
+    Delivering,
     Accepted,
     Failed,
     Superseded,
+    /// The process died after delivery began but before Loopflow recorded the outcome.
+    Uncertain,
 }
 
 impl ChildCommandState {
@@ -148,14 +152,19 @@ impl ChildCommandState {
         match self {
             Self::Persisted => "persisted",
             Self::Claimed => "claimed",
+            Self::Delivering => "delivering",
             Self::Accepted => "accepted",
             Self::Failed => "failed",
             Self::Superseded => "superseded",
+            Self::Uncertain => "uncertain",
         }
     }
 
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Accepted | Self::Failed | Self::Superseded)
+        matches!(
+            self,
+            Self::Accepted | Self::Failed | Self::Superseded | Self::Uncertain
+        )
     }
 }
 

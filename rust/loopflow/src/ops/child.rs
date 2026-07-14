@@ -38,8 +38,8 @@ impl ChildSession {
 
     fn label(&self) -> String {
         match self {
-            Self::Project(session) => format!("Project {}", session.project.slug),
-            Self::Task(session) => format!("Task {}", session.issue.identifier),
+            Self::Project(session) => format!("Project {}", session.launch.project.slug),
+            Self::Task(session) => format!("Task {}", session.launch.issue.identifier),
         }
     }
 
@@ -360,7 +360,7 @@ pub(crate) async fn queue_command(
     let mut receipt = resolve_receipt(store, &command.id, wait_for_resolution).await?;
     if matches!(
         receipt.state,
-        ChildCommandState::Persisted | ChildCommandState::Claimed
+        ChildCommandState::Persisted | ChildCommandState::Claimed | ChildCommandState::Delivering
     ) {
         session.refresh(store).await?;
         if !session.is_process_active() && !session.is_terminal() {
@@ -450,7 +450,9 @@ pub(crate) async fn wait_for_receipt_condition(
         let command = read_receipt(store, command_id).await?;
         if matches!(
             command.state,
-            ChildCommandState::Failed | ChildCommandState::Superseded
+            ChildCommandState::Failed
+                | ChildCommandState::Superseded
+                | ChildCommandState::Uncertain
         ) {
             return Ok((command, false));
         }
@@ -493,7 +495,7 @@ mod tests {
     };
     use crate::id::WaveId;
     use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
-    use crate::session_context::{LinearProjectId, LinearProjectSnapshot};
+    use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
     use crate::store::{open_store, StorageConfig};
     use crate::wave::Wave;
 
@@ -509,16 +511,16 @@ mod tests {
         let active = status.is_process_active();
         ProjectSession {
             id: ProjectSessionId::new(),
-            project: LinearProjectSnapshot {
-                id: LinearProjectId::new(format!("project-{}", WaveId::new())).unwrap(),
-                slug: format!("project-{}", WaveId::new()),
-                name: "Child control".to_string(),
-                context: "Keep one control protocol.".to_string(),
+            launch: ProjectLaunchReceipt {
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new(format!("project-{}", WaveId::new())).unwrap(),
+                    slug: format!("project-{}", WaveId::new()),
+                    name: "Child control".to_string(),
+                    prompt_context: "Keep one control protocol.".to_string(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            wave_name: wave.name().to_string(),
-            control_repo: wave.repo().to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
             current_directive_version: 0,
             incorporated_directive_version: 0,
             status,

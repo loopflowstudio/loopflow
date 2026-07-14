@@ -376,7 +376,7 @@ fn first_ledger_failure() -> bool {
 
 /// Open the local ledger store, creating and migrating it if needed.
 pub fn open_ledger() -> Result<SqliteStore, crate::store::StoreError> {
-    SqliteStore::new(&ledger_db_path())
+    SqliteStore::new(&ledger_db_path()?)
 }
 
 /// Return explicit launch identity for durable trace capture.
@@ -401,22 +401,27 @@ pub fn trace_capture_context(
 }
 
 #[cfg(not(test))]
-fn ledger_db_path() -> PathBuf {
-    crate::store::default_db_path()
+fn ledger_db_path() -> Result<PathBuf, crate::store::StoreError> {
+    crate::store::database_path_from_env()
+        .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
 }
 
-/// In lib tests, never touch the real ~/.lf ledger: honor a test's LF_HOME
-/// if set, else fall back to one process-wide temp store.
+/// In lib tests, never touch the real ~/.lf ledger: honor an explicit database,
+/// then a test's LF_HOME, else fall back to one process-wide temp store.
 #[cfg(test)]
-fn ledger_db_path() -> PathBuf {
+fn ledger_db_path() -> Result<PathBuf, crate::store::StoreError> {
+    if std::env::var_os("LF_DB_PATH").is_some() {
+        return crate::store::database_path_from_env()
+            .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()));
+    }
     if let Ok(home) = std::env::var("LF_HOME") {
-        return PathBuf::from(home).join("loopflow.db");
+        return Ok(PathBuf::from(home).join("loopflow.db"));
     }
     static TEST_HOME: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
-    TEST_HOME
+    Ok(TEST_HOME
         .get_or_init(|| tempfile::TempDir::new().expect("test ledger home"))
         .path()
-        .join("loopflow.db")
+        .join("loopflow.db"))
 }
 
 fn node_name(node: LfNode) -> &'static str {
@@ -766,6 +771,23 @@ mod tests {
         let home = tempfile::TempDir::new().expect("ledger home");
         std::env::set_var("LF_HOME", home.path());
         (guard, home)
+    }
+
+    #[test]
+    fn explicit_database_path_controls_the_ledger() {
+        let (_guard, home) = journal_test_guard();
+        let path = home.path().join("explicit.db");
+        let previous = std::env::var_os("LF_DB_PATH");
+        std::env::set_var("LF_DB_PATH", &path);
+
+        let opened = super::open_ledger();
+
+        match previous {
+            Some(value) => std::env::set_var("LF_DB_PATH", value),
+            None => std::env::remove_var("LF_DB_PATH"),
+        }
+        opened.expect("open explicit ledger");
+        assert!(path.exists());
     }
 
     fn started_fields(

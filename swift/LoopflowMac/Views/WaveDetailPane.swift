@@ -199,6 +199,11 @@ private struct WavePlanView: View {
     }
 
     private func refreshWorkMap() async {
+        guard wave.isRegistered else {
+            workMap = nil
+            workMapError = nil
+            return
+        }
         do {
             let snapshot = try await RegistryQueryLocal.shared.status(
                 wave: wave.name,

@@ -1383,6 +1383,45 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn stop_closes_a_live_event_subscription() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
+        let repo = tmp.path().to_path_buf();
+        let repo2 = repo.clone();
+        let mut handle = tokio::spawn(async move {
+            run_listener(
+                repo2,
+                "ship".into(),
+                None,
+                false,
+                false,
+                std::future::pending(),
+            )
+            .await
+        });
+
+        let endpoint = server::endpoint_path(&repo, "ship");
+        wait_for(|| endpoint.exists()).await;
+        let addr = std::fs::read_to_string(&endpoint).unwrap();
+        let client = reqwest::Client::new();
+        let events = client
+            .get(format!("http://{}/events?inbox=true", addr.trim()))
+            .send()
+            .await
+            .expect("subscribe");
+        assert_eq!(events.status(), reqwest::StatusCode::OK);
+
+        assert!(request_stop(&repo, "ship").await.expect("request stop"));
+        match tokio::time::timeout(Duration::from_secs(2), &mut handle).await {
+            Ok(result) => result.unwrap().unwrap(),
+            Err(_) => {
+                handle.abort();
+                panic!("listener stayed alive behind its event subscription");
+            }
+        }
+    }
+
     /// No registry store on the machine: the boot degrades to unregistered
     /// (warn-and-continue), never an error — the pre-registry status quo.
     #[tokio::test]

@@ -622,6 +622,7 @@ async fn events_handler(
     State(state): State<ServerState>,
     Query(query): Query<EventsQuery>,
 ) -> axum::response::Response {
+    let shutdown = state.shutdown.clone();
     let include_inbox = query.inbox == Some(true);
     let sub = state.runtime.subscribe_with_snapshot();
     // The resident's subscription replays the pending queue after the
@@ -684,7 +685,12 @@ async fn events_handler(
         let live_inbox = live_stream(sub.inbox_rx, |item| inbox_event(&inbox_item_frame(&item)));
         live = Box::pin(stream::select(live, live_inbox));
     }
-    let merged: BoxedEventStream = Box::pin(replay.chain(live));
+    // Axum's graceful shutdown waits for open responses. End this long-lived
+    // response when /stop fires so the listener can finish before asking the
+    // resident to leave; otherwise each side waits for the other forever.
+    let merged: BoxedEventStream = Box::pin(replay.chain(live).take_until(async move {
+        shutdown.wait().await;
+    }));
     axum::response::IntoResponse::into_response(Sse::new(merged).keep_alive(KeepAlive::default()))
 }
 

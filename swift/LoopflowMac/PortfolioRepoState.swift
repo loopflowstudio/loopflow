@@ -101,8 +101,9 @@ final class PortfolioRepoState {
 
     func applyConnectedWaves(_ connectedWaves: [Wave], plans: [String: WavePlan] = [:]) {
         plansByKey = plans
+        let origin = WaveOrigin.resolve(repoPath).normalizedFilePath
         let filtered = connectedWaves
-            .filter { $0.repo.normalizedFilePath == repoPath }
+            .filter { WaveOrigin.resolve($0.repo).normalizedFilePath == origin }
             .map { wave in
                 WaveViewModel(
                     api: wave,

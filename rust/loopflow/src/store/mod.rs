@@ -110,7 +110,7 @@ pub fn default_db_path() -> PathBuf {
     lf_home_dir().join("loopflow.db")
 }
 
-pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
+pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
     let candidate = std::env::var_os("LF_DB_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(default_db_path);
@@ -133,7 +133,11 @@ pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    Ok(StorageConfig::sqlite(path))
+    Ok(path)
+}
+
+pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
+    Ok(StorageConfig::sqlite(database_path_from_env()?))
 }
 
 #[derive(Debug)]

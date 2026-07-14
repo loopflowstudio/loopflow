@@ -67,7 +67,8 @@ enum LocalWaveAgentLauncher {
             lfPath: lfPath,
             sessionName: sessionName,
             repoPath: origin,
-            waveName: waveName
+            waveName: waveName,
+            environment: ProcessInfo.processInfo.environment
         )
         try runChecked(args, cwd: origin)
     }
@@ -142,9 +143,19 @@ enum LocalWaveAgentLauncher {
         lfPath: String,
         sessionName: String,
         repoPath: String,
-        waveName: String
+        waveName: String,
+        environment: [String: String]
     ) -> [String] {
-        ["tmux", "new-session", "-d", "-s", sessionName, "-c", repoPath, lfPath, "wave", waveName]
+        var command = ["tmux", "new-session", "-d", "-s", sessionName, "-c", repoPath]
+        let registryEnvironment = ["LF_HOME", "LF_DB_PATH"].compactMap { key in
+            environment[key].map { "\(key)=\($0)" }
+        }
+        if !registryEnvironment.isEmpty {
+            command.append("/usr/bin/env")
+            command.append(contentsOf: registryEnvironment)
+        }
+        command.append(contentsOf: [lfPath, "wave", waveName])
+        return command
     }
 
     /// Candidate lf binaries in trust order: the lf bundled inside Loopflow.app,

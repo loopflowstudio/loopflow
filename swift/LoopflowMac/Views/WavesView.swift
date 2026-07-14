@@ -77,7 +77,8 @@ struct WavesView: View {
             name: snapshot.name,
             repo: repoPath,
             status: snapshot.status
-        ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: snapshot.name)])
+        ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: snapshot.name)],
+        isRegistered: false)
     }
 
     private static func statusPriority(_ status: WaveStatus) -> Int {
@@ -93,14 +94,23 @@ struct WavesView: View {
         case .all:
             return allWaves
         case .repo(let path):
-            let target = path.normalizedFilePath
-            return allWaves.filter { $0.repo.normalizedFilePath == target }
+            let target = WaveOrigin.resolve(path).normalizedFilePath
+            return allWaves.filter {
+                WaveOrigin.resolve($0.repo).normalizedFilePath == target
+            }
         }
     }
 
     private var selectedWave: WaveViewModel? {
         guard let selectedWaveId else { return nil }
-        return allWaves.first { $0.id == selectedWaveId }
+        return allWaves.first { waveSelectionId($0) == selectedWaveId }
+    }
+
+    private func waveSelectionId(_ wave: WaveViewModel) -> String {
+        Self.wavePlanKey(
+            repoPath: WaveOrigin.resolve(wave.repo),
+            waveName: wave.name
+        )
     }
 
     private var isAnyConnected: Bool {
@@ -158,7 +168,8 @@ struct WavesView: View {
         }
         .onChange(of: selection) { _, _ in
             // Drop a wave selection that no longer matches the active repo filter.
-            if let id = selectedWaveId, !filteredWaves.contains(where: { $0.id == id }) {
+            if let id = selectedWaveId,
+               !filteredWaves.contains(where: { waveSelectionId($0) == id }) {
                 selectedWaveId = nil
             }
             persistRepoSelection()
@@ -246,8 +257,8 @@ struct WavesView: View {
                         ForEach(filteredWaves) { wave in
                             WaveRow(
                                 wave: wave,
-                                isSelected: selectedWaveId == wave.id,
-                                onSelect: { selectedWaveId = wave.id }
+                                isSelected: selectedWaveId == waveSelectionId(wave),
+                                onSelect: { selectedWaveId = waveSelectionId(wave) }
                             )
                         }
                     }
@@ -332,7 +343,7 @@ struct WavesView: View {
                 repoPath: waveRepoPath(for: wave),
                 onClose: { selectedWaveId = nil }
             )
-            .id(wave.id)
+            .id(waveSelectionId(wave))
         } else {
             VStack(spacing: Spacing.md) {
                 Image(systemName: "bubble.left.and.bubble.right")

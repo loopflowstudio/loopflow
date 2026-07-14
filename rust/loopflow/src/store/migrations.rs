@@ -5,28 +5,6 @@ const BASELINE_SQL: &str = include_str!("migrations/001_initial.sql");
 const RECREATE_MESSAGE: &str =
     "incompatible Loopflow database; delete loopflow.db and rerun the command";
 
-const REQUIRED_TABLES: &[&str] = &[
-    "agent_launches",
-    "agent_turns",
-    "blob_tokens",
-    "bus_cursors",
-    "bus_messages",
-    "child_commands",
-    "child_directives",
-    "context_assets",
-    "context_decisions",
-    "observation_outbox",
-    "pm_snapshots",
-    "project_events",
-    "project_sessions",
-    "provider_tokens",
-    "run_events",
-    "task_events",
-    "task_sessions",
-    "trace_capture_meta",
-    "waves",
-];
-
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
     conn.execute_batch("BEGIN EXCLUSIVE")?;
     let result = apply_locked(conn);
@@ -85,27 +63,33 @@ fn applied_versions(conn: &rusqlite::Connection) -> StoreResult<Vec<String>> {
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// A database matches the baseline only if every product table and every column
+/// matches `001_initial.sql`. Comparing table names alone lets a database built
+/// from an older edit of the baseline open cleanly and then fail each query with
+/// a raw `no such column` error instead of the recreate message.
 fn validate_baseline(conn: &rusqlite::Connection) -> StoreResult<()> {
-    let tables = user_tables(conn)?;
-    if tables.len() != REQUIRED_TABLES.len() + 1
-        || REQUIRED_TABLES
-            .iter()
-            .any(|required| !tables.iter().any(|table| table == required))
-    {
-        return Err(incompatible());
-    }
+    let baseline = rusqlite::Connection::open_in_memory()?;
+    baseline.execute_batch(BASELINE_SQL)?;
 
-    let wave_columns = table_columns(conn, "waves")?;
-    if wave_columns != ["id", "name", "repo", "created_at", "parent_wave_id"] {
+    if product_schema(conn)? != product_schema(&baseline)? {
         return Err(incompatible());
     }
     Ok(())
 }
 
-fn table_columns(conn: &rusqlite::Connection, table: &str) -> StoreResult<Vec<String>> {
-    let mut statement = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let rows = statement.query_map([], |row| row.get(1))?;
-    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+/// Every product table with its columns, in declaration order. `schema_migrations`
+/// is bookkeeping rather than product schema, so the baseline SQL never declares it.
+fn product_schema(conn: &rusqlite::Connection) -> StoreResult<Vec<(String, Vec<String>)>> {
+    let mut schema = Vec::new();
+    for table in user_tables(conn)? {
+        if table == "schema_migrations" {
+            continue;
+        }
+        let mut statement = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let rows = statement.query_map([], |row| row.get(1))?;
+        schema.push((table, rows.collect::<Result<Vec<_>, _>>()?));
+    }
+    Ok(schema)
 }
 
 pub fn latest_version_sqlite(conn: &rusqlite::Connection) -> StoreResult<String> {
@@ -132,13 +116,25 @@ mod tests {
         apply_sqlite(&conn).unwrap();
 
         assert_eq!(latest_version_sqlite(&conn).unwrap(), BASELINE_VERSION);
-        let tables = user_tables(&conn).unwrap();
-        for table in REQUIRED_TABLES {
-            assert!(tables.iter().any(|candidate| candidate == table), "{table}");
-        }
-        assert_eq!(tables.len(), REQUIRED_TABLES.len() + 1);
+        assert!(product_schema(&conn)
+            .unwrap()
+            .iter()
+            .any(|(table, _)| table == "task_sessions"));
 
         apply_sqlite(&conn).unwrap();
+    }
+
+    /// A database written by an earlier edit of `001_initial` carries the right
+    /// table names and version row, so only column comparison catches it.
+    #[test]
+    fn a_stale_edit_of_the_baseline_tells_the_user_to_recreate() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_sqlite(&conn).unwrap();
+        conn.execute_batch("ALTER TABLE task_sessions DROP COLUMN project_prompt_context")
+            .unwrap();
+
+        let error = apply_sqlite(&conn).unwrap_err();
+        assert!(error.to_string().contains("delete loopflow.db"));
     }
 
     #[test]

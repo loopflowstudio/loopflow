@@ -17,6 +17,22 @@ struct WaveTests {
         #expect(wave.displayName == "infrastructure")
         #expect(wave.repo == "/tmp/repo")
         #expect(wave.statusText == "Running")
+        #expect(wave.isRegistered)
+    }
+
+    @Test("authored waves can exist before runtime registration")
+    func authoredWaveHasNoRegistryRow() {
+        let wave = WaveViewModel(
+            api: Wave(
+                id: "authored:/tmp/repo#infrastructure",
+                name: "infrastructure",
+                repo: "/tmp/repo",
+                status: .idle
+            ),
+            isRegistered: false
+        )
+
+        #expect(!wave.isRegistered)
     }
 
     @Test("objective tagline uses the first authored line")

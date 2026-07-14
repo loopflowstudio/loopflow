@@ -23,6 +23,7 @@ Streaming logs (long-running commands):
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -44,6 +45,14 @@ LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
 ENV_SETUP = REPO_ROOT / ".lf" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
+
+
+def _app_environment(repo: Path) -> dict[str, str]:
+    env = {"LOOPFLOW_DEV_WAVE_REPO": str(repo)}
+    for key in ("LF_HOME", "LF_DB_PATH"):
+        if value := os.environ.get(key):
+            env[key] = value
+    return env
 
 
 def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -168,18 +177,11 @@ def cmd_run() -> int:
     _install_dev_app()
     # Dev launches read this checkout's wave/ dir as-is; a plain production
     # launch leaves the override unset and reads the main worktree.
-    run(
-        [
-            "open",
-            "-n",
-            "--env",
-            f"LOOPFLOW_DEV_WAVE_REPO={REPO_ROOT}",
-            str(DEV_APP),
-            "--args",
-            "--repo",
-            str(REPO_ROOT),
-        ]
-    )
+    command = ["open", "-n"]
+    for key, value in _app_environment(REPO_ROOT).items():
+        command.extend(["--env", f"{key}={value}"])
+    command.extend([str(DEV_APP), "--args", "--repo", str(REPO_ROOT)])
+    run(command)
     return 0
 
 
@@ -217,7 +219,7 @@ def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
         args=["--repo", str(repo)],
         # Dev launches read the launched checkout's wave/ dir as-is; a plain
         # production launch leaves this unset and reads the main worktree.
-        env={"LOOPFLOW_DEV_WAVE_REPO": str(repo)},
+        env=_app_environment(repo),
     )
 
 

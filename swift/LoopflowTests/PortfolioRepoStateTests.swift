@@ -89,6 +89,13 @@ struct PortfolioRepoStateTests {
         )
         #expect(probeName == launchName)
         #expect(probeName == "lf-repo-goals", "named after the origin, not the worktree")
+
+        let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, lastOpened: Date())
+        let state = PortfolioRepoState(repo: repo)
+        state.applyConnectedWaves([
+            makeWave(id: "goals", repoPath: origin.path.normalizedFilePath, status: .running),
+        ])
+        #expect(state.waves.map(\.id) == ["goals"], "a dev worktree sees its origin's registry row")
     }
 
     @Test("createWave writes GOAL.md at the origin repo, not the worktree")

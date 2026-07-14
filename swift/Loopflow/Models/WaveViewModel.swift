@@ -3,10 +3,12 @@ import SwiftUI
 public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public let api: Wave
     public let plan: WavePlan?
+    public let isRegistered: Bool
 
-    public init(api: Wave, plan: WavePlan? = nil) {
+    public init(api: Wave, plan: WavePlan? = nil, isRegistered: Bool = true) {
         self.api = api
         self.plan = plan
+        self.isRegistered = isRegistered
     }
 
     public var id: String { api.id }

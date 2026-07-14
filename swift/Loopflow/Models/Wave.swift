@@ -177,8 +177,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
     /// The single repository whose main checkout is this Wave's control plane.
     public var repo: String
     public var iteration: Int
-    public var activeRun: Run?
-    public var flowSteps: [String]
     public var createdAt: Date?
     /// Parent wave in the chord tree. `nil` for a root wave.
     public var parentWaveId: String?
@@ -197,8 +195,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
         crons: [WaveCron] = [],
         status: WaveStatus = .idle,
         iteration: Int = 0,
-        flowSteps: [String] = [],
-        activeRun: Run? = nil,
         createdAt: Date? = nil,
         parentWaveId: String? = nil
     ) {
@@ -215,8 +211,6 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.crons = crons
         self.status = status
         self.iteration = iteration
-        self.activeRun = activeRun
-        self.flowSteps = flowSteps
         self.createdAt = createdAt
         self.parentWaveId = parentWaveId
     }

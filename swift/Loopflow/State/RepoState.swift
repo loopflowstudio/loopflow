@@ -136,11 +136,10 @@ public final class RepoState {
         }
         let repoRoot = currentRepo?.path() ?? FileManager.default.currentDirectoryPath
         let wave = waveStore.wave(for: waveId)
-        let sessionSkill = wave?.activeRun?.currentStep ?? "design"
         let state = SessionState(
             waveId: waveId,
             sessionConfig: AgentSessionConfig(
-                skill: sessionSkill,
+                skill: "design",
                 repoRoot: repoRoot,
                 directions: wave?.direction ?? [],
                 area: wave?.area.first,
@@ -350,19 +349,7 @@ public final class RepoState {
                     area: ["src/deploy"],
                     triggers: [],
                     status: .failed,
-                    iteration: 2,
-                    activeRun: Run(
-                        id: "run-failed-1",
-                        waveId: "mock-wave-5",
-                        flow: "build",
-                        area: "src/deploy",
-                        repo: repo,
-                        direction: ["clarity"],
-                        status: .failed,
-                        currentStep: "implement",
-                        error: "Build failed: missing dependency 'libcrypto'",
-                        createdAt: Date().addingTimeInterval(-3600)
-                    )
+                    iteration: 2
                 )
             )
         ])
@@ -658,24 +645,21 @@ public final class RepoState {
         return item
     }
 
-    private func handleWaveStatusChange(wave: WaveViewModel, from oldStatus: WaveStatus?, to newStatus: WaveStatus) {
+    private func handleWaveStatusChange(wave: WaveViewModel, from _: WaveStatus?, to newStatus: WaveStatus) {
         // Note: loadWaveContent is driven by the snapshot loop / selection — not duplicated here.
         switch newStatus {
         case .waiting:
-            let skill = wave.recentSteps.first?.skill ?? "skill"
             NotificationService.shared.notifyNeedsInteractive(
                 waveId: wave.id,
                 waveName: wave.displayName,
-                skill: skill
+                skill: "Wave"
             )
 
         case .failed:
-            let skill = wave.recentSteps.first?.skill ?? "unknown skill"
-            let message = "Error in \(skill)"
             NotificationService.shared.notifyError(
                 waveId: wave.id,
                 waveName: wave.displayName,
-                message: message
+                message: "Wave failed"
             )
 
         case .idle:

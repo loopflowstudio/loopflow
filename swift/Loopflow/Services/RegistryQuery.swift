@@ -66,7 +66,7 @@ public struct RegistryQuery: Sendable {
     }
 
     /// The recent-run window across every wave on the machine — the ledger the
-    /// live `op` frames mirror. A lightweight timeline, not full `Run` objects.
+    /// live `op` frames mirror. A process timeline, not a second work hierarchy.
     public func recentRuns() async throws -> [RunLedgerEntry] {
         let stdout = try await run(["runs", "--json"], nil)
         return try Self.decode([RunLedgerEntry].self, from: stdout)

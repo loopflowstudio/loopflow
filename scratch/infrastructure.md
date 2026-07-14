@@ -468,7 +468,30 @@ Delete that competing projection:
 - `RepoState` keeps attention and terminal sessions, but no invisible Run
   cache or dead load/clear lifecycle.
 
-This does not delete the internal `Run` type yet. Legacy Wave/session APIs still
-carry it. It removes the unused product projection first, so a later pass can
-judge those remaining uses from evidence rather than preserving a cache that
-made them look live.
+That first slice leaves the internal `Run` type in place long enough to judge
+its remaining uses without the cache making them look live. The following pass
+then removes it from the Wave model itself.
+
+## Current reduction: make Wave turn state belong to Wave Chat
+
+After removing the cache, the remaining app `Run` model has no live producer.
+The registry path creates Waves from `lf ls`, which carries rolled-up Wave
+status but no `active_run`, `flow_steps`, or recent skill executions. The Mac
+gets the real active turn, step provenance, retries, and loop state from Wave
+Chat's replayable SSE playhead. Project/Task status and PR delivery come from
+the work map. Only the retired HTTP parser, mock data, and tests still populate
+`Wave.activeRun` and `WaveViewModel.recentSteps`.
+
+Remove the shadow Wave lifecycle:
+
+- a Wave model carries identity, objective, status, and authored operating
+  context—not a generic worker Run or shipping PR;
+- Wave Chat owns current-turn and flow-step presentation;
+- the work map owns Project/Task execution and delivery presentation;
+- the telemetry ledger owns historical generic process activity;
+- the sidebar shows durable Wave status and its authored tagline, without an
+  activity timestamp no production path can supply.
+
+This deletes the app's `Run`, `PullRequest`, and `StepRun` types. The required
+`runs` field in the `lf status` wire snapshot remains decoded but deliberately
+unprojected until the Rust status contract can drop it separately.

@@ -194,8 +194,7 @@ struct AreaTypeahead: View {
             repo: "/Users/jack/src/loopflow",
             direction: [],
             area: ["src/loopflow"]
-        ),
-        recentSteps: []
+        )
     )
 
     return AreaTypeahead(wave: wave) { _ in

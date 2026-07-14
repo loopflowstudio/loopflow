@@ -231,13 +231,6 @@ public struct WaveService: @unchecked Sendable {
         try await shellCommandRunner(["lfd", "install"])
     }
 
-    public func listRuns(waveId: String? = nil, repo: URL? = nil, limit: Int = 50) async throws -> [Run] {
-        _ = waveId
-        _ = repo
-        _ = limit
-        throw unsupported("Run reads must use RegistryQuery (`lf status --json` or `lf runs --json`).")
-    }
-
     public func streamOutput(waveId: String) -> AsyncThrowingStream<String, Error> {
         _ = waveId
         return AsyncThrowingStream { continuation in
@@ -322,8 +315,6 @@ public extension WaveService {
             crons: parseCrons(json["crons"]),
             status: WaveStatus(rawValue: normalizedStatus) ?? .idle,
             iteration: normalizeInt(json["iteration"]),
-            flowSteps: json["flow_steps"] as? [String] ?? [],
-            activeRun: (json["active_run"] as? [String: Any]).flatMap(parseRunFromJSON),
             createdAt: parseDate(json["created_at"]),
             parentWaveId: json["parent_wave_id"] as? String
         )
@@ -369,36 +360,6 @@ public extension WaveService {
         )
     }
 
-    private static func parseRunFromJSON(_ json: [String: Any]) -> Run? {
-        guard let id = json["id"] as? String,
-              let flow = json["flow"] as? String,
-              let repoPath = json["repo"] as? String
-        else {
-            return nil
-        }
-
-        return Run(
-            id: id,
-            waveId: json["wave_id"] as? String,
-            flow: flow,
-            task: json["task"] as? String,
-            area: normalizeAreaDisplay(json["area"]),
-            repo: repoPath,
-            direction: normalizeStringList(json["direction"]),
-            status: RunStatus(lfToken: json["status"] as? String ?? "pending"),
-            iteration: normalizeInt(json["iteration"]),
-            stepIndex: normalizeInt(json["step_index"]),
-            worktree: json["local_worktree"] as? String,
-            branch: json["remote_branch"] as? String,
-            currentStep: json["current_skill"] as? String,
-            error: json["error"] as? String,
-            pr: parsePullRequest(json["pr"]),
-            startedAt: parseDate(json["started_at"]),
-            endedAt: parseDate(json["ended_at"]),
-            createdAt: parseDate(json["created_at"])
-        )
-    }
-
     private static func parseTriggers(_ value: Any?) -> [Trigger] {
         guard let items = value as? [[String: Any]] else { return [] }
         return items.compactMap { item in
@@ -436,22 +397,6 @@ public extension WaveService {
         }
     }
 
-    private static func parsePullRequest(_ value: Any?) -> PullRequest? {
-        guard let json = value as? [String: Any],
-              let urlString = json["url"] as? String,
-              let url = URL(string: urlString)
-        else {
-            return nil
-        }
-        return PullRequest(
-            url: url,
-            number: json["number"] as? Int,
-            state: (json["state"] as? String).map { $0.lowercased() }.flatMap(PRState.init(rawValue:)),
-            title: json["title"] as? String,
-            branch: json["branch"] as? String
-        )
-    }
-
     private static func normalizeStringList(_ value: Any?) -> [String] {
         if let list = value as? [String] { return list }
         if let string = value as? String { return decodeStringArray(string) }
@@ -464,20 +409,6 @@ public extension WaveService {
                 partial[entry.key] = value
             }
         }
-    }
-
-    private static func normalizeAreaDisplay(_ value: Any?) -> String? {
-        if let area = value as? String {
-            let decoded = decodeStringArray(area)
-            if decoded.count == 1 { return decoded[0] }
-            if !decoded.isEmpty { return decoded.joined(separator: ", ") }
-            return area.isEmpty ? nil : area
-        }
-        if let areas = value as? [String] {
-            if areas.count == 1 { return areas[0] }
-            if !areas.isEmpty { return areas.joined(separator: ", ") }
-        }
-        return nil
     }
 
     private static func normalizeInt(_ value: Any?) -> Int {

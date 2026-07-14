@@ -182,12 +182,6 @@ struct RegistryQueryTests {
         #expect(plan.projects[0].krs[0].proof == .holds)
     }
 
-    @Test("run status accepts lf runs folded ok token")
-    func runStatusAcceptsFoldedOkToken() {
-        #expect(RunStatus(lfToken: "ok") == .ok)
-        #expect(RunStatus(lfToken: "escal.") == .escalated)
-    }
-
     @Test("a failed lf query surfaces as an error")
     func failedQueryThrows() async {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("lf exploded") }

@@ -5,25 +5,18 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var api: Wave
     public var content: WaveContent?
     public var plan: WavePlan?
-    public var recentSteps: [StepRun]
     public var pid: Int?
-    public var runStartedAt: Date?
 
     public init(
         api: Wave,
         content: WaveContent? = nil,
         plan: WavePlan? = nil,
-        recentSteps: [StepRun] = [],
-        pid: Int? = nil,
-        runStartedAt: Date? = nil
+        pid: Int? = nil
     ) {
-        let activeRun = api.activeRun
         self.api = api
         self.content = content
         self.plan = plan
-        self.recentSteps = recentSteps
         self.pid = pid
-        self.runStartedAt = runStartedAt ?? activeRun?.startedAt
     }
 
     public var id: String { api.id }
@@ -76,18 +69,9 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         set { api.iteration = newValue }
     }
 
-    public var activeRun: Run? {
-        get { api.activeRun }
-        set { api.activeRun = newValue }
-    }
-
     public var createdAt: Date? {
         get { api.createdAt }
         set { api.createdAt = newValue }
-    }
-
-    public var stepIndex: Int {
-        activeRun?.stepIndex ?? 0
     }
 
     public var shortId: String { String(id.prefix(7)) }
@@ -115,25 +99,6 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         direction.isEmpty ? "" : direction.joined(separator: ", ")
     }
 
-    public var flowSteps: [String] { api.flowSteps }
-
-    private var activeRunFlow: String? {
-        let runFlow = activeRun?.flow.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return runFlow.isEmpty ? nil : runFlow
-    }
-
-    public var displayFlow: String {
-        activeRunFlow ?? ""
-    }
-
-    public var displayFlowSteps: [String] {
-        if let activeRunFlow { return [activeRunFlow] }
-        if !flowSteps.isEmpty {
-            return flowSteps
-        }
-        return []
-    }
-
     public var statusText: String {
         switch status {
         case .running: return "Running"
@@ -151,7 +116,6 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var detailText: String {
         var parts: [String] = []
         if !areaDisplay.isEmpty { parts.append(areaDisplay) }
-        if !displayFlow.isEmpty { parts.append(displayFlow) }
         if let t = trigger { parts.append(t.signal.rawValue) }
         return parts.joined(separator: " · ")
     }
@@ -175,17 +139,5 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         case .paused:
             return ("pause.circle", .statusNeutral)
         }
-    }
-
-    public var lastActivityAt: Date? {
-        recentSteps.first?.endedAt ?? recentSteps.first?.startedAt
-    }
-
-    public var lastActivityDescription: String? {
-        guard let skill = recentSteps.first else { return nil }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        let time = formatter.localizedString(for: skill.endedAt ?? skill.startedAt, relativeTo: Date())
-        return "\(skill.skill) \(time)"
     }
 }

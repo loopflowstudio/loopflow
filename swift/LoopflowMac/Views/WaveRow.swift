@@ -37,30 +37,12 @@ struct WaveRow: View {
             .lineLimit(1)
             .accessibilityIdentifier("wave-name-row")
 
-            // Secondary info line: vision tagline + activity
-            HStack(spacing: 4) {
-                if let tagline = wave.visionTagline {
-                    Text(tagline)
-                        .font(Typography.caption())
-                        .foregroundStyle(.white.opacity(0.5))
-                        .lineLimit(1)
-                        .accessibilityIdentifier("wave-vision")
-                }
-
-                // Activity timestamp (italic serif per VISUAL_DESIGN.md)
-                if let activity = wave.lastActivityDescription {
-                    if wave.visionTagline != nil {
-                        Text("•")
-                            .font(Typography.caption())
-                            .foregroundStyle(.white.opacity(0.3))
-                    }
-                    Text(activity)
-                        .font(Typography.caption(11))
-                        .italic()
-                        .foregroundStyle(.white.opacity(0.4))
-                        .accessibilityLabel(activityAccessibilityLabel)
-                        .accessibilityIdentifier("wave-activity")
-                }
+            if let tagline = wave.visionTagline {
+                Text(tagline)
+                    .font(Typography.caption())
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(1)
+                    .accessibilityIdentifier("wave-vision")
             }
         }
         .padding(.horizontal, 12)
@@ -91,14 +73,5 @@ struct WaveRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Wave: \(wave.displayName)")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-    }
-
-    /// Accessibility-friendly description of activity (e.g., "implement, 2 minutes ago").
-    private var activityAccessibilityLabel: String {
-        guard let skill = wave.recentSteps.first else { return "" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        let time = formatter.localizedString(for: skill.endedAt ?? skill.startedAt, relativeTo: Date())
-        return "\(skill.skill), \(time)"
     }
 }

@@ -210,9 +210,6 @@ impl<E: SkillExecutor> FlowEngine<E> {
                     Ok(FlowOutcome::Completed)
                 }
                 ConcreteStep::Xor(branch) => self.run_xor(branch, cursor, ctx).await,
-                ConcreteStep::Or(_) => Err(anyhow!(
-                    "or (multi-select) execution is not yet implemented"
-                )),
                 ConcreteStep::Loop(body) => self.run_loop(body, cursor).await,
             }
         }
@@ -439,7 +436,7 @@ pub fn current_skill(
             }
             _ => Ok(None),
         },
-        ConcreteStep::Op(_) | ConcreteStep::Or(_) => Ok(None),
+        ConcreteStep::Op(_) => Ok(None),
     }
 }
 
@@ -456,7 +453,6 @@ pub fn current_flow_parents(
         Some(ConcreteStep::Skill(skill)) => skill.flow_parents.clone(),
         Some(ConcreteStep::Op(ops)) => ops.flow_parents.clone(),
         Some(ConcreteStep::Xor(branch)) => branch.flow_parents.clone(),
-        Some(ConcreteStep::Or(branch)) => branch.flow_parents.clone(),
         Some(ConcreteStep::Loop(loop_body)) => loop_body.flow_parents.clone(),
         None => Vec::new(),
     })
@@ -541,9 +537,6 @@ pub fn advance_cursor_after_wait(
                 )),
             }
         }
-        ConcreteStep::Or(_) => Err(anyhow!(
-            "or (multi-select) execution is not yet implemented"
-        )),
     }
 }
 

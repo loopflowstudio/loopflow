@@ -806,10 +806,6 @@ fn extract_skill_names_from_value(value: &serde_yaml_ng::Value) -> Vec<String> {
                 names.push("[xor]".to_string());
                 names.extend(extract_branch_preview(xor));
             }
-            if let Some(or) = map.get(serde_yaml_ng::Value::String("or".to_string())) {
-                names.push("[or]".to_string());
-                names.extend(extract_branch_preview(or));
-            }
             if let Some(loop_value) = map.get(serde_yaml_ng::Value::String("loop".to_string())) {
                 names.push("loop".to_string());
                 names.extend(extract_branch_preview(loop_value));

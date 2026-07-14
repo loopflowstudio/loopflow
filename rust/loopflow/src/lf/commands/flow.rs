@@ -136,7 +136,6 @@ fn render_pipeline_item(item: &ConcreteStep, repo: &Path) -> Result<Vec<String>>
         ConcreteStep::Xor(branch) => {
             render_branch_item("xor", branch, TEMP_XOR_ROUTE_STEP_NAME, repo)
         }
-        ConcreteStep::Or(branch) => render_branch_item("or", branch, "or-route", repo),
         ConcreteStep::Loop(loop_def) => render_loop_pipeline(loop_def, repo),
     }
 }

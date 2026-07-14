@@ -48,7 +48,6 @@ pub enum Step {
     Op(Op),
     FlowRef(String),
     Xor(XorDef),
-    Or(OrDef),
     Loop(LoopDef),
 }
 
@@ -101,21 +100,12 @@ pub struct XorPath {
     pub direction: Vec<String>,
 }
 
-/// Multi-select branch: router picks 1+ paths, which run sequentially.
-/// Structurally identical to `XorDef`; only execution semantics differ.
-pub type OrDef = XorDef;
-
-/// Multi-select branch with resolved flow context.
-/// Structurally identical to `ConcreteXor`; only execution semantics differ.
-pub type ConcreteOr = ConcreteXor;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FlowAction {
     RunSkill { skill: ConcreteSkill },
     RunOps { ops: ConcreteOp },
     WaitInteractive { skill: ConcreteSkill },
     Xor { branch: ConcreteXor },
-    Or { branch: ConcreteOr },
     Loop { body: ConcreteLoop },
     Complete,
 }
@@ -176,7 +166,6 @@ pub enum ConcreteStep {
     Skill(ConcreteSkill),
     Op(ConcreteOp),
     Xor(ConcreteXor),
-    Or(ConcreteOr),
     Loop(ConcreteLoop),
 }
 
@@ -202,7 +191,6 @@ pub fn next_action(items: &[ConcreteStep], step_index: usize) -> FlowAction {
         }
         ConcreteStep::Op(ops) => FlowAction::RunOps { ops },
         ConcreteStep::Xor(branch) => FlowAction::Xor { branch },
-        ConcreteStep::Or(branch) => FlowAction::Or { branch },
         ConcreteStep::Loop(body) => FlowAction::Loop { body },
     }
 }
@@ -768,9 +756,6 @@ fn parse_flow_mapping_with_options(
     if let Some(xor_value) = map.get(key("xor")) {
         return parse_xor_value(xor_value);
     }
-    if let Some(or_value) = map.get(key("or")) {
-        return parse_or_value(or_value);
-    }
     if let Some(loop_value) = map.get(key("loop")) {
         if !allow_loop {
             return Err(LoadError::InvalidFlow(
@@ -780,7 +765,7 @@ fn parse_flow_mapping_with_options(
         return parse_loop_value(loop_value);
     }
     Err(LoadError::InvalidFlow(
-        "flow item mapping must include step, op, flow, xor, or, or loop".to_string(),
+        "flow item mapping must include step, op, flow, xor, or loop".to_string(),
     ))
 }
 
@@ -847,13 +832,6 @@ fn parse_xor_value(value: &Value) -> Result<Step, LoadError> {
         .as_mapping()
         .ok_or_else(|| LoadError::InvalidFlow("xor must be mapping".to_string()))?;
     Ok(Step::Xor(parse_xor_def(map, "xor")?))
-}
-
-fn parse_or_value(value: &Value) -> Result<Step, LoadError> {
-    let map = value
-        .as_mapping()
-        .ok_or_else(|| LoadError::InvalidFlow("or must be mapping".to_string()))?;
-    parse_xor_def(map, "or").map(Step::Or)
 }
 
 fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, LoadError> {
@@ -1191,9 +1169,6 @@ fn expand_with_chain(
                 items.push(ConcreteStep::Xor(expand_branch_def(
                     branch_def, repo, &chain,
                 )?));
-            }
-            Step::Or(or_def) => {
-                items.push(ConcreteStep::Or(expand_branch_def(or_def, repo, &chain)?));
             }
             Step::Loop(loop_def) => {
                 let skills = expand_items_with_chain(&loop_def.steps, repo, &chain, depth)?;
@@ -1716,18 +1691,6 @@ Be careful.
                             }
                         }
                     }
-                    ConcreteStep::Or(branch) => {
-                        for (path_key, path) in &branch.paths {
-                            if let Some(ref flow_name) = path.flow {
-                                let result = load_flow(flow_name, tmp.path());
-                                assert!(
-                                    result.is_ok(),
-                                    "builtin flow '{}' or path '{}' references missing flow '{}': {:?}",
-                                    name, path_key, flow_name, result.err()
-                                );
-                            }
-                        }
-                    }
                     ConcreteStep::Loop(loop_item) => {
                         // Loop body skills are validated during expansion
                         assert!(
@@ -1773,7 +1736,23 @@ Be careful.
         let error = parse_flow_items(&value).expect_err("and steps are retired");
         assert!(error
             .to_string()
-            .contains("flow item mapping must include step, op, flow, xor, or, or loop"));
+            .contains("flow item mapping must include step, op, flow, xor, or loop"));
+    }
+
+    #[test]
+    fn unimplemented_or_step_is_rejected() {
+        let yaml = r#"
+- or:
+    paths:
+      fix:
+        step: implement
+        description: "Fix it"
+"#;
+        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
+        let error = parse_flow_items(&value).expect_err("or steps are not supported");
+        assert!(error
+            .to_string()
+            .contains("flow item mapping must include step, op, flow, xor, or loop"));
     }
 
     #[test]
@@ -2297,72 +2276,5 @@ Be careful.
         let flow = load_flow("deploy", tmp.path()).unwrap();
         let items = expand_flow(&flow, tmp.path()).unwrap();
         assert_eq!(items.len(), 2); // gate, op: pr land
-    }
-
-    #[test]
-    fn parse_or_multi_select() {
-        let yaml = r#"
-- or:
-    router: triage
-    paths:
-      fix:
-        flow: code
-        description: "Fix blocking issues"
-      refactor:
-        step: compress
-        description: "Clean up while we're here"
-      deploy:
-        description: "Ship it"
-"#;
-        let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
-        let items = parse_flow_items(&value).unwrap();
-        assert_eq!(items.len(), 1);
-
-        let Step::Or(or_def) = &items[0] else {
-            panic!("expected Or item, got {:?}", items[0]);
-        };
-        assert_eq!(or_def.router.as_deref(), Some("triage"));
-        assert_eq!(or_def.paths.len(), 3);
-        assert_eq!(or_def.paths["fix"].flow.as_deref(), Some("code"));
-        assert_eq!(or_def.paths["refactor"].skill.as_deref(), Some("compress"));
-        assert!(or_def.paths["deploy"].flow.is_none());
-        assert!(or_def.paths["deploy"].skill.is_none());
-    }
-
-    #[test]
-    fn expand_or_keeps_concrete_or() {
-        let tmp = TempDir::new().unwrap();
-        let flow = Flow {
-            name: "test-or".to_string(),
-            items: vec![
-                Step::Skill(Skill::named("gate")),
-                Step::Or(OrDef {
-                    router: None,
-                    paths: {
-                        let mut m = HashMap::new();
-                        m.insert(
-                            "fix".to_string(),
-                            XorPath {
-                                flow: None,
-                                skill: Some("implement".to_string()),
-                                steps: vec![],
-                                description: "Fix it".to_string(),
-                                direction: vec![],
-                            },
-                        );
-                        m
-                    },
-                }),
-            ],
-        };
-        let items = expand_flow(&flow, tmp.path()).unwrap();
-        assert_eq!(items.len(), 2);
-        assert!(matches!(&items[0], ConcreteStep::Skill(_)));
-        assert!(matches!(&items[1], ConcreteStep::Or(_)));
-
-        if let ConcreteStep::Or(branch) = &items[1] {
-            assert_eq!(branch.paths.len(), 1);
-            assert_eq!(branch.paths["fix"].description, "Fix it");
-        }
     }
 }

@@ -692,3 +692,9 @@ Keep the historical `and` playhead enum value only so persisted Wave journals
 remain readable. New flows cannot parse or emit it. The resulting invariant is
 mechanical: outside the explicit diagnostic `lf wt` surface, acquiring a
 file-writing worktree means creating a Task Session first.
+
+The same language audit found `or:` one layer over: the parser, catalog, and
+playhead accepted it, but both execution paths failed with “not yet
+implemented,” and no builtin used it. Remove the false capability instead of
+documenting a future. Retain its historical playhead kind beside `and` only for
+journal decoding; executable branching is the one implemented `xor:` model.

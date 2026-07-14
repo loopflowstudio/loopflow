@@ -131,9 +131,6 @@ fn extract_step_names(items: &[crate::engine::flow::ConcreteStep]) -> Vec<String
             crate::engine::flow::ConcreteStep::Xor(_) => {
                 names.push("[xor]".to_string());
             }
-            crate::engine::flow::ConcreteStep::Or(_) => {
-                names.push("[or]".to_string());
-            }
             crate::engine::flow::ConcreteStep::Loop(_) => {
                 names.push("[loop]".to_string());
             }

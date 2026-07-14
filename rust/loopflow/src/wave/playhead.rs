@@ -11,8 +11,8 @@ use crate::engine::{expand_flow, load_flow, ConcreteStep};
 pub enum StepKind {
     Skill,
     Op,
-    // Retained so journals written by the retired worktree-forking flow step
-    // remain readable. New flow plans never produce this value.
+    // Retained so journals written by retired flow steps remain readable. New
+    // flow plans never produce these values.
     And,
     Xor,
     Or,
@@ -36,13 +36,6 @@ impl StepPlan {
                     .clone()
                     .unwrap_or_else(|| "xor-route".to_string()),
                 StepKind::Xor,
-            ),
-            ConcreteStep::Or(branch) => (
-                branch
-                    .router
-                    .clone()
-                    .unwrap_or_else(|| "or-route".to_string()),
-                StepKind::Or,
             ),
             ConcreteStep::Loop(_) => ("loop".to_string(), StepKind::Loop),
         };

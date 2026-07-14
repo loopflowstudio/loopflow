@@ -4,6 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::engine::error::GitError;
 
@@ -254,6 +255,20 @@ pub fn current_branch(repo: &Path) -> Result<Option<String>, GitError> {
     }
 }
 
+/// Resolve the root of the working tree containing `repo`.
+pub fn worktree_root(repo: &Path) -> Result<PathBuf, GitError> {
+    let output = run_git(repo, &["rev-parse", "--show-toplevel"])?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: "git rev-parse --show-toplevel".to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(PathBuf::from(
+        String::from_utf8_lossy(&output.stdout).trim(),
+    ))
+}
+
 /// Return default branch name from origin/HEAD. Falls back to "main".
 pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
     let output = run_git(
@@ -290,6 +305,39 @@ pub fn is_clean(repo: &Path) -> Result<bool, GitError> {
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
+/// Repository state relevant to a Task flow's no-progress check.
+///
+/// The returned text is an opaque comparison value, not a user-facing diff.
+/// It includes committed, staged, tracked working-tree, and untracked-file
+/// changes without reading ignored files.
+pub fn worktree_state(repo: &Path) -> Result<String, GitError> {
+    let head = git_stdout(repo, &["rev-parse", "HEAD"])?;
+    let status = git_stdout(repo, &["status", "--porcelain"])?;
+    let diff = git_stdout(repo, &["diff", "--binary", "HEAD"])?;
+    let untracked = git_stdout(repo, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    let mut untracked_state = String::new();
+    for relative in untracked.split('\0').filter(|path| !path.is_empty()) {
+        let path = repo.join(relative);
+        let metadata = std::fs::symlink_metadata(&path)?;
+        let contents = if metadata.file_type().is_symlink() {
+            std::fs::read_link(path)?
+                .as_os_str()
+                .as_encoded_bytes()
+                .to_vec()
+        } else if metadata.is_file() {
+            std::fs::read(path)?
+        } else {
+            Vec::new()
+        };
+        let digest = hex::encode(Sha256::digest(contents));
+        untracked_state.push_str(relative);
+        untracked_state.push('\0');
+        untracked_state.push_str(&digest);
+        untracked_state.push('\0');
+    }
+    Ok(format!("{head}\0{status}\0{diff}\0{untracked_state}"))
 }
 
 /// Return true if working tree is clean, ignoring untracked `scratch/` entries.
@@ -738,6 +786,24 @@ pub fn rebase(
     onto: &str,
     base_commit: Option<&str>,
 ) -> Result<RebaseResult, GitError> {
+    rebase_command(worktree, onto, base_commit, true)
+}
+
+/// Start a rebase and leave conflicts in place for the current process.
+pub fn rebase_for_resolution(
+    worktree: &Path,
+    onto: &str,
+    base_commit: Option<&str>,
+) -> Result<RebaseResult, GitError> {
+    rebase_command(worktree, onto, base_commit, false)
+}
+
+fn rebase_command(
+    worktree: &Path,
+    onto: &str,
+    base_commit: Option<&str>,
+    abort_on_conflict: bool,
+) -> Result<RebaseResult, GitError> {
     let mut args = vec!["rebase"];
     if let Some(base) = base_commit {
         args.extend(["--onto", onto, base]);
@@ -757,7 +823,9 @@ pub fn rebase(
     }
 
     let conflicts = list_conflicts(worktree)?;
-    let _ = run_git(worktree, &["rebase", "--abort"])?;
+    if abort_on_conflict {
+        let _ = run_git(worktree, &["rebase", "--abort"])?;
+    }
     Ok(RebaseResult {
         success: false,
         conflicts: if conflicts.is_empty() {
@@ -767,6 +835,53 @@ pub fn rebase(
         },
         new_head: None,
     })
+}
+
+/// Stage the resolved conflict paths and continue an in-progress rebase.
+pub fn continue_rebase(worktree: &Path) -> Result<RebaseResult, GitError> {
+    let conflicts = list_conflicts(worktree)?;
+    if !conflicts.is_empty() {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(worktree)
+            .args(["add", "--"])
+            .args(&conflicts)
+            .output()?;
+        if !output.status.success() {
+            return Err(GitError::CommandFailed {
+                command: "git add -- <resolved conflicts>".to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            });
+        }
+    }
+
+    let output = run_git(
+        worktree,
+        &["-c", "core.editor=true", "rebase", "--continue"],
+    )?;
+    if output.status.success() {
+        let new_head = git_stdout(worktree, &["rev-parse", "HEAD"])?
+            .trim()
+            .to_string();
+        return Ok(RebaseResult {
+            success: true,
+            conflicts: None,
+            new_head: Some(new_head),
+        });
+    }
+
+    let conflicts = list_conflicts(worktree)?;
+    Ok(RebaseResult {
+        success: false,
+        conflicts: (!conflicts.is_empty()).then_some(conflicts),
+        new_head: None,
+    })
+}
+
+/// Abort an in-progress rebase and restore its pre-rebase state.
+pub fn abort_rebase(worktree: &Path) -> Result<(), GitError> {
+    git_stdout(worktree, &["rebase", "--abort"])?;
+    Ok(())
 }
 
 pub fn create_branch(worktree: &Path, name: &str) -> Result<BranchInfo, GitError> {
@@ -975,6 +1090,40 @@ mod tests {
     }
 
     #[test]
+    fn git_rebase_can_preserve_and_continue_conflicts() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "base\n");
+        create_branch(repo.path(), "feature").expect("create branch");
+        fs::write(repo.path().join("README.md"), "feature\n").expect("write feature");
+        git_stdout(repo.path(), &["add", "README.md"]).expect("stage feature");
+        git_stdout(repo.path(), &["commit", "-m", "feature change"]).expect("commit feature");
+
+        git_stdout(repo.path(), &["checkout", "main"]).expect("checkout main");
+        fs::write(repo.path().join("README.md"), "main\n").expect("write main");
+        git_stdout(repo.path(), &["add", "README.md"]).expect("stage main");
+        git_stdout(repo.path(), &["commit", "-m", "main change"]).expect("commit main");
+        git_stdout(repo.path(), &["checkout", "feature"]).expect("checkout feature");
+
+        let conflicted =
+            rebase_for_resolution(repo.path(), "main", None).expect("start manual rebase");
+        assert!(!conflicted.success);
+        assert_eq!(conflicted.conflicts, Some(vec![PathBuf::from("README.md")]));
+        assert_eq!(list_conflicts(repo.path()).unwrap().len(), 1);
+
+        fs::write(repo.path().join("README.md"), "main\nfeature\n").expect("resolve conflict");
+        let completed = continue_rebase(repo.path()).expect("continue rebase");
+        assert!(completed.success);
+        assert_eq!(
+            current_branch(repo.path()).unwrap(),
+            Some("feature".to_string())
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("README.md")).unwrap(),
+            "main\nfeature\n"
+        );
+    }
+
+    #[test]
     fn git_push_force_with_lease() {
         let repo = init_repo();
         commit_file(repo.path(), "README.md", "hello");
@@ -1087,6 +1236,36 @@ mod tests {
         let path = repo.path().join("dirty.txt");
         fs::write(&path, "dirty").expect("write file");
         assert!(!is_clean(repo.path()).expect("dirty repo"));
+    }
+
+    #[test]
+    fn worktree_state_changes_with_committed_and_uncommitted_work() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "one");
+        let initial = worktree_state(repo.path()).expect("initial state");
+
+        fs::write(repo.path().join("README.md"), "two").expect("edit tracked file");
+        let dirty = worktree_state(repo.path()).expect("dirty state");
+        assert_ne!(dirty, initial);
+
+        stage_all(repo.path()).expect("stage all");
+        commit(repo.path(), "update readme").expect("commit");
+        let committed = worktree_state(repo.path()).expect("committed state");
+        assert_ne!(committed, initial);
+        assert_ne!(committed, dirty);
+    }
+
+    #[test]
+    fn worktree_state_tracks_untracked_file_contents() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "tracked");
+
+        fs::write(repo.path().join("new.txt"), "one").expect("write untracked file");
+        let initial = worktree_state(repo.path()).expect("initial untracked state");
+        fs::write(repo.path().join("new.txt"), "two").expect("update untracked file");
+        let updated = worktree_state(repo.path()).expect("updated untracked state");
+
+        assert_ne!(initial, updated);
     }
 
     #[test]

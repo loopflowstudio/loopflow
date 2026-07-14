@@ -49,6 +49,7 @@ fn prepare_pr(
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
+    crate::ops::pr::reject_control_plane_delivery(&repo_root)?;
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     prepare_land(&repo_root, options, progress)?;
@@ -92,9 +93,8 @@ fn prepare_pr(
 }
 
 /// Land a PR and walk away: commit, rebase, clear scratch, and arm auto-merge so
-/// GitHub merges it once checks pass. The wave home is permanent — a land never
-/// rotates or renames the live worktree; worker worktrees self-prune once their
-/// PR merges.
+/// GitHub merges it once checks pass. Task worktrees self-prune once their PR
+/// merges; permanent Wave homes are rejected before any mutation.
 pub fn land(
     repo: &Path,
     options: &LandOptions,

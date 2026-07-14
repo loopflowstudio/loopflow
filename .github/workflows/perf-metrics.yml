@@ -5,7 +5,7 @@ name: Perf metrics (daily)
 
 on:
   schedule:
-    # 05:30 UTC daily — before the release/regression hours.
+    # 05:30 UTC daily — before package and release jobs.
     - cron: "30 5 * * *"
   workflow_dispatch:
 

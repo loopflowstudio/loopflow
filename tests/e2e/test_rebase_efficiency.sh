@@ -63,20 +63,4 @@ if ! git -C "$repo_dir" diff --quiet HEAD origin/main -- file.txt; then
   exit 1
 fi
 
-placement=$(cd "$repo_dir" && run_lf wt create --plan child)
-grep -q "branch: demo.parent.child" <<<"$placement"
-grep -q "base: demo.parent" <<<"$placement"
-grep -q "strategy: create_stack_child" <<<"$placement"
-
-set +e
-dot_output=$(cd "$repo_dir" && run_lf wt create --plan api.v2 2>&1)
-dot_status=$?
-set -e
-
-if [ "$dot_status" -eq 0 ]; then
-  echo "expected dotted worktree segment to fail" >&2
-  exit 1
-fi
-grep -q "Dots are reserved for stack ancestry" <<<"$dot_output"
-
 echo "PASS"

@@ -8,15 +8,15 @@ find release -maxdepth 2 -type f | sort
 ```
 
 ```bash
-uv run python scripts/install.py local --use   # full build: lf, lfd, Loopflow.app -> local-bin/, make active
-uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf+lfd
+uv run python scripts/install.py local --use   # full build: lf + Loopflow.app -> local-bin/, make active
+uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf
 cat release/SCHEDULE.md      # shared loopflow + cadenza release cadence
 ```
 
 `install.py` is the local entry point. `local --use` builds this worktree's
-`lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that
-build. `refresh` is the fast CLI-only path: pull the default branch, rebuild
-`lf`/`lfd`, and install them into the local bin dir.
+`lf` and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build.
+`refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`, and
+install it into the local bin dir.
 
 Use `release/` to keep the rationale and notes for each shipped version close to the code.
 
@@ -29,14 +29,13 @@ Use `release/` to keep the rationale and notes for each shipped version close to
 
 ## Shipped artifacts
 
-Every tagged release publishes `lf`/`lfd` and the **Loopflow desktop app** as
-peers — the app is not a side artifact.
+Every tagged release publishes `lf` and the **Loopflow desktop app** as peers —
+the app is not a side artifact.
 
 | Artifact | Where | Versioned by |
 |----------|-------|--------------|
 | `lf-<target>.tar.gz` | GitHub Release | `Cargo.toml` |
 | `Loopflow-<version>.dmg`, `Loopflow-latest.dmg` | R2 `downloads/` + GitHub Release | tag |
-| `loopflow` wheel | PyPI | `pyproject.toml` |
 | `loopflow` crate | crates.io | `Cargo.toml` |
 
 `Loopflow.app`'s `CFBundleShortVersionString`/`CFBundleVersion` are stamped from
@@ -47,11 +46,11 @@ version as `lf --version` — no separate manifest to bump or drift.
 
 | Cadence | Workflow | What it does | Ships? |
 |---------|----------|--------------|--------|
-| Nightly | `Packages (nightly)` | Runs the regression tier, builds every native `lf`/`lfd` tarball, extracts each package, and smoke-tests `--version` | No — artifacts expire after 14 days |
-| Weekly | `Regression (weekly auto-release)` | Runs nightly package verification, bumps patch when commits landed since the last tag, tags, and dispatches `Release` | Yes |
-| Release | `Release` (on tag) | Builds the native tarballs **and** the signed, notarized `Loopflow.dmg`; uploads the DMG to R2 and attaches it to the GitHub Release alongside `lf`/`lfd` | Yes |
-| Local | `scripts/install.py local --use` | Build this worktree's `lf`, `lfd`, and `Loopflow.app` into `local-bin/`, then promote it active | Local only |
-| Local | `scripts/install.py refresh` | `lf`/`lfd` only: pull, release-build, atomically copy into the local bin dir | Local only |
+| Nightly | `Packages (nightly)` | Builds every native `lf` tarball, extracts each package, and smoke-tests `--version` | No — artifacts expire after 14 days |
+| Weekly | `Release (weekly)` | Runs nightly package verification, bumps patch when commits landed since the last tag, tags, and dispatches `Release` | Yes |
+| Release | `Release` (on tag) | Builds the native tarballs **and** the signed, notarized `Loopflow.dmg`; uploads the DMG to R2 and attaches it to the GitHub Release alongside `lf` | Yes |
+| Local | `scripts/install.py local --use` | Build this worktree's `lf` and `Loopflow.app` into `local-bin/`, then promote it active | Local only |
+| Local | `scripts/install.py refresh` | Pull, release-build `lf`, and atomically copy it into the local bin dir | Local only |
 
 Nightly packages prove release artifacts while keeping deployment out of the loop. Weekly release reuses that package gate before publishing.
 

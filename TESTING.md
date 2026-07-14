@@ -14,7 +14,6 @@ cd website && uv run python dev.py test # Website tests
 swift test --package-path swift        # Swift package tests
 cd swift && xcodegen generate && xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=  # Loopflow UI compile
 tests/e2e/test_smoke.sh               # E2E smoke
-uv run pytest tests/regression/ -v     # nightly/weekly release gate
 ```
 
 Run at minimum the checks that apply to files you changed. A PR that passes locally but fails CI is a broken gate.
@@ -48,15 +47,15 @@ Path → suite mapping:
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
 | `swift/` | swift | `swift test --package-path swift -Xswiftc -gnone`, then the multiplatform boundary check |
 | `swift/LoopflowMac/`, `swift/project.yml` | loopflow *(slow)* | xcodegen + xcodebuild |
-| lfd `http`/`store`, `tests/e2e/` | e2e *(slow)* | e2e + API smoke |
+| local store/worktree code, `tests/e2e/` | e2e *(slow)* | CLI smoke |
 
 ## Python Tests
 
-Unit and integration tests for the Python package (`python/loopflow/` — wire models).
+Tests for release automation, installers, and repository scripts.
 
 ```bash
 uv run pytest python/tests/                          # All Python tests
-uv run pytest python/tests/test_client.py::TestClientErrors -v  # Single class
+uv run pytest python/tests/test_install_script.py -v # One file
 ```
 
 ## Website Tests
@@ -132,13 +131,9 @@ cargo test -p loopflow golden_prompt
 uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after prompt changes
 ```
 
-Migration coverage includes a drifted-database fixture, not only a fresh
-schema chain. `the_migration_starts_the_ledger_empty` seeds the pre-057
-`run_events` shape and proves the identity cutover truncates ambiguous history,
-then recreates `process_id` as `NOT NULL`. A separate storage regression proves
-the rebuilt table rejects vocabulary drift. The trace drift fixture reproduces
-the partially applied 062 index collision, then proves 063 preserves run totals
-and captured launches while converting paths, timing ownership, and taxonomy.
+Fresh-store coverage exercises the live SQLite schema. Existing incompatible
+databases are rejected with a direct delete-and-recreate instruction; there is
+no historical upgrade chain.
 
 Trace capture has focused storage, prompt-accounting, harness, and reader
 checks:
@@ -146,17 +141,16 @@ checks:
 ```bash
 cargo test -p loopflow trace
 cargo test -p loopflow journal
-cargo test -p loopflow lfdb
+cargo test -p loopflow store
 cargo test -p loopflow harness::conformance_tests
 ```
 
 After schema or capture changes, run `lf trace`, `lf context --json`, and
-`lf doctor --json` against the long-lived local ledger. Fresh stores cannot
-expose applied-migration drift or missing production launch coverage.
+`lf doctor --json` against a fresh local ledger.
 
 ## E2E Tests
 
-Shell-based workflows for CLI and live HTTP API behavior.
+Shell-based workflows for CLI and worktree behavior.
 
 ```bash
 tests/e2e/test_smoke.sh
@@ -171,11 +165,10 @@ tests/e2e/test_rebase_conflict.sh
 
 ## Nightly Package Tests
 
-`.github/workflows/nightly-packages.yml` builds the same native `lf`/`lfd` tarballs as the release workflow after the regression tier passes. Each runner extracts its tarball and runs:
+`.github/workflows/nightly-packages.yml` builds the same native `lf` tarballs as the release workflow. Each runner extracts its tarball and runs:
 
 ```bash
 package-smoke/lf --version
-package-smoke/lfd --version
 ```
 
 Nightly package artifacts are verification only. They are uploaded for 14 days and not deployed.
@@ -185,11 +178,8 @@ Nightly package artifacts are verification only. They are uploaded for 14 days a
 `scripts/` contains runnable validation and demo scripts. Use these for branch validation and manual UI walkthroughs.
 
 ```bash
-uv run python scripts/loopflow-dev.py run-debug     # build and launch lfd + Loopflow (macOS)
-uv run python scripts/loopflow-dev.py run-ios        # build and launch in iOS Simulator
+uv run python scripts/loopflow-dev.py run-debug     # build and launch Loopflow (macOS)
 uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 boundary guardrails
-uv run python scripts/test_auth_live_contract.py --providers github,claude,codex  # live provider-auth contract + evidence capture
-uv run python scripts/test_remote_smoke.py --url https://lfd.example.com --token "$LFD_AUTH_TOKEN" --repo /remote/repo/path  # remote TLS smoke (repo required on fresh hosts)
 uv run python scripts/verify_skill_sync.py --live  # sync a probe step, then invoke it through Claude and Codex
 ```
 

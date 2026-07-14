@@ -10,7 +10,7 @@ private func enrichProcessPathForGUILaunch() {
 }
 
 @MainActor
-private enum TmuxTerminationCleanup {
+private enum TaskTerminalCleanup {
     private static var observer: NSObjectProtocol?
 
     static func install() {
@@ -28,7 +28,6 @@ private enum TmuxTerminationCleanup {
 @main
 struct LoopflowApp: App {
     @State private var portfolioService = PortfolioService()
-    @State private var keyboardRouter = KeyboardRouter()
     @Environment(\.openWindow) private var openWindow
     @Environment(\.colorScheme) private var systemScheme
     @State private var snapshotError: String?
@@ -37,17 +36,12 @@ struct LoopflowApp: App {
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
+        TaskTerminalCleanup.install()
         bootstrapLoopflowApp()
         // Enrich our own process PATH before any children spawn, so tools launched
-        // through Ghostty surfaces and `--noprofile --norc` shells can find tmux,
-        // git, and agent CLIs that live in Homebrew or ~/.local/bin.
+        // by Wave launchers can find tmux, git, and agent CLIs that live in
+        // Homebrew or ~/.local/bin.
         enrichProcessPathForGUILaunch()
-        if !AppRuntime.isAutomatedTest {
-            Task { @MainActor in
-                SharedDaemon.eagerStart()
-            }
-        }
-        TmuxTerminationCleanup.install()
     }
 
     var body: some Scene {
@@ -62,7 +56,6 @@ struct LoopflowApp: App {
             .tint(.loopflowBurgundy)
             .preferredColorScheme(theme.preferredScheme)
             .environment(\.palette, theme.palette)
-            .environment(keyboardRouter)
             .onOpenURL { handleDeepLink($0) }
         }
         .windowStyle(.automatic)
@@ -76,7 +69,6 @@ struct LoopflowApp: App {
             .tint(.loopflowBurgundy)
             .preferredColorScheme(theme.preferredScheme)
             .environment(\.palette, theme.palette)
-            .environment(keyboardRouter)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1080, height: 760)
@@ -86,7 +78,6 @@ struct LoopflowApp: App {
                 .tint(.loopflowBurgundy)
                 .preferredColorScheme(theme.preferredScheme)
                 .environment(\.palette, theme.palette)
-                .environment(keyboardRouter)
         }
         .defaultSize(width: 1080, height: 760)
 
@@ -98,20 +89,8 @@ struct LoopflowApp: App {
         }
         .defaultSize(width: 1180, height: 860)
 
-        Window("Terminal Test", id: "terminal-test") {
-            TerminalTestWindow()
-                .preferredColorScheme(theme.preferredScheme)
-                .environment(\.palette, theme.palette)
-        }
-        .defaultSize(width: 800, height: 600)
-
         .commands {
             CommandGroup(after: .appSettings) {
-                Toggle("Beta Features", isOn: Binding(
-                    get: { Flags.beta },
-                    set: { Flags.setBeta($0) }
-                ))
-                Divider()
                 Picker("Appearance", selection: Binding(
                     get: { appearanceMode },
                     set: { appearanceMode = $0 }
@@ -128,13 +107,6 @@ struct LoopflowApp: App {
                     snapshotCurrentWindow()
                 }
                 .keyboardShortcut("4", modifiers: [.command])
-            }
-
-            CommandGroup(after: .sidebar) {
-                Button("Command Palette") {
-                    NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
-                }
-                .keyboardShortcut("k", modifiers: .command)
             }
 
             CommandMenu("Go") {
@@ -163,13 +135,6 @@ struct LoopflowApp: App {
                     openRepoPanel()
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
-            }
-
-            CommandMenu("Debug") {
-                Button("Terminal Test") {
-                    openWindow(id: "terminal-test")
-                }
-                .keyboardShortcut("t", modifiers: [.command, .shift])
             }
         }
     }

@@ -22,7 +22,7 @@
 //! and broadcasts. This module is vendor-free: the harness lives with the
 //! resident process, never here.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -32,12 +32,13 @@ use tokio::sync::broadcast;
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
-use crate::lfd::security::sanitize_fs_component;
+use crate::project_session::ProjectObservation;
+use crate::security::sanitize_fs_component;
+use crate::task::TaskObservation;
 use crate::wave::channel::matches_prefix;
 use crate::wave::journal::{
-    channel_opened_turn, fold_thread, fold_workers, journal_path, restore_pending,
-    run_completed_turn, EventKind, Journal, MessageId, MessageOp, PendingMessage, Usage,
-    WorkerOutcome, WorkerRecord,
+    fold_thread, journal_path, project_observation_message, restore_pending,
+    task_observation_message, EventKind, Journal, MessageId, MessageOp, PendingMessage, Usage,
 };
 use crate::wave::memory::Memory;
 use crate::wave::playhead::{
@@ -45,7 +46,7 @@ use crate::wave::playhead::{
     StepOutcome,
 };
 use crate::wave::state::{can_transition, LoopState};
-use crate::wave::wire::{OpFrame, ResidentDelta, ResidentStateTo};
+use crate::wave::wire::{ProviderSessionRef, ResidentDelta, ResidentStateTo};
 
 /// Capacity of the live turn broadcast. SSE clients that fall this far behind
 /// get a lag error and resync from `/conversation`; the journal is the source
@@ -69,10 +70,6 @@ const MEMORY_BROADCAST_CAPACITY: usize = 64;
 /// durable queue; a lagged subscriber resyncs from the pending replay.
 const INBOX_BROADCAST_CAPACITY: usize = 256;
 
-/// Capacity of the live `op` broadcast (worker run motion → `/events` `op`
-/// frames). Live-only; a lagged subscriber re-reads history from `lf runs`.
-const OP_BROADCAST_CAPACITY: usize = 256;
-
 /// How a channel name relates to a wave's family, per [`channel_role`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelRole {
@@ -84,8 +81,7 @@ pub enum ChannelRole {
 
 /// A wave's primary channel name: the sanitized filesystem form of its name.
 /// Worktree basenames — and therefore child channel names — derive from it
-/// (`web/ui` mints `web-ui` worktrees and `web-ui.<run>` channels; see
-/// `lfd::security::sanitize_fs_component`).
+/// (`web/ui` mints `web-ui` worktrees and `web-ui.<run>` channels).
 pub fn wave_channel_name(wave: &str) -> String {
     sanitize_fs_component(wave)
 }
@@ -130,6 +126,11 @@ pub enum InboxItem {
     /// carrying text — "interrupt & send"), awaiting consumption (named in a
     /// `TurnStarted.answers` or `TurnSteered.answers`).
     Message(PendingMessage),
+    /// A typed Task ledger observation awaiting the same durable turn
+    /// consumption acknowledgement as a queued message.
+    Task(TaskObservation),
+    /// A typed Project ledger observation.
+    Project(ProjectObservation),
     /// A bare interrupt (no text): cancel the open turn. Nothing is journaled
     /// for it — the `LoopState` transition records the interrupt itself.
     Interrupt,
@@ -162,11 +163,10 @@ pub struct Subscription {
     /// The pending queue as of the snapshot: journaled user messages not yet
     /// named in any `answers` — the resident's boot replay.
     pub pending: Vec<PendingMessage>,
+    pub tasks: HashMap<MessageId, TaskObservation>,
+    pub projects: HashMap<MessageId, ProjectObservation>,
     /// Live resident-directed ops sent after the snapshot.
     pub inbox_rx: broadcast::Receiver<InboxItem>,
-    /// Live worker-run motion (`op` frames) sent after the snapshot. Live-only
-    /// — history is a `lf runs` query, never replayed here.
-    pub op_rx: broadcast::Receiver<OpFrame>,
 }
 
 /// The assistant turn in progress. `turn` is the snapshot the wire watches
@@ -207,19 +207,13 @@ struct Inner {
     /// send (the thread's *last* turn at that point is usually the steer's
     /// own user turn, which must never be named as a consumer).
     last_assistant_turn_id: Option<String>,
-    /// Dispatched workers, folded from `RunObserved`/`RunCompleted`
-    /// observations (the lfd tail). Keyed on run id — the idempotence guard:
-    /// a run dispatches once and finishes once, however many times the
-    /// observer sees it (live event + reconnect snapshot).
-    workers: Vec<WorkerRecord>,
     /// Durable scheduler queue folded from the journal on boot.
     pending_messages: Vec<PendingMessage>,
     /// Every journaled user message by id — requeues restore pending entries
     /// from it (an id alone can't rebuild the text/op/from).
     messages: HashMap<MessageId, PendingMessage>,
-    /// Run ids whose `ChannelOpened` is already journaled — the dispatch
-    /// notification door's idempotence guard, folded from the journal.
-    opened_channel_runs: HashSet<String>,
+    tasks: HashMap<MessageId, TaskObservation>,
+    projects: HashMap<MessageId, ProjectObservation>,
     /// Memory facts added since the last externalization. The compiled
     /// checkpoint lives in MEMORY.md; this is the replayable delta after it.
     memory_adds: Vec<String>,
@@ -261,11 +255,6 @@ pub struct WaveRuntime {
     /// listener. `/health` serves `loop_state: null` until then (a dormant channel
     /// has no loop to report on).
     resident_expected: AtomicBool,
-    /// Fans worker-run motion (`op` frames) out to live `/events` subscribers.
-    /// Sent under the append lock in [`WaveRuntime::journal_run_observed`] /
-    /// [`WaveRuntime::journal_run_completed`], so op order matches journal
-    /// order. Live-only — a lagged subscriber re-reads `lf runs`.
-    op_tx: broadcast::Sender<OpFrame>,
 }
 
 impl WaveRuntime {
@@ -283,7 +272,6 @@ impl WaveRuntime {
     pub fn open(name: String, repo_root: PathBuf) -> anyhow::Result<Arc<Self>> {
         let (mut journal, events) = Journal::open(&journal_path(&repo_root, &name))?;
         let mut fold = fold_thread(&events);
-        let workers = fold_workers(&events);
 
         // Janitor: an active body belonged to the dead server process. Keep
         // its logical step selected, close only the abandoned attempt, and
@@ -352,7 +340,6 @@ impl WaveRuntime {
         let (memory_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
         let (memory_add_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
         let (inbox_tx, _) = broadcast::channel(INBOX_BROADCAST_CAPACITY);
-        let (op_tx, _) = broadcast::channel(OP_BROADCAST_CAPACITY);
         let memory = Memory::for_wave(&repo_root, &name);
         Ok(Arc::new(Self {
             channel_name: wave_channel_name(&name),
@@ -366,10 +353,10 @@ impl WaveRuntime {
                 state,
                 playhead,
                 last_assistant_turn_id,
-                workers,
                 pending_messages: fold.pending_messages,
                 messages: fold.messages,
-                opened_channel_runs: fold.opened_channel_runs,
+                tasks: fold.tasks,
+                projects: fold.projects,
                 memory_adds: fold.memory_adds,
             }),
             turn_tx,
@@ -380,7 +367,6 @@ impl WaveRuntime {
             memory,
             inbox_tx,
             resident_expected: AtomicBool::new(false),
-            op_tx,
         }))
     }
 
@@ -446,6 +432,26 @@ impl WaveRuntime {
     pub fn thread_len(&self) -> usize {
         let inner = self.inner();
         inner.thread.len() + usize::from(inner.open.is_some())
+    }
+
+    /// The newest provider thread recorded by the durable Wave journal.
+    pub fn latest_provider_session(&self) -> Option<ProviderSessionRef> {
+        let inner = self.inner();
+        if let Some(body) = inner
+            .open
+            .as_ref()
+            .and_then(|open| open.turn.body.as_ref())
+            .filter(|body| body_has_harness(body))
+        {
+            return provider_session_from_body(body);
+        }
+        inner
+            .thread
+            .iter()
+            .rev()
+            .filter_map(|turn| turn.body.as_ref())
+            .find(|body| body_has_harness(body))
+            .and_then(provider_session_from_body)
     }
 
     /// Current loop state, for `/health` and the composer.
@@ -602,7 +608,6 @@ impl WaveRuntime {
         Ok(view)
     }
 
-    /// The last journaled vendor thread id, if any — the loop's resume handle.
     /// User messages journaled but not yet consumed by a turn — the durable
     /// queue. Replayed as `inbox` frames when a resident subscribes, and the
     /// validator for the resident's `answers` declarations.
@@ -637,123 +642,6 @@ impl WaveRuntime {
         self.resident_expected.store(true, Ordering::Relaxed);
     }
 
-    // -- Worker observations (the lfd tail's write surface) --
-    //
-    // These are OBSERVATIONS, not commands: the server tails lfd's event
-    // stream and records confirmed facts. Both appends are idempotent keyed
-    // on run id, so a live event plus a reconnect snapshot never journals a
-    // worker twice.
-
-    /// Journal a `RunObserved` observation. Returns false (and appends
-    /// nothing) when the run is already known.
-    pub fn journal_run_observed(
-        &self,
-        run_id: &str,
-        session_id: &str,
-        flow: &str,
-        task: &str,
-    ) -> bool {
-        let mut inner = self.inner();
-        if inner.workers.iter().any(|w| w.run_id == run_id) {
-            return false;
-        }
-        inner.journal.append(|_| EventKind::RunObserved {
-            run_id: run_id.to_string(),
-            session_id: session_id.to_string(),
-            flow: flow.to_string(),
-            task: task.to_string(),
-        });
-        inner.workers.push(WorkerRecord {
-            run_id: run_id.to_string(),
-            session_id: session_id.to_string(),
-            flow: flow.to_string(),
-            task: task.to_string(),
-            finished: None,
-        });
-        // Live `op` frame for the wave's operational stream — a send error
-        // just means no live subscribers.
-        let _ = self.op_tx.send(OpFrame {
-            kind: "run.started".to_string(),
-            run_id: run_id.to_string(),
-            flow: Some(flow.to_string()),
-            task: Some(task.to_string()),
-            summary: None,
-            ts: now_rfc3339(),
-        });
-        true
-    }
-
-    /// Journal a `RunCompleted` observation and commit its thread-visible
-    /// turn on the PRIMARY channel ("run <id> completed/failed · <summary>",
-    /// broadcast live) — a worker that died without reporting still ends
-    /// visibly, failure summary on the wire. Returns false (and appends
-    /// nothing) when the run was never dispatched or already finished.
-    pub fn journal_run_completed(
-        &self,
-        run_id: &str,
-        outcome: WorkerOutcome,
-        summary: &str,
-    ) -> bool {
-        let mut inner = self.inner();
-        let Some(pos) = inner
-            .workers
-            .iter()
-            .position(|w| w.run_id == run_id && w.finished.is_none())
-        else {
-            return false;
-        };
-        inner.workers[pos].finished = Some(outcome);
-        let flow = inner.workers[pos].flow.clone();
-        let event = inner.journal.append(|_| EventKind::RunCompleted {
-            run_id: run_id.to_string(),
-            outcome,
-            summary: summary.to_string(),
-        });
-        let turn = run_completed_turn(&event, run_id, outcome, summary);
-        self.commit_locked(&mut inner, turn);
-        // Live `op` frame: the finish, kind mirroring the ledger's terminal
-        // event names (`run.completed` / `run.errored`).
-        let kind = match outcome {
-            WorkerOutcome::Completed => "run.completed",
-            WorkerOutcome::Failed => "run.errored",
-        };
-        let _ = self.op_tx.send(OpFrame {
-            kind: kind.to_string(),
-            run_id: run_id.to_string(),
-            flow: Some(flow),
-            task: None,
-            summary: Some(summary.to_string()),
-            ts: now_rfc3339(),
-        });
-        true
-    }
-
-    /// Subscribe to this wave's live `op` stream (worker-run motion). Live-only
-    /// — the past is a `lf runs` query, so nothing replays. The SSE route takes
-    /// its receiver from `subscribe_with_snapshot`, so this bare accessor
-    /// exists for tests that want the op stream without the snapshot.
-    #[cfg(test)]
-    pub fn subscribe_ops(&self) -> broadcast::Receiver<OpFrame> {
-        self.op_tx.subscribe()
-    }
-
-    /// Whether a `RunObserved` is already journaled for `run_id` —
-    /// the observer checks before fetching run details it won't need.
-    pub fn worker_known(&self, run_id: &str) -> bool {
-        self.inner().workers.iter().any(|w| w.run_id == run_id)
-    }
-
-    /// Workers dispatched and not yet finished — folded into the loop's
-    /// heartbeat seed as the `<in_flight>` section.
-    pub fn in_flight_workers(&self) -> Vec<WorkerRecord> {
-        self.inner()
-            .workers
-            .iter()
-            .filter(|w| w.finished.is_none())
-            .cloned()
-            .collect()
-    }
-
     // -- Channel family --
     //
     // The primary channel is the served mind and the only journaled one. Child
@@ -771,23 +659,6 @@ impl WaveRuntime {
     /// sanitized spelling).
     pub fn is_primary(&self, channel: &str) -> bool {
         channel_role(&self.name, channel) == Some(ChannelRole::Primary)
-    }
-
-    /// Journal a `ChannelOpened` fact on the PRIMARY channel (the dispatch
-    /// notification door) and commit its thread-visible turn. Idempotent on
-    /// `run_id`: a repeated knock returns `None` and appends nothing.
-    pub fn journal_channel_opened(&self, name: &str, run_id: &str) -> Option<ChatTurn> {
-        let mut inner = self.inner();
-        if inner.opened_channel_runs.contains(run_id) {
-            return None;
-        }
-        inner.opened_channel_runs.insert(run_id.to_string());
-        let event = inner.journal.append(|_| EventKind::ChannelOpened {
-            name: name.to_string(),
-            run_id: run_id.to_string(),
-        });
-        let turn = channel_opened_turn(&event, name);
-        Some(self.commit_locked(&mut inner, turn))
     }
 
     // -- Memory (the server holds MEMORY.md's pen) --
@@ -861,8 +732,9 @@ impl WaveRuntime {
             memory_adds: inner.memory_adds.clone(),
             memory_add_rx: self.memory_add_tx.subscribe(),
             pending: inner.pending_messages.clone(),
+            tasks: inner.tasks.clone(),
+            projects: inner.projects.clone(),
             inbox_rx: self.inbox_tx.subscribe(),
-            op_rx: self.op_tx.subscribe(),
         }
     }
 
@@ -977,6 +849,8 @@ impl WaveRuntime {
     /// Push a turn into the thread cache and broadcast it live. The journal
     /// events for the turn must already be appended (same lock).
     fn commit_locked(&self, inner: &mut Inner, turn: ChatTurn) -> ChatTurn {
+        turn.validate()
+            .expect("Wave thread entries must satisfy the ChatTurn wire invariant");
         if turn.role == ChatRole::Assistant {
             inner.last_assistant_turn_id = Some(turn.id.clone());
         }
@@ -1042,6 +916,56 @@ impl WaveRuntime {
 
     pub fn deliver_skip(&self) {
         let _ = self.inbox_tx.send(InboxItem::Skip);
+    }
+
+    /// Journal and queue a typed Task observation exactly once.
+    pub fn deliver_task_observation(&self, observation: TaskObservation) -> bool {
+        let mut inner = self.inner();
+        let pending = task_observation_message(&observation);
+        if inner.tasks.contains_key(&pending.id) {
+            return false;
+        }
+        let event = inner.journal.append(|_| EventKind::TaskObserved {
+            observation: observation.clone(),
+        });
+        let turn = ChatTurn::child_activity(
+            format!("turn-{}", event.seq),
+            event.at_rfc3339(),
+            "task".to_string(),
+            crate::chat::turns::ChildControlActivity::from_task(&observation),
+        );
+        self.commit_locked(&mut inner, turn);
+        inner.messages.insert(pending.id.clone(), pending.clone());
+        inner.tasks.insert(pending.id.clone(), observation.clone());
+        inner.pending_messages.push(pending);
+        let _ = self.inbox_tx.send(InboxItem::Task(observation));
+        true
+    }
+
+    /// Journal and queue a typed Project observation exactly once.
+    pub fn deliver_project_observation(&self, observation: ProjectObservation) -> bool {
+        let mut inner = self.inner();
+        let pending = project_observation_message(&observation);
+        if inner.projects.contains_key(&pending.id) {
+            return false;
+        }
+        let event = inner.journal.append(|_| EventKind::ProjectObserved {
+            observation: observation.clone(),
+        });
+        let turn = ChatTurn::child_activity(
+            format!("turn-{}", event.seq),
+            event.at_rfc3339(),
+            "project".to_string(),
+            crate::chat::turns::ChildControlActivity::from_project(&observation),
+        );
+        self.commit_locked(&mut inner, turn);
+        inner.messages.insert(pending.id.clone(), pending.clone());
+        inner
+            .projects
+            .insert(pending.id.clone(), observation.clone());
+        inner.pending_messages.push(pending);
+        let _ = self.inbox_tx.send(InboxItem::Project(observation));
+        true
     }
 
     /// Record an already-finalized turn as its full event triple
@@ -1227,6 +1151,7 @@ impl WaveRuntime {
             created_at: event.at_rfc3339(),
             from: None,
             body,
+            activity: None,
         };
         let _ = self.turn_tx.send(TurnFrame::share(open.clone()));
         inner.open = Some(OpenTurn {
@@ -1396,6 +1321,24 @@ impl WaveRuntime {
     }
 }
 
+fn provider_session_from_body(body: &BodyProvenance) -> Option<ProviderSessionRef> {
+    let harness = body.harness.as_deref()?.trim();
+    let session_id = body.session_id.as_deref()?.trim();
+    if harness.is_empty() || session_id.is_empty() {
+        return None;
+    }
+    Some(ProviderSessionRef {
+        harness: harness.to_string(),
+        session_id: session_id.to_string(),
+    })
+}
+
+fn body_has_harness(body: &BodyProvenance) -> bool {
+    body.harness
+        .as_deref()
+        .is_some_and(|harness| !harness.trim().is_empty())
+}
+
 /// Validate a wire `answers` declaration against the pending fold: known ids
 /// are claimed (removed from pending) and returned in wire order; unknown or
 /// already-consumed ids are dropped with a warning — the journal never names
@@ -1461,6 +1404,7 @@ mod tests {
             created_at: String::new(),
             from: None,
             body: None,
+            activity: None,
         }
     }
 
@@ -1517,6 +1461,27 @@ mod tests {
         }
     }
 
+    fn complete_body(rt: &WaveRuntime, harness: &str, session_id: Option<&str>) {
+        let step = rt
+            .ensure_playhead()
+            .expect("initialize playhead")
+            .now
+            .expect("wave has a current step");
+        let mut body = BodyProvenance::for_step(&step, rt.repo_root());
+        body.harness = Some(harness.to_string());
+        body.session_id = session_id.map(str::to_string);
+        let body_id = body.body_id.clone();
+        rt.apply_resident_delta(ResidentDelta::BodyStarted { body });
+        rt.apply_resident_delta(d_opened(&[]));
+        rt.apply_resident_delta(d_text("done"));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
+        rt.apply_resident_delta(ResidentDelta::BodyFinished {
+            body_id,
+            outcome: StepOutcome::Completed,
+            reason: "completed".to_string(),
+        });
+    }
+
     #[test]
     fn turns_get_monotonic_ids_from_the_journal() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1556,6 +1521,80 @@ mod tests {
         assert_eq!(msg.id, MessageId(msg_id(&turn)));
         // And the durable queue has it immediately — no reboot needed.
         assert_eq!(rt.pending_messages().len(), 1);
+    }
+
+    #[test]
+    fn task_observation_is_typed_idempotent_and_replayable() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let mut rx = rt.subscribe_inbox();
+        let observation = crate::task::TaskObservation {
+            session_id: crate::task::TaskSessionId::from_raw("ts_example"),
+            issue_identifier: "INF-123".to_string(),
+            event_id: 7,
+            control_source: None,
+            event: crate::task::TaskEventKind::DecisionRequested {
+                decision_id: crate::child_session::ChildDecisionId::new(),
+                prompt: "Approve the plan?".to_string(),
+                options: vec!["approve".to_string(), "revise".to_string()],
+            },
+        };
+
+        assert!(rt.deliver_task_observation(observation.clone()));
+        assert!(!rt.deliver_task_observation(observation.clone()));
+        assert!(matches!(
+            rx.try_recv().expect("live Task observation"),
+            InboxItem::Task(ref received) if received == &observation
+        ));
+        let sub = rt.subscribe_with_snapshot();
+        assert_eq!(sub.pending.len(), 1);
+        assert_eq!(
+            sub.tasks.get(&MessageId(observation.inbox_id())),
+            Some(&observation)
+        );
+
+        drop(rt);
+        let replayed = open_runtime(tmp.path()).subscribe_with_snapshot();
+        assert_eq!(replayed.pending.len(), 1);
+        assert_eq!(
+            replayed.tasks.get(&MessageId(observation.inbox_id())),
+            Some(&observation)
+        );
+    }
+
+    #[test]
+    fn project_observation_is_typed_idempotent_and_replayable() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let mut rx = rt.subscribe_inbox();
+        let observation = crate::project_session::ProjectObservation {
+            session_id: crate::project_session::ProjectSessionId::from_raw("ps_example"),
+            project: "developer-efficiency".to_string(),
+            event_id: 8,
+            control_source: None,
+            event: crate::project_session::ProjectEventKind::Completed {
+                summary: "all KRs hold".to_string(),
+            },
+        };
+
+        assert!(rt.deliver_project_observation(observation.clone()));
+        assert!(!rt.deliver_project_observation(observation.clone()));
+        assert!(matches!(
+            rx.try_recv().expect("live Project observation"),
+            InboxItem::Project(ref received) if received == &observation
+        ));
+        let sub = rt.subscribe_with_snapshot();
+        assert_eq!(
+            sub.projects.get(&MessageId(observation.inbox_id())),
+            Some(&observation)
+        );
+
+        drop(rt);
+        let replayed = open_runtime(tmp.path()).subscribe_with_snapshot();
+        assert_eq!(
+            replayed.projects.get(&MessageId(observation.inbox_id())),
+            Some(&observation)
+        );
     }
 
     #[test]
@@ -1756,6 +1795,40 @@ mod tests {
         assert_eq!(usage.input_tokens, Some(10));
         assert_eq!(usage.output_tokens, Some(4));
         assert_eq!(usage.cost_usd, Some(0.02));
+    }
+
+    #[test]
+    fn provider_session_survives_runtime_reopen() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        complete_body(&rt, "codex", Some("thread-resume"));
+        assert_eq!(
+            rt.latest_provider_session(),
+            Some(ProviderSessionRef {
+                harness: "codex".to_string(),
+                session_id: "thread-resume".to_string(),
+            })
+        );
+
+        drop(rt);
+        let reopened = open_runtime(tmp.path());
+        assert_eq!(
+            reopened.latest_provider_session(),
+            Some(ProviderSessionRef {
+                harness: "codex".to_string(),
+                session_id: "thread-resume".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn newest_harness_body_masks_an_older_provider_session() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        complete_body(&rt, "codex", Some("codex-thread"));
+        complete_body(&rt, "claude", None);
+
+        assert_eq!(rt.latest_provider_session(), None);
     }
 
     /// The consumption declaration is the RESIDENT's, validated by the
@@ -2032,87 +2105,6 @@ mod tests {
         assert!(!rt.in_family("web-ui-other"));
     }
 
-    /// `RunCompleted` commits a thread-visible turn on the primary channel —
-    /// the died-silently backstop: a worker that never reported still ends
-    /// visibly, the failure summary on the wire.
-    #[test]
-    fn run_completed_commits_a_thread_visible_turn() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let rt = open_runtime(tmp.path());
-        rt.journal_run_observed("run-abcdef12", "sess-1", "implement", "wire it");
-        let mut frames = rt.subscribe_turns();
-
-        assert!(rt.journal_run_completed(
-            "run-abcdef12",
-            WorkerOutcome::Failed,
-            "session failed; error: boom"
-        ));
-        let turn = &rt.thread_snapshot()[0];
-        assert!(
-            turn.text.contains("run run-abcd"),
-            "short id: {}",
-            turn.text
-        );
-        assert!(turn.text.contains("failed"));
-        assert!(turn.text.contains("boom"), "failure summary on the turn");
-        assert_eq!(turn.from.as_deref(), Some("observer"));
-
-        // It rode the live turn broadcast.
-        let frame = frames.try_recv().expect("run-completed frame");
-        assert_eq!(frame.turn.id, turn.id);
-
-        // Never queued for the loop (only UserMessage rows feed pending).
-        assert!(rt.pending_messages().is_empty());
-
-        // A restart folds the same turn back out of the journal, once.
-        let rt2 = open_runtime(tmp.path());
-        let completed: Vec<_> = rt2
-            .thread_snapshot()
-            .into_iter()
-            .filter(|t| t.from.as_deref() == Some("observer"))
-            .collect();
-        assert_eq!(completed.len(), 1);
-    }
-
-    /// Worker motion rides the live `op` stream: a dispatch emits
-    /// `run.started` (flow + task), a finish emits the ledger-matching
-    /// terminal kind (`run.errored` on failure) with the registry summary.
-    /// Op frames are live-only — a subscriber that connects after the fact
-    /// sees nothing (history is a `lf runs` query).
-    #[test]
-    fn worker_motion_rides_the_op_stream() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let rt = open_runtime(tmp.path());
-        let mut ops = rt.subscribe_ops();
-
-        assert!(rt.journal_run_observed("run-abcdef12", "sess-1", "implement", "wire it"));
-        let started = ops.try_recv().expect("run.started frame");
-        assert_eq!(started.kind, "run.started");
-        assert_eq!(started.run_id, "run-abcdef12");
-        assert_eq!(started.flow.as_deref(), Some("implement"));
-        assert_eq!(started.task.as_deref(), Some("wire it"));
-        assert_eq!(started.summary, None);
-        assert!(!started.ts.is_empty());
-
-        assert!(rt.journal_run_completed(
-            "run-abcdef12",
-            WorkerOutcome::Failed,
-            "session failed; error: boom"
-        ));
-        let finished = ops.try_recv().expect("run.errored frame");
-        assert_eq!(finished.kind, "run.errored");
-        assert_eq!(finished.run_id, "run-abcdef12");
-        assert_eq!(finished.flow.as_deref(), Some("implement"));
-        assert_eq!(
-            finished.summary.as_deref(),
-            Some("session failed; error: boom")
-        );
-
-        // Live-only: a fresh subscriber replays nothing.
-        let mut late = rt.subscribe_ops();
-        assert!(late.try_recv().is_err(), "op frames never replay");
-    }
-
     /// Claimed-but-unanswered messages are requeued when a turn ends without
     /// completing: a Failed TurnFinished returns its claims to pending, and a
     /// restart re-delivers them (never lost). A Completed turn keeps them
@@ -2249,54 +2241,6 @@ mod tests {
             rt.pending_messages().is_empty(),
             "unpaused turn answered it"
         );
-    }
-
-    #[test]
-    fn worker_observations_are_idempotent_and_survive_restart() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        {
-            let rt = open_runtime(tmp.path());
-            assert!(rt.journal_run_observed("run-1", "sess-1", "implement", "wire it"));
-            // Same run seen again (reconnect snapshot): guarded, not journaled.
-            assert!(!rt.journal_run_observed("run-1", "sess-1", "implement", "wire it"));
-            assert_eq!(rt.in_flight_workers().len(), 1);
-            // A finish for a run never dispatched is refused.
-            assert!(!rt.journal_run_completed("run-9", WorkerOutcome::Failed, "?"));
-            assert!(rt.journal_run_completed("run-1", WorkerOutcome::Completed, "pr landed"));
-            assert!(!rt.journal_run_completed(
-                "run-1",
-                WorkerOutcome::Completed,
-                "pr landed again"
-            ));
-            assert!(rt.in_flight_workers().is_empty());
-        }
-
-        // A restarted runtime folds the same guard state back out of the log:
-        // the finished run stays finished, a new run dispatches normally.
-        let rt = open_runtime(tmp.path());
-        assert!(!rt.journal_run_observed("run-1", "sess-1", "implement", "wire it"));
-        assert!(rt.journal_run_observed("run-2", "sess-2", "design", "sketch it"));
-        assert_eq!(rt.in_flight_workers().len(), 1);
-        assert_eq!(rt.in_flight_workers()[0].run_id, "run-2");
-
-        // Exactly one RunObserved per run in the journal itself.
-        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-        let dispatched: Vec<&str> = events
-            .iter()
-            .filter_map(|e| match &e.kind {
-                EventKind::RunObserved { run_id, .. } => Some(run_id.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(dispatched, vec!["run-1", "run-2"]);
-        let finished: Vec<&str> = events
-            .iter()
-            .filter_map(|e| match &e.kind {
-                EventKind::RunCompleted { run_id, .. } => Some(run_id.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(finished, vec!["run-1"]);
     }
 
     /// Steer consumption over the wire: the live turn answers a steered
@@ -2447,36 +2391,6 @@ mod tests {
         let texts: Vec<_> = pending.iter().map(|m| m.text.as_str()).collect();
         assert_eq!(texts.len(), 2);
         assert!(texts.contains(&"to the wave") && texts.contains(&"to a"));
-    }
-
-    /// `ChannelOpened` (the dispatch notification): the thread shows the
-    /// opening, once per run id, and the guard survives restart.
-    #[test]
-    fn journal_channel_opened_is_idempotent_and_thread_visible() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let rt = open_runtime(tmp.path());
-        let turn = rt
-            .journal_channel_opened("ship.148e0e02", "run-1")
-            .expect("first knock journals");
-        assert_eq!(turn.text, "work line ship.148e0e02 opened");
-        assert_eq!(turn.from.as_deref(), Some("dispatch"));
-        assert!(
-            rt.journal_channel_opened("ship.148e0e02", "run-1")
-                .is_none(),
-            "second knock for the same run appends nothing"
-        );
-        assert_eq!(rt.thread_snapshot().len(), 1);
-
-        // Restart: the guard folds back out of the journal.
-        let rt2 = open_runtime(tmp.path());
-        assert!(rt2
-            .journal_channel_opened("ship.148e0e02", "run-1")
-            .is_none());
-        assert_eq!(rt2.thread_snapshot().len(), 1);
-        assert_eq!(
-            rt2.thread_snapshot()[0].text,
-            "work line ship.148e0e02 opened"
-        );
     }
 
     /// A subscription's snapshot carries the pending queue (the resident's

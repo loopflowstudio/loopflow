@@ -13,6 +13,7 @@
 //! - `turn/interrupt {threadId, turnId}` -> `{}`; the turn then ends with
 //!   `turn/completed` status "interrupted" (probed live).
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -75,6 +76,10 @@ pub(super) struct NotificationState {
     thread_id_tx: Option<oneshot::Sender<String>>,
     /// Latest thread/tokenUsage/updated snapshot, reported at turn/completed.
     pending_usage: Option<TurnUsage>,
+    /// Codex closes each streamed agent message with the full text again.
+    /// Remember which item ids already arrived as deltas so completion is a
+    /// recovery fallback, not a second copy of the prose.
+    streamed_agent_messages: HashSet<String>,
     tag_parser: LfTagParser,
 }
 
@@ -91,6 +96,7 @@ impl NotificationState {
             current_turn_id,
             thread_id_tx,
             pending_usage: None,
+            streamed_agent_messages: HashSet::new(),
             tag_parser: LfTagParser::default(),
         }
     }
@@ -175,7 +181,19 @@ pub(super) fn process_notification(
             // The server echoes the client's own input (turn/start and
             // turn/steer text) back as userMessage items; the caller already
             // knows what it sent, so don't surface those as items.
-            if codex_mapping::map_item_type(params) == "userMessage" {
+            let item_type = codex_mapping::map_item_type(params);
+            if item_type == "userMessage" {
+                return;
+            }
+            // agentMessage/delta is the live prose stream. The matching
+            // item/completed repeats the entire message, but remains useful
+            // as a fallback if a provider version omits the deltas.
+            if item_type == "agentMessage"
+                && (method == "item/started"
+                    || state
+                        .streamed_agent_messages
+                        .contains(&codex_mapping::map_item_id(params)))
+            {
                 return;
             }
             let tid = state.resolve_turn_id(turn_id_from_params);
@@ -189,6 +207,9 @@ pub(super) fn process_notification(
         }
         "item/agentMessage/delta" => {
             if let Some(content) = codex_mapping::delta_content(params) {
+                state
+                    .streamed_agent_messages
+                    .insert(codex_mapping::map_item_id(params));
                 let tid = state.resolve_turn_id(turn_id_from_params);
                 for parsed_event in state.tag_parser.consume_text(&tid, &content) {
                     let _ = events.send(parsed_event);
@@ -901,6 +922,73 @@ mod tests {
                 status: crate::chat::types::Lifecycle::Interrupted,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn completed_agent_message_does_not_repeat_streamed_prose() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (mut state, _slot) = replay_state();
+
+        process_notification(
+            "item/agentMessage/delta",
+            &json!({
+                "turnId": "turn_1",
+                "itemId": "msg_1",
+                "delta": "Hello"
+            }),
+            &mut state,
+            &tx,
+        );
+        process_notification(
+            "item/completed",
+            &json!({
+                "turnId": "turn_1",
+                "item": {
+                    "id": "msg_1",
+                    "type": "agentMessage",
+                    "text": "Hello",
+                    "phase": "final_answer"
+                }
+            }),
+            &mut state,
+            &tx,
+        );
+
+        let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            ConversationEvent::TextDelta { content, .. } if content == "Hello"
+        ));
+    }
+
+    #[test]
+    fn completed_agent_message_is_a_fallback_without_deltas() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (mut state, _slot) = replay_state();
+
+        process_notification(
+            "item/completed",
+            &json!({
+                "turnId": "turn_1",
+                "item": {
+                    "id": "msg_1",
+                    "type": "agentMessage",
+                    "text": "Recovered",
+                    "phase": "final_answer"
+                }
+            }),
+            &mut state,
+            &tx,
+        );
+
+        assert!(matches!(
+            rx.try_recv().expect("fallback message"),
+            ConversationEvent::ItemCompleted {
+                item: ConversationItem::Message { ref text, .. },
+                ..
+            } if text == "Recovered"
         ));
     }
 }

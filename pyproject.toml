@@ -20,10 +20,10 @@ classifiers = [
     "Programming Language :: Rust",
     "Topic :: Software Development",
 ]
-dependencies = ["httpx>=0.27", "pydantic>=2.0", "typer>=0.9", "pyyaml>=6.0"]
+dependencies = ["typer>=0.9", "pyyaml>=6.0"]
 
 [dependency-groups]
-dev = ["boto3", "hatchling", "pytest>=8.0", "ruff>=0.8", "websockets>=13.0"]
+dev = ["boto3", "pytest>=8.0", "ruff>=0.8"]
 
 [project.urls]
 Homepage = "https://loopflow.studio/"
@@ -31,23 +31,12 @@ Repository = "https://github.com/loopflowstudio/loopflow"
 Documentation = "https://loopflow.studio/docs"
 Issues = "https://github.com/loopflowstudio/loopflow/issues"
 
-[build-system]
-requires = ["hatchling", "hatch-vcs"]
-build-backend = "hatchling.build"
-
-[tool.hatch.version]
-source = "vcs"
-
-[tool.hatch.build.targets.wheel]
-packages = ["python/loopflow"]
+[tool.uv]
+package = false
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-markers = [
-    "e2e: end-to-end tests requiring lfd",
-    "docker: tests requiring Docker and Claude credentials",
-    "regression: expensive regression tests — run nightly in CI, not on every PR",
-]
+markers = ["docker: tests requiring Docker and Claude credentials"]
 
 [tool.ruff]
 line-length = 100

@@ -16,14 +16,37 @@ struct LocalWaveAgentLauncherTests {
             lfPath: "/Applications/Loopflow.app/Contents/MacOS/lf",
             sessionName: "lf-loopflow-goals",
             repoPath: "/Users/jack/src/loopflow",
-            waveName: "goals"
+            waveName: "goals",
+            environment: [:]
         )
 
         #expect(args == [
             "tmux", "new-session", "-d",
             "-s", "lf-loopflow-goals",
             "-c", "/Users/jack/src/loopflow",
-            "/Applications/Loopflow.app/Contents/MacOS/lf", "serve", "goals",
+            "/Applications/Loopflow.app/Contents/MacOS/lf", "wave", "goals",
+        ])
+    }
+
+    @Test("launch carries an explicit registry through tmux")
+    func launchCommandForwardsRegistryEnvironment() {
+        let args = LocalWaveAgentLauncher.waveLaunchCommand(
+            lfPath: "/Applications/Loopflow.app/Contents/MacOS/lf",
+            sessionName: "lf-loopflow-goals",
+            repoPath: "/Users/jack/src/loopflow",
+            waveName: "goals",
+            environment: [
+                "LF_DB_PATH": "/Users/jack/.lf/demo.db",
+                "UNRELATED": "ignored",
+            ]
+        )
+
+        #expect(args == [
+            "tmux", "new-session", "-d",
+            "-s", "lf-loopflow-goals",
+            "-c", "/Users/jack/src/loopflow",
+            "/usr/bin/env", "LF_DB_PATH=/Users/jack/.lf/demo.db",
+            "/Applications/Loopflow.app/Contents/MacOS/lf", "wave", "goals",
         ])
     }
 
@@ -107,7 +130,7 @@ struct LocalWaveAgentLauncherTests {
             guard case let WaveLaunchError.noUsableLf(detail) = error else { return false }
             return detail.contains("/Users/jack/.local/bin/lf")
                 && detail.contains("/Users/jack/src/loopflow/target/release/lf")
-                && detail.contains("lf help serve")
+                && detail.contains("lf help wave")
                 && detail.contains("lf help stop")
         }
     }
@@ -231,11 +254,11 @@ struct LocalWaveAgentLauncherTests {
 
         #expect(
             String(hint.characters)
-                == "Start it here, or run lf serve goals in a terminal — its conversation appears here live."
+                == "Start it here, or run lf wave goals in a terminal — its conversation appears here live."
         )
 
         let codeRuns = hint.runs.filter { $0.inlinePresentationIntent == .code }
-        #expect(codeRuns.map { String(hint.characters[$0.range]) } == ["lf serve goals"])
+        #expect(codeRuns.map { String(hint.characters[$0.range]) } == ["lf wave goals"])
     }
 }
 #endif

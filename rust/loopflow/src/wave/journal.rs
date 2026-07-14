@@ -16,13 +16,13 @@
 //! depends on explicit fields. Each line carries `v: 1` so the format can be
 //! migrated.
 //!
-//! `RunObserved`/`RunCompleted` are produced by the registry observer
-//! ([`crate::wave::registry::StoreObserver`]): the server polls the
-//! shared store — these are confirmed facts, not commands — and the in-flight
-//! view is their fold ([`fold_workers`]). `MemoryUpdated` and `MemoryAdded`
-//! are produced by the server's memory routes (`lf memory update`/`add` — the
-//! server holds MEMORY.md's pen). `ServerStarted` is appended once per boot,
-//! after replay — restarts are forensically visible in the record.
+//! `RunObserved`/`RunCompleted` remain readable for journals written before
+//! Project and Task Sessions replaced generic workers. New child lifecycle
+//! facts arrive as typed Project and Task observations. `MemoryUpdated` and
+//! `MemoryAdded` are produced by the server's memory routes (`lf memory
+//! update`/`add` — the server holds MEMORY.md's pen). `ServerStarted` is
+//! appended once per boot, after replay — restarts are forensically visible
+//! in the record.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
@@ -34,6 +34,8 @@ use time::OffsetDateTime;
 
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
+use crate::project_session::ProjectObservation;
+use crate::task::TaskObservation;
 use crate::wave::playhead::{BodyProvenance, Playhead, PlayheadEvent};
 use crate::wave::state::LoopState;
 
@@ -97,7 +99,7 @@ impl Usage {
     }
 }
 
-/// How a dispatched worker ended, as lfd reported it.
+/// How an observed worker ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerOutcome {
@@ -112,17 +114,6 @@ impl WorkerOutcome {
             Self::Failed => "failed",
         }
     }
-}
-
-/// One dispatched worker, folded from `RunObserved`/`RunCompleted` rows.
-/// `finished` is `None` while the worker is in flight.
-#[derive(Debug, Clone, PartialEq)]
-pub struct WorkerRecord {
-    pub run_id: String,
-    pub session_id: String,
-    pub flow: String,
-    pub task: String,
-    pub finished: Option<WorkerOutcome>,
 }
 
 /// A journaled user message that has not yet been consumed by a turn.
@@ -203,7 +194,9 @@ pub enum EventKind {
     /// force-finalized, failed, or the resident reported the vendor never
     /// received them). The fold returns them to the pending queue, so a
     /// resident replay re-delivers them instead of losing them forever.
-    MessagesRequeued { ids: Vec<MessageId> },
+    MessagesRequeued {
+        ids: Vec<MessageId>,
+    },
     TurnFinished {
         turn_id: String,
         status: Lifecycle,
@@ -235,13 +228,15 @@ pub enum EventKind {
         outcome: WorkerOutcome,
         summary: String,
     },
-    // -- channels --
-    /// A work-line channel opened under this wave (dispatch minted the
-    /// worktree and its bus address; see placed `lf` runs). Journaled on the
-    /// PARENT channel — the fold materializes a thread-visible turn
-    /// ([`channel_opened_turn`]) so the wave's thread shows the opening.
-    /// `run_id` is the idempotence key: one dispatch, one opening, however
-    /// often the door is knocked.
+    TaskObserved {
+        observation: TaskObservation,
+    },
+    ProjectObserved {
+        observation: ProjectObservation,
+    },
+    // -- legacy channels --
+    /// A work-line channel opened under this wave. No current code produces
+    /// this event; retaining the variant lets existing journals replay.
     ChannelOpened {
         /// The child channel's name — exactly the worktree basename minus
         /// the repo prefix (`goals.148e0e02`).
@@ -251,14 +246,21 @@ pub enum EventKind {
     // -- memory --
     /// A compiled memory checkpoint was written to `MEMORY.md`. Clears the
     /// replayable add delta because the checkpoint is now the seed.
-    MemoryUpdated { summary: String },
+    MemoryUpdated {
+        summary: String,
+    },
     /// A fact published to the stream (`lf memory add`). Accumulates into the
     /// replayable delta until the next `MemoryUpdated`.
-    MemoryAdded { fact: String },
+    MemoryAdded {
+        fact: String,
+    },
     // -- server lifecycle --
     /// One boot of the wave server, appended after replay. Folds ignore it;
     /// it exists so restarts are visible in the forensic record.
-    ServerStarted { pid: u32, endpoint: String },
+    ServerStarted {
+        pid: u32,
+        endpoint: String,
+    },
 }
 
 /// Path of a wave's journal: `.lf/journal/waves/<wave>/journal.jsonl` under
@@ -486,7 +488,7 @@ impl Narrator {
             EventKind::RunObserved {
                 run_id, flow, task, ..
             } => info(format!(
-                "observed run {} flow={flow} dispatched · {}",
+                "observed worker {} flow={flow} started · {}",
                 short_id(run_id),
                 ellipsize(task, 60)
             )),
@@ -499,6 +501,18 @@ impl Narrator {
                 short_id(run_id),
                 outcome.name(),
                 ellipsize(summary, 60)
+            )),
+            EventKind::TaskObserved { observation } => info(format!(
+                "observed task {} event {} · {}",
+                observation.issue_identifier,
+                observation.event_id,
+                ellipsize(&observation.prompt(), 70)
+            )),
+            EventKind::ProjectObserved { observation } => info(format!(
+                "observed project {} event {} · {}",
+                observation.project,
+                observation.event_id,
+                ellipsize(&observation.prompt(), 70)
             )),
             EventKind::ChannelOpened { name, run_id } => {
                 info(format!("channel {name} opened · run {}", short_id(run_id)))
@@ -536,8 +550,7 @@ impl Narrator {
 }
 
 /// Flatten whitespace and cap at `max` chars (with an ellipsis when cut).
-/// Shared with the loop's heartbeat prompt, where the flattening keeps
-/// multi-line worker tasks from breaking the one-line `<in_flight>` format.
+/// Shared by journal narration and the CLI thread renderer.
 pub(crate) fn ellipsize(text: &str, max: usize) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.chars().count() <= max {
@@ -735,29 +748,27 @@ pub struct ThreadFold {
     /// Every journaled user message by id — `MessagesRequeued` restores
     /// pending entries from it (an id alone can't rebuild the text/op/from).
     pub messages: HashMap<MessageId, PendingMessage>,
+    /// Typed Task observations indexed by their synthetic consumption id.
+    pub tasks: HashMap<MessageId, TaskObservation>,
+    /// Typed Project observations indexed by their synthetic consumption id.
+    pub projects: HashMap<MessageId, ProjectObservation>,
     /// Message ids claimed (`answers`) by turns still open at the end of the
     /// log — the crash tail's consumption. The boot janitor requeues these
     /// when it finalizes the crashed turns as `Failed`.
     pub open_claims: Vec<MessageId>,
-    /// Run ids of `ChannelOpened` events — the idempotence guard for the
-    /// dispatch-notification door (one dispatch, one opening).
-    pub opened_channel_runs: HashSet<String>,
     /// Memory facts added this server life — the replayable stream a fresh
     /// subscriber gets before going live. Rebuilt from the journal on restart.
     pub memory_adds: Vec<String>,
 }
 
-/// The thread-visible turn a `ChannelOpened` event materializes: a bylined
-/// statement, never queued for the loop (only `UserMessage` rows feed the
-/// pending queue). Shared by the fold and the live append so replay and the
-/// live thread agree byte for byte.
-pub fn channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
+/// Materialize a historical `ChannelOpened` event during journal replay.
+fn legacy_channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
     let mut turn = ChatTurn::user(
         format!("turn-{}", event.seq),
         format!("work line {name} opened"),
     );
     turn.created_at = event.at_rfc3339();
-    turn.from = Some("dispatch".to_string());
+    turn.from = Some("worker".to_string());
     turn
 }
 
@@ -822,11 +833,12 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut playhead: Option<Playhead> = None;
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
     let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
+    let mut tasks: HashMap<MessageId, TaskObservation> = HashMap::new();
+    let mut projects: HashMap<MessageId, ProjectObservation> = HashMap::new();
     let mut consumed_messages: HashSet<MessageId> = HashSet::new();
     // Claims (`answers`) per still-open turn — the crash tail's consumption,
     // exported so the boot janitor can requeue it.
     let mut claims_by_open_turn: HashMap<String, Vec<MessageId>> = HashMap::new();
-    let mut opened_channel_runs: HashSet<String> = HashSet::new();
     let mut memory_adds: Vec<String> = Vec::new();
 
     for event in events {
@@ -847,6 +859,36 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 }
                 messages.insert(id.clone(), message);
             }
+            EventKind::TaskObserved { observation } => {
+                let message = task_observation_message(observation);
+                let turn = ChatTurn::child_activity(
+                    format!("turn-{}", event.seq),
+                    event.at_rfc3339(),
+                    "task".to_string(),
+                    crate::chat::turns::ChildControlActivity::from_task(observation),
+                );
+                turns.push(turn);
+                if !consumed_messages.contains(&message.id) {
+                    pending_messages.push(message.clone());
+                }
+                tasks.insert(message.id.clone(), observation.clone());
+                messages.insert(message.id.clone(), message);
+            }
+            EventKind::ProjectObserved { observation } => {
+                let message = project_observation_message(observation);
+                let turn = ChatTurn::child_activity(
+                    format!("turn-{}", event.seq),
+                    event.at_rfc3339(),
+                    "project".to_string(),
+                    crate::chat::turns::ChildControlActivity::from_project(observation),
+                );
+                turns.push(turn);
+                if !consumed_messages.contains(&message.id) {
+                    pending_messages.push(message.clone());
+                }
+                projects.insert(message.id.clone(), observation.clone());
+                messages.insert(message.id.clone(), message);
+            }
             EventKind::TurnStarted {
                 turn_id,
                 answers,
@@ -863,6 +905,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     created_at: event.at_rfc3339(),
                     from: None,
                     body: body.as_deref().cloned(),
+                    activity: None,
                 });
             }
             EventKind::TurnItem { turn_id, item } => {
@@ -933,9 +976,8 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             EventKind::MessagesRequeued { ids } => {
                 restore_pending(&mut pending_messages, &messages, ids);
             }
-            EventKind::ChannelOpened { name, run_id } => {
-                opened_channel_runs.insert(run_id.clone());
-                turns.push(channel_opened_turn(event, name));
+            EventKind::ChannelOpened { name, .. } => {
+                turns.push(legacy_channel_opened_turn(event, name));
             }
             EventKind::RunCompleted {
                 run_id,
@@ -968,9 +1010,28 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         playhead,
         pending_messages,
         messages,
+        tasks,
+        projects,
         open_claims,
-        opened_channel_runs,
         memory_adds,
+    }
+}
+
+pub fn task_observation_message(observation: &TaskObservation) -> PendingMessage {
+    PendingMessage {
+        id: MessageId(observation.inbox_id()),
+        op: MessageOp::Message,
+        text: observation.prompt(),
+        from: Some("task".to_string()),
+    }
+}
+
+pub fn project_observation_message(observation: &ProjectObservation) -> PendingMessage {
+    PendingMessage {
+        id: MessageId(observation.inbox_id()),
+        op: MessageOp::Message,
+        text: observation.prompt(),
+        from: Some("project".to_string()),
     }
 }
 
@@ -986,46 +1047,6 @@ fn mark_consumed(
         consumed_messages.insert(answer.clone());
     }
     pending_messages.retain(|message| !consumed_messages.contains(&message.id));
-}
-
-/// Fold the worker observations: one record per dispatched run, in dispatch
-/// order, finished stamped when its `RunCompleted` arrives. The map keyed
-/// on `run_id` is the idempotence guard's ground truth — a run dispatches
-/// exactly once, whatever the observer saw.
-pub fn fold_workers(events: &[Event]) -> Vec<WorkerRecord> {
-    let mut workers: Vec<WorkerRecord> = Vec::new();
-    for event in events {
-        match &event.kind {
-            EventKind::RunObserved {
-                run_id,
-                session_id,
-                flow,
-                task,
-            } => {
-                if workers.iter().any(|w| &w.run_id == run_id) {
-                    tracing::warn!(run_id, seq = event.seq, "duplicate RunObserved in journal");
-                    continue;
-                }
-                workers.push(WorkerRecord {
-                    run_id: run_id.clone(),
-                    session_id: session_id.clone(),
-                    flow: flow.clone(),
-                    task: task.clone(),
-                    finished: None,
-                });
-            }
-            EventKind::RunCompleted {
-                run_id, outcome, ..
-            } => match workers.iter_mut().find(|w| &w.run_id == run_id) {
-                Some(worker) => worker.finished = Some(*outcome),
-                None => {
-                    tracing::warn!(run_id, seq = event.seq, "RunCompleted for unknown worker");
-                }
-            },
-            _ => {}
-        }
-    }
-    workers
 }
 
 #[cfg(test)]
@@ -1044,6 +1065,19 @@ mod tests {
             op: MessageOp::Message,
             text: text.to_string(),
             from: None,
+        }
+    }
+
+    fn task_observation() -> crate::task::TaskObservation {
+        crate::task::TaskObservation {
+            session_id: crate::task::TaskSessionId::from_raw("ts_example"),
+            issue_identifier: "INF-123".to_string(),
+            event_id: 42,
+            control_source: None,
+            event: crate::task::TaskEventKind::Failed {
+                error: "provider stopped".to_string(),
+                resumable: true,
+            },
         }
     }
 
@@ -1178,6 +1212,9 @@ mod tests {
                 outcome: WorkerOutcome::Completed,
                 summary: "landed".into(),
             },
+            EventKind::TaskObserved {
+                observation: task_observation(),
+            },
             EventKind::ChannelOpened {
                 name: "ship.148e0e02".into(),
                 run_id: "run-1".into(),
@@ -1311,6 +1348,9 @@ mod tests {
                 outcome: WorkerOutcome::Completed,
                 summary: "landed".into(),
             },
+            EventKind::TaskObserved {
+                observation: task_observation(),
+            },
             EventKind::ChannelOpened {
                 name: "ship.148e0e02".into(),
                 run_id: "run-1".into(),
@@ -1327,9 +1367,50 @@ mod tests {
         }
     }
 
+    #[test]
+    fn typed_task_observation_uses_the_existing_durable_consumption_fold() {
+        let observation = task_observation();
+        let observation_id = MessageId(observation.inbox_id());
+        let observed = Event {
+            v: FORMAT_VERSION,
+            seq: 1,
+            at: OffsetDateTime::now_utc(),
+            kind: EventKind::TaskObserved {
+                observation: observation.clone(),
+            },
+        };
+        let pending = fold_thread(std::slice::from_ref(&observed));
+        assert_eq!(pending.pending_messages.len(), 1);
+        assert_eq!(pending.tasks.get(&observation_id), Some(&observation));
+        assert_eq!(pending.turns.len(), 1);
+        assert!(pending.turns[0].text.is_empty());
+        assert_eq!(
+            pending.turns[0]
+                .activity
+                .as_ref()
+                .map(|activity| activity.id.as_str()),
+            Some(observation_id.0.as_str())
+        );
+
+        let consumed = fold_thread(&[
+            observed,
+            Event {
+                v: FORMAT_VERSION,
+                seq: 2,
+                at: OffsetDateTime::now_utc(),
+                kind: EventKind::TurnStarted {
+                    turn_id: "turn-2".to_string(),
+                    answers: vec![observation_id],
+                    body: None,
+                },
+            },
+        ]);
+        assert!(consumed.pending_messages.is_empty());
+    }
+
     /// A fixed event sequence renders the console a human would want to read:
     /// chat with bylines and ops, turn open/close with items and usage, the
-    /// prose gist once at INFO with the rest at DEBUG, worker observations,
+    /// prose gist once at INFO with the rest at DEBUG, legacy worker observations,
     /// memory curation.
     #[test]
     fn narration_demo_reads_like_a_console() {
@@ -1428,7 +1509,7 @@ mod tests {
             turn_id: "turn-4".into(),
             item: ConversationItem::Message {
                 id: "text-1".into(),
-                text: "The build worker is still grinding; I'll dispatch the doc pass.".into(),
+                text: "The build worker is still grinding; I'll start the doc pass.".into(),
                 phase: None,
             },
         });
@@ -1472,7 +1553,7 @@ mod tests {
         });
         assert_eq!(
             n.line,
-            "observed run run-8c1d flow=build dispatched · wire the narration tap into the journal"
+            "observed worker run-8c1d flow=build started · wire the narration tap into the journal"
         );
 
         let n = render(EventKind::RunCompleted {
@@ -1514,10 +1595,9 @@ mod tests {
         assert_eq!(n.line, "channel ship.148e0e02 opened · run run-8c1d");
     }
 
-    /// `ChannelOpened` folds into a thread-visible bylined turn (never queued
-    /// for the loop) and its run id lands in the idempotence guard.
+    /// Historical `ChannelOpened` rows still fold into a thread-visible turn.
     #[test]
-    fn fold_materializes_channel_opened_as_a_dispatch_turn() {
+    fn fold_materializes_legacy_channel_opened_as_a_worker_turn() {
         let events = vec![Event {
             v: FORMAT_VERSION,
             seq: 1,
@@ -1530,13 +1610,12 @@ mod tests {
         let fold = fold_thread(&events);
         assert_eq!(fold.turns.len(), 1);
         assert_eq!(fold.turns[0].text, "work line ship.148e0e02 opened");
-        assert_eq!(fold.turns[0].from.as_deref(), Some("dispatch"));
+        assert_eq!(fold.turns[0].from.as_deref(), Some("worker"));
         assert_eq!(fold.turns[0].id, "turn-1");
         assert!(
             fold.pending_messages.is_empty(),
             "a channel opening never queues for the loop"
         );
-        assert!(fold.opened_channel_runs.contains("run-7"));
     }
 
     /// Long text is flattened and cut; a fresh turn resets the prose gist.
@@ -1687,36 +1766,6 @@ mod tests {
         ];
         let fold = fold_thread(&consumed);
         assert!(fold.pending_messages.is_empty(), "answered say is consumed");
-    }
-
-    #[test]
-    fn fold_workers_tracks_dispatch_and_finish_once_per_run() {
-        let (_tmp, path) = open_tmp();
-        let (mut journal, _) = Journal::open(&path).expect("open");
-        let dispatch = |run: &str| EventKind::RunObserved {
-            run_id: run.to_string(),
-            session_id: format!("sess-{run}"),
-            flow: "implement".to_string(),
-            task: "build the thing".to_string(),
-        };
-        let events = vec![
-            journal.append(|_| dispatch("run-1")),
-            journal.append(|_| dispatch("run-2")),
-            // Duplicate dispatch rows are tolerated by the fold (first wins).
-            journal.append(|_| dispatch("run-1")),
-            journal.append(|_| EventKind::RunCompleted {
-                run_id: "run-1".to_string(),
-                outcome: WorkerOutcome::Completed,
-                summary: "pr landed".to_string(),
-            }),
-        ];
-
-        let workers = fold_workers(&events);
-        assert_eq!(workers.len(), 2);
-        assert_eq!(workers[0].run_id, "run-1");
-        assert_eq!(workers[0].finished, Some(WorkerOutcome::Completed));
-        assert_eq!(workers[1].run_id, "run-2");
-        assert_eq!(workers[1].finished, None);
     }
 
     #[test]

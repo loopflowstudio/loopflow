@@ -1,8 +1,8 @@
 import Foundation
 
 // Wire models for a wave's live conversation, mirroring the Rust types the wave
-// chat server serves (`lfd::conversations::turns::ChatTurn` +
-// `lfd::conversations::types::ConversationItem`). snake_case on the wire; every
+// chat server serves (`chat::turns::ChatTurn` + `chat::types::ConversationItem`).
+// snake_case on the wire; every
 // field is required or explicitly Optional — no defaults masking absent fields,
 // so the Rust and Swift shapes stay in lockstep (see CLAUDE.md "DTOs").
 
@@ -10,6 +10,102 @@ import Foundation
 public enum ChatRole: String, Codable, Sendable, Hashable {
     case user
     case assistant
+}
+
+public enum ChildActivitySubject: String, Codable, Sendable, Hashable {
+    case project, task
+}
+
+public enum ChildActivityKind: String, Codable, Sendable, Hashable {
+    case stateChanged = "state_changed"
+    case controlApplied = "control_applied"
+    case controlUncertain = "control_uncertain"
+    case directed
+    case incorporated
+    case decisionRequired = "decision_required"
+    case decisionResolved = "decision_resolved"
+    case pullRequestOpened = "pull_request_opened"
+    case completed
+    case failed
+}
+
+public enum ChildCommandEffect: String, Codable, Sendable, Hashable {
+    case liveSteer = "live_steer"
+    case nextTurn = "next_turn"
+    case replacement
+    case decision
+}
+
+public enum ChildControlSource: Codable, Sendable, Hashable {
+    case wave(id: String)
+    case project(id: String)
+    case human
+    case attachment
+    case system
+
+    public var label: String {
+        switch self {
+        case .wave: "Wave"
+        case .project: "Project"
+        case .human: "Human"
+        case .attachment: "Terminal"
+        case .system: "System"
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey { case kind, id }
+    private enum Kind: String, Codable { case wave, project, human, attachment, system }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .wave: self = .wave(id: try container.decode(String.self, forKey: .id))
+        case .project: self = .project(id: try container.decode(String.self, forKey: .id))
+        case .human: self = .human
+        case .attachment: self = .attachment
+        case .system: self = .system
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .wave(id):
+            try container.encode(Kind.wave, forKey: .kind)
+            try container.encode(id, forKey: .id)
+        case let .project(id):
+            try container.encode(Kind.project, forKey: .kind)
+            try container.encode(id, forKey: .id)
+        case .human: try container.encode(Kind.human, forKey: .kind)
+        case .attachment: try container.encode(Kind.attachment, forKey: .kind)
+        case .system: try container.encode(Kind.system, forKey: .kind)
+        }
+    }
+}
+
+public struct ChildControlActivity: Codable, Sendable, Hashable, Identifiable {
+    public let id: String
+    public let subject: ChildActivitySubject
+    public let subjectId: String
+    public let sessionId: String
+    public let kind: ChildActivityKind
+    public let title: String
+    public let summary: String
+    public let directiveVersion: UInt32?
+    public let commandId: String?
+    public let effect: ChildCommandEffect?
+    public let source: ChildControlSource?
+    public let decisionId: String?
+    public let options: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case id, subject, kind, title, summary, effect, source, options
+        case subjectId = "subject_id"
+        case sessionId = "session_id"
+        case directiveVersion = "directive_version"
+        case commandId = "command_id"
+        case decisionId = "decision_id"
+    }
 }
 
 public enum PlayheadStepKind: String, Codable, Sendable, Hashable {
@@ -92,8 +188,7 @@ public struct PlayheadView: Codable, Sendable, Hashable {
     }
 }
 
-// `Lifecycle` and `FileEdit` are shared with the session models in
-// AgentSession.swift (made `Codable` there); the wire shape is identical.
+// `Lifecycle` and `FileEdit` are shared conversation wire types.
 // One `Lifecycle` covers turns and items; a `user` turn is always `completed`.
 
 /// A tool/command/file/message/thought item the agent produced, serde-tagged by
@@ -210,6 +305,12 @@ public enum ConversationItem: Codable, Sendable, Hashable, Identifiable {
 }
 
 /// One turn in a wave's conversation — the unit the chat server streams.
+public enum ChatTurnError: Error, Equatable {
+    case mixedActivity
+    case invalidActivityEnvelope
+    case invalidHumanTurn
+}
+
 public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let role: ChatRole
@@ -223,13 +324,24 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     public let from: String?
     /// Body that produced an assistant span; nil for human/attributed turns.
     public let body: BodyProvenance?
+    public let activity: ChildControlActivity?
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, text, status, items, from, body
+        case id, role, text, status, items, from, body, activity
         case createdAt = "created_at"
     }
 
-    public init(id: String, role: ChatRole, text: String, status: Lifecycle, items: [ConversationItem], createdAt: String, from: String?, body: BodyProvenance?) {
+    public init(
+        id: String,
+        role: ChatRole,
+        text: String,
+        status: Lifecycle,
+        items: [ConversationItem],
+        createdAt: String,
+        from: String?,
+        body: BodyProvenance?,
+        activity: ChildControlActivity?
+    ) throws {
         self.id = id
         self.role = role
         self.text = text
@@ -238,6 +350,38 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
         self.createdAt = createdAt
         self.from = from
         self.body = body
+        self.activity = activity
+        try validate()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            id: values.decode(String.self, forKey: .id),
+            role: values.decode(ChatRole.self, forKey: .role),
+            text: values.decode(String.self, forKey: .text),
+            status: values.decode(Lifecycle.self, forKey: .status),
+            items: values.decode([ConversationItem].self, forKey: .items),
+            createdAt: values.decode(String.self, forKey: .createdAt),
+            from: values.decodeIfPresent(String.self, forKey: .from),
+            body: values.decodeIfPresent(BodyProvenance.self, forKey: .body),
+            activity: values.decodeIfPresent(ChildControlActivity.self, forKey: .activity)
+        )
+    }
+
+    private func validate() throws {
+        if activity != nil {
+            guard text.isEmpty, items.isEmpty, body == nil else {
+                throw ChatTurnError.mixedActivity
+            }
+            guard role == .user, status == .completed, from != nil else {
+                throw ChatTurnError.invalidActivityEnvelope
+            }
+        } else if role == .user {
+            guard status == .completed, items.isEmpty, body == nil else {
+                throw ChatTurnError.invalidHumanTurn
+            }
+        }
     }
 
     /// Monotonic sequence parsed from a `"turn-<n>"` id; used to order the thread.

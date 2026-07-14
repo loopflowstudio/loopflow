@@ -7,11 +7,12 @@ Pursue the open KRs.
 
 ## Orientation
 
-Read the KR set in `scratch/<branch>.md` and the wave's GOAL/MEMORY. The
+Read the exact Linear Project named by `LF_PROJECT_SESSION_ID` and the wave's
+GOAL/MEMORY. The
 project loop owns the KR set, not a product PR. KRs are proof-shaped end
 states; tasks are the concrete work that advances them. Filed tasks live in
-Linear; running hands live in `lf runs`; merged PRs are closure evidence.
-Resolve the exact wave from the prompt or GOAL path; never guess it. If the PM
+Linear; running work lives in Task Sessions; merged PRs are closure evidence.
+Resolve the exact wave and Project from the session prompt; never guess them. If the PM
 reader fails, report that once and continue from the KR set instead of repairing
 PM or auth.
 
@@ -24,21 +25,24 @@ lf pm task create --project <project> --title "..." --notes "..."
 
 ## Work
 
+- Acknowledge the seed's current directive before pursuit with its exact `lf
+  project acknowledge` command. State the resulting priority or plan change.
 - Read the filed backlog before creating work. File a concrete task when the
   KR needs it; no rule requires every filed task to start immediately.
-- Work the next concrete step inline by default. Resolve the sole task blocking
-  a KR in this process when it fits the current branch and pass.
-- Create a task loop only when the task is a strict subset with its own PR or
-  multi-pass/recheck lifecycle, or when independent parallel work materially
-  helps. Use `lf --wave <exact-wave> loop task "<one-PR-sized statement>"`;
-  add `--detach` only when that exact wave already has a live server and the
-  project has another useful move while the task runs. If the result gates the
-  project, keep the loop foreground.
-- Never start a project or wave from a project loop, and never delegate the
-  remaining project as one task. A stopped server is a reason to work inline,
-  not to boot orchestration infrastructure.
-- A detached task must report, publish live learnings, and leave a PR; otherwise
-  its private vendor session leaves no durable evidence.
+- Every file-writing task must already have a Linear identity. Start it with
+  `lf task run <issue-id> --directive "<delegation brief>"` and supervise the
+  same Task Session through review and merge.
+- The Project Session owns no worktree or delivery branch. Never edit, commit,
+  test, or open a PR from the canonical main checkout; delegate every
+  repository mutation to a Task Session.
+- Use `lf task follow-up`, `steer`, `interrupt`, `wait`, and `resume`. Do not
+  create another worktree or session for review feedback or CI repair.
+- Answer routine Task decisions with `lf task decide`. When the choice needs
+  Wave judgment, call `lf project request-decision <project-id> <prompt>
+  --option <choice> --option <choice> --wait`, then continue the same Project
+  and Task transcripts from the answer.
+- Never start another Project or Wave from Project pursuit, and never collapse
+  the remaining Project into one anonymous task.
 - Discovered debt becomes a task under an existing KR unless it
   reveals a broader standing quality frontier. Do not turn individual cleanup
   into a project-shaped KR.

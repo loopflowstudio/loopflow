@@ -24,7 +24,7 @@ homepage:
       - title: "Prompt files you can diff"
         description: "Skills, directions, and goals live in your repo, so prompt changes get reviewed like code."
       - title: "Delegation you can watch"
-        description: "A wave agent coordinates; it dispatches workers that each open a PR you can attach to, steer, or ship."
+        description: "A wave directs Projects and Tasks; each Task keeps one steerable Session and one PR through merge."
       - title: "From manual to autonomous"
         description: "Run a wave by hand, or let it loop — picking work, reacting to merges, firing on a schedule."
       - title: "Human control at shipping time"
@@ -38,15 +38,11 @@ homepage:
       - label: "A wave"
         filename: "wave/auth/GOAL.md"
         content: |
-          ---
-          workers: 2
-          ---
-
           ## Objective
 
           Unify authentication. Each loop, pick the next gap — duplicate token
-          validation, session refresh, a slow startup path — dispatch a worker
-          to close it, and record what shipped in memory.
+          validation, session refresh, a slow startup path — create or direct
+          the concrete Task that closes it, and record what shipped in memory.
 
           ## Measures
 
@@ -95,17 +91,17 @@ homepage:
         - "Stay creative — interactive sessions where you play the lead part, not approve permissions"
         - "Arrange the symphony — create, configure, and launch waves visually"
         - "Maintain focus — easily find where your attention is most needed"
-    server:
-      name: "Server"
-      note: "CLI and daemon"
-      description: "Manage prompts and context with the CLI. Run waves remotely with the daemon."
+    cli:
+      name: "CLI"
+      note: "One local command"
+      description: "Manage prompts, context, Waves, Projects, and Tasks with `lf`."
       details:
-        - "lf — context management for waves, skills, directions, and memory"
-        - "lfd — long-running daemon, natively or in containers"
-        - "Authentication built in — WorkOS OAuth via Loopflow Studio"
+        - "Run one resident Wave process with its own listener and memory"
+        - "Keep Project and Task lifecycle state in local SQLite"
+        - "Connect provider accounts directly with `lf auth`"
       terminal_lines:
         - type: "command"
-          content: "lf serve billing"
+          content: "lf wave billing"
         - type: "output"
           content: "wave agent · reading GOAL.md + MEMORY.md"
         - type: "output"

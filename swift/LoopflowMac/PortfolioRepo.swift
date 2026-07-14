@@ -8,7 +8,7 @@ struct PortfolioRepo: Codable, Identifiable, Hashable {
     var lastOpened: Date
 
     /// Overrides the rail label for a launch-provided worktree that stands in for
-    /// its main repo: the stored `path` stays the real checkout (for reads + lfd),
+    /// its main repo: the stored `path` stays the real checkout for local reads,
     /// while the rail shows the collapsed main-repo name. Absent for scanned repos.
     var displayNameOverride: String? = nil
 

@@ -67,17 +67,17 @@ with open(subjects_path, encoding="utf-8") as handle:
 
 sections = [
     (
-        "Release and self-hosting infrastructure",
+        "Release infrastructure",
         lambda subject: any(
             marker in subject.lower()
             for marker in ("release", "deploy", "cron", "host", "budget", "local binary")
         ),
     ),
     (
-        "Authentication and remote execution",
+        "Authentication",
         lambda subject: any(
             marker in subject.lower()
-            for marker in ("auth", "token", "credential", "remote", "lfd")
+            for marker in ("auth", "token", "credential")
         ),
     ),
     (

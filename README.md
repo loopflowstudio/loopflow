@@ -1,8 +1,11 @@
 # Loopflow
 
-Loopflow helps you create and run **Waves** — persistent agents that work toward an outcome. You write a wave's goal once; it works Linear tasks inline, spins off independent loops when parallelism earns them, remembers what it learns, and shows you every live session.
+Loopflow helps you create and run **Waves** — persistent agents that work toward
+an outcome. Write a Wave's goal once; it coordinates Linear-backed Projects and
+Tasks, remembers what it learns, and keeps one steerable conversation beside
+the live work map.
 
-Start a wave by hand and steer it interactively. As it earns trust, let it loop — picking work, dispatching flows, and reacting to changes on its own.
+Start a wave by hand and steer it interactively. As it earns trust, let it loop — selecting Projects, directing Tasks, and reacting to changes on its own.
 
 ## Waves
 
@@ -15,15 +18,11 @@ A wave is a named agent with a goal. Two files author it:
 
 ```markdown
 <!-- wave/designer/GOAL.md -->
----
-workers: 2
----
-
 ## Objective
 
-Keep the design system coherent. Each loop: read the Linear tasks, pick the next
-useful design move, execute its local blocker, spin off independent work only
-when parallelism earns it, and fold what changed into memory.
+Keep the design system coherent. Each wake: read the Linear Projects and Tasks,
+direct the Project with the highest-leverage open KR, start a concrete Task only
+after it has a Linear issue, and fold what changed into memory.
 
 ## Measures
 
@@ -38,62 +37,100 @@ change crosses component or product boundaries.
 Run the wave in your terminal:
 
 ```bash
-lf serve designer             # the wave's server: one persistent loop, until Ctrl-C
+lf wave designer              # one persistent Wave loop, until Ctrl-C
 lf chat --steer "ship the button audit first" # steer the live body, else queue
 lf memory add "buttons: variants unified" # curate what it knows
 lf stop designer              # stop its listener and resident gracefully
 ```
 
-Sessions are plain tmux — `tmux ls` to see the wave agent and its workers,
-`tmux attach -r -t <name>` to inspect one without writing into its session.
+Detached Wave, Project, and Task processes use named tmux sessions. Use
+`lf project attach <project>` or `lf task attach <issue-id>` for an audited
+writable control prompt; tmux is process lifetime and inspection, not the
+steering protocol.
 
-`lf serve <name>` starts a long-lived server at the repo's main checkout (the
-wave's journal and endpoint live at the origin); its playhead enters the wave's
-worktree and gives each flow step a live harness session. Progress and chat are
+`lf wave <name>` starts a long-lived listener and resident at the repo's clean
+canonical main checkout. Wave turns coordinate there; Task Sessions own every
+repository mutation. Progress and chat are
 a single conversation: `lf chat --steer` reaches the body now playing (and
 queues when it cannot). Truth is an append-only journal, so a restart keeps the
 whole thread. Humans use `lf chat`; agents broadcast with `lf radio pub`; `lf
-memory` curates retained facts. A served wave folds family reports into its
+memory` curates retained facts. A running Wave folds family reports into its
 thread with attribution. Outside any wave a publish prints a short drop note
 and exits 0, so the verbs are safe in every prompt. See
-`rust/loopflow/src/wave/README.md` for the wire contract, and
-`scripts/demo_wave.sh` for the guided demo.
+`rust/loopflow/src/wave/README.md` for the wire contract. Inspect a live
+Wave/Project/Task hierarchy and open the app with:
+
+```bash
+uv run python scripts/demo_sessions.py infrastructure --task INF-123 --app
+```
+
+Add `--start-wave`, `--sync`, or `--start-task` only when you intend their
+provider, Linear, or worktree side effects.
 
 The five Viable System Model charters ship as builtin goals `s1`…`s5`. Run one directly:
 
 ```bash
-lf serve s3           # the s3 (control) charter
+lf wave s3            # the s3 (control) charter
 lf stop s3            # stop only this wave
 ```
 
-The wave agent executes the next move inline by default. Give a strict subset
-its own repeated lifecycle only when the work earns a separate worktree and PR:
+The wave agent coordinates concrete work through Linear-backed Task Sessions:
 
 ```bash
-lf --wave designer loop build "unify button variants"            # caller waits
-lf --wave designer loop build "audit settings panes" --detach    # server owns it
+lf task start "unify button variants" --project <linear-project-id> \
+  --directive "fix the shared primitive before the call sites"
+lf task steer INF-123 "also audit the settings panes"
+lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
+lf task acknowledge INF-123 --directive 2 --summary "the shared primitive is first"
+lf task decide INF-123 DECISION_ID revise --message "cover the boundary race"
+lf task wait INF-123
 ```
 
-Use `--detach` only when `designer` is already served and the parent has another
-useful move while the child runs. If this result is needed next, keep it
-foreground. If it is the sole local blocker, do it inline.
+The Linear task exists before its worktree. One durable Task Session retains
+that immutable sibling worktree and provider history through review, CI repair,
+and merge. Every Task PR targets `main`.
 
-Workers inherit the wave's `GOAL.md` and `MEMORY.md`, so they build with its intent in view. Their PRs are how results flow back to the wave.
+Task Sessions inherit the Wave objective, curated memory, Project definition,
+and KRs. Typed, idempotent Task observations keep the Wave informed without
+copying raw tool chatter into its thread. Every Task reports through the one
+Project Session for its Linear Project and asks that Project for routine
+decisions. The owning Wave can inspect or override any Task as root authority,
+without becoming a second supervision path. Loopflow does not invent a default
+Project; `task start` requires one and `task run` resolves one from the issue.
 
-Run a task as a bounded task loop:
+Inspect the Task's actual workspace without reconstructing Git state in a
+client:
 
 ```bash
-lf --wave designer loop task "fix the flaky chord-timeout test"
+lf task changes INF-123
+lf task diff INF-123 src/parser.rs
+lf task file INF-123 src/parser.rs
 ```
 
-`lf loop` takes a flow and free text, creates a worktree, and repeats the flow
-until its bit flips (`task`: when the PR merges). Linear holds filed work,
-`lf runs` holds active hands, and merged PRs record done.
+The Mac Task inspector uses the same reads for its changed-file list, patch,
+and current-file views. It also opens multiple embedded Ghostty/tmux shells or
+the same worktree in Warp.
 
-Two commands, two kinds of run. `lf serve designer` boots a mind: a listener, a
-thread, a playhead — something you can chat with while it works. `lf loop task
-"fix it"` runs a bounded child loop in batch: no chat surface, reports at its
-boundaries. Serving is for waves; looping is for the work a wave hands off.
+Run an existing Linear Project or task:
+
+```bash
+lf project run <linear-project-id> --directive "pursue onboarding first"
+lf project steer <linear-project-id> "prioritize the CLI path"
+lf project acknowledge <linear-project-id> --directive 2 --summary "CLI proof is first"
+lf project wait <linear-project-id> --until waiting
+
+lf task run INF-123
+```
+
+Launch persists directive v1 before the provider starts. `steer` and an
+interrupt with replacement advance the version; `follow-up` does not replace
+current intent. A receipt distinguishes provider application from explicit
+child incorporation.
+
+`lf project run` starts one durable KR-pursuit session with no branch or
+worktree. It creates and supervises Task Sessions, stops while only child
+progress can change the answer, and resumes from typed Task observations. The
+Wave stays directly steerable while Project and Task Sessions run.
 
 Inspect exactly what an agent received and what Loopflow observed:
 
@@ -114,30 +151,17 @@ and provider-reported history.
 
 ### Crons
 
-Crons schedule supplementary flows on a wave — maintenance that runs independently of the worker pool. They live in `GOAL.md` frontmatter; the wave's resident loop fires each due schedule as a system pass. `workers: 0` is valid for a cron-only wave.
+Crons schedule supplementary Wave wakes. They live in `GOAL.md` frontmatter;
+the Wave resident opens one system turn when a schedule is due.
 
 ```markdown
 <!-- wave/governance/GOAL.md -->
 ---
-workers: 0
 crons:
   - flow: govern-identity
     schedule: "0 0 0 * * Sun *"
 ---
 ```
-
-### GitHub webhooks
-
-`lfd` verifies each GitHub webhook and translates it inward as an `lf` exec.
-For the current demo path, CI failures and main pushes arrive as attributed
-bus publishes — machine speech with a byline that survives a sleeping wave
-and folds into its thread attributed on the next sweep.
-
-| Event | What lfd runs |
-|-------|---------------|
-| CI fails on a wave's PR | `lf radio pub --channel <name> --from ci "CI failed: …"` — the loop decides how to fix (usually a `ci-fix` worker) |
-| PR merged | queue state reconciles in-process |
-| Push to main | `lf radio pub --channel <name> --from github "main moved: …"` — the loop decides whether to rebase or integrate |
 
 ## Skills
 
@@ -216,13 +240,12 @@ Side-channel utilities — wrappers around git, PR, release, and wave state.
 | `commit` | Commit with generated message |
 | `rebase` | Rebase onto main |
 | `pr` | Generate PR title/body and call `lf pr open --title --body` |
-| `land` | Land PR, rotate worktree |
+| `land` | Land the PR and prune its merged worker worktree |
 | `lint` | Run linter, fix issues |
 | `update-wave` | Create, update, or delete wave state |
 | `split-wave` | Split a wave into smaller independent waves |
 | `release` | Run the full release workflow (notes, PR, tag, status) |
 | `release-notes` | Write narrative `RELEASE_NOTES.md` from release context, preferring release decisions when present |
-| `synthesize` | Combine multiple perspectives into one |
 | `token-compress` | Compress text into a target token budget without silently dropping important information |
 | `validate` | Validate flows, skills, and directions |
 
@@ -247,7 +270,7 @@ Flows can include mechanical ops items directly:
 
 | Flow | Skills |
 |------|-------|
-| `build` | kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy |
+| `build` | kickoff → review-design → implement → compress → lint → xor(demo, code-review) → gate |
 | `build-or-silent` | xor(build, silence) |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `queue` | compress → update-wave → gate |
@@ -296,15 +319,6 @@ find release -maxdepth 2 -type f | sort
 
 Interactive runs append to `release/unreleased/DECISIONS.md` when they make a durable product or process decision. Headless runs do not. If the ledger exists, `lf release run` promotes `release/unreleased/` to `release/v<version>/`, uses `DECISIONS.md` to shape the narrative release notes, and archives the generated root notes to `release/v<version>/NOTES.md`. If the ledger is absent, release notes fall back to merged PR history.
 
-### Browse the catalog
-
-```bash
-lfd serve
-curl -s "http://127.0.0.1:2486/v0/catalog?repo=$(pwd)" | jq '.result.flows[] | {name, category, source}'
-```
-
-Open **Flows** in Loopflow to browse the same catalog visually. The left pane groups flows and skills by `build`, `govern`, and `ops`; the right pane shows every parent flow that uses the selected flow or skill.
-
 ### Branches (xor)
 
 Branches route a flow based on an agent's assessment of the current state. Exactly one path runs.
@@ -332,7 +346,7 @@ If no `router:` is specified, a generic routing agent picks a path based on scra
 Once you're chaining skills into flows, you're ready to ride a wave. Write its `wave/<name>/GOAL.md`, then run the agent:
 
 ```bash
-lf serve engbot             # start the wave agent
+lf wave engbot              # start the Wave
 ```
 
 Directions compose extra nuance into any skill or flow the wave dispatches.
@@ -348,40 +362,43 @@ lf research -d ceo
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 ```
 
-Or grab the desktop app: download [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg) and drag **Loopflow** to Applications. The app bundles `lf` and `lfd`.
+Or grab the desktop app: download [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg) and drag **Loopflow** to Applications. The app bundles `lf`.
 
 Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.
 
-`install.sh` only downloads the `lf` and `lfd` binaries. To connect Claude, GitHub, and optional providers, run `lfd install`—add `--no-interactive` to skip the prompts (CI, Docker, scripted installs).
+`install.sh` downloads the `lf` binary. Run `lf init` to connect coding agents and preferences.
 
 From a dev checkout, build everything locally with one entry:
 
 ```bash
-uv run python scripts/install.py local --use   # full build: lf, lfd, Loopflow.app -> local-bin/, make active
-uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf+lfd, sync skills
+uv run python scripts/install.py local --use   # full build: lf + Loopflow.app -> local-bin/, make active
+uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf, sync skills
 ```
 
-`install.py` is the local entry point. `local --use` builds this worktree's `lf`, `lfd`, and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build. `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`/`lfd`, install them into the local bin dir, and sync loopflow skills into `~/.claude/skills` and `~/.agents/skills`.
+`install.py` is the local entry point. `local --use` builds this worktree's
+`lf` and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build.
+`refresh` is the fast CLI-only path: pull the default branch, rebuild/install
+`lf`, and sync Loopflow skills into `~/.claude/skills` and
+`~/.agents/skills`.
 
 Built-in skills and flows included. `lf init` sets up your coding agent and preferences.
 
 ```bash
-cargo install --git https://github.com/loopflowstudio/loopflow --bin lf --bin lfd
+cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 ```
 Install the Rust binaries directly with cargo.
 
-## Execute, Loop, Observe
+## Execute and observe
 
 ```bash
-lf serve engbot       # start the wave agent (Ctrl-C to stop)
-lf --wave engbot loop implement "Add the endpoint" --detach
-tmux ls              # list live sessions — the wave agent and its workers
-tmux attach -r -t <name>  # inspect without direct control
+lf wave engbot        # start the Wave (Ctrl-C to stop)
+lf task run ENG-123   # start the Linear task in its own worktree
+tmux ls              # list detached Wave, Project, and Task processes
+lf task attach ENG-123    # writable audited control prompt
 ```
 
 Read `wave/engbot/GOAL.md` and `wave/engbot/MEMORY.md` for a wave's state, or
-watch it in Loopflow. To remove a wave, delete `wave/engbot/` and its worktree
-(`lf wt remove engbot`).
+watch it in Loopflow. To remove a wave, stop it, then delete `wave/engbot/`.
 
 ```bash
 lf auth status    # provider auth status (GitHub / Claude / Codex / OpenCode Zen / Linear)
@@ -434,8 +451,7 @@ older than a week when Linear is unreachable. Use `--no-sync` for deterministic
 cache-only reads. Issue descriptions and comments are Markdown, which Linear
 renders natively.
 
-The `loopflow` Python package is a library only (wire models).
-Use the install script or cargo to install `lf` and `lfd`.
+Use the install script or cargo to install `lf`.
 
 [Documentation →](docs/index.md)
 
@@ -466,9 +482,8 @@ Keybindings start with `prefix+l`:
 | `s` | Stop |
 | `o` | Open logs |
 | `p` | Open PR |
-| `n` | Next iteration |
+| `n` | New worktree |
 | `d` | Land PR |
-| `u` | Start/bootstrap |
 | `w` | Pick wave/worktree |
 | `L` | Pick layout |
 | `?` | Help |

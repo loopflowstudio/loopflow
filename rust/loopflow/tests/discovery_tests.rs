@@ -143,12 +143,7 @@ fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
         flow: gstack/plan-manual
         description: "Interactive planning"
 - implement
-- and:
-    branches:
-      - skill: gstack/pr-review
-      - skill: gstack/cso
-      - skill: gstack/codex
-    synthesize: gstack/review-synthesize
+- gstack/pr-review
 "#,
     )
     .expect("write flow");
@@ -166,11 +161,7 @@ fn discover_namespaced_flows_with_hyphenated_names_and_branch_summaries() {
             "gstack/autoplan",
             "gstack/plan-manual",
             "implement",
-            "[and]",
             "gstack/pr-review",
-            "gstack/cso",
-            "gstack/codex",
-            "gstack/review-synthesize",
         ]
     );
 }

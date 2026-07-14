@@ -84,7 +84,7 @@ wave, or demote the pieces into tasks.
 Good projects are either completable behavioral improvements or standing quality
 frontiers. "Wave Chat can steer and interrupt work from CLI and Mac" is a
 project. "Technical Architecture stays legible and minimally simple" is a
-project. "Collapse `lfd` and `lfq`" is individual debt: file it as a task under
+project. "Delete an obsolete API" is individual debt: file it as a task under
 a project.
 
 Write project KRs as proof, not backlog. A KR states an observable end state:
@@ -97,7 +97,7 @@ implementation receipts, issue ids, or status into the KR line.
 
 ## KRs
 
-- Collapse lfd/lfq into lf.
+- Delete the obsolete HTTP read surface.
 - Retire chord/member vocabulary.
 - Unify the operating prompt.
 

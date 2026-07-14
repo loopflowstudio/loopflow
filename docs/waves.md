@@ -15,41 +15,45 @@ You author wave files under `wave/<name>/`:
 | **`GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
 | **`MEMORY.md`** | What the wave remembers between loops — written by the wave agent |
 
-Projects and tasks live in Linear and sync into the local SQLite registry. Run
-`lf pm sync`, then run the agent: it reads its projects,
-tasks, and memory; pick the next move; execute it inline or place a justified
-child loop; watch the PR; and fold what changed back into memory.
+Tasks live in Linear. Run the agent and it reads its Projects, tasks, and
+memory; selects a Project before creating or selecting the next Task; starts
+one durable Task Session; and folds the linked result back into memory.
 
 ```bash
-lf serve shipper            # start the wave agent
-tmux ls                    # the wave agent and every worker it launches
-tmux attach -r -t <name>   # inspect one without direct control
+lf wave shipper             # start the Wave
+tmux ls                    # detached Wave, Project, and Task processes
+lf task attach INF-123     # audited writable task control prompt
 ```
 
-The wave agent resolves the sole blocker inline. It creates a child loop only
-for a strict subset that needs its own repeated lifecycle or useful parallelism:
+Every concrete file-writing change begins with a Linear task:
 
 ```bash
-lf --wave shipper loop build "add retry to token refresh"
-lf --wave shipper loop build "audit retry callers" --detach
+lf task start "add retry to token refresh" --project <linear-project-id>
+lf task run INF-123
+lf task follow-up INF-123 "also audit retry callers"
 ```
 
-A worker runs the flow in its own worktree, opens a PR, and reports back. It inherits the wave's `GOAL.md` and `MEMORY.md`, so it builds with the wave's intent in view.
+A Task Session runs in one immutable worktree, opens one PR to `main`, and
+reports linked events to its Wave. It inherits the Wave's `GOAL.md` and
+`MEMORY.md` plus its Project definition and KRs.
 
-Each loop gets a fresh sibling worktree — `<repo>.<wave>.<run-id>` — off the
-default branch, with its own branch and PR:
+Each Task Session gets a sibling worktree off `main`, with its own branch and
+PR:
 
 ```bash
-lf --wave shipper loop task "…"           # foreground: caller-owned
-lf --wave shipper loop task "…" --detach  # background: server-owned
+lf task status INF-123
+lf task interrupt INF-123 --message "take the smaller approach"
+lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
+lf task acknowledge INF-123 --directive 2 --summary "the smaller approach is active"
+lf task decide INF-123 DECISION_ID approve
+lf task wait INF-123
 ```
 
-Both forms create the same placed worktree. `--detach` changes attention and
-ownership, not execution: the server launches a headless loop and the caller
-returns immediately. It requires an already-running server and is useful only
-when the parent has another move; otherwise keep the loop foreground.
+The Wave stays directly steerable while several independent tasks run. Task
+events enter its inbox as typed observations and wake it once. Decision answers,
+review feedback, and CI repair resume the same Task Session and provider history.
 
-Waves are independent by default. Humans steer a served mind with `lf chat`;
+Waves are independent by default. Humans steer a running Wave with `lf chat`;
 agents report on its bus with `lf radio pub --channel <name> "…"`, even while the
 wave sleeps.
 
@@ -60,7 +64,6 @@ Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter
 ```markdown
 <!-- wave/shipper/GOAL.md -->
 ---
-workers: 2
 crons:
   - flow: sync
     schedule: "0 0 0 1 * * *"
@@ -68,54 +71,39 @@ crons:
 
 ## Objective
 
-Run one loop iteration for the shipper wave.
+Keep releases routine and recoverable.
 
 ## Measures
 
-- **Key Results**: backlog is empty.
+- **Key Results**: four weekly releases complete without manual repair.
 
 ## Process
 
-Read the live tasks and dispatch the appropriate flow for the next useful move.
+Clarify the portfolio, direct the next Project or Task, and judge the evidence.
 ```
 
 Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due mid-turn fires at the next turn boundary; occurrences older than 24 hours are missed, not replayed.
-
-Use `workers: 0` in `GOAL.md` for waves that only run from cron schedules:
-
-```markdown
-<!-- wave/governance/GOAL.md -->
----
-workers: 0
-crons:
-  - flow: govern-identity
-    schedule: "0 0 0 * * Sun *"
-  - flow: govern-coordination
-    schedule: "0 0 0 * * * *"
----
-
-Run one loop iteration for the governance wave.
-```
 
 ---
 
 ## Quick Start
 
 ```bash
-lfd install                      # one-time: install daemon
+lf wave <name>
 ```
 
-Or run manually: `lfd serve`. Watch progress in Loopflow.
+Open the repository in Loopflow to see the Wave conversation and Project →
+Task work map.
 
 ## Managing Waves
 
 ```bash
-lf serve <name>          # start the wave agent (Ctrl-C to stop)
-tmux ls                 # live sessions — the wave agent and its workers
-tmux attach -r -t <name>   # inspect one; stdin stays closed
+lf wave <name>           # start the Wave (Ctrl-C to stop)
+lf project attach <id>  # audited Project control prompt
+lf task attach INF-123  # audited Task control prompt
 ```
 
-To remove a wave, delete `wave/<name>/` and its worktree (`lf wt remove <name>`).
+To remove a wave, stop it, then delete `wave/<name>/`.
 
 ## Next
 
@@ -123,4 +111,4 @@ To remove a wave, delete `wave/<name>/` and its worktree (`lf wt remove <name>`)
 
 ## Reference
 
-[`lfd` commands](lfd.md) · [Configuration](config.md) · [Troubleshooting](troubleshooting.md)
+[Configuration](config.md) · [Troubleshooting](troubleshooting.md)

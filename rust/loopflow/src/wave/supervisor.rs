@@ -360,6 +360,19 @@ impl Supervisor {
                 }
                 message.op == MessageOp::Interrupt
             }
+            InboxItem::Task(_) | InboxItem::Project(_) => {
+                if self.spawner.is_some()
+                    && self.child.is_none()
+                    && matches!(self.runtime.loop_state(), LoopState::Failed { .. })
+                {
+                    tracing::info!(
+                        wave = self.runtime.name(),
+                        "child observation for a dead resident; respawning now"
+                    );
+                    self.spawn().await;
+                }
+                false
+            }
         };
         // The janitor arms only while a turn is live; an interrupt while idle
         // is a no-op (nothing to force).

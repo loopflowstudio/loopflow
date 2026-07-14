@@ -11,6 +11,8 @@ use crate::engine::{expand_flow, load_flow, ConcreteStep};
 pub enum StepKind {
     Skill,
     Op,
+    // Retained so journals written by retired flow steps remain readable. New
+    // flow plans never produce these values.
     And,
     Xor,
     Or,
@@ -28,7 +30,6 @@ impl StepPlan {
         let (name, kind) = match step {
             ConcreteStep::Skill(skill) => (skill.skill.name.clone(), StepKind::Skill),
             ConcreteStep::Op(op) => (op.item.display_name(), StepKind::Op),
-            ConcreteStep::And(_) => ("and".to_string(), StepKind::And),
             ConcreteStep::Xor(branch) => (
                 branch
                     .router
@@ -36,14 +37,6 @@ impl StepPlan {
                     .unwrap_or_else(|| "xor-route".to_string()),
                 StepKind::Xor,
             ),
-            ConcreteStep::Or(branch) => (
-                branch
-                    .router
-                    .clone()
-                    .unwrap_or_else(|| "or-route".to_string()),
-                StepKind::Or,
-            ),
-            ConcreteStep::Loop(_) => ("loop".to_string(), StepKind::Loop),
         };
         Self { name, kind }
     }

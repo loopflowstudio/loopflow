@@ -82,7 +82,7 @@ async fn resolve(context: &CliContext, target: &WaveTargetArgs) -> Result<Option
 async fn show(context: &CliContext, target: &WaveTargetArgs) -> Result<()> {
     let resolved = resolve(context, target).await?.ok_or_else(|| {
         anyhow!(
-            "cannot resolve a target wave: no LFD_WAVE_ID in env and \
+            "cannot resolve a target wave: no LF_WAVE_ID in env and \
              not inside a wave worktree — pass --wave <name>"
         )
     })?;
@@ -94,7 +94,7 @@ async fn show(context: &CliContext, target: &WaveTargetArgs) -> Result<()> {
 async fn log(context: &CliContext, target: &WaveTargetArgs) -> Result<()> {
     let resolved = resolve(context, target).await?.ok_or_else(|| {
         anyhow!(
-            "cannot resolve a target wave: no LFD_WAVE_ID in env and \
+            "cannot resolve a target wave: no LF_WAVE_ID in env and \
              not inside a wave worktree — pass --wave <name>"
         )
     })?;
@@ -350,6 +350,6 @@ mod tests {
         )
         .await
         .expect_err("no server");
-        assert!(err.to_string().contains("no live server"), "{err}");
+        assert!(err.to_string().contains("no live listener"), "{err}");
     }
 }

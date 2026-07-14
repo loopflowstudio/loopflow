@@ -17,13 +17,12 @@ MAC_ONLY_IMPORTS = {
     "ApplicationServices",
     "IOKit",
     "Metal",
-    "GhosttyKit",
 }
 
 # The shared library must build on every platform; the per-platform app targets
 # are single-platform shells where `#if` and platform-only imports are expected.
 SHARED_PREFIX = "swift/Loopflow/"
-PLATFORM_PREFIXES = ("swift/LoopflowMac/", "swift/LoopflowiOS/")
+PLATFORM_PREFIXES = ("swift/LoopflowMac/",)
 
 
 def _resolve_main_ref() -> str:

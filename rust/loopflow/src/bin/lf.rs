@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::OnceLock;
 
 use clap::{CommandFactory, Parser};
@@ -7,7 +7,7 @@ use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
-use loopflow::lf::{Cli, Commands, ProjectCommand};
+use loopflow::lf::{Cli, Commands, ProjectCommand, TaskCommand};
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -384,7 +384,7 @@ fn with_runtime<T>(
         LfNode::Run,
         LfEventType::Started,
         LfEventFields {
-            wave_name: loopflow::engine::wave_context::resolve_run_wave_name(repo_root),
+            wave_name: loopflow::engine::wave_context::resolve_run_wave_name(),
             worktree: Some(repo_root.display().to_string()),
             command: Some(command.to_vec()),
             ..LfEventFields::default()
@@ -493,9 +493,6 @@ fn run_target(
     command: &[String],
 ) -> anyhow::Result<()> {
     let repo_root = loopflow::lf::commands::util::find_repo_root()?;
-    if placement_requested(cli) {
-        return run_placed_target(&repo_root, name, message, cli, command);
-    }
     run_target_in_repo(&repo_root, name, message, cli, command)
 }
 
@@ -528,129 +525,6 @@ fn run_target_in_repo(
     }
 }
 
-fn placement_requested(cli: &Cli) -> bool {
-    cli.stack.is_some() || cli.fork
-}
-
-fn validate_loop_command(cli: &Cli) -> anyhow::Result<()> {
-    if let Some(Commands::Loop {
-        name, max_passes, ..
-    }) = &cli.command
-    {
-        loopflow::flowloop::driver::validate_loop_passes(name, *max_passes)?;
-    }
-    Ok(())
-}
-
-fn inner_placement_invocation(command: &[String]) -> anyhow::Result<(Cli, Vec<String>)> {
-    let inner_command = strip_placement_args(command);
-    let inner_cli = Cli::try_parse_from(inner_command.clone())?;
-    if placement_requested(&inner_cli) {
-        return Err(anyhow::anyhow!(
-            "placement flags leaked into placed invocation"
-        ));
-    }
-    Ok((inner_cli, inner_command))
-}
-
-fn strip_placement_args(command: &[String]) -> Vec<String> {
-    let mut stripped = Vec::with_capacity(command.len());
-    let mut args = command.iter().peekable();
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--fork" => {}
-            "--stack" => {
-                let _ = args.next();
-            }
-            value if value.starts_with("--stack=") => {}
-            _ => stripped.push(arg.clone()),
-        }
-    }
-    stripped
-}
-
-fn run_placed_target(
-    repo_root: &Path,
-    name: &str,
-    message: Option<&str>,
-    cli: &Cli,
-    command: &[String],
-) -> anyhow::Result<()> {
-    let wave_name = resolve_placement_wave(repo_root, cli)?;
-    let placement = if let Some(parent) = cli.stack.as_deref() {
-        loopflow::lfd::executor::Placement::Stack {
-            parent_run_id: parent
-                .parse()
-                .map_err(|_| anyhow::anyhow!("invalid --stack run id: '{parent}'"))?,
-        }
-    } else {
-        loopflow::lfd::executor::Placement::Fresh
-    };
-    // The same registry-backed run lifecycle `lf loop` uses; only the
-    // placement and what happens inside the worktree differ.
-    let run_id = loopflow::lfd::id::LfdId::new();
-    let placed = loopflow::flowloop::run::LoopRun::start(
-        &wave_name,
-        name.trim_end_matches(':'),
-        message.map(str::to_string),
-        &run_id,
-        &placement,
-    )?;
-    let run = &placed.run;
-
-    eprintln!("placed {name} in {}", run.worktree);
-    let _cwd = CurrentDirGuard::set(&run.worktree)?;
-    let _wave_env = EnvGuard::set("LFD_WAVE_ID", run.wave_id.to_string());
-    let _run_env = EnvGuard::set("LFD_RUN_ID", run.id.to_string());
-    let _lf_run_env = EnvGuard::set("LF_RUN_ID", run.id.to_string());
-    // Placement starts a trace and a work line: neither identity may leak from
-    // the caller even though the target executes synchronously in this process.
-    let _channel_env = EnvGuard::set(
-        loopflow::lf::session::CHANNEL_ENV,
-        loopflow::engine::wave_context::placed_channel_name(&wave_name, &run.id),
-    );
-    let _process_env = EnvGuard::remove(loopflow::journal::LF_PROCESS_ID_ENV);
-
-    let (inner_cli, inner_command) = inner_placement_invocation(command)?;
-    let result = run_target_in_repo(
-        Path::new(&run.worktree),
-        name,
-        message,
-        &inner_cli,
-        &inner_command,
-    );
-    placed.finish(result)
-}
-
-fn resolve_placement_wave(repo_root: &Path, cli: &Cli) -> anyhow::Result<String> {
-    if let Some(wave) = cli.wave.as_ref().filter(|value| !value.trim().is_empty()) {
-        return Ok(wave.clone());
-    }
-    let main_repo = loopflow::engine::worktrees::main_repo_root(repo_root)?;
-    loopflow::engine::worktrees::wave_name_from_worktree_and_main(repo_root, &main_repo)
-        .ok_or_else(|| anyhow::anyhow!("placement requires --wave or an ambient wave worktree"))
-}
-
-struct CurrentDirGuard {
-    previous: PathBuf,
-}
-
-impl CurrentDirGuard {
-    fn set(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let previous = std::env::current_dir()?;
-        std::env::set_current_dir(path)?;
-        Ok(Self { previous })
-    }
-}
-
-impl Drop for CurrentDirGuard {
-    fn drop(&mut self) {
-        if let Err(err) = std::env::set_current_dir(&self.previous) {
-            eprintln!("failed to restore cwd {}: {err}", self.previous.display());
-        }
-    }
-}
-
 struct EnvGuard {
     key: &'static str,
     previous: Option<std::ffi::OsString>,
@@ -662,12 +536,6 @@ impl EnvGuard {
         std::env::set_var(key, value.into());
         Self { key, previous }
     }
-
-    fn remove(key: &'static str) -> Self {
-        let previous = std::env::var_os(key);
-        std::env::remove_var(key);
-        Self { key, previous }
-    }
 }
 
 impl Drop for EnvGuard {
@@ -676,6 +544,498 @@ impl Drop for EnvGuard {
             std::env::set_var(self.key, value);
         } else {
             std::env::remove_var(self.key);
+        }
+    }
+}
+
+fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
+    let value = value.trim();
+    let (number, multiplier) = if let Some(number) = value.strip_suffix('s') {
+        (number, 1)
+    } else if let Some(number) = value.strip_suffix('m') {
+        (number, 60)
+    } else if let Some(number) = value.strip_suffix('h') {
+        (number, 60 * 60)
+    } else {
+        (value, 1)
+    };
+    let amount: u64 = number
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid duration {value:?}; use seconds, 10s, 5m, or 1h"))?;
+    Ok(std::time::Duration::from_secs(
+        amount.saturating_mul(multiplier),
+    ))
+}
+
+fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyhow::Result<()> {
+    if json {
+        let snapshot = loopflow::ops::task::task_snapshot(session)?;
+        println!("{}", serde_json::to_string_pretty(&snapshot)?);
+    } else {
+        let pm_writeback = match &session.pm_writeback {
+            loopflow::task::PmWritebackState::Current => "current".to_string(),
+            loopflow::task::PmWritebackState::Pending { error, .. } => {
+                format!("pending: {error}")
+            }
+        };
+        println!(
+            "{}  {}  {}\n  session: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
+            session.launch.issue.identifier,
+            session.status.as_str(),
+            session.provider,
+            session.id,
+            session.worktree.display(),
+            session.branch,
+            pm_writeback,
+            session.status_reason,
+        );
+    }
+    Ok(())
+}
+
+fn print_task_control(
+    result: &loopflow::ops::task::TaskControlResult,
+    json: bool,
+) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(result)?);
+    } else {
+        let effect = result
+            .effect
+            .map(|effect| effect.as_str())
+            .unwrap_or("none");
+        println!(
+            "{} → {} (state={}, effect={})",
+            result.command_id,
+            result.issue_id,
+            result.state.as_str(),
+            effect
+        );
+    }
+    Ok(())
+}
+
+fn print_project_session(
+    session: &loopflow::project_session::ProjectSession,
+    json: bool,
+) -> anyhow::Result<()> {
+    if json {
+        let snapshot = loopflow::ops::project::project_snapshot(session)?;
+        println!("{}", serde_json::to_string_pretty(&snapshot)?);
+    } else {
+        println!(
+            "{}  {}  {}\n  session: {}\n  iteration: {}\n  reason: {}",
+            session.launch.project.slug,
+            session.status.as_str(),
+            session.provider,
+            session.id,
+            session.iteration,
+            session.status_reason,
+        );
+    }
+    Ok(())
+}
+
+fn print_project_control(
+    result: &loopflow::ops::project::ProjectControlResult,
+    json: bool,
+) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(result)?);
+    } else {
+        let effect = result
+            .effect
+            .map(|effect| effect.as_str())
+            .unwrap_or("none");
+        println!(
+            "{} → {} (state={}, effect={})",
+            result.command_id,
+            result.project_id,
+            result.state.as_str(),
+            effect
+        );
+    }
+    Ok(())
+}
+
+fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<()> {
+    match command {
+        ProjectCommand::Run {
+            project_id,
+            directive,
+            json,
+        } => {
+            let session = loopflow::ops::project::project_run(repo, project_id, directive.clone())?;
+            print_project_session(&session, *json)
+        }
+        ProjectCommand::Start {
+            title,
+            wave,
+            directive,
+            json,
+        } => {
+            let session = loopflow::ops::project::project_start(
+                repo,
+                title,
+                wave.as_deref(),
+                directive.clone(),
+            )?;
+            print_project_session(&session, *json)
+        }
+        ProjectCommand::Status { project_id, json } => {
+            let session = loopflow::ops::project::project_status(project_id)?;
+            print_project_session(&session, *json)
+        }
+        ProjectCommand::FollowUp {
+            project_id,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_follow_up(project_id, message.clone())?;
+            print_project_control(&result, *json)
+        }
+        ProjectCommand::Steer {
+            project_id,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_steer(project_id, message.clone())?;
+            print_project_control(&result, *json)
+        }
+        ProjectCommand::Interrupt {
+            project_id,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_interrupt(project_id, message.clone())?;
+            print_project_control(&result, *json)
+        }
+        ProjectCommand::Receipt {
+            command_id,
+            until,
+            timeout,
+            json,
+        } => {
+            let read = loopflow::ops::project::project_receipt(
+                command_id,
+                *until,
+                parse_duration(timeout)?,
+            )?;
+            print_project_control(&read.receipt, *json)?;
+            if read.timed_out {
+                std::process::exit(124);
+            }
+            Ok(())
+        }
+        ProjectCommand::Acknowledge {
+            project_id,
+            directive,
+            summary,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_acknowledge(
+                project_id,
+                *directive,
+                summary.clone(),
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("{} incorporated directive v{}", project_id, directive);
+            }
+            Ok(())
+        }
+        ProjectCommand::Decide {
+            project_id,
+            decision_id,
+            choice,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_decide(
+                project_id,
+                decision_id,
+                choice.clone(),
+                message.clone(),
+            )?;
+            print_project_control(&result, *json)
+        }
+        ProjectCommand::RequestDecision {
+            project_id,
+            prompt,
+            options,
+            wait,
+            timeout,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_request_decision(
+                project_id,
+                prompt.clone(),
+                options.clone(),
+                *wait,
+                parse_duration(timeout)?,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else if result.resolved {
+                println!(
+                    "{} → {}",
+                    result.decision_id,
+                    result.choice.as_deref().unwrap_or("resolved")
+                );
+            } else {
+                println!("{} → pending", result.decision_id);
+            }
+            Ok(())
+        }
+        ProjectCommand::Wait {
+            project_id,
+            until,
+            timeout,
+            json,
+        } => {
+            let until = if until == "waiting" {
+                loopflow::ops::project::ProjectWaitUntil::Waiting
+            } else {
+                loopflow::ops::project::ProjectWaitUntil::Terminal
+            };
+            let timeout = timeout.as_deref().map(parse_duration).transpose()?;
+            let session = loopflow::ops::project::project_wait(project_id, until, timeout)?;
+            print_project_session(&session, *json)
+        }
+        ProjectCommand::Resume {
+            project_id,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_resume(project_id, message.clone())?;
+            print_project_control(&result, *json)
+        }
+        ProjectCommand::Attach { project_id } => {
+            loopflow::ops::project::project_attach(project_id).map_err(Into::into)
+        }
+        ProjectCommand::Abandon {
+            project_id,
+            reason,
+            json,
+        } => {
+            let result = loopflow::ops::project::project_abandon(project_id, reason.clone())?;
+            print_project_control(&result, *json)
+        }
+        ProjectCommand::Promote { .. } => {
+            anyhow::bail!("project promote is handled by the authored promotion flow")
+        }
+    }
+}
+
+fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
+    match command {
+        TaskCommand::Run {
+            issue,
+            directive,
+            json,
+        } => {
+            let session = loopflow::ops::task::task_run(repo, issue, directive.clone())?;
+            print_task_session(&session, *json)
+        }
+        TaskCommand::Start {
+            title,
+            project_id,
+            directive,
+            json,
+        } => {
+            let session = loopflow::ops::task::task_start(
+                repo,
+                title.clone(),
+                project_id,
+                directive.clone(),
+            )?;
+            print_task_session(&session, *json)
+        }
+        TaskCommand::Status { issue, json } => {
+            let session = loopflow::ops::task::task_status(issue)?;
+            print_task_session(&session, *json)
+        }
+        TaskCommand::Changes { issue, json } => {
+            let snapshot = loopflow::ops::task::task_changes(issue)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            } else if snapshot.files.is_empty() {
+                println!("{} has no changes from its recorded base", issue);
+            } else {
+                for file in snapshot.files {
+                    let mut states = Vec::new();
+                    if file.committed {
+                        states.push("committed");
+                    }
+                    if file.staged {
+                        states.push("staged");
+                    }
+                    if file.unstaged {
+                        states.push("unstaged");
+                    }
+                    if file.untracked {
+                        states.push("untracked");
+                    }
+                    println!("{}\t{}", states.join(","), file.path);
+                }
+            }
+            Ok(())
+        }
+        TaskCommand::Diff { issue, path, json } => {
+            let snapshot = loopflow::ops::task::task_diff(issue, path.as_deref())?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            } else {
+                print!("{}", snapshot.patch);
+                if snapshot.truncated {
+                    eprintln!("\n[diff truncated at 1 MB]");
+                }
+            }
+            Ok(())
+        }
+        TaskCommand::File { issue, path, json } => {
+            let snapshot = loopflow::ops::task::task_file(issue, path)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            } else if snapshot.binary {
+                anyhow::bail!("{} is binary", snapshot.path);
+            } else {
+                print!("{}", snapshot.content.as_deref().unwrap_or_default());
+                if snapshot.truncated {
+                    eprintln!("\n[file truncated at 1 MB]");
+                }
+            }
+            Ok(())
+        }
+        TaskCommand::FollowUp {
+            issue,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_follow_up(issue, message.clone())?;
+            print_task_control(&result, *json)
+        }
+        TaskCommand::Steer {
+            issue,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_steer(issue, message.clone())?;
+            print_task_control(&result, *json)
+        }
+        TaskCommand::Interrupt {
+            issue,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_interrupt(issue, message.clone())?;
+            print_task_control(&result, *json)
+        }
+        TaskCommand::Receipt {
+            command_id,
+            until,
+            timeout,
+            json,
+        } => {
+            let timeout = parse_duration(timeout)?;
+            let read = loopflow::ops::task::task_receipt(command_id, *until, timeout)?;
+            print_task_control(&read.receipt, *json)?;
+            if read.timed_out {
+                std::process::exit(124);
+            }
+            Ok(())
+        }
+        TaskCommand::Acknowledge {
+            issue,
+            directive,
+            summary,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_acknowledge(issue, *directive, summary.clone())?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("{} incorporated directive v{}", issue, directive);
+            }
+            Ok(())
+        }
+        TaskCommand::Decide {
+            issue,
+            decision_id,
+            choice,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_decide(
+                issue,
+                decision_id,
+                choice.clone(),
+                message.clone(),
+            )?;
+            print_task_control(&result, *json)
+        }
+        TaskCommand::RequestDecision {
+            issue,
+            prompt,
+            options,
+            wait,
+            timeout,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_request_decision(
+                issue,
+                prompt.clone(),
+                options.clone(),
+                *wait,
+                parse_duration(timeout)?,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else if result.resolved {
+                println!(
+                    "{} → {}",
+                    result.decision_id,
+                    result.choice.as_deref().unwrap_or("resolved")
+                );
+            } else {
+                println!("{} → pending", result.decision_id);
+            }
+            Ok(())
+        }
+        TaskCommand::Wait {
+            issue,
+            until,
+            timeout,
+            json,
+        } => {
+            let until = if until == "submitted" {
+                loopflow::ops::task::TaskWaitUntil::Submitted
+            } else {
+                loopflow::ops::task::TaskWaitUntil::Terminal
+            };
+            let timeout = timeout.as_deref().map(parse_duration).transpose()?;
+            let session = loopflow::ops::task::task_wait(issue, until, timeout)?;
+            print_task_session(&session, *json)
+        }
+        TaskCommand::Resume {
+            issue,
+            message,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_resume(issue, message.clone())?;
+            print_task_control(&result, *json)
+        }
+        TaskCommand::Attach { issue } => {
+            loopflow::ops::task::task_attach(issue).map_err(Into::into)
+        }
+        TaskCommand::Abandon {
+            issue,
+            reason,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_abandon(issue, reason.clone())?;
+            print_task_control(&result, *json)
         }
     }
 }
@@ -710,13 +1070,10 @@ fn main() -> anyhow::Result<()> {
     let args = reorder_args(raw_args.clone());
 
     let mut cli = Cli::parse_from(args.clone());
-    // A one-shot invocation is not a loop. Reject it before explicit wave
-    // resolution, placement, registry access, or detached-server discovery.
-    validate_loop_command(&cli)?;
     let explicit_wave = cli
         .wave
         .as_deref()
-        .map(loopflow::lf::session::resolve_explicit_wave)
+        .map(loopflow::engine::wave_context::resolve_explicit_wave)
         .transpose()?;
     if let Some(wave) = &explicit_wave {
         cli.wave = Some(wave.name().to_string());
@@ -724,29 +1081,19 @@ fn main() -> anyhow::Result<()> {
     // One resolved wave identity drives prompt context, registry attribution,
     // journaling, and every child process. An explicit wave is also the
     // default bus channel for this invocation.
-    let _explicit_wave_env = explicit_wave
-        .as_ref()
-        .map(|wave| EnvGuard::set(loopflow::lf::session::WAVE_ID_ENV, wave.id().to_string()));
-    let _explicit_channel_env = explicit_wave
-        .as_ref()
-        .map(|wave| EnvGuard::set(loopflow::lf::session::CHANNEL_ENV, wave.name().to_string()));
+    let _explicit_wave_env = explicit_wave.as_ref().map(|wave| {
+        EnvGuard::set(
+            loopflow::engine::wave_context::WAVE_ID_ENV,
+            wave.id().to_string(),
+        )
+    });
+    let _explicit_channel_env = explicit_wave.as_ref().map(|wave| {
+        EnvGuard::set(
+            loopflow::engine::wave_context::CHANNEL_ENV,
+            wave.name().to_string(),
+        )
+    });
     debug!(?cli, "parsed CLI arguments");
-
-    // Inside a wave context, agent-launching runs register themselves as lfd
-    // sessions; every other command still flips LFD_SESSION_ID to "inherited"
-    // for its children (see lf::session for the env contract).
-    let registration = match run_label(&cli) {
-        Some(skill) => loopflow::lf::session::register_run(
-            &skill,
-            cli.model.as_deref().unwrap_or("lf"),
-            &raw_args,
-            explicit_wave.as_ref(),
-        ),
-        None => {
-            loopflow::lf::session::mark_child_sessions_inherited();
-            None
-        }
-    };
 
     let result = if cli.list {
         in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
@@ -764,8 +1111,20 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Wt { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::run_wt(cmd))
             }
-            Some(Commands::Rebase { plan, onto }) => in_repo_runtime(&args, |_| {
-                loopflow::lf::commands::ops::run_rebase(onto.as_deref(), *plan)
+            Some(Commands::Rebase {
+                plan,
+                manual,
+                continue_rebase,
+                abort,
+                onto,
+            }) => in_repo_runtime(&args, |_| {
+                loopflow::lf::commands::ops::run_rebase(
+                    onto.as_deref(),
+                    *plan,
+                    *manual,
+                    *continue_rebase,
+                    *abort,
+                )
             }),
             Some(Commands::Commit {
                 message,
@@ -794,62 +1153,22 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Cron { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::ops::cron_cmd(cmd))
             }
-            Some(Commands::Serve { name, force }) => {
-                in_repo_runtime(&args, |_| loopflow::wave::serve(name, *force))
+            Some(Commands::Wave { name, force }) => {
+                in_repo_runtime(&args, |_| loopflow::wave::run(name, *force))
             }
             Some(Commands::Stop { name }) => in_repo_runtime(&args, |_| loopflow::wave::stop(name)),
             Some(Commands::Resident { name }) => {
                 in_repo_runtime(&args, |_| loopflow::wave::resident::run(name))
             }
-            Some(Commands::Loop {
-                name,
-                seed,
-                detach,
-                max_passes,
-                pass_timeout_secs,
-                wall_clock_secs,
-                poll_secs,
-                max_turns,
-            }) => {
-                // A placed loop owns a fresh trace just like --fork/--stack.
-                // Do not start the generic invocation runtime first: it may
-                // have inherited its caller's trace, and two loops from one
-                // pass must never compete for the same registry Run id.
-                let repo = loopflow::lf::commands::util::find_repo_root()?;
-                let mut options =
-                    loopflow::flowloop::driver::LoopOptions::new(name.clone(), cli.wave.clone());
-                options.max_passes = *max_passes;
-                options.pass_timeout = std::time::Duration::from_secs(*pass_timeout_secs);
-                options.wall_clock = std::time::Duration::from_secs(*wall_clock_secs);
-                options.poll = std::time::Duration::from_secs(*poll_secs);
-                options.max_turns = max_turns.or(cli.max_turns);
-                if *detach {
-                    let session = loopflow::flowloop::driver::detach_loop(&repo, seed, &options)
-                        .map_err(anyhow::Error::from)?;
-                    println!("detached {name} loop in tmux session {session}");
-                    println!("inspect: tmux attach -r -t {session}");
-                    Ok(())
-                } else {
-                    loopflow::flowloop::driver::run_loop(&repo, seed, &options)
-                        .map_err(anyhow::Error::from)
-                }
-            }
-            Some(Commands::Enqueue { flow }) => in_repo_runtime(&args, |repo| {
-                loopflow::lf::commands::playhead::enqueue(repo, cli.wave.as_deref(), flow)
-            }),
-            Some(Commands::Skip) => in_repo_runtime(&args, |repo| {
-                loopflow::lf::commands::playhead::skip(repo, cli.wave.as_deref())
-            }),
             Some(Commands::FlowStep { flow, index, seed }) => in_repo_runtime(&args, |repo| {
                 loopflow::lf::commands::flow::run_step(flow, *index, seed, &cli, repo)
             }),
             Some(Commands::Project {
                 cmd: ProjectCommand::Promote { slug, wave },
             }) => in_repo_runtime(&args, |repo| {
-                let parent = wave
-                    .clone()
-                    .or_else(|| loopflow::ops::resolve_wave_name(repo, None))
-                    .ok_or_else(|| anyhow::anyhow!("cannot determine parent wave"))?;
+                let parent = wave.clone().ok_or_else(|| {
+                    anyhow::anyhow!("cannot determine parent wave; pass --wave <name>")
+                })?;
                 let message = format!(
                     "Promote project '{slug}' from parent wave '{parent}'. Complete the authored migration, PM move, parent link, and residency checks."
                 );
@@ -859,6 +1178,31 @@ fn main() -> anyhow::Result<()> {
                 println!("promoted {slug} from {parent}; residency: {session}");
                 Ok(())
             }),
+            Some(Commands::Project { cmd }) => {
+                in_repo_runtime(&args, |repo| run_project_command(repo, cmd))
+            }
+            Some(Commands::Task { cmd }) => {
+                in_repo_runtime(&args, |repo| run_task_command(repo, cmd))
+            }
+            Some(Commands::TaskRunner {
+                session_id,
+                generation,
+            }) => {
+                let session_id = session_id.parse()?;
+                tokio::runtime::Runtime::new()?.block_on(loopflow::task::runner::run_task_session(
+                    session_id,
+                    *generation,
+                ))
+            }
+            Some(Commands::ProjectRunner {
+                session_id,
+                generation,
+            }) => {
+                let session_id = session_id.parse()?;
+                tokio::runtime::Runtime::new()?.block_on(
+                    loopflow::project_session::runner::run_project_session(session_id, *generation),
+                )
+            }
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)
             }
@@ -952,70 +1296,12 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    if let Some(registration) = registration {
-        registration.complete(if result.is_ok() { 0 } else { 1 });
-    }
     result
-}
-
-/// Session label for agent-launching invocations. Utility commands return
-/// `None`; `lf serve` and `lf loop` also return `None` because their own
-/// lifecycle owners register the WaveAgent and LoopRun rows respectively.
-fn run_label(cli: &Cli) -> Option<String> {
-    if cli.list {
-        return None;
-    }
-    if placement_requested(cli) {
-        return None;
-    }
-    match &cli.command {
-        Some(Commands::Inline { .. }) => Some("inline".to_string()),
-        Some(Commands::Flow { name, .. }) | Some(Commands::Skill { name, .. }) => {
-            Some(name.clone())
-        }
-        Some(Commands::External(args)) => args
-            .first()
-            .map(|skill| skill.trim_end_matches(':').to_string()),
-        None => Some("interactive".to_string()),
-        Some(Commands::Pr { .. })
-        | Some(Commands::Wt { .. })
-        | Some(Commands::Rebase { .. })
-        | Some(Commands::Commit { .. })
-        | Some(Commands::Auth { .. })
-        | Some(Commands::Release { .. })
-        | Some(Commands::Pm { .. })
-        | Some(Commands::SyncSkills { .. })
-        | Some(Commands::Cron { .. })
-        | Some(Commands::Serve { .. })
-        | Some(Commands::Stop { .. })
-        | Some(Commands::Resident { .. })
-        | Some(Commands::Loop { .. })
-        | Some(Commands::Enqueue { .. })
-        | Some(Commands::Skip)
-        | Some(Commands::FlowStep { .. })
-        | Some(Commands::Usage { .. })
-        | Some(Commands::Context { .. })
-        | Some(Commands::Tokens { .. })
-        | Some(Commands::Doctor { .. })
-        | Some(Commands::Ls { .. })
-        | Some(Commands::Status { .. })
-        | Some(Commands::Runs { .. })
-        | Some(Commands::Trace { .. })
-        | Some(Commands::Chat { .. })
-        | Some(Commands::Radio { .. })
-        | Some(Commands::RetiredSub { .. })
-        | Some(Commands::Memory { .. })
-        | Some(Commands::Ssh { .. }) => None,
-        Some(Commands::Project { .. }) => Some("project-promote".to_string()),
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        arg_tables, inner_placement_invocation, placement_requested, reorder_args,
-        validate_loop_command,
-    };
+    use super::{arg_tables, reorder_args};
 
     use clap::Parser;
     use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand};
@@ -1026,7 +1312,7 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "loop", "project",
+            ":", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "task", "project",
             "flow", "skill", "chat", "memory", "usage", "ls", "status", "runs", "trace", "help",
         ] {
             assert!(tables.commands.contains_key(command), "command {command}");
@@ -1043,7 +1329,6 @@ mod tests {
             "-w",
             "-W",
             "--wave",
-            "--stack",
         ] {
             assert!(tables.top_level.value.contains(flag), "value flag {flag}");
         }
@@ -1068,7 +1353,6 @@ mod tests {
             "--diff",
             "--no-diff",
             "--no-loopflow",
-            "--fork",
             "-h",
             "--help",
             "-V",
@@ -1105,105 +1389,20 @@ mod tests {
         assert_eq!(result, vec!["lf", "-c", "debug"]);
     }
 
-    #[test]
-    fn reorder_args_placement_flags_after_skill() {
-        let args = vec![
-            "lf".to_string(),
-            "implement".to_string(),
-            "ship it".to_string(),
-            "--fork".to_string(),
-        ];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "--fork", "implement", "ship it"]);
-    }
-
-    #[test]
-    fn placed_inner_invocation_strips_fork() {
-        let command: Vec<String> = [
-            "lf",
-            "--fork",
-            "-b",
-            "--wave",
-            "goals",
-            "implement",
-            "ship it",
-        ]
-        .map(String::from)
-        .to_vec();
-        let cli = Cli::parse_from(command.clone());
-        assert!(placement_requested(&cli));
-
-        let (inner_cli, inner_command) = inner_placement_invocation(&command).unwrap();
-
-        assert!(!placement_requested(&inner_cli));
-        assert_eq!(
-            inner_command,
-            vec!["lf", "-b", "--wave", "goals", "implement", "ship it"]
-        );
-        assert!(inner_cli.batch);
-        assert_eq!(inner_cli.wave.as_deref(), Some("goals"));
-        assert!(matches!(inner_cli.command, Some(Commands::External(_))));
-    }
-
-    /// Batch and steerable are different entrypoints, not one verb reading its
-    /// environment. `lf loop` always names a flow and always carries a seed.
-    #[test]
-    fn loop_parses_blocking_and_detached_batch_forms() {
-        let blocking = Cli::try_parse_from(["lf", "loop", "task", "ship it"]).unwrap();
-        assert!(matches!(
-            blocking.command,
-            Some(Commands::Loop {
-                detach: false,
-                name,
-                seed,
-                ..
-            }) if name == "task" && seed == "ship it"
-        ));
-
-        let detached =
-            Cli::try_parse_from(["lf", "loop", "project", "hold the KR frontier", "--detach"])
-                .unwrap();
-        assert!(matches!(
-            detached.command,
-            Some(Commands::Loop { detach: true, name, .. }) if name == "project"
-        ));
-
-        // A seedless loop has nothing to run: it is a parse error, not a wave.
-        assert!(Cli::try_parse_from(["lf", "loop", "goals"]).is_err());
-    }
-
-    #[test]
-    fn one_pass_loop_is_rejected_before_explicit_wave_resolution() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "--wave",
-            "not-registered",
-            "loop",
-            "task",
-            "ship it",
-            "--max-passes",
-            "1",
-        ])
-        .expect("loop syntax parses");
-
-        let error = validate_loop_command(&cli).expect_err("one pass is a direct flow");
-        assert!(error.to_string().contains("lf flow task \"<seed>\""));
-    }
-
     /// Serving a mind is its own command. Nothing about the ambient
     /// environment can turn one of these into the other.
     #[test]
-    fn serve_and_resident_are_distinct_entrypoints() {
-        let served = Cli::try_parse_from(["lf", "serve", "goals"]).unwrap();
+    fn wave_and_resident_are_distinct_entrypoints() {
+        let served = Cli::try_parse_from(["lf", "wave", "goals"]).unwrap();
         assert!(matches!(
             served.command,
-            Some(Commands::Serve { name, force: false }) if name == "goals"
+            Some(Commands::Wave { name, force: false }) if name == "goals"
         ));
 
-        let forced = Cli::try_parse_from(["lf", "serve", "goals", "--force"]).unwrap();
+        let forced = Cli::try_parse_from(["lf", "wave", "goals", "--force"]).unwrap();
         assert!(matches!(
             forced.command,
-            Some(Commands::Serve { force: true, .. })
+            Some(Commands::Wave { force: true, .. })
         ));
 
         let stopped = Cli::try_parse_from(["lf", "stop", "goals"]).unwrap();
@@ -1221,45 +1420,28 @@ mod tests {
         ));
     }
 
-    /// `wave` became `serve`. The parser can't reject it outright — the
+    /// `serve` is retired. The parser can't reject it outright — the
     /// `external_subcommand` catch-all claims any unmatched verb — so the
     /// property that actually holds is that it no longer names a built-in
     /// command. The exec door denies `External` on top of that.
     #[test]
-    fn old_wave_surface_is_no_longer_a_builtin_command() {
-        let cli = Cli::try_parse_from(["lf", "wave", "goals"]).expect("falls through to external");
+    fn old_serve_surface_is_no_longer_a_builtin_command() {
+        let cli = Cli::try_parse_from(["lf", "serve", "goals"]).expect("falls through to external");
         assert!(
-            matches!(cli.command, Some(Commands::External(parts)) if parts[0] == "wave"),
-            "`wave` survives only as an external verb, not a wave command"
+            matches!(cli.command, Some(Commands::External(parts)) if parts[0] == "serve"),
+            "`serve` survives only as an external verb, not a built-in"
         );
         assert!(matches!(
-            Cli::try_parse_from(["lf", "serve", "goals"])
+            Cli::try_parse_from(["lf", "wave", "goals"])
                 .expect("the replacement")
                 .command,
-            Some(Commands::Serve { .. })
+            Some(Commands::Wave { .. })
         ));
     }
 
     #[test]
     fn removed_dispatch_flag_is_rejected() {
         assert!(Cli::try_parse_from(["lf", "--dispatch", "implement", "ship it"]).is_err());
-    }
-
-    #[test]
-    fn placed_inner_invocation_strips_stack_value_forms() {
-        let spaced: Vec<String> = ["lf", "--stack", "01JSTACK", "implement"]
-            .map(String::from)
-            .to_vec();
-        let (inner_cli, inner_command) = inner_placement_invocation(&spaced).unwrap();
-        assert!(!placement_requested(&inner_cli));
-        assert_eq!(inner_command, vec!["lf", "implement"]);
-
-        let equals: Vec<String> = ["lf", "--stack=01JSTACK", "implement"]
-            .map(String::from)
-            .to_vec();
-        let (inner_cli, inner_command) = inner_placement_invocation(&equals).unwrap();
-        assert!(!placement_requested(&inner_cli));
-        assert_eq!(inner_command, vec!["lf", "implement"]);
     }
 
     #[test]
@@ -1357,42 +1539,6 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_hoists_unambiguous_globals_after_loop() {
-        let args: Vec<String> = [
-            "lf", "loop", "task", "ship it", "-M", "codex", "--wave", "goals", "--detach",
-        ]
-        .map(String::from)
-        .to_vec();
-        let reordered = reorder_args(args);
-        assert_eq!(
-            reordered,
-            vec!["lf", "-M", "codex", "--wave", "goals", "loop", "task", "ship it", "--detach"]
-        );
-        let cli = Cli::try_parse_from(reordered).unwrap();
-        assert_eq!(cli.model.as_deref(), Some("codex"));
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Loop { detach: true, .. })
-        ));
-    }
-
-    #[test]
-    fn reorder_args_accepts_equals_globals_after_command() {
-        let args: Vec<String> = ["lf", "loop", "task", "ship it", "--wave=goals"]
-            .map(String::from)
-            .to_vec();
-        let reordered = reorder_args(args);
-        assert_eq!(
-            reordered,
-            vec!["lf", "--wave=goals", "loop", "task", "ship it"]
-        );
-        assert_eq!(
-            Cli::try_parse_from(reordered).unwrap().wave.as_deref(),
-            Some("goals")
-        );
-    }
-
-    #[test]
     fn reorder_args_preserves_local_collision_after_leading_global() {
         let args: Vec<String> = ["lf", "--wave", "goals", "commit", "-m", "ship it"]
             .map(String::from)
@@ -1401,43 +1547,6 @@ mod tests {
             reorder_args(args),
             vec!["lf", "--wave", "goals", "commit", "-m", "ship it"]
         );
-    }
-
-    #[test]
-    fn reorder_args_keeps_loop_max_turns_local() {
-        let args: Vec<String> = [
-            "lf",
-            "loop",
-            "task",
-            "ship it",
-            "--max-turns",
-            "4",
-            "--wave",
-            "goals",
-        ]
-        .map(String::from)
-        .to_vec();
-        let reordered = reorder_args(args);
-        assert_eq!(
-            reordered,
-            vec![
-                "lf",
-                "--wave",
-                "goals",
-                "loop",
-                "task",
-                "ship it",
-                "--max-turns",
-                "4"
-            ]
-        );
-        assert!(matches!(
-            Cli::try_parse_from(reordered).unwrap().command,
-            Some(Commands::Loop {
-                max_turns: Some(4),
-                ..
-            })
-        ));
     }
 
     #[test]

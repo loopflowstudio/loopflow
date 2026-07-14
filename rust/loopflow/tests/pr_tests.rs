@@ -70,6 +70,28 @@ fn pr_create_calls_gh() {
 }
 
 #[test]
+fn canonical_checkout_refuses_delivery_before_committing_or_pushing() {
+    let repo = TestRepo::new();
+
+    let result = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: Some("must not ship".to_string()),
+            body: None,
+            agent: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(matches!(
+        result,
+        Err(OpsError::Message(message))
+            if message.contains("canonical checkout")
+                && message.contains("lf task run")
+    ));
+}
+
+#[test]
 fn pr_update_refreshes_body() {
     let gh_script = write_gh_script(
         r#"[{"url":"https://example.com/pr/1","state":"OPEN","isDraft":false,"number":1}]"#,

@@ -1,27 +1,22 @@
 ---
-description: Turn a task seed into a computable design doc for one small PR.
+description: Turn one Linear Task directive into a computable change design.
 default_agent: codex
 action_style: procedural
 ---
-Clarify the task into one small PR's worth of work.
+Clarify the exact Task named by `LF_TASK_SESSION_ID`.
 
-## Orientation
+Read the Task seed, current directive, Project definition/KRs, repository
+instructions, current worktree, and any existing design note in `scratch/`.
 
-The task seed is in `<lf:message>` — free text: a sentence, an error paste, a
-file path, sometimes a tracker reference. Read it, then read `scratch/` and
-the repo style guide. This loop owns one design doc and one PR. If the seed
-came from Linear, keep that filed task as the planning record and link the PR
-when it ships; the run row is the active execution record.
+- Acknowledge the current directive with the exact command in the session seed
+  before editing.
+- Keep the design to this Task's one worktree and one PR. Do not select backlog
+  work, start another Task Session, or create a second worktree.
+- Write or tighten the single Task design note only when the change is not yet
+  computable. Preserve a clear existing design.
+- Resolve reversible ambiguity with the simpler path. Request a durable
+  supervisor decision when the choice changes scope, behavior, or authority.
+- Do not implement beyond a trivial probe that makes the design computable.
 
-## Work
-
-- If `scratch/<branch>.md` already gives a clear build plan, leave it alone.
-- If the design doc is missing or too vague to compute from, write the
-  smallest useful `scratch/<branch>.md`.
-- If the seed references something external (a tracker id, a URL) read it if
-  you cheaply can; if auth fails, work from the seed text alone and note it.
-- Record genuine ambiguity in `scratch/questions.md`, choose the simpler
-  path, and keep moving.
-
-Do not implement product code in this phase unless the clarification is
-trivial and directly unblocks the next phase.
+Leave the pursue phase a concrete build and verification target. The Task
+runner advances the flow; write no loop bit.

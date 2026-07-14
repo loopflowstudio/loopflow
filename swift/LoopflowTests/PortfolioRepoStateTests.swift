@@ -6,55 +6,37 @@ import Testing
 @MainActor
 @Suite("Portfolio Repo State")
 struct PortfolioRepoStateTests {
-    @Test("summary metrics count blocked and diff totals")
-    func summaryMetrics() {
-        let repoURL = URL(fileURLWithPath: "/tmp/portfolio-state")
-        let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
-
-        state.applyConnectedWaves([
-            makeWave(id: "running", repoPath: repo.path, status: .running, diffStat: " 1 files changed, 8 insertions(+), 2 deletions(-)"),
-            makeWave(id: "waiting", repoPath: repo.path, status: .waiting, diffStat: " 2 files changed, 3 insertions(+), 7 deletions(-)"),
-            makeWave(id: "failed", repoPath: repo.path, status: .failed, diffStat: " 1 files changed, 4 insertions(+), 0 deletions(-)"),
-        ])
-
-        #expect(state.blockedCount == 1)
-        #expect(state.totalDiff.insertions == 15)
-        #expect(state.totalDiff.deletions == 9)
-    }
-
     @Test("connected waves keep only this repo's rows")
     func connectedWavesScopedToRepo() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-scope")
         let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
+        let state = PortfolioRepoState(repo: repo)
 
-        let mine = makeWave(id: "mine", repoPath: repo.path, status: .running, diffStat: nil)
+        let mine = makeWave(id: "mine", repoPath: repo.path, status: .running)
         let other = makeWave(
             id: "other",
             repoPath: URL(fileURLWithPath: "/tmp/portfolio-other").normalizedFilePath,
-            status: .running,
-            diffStat: nil
+            status: .running
         )
         state.applyConnectedWaves([mine, other])
 
         #expect(state.waves.map(\.id) == ["mine"])
     }
 
-    @Test("waves sort by attention priority")
-    func wavesSortByAttentionPriority() {
+    @Test("waves sort by presence before name")
+    func wavesSortByPresenceBeforeName() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-priority")
         let repo = PortfolioRepo(path: repoURL.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
+        let state = PortfolioRepoState(repo: repo)
 
         state.applyConnectedWaves([
-            makeWave(id: "running", repoPath: repo.path, status: .running, diffStat: nil),
-            makeWave(id: "idle", repoPath: repo.path, status: .idle, diffStat: nil),
-            makeWave(id: "waiting", repoPath: repo.path, status: .waiting, diffStat: nil),
-            makeWave(id: "failed", repoPath: repo.path, status: .failed, diffStat: nil),
+            makeWave(id: "running-b", repoPath: repo.path, status: .running),
+            makeWave(id: "idle", repoPath: repo.path, status: .idle),
+            makeWave(id: "paused", repoPath: repo.path, status: .paused),
+            makeWave(id: "running-a", repoPath: repo.path, status: .running),
         ])
 
-        #expect(state.waves.map(\.id) == ["failed", "waiting", "running", "idle"])
+        #expect(state.waves.map(\.id) == ["running-a", "running-b", "paused", "idle"])
     }
 
     @Test("wave agent session name mirrors lf tmux handle")
@@ -107,6 +89,13 @@ struct PortfolioRepoStateTests {
         )
         #expect(probeName == launchName)
         #expect(probeName == "lf-repo-goals", "named after the origin, not the worktree")
+
+        let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, lastOpened: Date())
+        let state = PortfolioRepoState(repo: repo)
+        state.applyConnectedWaves([
+            makeWave(id: "goals", repoPath: origin.path.normalizedFilePath, status: .running),
+        ])
+        #expect(state.waves.map(\.id) == ["goals"], "a dev worktree sees its origin's registry row")
     }
 
     @Test("createWave writes GOAL.md at the origin repo, not the worktree")
@@ -141,7 +130,7 @@ struct PortfolioRepoStateTests {
         try git(["worktree", "add", "-q", worktree.path], at: origin)
 
         let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, lastOpened: Date())
-        let state = PortfolioRepoState(repo: repo, connection: .local, token: nil)
+        let state = PortfolioRepoState(repo: repo)
         try await state.createWave(name: "goals")
 
         let originGoal = origin.appendingPathComponent("wave/goals/GOAL.md")
@@ -151,17 +140,12 @@ struct PortfolioRepoStateTests {
         #expect(!FileManager.default.fileExists(atPath: worktreeGoal.path), "nothing written into the worktree")
     }
 
-    private func makeWave(id: String, repoPath: String, status: WaveStatus, diffStat: String?) -> Wave {
+    private func makeWave(id: String, repoPath: String, status: WaveStatus) -> Wave {
         Wave(
             id: id,
             name: id,
             repo: repoPath,
-            direction: [],
-            area: ["."],
-            triggers: [],
-            status: status,
-            iteration: 0,
-            diffStat: diffStat
+            status: status
         )
     }
 }

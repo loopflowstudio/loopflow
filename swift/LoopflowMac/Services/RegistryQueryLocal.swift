@@ -1,5 +1,5 @@
 // The local macOS registry query: `RegistryQuery` backed by a launcher-resolved
-// `lf`. Discovery and history are `lf` subprocesses over `lfdb`, run off the
+// `lf`. Discovery and history are `lf` subprocesses over the local store, run off the
 // main actor so a slow query never stalls the UI.
 
 #if os(macOS)

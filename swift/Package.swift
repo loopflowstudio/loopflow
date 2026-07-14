@@ -2,9 +2,7 @@
 
 import PackageDescription
 
-// SwiftPM builds the cross-platform `Loopflow` library and the macOS app
-// (`LoopflowMac`) — the `swift build` / `swift test` / CI path. The iOS app
-// (`LoopflowiOS`) is built through xcodegen + Xcode; see project.yml.
+// SwiftPM builds the cross-platform `Loopflow` library and the macOS app.
 let package = Package(
     name: "LoopflowSwift",
     platforms: [
@@ -37,21 +35,16 @@ let package = Package(
             name: "LoopflowMac",
             dependencies: [
                 "Loopflow",
-                .target(
-                    name: "GhosttyKit",
-                    condition: .when(platforms: [.macOS])
-                ),
+                .target(name: "GhosttyKit", condition: .when(platforms: [.macOS])),
             ],
             path: "LoopflowMac",
             exclude: [
                 "Info.plist",
                 "Loopflow.sdef",
                 "Loopflow.entitlements",
-                "UX_DESIGN.md",
                 "AppIcon.icns",
                 "logo.svg",
                 "dmg-background.png",
-                "Services/Ghostty/README.md",
             ],
             swiftSettings: [
                 .define("GHOSTTY_ENABLED", .when(platforms: [.macOS])),

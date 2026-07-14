@@ -7,7 +7,7 @@
 //! die with the process. The remote host stays a stateless compute surface.
 //!
 //! Forwarded bundle: GitHub (`gh`), Claude/agent OAuth, and — the capability
-//! beyond the shell prototype — the PM/Linear token, which lives in lfdb rather
+//! beyond the shell prototype — the PM/Linear token, which lives in store rather
 //! than the environment. The remote `resolve_pm_token` reads
 //! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf pm` works.
 //!
@@ -25,7 +25,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context};
 
-use crate::lfd::pm::PmProviderKind;
+use crate::pm::PmProviderKind;
 use crate::provider_auth::extract_claude_token;
 
 /// Default repository path (relative to `$HOME`) the remote command runs in.
@@ -131,11 +131,11 @@ fn resolve_doppler_secret(name: &str) -> anyhow::Result<String> {
     Ok(value)
 }
 
-/// PM/Linear access token from the local lfdb credential store. Absent when no
+/// PM/Linear access token from the local store credential store. Absent when no
 /// store exists or no Linear credential is stored.
 async fn resolve_pm_token() -> Option<String> {
-    let cfg = crate::lfd::storage_config_from_env().ok()?;
-    let store = crate::lfdb::open_store(&cfg).await.ok()?;
+    let cfg = crate::store::storage_config_from_env().ok()?;
+    let store = crate::store::open_store(&cfg).await.ok()?;
     let token = store
         .get_provider_token(PmProviderKind::Linear.as_str())
         .await

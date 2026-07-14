@@ -222,18 +222,11 @@ fn claude_trace_multi_tool_lifecycle() {
 fn codex_trace_normal_turn() {
     let events = replay_codex_trace("codex_normal_turn.jsonl");
     let event_types: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
-    // userMessage item echoes and status/rateLimit notifications produce no
-    // events; tokenUsage folds into the trailing turn_usage.
+    // User echoes, the completed copy of streamed agent prose, and status
+    // notifications produce no events; tokenUsage folds into turn_usage.
     assert_eq!(
         event_types,
-        vec![
-            "turn_started",
-            "item_started",
-            "text_delta",
-            "item_completed",
-            "turn_completed",
-            "turn_usage",
-        ]
+        vec!["turn_started", "text_delta", "turn_completed", "turn_usage",]
     );
     assert!(matches!(
         events
@@ -245,13 +238,8 @@ fn codex_trace_normal_turn() {
         })
     ));
     assert!(matches!(
-        events
-            .iter()
-            .find(|event| matches!(event, ConversationEvent::ItemCompleted { .. })),
-        Some(ConversationEvent::ItemCompleted {
-            item: ConversationItem::Message { ref text, ref phase, .. },
-            ..
-        }) if text == "OK" && phase.as_deref() == Some("final_answer")
+        events.get(1),
+        Some(ConversationEvent::TextDelta { content, .. }) if content == "OK"
     ));
     assert!(matches!(
         events.last(),

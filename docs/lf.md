@@ -5,7 +5,9 @@ title: lf Command Reference
 
 # lf Command Reference
 
-`lf` is a prompt launcher. Every command launches a prompt—assembling context and passing it to Claude, Codex, Gemini, or OpenCode.
+`lf` launches prompts and operates durable Waves, Projects, and Tasks. Prompt
+commands assemble context for Claude, Codex, Gemini, or OpenCode; lifecycle and
+repository commands use the same CLI.
 
 ## Basic Usage
 
@@ -28,7 +30,7 @@ lf office-hours                   # bare name works when unambiguous
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
-lf --wave designer loop task "fix the flaky test"   # loop task until the PR merges
+lf task run DES-123 --directive "fix the flaky test" # keep one Task through merge
 ```
 
 ## Skills
@@ -58,8 +60,11 @@ Write global flags before a built-in subcommand. Unambiguous flags also work
 after it:
 
 ```bash
-lf --wave designer loop task "fix the flaky test"   # canonical
-lf loop task "fix the flaky test" --wave designer   # accepted and normalized
+lf task run DES-123 --json                           # durable Task Session
+lf task status DES-123 --json                        # same identity and worktree
+lf task changes DES-123 --json                       # committed + working changes
+lf task diff DES-123 src/parser.rs --json            # one file's Task patch
+lf task file DES-123 src/parser.rs --json            # current worktree contents
 lf pm --wave designer show                           # normalized onto `show`
 lf pm task --wave designer create --title "Fix it"  # normalized onto `create`
 lf commit -m "explain the change"                   # -m remains commit-local
@@ -135,32 +140,36 @@ lf ship -w feature-branch
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
-## Running Loops
+## Running Waves, Projects, and Tasks
 
 ```bash
-lf serve designer                                  # start the named mind
+lf wave designer                                   # start the named Wave
 lf stop designer                                   # stop its listener and resident
-lf --wave designer loop task "fix the flaky chord-timeout test"
-lf --wave designer loop task "…" --max-passes 4 --wall-clock-secs 3600
-lf --wave designer loop scan-pass "scan the runtime" --detach
+lf project run <linear-project-id>                  # durable Project Session
+lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
+lf task run DES-123 --directive "fix the parser before the docs"
+lf task steer DES-123 "rename the flag"
+lf task interrupt DES-123 --message "take the smaller approach"
+lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
+lf task acknowledge DES-123 --directive 2 --summary "the smaller parser path is active"
+lf task decide DES-123 DECISION_ID approve
+lf task wait DES-123
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
-With one name, `lf serve <name>` starts that mind and its persistent playhead;
-`lf stop <name>` shuts it down without touching detached worker loops.
-With a flow plus free text, it creates a child worktree and loops until the
-flow's skills write `done` to `scratch/loop.yaml` (`task`: when the PR merges).
-Loops allow at least two passes; run the flow directly for one-shot work.
-Without `--detach` the caller owns the loop and blocks; with `--detach` the
-already-running wave server owns it and returns a read-only tmux inspection
-session. Detach only when the parent has another useful move while the loop
-runs. Linear holds filed tasks,
-`lf runs` shows active hands, and merged PRs record done.
+`lf wave <name>` starts the durable Wave listener, resident, and persistent
+playhead. A Project Session pursues one Linear Project's KRs without a
+worktree. Every Task requires that Project Session; `task start/run` ensures it
+before reserving the Task. The Task starts only after its Linear issue exists,
+owns one immutable worktree and provider transcript, and remains resumable
+through review and merge.
+`lf task attach` exposes a writable prompt that records structured commands;
+terminal bytes never drive the provider directly.
 
 ## Speaking to Waves
 
 Two wires, not one. The **thread** is the human surface: durable, replayed,
-owned by a served mind. The **bus** is how agents call to each other: a table in
+owned by a running Wave. The **bus** is how agents call to each other: a table in
 the shared store, ephemeral, no server in the path.
 
 ```bash
@@ -179,7 +188,9 @@ lf memory update < MEMORY.md                # replace it from stdin
 | `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays and follows while typed lines post, `/status` reads health, and `/quit` leaves. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
 | `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact |
 
-Both default to the invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
+Managed sessions default to their invoking Wave through `LF_WAVE_ID`. From a
+human shell, pass `--wave`; repository location does not identify one of the
+Waves sharing `main`.
 
 | Flag | Description |
 |------|-------------|
@@ -203,13 +214,13 @@ A subscription is a prefix, so `lf radio sub infra` hears the whole family.
 | Command | What it does |
 |---------|--------------|
 | `lf radio pub [TEXT]` | Broadcast one frame on a channel. An INSERT into the shared store, so it works with no wave running; reads stdin when TEXT is omitted. No channel resolves, or no store on this machine — the broadcast drops with exit 0 |
-| `lf radio sub [CHANNEL] [--json]` | Tune in to a channel and its descendants until killed. Never opens a socket — the served mind need not exist |
+| `lf radio sub [CHANNEL] [--json]` | Tune in to a channel and its descendants until killed. Never opens a socket — the Wave need not be running |
 
 Broadcast, not delivery. `lf radio sub` tunes in at the head and hears only what is
 said while it listens: nothing is replayed, and a frame published to a channel
 nobody was on is gone. A frame survives one hour, then the sweeper takes it —
 the bus is a wire, and `lf runs` plus the merged PR are the records of record. A
-served mind is the one durable subscriber: it polls from a saved cursor, so it
+running Wave is the one durable subscriber: it polls from a saved cursor, so it
 catches its hands' reports across a restart, and when a frame aged out before it
 woke, the miss is announced in its thread rather than passed over in silence.
 

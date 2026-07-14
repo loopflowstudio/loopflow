@@ -1,31 +1,21 @@
 ---
-description: Retire or renew KRs; flip the loop bit only when all KRs hold.
+description: Judge one Project's KR evidence after pursuit.
 default_agent: codex
 action_style: procedural
 ---
-Mutate the project honestly. The loop's termination mechanics are in the
-`<lf:loop>` instruction; this is the judgment about WHEN.
+Judge the exact Project after this pursuit pass.
 
-## Orientation
+Read its authoritative Linear definition/KRs, filed Tasks, supervised Task
+Session state, merged PR evidence, decisions, and linked observations.
 
-Read the authoritative KR set with `lf pm show --wave <wave> --project
-<project> --json --no-sync`; check filed tasks in that snapshot, running tasks with `lf
-runs`, and merged PRs with `gh`.
+- Check a KR only when its observable condition holds. Endurance KRs require
+  their full duration; a single demo or implementation receipt is not proof.
+- Renew self-renewing KRs through `lf pm project update` when their stated
+  condition requires it.
+- Distinguish active child work, an external wait, a missing decision, a real
+  blocker, and a no-progress pass.
+- Escalate only choices that need Wave judgment. Never create a second Project
+  or edit repository files.
 
-## Work
-
-- Check off a KR only after verifying its observable condition yourself.
-  Endurance KRs mean what they say: a counted streak isn't satisfied by one
-  good day, and any human rescue inside an unattended window resets it.
-- Renew self-renewing KRs with `lf pm project update`; the write refreshes the
-  local SQLite snapshot before returning.
-- Tasks still running and nothing left to decompose → hand the wait to the
-  runner with a recheck on the state you are waiting for (e.g. a
-  `gh pr view` on a task's PR).
-- Blocked on missing authority, credentials, or strategy → escalate with
-  `lf radio pub --parent` and record the blocker.
-
-The project's real-world condition: **every KR's observable condition is
-true.** You both drive the KRs there and decide that checking each one means
-flipping the bit — a self-renewing KR that respawned keeps the project
-running.
+Return a concise evidence summary. The Project runner independently reads PM
+and Task state to choose repeat, wait, block, or complete; write no loop bit.

@@ -1,10 +1,9 @@
 //! Provider auth flows: device-code/browser OAuth for the agent and PM
 //! providers, token extraction from vendor CLI artifacts, and store-direct
-//! persistence into lfdb provider tokens.
+//! persistence into store provider tokens.
 //!
-//! Shared home — called in-process by `lf auth` and wrapped by the daemon's
-//! HTTP routes. Must not depend on daemon (`lfd`) types; auth lifecycle
-//! notifications go through [`AuthEventSink`]. Auth is poll-only in the base
+//! Shared home — called in-process by `lf auth`. Auth lifecycle notifications
+//! go through [`AuthEventSink`]. Auth is poll-only in the base
 //! wave model (see `scratch/eventing.md` §5), so both the CLI and the HTTP
 //! routes pass [`no_event_sink`] — the store write is the record; a caller
 //! reads it back by querying the provider list.
@@ -37,10 +36,10 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::lfdb::{CredentialType, ProviderToken, SharedStore};
 use crate::provider_auth::credential_socket::{
     AuthStartResponse, CredentialSocketClient, CredentialSocketError,
 };
+use crate::store::{CredentialType, ProviderToken, SharedStore};
 
 const AUTH_URL_TIMEOUT: Duration = Duration::from_secs(20);
 const AUTH_URL_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -687,7 +686,7 @@ impl std::fmt::Debug for ProviderAuthService {
 
 impl ProviderAuthService {
     pub fn new(store: SharedStore) -> Self {
-        if let Ok(socket_path) = std::env::var("LFD_CREDENTIAL_SOCKET") {
+        if let Ok(socket_path) = std::env::var("LF_CREDENTIAL_SOCKET") {
             let trimmed = socket_path.trim();
             if !trimmed.is_empty() {
                 let client = Arc::new(CredentialSocketClient::new(PathBuf::from(trimmed)));
@@ -793,7 +792,7 @@ impl ProviderAuthService {
         debug!(provider = %provider, ?status, "broker check_status result (no stored token)");
 
         // If the CLI reports Active but we have no stored token, auto-persist it.
-        // This handles providers where the user logged in outside of lfd
+        // This handles providers where the user logged in outside Loopflow
         // (e.g., `doppler login` in a terminal).
         if matches!(&status, AuthStatus::Active { .. }) {
             if let Some(store) = &self.store {
@@ -1348,7 +1347,7 @@ async fn extract_doppler_token() -> Option<ProviderToken> {
         oauth_client_id: None,
         expires_at: None,
         login: None,
-        updated_at: crate::lfdb::rows::now_unix(),
+        updated_at: crate::store::rows::now_unix(),
         credential_type: CredentialType::OAuth,
     })
 }
@@ -2597,7 +2596,7 @@ pub fn env_var_for_token(token: &ProviderToken) -> Option<(String, String)> {
 /// Build env vars for all stored provider tokens. Used by executors to inject
 /// credentials into agent processes. The env var chosen depends on the token's
 /// credential_type (oauth vs apikey).
-pub async fn provider_env_vars(store: &crate::lfdb::Store) -> Vec<(String, String)> {
+pub async fn provider_env_vars(store: &crate::store::Store) -> Vec<(String, String)> {
     let tokens = match store.list_provider_tokens().await {
         Ok(tokens) => tokens,
         Err(_) => return Vec::new(),
@@ -3012,7 +3011,7 @@ mod tests {
         let db_path =
             std::env::temp_dir().join(format!("provider-auth-test-{}.db", Uuid::new_v4().simple()));
         Arc::new(
-            crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(db_path))
+            crate::store::open_store(&crate::store::StorageConfig::sqlite(db_path))
                 .await
                 .expect("open sqlite store"),
         )
@@ -3581,8 +3580,8 @@ mod tests {
     #[tokio::test]
     async fn provider_env_vars_includes_opencode_zen_token_for_opencode_harness() {
         let tmp = tempdir().expect("tempdir");
-        let store = crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(
-            tmp.path().join("lfd.db"),
+        let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
+            tmp.path().join("loopflow.db"),
         ))
         .await
         .expect("open sqlite store");
@@ -3745,8 +3744,8 @@ mod tests {
     #[tokio::test]
     async fn provider_env_vars_returns_correct_vars_for_mixed_credential_types() {
         let tmp = tempdir().expect("tempdir");
-        let store = crate::lfdb::open_store(&crate::lfdb::StorageConfig::sqlite(
-            tmp.path().join("lfd.db"),
+        let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
+            tmp.path().join("loopflow.db"),
         ))
         .await
         .expect("open sqlite store");

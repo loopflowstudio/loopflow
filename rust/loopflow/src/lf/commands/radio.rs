@@ -2,12 +2,12 @@
 //!
 //! The bus is a table in the shared store, so publishing is an INSERT and
 //! nothing else: no endpoint, no HTTP, no served wave. `lf radio pub` works with
-//! zero loopflow processes running, and two detached hands hear each other
+//! zero loopflow processes running, and two Task Sessions hear each other
 //! with no mind awake between them.
 //!
 //! # Targeting
-//! - default: the invoking context's channel — `LFD_CHANNEL` (set by dispatch),
-//!   else `LFD_WAVE_ID`, else the worktree name, which IS the channel name.
+//! - default: the invoking context's channel — `LF_CHANNEL` (set by dispatch),
+//!   else `LF_WAVE_ID`.
 //! - `--channel <name>`: any name on the bus. Whoever is tuned in hears it.
 //! - `--parent`: the parent wave's channel, walked through the registry.
 //!
@@ -25,13 +25,13 @@
 
 use anyhow::{anyhow, Result};
 
-use crate::engine::wave_context::{resolve_ambient_channel, AmbientWaveRef};
+use crate::engine::wave_context::{resolve_ambient_channel, AmbientChannelRef};
 use crate::lf::commands::chat::{parent_wave, CliContext};
 use crate::lf::commands::util::message_text;
-use crate::lfd::types::Wave;
-use crate::lfdb::SharedStore;
+use crate::store::SharedStore;
 use crate::wave::channel::family_head;
 use crate::wave::runtime::wave_channel_name;
+use crate::wave::Wave;
 
 pub fn run_pub(
     text_args: &[String],
@@ -91,23 +91,21 @@ impl AmbientWave {
     }
 }
 
-/// The invoking context: the shared ambient rule (`LFD_CHANNEL`, else
-/// `LFD_WAVE_ID`, else the worktree name), with the wave row resolved when the
-/// registry has it.
+/// The invoking context: the shared ambient rule (`LF_CHANNEL`, else
+/// `LF_WAVE_ID`), with the Wave row resolved when the registry has it.
 pub(crate) async fn ambient_wave(context: &CliContext, store: &SharedStore) -> Option<AmbientWave> {
     match resolve_ambient_channel(
         context.env_channel.as_deref(),
         context.env_wave_id.as_deref(),
-        context.repo.as_deref(),
     )? {
-        AmbientWaveRef::Id(id) => {
+        AmbientChannelRef::WaveId(id) => {
             let row = store.get_wave(&id.parse().ok()?).await.ok().flatten()?;
             Some(AmbientWave {
                 channel: wave_channel_name(row.name()),
                 row: Some(row),
             })
         }
-        AmbientWaveRef::Name(name) => {
+        AmbientChannelRef::Channel(name) => {
             let row = store
                 .get_wave_by_name(family_head(&name))
                 .await
@@ -142,8 +140,8 @@ async fn target_channel(
         .and_then(|ambient| ambient.row.as_ref())
         .ok_or_else(|| {
             anyhow!(
-                "cannot resolve the invoking wave for --parent: no LFD_CHANNEL or \
-             LFD_WAVE_ID in env and no registered wave matches this worktree"
+                "cannot resolve the invoking wave for --parent: no LF_CHANNEL or \
+                 LF_WAVE_ID in env"
             )
         })?;
     let parent = parent_wave(store, own).await?;
@@ -206,7 +204,7 @@ mod tests {
         assert_eq!(rows[0].channel, "ship.148e", "where it actually arrived");
     }
 
-    /// Two detached hands exchange messages with no served wave: one publishes,
+    /// Two Task Sessions exchange messages with no served Wave: one publishes,
     /// the other reads it off the table.
     #[tokio::test]
     async fn two_hands_converse_with_no_served_wave() {
@@ -246,7 +244,7 @@ mod tests {
 
     /// `--parent` walks the registry row, not the channel name. A wave whose
     /// name sanitizes (`web/ui` → channel `web-ui`) would never find itself by
-    /// channel name, so escalation resolves through `LFD_WAVE_ID`'s row.
+    /// channel name, so escalation resolves through `LF_WAVE_ID`'s row.
     #[tokio::test]
     async fn parent_escalation_walks_the_wave_row_of_a_sanitized_name() {
         let tmp = tempfile::tempdir().expect("tempdir");

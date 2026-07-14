@@ -1,12 +1,11 @@
 use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch, sync_main};
-use crate::engine::identity::WaveId;
+use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
     create_from_placement_plan, list_worktrees, main_repo_root, plan_placement,
-    wave_name_from_worktree, wave_name_from_worktree_and_main, worktree_path, PlacementRequest,
-    PlacementStrategy, WorktreeSegment,
+    sibling_worktree_name, sibling_worktree_name_with_main, PlacementStrategy, WorktreeSegment,
 };
 use crate::engine::{
     prepare_launch_prompt, sync_skills, ContextSourceOverrides, LaunchPromptInput,
@@ -20,10 +19,11 @@ use crate::lf::{
 };
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, commit_workflow, create_or_update_pr, current_pr, land, plan_rebase,
-    rebase_class_name, rebase_strategy_name, rebase_with_recovery, release_bump, release_check,
-    release_notes, release_run, release_status, release_tag, submit, AbandonOptions, CommitOptions,
-    CronSpec, LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
+    abandon_branch, abort_rebase_for_resolution, commit_workflow, continue_rebase_for_resolution,
+    create_or_update_pr, current_pr, land, plan_rebase, rebase_class_name, rebase_strategy_name,
+    rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
+    release_tag, start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronSpec,
+    LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
 };
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
@@ -134,15 +134,47 @@ impl Progress for CliProgress {
     }
 }
 
-pub fn run_rebase(onto: Option<&str>, plan_only: bool) -> Result<()> {
+pub fn run_rebase(
+    onto: Option<&str>,
+    plan_only: bool,
+    manual: bool,
+    continue_rebase: bool,
+    abort: bool,
+) -> Result<()> {
     let progress = &CliProgress;
     let repo_root = find_repo_root()?;
+    if onto.is_some() && (continue_rebase || abort) {
+        return Err(anyhow!(
+            "a rebase target cannot be combined with --continue or --abort"
+        ));
+    }
+    if continue_rebase {
+        continue_rebase_for_resolution(&repo_root)?;
+        progress.status("Rebase complete; branch remains local.");
+        return Ok(());
+    }
+    if abort {
+        abort_rebase_for_resolution(&repo_root)?;
+        progress.status("Rebase aborted.");
+        return Ok(());
+    }
     let started = Instant::now();
     let plan = plan_rebase(&repo_root, onto)?;
     let onto_ref = plan.base_ref.clone();
     if plan_only {
         print_rebase_plan(&plan);
         return Ok(());
+    }
+    if manual {
+        return start_rebase_for_resolution(
+            &repo_root,
+            &RebaseOptions {
+                onto: onto_ref,
+                push: false,
+            },
+            progress,
+        )
+        .map_err(Into::into);
     }
     match rebase_with_recovery(
         &repo_root,
@@ -159,7 +191,6 @@ pub fn run_rebase(onto: Option<&str>, plan_only: bool) -> Result<()> {
                     "op": "rebase",
                     "branch": plan.branch,
                     "base_ref": plan.base_ref,
-                    "stack_parent": plan.stack_parent,
                     "class": rebase_class_name(&plan.class),
                     "strategy": rebase_strategy_name(&plan.strategy),
                     "unique_commits": plan.unique_commits,
@@ -187,9 +218,6 @@ pub fn run_rebase(onto: Option<&str>, plan_only: bool) -> Result<()> {
 fn print_rebase_plan(plan: &crate::ops::RebasePlan) {
     println!("branch: {}", plan.branch);
     println!("base: {}", plan.base_ref);
-    if let Some(parent) = plan.stack_parent.as_deref() {
-        println!("stack_parent: {parent}");
-    }
     println!("class: {}", rebase_class_name(&plan.class));
     println!("strategy: {}", rebase_strategy_name(&plan.strategy));
     println!("unique_commits: {}", plan.unique_commits);
@@ -370,8 +398,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                 vec![wave
                     .clone()
                     .or_else(|| wave_flag.clone())
-                    .or_else(|| crate::ops::util::resolve_wave_name(&repo_root, None))
-                    .ok_or_else(|| anyhow!("cannot determine wave name"))?]
+                    .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?]
             };
             for wave in targets {
                 let result = crate::ops::pm::pm_init(
@@ -664,7 +691,7 @@ struct PmTaskRow {
     rank: u32,
 }
 
-fn format_pm_task_table(items: &[crate::lfd::pm::PmItem]) -> Vec<String> {
+fn format_pm_task_table(items: &[crate::pm::PmItem]) -> Vec<String> {
     let mut rows: Vec<_> = items
         .iter()
         .map(|item| PmTaskRow {
@@ -701,13 +728,14 @@ fn format_pm_task_table(items: &[crate::lfd::pm::PmItem]) -> Vec<String> {
 #[cfg(test)]
 mod pm_output_tests {
     use super::format_pm_task_table;
-    use crate::lfd::pm::PmItem;
+    use crate::pm::PmItem;
 
     #[test]
     fn task_table_is_aligned_complete_and_open_first() {
         let lines = format_pm_task_table(&[
             PmItem {
                 id: "done-1".to_string(),
+                identifier: "INF-1".to_string(),
                 name: "Done task".to_string(),
                 description: String::new(),
                 rank: 0,
@@ -717,6 +745,7 @@ mod pm_output_tests {
             },
             PmItem {
                 id: "open-1".to_string(),
+                identifier: "INF-2".to_string(),
                 name: "Longer\ntitle".to_string(),
                 description: String::new(),
                 rank: 1,
@@ -899,15 +928,8 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
 
 pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
-        WtCommand::Create {
-            name,
-            child,
-            sibling: _,
-            plan,
-        } => wt_create(name, child.as_deref(), *plan),
+        WtCommand::Create { name, plan } => wt_create(name, *plan),
         WtCommand::Switch { name } => wt_switch(name),
-        WtCommand::Up => wt_up(),
-        WtCommand::Down { name } => wt_down(name.as_deref()),
         WtCommand::List { format, .. } => wt_list(format.as_deref()),
         WtCommand::Remove { name, force } => wt_remove(name, *force),
         WtCommand::Prune {
@@ -918,39 +940,16 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     }
 }
 
-fn wt_create(name: &str, child: Option<&str>, dry_run: bool) -> Result<()> {
+fn wt_create(name: &str, dry_run: bool) -> Result<()> {
     let started = Instant::now();
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let segment = WorktreeSegment::parse(name)?;
-    let current = current_branch(&repo_root)?;
-    // Sibling (the default) roots from the default branch. A child stacks under
-    // its parent — opt-in only via --child, so ad-hoc worktrees never nest off
-    // the current feature branch by accident.
-    let request = if let Some(parent) = child {
-        let parent = if parent == "__current__" {
-            current
-                .as_deref()
-                .ok_or_else(|| anyhow!("not on a branch"))?
-                .to_string()
-        } else {
-            parent.to_string()
-        };
-        PlacementRequest::Stack { parent, segment }
-    } else {
-        PlacementRequest::Main { segment }
-    };
 
     let default_branch = get_default_branch(&main_repo)?;
-    let sync_default_base = match &request {
-        PlacementRequest::Main { .. } => true,
-        PlacementRequest::Stack { .. } => false,
-    };
-    if sync_default_base {
-        let _ = sync_main(&main_repo, &default_branch);
-    }
+    let _ = sync_main(&main_repo, &default_branch);
 
-    let placement = plan_placement(&main_repo, request)?;
+    let placement = plan_placement(&main_repo, segment)?;
 
     if dry_run {
         print_placement_plan(&placement);
@@ -964,9 +963,7 @@ fn wt_create(name: &str, child: Option<&str>, dry_run: bool) -> Result<()> {
             "op": "wt.create",
             "branch": placement.branch,
             "base_ref": placement.base_ref,
-            "stack_parent": placement.parent_branch,
             "strategy": placement_strategy_name(&placement.strategy),
-            "stack_depth": placement.stack_depth,
             "duration_ms": started.elapsed().as_millis(),
             "exit_status": "ok",
         }),
@@ -981,7 +978,7 @@ fn wt_create(name: &str, child: Option<&str>, dry_run: bool) -> Result<()> {
         println!("Branch: {}", result.branch);
     }
     if let Some(base_branch) = result.base_branch {
-        println!("Base: {}", base_branch);
+        println!("Base: {base_branch}");
     }
 
     if !write_shell_directive(&format!("cd {}", result.path.display()))? {
@@ -995,18 +992,13 @@ fn wt_create(name: &str, child: Option<&str>, dry_run: bool) -> Result<()> {
 fn print_placement_plan(plan: &crate::engine::worktrees::PlacementPlan) {
     println!("branch: {}", plan.branch);
     println!("base: {}", plan.base_ref);
-    if let Some(parent) = plan.parent_branch.as_deref() {
-        println!("parent: {parent}");
-    }
     println!("worktree: {}", plan.worktree_path.display());
-    println!("stack_depth: {}", plan.stack_depth);
     println!("strategy: {}", placement_strategy_name(&plan.strategy));
 }
 
 fn placement_strategy_name(strategy: &PlacementStrategy) -> &'static str {
     match strategy {
-        PlacementStrategy::CreateRoot => "create_root",
-        PlacementStrategy::CreateStackChild => "create_stack_child",
+        PlacementStrategy::Create => "create",
         PlacementStrategy::CheckoutExisting => "checkout_existing",
         PlacementStrategy::UseExistingWorktree => "use_existing_worktree",
     }
@@ -1051,48 +1043,30 @@ fn wt_switch(name: &str) -> Result<()> {
     {
         exact_branch_match
     } else {
-        // Path-guessing only applies to a bare wave/dir name. A full `user/…`
-        // branch spec must resolve via an exact branch match (handled above) or
-        // the wave-name match below — never by landing in whatever worktree
-        // happens to occupy the guessed directory.
-        let target = worktree_path(&main_repo, name);
-        if target.exists() && !name.contains('/') {
-            target
+        let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
+        let mut matches = worktrees
+            .into_iter()
+            .filter(|wt| {
+                let wt_name = sibling_worktree_name_with_main(&wt.path, &main_repo);
+                let parsed = wt
+                    .branch
+                    .as_deref()
+                    .and_then(|branch| WorktreeName::parse(branch, &user));
+                wt_name.as_deref() == Some(name)
+                    || wt
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy() == name)
+                        .unwrap_or(false)
+                    || parsed.as_ref().map(|id| id.name() == name).unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+        if matches.len() == 1 {
+            matches.remove(0).path
+        } else if matches.is_empty() {
+            return Err(anyhow!("no worktree found for '{}'", name));
         } else {
-            let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
-            let mut matches = worktrees
-                .into_iter()
-                .filter(|wt| {
-                    let wt_name = wave_name_from_worktree_and_main(&wt.path, &main_repo);
-                    // Match a chain leaf or wave name too, so `fix-auth` finds
-                    // the `…bugs.fix-auth…` worktree without the full chain.
-                    let id = wt
-                        .branch
-                        .as_deref()
-                        .and_then(|branch| WaveId::parse(branch, &user));
-                    wt_name.as_deref() == Some(name)
-                        || wt_name
-                            .as_ref()
-                            .map(|n| n.starts_with(&format!("{name}.")))
-                            .unwrap_or(false)
-                        || wt
-                            .path
-                            .file_name()
-                            .map(|n| n.to_string_lossy() == name)
-                            .unwrap_or(false)
-                        || id
-                            .as_ref()
-                            .map(|id| id.leaf() == name || id.wave_name() == name)
-                            .unwrap_or(false)
-                })
-                .collect::<Vec<_>>();
-            if matches.len() == 1 {
-                matches.remove(0).path
-            } else if matches.is_empty() {
-                return Err(anyhow!("no worktree found for '{}'", name));
-            } else {
-                return Err(anyhow!("multiple worktrees match '{}'", name));
-            }
+            return Err(anyhow!("multiple worktrees match '{}'", name));
         }
     };
 
@@ -1104,89 +1078,6 @@ fn cd_directive(path: &Path) -> Result<()> {
         println!("cd {}", path.display());
     }
     Ok(())
-}
-
-/// The parent branch of `branch`: its chain minus the last segment, or the
-/// default branch for a bare wave (or a branch that isn't a wave at all).
-fn parent_branch_of(branch: &str, user: &str, default_branch: &str) -> String {
-    WaveId::parse(branch, user)
-        .and_then(|id| id.parent())
-        .unwrap_or_else(|| default_branch.to_string())
-}
-
-/// `lf wt up` — skill to the parent worktree in the stack (toward main).
-fn wt_up() -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
-    let default_branch = get_default_branch(&main_repo)?;
-    let current = current_branch(&repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
-    if current == default_branch {
-        return Err(anyhow!("already at the root ({default_branch})"));
-    }
-    let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
-    let parent = parent_branch_of(&current, &user, &default_branch);
-
-    let target = list_worktrees(&main_repo)?
-        .into_iter()
-        .find(|wt| wt.branch.as_deref() == Some(parent.as_str()))
-        .map(|wt| wt.path)
-        .ok_or_else(|| anyhow!("no worktree for parent branch '{parent}'"))?;
-    cd_directive(&target)
-}
-
-/// `lf wt down [name]` — skill to a child worktree (away from main). When
-/// there is more than one child, `name` picks it by leaf.
-fn wt_down(name: Option<&str>) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
-    let default_branch = get_default_branch(&main_repo)?;
-    let current = current_branch(&repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
-    let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
-
-    let mut children: Vec<_> = list_worktrees(&main_repo)?
-        .into_iter()
-        .filter(|wt| {
-            let branch = match wt.branch.as_deref() {
-                Some(branch) if branch != current => branch,
-                _ => return false,
-            };
-            parent_branch_of(branch, &user, &default_branch) == current
-        })
-        .collect();
-
-    if let Some(name) = name {
-        children.retain(|wt| {
-            wt.branch
-                .as_deref()
-                .and_then(|branch| WaveId::parse(branch, &user))
-                .map(|id| id.leaf() == name)
-                .unwrap_or(false)
-        });
-    }
-
-    match children.len() {
-        0 => Err(anyhow!(
-            "no child worktree{}",
-            name.map(|n| format!(" named '{n}'")).unwrap_or_default()
-        )),
-        1 => cd_directive(&children.remove(0).path),
-        _ => {
-            let leaves: Vec<String> = children
-                .iter()
-                .filter_map(|wt| {
-                    wt.branch
-                        .as_deref()
-                        .and_then(|branch| WaveId::parse(branch, &user))
-                        .map(|id| id.leaf().to_string())
-                })
-                .collect();
-            Err(anyhow!(
-                "{} children — pick one: lf wt down <{}>",
-                leaves.len(),
-                leaves.join("|")
-            ))
-        }
-    }
 }
 
 fn wt_list(format: Option<&str>) -> Result<()> {
@@ -1205,12 +1096,9 @@ fn wt_list(format: Option<&str>) -> Result<()> {
     let c = Colors::new();
     let user = git_user(&main_repo).unwrap_or_else(|_| "user".to_string());
 
-    // Collect display info for all worktrees. `depth`/`sort_key` come from the
-    // branch's WaveId chain so children render indented under their parents.
+    // Collect one flat display row per worktree.
     struct Row {
-        depth: usize,
         label: String,
-        stamp: Option<String>,
         sort_key: String,
         is_current: bool,
         is_main: bool,
@@ -1226,27 +1114,22 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         .iter()
         .map(|wt| {
             let is_main = wt.branch.as_deref() == Some(&default_branch);
-            let id = wt
+            let parsed = wt
                 .branch
                 .as_deref()
-                .and_then(|branch| WaveId::parse(branch, &user));
-            let (depth, label, stamp, sort_key) = if is_main {
-                (0, default_branch.clone(), None, String::new())
-            } else if let Some(id) = &id {
-                (
-                    id.depth(),
-                    id.leaf().to_string(),
-                    id.timestamp().map(str::to_string),
-                    id.chain_str(),
-                )
+                .and_then(|branch| WorktreeName::parse(branch, &user));
+            let (label, sort_key) = if is_main {
+                (default_branch.clone(), String::new())
+            } else if let Some(name) = &parsed {
+                (name.name().to_string(), name.name().to_string())
             } else {
-                let name = wave_name_from_worktree(&wt.path).unwrap_or_else(|| {
+                let name = sibling_worktree_name(&wt.path).unwrap_or_else(|| {
                     wt.path
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_else(|| "?".to_string())
                 });
-                (1, name.clone(), None, name)
+                (name.clone(), name)
             };
             let is_current = wt.path == repo_root;
             let diff_stat = if is_main {
@@ -1255,9 +1138,7 @@ fn wt_list(format: Option<&str>) -> Result<()> {
                 wt_diff_stat(&main_repo, wt.branch.as_deref(), &default_branch)
             };
             Row {
-                depth,
                 label,
-                stamp,
                 sort_key,
                 is_current,
                 is_main,
@@ -1271,17 +1152,10 @@ fn wt_list(format: Option<&str>) -> Result<()> {
         })
         .collect();
 
-    // Main first (empty key), then a pre-order tree walk by chain.
+    // Main first (empty key), then alphabetical flat names.
     rows.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
 
-    // Displayed name = indent (one level per stacked tier) + leaf + worker stamp.
-    let display_name = |row: &Row| -> String {
-        let indent = "  ".repeat(row.depth.saturating_sub(1));
-        match &row.stamp {
-            Some(ts) => format!("{indent}{} {ts}", row.label),
-            None => format!("{indent}{}", row.label),
-        }
-    };
+    let display_name = |row: &Row| row.label.clone();
     let max_name = column_width("", rows.iter().map(display_name));
 
     for row in &rows {
@@ -1344,7 +1218,7 @@ fn wt_remove(name: &str, force: bool) -> Result<()> {
     // Find the worktree by short name or directory name
     let worktrees = list_worktrees(&main_repo)?;
     let target = worktrees.iter().find(|wt| {
-        wave_name_from_worktree(&wt.path).as_deref() == Some(name)
+        sibling_worktree_name(&wt.path).as_deref() == Some(name)
             || wt
                 .path
                 .file_name()
@@ -1588,7 +1462,13 @@ fn launch_skill_agent(repo_root: &Path, skill_name: &str, context: Option<&str>)
             cwd: Some(repo_root.to_path_buf()),
             yolo_mode: config.yolo,
             source_overrides: ContextSourceOverrides {
-                diff_files: Some(true),
+                // Rebase conflicts already name the affected paths in `context`.
+                // Embedding every authored file here makes the task prompt grow
+                // with the branch and can exceed the OS argument limit before
+                // the resolver starts. The agent has the repository as its cwd
+                // and can inspect the conflict in place.
+                diff_files: Some(false),
+                diff: Some(false),
                 ..Default::default()
             },
             ..LaunchPromptInput::default()

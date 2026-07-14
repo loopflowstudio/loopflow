@@ -1,27 +1,23 @@
 ---
-description: Evolve the wave from what it learned.
+description: Judge Wave evidence and evolve the operating context.
 default_agent: codex
 action_style: procedural
 ---
-Mutate the wave.
+Judge what the Wave learned this iteration.
 
-## Orientation
+Read the exact Wave's GOAL/MEMORY, cache-only PM snapshot, linked Project/Task
+observations, and the work just directed. Trust structured child summaries;
+do not ingest raw child transcripts.
 
-Read GOAL/MEMORY, `lf pm show --wave <wave> --json --no-sync`, recent chat, and the live tasks. The wave never
-terminates; it changes shape.
+- Reconcile Project KRs against observable evidence. Update or retire them
+  through `lf pm`; never treat a filed Task or merged PR as proof by itself.
+- Record durable learning through the Wave memory surface when it will change
+  later decisions.
+- Surface decisions, blockers, and failed child delivery that require human or
+  Wave judgment.
+- Name the next actionable Project, Task, or external event. If nothing is
+  actionable, say what event or cadence should wake the Wave.
 
-## Work
-
-- Reconcile Linear Projects against what actually landed: retire a KR only when
-  its condition verifiably holds — endurance KRs mean what they say (a
-  counted streak isn't satisfied by one good day; a human rescue inside an
-  unattended window resets it). Write changed KRs with `lf pm project update`;
-  archive dead bets with `lf pm project archive`.
-- Add durable learnings with `lf memory add` or rewrite memory through the
-  server-owned memory command when the accumulated facts need curation.
-- Launch, retire, reset, or split sub-waves when the objective needs a new
-  center of work.
-- Update GOAL.md when the current objective no longer asks the honest question.
-- Escalate blockers upward with `lf radio pub --parent`.
-
-The wave oracle is `Never`: stopping is not a runtime decision.
+A Wave never completes. This phase judges whether another iteration is useful
+now or the resident should yield to its scheduler. The scheduler owns that
+choice; write no loop bit and do not busy-spin.

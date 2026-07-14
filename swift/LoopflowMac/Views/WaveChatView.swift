@@ -2,7 +2,7 @@
 import SwiftUI
 import Loopflow
 
-/// WaveChat: the live conversation with a running `lf serve <name>`. Discovers the
+/// WaveChat: the live conversation with a running `lf wave <name>`. Discovers the
 /// wave's chat server through its `.wave-endpoint` pointer, replays + streams the
 /// thread over SSE, and posts messages back through the composer. The composer is
 /// verb-aware — Send while idle, Steer / Interrupt & Send / Interrupt while a turn
@@ -12,13 +12,15 @@ import Loopflow
 struct WaveChatView: View {
     let repoPath: String
     let waveName: String
+    let prefill: WaveComposerPrefill?
+    let onSelectChild: (WaveWorkSelection) -> Void
+    let onChildActivity: () -> Void
 
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var connection: WaveChatConnection?
     @State private var composerText = ""
-    @State private var enqueueFlow = ""
     @State private var sendError: String?
     @State private var launch: LaunchState = .idle
     @State private var isStopping = false
@@ -44,7 +46,7 @@ struct WaveChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             if isLive {
-                playheadHeader
+                waveControlHeader
                 Divider()
             }
             transcript
@@ -66,6 +68,14 @@ struct WaveChatView: View {
             conn.start()
         }
         .onDisappear { connection?.stop() }
+        .onChange(of: prefill) { _, value in
+            guard let value else { return }
+            composerText = value.text
+            composerFocused = true
+        }
+        .onChange(of: connection?.turns.last?.activity?.id) { _, activityId in
+            if activityId != nil { onChildActivity() }
+        }
         .confirmationDialog(
             "Stop \(waveName)?",
             isPresented: $confirmStop,
@@ -74,7 +84,7 @@ struct WaveChatView: View {
             Button("Stop wave", role: .destructive) { stopWave() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Stops the wave listener and its resident. Detached worker loops keep running.")
+            Text("Stops this Wave conversation. Project and Task Sessions continue independently; their observations remain durable.")
         }
     }
 
@@ -95,12 +105,30 @@ struct WaveChatView: View {
                         if let body = turn.body, turn.role == .assistant {
                             bodyBoundary(body, status: turn.status)
                         }
-                        MessageRow(
-                            turn: turn,
-                            timestampLabel: timestampLabel(for: turn),
-                            attemptFailure: failures[turn.id]
-                        )
+                        if let activity = turn.activity {
+                            ChildControlActivityCard(
+                                activity: activity,
+                                select: {
+                                    onSelectChild(WaveWorkSelection(
+                                        kind: activity.subject,
+                                        id: activity.subjectId
+                                    ))
+                                },
+                                choose: { option in
+                                    let decision = activity.decisionId.map { " \($0)" } ?? ""
+                                    composerText = "Resolve \(activity.subject.rawValue) \(activity.subjectId) decision\(decision): \(option)"
+                                    composerFocused = true
+                                }
+                            )
                             .id(turn.id)
+                        } else {
+                            MessageRow(
+                                turn: turn,
+                                timestampLabel: timestampLabel(for: turn),
+                                attemptFailure: failures[turn.id]
+                            )
+                                .id(turn.id)
+                        }
                     }
                     Color.clear
                         .frame(height: 1)
@@ -145,86 +173,37 @@ struct WaveChatView: View {
         }
     }
 
-    // MARK: - Playhead
+    // MARK: - Wave control
 
-    private var playheadHeader: some View {
-        let playhead = connection?.playhead
-        let breadcrumb = (playhead?.stack.map(\.flow) ?? [])
-            + (playhead?.now.map { [$0.step] } ?? [])
-        return VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(spacing: Spacing.sm) {
-                Text(breadcrumb.isEmpty ? waveName : breadcrumb.joined(separator: " › "))
-                    .font(Typography.caption().weight(.semibold))
-                    .foregroundStyle(palette.text)
-                    .lineLimit(1)
-                Spacer()
-                if let now = playhead?.now {
-                    Text("\(now.index + 1)/\(now.total) · loop \(now.iteration + 1)")
-                        .font(Typography.caption())
-                        .foregroundStyle(palette.textSecondary)
-                }
-                Button("Skip") { skipStep() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(playhead?.now == nil)
-                    .accessibilityIdentifier("wave-chat-skip")
-                Button {
-                    confirmStop = true
-                } label: {
-                    HStack(spacing: Spacing.xs) {
-                        if isStopping {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text(isStopping ? "Stopping…" : "Stop")
+    private var waveControlHeader: some View {
+        HStack(spacing: Spacing.sm) {
+            Text(waveName)
+                .font(Typography.caption().weight(.semibold))
+                .foregroundStyle(palette.text)
+            Text(connection?.loopState.rawValue ?? "idle")
+                .font(Typography.caption())
+                .foregroundStyle(palette.textSecondary)
+            Spacer()
+            Button {
+                confirmStop = true
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    if isStopping {
+                        ProgressView()
+                            .controlSize(.small)
                     }
+                    Text(isStopping ? "Stopping…" : "Stop")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .foregroundStyle(Color.statusError)
-                .disabled(isStopping)
-                .accessibilityIdentifier("wave-chat-stop")
             }
-
-            HStack(spacing: Spacing.lg) {
-                playheadFact("now", playhead?.now.map { "\($0.flow) / \($0.step)" })
-                playheadFact("next", playhead?.next.map { "\($0.flow) / \($0.step)" })
-                playheadFact("return", playhead?.returnTo.map { "\($0.flow) / \($0.step)" })
-            }
-
-            if let queued = playhead?.stack.last?.queue, !queued.isEmpty {
-                Text("queued  " + queued.map(\.flow).joined(separator: "  →  "))
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.textSecondary)
-            }
-
-            HStack(spacing: Spacing.sm) {
-                TextField("Enqueue flow", text: $enqueueFlow)
-                    .textFieldStyle(.roundedBorder)
-                    .controlSize(.small)
-                    .onSubmit { enqueue() }
-                    .accessibilityIdentifier("wave-chat-enqueue-field")
-                Button("Enqueue") { enqueue() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(enqueueFlow.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier("wave-chat-enqueue")
-            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .foregroundStyle(Color.statusError)
+            .disabled(isStopping)
+            .accessibilityIdentifier("wave-chat-stop")
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)
         .background(palette.surfaceMuted.opacity(0.45))
-    }
-
-    private func playheadFact(_ label: String, _ value: String?) -> some View {
-        HStack(spacing: Spacing.xs) {
-            Text(label)
-                .foregroundStyle(palette.textSecondary)
-            Text(value ?? "—")
-                .foregroundStyle(palette.text)
-                .lineLimit(1)
-        }
-        .font(Typography.caption())
     }
 
     private func bodyBoundary(_ body: BodyProvenance, status: Lifecycle) -> some View {
@@ -271,31 +250,6 @@ struct WaveChatView: View {
         case .interrupted: return "interrupted"
         case .failed: return "failed"
         default: return String(describing: status)
-        }
-    }
-
-    private func enqueue() {
-        let flow = enqueueFlow.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !flow.isEmpty, let connection else { return }
-        enqueueFlow = ""
-        Task {
-            do {
-                try await connection.enqueue(flow)
-            } catch {
-                enqueueFlow = flow
-                sendError = "Enqueue failed: \(error.localizedDescription)"
-            }
-        }
-    }
-
-    private func skipStep() {
-        guard let connection else { return }
-        Task {
-            do {
-                try await connection.skip()
-            } catch {
-                sendError = "Skip failed: \(error.localizedDescription)"
-            }
         }
     }
 
@@ -369,7 +323,7 @@ struct WaveChatView: View {
     // MARK: - Not running (start the wave)
     //
     // The wave is a detached tmux session, launched here through the same door
-    // as a terminal: `lf serve <name>` at the wave's repo. Quitting Loopflow
+    // as a terminal: `lf wave <name>` at the wave's repo. Quitting Loopflow
     // never touches it. After a launch, the connection's 1s endpoint poll picks
     // the wave up on its own — this view just waits for the phase to move.
 
@@ -413,7 +367,7 @@ struct WaveChatView: View {
         .padding()
     }
 
-    /// Launch `lf serve` detached, then wait for the endpoint poll to attach.
+    /// Launch `lf wave` detached, then wait for the endpoint poll to attach.
     /// The launch itself is quick (tmux returns immediately); the wave server
     /// takes a few seconds to publish its endpoint.
     private func startWave() {
@@ -560,10 +514,88 @@ struct WaveChatView: View {
     }
 }
 
+private struct ChildControlActivityCard: View {
+    let activity: ChildControlActivity
+    let select: () -> Void
+    let choose: (String) -> Void
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Button(action: select) {
+                HStack(alignment: .top, spacing: Spacing.md) {
+                    Image(systemName: icon)
+                        .foregroundStyle(
+                            activity.kind == .failed || activity.kind == .controlUncertain
+                                ? Color.statusError
+                                : palette.accent
+                        )
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        Text("\(activity.subjectId) · \(activity.title)")
+                            .font(Typography.caption(12))
+                            .fontWeight(.medium)
+                            .foregroundStyle(palette.text)
+                        if !activity.summary.isEmpty {
+                            Text(activity.summary)
+                                .font(Typography.caption(11))
+                                .foregroundStyle(palette.textSecondary)
+                                .lineLimit(3)
+                        }
+                        if let version = activity.directiveVersion {
+                            Text("directive v\(version)\(activity.effect.map { " · \($0.rawValue)" } ?? "")")
+                                .font(Typography.caption(10))
+                                .foregroundStyle(palette.textSecondary)
+                        }
+                        if let source = activity.source {
+                            Text("Directed by \(source.label)")
+                                .font(Typography.caption(10))
+                                .foregroundStyle(palette.textSecondary)
+                        }
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(Typography.caption(9))
+                        .foregroundStyle(palette.textSecondary)
+                }
+            }
+            .buttonStyle(.plain)
+            if !activity.options.isEmpty {
+                HStack(spacing: Spacing.xs) {
+                    ForEach(activity.options, id: \.self) { option in
+                        Button(option) { choose(option) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }
+        .padding(Spacing.md)
+        .background(palette.surfaceMuted)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        .accessibilityLabel("\(activity.subjectId), \(activity.title)")
+    }
+
+    private var icon: String {
+        switch activity.kind {
+        case .directed: "arrow.triangle.turn.up.right.circle"
+        case .incorporated: "checkmark.circle.fill"
+        case .decisionRequired: "questionmark.circle.fill"
+        case .decisionResolved: "checkmark.bubble.fill"
+        case .pullRequestOpened: "arrow.triangle.pull"
+        case .completed: "checkmark.seal.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        case .controlUncertain: "questionmark.diamond.fill"
+        case .stateChanged, .controlApplied: "circle.dotted"
+        }
+    }
+}
+
 /// The not-running hint, with the launch command as inline code so `lf` can't
 /// be misread as "If". Plain-string fallback only if markdown parsing fails.
 func waveStartHint(waveName: String) -> AttributedString {
-    let markdown = "Start it here, or run `lf serve \(waveName)` in a terminal — "
+    let markdown = "Start it here, or run `lf wave \(waveName)` in a terminal — "
         + "its conversation appears here live."
     return (try? AttributedString(markdown: markdown))
         ?? AttributedString(markdown.replacingOccurrences(of: "`", with: ""))

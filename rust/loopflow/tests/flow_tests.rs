@@ -4,7 +4,7 @@ use std::process::Command;
 
 use loopflow::engine::flow::{ConcreteStep, Skill, Step};
 use loopflow::engine::{expand_flow, load_flow};
-use loopflow::lfdb::sqlite::SqliteStore;
+use loopflow::store::sqlite::SqliteStore;
 use tempfile::TempDir;
 
 fn write_skill(repo: &Path, name: &str, content: &str) {
@@ -153,7 +153,7 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let store = SqliteStore::new(&home.path().join("lfd.db")).unwrap();
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let events = store.list_run_events_since(0).unwrap();
     let run_id = events
         .iter()
@@ -229,68 +229,6 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
         .find(|check| check["name"] == "capture")
         .expect("capture check");
     assert_eq!(capture["status"], "ok");
-}
-
-#[test]
-fn golden_flows() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    write_flow(
-        repo,
-        "forked",
-        r#"
-- and:
-    branches:
-      - step: { name: implement }
-      - step: { name: polish }
-- and:
-    branches:
-      - step: { name: quick }
-      - step: { name: deep }
-- flow: nested
-"#,
-    );
-
-    let flow = load_flow("forked", repo).unwrap();
-    assert_eq!(flow.items.len(), 3);
-    match &flow.items[0] {
-        Step::And { branches, .. } => {
-            assert_eq!(branches.len(), 2);
-        }
-        _ => panic!("expected and"),
-    }
-    match &flow.items[1] {
-        Step::And { branches, .. } => {
-            assert_eq!(branches.len(), 2);
-        }
-        _ => panic!("expected and"),
-    }
-    match &flow.items[2] {
-        Step::FlowRef(name) => {
-            assert_eq!(name, "nested");
-        }
-        _ => panic!("expected flow ref"),
-    }
-}
-
-#[test]
-fn and_select_is_rejected() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    write_flow(
-        repo,
-        "forked",
-        r#"
-- and:
-    branches:
-      - step: { name: implement }
-    select: all
-"#,
-    );
-
-    let err = load_flow("forked", repo).expect_err("and select should fail");
-    let message = err.to_string();
-    assert!(message.contains("and select modes are not supported"));
 }
 
 #[test]

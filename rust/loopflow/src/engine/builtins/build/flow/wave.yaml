@@ -1,4 +1,6 @@
-# One bounded pass of the wave loop.
+# One bounded Wave iteration. The resident plays every skill through the Wave
+# harness; its scheduler, not a loop-bit file, decides when another iteration
+# is useful.
 - wave_clarify
 - wave_pursue
 - wave_mutate

@@ -119,7 +119,6 @@ Next:
   lf --list              # see all steps and flows
 
   Download Loopflow for visual wave management
-  Run `lfd install` to set up the daemon for autonomous waves
 ```
 
 **Linux:**
@@ -133,8 +132,6 @@ Next:
   lf design              # interactive design session
   lf debug -c            # paste an error, fix it
   lf --list              # see all steps and flows
-
-  Run `lfd install` to set up the daemon for autonomous waves
 ```
 
 ## Conversation style

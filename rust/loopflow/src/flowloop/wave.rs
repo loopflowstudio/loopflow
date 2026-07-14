@@ -2,11 +2,12 @@
 //! scheduled by events, publishing through the wire.
 //!
 //! This runs inside the resident process (the internal half of
-//! `lf serve <name>`,
+//! `lf wave <name>`,
 //! see [`crate::wave::resident`]) — never in the listener. A turn is one
-//! `wave` flow (`wave_clarify → wave_pursue → wave_mutate`) run as a
-//! bounded headless child in the wave home; continuity is GOAL.md + memory +
-//! the chat journal riding every pass's seed, never a vendor thread.
+//! `wave` flow (clarify, pursue, then mutate) played through the live Harness
+//! boundary. Phases reuse one provider session while the resident lives;
+//! GOAL.md, memory, and the chat journal preserve continuity across resident
+//! restarts.
 //! Everything the loop does surfaces as [`ResidentDelta`]s sent through
 //! the listener's resident door, where the journal, the open-turn snapshot,
 //! SSE broadcast, and `LoopState` transitions live.
@@ -23,8 +24,7 @@
 //!   closes `Interrupted`; non-empty interrupt text queues for the next pass.
 //! - **Interrupt while idle** → no-op; text, if any, queues like a message.
 //! - **Heartbeat**: idle for [`HEARTBEAT_IDLE`] with an empty queue → a
-//!   progress pass carrying a compact nudge plus the `<in_flight>` fold
-//!   fetched from `GET /resident/context`.
+//!   progress pass carrying a compact nudge.
 //! - **Cron**: the wave's `crons:` frontmatter (GOAL.md, re-read at every
 //!   deadline computation so edits land without a restart) arms a third
 //!   deadline; a due schedule opens a system pass ("cron due: <flow> —
@@ -59,18 +59,18 @@ use tokio::time::Instant;
 use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
-use crate::flowloop::pass::lf_command;
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness};
-use crate::wave::journal::{ellipsize, MessageId, MessageOp, PendingMessage};
+use crate::wave::journal::{MessageId, MessageOp, PendingMessage};
 use crate::wave::playhead::{BodyProvenance, StepKind, StepOutcome, StepRef};
 use crate::wave::resident::ListenerClient;
 use crate::wave::runtime::InboxItem;
 use crate::wave::supervisor::sleep_until_opt;
-use crate::wave::wire::{InFlightWorker, ResidentDelta, ResidentStateTo};
+use crate::wave::wire::{ProviderSessionRef, ResidentDelta, ResidentStateTo};
 
-/// The default playlist advances continuously. Tests and specialized callers
-/// can still supply a non-zero idle cadence.
-pub const HEARTBEAT_IDLE: Duration = Duration::ZERO;
+/// How long an eventless Wave stays idle before a safety heartbeat. Human
+/// chat, child observations, and crons wake it immediately; the quiet cadence
+/// is deliberately coarse because every wake runs the full three-phase flow.
+pub const HEARTBEAT_IDLE: Duration = Duration::from_secs(4 * 60 * 60);
 
 /// Consecutive failed turns before the loop itself is declared failed and
 /// the resident exits (the listener's supervisor revives by respawning).
@@ -87,10 +87,6 @@ pub const CRON_GRACE: chrono::Duration = chrono::Duration::hours(24);
 const HEARTBEAT_PROMPT: &str = "Heartbeat: re-read your goal and memory, then take the next \
      orchestration skill. If nothing needs doing, say so in one line.";
 
-/// Longest task excerpt carried per worker in the `<in_flight>` section —
-/// enough to recognize the dispatch, token-lean by design.
-const IN_FLIGHT_TASK_CHARS: usize = 80;
-
 fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) {
     let Some(capture) = capture else {
         return;
@@ -98,29 +94,6 @@ fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) 
     if let Err(error) = capture.finish(outcome, false) {
         tracing::warn!(%error, %outcome, "failed to finalize trace capture");
     }
-}
-
-/// The heartbeat nudge, plus a compact `<in_flight>` section when workers are
-/// grinding: one line per dispatched-not-finished worker, from the listener's
-/// `GET /resident/context` — the loop's orchestration turns see their workers
-/// without re-reading transcripts.
-pub fn heartbeat_prompt(workers: &[InFlightWorker]) -> String {
-    if workers.is_empty() {
-        return HEARTBEAT_PROMPT.to_string();
-    }
-    let mut prompt = String::from(HEARTBEAT_PROMPT);
-    prompt.push_str("\n\n<in_flight>\n");
-    for worker in workers {
-        // Whitespace-flattened, so a multi-line task can't break the
-        // one-line-per-worker format.
-        let task = ellipsize(&worker.task, IN_FLIGHT_TASK_CHARS);
-        prompt.push_str(&format!(
-            "- run {} · {}: {} · running\n",
-            worker.run_id, worker.flow, task
-        ));
-    }
-    prompt.push_str("</in_flight>");
-    prompt
 }
 
 // -- Cron: the third deadline ------------------------------------------------
@@ -161,8 +134,8 @@ pub(crate) fn cron_prompt(due: &[WaveCronDef]) -> String {
         .join("\n")
 }
 
-/// Loop knobs. Production advances the playlist immediately and gives each
-/// body a 30-minute timeout.
+/// Loop knobs. Production uses a four-hour quiet heartbeat and gives each body
+/// a 30-minute timeout.
 #[derive(Debug, Clone)]
 pub struct LoopConfig {
     /// Idle window before a heartbeat `wave`.
@@ -252,20 +225,25 @@ fn orchestration_discipline(wave: &str) -> String {
          infrastructure repair into this wave's work.\n\
          - Execute the next move inline by default. Resolve the one concrete \
          blocker between the wave and progress in this process.\n\
-         - Create only project or task loops, and only for strict subsets that \
-         need an independent multi-pass lifecycle, their own PR, or useful \
-         parallel execution. Never delegate the whole wave objective.\n\
-         - Inhabit with `lf --wave {wave} loop <flow> \"<whole handoff>\"`. \
-         Add `--detach` only when the wave has another useful move while that \
-         child runs; if the result gates the next move, keep it foreground. \
-         Never use a one-pass loop. Detached hands report with `lf radio pub`, \
-         publish durable learnings with `lf memory add`, and leave done as a PR.\n\
+         - Create or select a Linear Project and Linear task before delegating \
+         file-writing work. Start it with `lf task run <issue-id>`. Never \
+         delegate anonymous work or the whole wave objective.\n\
+         - Supervise durable Task Sessions with `lf task status`, `follow-up`, \
+         `steer`, `interrupt`, `wait`, and `resume`. Each task owns one immutable \
+         worktree and one PR to main; keep the Wave home free of shipping edits.\n\
          - Keep turns centered on selection, direct progress, sequencing, and \
          authored reports.\n\
          - Trust worker summaries; never re-read worker transcripts.\n\
          - A human message is steering: answer it directly and adjust course \
          before returning to the goal."
     )
+}
+
+fn lf_command() -> std::process::Command {
+    if let Ok(path) = std::env::current_exe() {
+        return std::process::Command::new(path);
+    }
+    std::process::Command::new("lf")
 }
 
 fn body_provenance(step: &StepRef, cwd: &Path) -> BodyProvenance {
@@ -276,6 +254,15 @@ fn body_provenance(step: &StepRef, cwd: &Path) -> BodyProvenance {
     body.harness = Some(harness);
     body.model = model;
     body
+}
+
+fn provider_session_id_for_harness(
+    provider_session: Option<&ProviderSessionRef>,
+    harness: &str,
+) -> Option<String> {
+    provider_session
+        .filter(|session| session.harness == harness)
+        .map(|session| session.session_id.clone())
 }
 
 // -- The scheduler --
@@ -306,9 +293,7 @@ enum InboxAction {
 enum TimeoutAction {
     /// The loop already ended mid-fetch: tear down and return.
     End,
-    /// Delegated work is still live: renew the pass lease and keep waiting.
-    Renew,
-    /// Nothing is running: the pass is out of time.
+    /// The pass is out of time.
     Expire,
 }
 
@@ -388,6 +373,7 @@ async fn run_loop_with(
         consecutive_failures: 0,
         idle_since: Instant::now(),
         cron_last_fired: HashMap::new(),
+        provider_session: None,
         end: None,
     };
 
@@ -433,6 +419,7 @@ struct WaveLoop {
     consecutive_failures: u32,
     idle_since: Instant,
     cron_last_fired: HashMap<String, DateTime<Utc>>,
+    provider_session: Option<ProviderSessionRef>,
     end: Option<LoopEnd>,
 }
 
@@ -466,17 +453,25 @@ impl WaveLoop {
                     self.queue.push(message);
                 }
             }
+            InboxItem::Task(observation) => {
+                let message = crate::wave::journal::task_observation_message(&observation);
+                if self.seen.insert(message.id.clone()) {
+                    self.queue.push(message);
+                }
+            }
+            InboxItem::Project(observation) => {
+                let message = crate::wave::journal::project_observation_message(&observation);
+                if self.seen.insert(message.id.clone()) {
+                    self.queue.push(message);
+                }
+            }
             InboxItem::Interrupt | InboxItem::Skip => {}
         }
     }
 
     async fn on_heartbeat(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
-        let workers = self.fetch_in_flight().await;
-        if self.end.is_some() {
-            return;
-        }
-        let prompt = heartbeat_prompt(&workers);
-        self.run_pass(prompt, Vec::new(), inbox_rx).await;
+        self.run_pass(HEARTBEAT_PROMPT.to_string(), Vec::new(), inbox_rx)
+            .await;
     }
 
     async fn on_cron(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
@@ -522,22 +517,46 @@ impl WaveLoop {
         answers: Vec<MessageId>,
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
-        let context = match self.fetch_context().await {
-            Some(context) => context,
-            None => return,
-        };
-        let Some(step) = context.playhead.now else {
-            self.fail("playhead has no current step").await;
-            return;
-        };
-        let seed = wave_pass_seed(&self.origin_repo, &self.wave, &wake);
-        let answers = answers.into_iter().map(|id| id.0).collect();
-        let live_skill =
-            step.kind == StepKind::Skill && matches!(&self.backend, BodyBackend::Harness { .. });
-        if live_skill {
-            self.run_harness_pass(step, seed, answers, inbox_rx).await;
-        } else {
-            self.run_process_pass(step, seed, answers, inbox_rx).await;
+        let mut answers = answers.into_iter().map(|id| id.0).collect::<Vec<_>>();
+        let mut invocation: Option<(String, u32)> = None;
+        loop {
+            let context = match self.fetch_context().await {
+                Some(context) => context,
+                None => return,
+            };
+            let Some(step) = context.playhead.now else {
+                self.fail("playhead has no current step").await;
+                return;
+            };
+            let key = (step.invocation_id.clone(), step.iteration);
+            if invocation.as_ref().is_some_and(|expected| expected != &key) {
+                return;
+            }
+            invocation.get_or_insert(key);
+            let completed_index = step.index;
+            let seed = wave_pass_seed(&self.origin_repo, &self.wave, &wake);
+            let live_skill = step.kind == StepKind::Skill
+                && matches!(&self.backend, BodyBackend::Harness { .. });
+            if live_skill {
+                self.run_harness_pass(step, seed, answers, inbox_rx).await;
+            } else {
+                self.run_process_pass(step, seed, answers, inbox_rx).await;
+            }
+            if self.end.is_some() {
+                return;
+            }
+            let next = match self.fetch_context().await {
+                Some(context) => context.playhead.now,
+                None => return,
+            };
+            let Some(next) = next else { return };
+            let same_iteration = invocation.as_ref().is_some_and(|(id, iteration)| {
+                id == &next.invocation_id && *iteration == next.iteration
+            });
+            if !same_iteration || next.index == completed_index {
+                return;
+            }
+            answers = Vec::new();
         }
     }
 
@@ -592,14 +611,10 @@ impl WaveLoop {
                     }
                 }
                 _ = &mut timeout => {
-                    match self.timeout_action().await {
+                    match self.timeout_action() {
                         TimeoutAction::End => {
                             wait_task.abort();
                             return;
-                        }
-                        TimeoutAction::Renew => {
-                            timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
-                            continue;
                         }
                         TimeoutAction::Expire => {
                             wait_task.abort();
@@ -722,6 +737,12 @@ impl WaveLoop {
         if capture.is_some() {
             harness.set_raw_provider_sender(Some(raw_tx));
         }
+        let resume_session_id =
+            provider_session_id_for_harness(self.provider_session.as_ref(), &prepared.harness);
+        if resume_session_id.is_none() {
+            self.provider_session = None;
+        }
+        harness.set_provider_session_id(resume_session_id);
         if let Err(err) = harness.start(&prepared.config).await {
             finish_capture(capture.as_ref(), "failed");
             let body_id = body.body_id.clone();
@@ -736,6 +757,12 @@ impl WaveLoop {
         body.session_id = harness.provider_session_id();
         if let Some(capture) = &capture {
             capture.set_provider_session_id(body.session_id.clone());
+        }
+        if let Some(session_id) = &body.session_id {
+            self.provider_session = Some(ProviderSessionRef {
+                harness: prepared.harness.clone(),
+                session_id: session_id.clone(),
+            });
         }
         let mut body_session_id = body.session_id.clone();
         let body_id = body.body_id.clone();
@@ -784,6 +811,15 @@ impl WaveLoop {
                                 timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
                             }
                         }
+                        InboxAction::Deliver(InboxItem::Message(message))
+                            if message.op == MessageOp::Steer =>
+                        {
+                            if self.seen.insert(message.id.clone()) {
+                                self.queue.push(message);
+                            }
+                            self.interrupt_harness(&body_id, harness.as_mut(), false).await;
+                            return;
+                        }
                         InboxAction::Deliver(item) => self.on_inbox(item).await,
                         InboxAction::ListenerGone => {
                             let _ = harness.stop().await;
@@ -814,6 +850,10 @@ impl WaveLoop {
                             if let Some(capture) = &capture {
                                 capture.set_provider_session_id(Some(session_id.clone()));
                             }
+                            self.provider_session = Some(ProviderSessionRef {
+                                harness: prepared.harness.clone(),
+                                session_id: session_id.clone(),
+                            });
                             self.send(vec![ResidentDelta::BodySessionUpdated {
                                 body_id: body_id.clone(),
                                 session_id,
@@ -903,15 +943,11 @@ impl WaveLoop {
                     return;
                 }
                 _ = &mut timeout => {
-                    match self.timeout_action().await {
+                    match self.timeout_action() {
                         TimeoutAction::End => {
                             let _ = harness.stop().await;
                             finish_capture(capture.as_ref(), "interrupted");
                             return;
-                        }
-                        TimeoutAction::Renew => {
-                            timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
-                            continue;
                         }
                         TimeoutAction::Expire => {
                             let _ = harness.interrupt().await;
@@ -1007,6 +1043,9 @@ impl WaveLoop {
                 }
                 InboxAction::Interrupt { skip: false }
             }
+            Some(InboxItem::Task(observation)) => InboxAction::Deliver(InboxItem::Message(
+                crate::wave::journal::task_observation_message(&observation),
+            )),
             Some(item) => InboxAction::Deliver(item),
             None => {
                 self.end = Some(LoopEnd::ListenerGone);
@@ -1015,16 +1054,9 @@ impl WaveLoop {
         }
     }
 
-    /// What a fired pass-timeout means right now. A foreground `lf loop` is
-    /// one long tool call inside this pass; its registry row is presence, so
-    /// live delegated work renews the lease instead of hanging up on it at
-    /// the ordinary pass boundary.
-    async fn timeout_action(&mut self) -> TimeoutAction {
-        let workers = self.fetch_in_flight().await;
+    fn timeout_action(&self) -> TimeoutAction {
         if self.end.is_some() {
             TimeoutAction::End
-        } else if !workers.is_empty() {
-            TimeoutAction::Renew
         } else {
             TimeoutAction::Expire
         }
@@ -1183,16 +1215,14 @@ impl WaveLoop {
         }
     }
 
-    async fn fetch_in_flight(&mut self) -> Vec<InFlightWorker> {
-        self.fetch_context()
-            .await
-            .map(|context| context.in_flight)
-            .unwrap_or_default()
-    }
-
     async fn fetch_context(&mut self) -> Option<crate::wave::wire::ContextResponse> {
         match self.client.context().await {
-            Ok(context) => Some(context),
+            Ok(context) => {
+                if self.provider_session.is_none() {
+                    self.provider_session.clone_from(&context.provider_session);
+                }
+                Some(context)
+            }
             Err(err) => {
                 tracing::info!(
                     error = %format!("{err:#}"),
@@ -1383,7 +1413,6 @@ mod tests {
         let app = server::router(
             runtime.clone(),
             door,
-            server::SubagentDoor::new(),
             None,
             None,
             server::ShutdownDoor::new(),
@@ -1459,6 +1488,7 @@ mod tests {
     struct SteeringHarness {
         events: mpsc::UnboundedSender<ConversationEvent>,
         inputs: Arc<Mutex<Vec<String>>>,
+        supports_steer: bool,
     }
 
     #[async_trait]
@@ -1511,7 +1541,7 @@ mod tests {
 
         fn capabilities(&self) -> Capabilities {
             Capabilities {
-                supports_steer: true,
+                supports_steer: self.supports_steer,
             }
         }
 
@@ -1557,6 +1587,7 @@ mod tests {
                 Ok(Box::new(SteeringHarness {
                     events,
                     inputs: harness_inputs.clone(),
+                    supports_steer: true,
                 }))
             }),
         };
@@ -1600,8 +1631,75 @@ mod tests {
             EventKind::TurnSteered { answers, .. }
                 if answers == &[message_id(&steer)]
         )));
-        let playhead = runtime.playhead().expect("playhead");
-        assert_eq!(playhead.now.expect("next step").step, "wave_pursue");
+        assert!(inputs.lock().unwrap()[0].contains("wave_clarify"));
+    }
+
+    #[tokio::test]
+    async fn unsupported_steer_restarts_the_same_wave_step() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let status = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(tmp.path())
+            .status()
+            .expect("git init");
+        assert!(status.success());
+
+        let inputs = Arc::new(Mutex::new(Vec::new()));
+        let harness_inputs = inputs.clone();
+        let backend = BodyBackend::Harness {
+            prepare: Box::new(|skill, seed, _wave, max_turns| {
+                Ok(crate::lf::commands::run::PreparedHarnessTurn {
+                    config: crate::engine::AgentConfig {
+                        agent: Some("fake".to_string()),
+                        cwd: None,
+                        max_turns,
+                        ..crate::engine::AgentConfig::default()
+                    },
+                    input: format!("{skill}\n{seed}"),
+                    context: crate::trace::PreparedTurnContext::from_prompts(
+                        "",
+                        &format!("{skill}\n{seed}"),
+                    ),
+                    harness: "fake".to_string(),
+                    model: None,
+                    context_gather_ms: 0,
+                    context_render_ms: 0,
+                })
+            }),
+            create: Box::new(move |_name, _approval, events| {
+                Ok(Box::new(SteeringHarness {
+                    events,
+                    inputs: harness_inputs.clone(),
+                    supports_steer: false,
+                }))
+            }),
+        };
+        let loop_ = boot_backend(
+            tmp,
+            test_config(Duration::from_secs(600)),
+            backend,
+            Arc::new(Mutex::new(Vec::new())),
+        )
+        .await;
+        let runtime = loop_.runtime.clone();
+
+        runtime
+            .deliver(MessageOp::Message, "begin".into())
+            .expect("user turn");
+        wait_for("initial live input", || inputs.lock().unwrap().len() == 1).await;
+        runtime
+            .deliver(MessageOp::Steer, "finish differently".into())
+            .expect("steer");
+        wait_for("replacement turn", || inputs.lock().unwrap().len() >= 2).await;
+
+        let inputs = inputs.lock().unwrap();
+        assert!(inputs[0].starts_with("wave_clarify\n"));
+        assert!(inputs[1].starts_with("wave_clarify\n"));
+        assert!(inputs[1].contains("finish differently"));
+        assert!(runtime
+            .thread_snapshot()
+            .iter()
+            .any(|turn| turn.status == Lifecycle::Interrupted));
     }
 
     #[test]
@@ -1620,6 +1718,23 @@ mod tests {
     }
 
     #[test]
+    fn provider_sessions_resume_only_through_their_own_harness() {
+        let session = ProviderSessionRef {
+            harness: "codex".to_string(),
+            session_id: "thread-resume".to_string(),
+        };
+
+        assert_eq!(
+            provider_session_id_for_harness(Some(&session), "codex"),
+            Some("thread-resume".to_string())
+        );
+        assert_eq!(
+            provider_session_id_for_harness(Some(&session), "claude"),
+            None
+        );
+    }
+
+    #[test]
     fn wave_pass_seed_carries_goal_loopflow_and_wake() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let goal_dir = tmp.path().join("wave/ship");
@@ -1631,7 +1746,33 @@ mod tests {
         assert!(seed.contains("Ship the thing."));
         assert!(seed.contains("<lf:loopflow>"));
         assert!(seed.contains("<wake>\nhello from chat\n</wake>"));
-        assert_eq!(LoopConfig::default().heartbeat_idle, Duration::ZERO);
+        assert_eq!(
+            LoopConfig::default().heartbeat_idle,
+            Duration::from_secs(4 * 60 * 60)
+        );
+    }
+
+    #[tokio::test]
+    async fn one_wake_runs_one_full_wave_flow_then_idles() {
+        let loop_ = boot(Duration::from_secs(600), "echo done").await;
+
+        loop_
+            .runtime
+            .deliver(MessageOp::Message, "first wake".into())
+            .expect("first wake");
+        wait_for("first Wave flow", || loop_.pass_count() == 3).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            loop_.pass_count(),
+            3,
+            "a completed Wave flow waits instead of starting another iteration"
+        );
+
+        loop_
+            .runtime
+            .deliver(MessageOp::Message, "second wake".into())
+            .expect("second wake");
+        wait_for("second Wave flow", || loop_.pass_count() == 6).await;
     }
 
     // -- Scheduling, over the full wire --
@@ -1656,7 +1797,8 @@ mod tests {
         .await;
 
         let answers = started_answers(&loop_.journal_events());
-        assert_eq!(answers, vec![vec![message_id(&user_turn)]]);
+        assert_eq!(answers[0], vec![message_id(&user_turn)]);
+        assert!(answers.iter().skip(1).all(Vec::is_empty));
     }
 
     /// A say emission wakes the loop like a message: the next pass's
@@ -1686,8 +1828,8 @@ mod tests {
         );
     }
 
-    /// Messages landing mid-pass queue — never rejected, never injected —
-    /// and one boundary pass drains the whole queue.
+    /// Messages landing mid-flow queue — never rejected, never injected —
+    /// and the next full Wave iteration drains the whole queue.
     #[tokio::test]
     async fn messages_during_a_pass_coalesce_into_one_boundary_pass() {
         let loop_ = boot(Duration::from_secs(600), "sleep 0.4; echo done").await;
@@ -1709,17 +1851,20 @@ mod tests {
             .deliver(MessageOp::Message, "third".into())
             .expect("user turn");
 
-        // One boundary pass drains the whole queue.
-        wait_for("boundary pass spawned", || loop_.pass_count() == 2).await;
-        let wake = wake_of(&loop_.seed(1));
+        // Clarify, pursue, and mutate finish the current iteration before the
+        // queued human direction starts the next one.
+        wait_for("next iteration spawned", || loop_.pass_count() == 4).await;
+        let wake = wake_of(&loop_.seed(3));
         assert!(wake.contains("second") && wake.contains("third"));
 
-        wait_for("second TurnStarted journaled", || {
-            started_answers(&loop_.journal_events()).len() == 2
+        wait_for("next iteration TurnStarted journaled", || {
+            started_answers(&loop_.journal_events()).len() == 4
         })
         .await;
         let answers = started_answers(&loop_.journal_events());
-        assert_eq!(answers[1], vec![message_id(&m2), message_id(&m3)]);
+        assert!(answers[1].is_empty());
+        assert!(answers[2].is_empty());
+        assert_eq!(answers[3], vec![message_id(&m2), message_id(&m3)]);
     }
 
     // -- Cron: the third deadline --
@@ -1813,52 +1958,6 @@ mod tests {
         wait_for("next heartbeat", || loop_.pass_count() >= 2).await;
     }
 
-    #[tokio::test]
-    async fn heartbeat_carries_in_flight_workers_when_present() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        // Journal the observations before the loop boots so the first
-        // heartbeat deterministically sees them (served by /resident/context).
-        {
-            let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
-            assert!(runtime.journal_run_observed(
-                "run-7",
-                "sess-7",
-                "implement",
-                "wire the observation tail",
-            ));
-            assert!(runtime.journal_run_observed("run-8", "sess-8", "design", "next item"));
-            // Multi-line task: must flatten to one line in the prompt.
-            assert!(runtime.journal_run_observed(
-                "run-9",
-                "sess-9",
-                "design",
-                "multi-line task\n  with an indented second line",
-            ));
-            assert!(runtime.journal_run_completed(
-                "run-8",
-                crate::wave::journal::WorkerOutcome::Completed,
-                "landed",
-            ));
-        }
-
-        let loop_ = boot_in(tmp, Duration::from_millis(50), "echo ok").await;
-        wait_for("heartbeat pass", || loop_.pass_count() == 1).await;
-        let wake = wake_of(&loop_.seed(0));
-        assert!(wake.starts_with(HEARTBEAT_PROMPT));
-        assert!(wake.contains("<in_flight>"), "in-flight section present");
-        assert!(wake.contains("run run-7 · implement: wire the observation tail · running"));
-        assert!(
-            !wake.contains("run-8"),
-            "finished workers are not in flight"
-        );
-        assert!(
-            wake.contains(
-                "run run-9 · design: multi-line task with an indented second line · running"
-            ),
-            "multi-line tasks flatten to one in-flight line"
-        );
-    }
-
     // -- Failure and teardown --
 
     /// The failure cap ends the RESIDENT: `run_loop` returns an error
@@ -1920,44 +2019,6 @@ mod tests {
             loop_.runtime.loop_state() == LoopState::Idle
         })
         .await;
-    }
-
-    #[tokio::test]
-    async fn active_child_loop_renews_the_pass_lease() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let config = LoopConfig {
-            heartbeat_idle: Duration::from_secs(600),
-            pass_timeout: Duration::from_millis(80),
-            max_turns: None,
-        };
-        let loop_ = boot_with(tmp, config, "sleep 0.25; echo inhabited").await;
-        assert!(loop_.runtime.journal_run_observed(
-            "run-child",
-            "session-child",
-            "task",
-            "foreground loop"
-        ));
-        loop_
-            .runtime
-            .deliver(MessageOp::Message, "go".into())
-            .expect("user turn");
-        wait_for("pass spawned", || loop_.pass_count() == 1).await;
-        wait_for("long pass completed", || {
-            loop_.runtime.thread_snapshot().iter().any(|turn| {
-                turn.role == ChatRole::Assistant
-                    && turn.status == Lifecycle::Completed
-                    && turn.text.contains("inhabited")
-            })
-        })
-        .await;
-        assert!(
-            !loop_
-                .runtime
-                .thread_snapshot()
-                .iter()
-                .any(|turn| turn.status == Lifecycle::Failed),
-            "presence renewed the lease instead of timing out"
-        );
     }
 
     /// An interrupt mid-pass kills the child and finalizes the turn

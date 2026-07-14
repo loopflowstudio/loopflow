@@ -3,10 +3,11 @@
 import os
 import socket
 import subprocess
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
-from typing import Generator
+from typing import Generator, TextIO
 
 import pytest
 from playwright.sync_api import Page
@@ -41,21 +42,22 @@ def server() -> Generator[str, None, None]:
 
     port = _find_free_port()
     env = {**os.environ, "PORT": str(port)}
-    process = subprocess.Popen(
-        ["uv", "run", "python", "main.py"],
-        cwd=website_dir,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    base_url = f"http://127.0.0.1:{port}"
-    try:
-        _wait_for_server(base_url, process)
-        yield base_url
-    finally:
-        process.terminate()
-        process.wait(timeout=10)
+    with tempfile.TemporaryFile(mode="w+") as server_log:
+        process = subprocess.Popen(
+            ["uv", "run", "python", "main.py"],
+            cwd=website_dir,
+            env=env,
+            stdout=server_log,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        base_url = f"http://127.0.0.1:{port}"
+        try:
+            _wait_for_server(base_url, process, server_log)
+            yield base_url
+        finally:
+            process.terminate()
+            process.wait(timeout=10)
 
 
 @pytest.fixture(scope="session")
@@ -76,13 +78,15 @@ def _find_free_port() -> int:
         return sock.getsockname()[1]
 
 
-def _wait_for_server(base_url: str, process: subprocess.Popen[str]) -> None:
+def _wait_for_server(
+    base_url: str, process: subprocess.Popen[str], server_log: TextIO
+) -> None:
     deadline = time.time() + 15
     while time.time() < deadline:
         if process.poll() is not None:
-            stdout, stderr = process.communicate()
+            server_log.seek(0)
             raise RuntimeError(
-                f"Website server exited early.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+                f"Website server exited early.\noutput:\n{server_log.read()}"
             )
         try:
             with urllib.request.urlopen(base_url, timeout=1) as response:
@@ -92,7 +96,8 @@ def _wait_for_server(base_url: str, process: subprocess.Popen[str]) -> None:
             time.sleep(0.25)
 
     process.terminate()
-    stdout, stderr = process.communicate(timeout=10)
+    process.wait(timeout=10)
+    server_log.seek(0)
     raise RuntimeError(
-        f"Website server did not start at {base_url}.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        f"Website server did not start at {base_url}.\noutput:\n{server_log.read()}"
     )

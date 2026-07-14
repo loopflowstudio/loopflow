@@ -3,7 +3,6 @@ use clap::{Args, Parser, Subcommand};
 pub mod commands;
 pub mod discovery;
 pub mod output;
-pub mod session;
 
 #[derive(Parser, Debug, Default)]
 #[command(name = "lf")]
@@ -97,14 +96,6 @@ pub struct Cli {
     /// Exclude loopflow operating guidance
     #[arg(long = "no-loopflow")]
     pub no_loopflow: bool,
-
-    /// Run this invocation in a worktree stacked on a parent run
-    #[arg(long, value_name = "RUN_ID", conflicts_with = "fork")]
-    pub stack: Option<String>,
-
-    /// Run this invocation in a separate worktree forked from the review base
-    #[arg(long, conflicts_with = "stack")]
-    pub fork: bool,
 }
 
 impl Cli {
@@ -155,8 +146,17 @@ pub enum Commands {
     /// Rebase current branch onto target (default: main)
     Rebase {
         /// Print the planned rebase strategy without mutating git
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["manual", "continue_rebase", "abort"])]
         plan: bool,
+        /// Keep the rebase local and leave conflicts for this process to resolve
+        #[arg(long, conflicts_with_all = ["plan", "continue_rebase", "abort"])]
+        manual: bool,
+        /// Stage resolved conflict paths and continue the local rebase
+        #[arg(long = "continue", conflicts_with_all = ["plan", "manual", "abort"])]
+        continue_rebase: bool,
+        /// Abort the local rebase in progress
+        #[arg(long, conflicts_with_all = ["plan", "manual", "continue_rebase"])]
+        abort: bool,
         /// Branch to rebase onto
         onto: Option<String>,
     },
@@ -199,11 +199,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: CronCommand,
     },
-    /// Serve a mind: boot its listener, thread, and residency. Steerable.
+    /// Run a Wave's listener, thread, and residency. Steerable.
     ///
     /// By convention this is the wave loop's entrypoint — a served mind is one
-    /// you can chat with while it runs. `lf loop` is the batch counterpart.
-    Serve {
+    /// you can chat with while it runs.
+    Wave {
         /// Wave name
         name: String,
         /// Take over even if another live wave session is registered
@@ -216,41 +216,12 @@ pub enum Commands {
         name: String,
     },
     /// Internal: the resident body a listener spawns for its own wave. Never
-    /// booted by hand — `lf serve` owns the listener half.
+    /// booted by hand — `lf wave` owns the listener half.
     #[command(name = "__resident", hide = true)]
     Resident {
         /// Wave name
         name: String,
     },
-    /// Run a bounded child loop for a flow, to its bit. Batch: no chat surface.
-    Loop {
-        /// Flow name
-        name: String,
-        /// The loop's whole handoff — computable on its own
-        seed: String,
-        /// Ask the live wave server to own the loop and return immediately
-        #[arg(long)]
-        detach: bool,
-        /// Maximum passes before escalation (minimum 2; run the flow directly for one pass)
-        #[arg(long = "max-passes", default_value_t = 8)]
-        max_passes: u32,
-        /// Per-pass timeout in seconds
-        #[arg(long = "pass-timeout-secs", default_value_t = 1800)]
-        pass_timeout_secs: u64,
-        /// Overall timeout in seconds
-        #[arg(long = "wall-clock-secs", default_value_t = 7200)]
-        wall_clock_secs: u64,
-        /// Poll interval for the loop file's recheck predicate
-        #[arg(long = "poll-secs", default_value_t = 60)]
-        poll_secs: u64,
-        /// Maximum agent turns per pass
-        #[arg(long = "max-turns")]
-        max_turns: Option<u32>,
-    },
-    /// Enqueue a flow in the current wave's innermost invocation
-    Enqueue { flow: String },
-    /// Skip the current logical step without destroying its route
-    Skip,
     /// Internal resident primitive: execute one expanded top-level flow step.
     #[command(name = "__flow-step", hide = true)]
     FlowStep {
@@ -262,6 +233,25 @@ pub enum Commands {
     Project {
         #[command(subcommand)]
         cmd: ProjectCommand,
+    },
+    /// Linear-backed Task Session lifecycle
+    Task {
+        #[command(subcommand)]
+        cmd: TaskCommand,
+    },
+    /// Internal: run one durable Task Session process generation
+    #[command(name = "__task", hide = true)]
+    TaskRunner {
+        session_id: String,
+        #[arg(long)]
+        generation: u32,
+    },
+    /// Internal: run one durable Project Session process generation
+    #[command(name = "__project", hide = true)]
+    ProjectRunner {
+        session_id: String,
+        #[arg(long)]
+        generation: u32,
     },
     /// Measure this codebase: lines and tokens per directory (tracked files only)
     Tokens {
@@ -309,8 +299,8 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show one wave's runs, attention, and (when live) loop state, from the
-    /// registry. Defaults to the ambient wave (`LFD_WAVE_ID`).
+    /// Show one wave's Project/Task hierarchy, runs, attention, and live loop
+    /// state from the registry. Defaults to the ambient wave (`LF_WAVE_ID`).
     Status {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
@@ -463,7 +453,7 @@ fn reject_retired_sub(_: &str) -> Result<String, String> {
 }
 
 /// Wave targeting shared by `lf chat` and `lf memory`: default is the
-/// invoking context's wave (`LFD_WAVE_ID` env, else the worktree name).
+/// invoking context's wave (`LF_WAVE_ID` env, else the worktree name).
 #[derive(Args, Debug, Clone, Default)]
 pub struct WaveTargetArgs {
     /// Target wave by name
@@ -505,6 +495,123 @@ pub enum MemoryCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
+    /// Create a Linear Project first, then start its durable Project Session
+    Start {
+        title: String,
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        #[arg(long)]
+        directive: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Start or resume the one durable Session for an existing Linear Project
+    Run {
+        /// Linear Project UUID or unique slug
+        project_id: String,
+        #[arg(long)]
+        directive: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show durable Project Session state and reconcile process liveness
+    Status {
+        project_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Queue an audited instruction for exactly the next provider turn
+    FollowUp {
+        project_id: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Redirect Project work now, relaunching the Session when needed
+    Steer {
+        project_id: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Interrupt the active Project turn and optionally replace its next instruction
+    Interrupt {
+        project_id: String,
+        #[arg(long = "message")]
+        message: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read or wait for one durable Project command receipt
+    Receipt {
+        command_id: String,
+        #[arg(long, value_enum)]
+        until: Option<crate::ops::ChildReceiptUntil>,
+        #[arg(long, default_value = "30s")]
+        timeout: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Confirm that this Project incorporated its current direction
+    Acknowledge {
+        project_id: String,
+        #[arg(long)]
+        directive: u32,
+        #[arg(long)]
+        summary: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resolve a durable Project decision request
+    Decide {
+        project_id: String,
+        decision_id: String,
+        choice: String,
+        #[arg(long)]
+        message: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ask the owning Wave to choose while preserving this Project Session
+    RequestDecision {
+        project_id: String,
+        prompt: String,
+        #[arg(long = "option", required = true)]
+        options: Vec<String>,
+        #[arg(long)]
+        wait: bool,
+        #[arg(long, default_value = "30m")]
+        timeout: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Wait without polling an LM
+    Wait {
+        project_id: String,
+        #[arg(long, default_value = "terminal", value_parser = ["waiting", "terminal"])]
+        until: String,
+        #[arg(long)]
+        timeout: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resume the same Project Session and provider history
+    Resume {
+        project_id: String,
+        message: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Attach to the writable Project Session control terminal
+    Attach { project_id: String },
+    /// End Project pursuit without deleting its durable history
+    Abandon {
+        project_id: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Promote a project into a resident child wave through the authored flow
     Promote {
         /// Linear Project slug under the parent wave
@@ -512,6 +619,146 @@ pub enum ProjectCommand {
         /// Parent wave (default: ambient wave)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TaskCommand {
+    /// Ensure its Project Session, then start or return the existing Linear task
+    Run {
+        issue: String,
+        #[arg(long)]
+        directive: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a Linear task, ensure its Project Session, then start its Task Session
+    Start {
+        title: String,
+        #[arg(short = 'p', long = "project")]
+        project_id: String,
+        #[arg(long)]
+        directive: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show durable state and reconcile process liveness
+    Status {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List files changed from this Task's recorded base commit
+    Changes {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show this Task's patch, optionally limited to one changed file
+    Diff {
+        issue: String,
+        path: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read one file from this Task's worktree
+    File {
+        issue: String,
+        path: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Queue an audited instruction for exactly the next provider turn
+    FollowUp {
+        issue: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Redirect the active provider turn, interrupting when live steer is unavailable
+    Steer {
+        issue: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Interrupt the active provider turn and optionally replace its next instruction
+    Interrupt {
+        issue: String,
+        #[arg(long = "message")]
+        message: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read or wait for one durable command receipt
+    Receipt {
+        command_id: String,
+        #[arg(long, value_enum)]
+        until: Option<crate::ops::ChildReceiptUntil>,
+        #[arg(long, default_value = "30s")]
+        timeout: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Confirm that this Task incorporated its current direction
+    Acknowledge {
+        issue: String,
+        #[arg(long)]
+        directive: u32,
+        #[arg(long)]
+        summary: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resolve a durable Task decision request
+    Decide {
+        issue: String,
+        decision_id: String,
+        choice: String,
+        #[arg(long)]
+        message: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ask the Task's Project Session to choose while preserving this Task Session
+    RequestDecision {
+        issue: String,
+        prompt: String,
+        #[arg(long = "option", required = true)]
+        options: Vec<String>,
+        #[arg(long)]
+        wait: bool,
+        #[arg(long, default_value = "30m")]
+        timeout: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Wait without polling an LM
+    Wait {
+        issue: String,
+        #[arg(long, default_value = "terminal", value_parser = ["submitted", "terminal"])]
+        until: String,
+        #[arg(long)]
+        timeout: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resume the same Task Session, worktree, and provider history
+    Resume {
+        issue: String,
+        message: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Attach read-write to the Task Session control terminal
+    Attach { issue: String },
+    /// Explicitly end a Task Session without merging
+    Abandon {
+        issue: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -837,31 +1084,18 @@ pub enum ReleaseCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WtCommand {
-    /// Create a new worktree
+    /// Create a low-level sibling worktree
     Create {
-        /// Worktree name (creates ../NAME)
+        /// Worktree name
         name: String,
-        /// Stack as a child under a parent branch (defaults to the current branch)
-        #[arg(short = 'c', long = "child", value_name = "PARENT", num_args = 0..=1, default_missing_value = "__current__")]
-        child: Option<String>,
-        /// Root an independent sibling branch from the default branch (the default)
-        #[arg(short = 's', long = "sibling", conflicts_with = "child")]
-        sibling: bool,
         /// Print the placement plan without creating a worktree
         #[arg(long)]
         plan: bool,
     },
-    /// Switch to a worktree by wave name, leaf name, or full branch
+    /// Switch to a worktree by name, identity leaf, or full branch
     Switch {
         /// Worktree name or full branch name to switch to
         name: String,
-    },
-    /// Switch to the parent worktree in the stack (toward main)
-    Up,
-    /// Switch to a child worktree in the stack (away from main)
-    Down {
-        /// Which child to descend into, when there is more than one
-        name: Option<String>,
     },
     /// List worktrees
     List {
@@ -921,6 +1155,307 @@ mod tests {
         assert_eq!(wave.as_deref(), Some("pm"));
         assert_eq!(wave_flag, None);
         assert!(!all);
+    }
+
+    #[test]
+    fn task_run_accepts_linear_identifier_and_json() {
+        let cli = Cli::try_parse_from(["lf", "task", "run", "INF-123", "--json"])
+            .expect("parse task run");
+        let Some(Commands::Task {
+            cmd: TaskCommand::Run { issue, json, .. },
+        }) = cli.command
+        else {
+            panic!("expected task run command");
+        };
+        assert_eq!(issue, "INF-123");
+        assert!(json);
+    }
+
+    #[test]
+    fn task_workspace_commands_address_the_task_then_optional_file() {
+        let changes = Cli::try_parse_from(["lf", "task", "changes", "INF-123", "--json"])
+            .expect("parse task changes");
+        assert!(matches!(
+            changes.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Changes { issue, json: true }
+            }) if issue == "INF-123"
+        ));
+
+        let diff =
+            Cli::try_parse_from(["lf", "task", "diff", "INF-123", "src/parser.rs", "--json"])
+                .expect("parse task diff");
+        assert!(matches!(
+            diff.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Diff {
+                    issue,
+                    path: Some(path),
+                    json: true,
+                }
+            }) if issue == "INF-123" && path == "src/parser.rs"
+        ));
+
+        let file =
+            Cli::try_parse_from(["lf", "task", "file", "INF-123", "src/parser.rs", "--json"])
+                .expect("parse task file");
+        assert!(matches!(
+            file.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::File { issue, path, json: true }
+            }) if issue == "INF-123" && path == "src/parser.rs"
+        ));
+    }
+
+    #[test]
+    fn task_interrupt_requires_explicit_message_flag() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "interrupt",
+            "INF-123",
+            "--message",
+            "take the smaller approach",
+        ])
+        .expect("parse task interrupt");
+        let Some(Commands::Task {
+            cmd:
+                TaskCommand::Interrupt {
+                    issue,
+                    message,
+                    json,
+                },
+        }) = cli.command
+        else {
+            panic!("expected task interrupt command");
+        };
+        assert_eq!(issue, "INF-123");
+        assert_eq!(message.as_deref(), Some("take the smaller approach"));
+        assert!(!json);
+    }
+
+    #[test]
+    fn task_receipt_and_decision_commands_parse_the_durable_ids() {
+        let receipt = Cli::try_parse_from([
+            "lf",
+            "task",
+            "receipt",
+            "cc_00000000000000000000000000000000",
+            "--until",
+            "incorporated",
+            "--timeout",
+            "30s",
+            "--json",
+        ])
+        .expect("parse task receipt");
+        assert!(matches!(
+            receipt.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Receipt {
+                    until: Some(crate::ops::ChildReceiptUntil::Incorporated),
+                    timeout,
+                    json: true,
+                    ..
+                }
+            }) if timeout == "30s"
+        ));
+
+        let acknowledge = Cli::try_parse_from([
+            "lf",
+            "task",
+            "acknowledge",
+            "INF-123",
+            "--directive",
+            "2",
+            "--summary",
+            "parser work is now first",
+        ])
+        .expect("parse task acknowledgement");
+        assert!(matches!(
+            acknowledge.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Acknowledge {
+                    issue,
+                    directive: 2,
+                    ..
+                }
+            }) if issue == "INF-123"
+        ));
+
+        let decide = Cli::try_parse_from([
+            "lf",
+            "task",
+            "decide",
+            "INF-123",
+            "cd_00000000000000000000000000000000",
+            "revise",
+            "--message",
+            "cover the race",
+            "--json",
+        ])
+        .expect("parse task decide");
+        assert!(matches!(
+            decide.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Decide {
+                    issue,
+                    choice,
+                    json: true,
+                    ..
+                }
+            }) if issue == "INF-123" && choice == "revise"
+        ));
+    }
+
+    #[test]
+    fn task_steering_verbs_are_distinct_and_support_json_receipts() {
+        let follow_up = Cli::try_parse_from([
+            "lf",
+            "task",
+            "follow-up",
+            "INF-123",
+            "audit retry callers",
+            "--json",
+        ])
+        .expect("parse task follow-up");
+        let Some(Commands::Task {
+            cmd:
+                TaskCommand::FollowUp {
+                    issue,
+                    message,
+                    json,
+                },
+        }) = follow_up.command
+        else {
+            panic!("expected task follow-up command");
+        };
+        assert_eq!(issue, "INF-123");
+        assert_eq!(message, "audit retry callers");
+        assert!(json);
+
+        let steer = Cli::try_parse_from([
+            "lf",
+            "task",
+            "steer",
+            "INF-123",
+            "take the smaller approach",
+        ])
+        .expect("parse task steer");
+        let Some(Commands::Task {
+            cmd:
+                TaskCommand::Steer {
+                    issue,
+                    message,
+                    json,
+                },
+        }) = steer.command
+        else {
+            panic!("expected task steer command");
+        };
+        assert_eq!(issue, "INF-123");
+        assert_eq!(message, "take the smaller approach");
+        assert!(!json);
+    }
+
+    #[test]
+    fn project_start_accepts_title_wave_and_json() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "project",
+            "start",
+            "Release stability",
+            "--wave",
+            "infrastructure",
+            "--json",
+        ])
+        .expect("parse project start");
+        let Some(Commands::Project {
+            cmd: ProjectCommand::Start {
+                title, wave, json, ..
+            },
+        }) = cli.command
+        else {
+            panic!("expected project start command");
+        };
+        assert_eq!(title, "Release stability");
+        assert_eq!(wave.as_deref(), Some("infrastructure"));
+        assert!(json);
+    }
+
+    #[test]
+    fn project_session_controls_parse_durable_ids_and_waits() {
+        let steer = Cli::try_parse_from([
+            "lf",
+            "project",
+            "steer",
+            "project-uuid",
+            "prioritize the CLI path",
+            "--json",
+        ])
+        .expect("parse project steer");
+        assert!(matches!(
+            steer.command,
+            Some(Commands::Project {
+                cmd: ProjectCommand::Steer {
+                    project_id,
+                    message,
+                    json: true,
+                },
+            }) if project_id == "project-uuid" && message == "prioritize the CLI path"
+        ));
+
+        let receipt = Cli::try_parse_from([
+            "lf",
+            "project",
+            "receipt",
+            "cc_00000000000000000000000000000000",
+            "--until",
+            "applied",
+            "--timeout",
+            "30s",
+        ])
+        .expect("parse project receipt");
+        assert!(matches!(
+            receipt.command,
+            Some(Commands::Project {
+                cmd: ProjectCommand::Receipt {
+                    command_id,
+                    until: Some(crate::ops::ChildReceiptUntil::Applied),
+                    timeout,
+                    ..
+                },
+            }) if command_id.starts_with("cc_") && timeout == "30s"
+        ));
+    }
+
+    #[test]
+    fn retired_loop_and_stack_surfaces_are_not_first_class_commands() {
+        let loop_cli = Cli::try_parse_from(["lf", "loop", "infrastructure"])
+            .expect("unknown names remain eligible for skill discovery");
+        assert!(matches!(loop_cli.command, Some(Commands::External(_))));
+        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--stack"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "up"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "down"]).is_err());
+    }
+
+    #[test]
+    fn rebase_manual_recovery_modes_are_explicit_and_exclusive() {
+        let manual = Cli::try_parse_from(["lf", "rebase", "--manual", "origin/main"])
+            .expect("parse manual rebase");
+        assert!(matches!(
+            manual.command,
+            Some(Commands::Rebase {
+                manual: true,
+                continue_rebase: false,
+                abort: false,
+                onto: Some(ref onto),
+                ..
+            }) if onto == "origin/main"
+        ));
+
+        assert!(Cli::try_parse_from(["lf", "rebase", "--continue", "--abort"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "rebase", "--plan", "--manual"]).is_err());
     }
 
     #[test]

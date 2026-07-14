@@ -1,39 +1,23 @@
 ---
-description: Make the Linear Project's KR set measurable.
+description: Keep one Linear Project's definition and KRs computable.
 default_agent: codex
 action_style: procedural
 ---
-Clarify the Linear Project's KR set.
+Clarify the exact Linear Project named by `LF_PROJECT_SESSION_ID`.
 
-## Orientation
+Read its current directive, the authoritative cache-only PM snapshot, its
+definition and KRs, filed Tasks, linked Task observations, and the owning
+Wave's GOAL/MEMORY.
 
-The project seed is in `<lf:message>`. A project is a measured bet inside one
-wave; it owns KRs and closure criteria, not memory, cadence, or child projects.
-Read the seed, `lf pm show --wave <wave> --project <project> --json --no-sync`, and the
-wave's GOAL.md and MEMORY.md.
+- A Project is one measured bet inside one Wave. It owns KRs and closure
+  evidence, not memory, cadence, child Projects, a worktree, or a PR.
+- Acknowledge the current directive with the exact command in the session
+  seed before changing the plan.
+- If the definition or KRs are ambiguous, update that exact Linear Project
+  through `lf pm project update`. Use 2–10 observable, proof-shaped KRs.
+- Keep concrete work in Tasks. If this is only a task bundle or isolated debt,
+  clarify the broader behavioral bet or report that it belongs elsewhere.
+- Never edit repository files from the canonical main checkout.
 
-Linear Project content is authoritative. Update it with `lf pm project update`;
-that write refreshes the SQLite snapshot before returning. During an isolated
-project loop, draft the clarification in
-`scratch/<branch>.md` until it can be written to Linear. Concrete tasks live
-outside the KR set.
-
-## Work
-
-- If the Linear Project's KR set is measurable (each KR states an observable condition
-  you could check with a command or a look), leave it alone.
-- Otherwise update its Linear Project content: 2–10 KRs, each one line, each checkable. Shape each
-  KR as proof under duration — counted streaks on real work, unattended
-  windows ("over one week... zero rescues"), never capability checkboxes
-  that pass once on a demo. KRs should read
-  as proof that the bet holds, not backlog bullets, implementation receipts,
-  issue ids, or status notes. Milestone KRs retire when true; self-renewing KRs
-  say what respawns them.
-- If the seed is a task bundle or individual technical-debt cleanup, do not
-  promote it into a project. Name the broader behavioral improvement or standing
-  quality frontier, or record that it belongs under an existing project.
-- If the seed can't support real KRs, record that as a blocker in
-  `scratch/questions.md` and stop.
-
-Do not decompose work in this phase unless the clarification is trivial and
-directly unblocks the next phase.
+Leave a compact statement of what evidence is missing and what pursuit can do
+about it. The Project runner advances the flow; write no loop bit.

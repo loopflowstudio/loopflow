@@ -13,17 +13,17 @@ use futures_util::future::try_join_all;
 
 use crate::engine::config::load_config_or_default;
 use crate::engine::wave_config::{read_wave_config, update_wave_goal_config, WavePmConfig};
-use crate::lfd::pm::linear::LinearClient;
-use crate::lfd::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmProject, PmProviderKind, PmResult, PmWave,
-};
-use crate::lfdb::{open_store, PmSnapshotRow, ProviderToken, Store};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::resolve_wave_name;
+use crate::pm::linear::LinearClient;
+use crate::pm::{
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmProject, PmProviderKind, PmResult, PmWave,
+};
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
+use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store};
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -179,10 +179,95 @@ pub struct PmProjectArchiveResult {
     pub slug: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmResolvedTask {
+    pub wave: String,
+    pub initiative_id: String,
+    pub project: PmProject,
+    pub item: PmItem,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PmResolvedProject {
+    pub wave: String,
+    pub initiative_id: String,
+    pub project: PmProject,
+}
+
+pub fn pm_create_project(
+    repo: &Path,
+    wave: Option<&str>,
+    title: &str,
+) -> OpsResult<PmResolvedProject> {
+    block_on_pm(pm_create_project_async(repo, wave, title))
+}
+
+async fn pm_create_project_async(
+    repo: &Path,
+    wave: Option<&str>,
+    title: &str,
+) -> OpsResult<PmResolvedProject> {
+    let wave = resolve_wave(wave)?;
+    let ctx = resolve_context(repo, &wave).await?;
+    let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
+    if let Some(project) = projects
+        .into_iter()
+        .find(|project| project.name.eq_ignore_ascii_case(title))
+    {
+        return Ok(PmResolvedProject {
+            wave,
+            initiative_id: ctx.initiative,
+            project,
+        });
+    }
+    let seed = LocalProject {
+        slug: crate::pm::project_slug(title),
+        name: title.to_string(),
+        summary: title.to_string(),
+        definition: title.to_string(),
+        krs: Vec::new(),
+    };
+    let id = match ctx
+        .client
+        .create_project(&ctx.initiative, &seed.name, &seed.definition, &seed.krs)
+        .await
+    {
+        Ok(id) => id,
+        Err(create_error) => checked_projects(&ctx.client, &ctx.initiative, &wave)
+            .await?
+            .into_iter()
+            .find(|project| project.name.eq_ignore_ascii_case(title))
+            .map(|project| project.id)
+            .ok_or_else(|| pm_to_ops(create_error))?,
+    };
+    Ok(PmResolvedProject {
+        wave,
+        initiative_id: ctx.initiative.clone(),
+        project: PmProject {
+            id,
+            slug: seed.slug,
+            name: seed.name,
+            summary: seed.summary,
+            definition: seed.definition,
+            krs: seed.krs,
+            initiative_ids: vec![ctx.initiative],
+        },
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct PmSnapshot {
     projects: Vec<PmProject>,
     items: Vec<PmItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LocalProject {
+    slug: String,
+    name: String,
+    summary: String,
+    definition: String,
+    krs: Vec<PmKr>,
 }
 
 // ── Client + Linear project resolution ──────────────────────────────
@@ -315,9 +400,9 @@ fn read_wave_pm_config(repo: &Path, wave: &str) -> Option<WavePmConfig> {
     read_wave_config(repo, wave).and_then(|config| config.pm)
 }
 
-fn resolve_wave(repo: &Path, wave: Option<&str>) -> OpsResult<String> {
-    resolve_wave_name(repo, wave)
-        .ok_or_else(|| OpsError::Message("cannot determine wave name".to_string()))
+fn resolve_wave(wave: Option<&str>) -> OpsResult<String> {
+    resolve_wave_name(wave)
+        .ok_or_else(|| OpsError::Message("cannot determine wave; pass --wave <name>".to_string()))
 }
 
 fn parse_provider(value: &str) -> OpsResult<PmProviderKind> {
@@ -389,11 +474,11 @@ async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
 }
 
 /// Linear authenticates via OAuth: the access token and refresh grant live in
-/// lfdb, and PM access refreshes the grant before the access token expires.
+/// store, and PM access refreshes the grant before the access token expires.
 async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
     // A forwarded token wins over the local store: `lf ssh` resolves the PM
-    // credential on the caller's machine (where lfdb lives) and hands it to the
-    // remote through the environment. The remote lfdb holds no PM credential, so
+    // credential on the caller's machine (where store lives) and hands it to the
+    // remote through the environment. The remote store holds no PM credential, so
     // without this hook remote `lf pm` could never authenticate.
     if let Some(token) = forwarded_pm_token(provider) {
         return Ok(token);
@@ -401,7 +486,7 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
 
     let store = open_store(&storage_config_from_env()?)
         .await
-        .map_err(|err| OpsError::Message(format!("failed to open lfd credential store: {err}")))?;
+        .map_err(|err| OpsError::Message(format!("failed to open credential store: {err}")))?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     resolve_pm_token_from_store(provider, &store, now, |provider, token| async move {
         refresh_stored_provider_token(provider, &token).await
@@ -486,9 +571,9 @@ fn forwarded_pm_token(provider: PmProviderKind) -> Option<String> {
     }
 }
 
-fn storage_config_from_env() -> OpsResult<crate::lfdb::StorageConfig> {
-    crate::lfd::storage_config_from_env()
-        .map_err(|err| OpsError::Message(format!("failed to resolve lfd credential store: {err}")))
+fn storage_config_from_env() -> OpsResult<crate::store::StorageConfig> {
+    crate::store::storage_config_from_env()
+        .map_err(|err| OpsError::Message(format!("failed to resolve credential store: {err}")))
 }
 
 fn pm_repo_key(repo: &Path) -> String {
@@ -723,7 +808,7 @@ async fn pm_init_async(
     options: &PmInitOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmInitResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let wave_dir = repo.join("wave").join(&wave);
     if !wave_dir.is_dir() {
         return Err(OpsError::Message(format!(
@@ -803,12 +888,12 @@ pub fn pm_show(
     block_on_pm(pm_show_async(repo, options, progress))
 }
 
-async fn pm_show_async(
+pub(crate) async fn pm_show_async(
     repo: &Path,
     options: &PmShowOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmShowResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let row = load_show_snapshot(repo, &wave, options.refresh, progress).await?;
     let snapshot = decode_snapshot(&wave, &row.payload)?;
     let projects = match options.project.as_deref() {
@@ -849,12 +934,100 @@ pub fn pm_update(
     block_on_pm(pm_update_async(repo, options, progress))
 }
 
-async fn pm_update_async(
+pub fn pm_create_task_idempotent(
+    repo: &Path,
+    wave: &str,
+    project_slug: &str,
+    title: &str,
+    marker: &str,
+    progress: &impl Progress,
+) -> OpsResult<PmUpdateResult> {
+    block_on_pm(pm_create_task_idempotent_async(
+        repo,
+        wave,
+        project_slug,
+        title,
+        marker,
+        progress,
+    ))
+}
+
+async fn pm_create_task_idempotent_async(
+    repo: &Path,
+    wave: &str,
+    project_slug: &str,
+    title: &str,
+    marker: &str,
+    progress: &impl Progress,
+) -> OpsResult<PmUpdateResult> {
+    let ctx = resolve_context(repo, wave).await?;
+    let projects = checked_projects(&ctx.client, &ctx.initiative, wave).await?;
+    let project = find_project(&projects, wave, project_slug)?;
+    let find_existing = |items: Vec<PmItem>| {
+        items
+            .into_iter()
+            .find(|item| item.description.contains(marker))
+    };
+    if let Some(existing) = find_existing(
+        ctx.client
+            .list_items(&project.id)
+            .await
+            .map_err(pm_to_ops)?,
+    ) {
+        return Ok(PmUpdateResult {
+            wave: wave.to_string(),
+            id: existing.id,
+            created: false,
+            completed: existing.completed,
+            linked_pr: None,
+        });
+    }
+
+    progress.status(&format!(
+        "creating idempotent {} task in Linear Project {} for wave/{wave}",
+        ctx.provider, project.id
+    ));
+    let item = PmItemCreate {
+        name: title.to_string(),
+        description: marker.to_string(),
+    };
+    match ctx.client.create_item(&project.id, &item).await {
+        Ok(id) => Ok(PmUpdateResult {
+            wave: wave.to_string(),
+            id,
+            created: true,
+            completed: false,
+            linked_pr: None,
+        }),
+        Err(create_error) => {
+            // The request may have reached Linear before the transport failed.
+            // Resolve the durable marker before reporting failure so a retry
+            // cannot create a second issue.
+            let items = ctx
+                .client
+                .list_items(&project.id)
+                .await
+                .map_err(pm_to_ops)?;
+            if let Some(existing) = find_existing(items) {
+                return Ok(PmUpdateResult {
+                    wave: wave.to_string(),
+                    id: existing.id,
+                    created: false,
+                    completed: existing.completed,
+                    linked_pr: None,
+                });
+            }
+            Err(pm_to_ops(create_error))
+        }
+    }
+}
+
+pub(crate) async fn pm_update_async(
     repo: &Path,
     options: &PmUpdateOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     let result = apply_update(&wave, options.project.as_deref(), &ctx, options, progress).await?;
     progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
@@ -993,7 +1166,7 @@ async fn pm_status_async(
     _progress: &impl Progress,
 ) -> OpsResult<PmStatusResult> {
     let waves = if let Some(wave) = options.wave.as_deref() {
-        vec![resolve_wave(repo, Some(wave))?]
+        vec![resolve_wave(Some(wave))?]
     } else {
         list_pm_waves(repo)?
     };
@@ -1035,6 +1208,72 @@ pub fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
         .collect())
 }
 
+pub fn pm_resolve_task(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
+    block_on_pm(pm_resolve_task_async(repo, issue))
+}
+
+async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
+    let mut matches = Vec::new();
+    for wave in list_pm_waves(repo)? {
+        let ctx = resolve_context(repo, &wave).await?;
+        for project in checked_projects(&ctx.client, &ctx.initiative, &wave).await? {
+            let items = ctx
+                .client
+                .list_items(&project.id)
+                .await
+                .map_err(pm_to_ops)?;
+            for item in items {
+                if item.id == issue || item.identifier.eq_ignore_ascii_case(issue) {
+                    matches.push(PmResolvedTask {
+                        wave: wave.clone(),
+                        initiative_id: ctx.initiative.clone(),
+                        project: project.clone(),
+                        item,
+                    });
+                }
+            }
+        }
+    }
+    match matches.len() {
+        0 => Err(OpsError::Message(format!(
+            "Linear task {issue:?} does not belong to a known Loopflow Project and Wave"
+        ))),
+        1 => Ok(matches.pop().expect("one task match")),
+        count => Err(OpsError::Message(format!(
+            "Linear task {issue:?} belongs to {count} known Loopflow Waves; repair PM ownership before running it"
+        ))),
+    }
+}
+
+pub fn pm_resolve_project(repo: &Path, project_id: &str) -> OpsResult<PmResolvedProject> {
+    block_on_pm(pm_resolve_project_async(repo, project_id))
+}
+
+async fn pm_resolve_project_async(repo: &Path, project_id: &str) -> OpsResult<PmResolvedProject> {
+    let mut matches = Vec::new();
+    for wave in list_pm_waves(repo)? {
+        let ctx = resolve_context(repo, &wave).await?;
+        for project in checked_projects(&ctx.client, &ctx.initiative, &wave).await? {
+            if project.id == project_id {
+                matches.push(PmResolvedProject {
+                    wave: wave.clone(),
+                    initiative_id: ctx.initiative.clone(),
+                    project,
+                });
+            }
+        }
+    }
+    match matches.len() {
+        0 => Err(OpsError::Message(format!(
+            "Linear Project {project_id:?} does not belong to a known Loopflow Wave"
+        ))),
+        1 => Ok(matches.pop().expect("one project match")),
+        count => Err(OpsError::Message(format!(
+            "Linear Project {project_id:?} belongs to {count} known Loopflow Waves; each Project must belong to exactly one Wave"
+        ))),
+    }
+}
+
 // ── sync / doctor ──────────────────────────────────────────────────
 
 pub fn pm_sync(
@@ -1052,7 +1291,7 @@ async fn pm_sync_async(
 ) -> OpsResult<PmSyncResult> {
     let all_waves = list_local_waves(repo)?;
     let waves = match options.wave.as_deref() {
-        Some(wave) => vec![resolve_wave(repo, Some(wave))?],
+        Some(wave) => vec![resolve_wave(Some(wave))?],
         None => all_waves.clone(),
     };
     let mut actions = Vec::new();
@@ -1185,7 +1424,7 @@ async fn pm_project_archive_async(
     options: &PmProjectArchiveOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmProjectArchiveResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
     let project = find_project(&projects, &wave, &options.project)?;
@@ -1208,7 +1447,7 @@ async fn pm_project_write_async(
     options: &PmProjectWriteOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmProjectWriteResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     let krs = options
         .krs
@@ -1241,7 +1480,7 @@ async fn pm_project_write_async(
             .title
             .clone()
             .unwrap_or_else(|| project.name.clone());
-        let new_slug = crate::lfd::pm::project_slug(&name);
+        let new_slug = crate::pm::project_slug(&name);
         if projects
             .iter()
             .any(|candidate| candidate.id != project.id && candidate.slug == new_slug)
@@ -1260,7 +1499,7 @@ async fn pm_project_write_async(
         let name = options.title.clone().ok_or_else(|| {
             OpsError::Message("`lf pm project create --title` is required".to_string())
         })?;
-        let slug = crate::lfd::pm::project_slug(&name);
+        let slug = crate::pm::project_slug(&name);
         if projects.iter().any(|project| project.slug == slug) {
             return Err(OpsError::Message(format!(
                 "wave/{wave} already has a Linear Project with slug `{slug}`; use `lf pm project update`"
@@ -1297,7 +1536,7 @@ async fn pm_rename_async(
     options: &PmRenameOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmRenameResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     progress.status(&format!(
         "renaming {} Linear Initiative {} to {}",
@@ -1329,7 +1568,7 @@ async fn pm_task_move_async(
     options: &PmTaskMoveOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmTaskMoveResult> {
-    let wave = resolve_wave(repo, options.wave.as_deref())?;
+    let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
     let project = find_project(&projects, &wave, &options.project)?;
@@ -1399,29 +1638,7 @@ fn write_initiative_to_goal(
 }
 
 fn wave_summary(repo: &Path, wave: &str) -> OpsResult<String> {
-    let path = repo.join("wave").join(wave).join("GOAL.md");
-    let content = std::fs::read_to_string(&path)?;
-    let objective = markdown_section(&content, "Objective");
-    Ok(first_paragraph(&objective))
-}
-
-fn markdown_section(content: &str, heading: &str) -> String {
-    let marker = format!("## {heading}");
-    let mut in_section = false;
-    let mut lines = Vec::new();
-    for line in content.lines() {
-        if line.trim() == marker {
-            in_section = true;
-            continue;
-        }
-        if in_section && line.trim_start().starts_with("## ") {
-            break;
-        }
-        if in_section {
-            lines.push(line);
-        }
-    }
-    lines.join("\n").trim().to_string()
+    Ok(crate::engine::wave_config::read_wave_summary(repo, wave)?)
 }
 
 fn first_paragraph(content: &str) -> String {
@@ -1518,14 +1735,14 @@ fn pm_to_ops(err: PmError) -> OpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lfd::pm::test_server::{self, json_response, QueuedResponse};
     use crate::ops::NullProgress;
+    use crate::pm::test_server::{self, json_response, QueuedResponse};
     use axum::http::StatusCode;
     use serde_json::json;
 
     fn linear_test_ctx(base_url: String, initiative: &str) -> PmContext {
         PmContext {
-            client: PmClient::Linear(crate::lfd::pm::linear::LinearClient::with_base_url(
+            client: PmClient::Linear(crate::pm::linear::LinearClient::with_base_url(
                 "linear-secret".to_string(),
                 Some("team-9".to_string()),
                 base_url,
@@ -1653,7 +1870,7 @@ mod tests {
     fn duplicate_linear_project_slugs_are_drift() {
         let project = |id: &str, name: &str| PmProject {
             id: id.to_string(),
-            slug: crate::lfd::pm::project_slug(name),
+            slug: crate::pm::project_slug(name),
             name: name.to_string(),
             summary: String::new(),
             definition: String::new(),
@@ -1903,9 +2120,9 @@ mod tests {
     #[tokio::test]
     async fn pm_refreshes_due_linear_token_before_using_it() {
         let db_path =
-            std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::lfd::id::LfdId::new()));
+            std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::id::WaveId::new()));
         let store = std::sync::Arc::new(
-            open_store(&crate::lfdb::StorageConfig::sqlite(db_path))
+            open_store(&crate::store::StorageConfig::sqlite(db_path))
                 .await
                 .expect("open token store"),
         );
@@ -1919,7 +2136,7 @@ mod tests {
                 expires_at: Some(now + 60),
                 login: None,
                 updated_at: now,
-                credential_type: crate::lfdb::CredentialType::OAuth,
+                credential_type: crate::store::CredentialType::OAuth,
             })
             .await
             .expect("store current token");
@@ -1939,7 +2156,7 @@ mod tests {
                     expires_at: Some(now + 24 * 60 * 60),
                     login: None,
                     updated_at: now,
-                    credential_type: crate::lfdb::CredentialType::OAuth,
+                    credential_type: crate::store::CredentialType::OAuth,
                 })
             },
         )
@@ -1959,9 +2176,9 @@ mod tests {
     #[tokio::test]
     async fn proactive_refresh_failure_uses_still_valid_token() {
         let db_path =
-            std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::lfd::id::LfdId::new()));
+            std::env::temp_dir().join(format!("lf-pm-refresh-{}.db", crate::id::WaveId::new()));
         let store = std::sync::Arc::new(
-            open_store(&crate::lfdb::StorageConfig::sqlite(db_path))
+            open_store(&crate::store::StorageConfig::sqlite(db_path))
                 .await
                 .expect("open token store"),
         );
@@ -1975,7 +2192,7 @@ mod tests {
                 expires_at: Some(now + 60),
                 login: None,
                 updated_at: now,
-                credential_type: crate::lfdb::CredentialType::OAuth,
+                credential_type: crate::store::CredentialType::OAuth,
             })
             .await
             .expect("store current token");
@@ -2003,7 +2220,7 @@ mod tests {
         std::env::set_var(FORWARDED_PM_TOKEN_ENV, "forwarded-secret");
         std::env::remove_var(FORWARDED_PM_PROVIDER_ENV);
 
-        // Returns the forwarded token without ever opening the lfdb store.
+        // Returns the forwarded token without ever opening the store store.
         let token = block_on_pm(resolve_pm_token(PmProviderKind::Linear)).expect("token");
         assert_eq!(token, "forwarded-secret");
 

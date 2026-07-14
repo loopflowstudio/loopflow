@@ -179,9 +179,9 @@ lf rebase --plan # show the strategy without changing git
 ```
 
 Classifies the branch before mutating git. Disposable branches can reset to
-their base, stack children rebase onto their parent, and authored work uses a
-normal rebase path. If `scratch/` needs to survive a reset, Loopflow stashes it
-under `.lf/scratch-stash/` and restores it afterward.
+their base, while authored work uses a normal rebase path. If `scratch/` needs
+to survive a reset, Loopflow stashes it under `.lf/scratch-stash/` and restores
+it afterward.
 
 Use an explicit target when needed:
 
@@ -190,57 +190,33 @@ lf rebase origin/main
 lf rebase --plan parent.branch
 ```
 
-## lf wt
-
-Worktree helper commands.
-
-### lf wt create
-
-Create or select a worktree from a placement plan.
+Keep conflict resolution in the current process when the branch is too large
+or sensitive to hand to another agent:
 
 ```bash
-lf wt create my-feature              # sibling: root branch from main (the default)
-lf wt create thing --child parent    # child: create parent.thing
-lf wt create thing --child           # child of the current branch
-lf wt create my-feature --plan       # print the plan without creating anything
+lf rebase --manual
+# edit the conflict paths printed by lf
+lf rebase --continue
+
+lf rebase --abort # restore the pre-rebase branch instead
 ```
 
-Two relative-to-here verbs. **Sibling** (the default) roots an independent
-branch from main. **Child** stacks under its parent. Ad-hoc worktrees never
-nest unless you ask with `--child`.
+Manual recovery stays local and never pushes. Each `--continue` stages only
+the current conflict paths; repeat edit/continue until the rebase completes.
 
-| Flag | Description |
-|------|-------------|
-| `-c, --child [PARENT]` | Stack under `PARENT`, or under the current branch when omitted |
-| `-s, --sibling` | Root an independent branch from the default branch (already the default) |
-| `--plan` | Print the placement plan without mutating git |
+## lf wt
 
-Dots are reserved for stack ancestry. Use `api-v2` as a worktree segment, not
-`api.v2`; create ancestry with `--child`.
-
-Worktree branches use the fixed identity shape `<user>/<chain>`. A sibling
-`bugs` creates `<user>/bugs` in `../loopflow.bugs`; a child `fix-auth` under
-`<user>/bugs` creates `<user>/bugs.fix-auth` in
-`../loopflow.bugs.fix-auth`.
+Inspect, switch, and clean worktrees. Normal roadmap work starts with
+`lf task run <issue-id>`; `lf wt` remains a low-level Git primitive.
 
 ### lf wt switch
 
-Switch to a worktree by wave name, chain leaf, or full branch.
+Switch to a worktree by directory name, identity leaf, or full branch.
 
 ```bash
-lf wt switch bugs             # the bugs wave worktree
+lf wt switch bugs             # the bugs task worktree
 lf wt switch fix-auth         # the …bugs.fix-auth… worktree, by leaf
 lf wt switch jack/bugs.fix-auth.20260316_1856  # exact branch
-```
-
-### lf wt up / down
-
-Move through the stack — `up` toward main, `down` away from it.
-
-```bash
-lf wt up              # to the parent worktree
-lf wt down            # to the only child (else lists them)
-lf wt down fix-auth   # to a specific child by leaf
 ```
 
 ### lf wt list
@@ -298,20 +274,13 @@ lf pr abandon feature-branch --force   # skip confirmation
 |------|-------------|
 | `-f, --force` | Skip confirmation and force abandon with uncommitted changes |
 
-## Typical Workflow
+## Typical Task Workflow
 
 ```bash
-lf wt create my-feature       # create or select a placed worktree
-lf wt switch my-feature       # switch to worktree from another
-# ... work on feature ...
-lf commit                     # commit with generated message
-lf pr open                         # open PR (CI runs automatically)
-# ... address review feedback ...
-lf commit -p                  # commit and push
-lf wt ci                      # check CI status
-lf pr land                       # submit to merge queue
-# ... wait for CI to pass and merge ...
-lf wt prune                   # cleanup merged worktrees
+lf task run ENG-123
+lf task status ENG-123
+lf task steer ENG-123 "also cover the migration"
+lf task wait ENG-123 --until terminal
 ```
 
 ## See Also

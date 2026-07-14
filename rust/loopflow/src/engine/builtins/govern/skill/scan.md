@@ -22,8 +22,8 @@ re-derive what these already record.
 ## Scope
 
 The chord-wave's area lists member wave directories. Each directory contains a
-`GOAL.md` and `MEMORY.md`; Linear-owned projects and tasks are read from the
-local PM snapshot. This step reads all of it, plus the living state around it.
+`GOAL.md` and `MEMORY.md`; Project definitions, KRs, and tasks come from its PM
+snapshot. This step reads all of it, plus the living state around it.
 
 Member wave names come from those directory names. If the chord-wave area
 contains `wave/chord-model/` and `wave/signals/`, the wave names are
@@ -32,42 +32,47 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 ## Workflow
 
 1. **Read wave configs.** For each member wave directory in the area:
-   - `GOAL.md` — intent, measures, process judgment, and the Linear handle
+   - `GOAL.md` — objective, measures, cadence, policy, and the Linear handle
    - `MEMORY.md` — what the wave has learned and decided
-   - `lf pm show --wave <wave> --json --no-sync` — measured bets, KRs, and tasks from SQLite
-   - Live tasks — `lf pm show --wave <wave-name> --no-sync` (Linear is the source of truth; there are no local task lists)
+   - `lf pm show --wave <wave> --json` — measured bets, KRs, and tasks from SQLite
+
+   Linear is the source of truth; there are no local Project or Task lists.
 
 2. **Read runtime state.** For each member wave:
-   - `wave/<wave-name>/.wave-endpoint` — a live wave server publishes its
-     endpoint here; absent means the wave is not running
-   - `tmux ls` — the wave's server and any detached loop sessions
-   - Open PRs on the wave's branches (`gh pr list`) and their queue state
+   - `lf status <wave-name> --json` — Wave presence, resident state, Project
+     Sessions, Task Sessions, next owners, worktrees, PRs, and attention
+   - `lf task status <issue-id> --json` or
+     `lf project status <project-id> --json` only when the Wave snapshot needs
+     deeper inspection
+
+   Do not infer product state from tmux names or branch naming.
 
 3. **Read recent activity.** For each member wave:
    - `git log main --since="1 week ago"` filtered to the wave's area paths
-   - Open PRs (`gh pr list`) from the wave's worktrees
+   - Open PRs owned by the Wave's Task Sessions
    - CI status on open PRs
    - Any `scratch/` artifacts from in-progress work
 
 4. **Read unlanded branches.** Look for work that was pushed but never landed:
-   - `git branch -r` filtered to branches matching the wave name
-   - For each branch ahead of main, show `git log main..<branch> --oneline`
+   - Start from each Task Session's persisted branch and worktree
+   - For each Task branch ahead of main, show `git log main..<branch> --oneline`
      and `git diff --stat main..<branch>`
    - Check whether a PR exists for the branch (`gh pr list --head <branch>`)
    - Note branches with significant unlanded commits — these represent
      work the wave already did that the chord can't see from main alone
-   - Check local worktrees too (`git worktree list`) — a worktree with
-     uncommitted changes or unpushed commits is the same signal
+   - Check Task Session worktrees too (`lf wt list`) — a worktree with
+     uncommitted changes or unpushed commits is the same signal. Low-level
+     worktrees not attached to a Task are diagnostic state, not roadmap work.
 
 5. **Read blocks.** Look for signals that a wave is stuck:
    - PRs with failing CI that haven't been fixed
-   - Items with no recent commits
+   - Tasks or Sessions with no recent activity
    - Merge conflicts
    - Open questions in `scratch/questions.md`
 
-5. **Read cross-wave state.** Look for interactions between waves:
+6. **Read cross-wave state.** Look for interactions between waves:
    - PRs that touch files in another wave's area
-   - Items in different waves that reference the same code
+   - Tasks in different waves that reference the same code
    - Dependency ordering (does wave A's work block wave B?)
 
 ## Output
@@ -79,18 +84,19 @@ Write `scratch/garden-scan.md`:
 
 ## Wave: <name>
 ### Config
-<flow, mode, direction, area>
+<objective, cadence, policy, PM binding>
 
 ### Runtime
-<registered/not registered, status, iteration, active run, PR/queue state>
+<Wave presence and resident state, active Project/Task Sessions, attention>
 
 ### Progress
 <what shipped recently, what's in flight>
 
-### Items
-| # | Title | Status |
-|---|-------|--------|
-| 01 | ... | shipped / in-flight / blocked / queued |
+### Projects
+<Project KRs, Project Session state, next owner>
+
+### Tasks
+<Linear issue, Task Session state, worktree, PR, next owner>
 
 ### Blocks
 <anything preventing progress — CI failures, conflicts, stalls, missing decisions>
@@ -118,5 +124,5 @@ evaluate quality. That's assess's job.
 **Staleness.** Run the commands. Don't rely on memory or cached state. The scan must
 reflect the repo as it is right now.
 
-**Partial reads.** Read every Project and task in each member wave's PM snapshot.
-Skipping planning state means the assessment will miss things.
+**Partial reads.** Read every Project and Task in each Wave's PM/status snapshot.
+Skipping filed or running work means the assessment will miss things.

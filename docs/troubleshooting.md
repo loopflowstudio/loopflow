@@ -7,39 +7,43 @@ title: Troubleshooting
 
 Common issues and solutions.
 
-## lfd daemon not running
+## A Wave is not running
 
-**Symptom:** Loopflow shows no daemon, or `curl http://127.0.0.1:2486/health` fails.
-
-Check if installed:
-
-```bash
-launchctl list | grep lfd
-```
-
-Reinstall:
+The Loopflow app invokes its bundled `lf` and talks directly to each Wave.
+Inspect the selected Wave, then start it in the foreground:
 
 ```bash
-lfd install
+lf status <wave> --json
+lf wave <wave>
 ```
 
-Run in foreground to debug:
+## Task Session stops advancing
+
+**Symptom:** A Task remains waiting, blocked, failed, or submitted without an
+obvious next action.
+
+Read its durable state before restarting anything:
 
 ```bash
-lfd serve
+lf task status INF-123 --json
+lf task attach INF-123
 ```
 
-## Task hangs in batch mode
-
-**Symptom:** Task starts but never completes.
-
-The task may be waiting for input. Use interactive mode:
+`attach` opens the audited Task control prompt; it does not write bytes into a
+provider terminal. Answer a pending decision, send a follow-up, or resume a
+stopped process through the same Task Session:
 
 ```bash
-lf gate -i    # interactive mode
+lf task decide INF-123 cd_123 approve
+lf task follow-up INF-123 "address the latest review"
+lf task resume INF-123 "continue from the failure"
 ```
 
-Check if the coding agent is stuck on a permission prompt or clarifying question.
+If a control returned a command id, inspect or wait for its durable receipt:
+
+```bash
+lf task receipt cc_123 --wait --timeout 30s --json
+```
 
 ## Rate limits
 
@@ -58,16 +62,10 @@ Claude, Codex, Gemini, and OpenCode have usage limits. Options:
 List all worktrees:
 
 ```bash
-git worktree list
+lf wt list
 ```
 
 Clean up stale entries:
-
-```bash
-git worktree prune
-```
-
-Remove merged worktrees:
 
 ```bash
 lf wt prune
@@ -81,15 +79,24 @@ lf rebase
 
 Loopflow updates the default-branch worktree as part of the rebase path.
 
-## Loop stuck in WAITING
+## Project or Task is waiting
 
-**Symptom:** Loopflow shows a wave in WAITING state.
+**Symptom:** Loopflow shows a Project or Task Session in `waiting`.
 
-The loop hit its PR limit. Options:
+Waiting is deliberate: no provider process is running while a child or external
+system must change the answer. Inspect the Wave's work map and the child's
+state reason:
 
-1. Review and merge outstanding PRs
-2. Adjust the wave runtime settings in Loopflow
-3. Land accumulated work: see [Waves](waves.md) for loop management
+```bash
+lf status <wave> --json
+lf project status <project-id> --json
+lf task status INF-123 --json
+```
+
+Typical owners are a pending decision, an active child Task, PR review, CI, or
+merge. Steer, decide, or resume the named Project or Task. A relevant child
+observation wakes its Project Session automatically; there is no runtime knob
+or PR-limit counter to clear.
 
 ## Context too large
 
@@ -122,4 +129,4 @@ If an agent CLI is missing, install that vendor's CLI and rerun `lf init`.
 
 ## See Also
 
-[Configuration](config.md) · [Waves](waves.md) · [`lfd` reference](lfd.md)
+[Configuration](config.md) · [Waves](waves.md)

@@ -1,4 +1,4 @@
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 
 def test_navbar_links_exist(homepage: Page):
@@ -16,7 +16,7 @@ def test_navbar_docs_link(homepage: Page, base_url: str):
 def test_navbar_install_link(homepage: Page, base_url: str):
     homepage.locator("nav").locator("a", has_text="Install").click()
     assert homepage.url == f"{base_url}/download"
-    assert homepage.locator("h1", has_text="Install").is_visible()
+    expect(homepage.locator("h1", has_text="Install")).to_be_visible()
 
 
 def test_github_link_external(homepage: Page):

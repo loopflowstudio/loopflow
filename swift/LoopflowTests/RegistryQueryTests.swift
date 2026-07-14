@@ -1,6 +1,5 @@
-// RegistryQuery decodes the `lf ls/status/runs --json` wire snapshots (the Rust
-// query types) and maps them onto the app models the stores hold. The runner is
-// injected, so these exercise the parse + mapping without spawning `lf`.
+// RegistryQuery decodes the `lf ls/status/runs --json` wire snapshots. The
+// runner is injected, so these exercise parsing without spawning `lf`.
 
 import Foundation
 import Testing
@@ -12,8 +11,8 @@ struct RegistryQueryTests {
     func wavesDecodeAndScope() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","iteration":3,"workers":2,"active_runs":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
-          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
+          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
+          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
         ]
         """
         let query = RegistryQuery { args, _ in
@@ -31,8 +30,8 @@ struct RegistryQueryTests {
     func allWavesDecode() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","iteration":3,"workers":2,"active_runs":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
-          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
+          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null},
+          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null}
         ]
         """
         let counter = CallCounter()
@@ -48,14 +47,25 @@ struct RegistryQueryTests {
     }
 
 
-    @Test("lf status maps runs and attention onto the wave")
-    func statusMapsRunsAndAttention() async throws {
+    @Test("lf status maps the work hierarchy onto the wave")
+    func statusMapsWork() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
+          "wave":{"id":"goals","name":"goals","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
           "loop_state":"turning",
-          "runs":[{"id":"run-1","flow":"implement","task":"wire it","step_index":2,"status":"running","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":"https://example.test/pull/7","pr_state":"draft","pr_title":"Wire it"}],
-          "attention":[{"id":"att-1","kind":"interactive","status":"surfaced","title":"needs a human","summary":"review the design","run_id":"run-1","surfaced_at":"2026-07-06T00:00:00Z"}]
+          "projects":[{
+            "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","krs":[{"text":"Fast loops","holds":false}]},
+            "runtime":{"session_id":"ps_1","status":"waiting","reason":"supervised Tasks are active","status_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","process_alive":false},
+            "directive":null,
+            "next_move":{"owner":"project","reason":"supervised Tasks are active"},
+            "tasks":[{
+              "task":{"id":"issue-1","identifier":"INF-123","name":"Wire it","description":"","rank":1,"completed":false,"assignee":null},
+              "runtime":{"session_id":"ts_1","project_session_id":"ps_1","status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","worktree":"/task-wt","branch":"jack/inf-123","provider":"codex","process_alive":true},
+              "directive":null,
+              "next_move":{"owner":"task","reason":"provider turn is active"},
+              "pull_request":null
+            }]
+          }]
         }
         """
         let query = RegistryQuery { args, _ in
@@ -63,42 +73,52 @@ struct RegistryQueryTests {
             return json
         }
 
-        let result = try await query.status(wave: "goals", waveId: "wave-1", cwd: nil)
+        let result = try await query.status(wave: "goals", cwd: nil)
         #expect(result.loopState == "turning")
-        #expect(result.runs.map(\.id) == ["run-1"])
-        #expect(result.runs[0].waveId == "wave-1")
-        #expect(result.runs[0].status == .running)
-        #expect(result.runs[0].stepIndex == 2)
-        #expect(result.runs[0].pr?.state == .draft)
-        #expect(result.runs[0].pr?.title == "Wire it")
-        #expect(result.attention.map(\.id) == ["att-1"])
-        #expect(result.attention[0].waveId == "wave-1")
-        #expect(result.attention[0].kind == .interactive)
+        #expect(result.workMap.projects[0].project.slug == "developer-efficiency")
+        #expect(result.workMap.projects[0].runtime?.status == .waiting)
+        #expect(result.workMap.projects[0].tasks[0].task.identifier == "INF-123")
+        #expect(result.workMap.projects[0].tasks[0].runtime?.projectSessionId == "ps_1")
+        #expect(result.workMap.projects[0].tasks[0].runtime?.worktree == "/task-wt")
+        #expect(result.workMap.projects[0].tasks[0].runtime?.branch == "jack/inf-123")
     }
 
-    @Test("lf status preserves completed and unknown run statuses")
-    func statusPreservesRunStatuses() async throws {
-        let json = """
-        {
-          "wave":{"id":"goals","name":"goals","status":"waiting","paused":false,"goal":"g","repo":"/tmp/repo-a","iteration":0,"workers":1,"active_runs":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null},
-          "mind":null,
-          "runs":[
-            {"id":"run-1","flow":"implement","task":null,"step_index":0,"status":"completed","branch":"b","worktree":"/wt","started_at":"2026-07-06T00:00:00Z","ended_at":null,"error":null,"pr_url":null,"pr_state":null,"pr_title":null},
-            {"id":"run-2","flow":"gate","task":null,"step_index":0,"status":"new-token","branch":"b","worktree":"/wt","started_at":null,"ended_at":null,"error":null,"pr_url":null,"pr_state":null,"pr_title":null}
-          ],
-          "attention":[]
+    @Test("Task workspace queries preserve paths and binary/truncation evidence")
+    func taskWorkspaceQueriesDecode() async throws {
+        let query = RegistryQuery { args, cwd in
+            #expect(cwd == "/tmp/repo")
+            switch args {
+            case ["task", "changes", "INF-123", "--json"]:
+                return #"{"issue_identifier":"INF-123","session_id":"ts_1","base_commit":"abc","head_commit":"def","files":[{"path":"src/parser.rs","committed":true,"staged":false,"unstaged":true,"untracked":false}]}"#
+            case ["task", "diff", "INF-123", "src/parser.rs", "--json"]:
+                return #"{"issue_identifier":"INF-123","session_id":"ts_1","path":"src/parser.rs","patch":"@@ -1 +1 @@","binary":false,"truncated":false}"#
+            case ["task", "file", "INF-123", "src/parser.rs", "--json"]:
+                return #"{"issue_identifier":"INF-123","session_id":"ts_1","path":"src/parser.rs","content":"fn parse() {}\n","binary":false,"size_bytes":14,"truncated":false}"#
+            default:
+                throw RegistryQueryError("unexpected argv: \(args)")
+            }
         }
-        """
-        let query = RegistryQuery { _, _ in json }
 
-        let result = try await query.status(wave: "goals", waveId: "wave-1", cwd: nil)
+        let changes = try await query.taskChanges(issue: "INF-123", cwd: "/tmp/repo")
+        #expect(changes.sessionId == "ts_1")
+        #expect(changes.files[0].path == "src/parser.rs")
+        #expect(changes.files[0].committed && changes.files[0].unstaged)
 
-        #expect(result.runs[0].status == .completed)
-        #expect(result.runs[0].area == nil)
-        #expect(result.runs[0].createdAt != nil)
-        #expect(result.runs[1].status == .unknown("new-token"))
-        #expect(result.runs[1].status.displayName == "Unknown: new-token")
-        #expect(result.runs[1].createdAt == nil)
+        let diff = try await query.taskDiff(
+            issue: "INF-123",
+            path: "src/parser.rs",
+            cwd: "/tmp/repo"
+        )
+        #expect(diff.patch == "@@ -1 +1 @@")
+        #expect(!diff.binary && !diff.truncated)
+
+        let file = try await query.taskFile(
+            issue: "INF-123",
+            path: "src/parser.rs",
+            cwd: "/tmp/repo"
+        )
+        #expect(file.content == "fn parse() {}\n")
+        #expect(file.sizeBytes == 14)
     }
 
     @Test("lf runs decodes the ledger window")
@@ -195,12 +215,6 @@ struct RegistryQueryTests {
         #expect(plan.projects[0].id == "runtime")
         #expect(plan.projects[0].definition == "Run reliably.")
         #expect(plan.projects[0].krs[0].proof == .holds)
-    }
-
-    @Test("run status accepts lf runs folded ok token")
-    func runStatusAcceptsFoldedOkToken() {
-        #expect(RunStatus(lfToken: "ok") == .ok)
-        #expect(RunStatus(lfToken: "escal.") == .escalated)
     }
 
     @Test("a failed lf query surfaces as an error")

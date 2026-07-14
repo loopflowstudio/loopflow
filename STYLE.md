@@ -178,7 +178,7 @@ Use three planning nouns, and keep them distinct by kind rather than size:
 
 Do not make recursive project trees. If a project wants subprojects, either split it into sibling projects under the same wave, promote the durable operating context into a wave, or demote the pieces into tasks. For now, do not create orphan or ephemeral projects; every project has one parent wave.
 
-Good projects are either completable behavioral improvements or standing quality frontiers. "Wave Chat works from CLI and Mac" can be a project. "Technical Architecture stays legible and minimally simple" can be a project. "Collapse `lfd` and `lfq`" is a task under a project, not a project by itself.
+Good projects are either completable behavioral improvements or standing quality frontiers. "Wave Chat works from CLI and Mac" can be a project. "Technical Architecture stays legible and minimally simple" can be a project. "Delete an obsolete API" is a task under a project, not a project by itself.
 
 Write project KRs as proof. A KR should state an observable condition that would let a maintainer say "this bet now holds." Avoid mixing the KR with task lists, implementation receipts, or Linear issue ids. Put those in tasks and PR notes.
 
@@ -209,7 +209,7 @@ See TESTING.md for the full test suite (Python, Swift, Rust, Loopflow UI). CI ru
 
 Follow PEP8. Consistency with existing code matters more than any specific rule.
 
-Keep `__init__.py` files empty. They exist only to mark directories as packages. Don't use them for re-exports—import from the actual module (`from loopflow.lfd.runs.loop import create_loop`) not from package-level re-exports (`from loopflow.lfd.runs import create_loop`). A docstring describing the package contents is fine.
+Keep `__init__.py` files empty. They exist only to mark directories as packages. Don't use them for re-exports—import from the actual module (`from loopflow.models import WaveSnapshot`) rather than a package-level re-export. A docstring describing the package contents is fine.
 
 Keep information in one place. Version numbers, configuration, documentation—each piece of information should have a single source of truth. Don't duplicate versions in `__init__.py` and `pyproject.toml`. Don't copy FAQs into multiple READMEs. If something needs to appear in multiple places, generate it or reference the source.
 
@@ -267,14 +267,13 @@ When in doubt: if you'd write an `assert`, raise an exception instead—it's eas
 
 ## DTOs
 
-Wire types — anything that crosses the `lfd` HTTP boundary and is mirrored in Rust, Python, and Swift — get no defaults. Every field is either required or explicitly Optional.
+Wire types — anything emitted by `lf --json` and mirrored in Rust and Swift — get no defaults. Every field is either required or explicitly Optional.
 
 - No `#[serde(default)]`, no `Default` derive, no `#[serde(default = "...")]` on DTOs.
-- No Pydantic field defaults on wire models (`Field(default=...)`, `= False`, `= []`).
 - No Swift init default parameters on DTO structs. No `?? value` fallbacks in JSON parsing — if the field can be absent, its type is `T?`.
 - No Rust `Option<T>` with `#[serde(default)]` masquerading as "empty is fine"; decide required-or-Optional and surface it in the type.
 
-Why: three hand-maintained mirrors drift when defaults live at different layers. A field that quietly defaults to `true` in one language and `false` in another produces a silent split-brain. The rule kills the drift at the source — if every absent field is either a parse error or an explicit `None`/`nil`, the three models stay in lockstep without ceremony.
+Why: hand-maintained mirrors drift when defaults live at different layers. A field that quietly defaults to `true` in one language and `false` in another produces a silent split-brain. The rule kills the drift at the source — if every absent field is either a parse error or an explicit `nil`, the models stay in lockstep without ceremony.
 
 Round-trip fixture tests under `tests/fixtures/dto/` cover the wire shape. Adding a DTO field means adding it to the fixture and to each language's fixture test.
 

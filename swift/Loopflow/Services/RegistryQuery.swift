@@ -1,8 +1,8 @@
 // RegistryQuery — discovery and history as `lf` queries over the machine
-// registry (`lfdb`), not a streaming center.
+// registry store, not a streaming center.
 //
 // The wave model has no telemetry hub (see `scratch/eventing.md`): durable
-// facts — which waves exist (running and stopped), a wave's runs, its attention
+// facts — which waves exist (running and stopped) and their work
 // — are QUERIES against the shared SQLite ledger, served by the daemonless `lf`
 // CLI. Live motion is a per-wave SSE stream (`WaveChatConnection`), never this.
 //
@@ -51,21 +51,50 @@ public struct RegistryQuery: Sendable {
         return waves.filter { $0.repo.normalizedFilePath == target }
     }
 
-    /// One wave's runs and attention (its durable history from the ledger),
-    /// plus the live loop state when a server is answering. Feeds `RunStore`
-    /// and `AttentionStore` for the focused wave.
-    public func status(wave: String, waveId: String, cwd: String?) async throws
-        -> (runs: [Run], attention: [AttentionItem], loopState: String?) {
+    /// One wave's Project/Task work, plus the live loop state when its resident
+    /// is answering.
+    public func status(wave: String, cwd: String?) async throws
+        -> WaveStatusResult {
         let stdout = try await run(["status", wave, "--json"], cwd)
         let snapshot = try Self.decode(WaveStatusSnapshot.self, from: stdout)
-        let repo = snapshot.wave.repo
-        let runs = snapshot.runs.map { $0.toRun(waveId: waveId, repo: repo) }
-        let attention = snapshot.attention.map { $0.toItem(waveId: waveId) }
-        return (runs, attention, snapshot.loopState)
+        return WaveStatusResult(
+            workMap: WaveWorkMap(objective: snapshot.wave.goal, projects: snapshot.projects),
+            loopState: snapshot.loopState
+        )
+    }
+
+    /// Files changed by one Task, classified across commits, index, worktree,
+    /// and untracked state relative to the Task Session's recorded base.
+    public func taskChanges(issue: String, cwd: String?) async throws -> TaskChangesSnapshot {
+        let stdout = try await run(["task", "changes", issue, "--json"], cwd)
+        return try Self.decode(TaskChangesSnapshot.self, from: stdout)
+    }
+
+    /// One Task's complete patch, or the patch for a selected changed file.
+    public func taskDiff(
+        issue: String,
+        path: String?,
+        cwd: String?
+    ) async throws -> TaskDiffSnapshot {
+        var args = ["task", "diff", issue]
+        if let path { args.append(path) }
+        args.append("--json")
+        let stdout = try await run(args, cwd)
+        return try Self.decode(TaskDiffSnapshot.self, from: stdout)
+    }
+
+    /// Current contents of one file, constrained to the Task worktree.
+    public func taskFile(
+        issue: String,
+        path: String,
+        cwd: String?
+    ) async throws -> TaskFileSnapshot {
+        let stdout = try await run(["task", "file", issue, path, "--json"], cwd)
+        return try Self.decode(TaskFileSnapshot.self, from: stdout)
     }
 
     /// The recent-run window across every wave on the machine — the ledger the
-    /// live `op` frames mirror. A lightweight timeline, not full `Run` objects.
+    /// live `op` frames mirror. A process timeline, not a second work hierarchy.
     public func recentRuns() async throws -> [RunLedgerEntry] {
         let stdout = try await run(["runs", "--json"], nil)
         return try Self.decode([RunLedgerEntry].self, from: stdout)
@@ -198,39 +227,32 @@ public struct BacklogItem: Decodable, Sendable, Identifiable, Hashable {
 struct WaveSnapshot: Decodable {
     let id: String
     let name: String
-    let status: String
+    let status: WaveStatus
     let paused: Bool
     let goal: String
     let repo: String
-    let iteration: Int
-    let workers: Int
-    let activeRuns: Int
+    let activeTasks: Int
+    let activeProjects: Int
     let live: Bool
     let endpoint: String?
     let createdAt: String?
     let parentWaveId: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, paused, goal, repo, iteration, workers, live, endpoint
-        case activeRuns = "active_runs"
+        case id, name, status, paused, goal, repo, live, endpoint
+        case activeTasks = "active_tasks"
+        case activeProjects = "active_projects"
         case createdAt = "created_at"
         case parentWaveId = "parent_wave_id"
     }
 
-    /// Map the registry snapshot to the app `Wave`. `lf ls` carries the durable
-    /// identity + rolled-up status; the rich per-run and on-disk detail
-    /// (direction, area, active run object, diff) is loaded separately when a
-    /// wave is opened, so those stay empty here.
+    /// Map the registry snapshot to the app's deliberately small Wave row.
     func toWave() -> Wave {
         Wave(
             id: id,
             name: name,
             repo: repo,
-            goal: goal,
-            status: WaveStatus(rawValue: status) ?? .idle,
-            iteration: iteration,
-            createdAt: RegistrySnapshotDate.parse(createdAt),
-            parentWaveId: parentWaveId
+            status: status
         )
     }
 }
@@ -239,101 +261,11 @@ struct WaveSnapshot: Decodable {
 struct WaveStatusSnapshot: Decodable {
     let wave: WaveSnapshot
     let loopState: String?
-    let runs: [RunSnapshot]
-    let attention: [AttentionSnapshot]
+    let projects: [WaveProjectWork]
 
     enum CodingKeys: String, CodingKey {
-        case wave, runs, attention
+        case wave, projects
         case loopState = "loop_state"
-    }
-}
-
-/// One run under `lf status`. Mirrors Rust `RunSnapshot`.
-struct RunSnapshot: Decodable {
-    let id: String
-    let flow: String
-    let task: String?
-    let stepIndex: Int
-    let status: String
-    let branch: String
-    let worktree: String
-    let startedAt: String?
-    let endedAt: String?
-    let error: String?
-    let prURL: String?
-    let prState: String?
-    let prTitle: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, flow, task, status, branch, worktree, error
-        case stepIndex = "step_index"
-        case startedAt = "started_at"
-        case endedAt = "ended_at"
-        case prURL = "pr_url"
-        case prState = "pr_state"
-        case prTitle = "pr_title"
-    }
-
-    func toRun(waveId: String, repo: String) -> Run {
-        let pr: PullRequest? = prURL
-            .flatMap { URL(string: $0) }
-            .map {
-                PullRequest(
-                    url: $0,
-                    number: nil,
-                    state: prState.flatMap(PRState.init(rawValue:)),
-                    title: prTitle,
-                    branch: nil
-                )
-            }
-        return Run(
-            id: id,
-            waveId: waveId,
-            flow: flow,
-            task: task,
-            repo: repo,
-            status: RunStatus(lfToken: status),
-            stepIndex: stepIndex,
-            worktree: worktree.isEmpty ? nil : worktree,
-            branch: branch.isEmpty ? nil : branch,
-            error: error,
-            pr: pr,
-            startedAt: RegistrySnapshotDate.parse(startedAt),
-            endedAt: RegistrySnapshotDate.parse(endedAt),
-            createdAt: RegistrySnapshotDate.parse(startedAt)
-        )
-    }
-}
-
-/// One attention item under `lf status`. Mirrors Rust `AttentionSnapshot`.
-struct AttentionSnapshot: Decodable {
-    let id: String
-    let kind: String
-    let status: String
-    let title: String
-    let summary: String
-    let runId: String?
-    let surfacedAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case id, kind, status, title, summary
-        case runId = "run_id"
-        case surfacedAt = "surfaced_at"
-    }
-
-    func toItem(waveId: String) -> AttentionItem {
-        let attentionKind = AttentionKind(rawValue: kind) ?? .interactive
-        return AttentionItem(
-            id: id,
-            waveId: waveId,
-            runId: runId,
-            kind: attentionKind,
-            status: AttentionStatus(rawValue: status) ?? .surfaced,
-            title: title,
-            summary: summary,
-            context: AttentionItem.context(kind: attentionKind, json: [:]),
-            surfacedAt: RegistrySnapshotDate.parse(surfacedAt) ?? Date()
-        )
     }
 }
 
@@ -436,17 +368,6 @@ public struct DoctorCheck: Decodable, Sendable, Identifiable {
     public let name: String
     public let status: String
     public let detail: String
-}
-
-private enum RegistrySnapshotDate {
-    /// Parse an RFC3339 timestamp (with or without fractional seconds), the
-    /// grain the `lf` snapshots emit.
-    static func parse(_ value: String?) -> Date? {
-        guard let value, !value.isEmpty else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
-    }
 }
 
 /// A directory or file in the codebase, weighted by the tokens a model pays to

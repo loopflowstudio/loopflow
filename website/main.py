@@ -262,7 +262,7 @@ for required_key in (
     "homepage.capabilities.items",
     "homepage.building_blocks.items",
     "homepage.products.loopflow",
-    "homepage.products.server",
+    "homepage.products.cli",
 ):
     _require_content_path(required_key)
 
@@ -289,7 +289,6 @@ DOCS_NAV = [
     # Reference
     ("lf", "lf"),
     ("lf ops", "ops"),
-    ("lfd", "lfd"),
     ("Config", "config"),
     ("Troubleshooting", "troubleshooting"),
 ]
@@ -312,28 +311,34 @@ curl -fsSL https://loopflow.studio/install.sh | sh && lf init
 lf <skill>           Run a skill (design, implement, review, etc.)
 lf debug -c         Fix error from clipboard
 lf pr open          Create PR from current branch
-lf wt create X      Create worktree for feature X
-lf serve X           Start wave X's server (its resident loop)
-lf q worker run X --flow build --task "..."   Dispatch a PR-producing worker
+lf wave X            Start Wave X's resident loop
 lf chat -w X "..."  Post into wave X's thread
+lf project run ID   Start or resume one Linear Project Session
+lf task start "X" --project ID   Create a Linear Task, then run its Session
+lf task steer ID "..."           Redirect that Task Session
+lf wt create X      Low-level worktree primitive for explicit Git work
 
 ## Core Concepts
 Wave: a named agent with a goal. Authored as wave/<name>/GOAL.md (intent + loop
   prompt) and wave/<name>/MEMORY.md (durable memory the agent writes).
 Wave agent: coordinates — reads roadmap and memory, decides the next move,
-  dispatches workers, folds results back into memory. Rarely writes code itself.
-Worker: a scoped agent a wave dispatches to run a flow and open a PR; inherits
-  the wave's GOAL.md and MEMORY.md.
+  directs Project and Task Sessions, then folds results back into memory. It
+  does not own a delivery worktree.
+Project: one measured Linear-backed bet under a Wave. Its Session pursues KRs
+  across Tasks without owning a worktree or PR.
+Task: one concrete Linear issue. Its Session owns the only delivery worktree,
+  provider history, controls, and PR through merge or abandonment.
+Worker: a cooperating provider exec inside one Task worktree; never an
+  independent planning noun or worktree owner.
 Skill: a prompt that runs a coding agent. Flow: a sequence of skills.
 Direction: composable quality definitions that shape agent judgment.
 Roadmap: the wave's work queue, provider-backed (e.g. Linear).
 
 ## Docs
 /docs              Overview and quick start
-/docs/waves        Waves (goal agents, memory, workers)
+/docs/waves        Waves, Projects, Tasks, and memory
 /docs/lf           lf command reference
 /docs/ops          lf operations reference
-/docs/lfd          lfd (daemon) reference
 /docs/config       Configuration options
 
 ## Configuration
@@ -595,9 +600,9 @@ def build_homepage():
     building_blocks = BUILDING_BLOCKS_CONTENT["items"]
 
     loopflow_product = PRODUCTS_CONTENT["loopflow"]
-    server_product = PRODUCTS_CONTENT["server"]
-    server_terminal_lines = [
-        (line["type"], line["content"]) for line in server_product["terminal_lines"]
+    cli_product = PRODUCTS_CONTENT["cli"]
+    cli_terminal_lines = [
+        (line["type"], line["content"]) for line in cli_product["terminal_lines"]
     ]
 
     video_src = VIDEO_CONTENT.get("src") or None
@@ -678,11 +683,11 @@ def build_homepage():
                             note=loopflow_product.get("note"),
                         ),
                         ProductCard(
-                            server_product["name"],
-                            server_product["description"],
-                            server_product["details"],
-                            TerminalBlock(server_terminal_lines),
-                            note=server_product.get("note"),
+                            cli_product["name"],
+                            cli_product["description"],
+                            cli_product["details"],
+                            TerminalBlock(cli_terminal_lines),
+                            note=cli_product.get("note"),
                         ),
                         cls="two-products",
                     ),

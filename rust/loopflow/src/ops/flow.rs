@@ -22,7 +22,18 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
 
     match cli.command {
         Some(Commands::Pr { cmd: Some(pr) }) => execute_pr(repo, pr, progress),
-        Some(Commands::Rebase { plan, onto }) => {
+        Some(Commands::Rebase {
+            plan,
+            manual,
+            continue_rebase,
+            abort,
+            onto,
+        }) => {
+            if manual || continue_rebase || abort {
+                return Err(OpsError::Message(
+                    "manual rebase recovery is only available from the CLI".to_string(),
+                ));
+            }
             if plan {
                 return Ok(());
             }

@@ -1,14 +1,6 @@
-// The exposed main window: a burgundy repo rail (left) filtering a burgundy wave
-// list (center), with a "+" new-wave launcher, and a WaveChat detail (right) that
-// streams the selected wave's live conversation from its `lf serve` chat server.
-//
-// Reshaped from the battle-tested PortfolioWindow: keeps its connection / daemon
-// plumbing, swaps the multi-repo card grid for the sidebar+list+terminal shape
-// sketched by RepoSidebarWindow, and reuses WaveRow + WaveSidebar's burgundy
-// treatment so the style matches the app. Discovery is a registry QUERY
-// (`RegistryQuery`/`lf ls`), re-run on a cadence — not a streaming center; a
-// wave's live conversation + run motion is its own per-wave SSE in the detail
-// pane.
+// Repository rail, Wave list, and the selected Wave's work map + conversation.
+// Discovery is a periodic registry query (`lf ls`); live conversation and
+// resident motion stream directly from that Wave's listener.
 
 import SwiftUI
 import Loopflow
@@ -28,15 +20,13 @@ struct WavesView: View {
 
     /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
     /// window). Collapsed to its main worktree for reads — the on-disk `wave/`
-    /// dir holds quick-launch templates that live on main by design, and lfd owns
-    /// the real waves. The `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched
-    /// checkout AS-IS instead (see `resolveLaunchRepo`).
+    /// dir holds quick-launch templates that live on main by design. The
+    /// `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS
+    /// instead (see `resolveLaunchRepo`).
     var initialRepoPath: String? = nil
 
     @Environment(\.palette) private var palette
 
-    @State private var connectionStore = ConnectionStore()
-    @State private var authProviderStore = AuthProviderStore()
     @State private var repoStates: [String: PortfolioRepoState] = [:]
 
     /// Repos shown in the rail: a live `~/src` scan of main (non-worktree) repos.
@@ -44,7 +34,7 @@ struct WavesView: View {
     @State private var repos: [PortfolioRepo] = []
 
     /// Authored waves discovered on disk per repo path: `<repo>/wave/<name>/GOAL.md`.
-    /// Merged with lfd's running waves so not-yet-launched waves are still listed.
+    /// Merged with registered waves so not-yet-launched waves are still listed.
     @State private var authoredWavesByRepo: [String: [AuthoredWaveSnapshot]] = [:]
     @State private var plansByWaveKey: [String: WavePlan] = [:]
 
@@ -54,18 +44,17 @@ struct WavesView: View {
     @State private var didApplyInitialRepo = false
     @State private var didRestoreStickyRepo = false
 
-    /// Synthetic id prefix for an authored-on-disk wave that lfd hasn't created yet.
+    /// Synthetic id prefix for an authored Wave without a registry row yet.
     private static let authoredIdPrefix = "authored:"
 
-    /// All waves across every repo: lfd's running waves merged with waves authored
-    /// on disk that lfd hasn't created yet.
+    /// All waves across every repo: registry rows merged with Waves authored on
+    /// disk that have not been served yet.
     private var allWaves: [WaveViewModel] {
         repos.flatMap { mergedWaves(for: $0) }
     }
 
-    /// lfd's live waves for a repo, plus idle placeholders for any authored wave
-    /// (a `<repo>/wave/<name>/GOAL.md` on disk) that isn't already live. Sorted
-    /// attention-first, then by name.
+    /// Registered waves plus idle placeholders for authored GOAL.md files that
+    /// have not been served yet. Running Waves sort first, then paused and idle.
     private func mergedWaves(for repo: PortfolioRepo) -> [WaveViewModel] {
         let live = repoStates[repo.path]?.waves ?? []
         let liveNames = Set(live.map(\.name))
@@ -88,16 +77,15 @@ struct WavesView: View {
             name: snapshot.name,
             repo: repoPath,
             status: snapshot.status
-        ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: snapshot.name)])
+        ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: snapshot.name)],
+        isRegistered: false)
     }
 
     private static func statusPriority(_ status: WaveStatus) -> Int {
         switch status {
-        case .failed: 0
-        case .waiting: 1
-        case .running: 2
-        case .paused: 3
-        case .idle: 4
+        case .running: 0
+        case .paused: 1
+        case .idle: 2
         }
     }
 
@@ -106,14 +94,23 @@ struct WavesView: View {
         case .all:
             return allWaves
         case .repo(let path):
-            let target = path.normalizedFilePath
-            return allWaves.filter { $0.repo.normalizedFilePath == target }
+            let target = WaveOrigin.resolve(path).normalizedFilePath
+            return allWaves.filter {
+                WaveOrigin.resolve($0.repo).normalizedFilePath == target
+            }
         }
     }
 
     private var selectedWave: WaveViewModel? {
         guard let selectedWaveId else { return nil }
-        return allWaves.first { $0.id == selectedWaveId }
+        return allWaves.first { waveSelectionId($0) == selectedWaveId }
+    }
+
+    private func waveSelectionId(_ wave: WaveViewModel) -> String {
+        Self.wavePlanKey(
+            repoPath: WaveOrigin.resolve(wave.repo),
+            waveName: wave.name
+        )
     }
 
     private var isAnyConnected: Bool {
@@ -148,9 +145,6 @@ struct WavesView: View {
             .environment(\.palette, palette)
         }
         .task {
-            let daemonTask = Task {
-                await prepareConnectionIfNeeded()
-            }
             let initialMain = await registerInitialRepoIfNeeded()
             await refreshRepos()
             await refreshAuthoredWaves()
@@ -162,25 +156,20 @@ struct WavesView: View {
             }
             ensureRepoStates()
             await syncRepoStates()
-            _ = await daemonTask.value
-            await prepareAuth()
             await pollRegistry()
         }
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
             Task {
-                let daemonTask = Task {
-                    await prepareConnectionIfNeeded()
-                }
                 await refreshRepos()
                 await refreshAuthoredWaves()
                 ensureRepoStates()
                 await syncRepoStates()
-                _ = await daemonTask.value
             }
         }
         .onChange(of: selection) { _, _ in
             // Drop a wave selection that no longer matches the active repo filter.
-            if let id = selectedWaveId, !filteredWaves.contains(where: { $0.id == id }) {
+            if let id = selectedWaveId,
+               !filteredWaves.contains(where: { waveSelectionId($0) == id }) {
                 selectedWaveId = nil
             }
             persistRepoSelection()
@@ -268,8 +257,8 @@ struct WavesView: View {
                         ForEach(filteredWaves) { wave in
                             WaveRow(
                                 wave: wave,
-                                isSelected: selectedWaveId == wave.id,
-                                onSelect: { selectedWaveId = wave.id }
+                                isSelected: selectedWaveId == waveSelectionId(wave),
+                                onSelect: { selectedWaveId = waveSelectionId(wave) }
                             )
                         }
                     }
@@ -354,7 +343,7 @@ struct WavesView: View {
                 repoPath: waveRepoPath(for: wave),
                 onClose: { selectedWaveId = nil }
             )
-            .id(wave.id)
+            .id(waveSelectionId(wave))
         } else {
             VStack(spacing: Spacing.md) {
                 Image(systemName: "bubble.left.and.bubble.right")
@@ -390,12 +379,7 @@ struct WavesView: View {
     // MARK: - Header helpers
 
     private var connectionSubtitle: String {
-        switch connectionStore.mode {
-        case .bundled:
-            return "Bundled daemon"
-        case .remote:
-            return connectionStore.activeConnection.displayName
-        }
+        "Local registry"
     }
 
     /// The surface is named after the repo you're in (its GitHub/dir name),
@@ -430,7 +414,7 @@ struct WavesView: View {
     private func createWave(repoPath: String, name: String) async throws {
         ensureRepoStates()
         guard let state = repoStates[repoPath] else {
-            throw WaveServiceError.commandFailed("Unknown repo: \(repoPath)")
+            throw PortfolioRepoError.unknownRepo(repoPath)
         }
         try await state.createWave(name: name)
     }
@@ -440,7 +424,7 @@ struct WavesView: View {
     /// `LOOPFLOW_DEV_WAVE_REPO` dev override reads the launched checkout AS-IS.
     private func registerInitialRepoIfNeeded() async -> String? {
         guard let initialRepoPath, !didApplyInitialRepo else { return nil }
-        if RepoState.uiTestMode() != nil { return nil }
+        if AppTestMode.current() != nil { return nil }
         let readPath = await Task.detached {
             Self.resolveLaunchRepo(initialRepoPath).path
         }.value
@@ -452,11 +436,11 @@ struct WavesView: View {
 
     /// Resolve the launch-provided repo into its (read path, main path, rail label).
     /// Production reads the collapsed main worktree — the on-disk `wave/` dir is
-    /// quick-launch templates that live on main by design, and lfd is the authority
-    /// for real waves. The `LOOPFLOW_DEV_WAVE_REPO` dev override (set by loopflow-dev
-    /// on `run` / `run-debug`) instead reads the launched checkout AS-IS, so a dev
-    /// launch enumerates its own worktree's waves. The rail label is always the
-    /// collapsed main-repo name, so the rail stays clean and worktree-free.
+    /// quick-launch templates that live on main by design. The
+    /// `LOOPFLOW_DEV_WAVE_REPO` dev override (set by loopflow-dev on `run` /
+    /// `run-debug`) instead reads the launched checkout AS-IS, so a dev launch
+    /// enumerates its own worktree's waves. The rail label is always the collapsed
+    /// main-repo name, so the rail stays clean and worktree-free.
     private nonisolated static func resolveLaunchRepo(_ initialPath: String) -> (path: String, mainPath: String, displayName: String) {
         let scanner = RepoScanner()
         let dev = ProcessInfo.processInfo.environment["LOOPFLOW_DEV_WAVE_REPO"]
@@ -474,7 +458,7 @@ struct WavesView: View {
     /// (worktree included) as a single row labeled with the main-repo name.
     /// Runs the git/FS work off the main thread.
     private func refreshRepos() async {
-        if RepoState.uiTestMode() != nil {
+        if AppTestMode.current() != nil {
             repos = portfolioService.repos
             return
         }
@@ -504,7 +488,7 @@ struct WavesView: View {
                 } else {
                     // Dev override: the launched worktree stands in for its main
                     // repo. Drop the scanned main row so the worktree is the sole
-                    // row (reads its own wave/ dir + lfd), labeled with the main name.
+                    // row (reads its own wave/ dir + registry), labeled with the main name.
                     result.removeAll { $0.path == launch.mainPath || $0.path == launch.path }
                     result.append(PortfolioRepo(
                         path: launch.path,
@@ -519,9 +503,9 @@ struct WavesView: View {
 
     /// Enumerate each rail repo's authored waves — `<repo>/wave/<name>/GOAL.md`
     /// directories — off the main thread, so the list can offer them as launchable
-    /// rows before lfd has created them.
+    /// rows before they have a registry entry.
     private func refreshAuthoredWaves() async {
-        if RepoState.uiTestMode() != nil { return }
+        if AppTestMode.current() != nil { return }
         let paths = repos.map(\.path)
         authoredWavesByRepo = await Task.detached {
             let liveSessions = LocalWaveAgentLauncher.tmuxSessionNames()
@@ -571,54 +555,28 @@ struct WavesView: View {
             repoStates.removeValue(forKey: stalePath)
         }
 
-        let connection = connectionStore.activeConnection
-        let token = connectionStore.token(for: connection)
-
         for repo in repos where repoStates[repo.path] == nil {
             repoStates[repo.path] = PortfolioRepoState(
                 repo: repo,
-                connection: connection,
-                token: token,
                 registryQuery: RegistryQueryLocal.shared
             )
         }
     }
 
-    private func prepareConnectionIfNeeded() async {
-        // UI tests run against mock data; never start a daemon or reach a remote lfd.
-        if RepoState.uiTestMode() != nil { return }
-        guard connectionStore.mode == .bundled else { return }
-        if let current = SharedDaemon.currentConnection {
-            connectionStore.setBundledRuntimeConnection(current)
-            return
-        }
-        if let connection = try? await SharedDaemon.manager.start() {
-            connectionStore.setBundledRuntimeConnection(connection)
-        }
-    }
-
     private func syncRepoStates() async {
-        if RepoState.uiTestMode() != nil { return }
+        if AppTestMode.current() != nil { return }
         ensureRepoStates()
 
-        if connectionStore.mode == .bundled {
-            do {
-                let waves = try await RegistryQueryLocal.shared.allWaves()
-                let plans = await buildWavePlanCache(registryWaves: waves)
-                plansByWaveKey = plans
-                for state in repoStates.values {
-                    state.applyConnectedWaves(waves, plans: plans)
-                }
-            } catch {
-                for state in repoStates.values {
-                    state.markRefreshFailed()
-                }
+        do {
+            let waves = try await RegistryQueryLocal.shared.allWaves()
+            let plans = await buildWavePlanCache(registryWaves: waves)
+            plansByWaveKey = plans
+            for state in repoStates.values {
+                state.applyConnectedWaves(waves, plans: plans)
             }
-        } else {
-            await withTaskGroup(of: Void.self) { group in
-                for state in repoStates.values {
-                    group.addTask { await state.refresh() }
-                }
+        } catch {
+            for state in repoStates.values {
+                state.markRefreshFailed()
             }
         }
     }
@@ -682,27 +640,12 @@ struct WavesView: View {
         }
     }
 
-    /// Provider auth is a poll, not a stream (see `scratch/eventing.md` §5):
-    /// bind the store to a wave service and read the provider list. There is no
-    /// machine-wide auth push in the base model.
-    private func prepareAuth() async {
-        if RepoState.uiTestMode() != nil { return }
-        if connectionStore.mode == .bundled, SharedDaemon.currentConnection == nil {
-            return
-        }
-        let connection = connectionStore.activeConnection
-        let token = connectionStore.token(for: connection)
-        let waveService = WaveService(connection: connection, tokenProvider: { token })
-        authProviderStore.bindService(waveService)
-        await authProviderStore.refresh()
-    }
-
     /// Discovery has no stream: re-query the registry on a slow cadence so a
     /// wave that started, stopped, or advanced since the last read shows up.
     /// Each wave's live conversation + run motion is its own per-wave SSE,
     /// opened by the detail pane — not funnelled through a center.
     private func pollRegistry() async {
-        if RepoState.uiTestMode() != nil { return }
+        if AppTestMode.current() != nil { return }
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(5))
             if Task.isCancelled { return }
@@ -714,7 +657,7 @@ struct WavesView: View {
 
 
 /// Minimal create-wave flow: pick a target repo, name the wave, submit. Creates
-/// the wave against the repo's lfd via `PortfolioRepoState.createWave`.
+/// the Wave files through `PortfolioRepoState.createWave`.
 private struct CreateWaveSheet: View {
     let repos: [PortfolioRepo]
     let initialRepoPath: String?

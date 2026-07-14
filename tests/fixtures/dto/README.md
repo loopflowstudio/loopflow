@@ -1,14 +1,11 @@
 # DTO wire fixtures
 
-Each fixture pins one wire shape. Most are mirrored across three hand-written
-models — Rust (`rust/loopflow/tests/dto_fixtures.rs`), Python
-(`python/tests/test_dto_fixtures.py`), Swift
-(`swift/LoopflowTests/DTOFixtureTests.swift`) — so a drift in any mirror fails
-one of the three suites. No serde/Pydantic/init defaults on DTOs: every absent
-field is a parse error or an explicit null.
+Each fixture pins one live wire shape. Swift fixtures cover the per-Wave
+listener and `lf status` contracts consumed by the Mac app. Every absent field
+is a parse error or an explicit null.
 
 Carve-out: `resident_deltas.json` and `resident_door.json` are the wave
 listener↔resident wire (`POST /resident/deltas`, `POST /resident/attach`,
 `GET /resident/context` — see `rust/loopflow/src/wave/wire.rs`). Both ends are
-the same `lf` binary, so only the Rust fixture tests pin them — Swift and
-Python do not consume this wire.
+the same `lf` binary, so only the Rust fixture tests pin them. Swift does not
+consume this wire.

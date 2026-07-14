@@ -134,14 +134,14 @@ def _notarize_dmg(dmg_path: Path) -> int:
 
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
-    cargo_cmd = ["cargo", "build", "--release", "--bin", "lf", "--bin", "lfd"]
+    cargo_cmd = ["cargo", "build", "--release", "--bin", "lf"]
     bin_dir = REPO_ROOT / "target" / "release"
 
     result = run(cargo_cmd, cwd=REPO_ROOT, check=False, timeout=20 * 60)
     if result.returncode != 0:
-        raise RuntimeError("Failed to build bundled lf/lfd binaries")
+        raise RuntimeError("Failed to build bundled lf binary")
 
-    for binary in ("lf", "lfd"):
+    for binary in ("lf",):
         source = bin_dir / binary
         if not source.exists():
             raise RuntimeError(f"Missing built binary: {source}")

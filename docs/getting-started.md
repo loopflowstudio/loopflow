@@ -21,10 +21,9 @@ Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en
 | I want to... | Start here |
 |---|---|
 | Try loopflow from terminal | `lf init` |
-| Run autonomous waves | `lf init` → `lfd install` |
-| Use the visual app (macOS) | Download Loopflow (handles the rest) |
-| Connect from iPhone | Loopflow iOS → discovers your lfd |
-| Set up remote dev server | SSH into the host and run native `lf`/`lfd` there |
+| Run autonomous waves | `lf init` → `lf wave <name>` |
+| Use Wave Chat (macOS) | Download Loopflow and open a repository |
+| Run on another machine | SSH into the host and run `lf wave <name>` there |
 
 ---
 
@@ -81,14 +80,13 @@ lf : "add type hints to utils.py"
 
 ## Build Features
 
-Design, implement, gate, ship.
+Start from a Linear task; Loopflow creates and retains its worktree.
 
 ```bash
-lf wt create auth-feature       # create worktree
-lf design: add OAuth login         # discuss approach
-lf implement                       # build it
-lf gate                            # ship-ready check
-lf pr open                           # open PR
+lf task start "add OAuth login" --project <linear-project-id>
+lf task status <issue-id>
+lf task steer <issue-id> "support passkeys too"
+lf task wait <issue-id> --until terminal
 ```
 
 ### Skills chain
@@ -116,10 +114,13 @@ Chain skills manually, or use a named flow (a flow is a sequence of steps; each 
 
 ```bash
 lf design && lf implement && lf gate    # manual chain
-lf build                                # full design → code → demo/review → deploy loop
+lf build                                # one design → code → demo/review → gate pass
 ```
 
-Flows automate the handoffs. `build` runs kickoff → review-design → loop(code → xor(demo, code-review), exit: gate) → deploy.
+Flows automate handoffs within one bounded pass. `build` runs kickoff →
+review-design → implement → compress → lint → demo/review → gate. Use `ship` or
+`deploy` for the explicit delivery workflow. Repetition belongs to Wave,
+Project, and Task runtimes.
 
 ### Custom skills
 
@@ -146,44 +147,41 @@ lf pr land    # submit to merge queue
 
 ## Scale with Waves
 
-Ready to automate? Waves run your workflows continuously.
+Ready to automate? Waves remain available continuously and run a complete flow
+when chat, child observations, crons, or a heartbeat wake them.
 
-`lf` skills are manual building blocks. A wave is a named agent that runs them
-for you — reading Linear tasks, resolving the next blocker inline, spinning off
-independent work when parallelism earns it, and looping.
+`lf` skills are manual building blocks. A Wave is a named agent that reads its
+Linear Projects and tasks, starts durable Task Sessions, and supervises their
+results.
 
-Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter sets machine config such as `workers:`, `crons:`, and `pm:`), then run the agent:
+Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter sets machine config such as `crons:` and `pm:`), then run the agent:
 
 ```bash
-lf serve shipper
+lf wave shipper
 ```
 
-The wave agent resolves the next local blocker inline. It detaches an already
-justified child loop only when another useful move can run in parallel
-(`lf --wave shipper loop build "…" --detach`), then folds each shipped PR into
-memory. CI failures and pushes to main ride the bus with `lf radio pub`, then land
-in the wave's thread as attributed notifications.
+The Wave creates or selects a Linear task, starts it with `lf task run
+<issue-id>`, and stays steerable while the Task Session works in its immutable
+worktree. CI failures and review feedback return to the same session; linked
+events land in the Wave thread.
 
-**Loopflow** (macOS) is the native wave experience — monitor progress, browse flows, review PRs. Requires `lfd`.
+**Loopflow** (macOS) is the native Wave experience. Select a repository and a
+Wave to open its persistent conversation beside the Linear-backed Project →
+Task work map. The app queries local state through its bundled `lf` and starts
+the selected Wave's `lf wave` process when needed.
 
-Sessions are plain tmux:
+Detached processes use named tmux sessions:
 
 ```bash
 tmux ls               # live agent sessions
 tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Stop a wave with Ctrl-C in its `lf serve` session.
+Use `lf project attach <project>` or `lf task attach <issue>` for a writable,
+audited control prompt. Stop a foreground Wave with Ctrl-C or run
+`lf stop <name>`.
 
-### Browse flows
-
-1. Open **Flows** in Loopflow.
-2. Expand `build` → `build`.
-3. Click `gate` to see every parent flow that reaches it.
-
-`lfd` serves the same resolved catalog at `/v0/catalog?repo=/path/to/repo`, including builtin definitions and any `.lf/flows/*.yaml` or `.lf/skills/*.md` overrides in the repo.
-
-You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf serve <name>` runs them and Loopflow picks them up.
+You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
 
 [Wave Authoring Guide →](wave-authoring.md) · [Waves Reference →](waves.md)
 
@@ -191,16 +189,9 @@ You can draft wave content with `lf design` locally, or write it by hand. Once `
 
 ## Go Remote
 
-Run agents while you sleep. SSH into a server, install Loopflow, and run native
-`lf`/`lfd` there.
-
-```bash
-mkdir -p ~/.lf
-cat > ~/.lf/lfd.yaml <<'YAML'
-mode: native
-YAML
-lfd install
-```
+Run agents while you sleep. SSH into a server, install Loopflow, and run
+`lf wave <name>` there. The Wave process owns its listener and resident loop;
+there is no machine-wide service to install.
 
 Remote Loopflow/Cadenza is future work; for now, use SSH as the remote control
 surface.
@@ -242,4 +233,4 @@ Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3
 
 ## Reference
 
-[`lf` commands](lf.md) · [`lf` operations](ops.md) · [`lfd` commands](lfd.md) · [Configuration](config.md) · [Wave Authoring](wave-authoring.md) · [Waves](waves.md)
+[`lf` commands](lf.md) · [`lf` operations](ops.md) · [Configuration](config.md) · [Wave Authoring](wave-authoring.md) · [Waves](waves.md)

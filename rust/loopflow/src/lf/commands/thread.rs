@@ -6,8 +6,8 @@
 //! entirely — a table, polled ([`super::sub`]).
 //!
 //! Targeting and endpoint resolution are `lf chat`'s
-//! ([`super::chat::resolve_target`]): the ambient rule (`LFD_CHANNEL` env,
-//! else `LFD_WAVE_ID`, else the worktree name) with an explicit NAME override.
+//! ([`super::chat::resolve_target`]): the ambient rule (`LF_CHANNEL` env,
+//! else `LF_WAVE_ID`, else the worktree name) with an explicit NAME override.
 //!
 //! The stream is followed until the process is killed: on disconnect (or a
 //! wave with no live server yet) it reconnects on a backoff ladder,
@@ -81,7 +81,7 @@ pub(crate) async fn follow(wave: Option<&str>, json: bool) -> Result<()> {
             waiting_note_shown = false;
         } else if !waiting_note_shown {
             eprintln!(
-                "wave '{}' has no live server; waiting (start one with `lf serve {}`)",
+                "wave '{}' has no live listener; waiting (start one with `lf wave {}`)",
                 resolved.name, resolved.name
             );
             waiting_note_shown = true;
@@ -402,7 +402,6 @@ mod tests {
         let app = server::router(
             runtime.clone(),
             server::ResidentDoor::new("test-token"),
-            server::SubagentDoor::new(),
             None,
             None,
             server::ShutdownDoor::new(),

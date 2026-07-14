@@ -15,8 +15,8 @@ use time::OffsetDateTime;
 use crate::chat::types::{ConversationEvent, TurnUsage};
 use crate::engine::prompt::{account_prompt_tokens, count_tokens};
 use crate::engine::stream::{ResultSubtype, StreamEvent};
-use crate::lfd::id::LfdId;
-use crate::lfdb::{StoreError, StoreResult};
+use crate::id::{ProcessId, RunId};
+use crate::store::{StoreError, StoreResult};
 
 pub const TRACE_SCHEMA_VERSION: u32 = 1;
 pub const TOKENIZER: &str = "cl100k_base";
@@ -27,7 +27,7 @@ pub struct AgentLaunchId(String);
 
 impl AgentLaunchId {
     pub fn new() -> Self {
-        Self(LfdId::new().to_string())
+        Self(uuid::Uuid::new_v4().to_string())
     }
 
     pub fn as_str(&self) -> &str {
@@ -53,7 +53,7 @@ pub struct AgentTurnId(String);
 
 impl AgentTurnId {
     pub fn new() -> Self {
-        Self(LfdId::new().to_string())
+        Self(uuid::Uuid::new_v4().to_string())
     }
 
     pub fn as_str(&self) -> &str {
@@ -75,8 +75,8 @@ impl Default for AgentTurnId {
 
 #[derive(Debug, Clone)]
 pub struct TraceCaptureContext {
-    pub run_id: LfdId,
-    pub process_id: LfdId,
+    pub run_id: RunId,
+    pub process_id: ProcessId,
     pub repo: PathBuf,
     pub worktree: PathBuf,
     pub wave: Option<String>,
@@ -1501,7 +1501,7 @@ mod tests {
         ContextAssetKind, ContextAssetSpec, ContextChannel, ContextScope, PreparedTurnContext,
         TraceCaptureContext,
     };
-    use crate::lfd::id::LfdId;
+    use crate::id::{ProcessId, RunId};
 
     #[test]
     fn prompt_manifest_covers_exact_bytes_and_tokens() {
@@ -1633,10 +1633,10 @@ mod tests {
         let previous = std::env::var_os("LF_HOME");
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
-        let run_id = LfdId::new();
+        let run_id = RunId::new();
         let context = TraceCaptureContext {
             run_id: run_id.clone(),
-            process_id: LfdId::new(),
+            process_id: ProcessId::new(),
             repo: home.path().to_path_buf(),
             worktree: home.path().to_path_buf(),
             wave: Some("intelligence".to_string()),

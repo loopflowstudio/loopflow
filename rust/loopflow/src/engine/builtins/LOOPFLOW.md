@@ -2,8 +2,8 @@
 
 You are running inside loopflow. Loopflow owns git, worktrees, delegation, and
 release plumbing. Route those operations through `lf`, not around it. Doing them
-by hand breaks the machinery loopflow relies on: worktree naming, merge queue
-behavior, wave rotation, and context inheritance.
+by hand breaks the machinery loopflow relies on: worktree placement, release
+state, and session context.
 
 ## Git, Worktrees, GitHub -> `lf`
 
@@ -34,9 +34,8 @@ lands it:
   finish for anything a person should land by hand.
 - **`lf pr land`** — the work is done and **loopflow** lands it hands-off. Does
   everything `submit` does, then arms auto-merge so it merges when checks pass.
-  Use it in headless/auto runs where no human is gating. The wave home stays put
-  — landing never moves your worktree; a merged worker's tree is pruned when its
-  branch is deleted.
+  Use it in headless/auto runs where no human is gating. Landing never moves the
+  current worktree; a merged worker's tree is pruned when its branch is deleted.
 
 Stay in the worktree Loopflow placed for this run. If the assigned task is
 explicitly about worktree management, use `lf wt`; never create another
@@ -53,15 +52,15 @@ can finish independently; never hand the whole seed to another agent, and never
 delegate the one blocker between you and completion. Resolve that blocker
 inline.
 
-`lf loop`, `lf serve`, `lf project`, and `lf pm` are orchestration tools. Use
+`lf task`, `lf wave`, `lf project`, and `lf pm` are orchestration tools. Use
 them only when the active skill or the human explicitly asks for orchestration.
 Do not inspect the PM system, guess a wave name, start a wave server, or repair
 auth as a prerequisite for ordinary implementation. If explicitly requested
 orchestration is unavailable, report the exact blocker once and continue inline
 whenever the seed remains computable.
 
-A one-shot operation is a direct skill or flow run. A loop must leave room for
-at least two passes; never use `lf loop --max-passes 1`.
+A one-shot operation is a direct skill or flow run. Durable delegated work
+starts from an existing Linear task with `lf task run <issue-id>`.
 
 ## Speak
 

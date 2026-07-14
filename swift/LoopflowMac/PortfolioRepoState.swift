@@ -3,6 +3,23 @@
 import Loopflow
 import Foundation
 
+enum PortfolioRepoError: LocalizedError {
+    case emptyWaveName
+    case duplicateWave(String)
+    case unknownRepo(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyWaveName:
+            "Wave name is required"
+        case .duplicateWave(let name):
+            "Wave '\(name)' already exists"
+        case .unknownRepo(let path):
+            "Unknown repo: \(path)"
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class PortfolioRepoState {
@@ -10,7 +27,7 @@ final class PortfolioRepoState {
 
     private let repoPath: String
     /// Local discovery via `lf ls` (see `RegistryQuery`). `nil` means this
-    /// platform cannot read the registry yet; there is no lfd HTTP fallback.
+    /// platform cannot read the registry yet; there is no HTTP fallback.
     private let registryQuery: RegistryQuery?
 
     private(set) var waves: [WaveViewModel] = []
@@ -20,30 +37,25 @@ final class PortfolioRepoState {
 
     init(
         repo: PortfolioRepo,
-        connection: ServerConnection,
-        token: String?,
         registryQuery: RegistryQuery? = nil
     ) {
         self.repo = repo
         self.repoPath = repo.path.normalizedFilePath
         self.registryQuery = registryQuery
-        _ = connection
-        _ = token
     }
 
-    /// Create a wave file-first: a wave IS its markdown. Write
-    /// `wave/<name>/GOAL.md` (+ an empty MEMORY.md) into the repo — the same
-    /// shape the registry overlays when the wave is started (`lf serve <name>`,
-    /// the Start button). No POST; the row is not the wave.
+    /// Author a Wave before it is served. `lf wave` later registers the
+    /// coordination row; GOAL.md and MEMORY.md remain the authored objective
+    /// and durable learning.
     ///
-    /// Wave state lives at the ORIGIN repo: every reader (endpoint discovery,
+    /// Wave files live at the ORIGIN repo: every reader (endpoint discovery,
     /// launcher, session probe) resolves a worktree to its main checkout, so
     /// the write must land there too — a GOAL.md written into a worktree is a
     /// wave no reader ever finds.
     func createWave(name: String) async throws {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            throw WaveServiceError.commandFailed("Wave name is required")
+            throw PortfolioRepoError.emptyWaveName
         }
 
         let repoURL = repo.url
@@ -53,7 +65,7 @@ final class PortfolioRepoState {
                 .appendingPathComponent(trimmed, isDirectory: true)
             let goalURL = waveDir.appendingPathComponent("GOAL.md", isDirectory: false)
             guard !FileManager.default.fileExists(atPath: goalURL.path) else {
-                throw WaveServiceError.commandFailed("Wave '\(trimmed)' already exists")
+                throw PortfolioRepoError.duplicateWave(trimmed)
             }
             try FileManager.default.createDirectory(at: waveDir, withIntermediateDirectories: true)
             let goal = "Drive the '\(trimmed)' wave's goal forward.\n"
@@ -89,8 +101,9 @@ final class PortfolioRepoState {
 
     func applyConnectedWaves(_ connectedWaves: [Wave], plans: [String: WavePlan] = [:]) {
         plansByKey = plans
+        let origin = WaveOrigin.resolve(repoPath).normalizedFilePath
         let filtered = connectedWaves
-            .filter { $0.repo.normalizedFilePath == repoPath }
+            .filter { WaveOrigin.resolve($0.repo).normalizedFilePath == origin }
             .map { wave in
                 WaveViewModel(
                     api: wave,
@@ -111,26 +124,6 @@ final class PortfolioRepoState {
         "\(repoPath.normalizedFilePath)#\(waveName)"
     }
 
-    var blockedCount: Int {
-        waves.filter { $0.status == .waiting }.count
-    }
-
-    var totalDiff: (insertions: Int, deletions: Int) {
-        waves.reduce(into: (insertions: 0, deletions: 0)) { partial, wave in
-            let stat = Self.parseDiffStat(wave.diffStat)
-            partial.insertions += stat.insertions
-            partial.deletions += stat.deletions
-        }
-    }
-
-    func diffSummary(for wave: WaveViewModel) -> String? {
-        let summary = Self.parseDiffStat(wave.diffStat)
-        guard summary.insertions > 0 || summary.deletions > 0 else {
-            return nil
-        }
-        return "+\(summary.insertions) -\(summary.deletions)"
-    }
-
     private static func sortWaves(_ waves: [WaveViewModel]) -> [WaveViewModel] {
         waves.sorted { lhs, rhs in
             let lhsPriority = statusPriority(lhs.status)
@@ -144,20 +137,10 @@ final class PortfolioRepoState {
 
     private static func statusPriority(_ status: WaveStatus) -> Int {
         switch status {
-        case .failed: 0
-        case .waiting: 1
-        case .running: 2
-        case .paused: 3
-        case .idle: 4
+        case .running: 0
+        case .paused: 1
+        case .idle: 2
         }
-    }
-
-    private static func parseDiffStat(_ diffStat: String?) -> (insertions: Int, deletions: Int) {
-        guard let diffStat else { return (0, 0) }
-        return (
-            extractCount(from: diffStat, pattern: #"(\d+)\s+insertions?\(\+\)"#),
-            extractCount(from: diffStat, pattern: #"(\d+)\s+deletions?\(-\)"#)
-        )
     }
 
     /// The tmux session name for a wave. Named after the wave's ORIGIN repo
@@ -193,13 +176,4 @@ final class PortfolioRepoState {
         return sanitized.isEmpty ? "wave" : sanitized
     }
 
-    private static func extractCount(from text: String, pattern: String) -> Int {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return 0 }
-        let range = NSRange(text.startIndex..., in: text)
-        guard let match = regex.firstMatch(in: text, range: range),
-              let valueRange = Range(match.range(at: 1), in: text) else {
-            return 0
-        }
-        return Int(text[valueRange]) ?? 0
-    }
 }

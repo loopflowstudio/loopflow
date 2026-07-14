@@ -114,7 +114,7 @@ struct AttemptFailurePresentationTests {
 
     @Test("a bodyless failed turn stays a neutral legacy failure")
     func bodylessFailureHasNoAttemptProjection() {
-        let turn = ChatTurn(
+        let turn = try! ChatTurn(
             id: "turn-legacy",
             role: .assistant,
             text: "",
@@ -122,7 +122,8 @@ struct AttemptFailurePresentationTests {
             items: [],
             createdAt: "2026-07-10T17:53:00Z",
             from: nil,
-            body: nil
+            body: nil,
+            activity: nil
         )
 
         #expect(attemptFailurePresentations(
@@ -150,7 +151,7 @@ struct AttemptFailurePresentationTests {
             invocationId: invocationID,
             stepIndex: 0,
             flow: "wave",
-            step: "wave_clarify",
+            step: "wave_pursue",
             iteration: iteration,
             sessionId: nil,
             harness: "codex",
@@ -164,7 +165,7 @@ struct AttemptFailurePresentationTests {
     }
 
     private func turn(_ id: String, _ status: Lifecycle, body: BodyProvenance) -> ChatTurn {
-        ChatTurn(
+        try! ChatTurn(
             id: id,
             role: .assistant,
             text: "",
@@ -172,7 +173,8 @@ struct AttemptFailurePresentationTests {
             items: [],
             createdAt: "2026-07-10T17:53:00Z",
             from: nil,
-            body: body
+            body: body,
+            activity: nil
         )
     }
 

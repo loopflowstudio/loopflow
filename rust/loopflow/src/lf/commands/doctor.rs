@@ -17,7 +17,7 @@ use time::{Duration, OffsetDateTime};
 
 use crate::journal::open_ledger;
 use crate::lf::output::Colors;
-use crate::lfdb::RunEventRow;
+use crate::store::RunEventRow;
 
 /// A node value the current binary understands. `step` is the pre-054 spelling
 /// of `skill`; rows carrying it are history the readers silently drop.
@@ -95,7 +95,7 @@ pub fn run(json: bool) -> Result<()> {
 }
 
 fn check_capture(
-    store: &crate::lfdb::sqlite::SqliteStore,
+    store: &crate::store::sqlite::SqliteStore,
     events: &[RunEventRow],
 ) -> Result<Check> {
     let required_after = store.trace_capture_required_after()?;
@@ -593,7 +593,7 @@ fn print_checks(checks: &[Check], rows: usize) {
 #[cfg(test)]
 mod tests {
     use super::{audit, check_capture, check_continuity, Status};
-    use crate::lfdb::RunEventRow;
+    use crate::store::RunEventRow;
 
     const DAY: i64 = 86_400;
 

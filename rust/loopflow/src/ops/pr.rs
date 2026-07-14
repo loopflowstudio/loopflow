@@ -56,6 +56,7 @@ pub fn create_or_update_pr(
     options: &PrOptions,
     progress: &impl Progress,
 ) -> OpsResult<PrResult> {
+    reject_control_plane_delivery(repo)?;
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -119,6 +120,21 @@ pub fn create_or_update_pr(
             updated: false,
         })
     }
+}
+
+pub(crate) fn reject_control_plane_delivery(repo: &Path) -> OpsResult<()> {
+    let main_repo = main_repo_root(repo)?;
+    let checkout = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
+    let main_repo = main_repo.canonicalize().unwrap_or(main_repo);
+    let default_branch = get_default_branch(repo)?;
+    let branch = current_branch(repo)?;
+    if checkout == main_repo && branch.as_deref() == Some(default_branch.as_str()) {
+        return Err(OpsError::Message(
+            "the canonical checkout on main is the Wave/Project control plane and cannot open a PR; create a Linear task and run it with `lf task run <issue-id>`"
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn resolve_pr_copy(
@@ -241,6 +257,44 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
     }
 
     Ok(None)
+}
+
+pub fn current_or_merged_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
+    if !gh_available() {
+        return Ok(None);
+    }
+    let branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let output = Command::new("gh")
+        .arg("pr")
+        .arg("list")
+        .arg("--head")
+        .arg(&branch)
+        .arg("--state")
+        .arg("all")
+        .arg("--json")
+        .arg("url,state,isDraft,number")
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("gh pr list --head {branch} --state all"),
+            stderr: stderr_from_output(&output),
+        });
+    }
+    let list: Vec<GhPr> = serde_json::from_slice(&output.stdout).map_err(|error| {
+        OpsError::Message(format!("failed to parse gh pr list output: {error}"))
+    })?;
+    Ok(list.into_iter().next().map(|pr| PrInfo {
+        url: pr.url,
+        number: pr.number,
+        state: if pr.is_draft {
+            "draft".to_string()
+        } else {
+            pr.state.to_ascii_lowercase()
+        },
+        branch,
+    }))
 }
 
 fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
@@ -713,11 +767,11 @@ mod tests {
 
     #[test]
     fn parse_generated_pr_copy_accepts_plain_json() {
-        let raw = r###"{"title":"docs: tighten lfd docs","body":"## Try it!"}"###;
+        let raw = r###"{"title":"docs: tighten wave docs","body":"## Try it!"}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
-                title: "docs: tighten lfd docs".to_string(),
+                title: "docs: tighten wave docs".to_string(),
                 body: "## Try it!".to_string(),
             })
         );
@@ -726,12 +780,12 @@ mod tests {
     #[test]
     fn parse_generated_pr_copy_ignores_non_json_braces_around_reply() {
         let raw = r###"warning: telemetry payload {ignored=true}
-{"title":"docs: tighten lfd docs","body":"## Try it!\n- run tests"}
+{"title":"docs: tighten wave docs","body":"## Try it!\n- run tests"}
 info: done {ok=true}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
-                title: "docs: tighten lfd docs".to_string(),
+                title: "docs: tighten wave docs".to_string(),
                 body: "## Try it!\n- run tests".to_string(),
             })
         );
@@ -740,12 +794,12 @@ info: done {ok=true}"###;
     #[test]
     fn parse_generated_pr_copy_handles_braces_inside_body_strings() {
         let raw = r###"preface
-{"title":"docs: tighten lfd docs","body":"Use {native|container} and keep JSON like {\"a\":1}."}
+{"title":"docs: tighten wave docs","body":"Use {native|container} and keep JSON like {\"a\":1}."}
 trailer"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
-                title: "docs: tighten lfd docs".to_string(),
+                title: "docs: tighten wave docs".to_string(),
                 body: "Use {native|container} and keep JSON like {\"a\":1}.".to_string(),
             })
         );
@@ -775,11 +829,11 @@ lf pm init
 {"title":"...","body":"..."}
 No markdown fences.
 
-{"title":"lfd: ship algedonic signals with repair backoff","body":"## Usage\n\nRun the demo."}"###;
+{"title":"wave: ship algedonic signals with repair backoff","body":"## Usage\n\nRun the demo."}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
-                title: "lfd: ship algedonic signals with repair backoff".to_string(),
+                title: "wave: ship algedonic signals with repair backoff".to_string(),
                 body: "## Usage\n\nRun the demo.".to_string(),
             })
         );
@@ -788,7 +842,7 @@ No markdown fences.
     #[test]
     fn parse_generated_pr_copy_handles_literal_newlines_in_body() {
         let raw = r###"codex
-{"title":"lfd: ship algedonic signals with repair backoff","body":"## Usage
+{"title":"wave: ship algedonic signals with repair backoff","body":"## Usage
 
 ```bash
 cargo test repair_chain
@@ -800,7 +854,7 @@ Repairs now back off before escalating."}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
-                title: "lfd: ship algedonic signals with repair backoff".to_string(),
+                title: "wave: ship algedonic signals with repair backoff".to_string(),
                 body: "## Usage\n\n```bash\ncargo test repair_chain\n```\n\n## Summary\n\nRepairs now back off before escalating.".to_string(),
             })
         );

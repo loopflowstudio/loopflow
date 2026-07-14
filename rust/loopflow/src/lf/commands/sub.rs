@@ -21,7 +21,7 @@ use anyhow::Result;
 
 use crate::lf::commands::chat::CliContext;
 use crate::lf::commands::radio::ambient_channel;
-use crate::lfdb::BusMessage;
+use crate::store::BusMessage;
 use crate::wave::bus::POLL_CADENCE;
 use crate::wave::channel::matches_prefix;
 

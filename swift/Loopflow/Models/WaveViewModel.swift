@@ -1,291 +1,42 @@
-import Foundation
 import SwiftUI
 
 public struct WaveViewModel: Sendable, Identifiable, Hashable {
-    public var api: Wave
-    public var content: WaveContent?
-    public var plan: WavePlan?
-    public var worktreePath: String?
-    public var branch: String?
-    public var isDirty: Bool
-    public var isRebasing: Bool
-    public var isMerging: Bool
-    public var hasDiff: Bool
-    public var aheadMain: Int
-    public var behindMain: Int
-    public var aheadRemote: Int
-    public var behindRemote: Int
-    public var prURL: URL?
-    public var prNumber: Int?
-    public var prState: PRState?
-    public var recentSteps: [StepRun]
-    public var prLimit: Int
-    public var mergeMode: MergeMode
-    public var pid: Int?
-    public var lastMainSha: String?
-    public var waitingReason: WaitingReason?
-    public var runStartedAt: Date?
+    public let api: Wave
+    public let plan: WavePlan?
+    public let isRegistered: Bool
 
-    public init(
-        api: Wave,
-        content: WaveContent? = nil,
-        plan: WavePlan? = nil,
-        worktreePath: String? = nil,
-        branch: String? = nil,
-        isDirty: Bool = false,
-        isRebasing: Bool = false,
-        isMerging: Bool = false,
-        hasDiff: Bool = false,
-        aheadMain: Int = 0,
-        behindMain: Int = 0,
-        aheadRemote: Int = 0,
-        behindRemote: Int = 0,
-        prURL: URL? = nil,
-        prNumber: Int? = nil,
-        prState: PRState? = nil,
-        recentSteps: [StepRun] = [],
-        prLimit: Int = 5,
-        mergeMode: MergeMode = .pr,
-        pid: Int? = nil,
-        lastMainSha: String? = nil,
-        waitingReason: WaitingReason? = nil,
-        runStartedAt: Date? = nil
-    ) {
-        let activeRun = api.activeRun
+    public init(api: Wave, plan: WavePlan? = nil, isRegistered: Bool = true) {
         self.api = api
-        self.content = content
         self.plan = plan
-        self.worktreePath = worktreePath ?? activeRun?.worktree ?? api.localWorktree
-        self.branch = branch ?? activeRun?.branch ?? api.remoteBranch
-        self.isDirty = isDirty
-        self.isRebasing = isRebasing
-        self.isMerging = isMerging
-        self.hasDiff = hasDiff
-        self.aheadMain = aheadMain
-        self.behindMain = behindMain
-        self.aheadRemote = aheadRemote
-        self.behindRemote = behindRemote
-        self.prURL = prURL ?? activeRun?.pr?.url
-        self.prNumber = prNumber ?? activeRun?.pr?.number
-        self.prState = prState ?? activeRun?.pr?.state
-        self.recentSteps = recentSteps
-        self.prLimit = prLimit
-        self.mergeMode = mergeMode
-        self.pid = pid
-        self.lastMainSha = lastMainSha
-        self.waitingReason = waitingReason
-        self.runStartedAt = runStartedAt ?? activeRun?.startedAt
+        self.isRegistered = isRegistered
     }
 
     public var id: String { api.id }
 
-    public var name: String {
-        get { api.name }
-        set { api.name = newValue }
-    }
+    public var name: String { api.name }
 
-    public var repo: String {
-        get { api.repo }
-        set { api.repo = newValue }
-    }
+    public var repo: String { api.repo }
 
-    public var direction: [String] {
-        get { api.direction }
-        set { api.direction = newValue }
-    }
+    public var status: WaveStatus { api.status }
 
-    public var area: [String] {
-        get { api.area }
-        set { api.area = newValue }
-    }
+    public var displayName: String { name }
 
-    public var agent: String? {
-        get { api.agent }
-        set { api.agent = newValue }
-    }
-
-    public var skillAgents: [String: String]? {
-        get { api.skillAgents }
-        set { api.skillAgents = newValue }
-    }
-
-    public var triggers: [Trigger] {
-        get { api.triggers }
-        set { api.triggers = newValue }
-    }
-
-    /// First active trigger, if any.
-    public var trigger: Trigger? { triggers.first }
-
-    public var status: WaveStatus {
-        get { api.status }
-        set { api.status = newValue }
-    }
-
-    public var iteration: Int {
-        get { api.iteration }
-        set { api.iteration = newValue }
-    }
-
-    public var activeRun: Run? {
-        get { api.activeRun }
-        set { api.activeRun = newValue }
-    }
-
-    public var createdAt: Date? {
-        get { api.createdAt }
-        set { api.createdAt = newValue }
-    }
-
-    public var stepIndex: Int {
-        activeRun?.stepIndex ?? 0
-    }
-
-    public var shortId: String { String(id.prefix(7)) }
-
-    public var displayName: String {
-        if !name.isEmpty { return name }
-        return area.first.map { $0 == "." ? "root" : $0 } ?? "root"
-    }
-
-    /// First line of the vision section — the tagline.
-    public var visionTagline: String? {
-        guard let vision = content?.vision else { return nil }
-        let firstLine = vision.components(separatedBy: .newlines)
+    public var objectiveTagline: String? {
+        guard let objective = plan?.objective else { return nil }
+        return objective.components(separatedBy: .newlines)
             .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }?
             .trimmingCharacters(in: .whitespaces)
-        return firstLine
     }
-
-    /// Short diff summary like "+42 −8" for display, when there's an active diff.
-    public var diffIndicator: String? {
-        guard hasDiff, let diffCounts else { return nil }
-        let adds = diffCounts.additions
-        let dels = diffCounts.deletions
-        if adds == 0 && dels == 0 { return nil }
-        var result: [String] = []
-        if adds > 0 { result.append("+\(adds)") }
-        if dels > 0 { result.append("−\(dels)") }
-        return result.joined(separator: " ")
-    }
-
-    /// Whether the diff is net-positive (green) or net-negative (red).
-    public var diffIsPositive: Bool {
-        guard let diffCounts else { return true }
-        return diffCounts.additions >= diffCounts.deletions
-    }
-
-    public var areaDisplay: String {
-        if area.isEmpty { return "" }
-        return area.first == "." ? "." : area.joined(separator: ", ")
-    }
-
-    public var directionDisplay: String {
-        direction.isEmpty ? "" : direction.joined(separator: ", ")
-    }
-
-    public var commits: [CommitEntry] { api.commits }
-    public var diffStat: String? { api.diffStat }
-    public var flowSteps: [String] { api.flowSteps }
-    private var diffCounts: (additions: Int, deletions: Int)? {
-        guard let diffStat else { return nil }
-
-        var additions = 0
-        var deletions = 0
-        for part in diffStat.components(separatedBy: ",") {
-            let trimmed = part.trimmingCharacters(in: .whitespaces)
-            guard let count = Int(trimmed.components(separatedBy: .whitespaces).first ?? "") else {
-                continue
-            }
-
-            if trimmed.contains("insertion") {
-                additions = count
-            } else if trimmed.contains("deletion") {
-                deletions = count
-            }
-        }
-
-        return (additions, deletions)
-    }
-
-    private var activeRunFlow: String? {
-        let runFlow = activeRun?.flow.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return runFlow.isEmpty ? nil : runFlow
-    }
-
-    public var displayFlow: String {
-        activeRunFlow ?? ""
-    }
-
-    public var displayFlowSteps: [String] {
-        if let activeRunFlow { return [activeRunFlow] }
-        if !flowSteps.isEmpty {
-            return flowSteps
-        }
-        return []
-    }
-
-    public var openPRCount: Int { api.openPRCount }
-    public var effectiveOpenPRCount: Int { max(openPRCount, pendingPR == nil ? 0 : 1) }
-    public var hasOpenPRs: Bool { effectiveOpenPRCount > 0 }
 
     public var statusText: String {
         switch status {
-        case .running: return "Running"
-        case .waiting: return "Waiting"
-        case .idle: return "Idle"
-        case .failed: return "Failed"
-        case .paused: return "Paused"
+        case .running: "Running"
+        case .idle: "Idle"
+        case .paused: "Paused"
         }
     }
-
-    public var iterationText: String {
-        iteration > 0 ? "iter \(iteration)" : ""
-    }
-
-    public var detailText: String {
-        var parts: [String] = []
-        if !areaDisplay.isEmpty { parts.append(areaDisplay) }
-        if !displayFlow.isEmpty { parts.append(displayFlow) }
-        if let t = trigger { parts.append(t.signal.rawValue) }
-        return parts.joined(separator: " · ")
-    }
-
-    public var triggerText: String {
-        trigger?.description ?? "manual"
-    }
-
-    public var hasActiveTrigger: Bool { !triggers.isEmpty }
 
     public var statusIndicator: (icon: String, color: Color) {
-        switch status {
-        case .running:
-            return ("circle.fill", .statusSuccess)
-        case .waiting:
-            return ("circle.lefthalf.filled", .statusWarning)
-        case .failed:
-            return ("xmark.circle.fill", .statusError)
-        case .idle:
-            return ("circle", .statusNeutral)
-        case .paused:
-            return ("pause.circle", .statusNeutral)
-        }
-    }
-
-    public var pendingPR: (number: Int, url: URL?)? {
-        guard let prNumber, prState == .open else { return nil }
-        return (number: prNumber, url: prURL)
-    }
-
-    public var lastActivityAt: Date? {
-        recentSteps.first?.endedAt ?? recentSteps.first?.startedAt
-    }
-
-    public var lastActivityDescription: String? {
-        guard let skill = recentSteps.first else { return nil }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        let time = formatter.localizedString(for: skill.endedAt ?? skill.startedAt, relativeTo: Date())
-        return "\(skill.skill) \(time)"
+        (status.icon, status.color)
     }
 }

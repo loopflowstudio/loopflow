@@ -9,15 +9,19 @@ import Loopflow
 /// gives real text selection (copy, drag) that SwiftUI's `Text` can't, while
 /// sizing itself to its content so it flows in a `VStack`.
 struct SelectableAssistantMessageTextView: NSViewRepresentable {
+    @Environment(\.palette) private var palette
+
     let text: String
 
     func makeNSView(context: Context) -> AutosizingSelectableTextView {
         let textView = AutosizingSelectableTextView(frame: .zero, textContainer: nil)
         textView.string = text
+        textView.textColor = NSColor(palette.text)
         return textView
     }
 
     func updateNSView(_ nsView: AutosizingSelectableTextView, context: Context) {
+        nsView.textColor = NSColor(palette.text)
         if nsView.string != text {
             nsView.string = text
             nsView.invalidateIntrinsicContentSize()
@@ -50,7 +54,6 @@ final class AutosizingSelectableTextView: NSTextView {
         autoresizingMask = [.width]
 
         font = NSFont(name: "Lato", size: 14) ?? .systemFont(ofSize: 14)
-        textColor = .labelColor
     }
 
     required init?(coder: NSCoder) {

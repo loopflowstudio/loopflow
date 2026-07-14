@@ -5,163 +5,121 @@ title: Architecture
 
 # Architecture
 
-Loopflow turns repo-authored intent into persistent agent work. Skills and flows
-run one job. Waves keep working: they remember, dispatch workers, respond to
-messages in their thread, surface attention, and leave an auditable trail.
-
-## System Map
-
 ```text
-Authoring layer
-  README.md, docs/
-  .lf/skills/*.md
-  .lf/flows/*.yaml
-  .lf/directions/*.md
-  wave/<name>/GOAL.md
-  wave/<name>/MEMORY.md
-  wave/<name>/*.md
-        |
-        v
-Execution engine
-  rust/loopflow/src/engine/
-  prompt assembly, flow execution, agent launch, git/worktree helpers
-        |
-        +------------------------+
-        |                        |
-        v                        v
-Local CLI                 Daemon
-  lf                        lfd
-  rust/.../lf               rust/.../lfd
-  rust/.../ops              HTTP read surface, sessions,
-                            webhook lf-exec bridge, worktree
-                            janitor, token refresh
-        |                        |
-        v                        v
-Git/PR/PM ops             Clients
-                            lf CLI
-                            Loopflow Swift app
-                            webhooks
+Human ── Wave Chat ──▶ Wave
+                       │ selects and directs
+                       ▼
+                 Project Session
+                       │ supervises
+                       ▼
+                   Task Session ──▶ worktree + PR to main
+                       │
+                       └──────────▶ diff/file/terminal inspector
+
+Wave ─ ─ ─ ─ root inspection and override ─ ─ ─ ─ ─ ┘
 ```
 
-## Core Concepts
+`lf` is the machine-wide command and JSON interface. `lf wave <name>` is the
+resident process for one Wave: it owns that Wave's chat listener, journal,
+cadence, memory, and project selection. There is no global service.
 
-| Concept | Stored in | Runtime owner |
+## Product model
+
+| Concept | Durable truth | Runtime responsibility |
 |---|---|---|
-| Skill | `.lf/skills/` and built-ins | `engine` |
-| Flow | `.lf/flows/` and built-ins | `engine` |
-| Direction | `.lf/directions/` | `engine` prompt assembly |
-| Wave goal | `wave/<name>/GOAL.md` | `lf serve` server + resident loop |
-| Wave memory | `wave/<name>/MEMORY.md` | wave agent |
-| Task | Linear | `lf pm` and wave flows |
-| Session | lfdb | `lf` runs and placement flags |
-| Run/event | lfdb | lfd HTTP/event stream |
-| Attention | lfdb | lfd + Loopflow |
+| Wave | `wave/<name>/GOAL.md`, `MEMORY.md`, registry row | Choose Projects, converse, remember, and stay resident |
+| Project | Linear Project + local Project Session | Pursue measurable KRs across Tasks |
+| Task | Linear issue + local Task Session | Deliver one change through a worktree and PR |
+| Directive | local store | Preserve child direction and incorporation proof |
+| Trace | local store + `~/.lf/traces` | Record agent launch and conversation evidence |
 
-## CLI and Engine
+Every Project belongs to one Wave. Every Task belongs to one Project and one
+durable Project Session. Only a Task Session owns a worktree, branch, and pull
+request.
 
-`lf` is the local command runner. It resolves a skill or flow, assembles context,
-launches the configured coding agent, and runs ops such as commit, rebase, PR,
-PM sync, and release.
+There is one supervision path: Wave → Project Session → Task Session. The Wave
+retains root authority to inspect or override any descendant, but that command
+source does not bypass or replace the Task's Project Session. Loopflow creates
+no default Project. Free-text `lf task start` requires `--project`, creates the
+Linear issue, ensures the Project Session, then creates the Task Session and
+worktree. `lf task run` does the same for an existing Linear issue. A newly
+reserved Project Session does not block Task launch on another provider turn;
+the Task's first consequential event wakes it through the observation outbox.
+
+Free-text Project and Task starts verify the owning Wave before mutating
+Linear. They refresh the PM snapshot before creating local runtime state; a
+post-commit refresh failure reports the committed id and leaves no Session or
+worktree created by that attempt to reconcile.
+
+Wave and Project turns run from the clean canonical main checkout as a control
+plane. They read, decide, and create or steer children there; repository edits
+belong to Task worktrees. Commands fail before provider launch when that main
+checkout is dirty or the caller is in another checkout.
+
+## CLI and engine
+
+`lf` resolves skills and flows, assembles context, starts provider CLIs, and
+exposes local domain commands. The engine owns reusable prompt execution and
+Git primitives; Wave, Project, and Task controllers own lifecycle decisions.
+
+Each controller runs one bounded `clarify → pursue → mutate` flow. The three
+skills remain separate because they have separate jobs; no skill owns a loop
+bit. After the pass, the domain controller inspects durable truth. A Task
+continues, waits for review, or ends on merge/abandonment. A Project repeats,
+waits on Tasks, blocks on no progress, or completes when every current KR
+holds. A Wave returns to its resident idle state and wakes on human input,
+cadence, or child observations.
 
 Important paths:
 
-- `rust/loopflow/src/bin/lf.rs`
 - `rust/loopflow/src/lf/`
 - `rust/loopflow/src/engine/`
-- `rust/loopflow/src/ops/`
+- `rust/loopflow/src/wave/`
+- `rust/loopflow/src/project_session/`
+- `rust/loopflow/src/task/`
 
-The engine owns the common language: prompts, flows, forks, worktrees, built-in
-skills, skills, structured replies, and launch behavior. Ops wrap concrete
-side-effectful workflows around git, PRs, PM providers, and release artifacts.
+## Local store
 
-## Daemon
+SQLite coordinates Wave identity, PM snapshots, Project and Task Sessions,
+commands, directives, event ledgers, provider credentials, and traces. Callers
+open it directly. The default path is `~/.lf/loopflow.db`; set `LF_DB_PATH` to
+use another path.
 
-`lfd` is the gatekeeper: it serves read routes and the event push, verifies
-GitHub webhooks and translates them inward as `lf` execs, refreshes provider
-tokens, and tidies the registry at boot. It dispatches no work; waves and
-ordinary blocking and server-owned detached `lf loop` runs own agent execution.
+Important path:
 
-Important paths:
+- `rust/loopflow/src/store/`
 
-- `rust/loopflow/src/bin/lfd.rs`
-- `rust/loopflow/src/lfd/http/`
-- `rust/loopflow/src/lfdb/`
-- `rust/loopflow/src/lfd/triggers/` (token refresh — the one surviving loop)
-- `rust/loopflow/src/lfd/executor/` (placement helpers and worktree janitor)
-- `rust/loopflow/src/lfd/types/`
+## Wave process
 
-`lfd` uses sqlite and a local capability token. The old container service path
-is gone; self-hosted operations are SSH-first.
-
-## Clients
-
-`lf` and Loopflow read lfd state; webhooks push events in. The Python package
-is a library of wire models only.
-
-Important paths:
-
-- `python/loopflow/models.py`
-
-Loopflow is the Swift app. It reads lfd state, renders waves and sessions, and
-provides native surfaces for attention, terminal workspaces, provider auth, and
-live output.
-
-Important paths:
-
-- `swift/LoopflowCore/Models/`
-- `swift/LoopflowCore/State/`
-- `swift/LoopflowCore/Services/`
-- `swift/Loopflow/Views/`
-
-## Wave Loop
-
-```text
-1. Read GOAL.md, MEMORY.md, the local PM snapshot, and relevant docs.
-2. Assess current wave state and messages in the thread.
-3. Pick one move: study, ingest, dispatch, unblock, review, or wait.
-4. Run a skill or flow, often by dispatching a worker.
-5. Record events, update PM/repo state, and surface attention.
-6. Loop when mode, a `GOAL.md` cron, or an incoming message asks for another pass.
+```bash
+lf wave infrastructure
 ```
 
-A wave agent coordinates. Workers do scoped implementation and report back
-through PRs, PM state, events, and memory updates.
+One Wave process serves replay, live turns, and health for that Wave. The Mac
+app connects directly to the selected Wave while reading current registry,
+Project, and Task state through its bundled `lf`.
 
-## Data Boundaries
+Selecting a Task opens its worktree inspector. `lf task changes/diff/file`
+owns Git and path semantics; Swift renders those typed snapshots and keeps
+Task-scoped Ghostty/tmux terminals as presentation state. The terminal
+multiplexer never owns Task lifecycle or worktree identity.
 
-Wire DTOs are mirrored by hand across Rust, Python, Swift, and JSON fixtures.
-They do not get hidden defaults. A missing field is either a parse error or an
-explicit optional value.
+Project and Task Sessions are explicit child processes. They share the local
+store and durable control channel; they do not call a global HTTP API.
+
+## Delivery truth
+
+Task runners and status commands reconcile pull-request state through `gh`.
+Merge correctness does not depend on webhook delivery. A merged Task remains
+visible until Linear writeback succeeds or exposes a pending reconciliation.
+
+## Wire contracts
+
+The Mac app invokes `lf --json`. Shared fixtures keep Rust and Swift
+representations aligned. Wire fields have no implicit defaults: absence is
+either a parse error or an explicit optional value.
 
 Important paths:
 
-- `rust/loopflow/src/lfd/http/dto.rs`
-- `python/loopflow/models.py`
-- `swift/LoopflowCore/Models/`
+- `swift/Loopflow/Models/`
 - `tests/fixtures/dto/`
-
-This boundary deserves special care. If a field changes, update every mirror and
-the fixture tests in the same unit of work.
-
-## External Systems
-
-Loopflow integrates with:
-
-- Git and worktrees for branch isolation.
-- GitHub for PRs, webhook ingress translated to `lf` execs, and release workflows.
-- Linear and Notion for PM-backed wave tasks.
-- tmux and local processes for interactive sessions.
-- Swift/macOS services for Loopflow and native host behavior.
-
-## Where Complexity Collects
-
-- Context assembly: every agent session depends on it, and the sources span
-  docs, prompts, skills, wave memory, scratch notes, and command arguments.
-- Session lifecycle: lfd, Loopflow, tmux, and external agents must agree on
-  what is running, blocked, attachable, complete, or failed.
-- DTO parity: Rust, Python, Swift, and fixtures can drift unless changes are
-  made as one contract update.
-- Product continuity: backend, CLI, UI, docs, tests, and release notes often
-  move at different times.
-
-These are the highest-leverage places to simplify first.

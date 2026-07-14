@@ -3,7 +3,7 @@ import Foundation
 public enum LoggingService {
     public enum Category: String {
         case worktrees
-        case lfd
+        case wave
         case general
         case ui       // User interactions: button clicks, selections
         case model    // Data model changes: waves, state updates
@@ -48,8 +48,8 @@ public enum LoggingService {
         append(message, category: .model)
     }
 
-    public static func lfd(_ message: String) {
-        append(message, category: .lfd)
+    public static func wave(_ message: String) {
+        append(message, category: .wave)
     }
 
     public static func read(category: Category = .worktrees) -> String {

@@ -1,8 +1,7 @@
 //! The loop's state machine.
 //!
-//! This machine is about the LOOP only: workers grinding in the
-//! background are not a loop state (wave-level display is derived from
-//! `(loop_state, workers_in_flight)`). A failed *pass* is
+//! This machine is about the Wave turn only. Project and Task Sessions have
+//! independent lifecycle state and do not keep a Wave turn active. A failed *pass* is
 //! `TurnFinished { status: Failed }` and the loop returns to `Idle`;
 //! [`LoopState::Failed`] is reserved for the loop itself (consecutive
 //! pass failures — see [`crate::flowloop::wave`]).

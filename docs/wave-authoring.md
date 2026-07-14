@@ -48,10 +48,10 @@ Infrastructure wave
 
 ## Creating a Wave
 
-Author `wave/<name>/GOAL.md` — the body is the goal prompt; optional frontmatter sets machine config such as `workers:`, `crons:`, and `pm:`. Then run the agent:
+Author `wave/<name>/GOAL.md` — the body is the goal prompt; optional frontmatter sets machine config such as `crons:` and `pm:`. Then run the agent:
 
 ```bash
-lf serve infra             # start the wave agent
+lf wave infra              # start the Wave
 ```
 
 ---
@@ -75,20 +75,16 @@ tasks live in Linear and sync into SQLite — read and edit them with `lf pm`
 `GOAL.md` is the wave's loop surface. Frontmatter carries machine config; the body is the prompt the wave agent runs each loop.
 
 ```markdown
----
-workers: 2
----
-
 ## Objective
 
-Harden the daemon. Each loop: read Linear tasks and memory, pick the next useful
+Keep the runtime architecture legible. Each loop: read Linear tasks and memory, pick the next useful
 move, resolve its local blocker, spin off independent work only when parallelism
 earns it, and fold what shipped into memory.
 
 ## Measures
 
-- **Quality**: daemon migrations are transactional.
-- **Quality**: webhook security is enabled by default.
+- **Quality**: fresh-store tests cover every live persistence path.
+- **Quality**: each public command maps to one product concept.
 - **Done means**: a landed PR of real product code, Linear task closed and PR-linked.
 
 ## Process
@@ -97,10 +93,10 @@ Make mechanical changes directly; write a scratch design first when the blast
 radius crosses storage, auth, or public APIs.
 ```
 
-Run `lf serve <wave>` to start that wave directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
+Run `lf wave <wave>` to start that Wave directly. Builtin goals resolve by name the same way, so the five VSM system charters ship as `s1`…`s5`:
 
 ```bash
-lf serve s3           # the s3 (control) charter
+lf wave s3            # the s3 (control) charter
 ```
 
 ### Memory
@@ -190,13 +186,12 @@ lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 
 Keep each task to one PR's worth of work — roughly 1000 LOC. If a task feels
 like it needs splitting, it does. Give it a clear finish line and name the
-project it advances so a worker knows when to stop.
+Project it advances so its Task Session knows when to stop.
 
 ### Goal Frontmatter
 
 | Field | What it does |
 |-------|-------------|
-| `workers` | Parallelism for dispatched work. `0` means "don't auto-dispatch" |
 | `agent` | Preferred agent harness/model |
 | `crons` | Supplementary flow schedules (`flow:` + `schedule:`), fired by the wave's resident loop |
 | `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf pm init`) |
@@ -210,10 +205,10 @@ The resident loop reads `crons:` directly from this frontmatter and opens a syst
 **Use `lf design` to explore and draft.** Start a local design conversation and let it produce wave files. `lf design` doesn't register or run waves — think of it as drafting sheet music, not conducting.
 
 ```bash
-lf design: plan infrastructure hardening for the daemon
+lf design: plan infrastructure hardening for the runtime
 ```
 
-The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, `lf serve <name>` runs them and Loopflow picks them up; connect Linear with `lf pm init` and add tasks with `lf pm task create`.
+The session can produce a wave's `GOAL.md` and `MEMORY.md`. Once the files exist in your repo, `lf wave <name>` runs them and Loopflow picks them up; connect Linear with `lf pm init` and add tasks with `lf pm task create`.
 
 **Write by hand.** Sometimes an editor is faster. Create the files, push, done.
 
@@ -225,18 +220,20 @@ Run the wave agent and it works one move at a time:
 
 1. **Read** — its `GOAL.md`, `MEMORY.md`, Linear tasks, and any work already in flight.
 2. **Decide** — pick the next useful move against the task list and metrics.
-3. **Execute** — resolve the sole blocker inline. Create a worker only when a
-   strict subset needs its own repeated lifecycle or can run usefully in parallel:
+3. **Execute** — create or select the concrete Linear task, then start its Task
+   Session:
 
    ```bash
-   lf --wave infra loop build "wrap SQLite migrations in a transaction" --detach
+   lf task run INF-123
    ```
 
-4. **Watch** — the PR is how the worker reports back. The agent reads its diff, checks, and comments.
+4. **Watch** — use Task status and linked events; steer or interrupt the same
+   session when review changes course.
 5. **Remember** — the agent folds what shipped into `MEMORY.md` and updates Linear tasks.
 
-The wave agent coordinates and executes. Work becomes a worker session only
-when a separate lifecycle or real parallelism earns the extra worktree.
+The Wave coordinates. A durable Project Session pursues a Project's KRs and
+sleeps while its Task Sessions run. Concrete changes ship through Task
+Sessions; Projects never own worktrees, branches, or PRs.
 
 ### Fold, Don't Drop
 
@@ -247,21 +244,23 @@ When a task ships, its context — what was learned, what changed, what downstre
 ## Running and Monitoring
 
 ```bash
-lf serve mywave              # start the wave agent (Ctrl-C to stop)
-tmux ls                     # the wave agent and every worker it launched
-tmux attach -r -t <name>    # inspect one; agent output lives here
+lf wave mywave               # start the Wave (Ctrl-C to stop)
+lf project attach <id>      # audited Project control prompt
+lf task attach INF-123      # audited Task control prompt
 ```
 
-In **Loopflow**, a wave's detail view groups its live work — the wave agent session, worker runs, PR state, and anything needing your attention.
+In **Loopflow**, a wave's detail view renders its native Project → Task work
+map, including current direction, next-move ownership, Task delivery, and
+anything needing attention.
 
 ### Crons
 
-Crons live in `GOAL.md` frontmatter; the wave's resident loop fires each due schedule as a system pass and dispatches the flow with judgment. `workers: 0` is valid for a wave that only runs scheduled flows:
+Crons live in `GOAL.md` frontmatter; the Wave's resident opens each due
+schedule as a system turn:
 
 ```markdown
 <!-- wave/governance/GOAL.md -->
 ---
-workers: 0
 crons:
   - flow: govern-coordination
     schedule: "0 0 0 * * * *"
@@ -290,13 +289,13 @@ Migration shim     → Legacy API compatibility layer
 Cleanup            → Remove old billing code
 ```
 
-The wave agent reads tasks with `lf pm show --no-sync`, picks the highest-priority move,
-and resolves its local blocker inline. It creates a child loop only when an
-independent task earns its own lifecycle or useful parallelism, then folds each
-shipped PR into memory and closes the task with `lf pm task done`.
+The wave agent reads Projects and Tasks with `lf pm show --no-sync`, then
+directs the highest-priority Project. Every independent file-writing change
+starts a Task Session under that Project. Each shipped PR folds into memory and
+the Task closes with `lf pm task done`.
 
 ---
 
 ## Reference
 
-[Waves →](waves.md) · [Get Started →](getting-started.md) · [`lfd` commands](lfd.md) · [Configuration](config.md)
+[Waves →](waves.md) · [Get Started →](getting-started.md) · [Configuration](config.md)

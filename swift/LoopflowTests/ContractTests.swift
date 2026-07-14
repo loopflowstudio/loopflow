@@ -25,32 +25,6 @@ struct ContractTests {
         return json
     }
 
-    @Test("wave.json parses through parseWaveFromJSON")
-    func waveFixtureParses() throws {
-        let json = try fixtureJSON("wave.json")
-        let wave = WaveService.parseWaveFromJSON(json)
-
-        #expect(wave.id == "wave_abc123")
-        #expect(wave.name == "engbot")
-        #expect(wave.goal == "ship-roadmap")
-        #expect(wave.status == .running)
-        #expect(wave.direction == ["ux", "clarity"])
-        #expect(wave.area == ["src/"])
-        #expect(wave.parentWaveId == "wave_parent999")
-
-        #expect(wave.repo == "/home/user/project")
-        #expect(wave.iteration == 3)
-        #expect(wave.openPRCount == 1)
-        #expect(wave.localWorktree == "/home/user/project/.claude/worktrees/engbot")
-        #expect(wave.remoteBranch == "engbot/build-3")
-        #expect(wave.commits.count == 1)
-
-        // Triggers and crons left the wire in the collapse's organ cut:
-        // absent keys parse as empty.
-        #expect(wave.triggers.isEmpty)
-        #expect(wave.crons.isEmpty)
-    }
-
     @Test("chat_turn.json decodes through the wave chat models")
     func chatTurnFixtureParses() throws {
         let data = try fixtureData("dto/chat_turn.json")
@@ -133,10 +107,30 @@ struct ContractTests {
         #expect(unattributed.from == nil)
     }
 
+    @Test("child activity cannot masquerade as an ordinary conversation turn")
+    func childActivityEnvelopeIsChecked() throws {
+        let activity = try fixtureJSON("dto/child_control_activity.json")
+        let invalid: [String: Any] = [
+            "id": "turn-activity",
+            "role": "user",
+            "text": "ordinary prose cannot share the activity envelope",
+            "status": "completed",
+            "items": [],
+            "created_at": "2026-07-13T20:00:00Z",
+            "from": "Task INF-123",
+            "body": NSNull(),
+            "activity": activity,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: invalid)
+
+        #expect(throws: ChatTurnError.self) {
+            try JSONDecoder().decode(ChatTurn.self, from: data)
+        }
+    }
+
     @Test("post_message_response.json decodes through PostMessageResponse")
     func postMessageResponseFixtureParses() throws {
-        // Pins `POST /messages` → `{turn, state}` against Rust's
-        // dto_fixtures; a drifted turn shape or state name fails both.
+        // Pins `POST /messages` → `{turn, state}` for the Mac client.
         let data = try fixtureData("dto/post_message_response.json")
         let posted = try JSONDecoder().decode(PostMessageResponse.self, from: data)
 
@@ -160,10 +154,8 @@ struct ContractTests {
 
     @Test("wave_loop_states.json pins the shared SSE state vocabulary")
     func loopStateVocabularyPinned() throws {
-        // The same fixture Rust's dto_fixtures checks against LoopState::name;
-        // a renamed state fails both languages. Swift still deliberately drops
-        // unknown names off the stream (see WaveChatConnectionTests) — this
-        // pins the vocabulary, not the tolerance.
+        // Swift deliberately drops unknown names off the stream (see
+        // WaveChatConnectionTests); this pins the vocabulary, not the tolerance.
         let json = try fixtureJSON("dto/wave_loop_states.json")
         let names = try #require(json["states"] as? [String])
         #expect(names.map { WaveLoopState(rawValue: $0) } == [.idle, .turning, .interrupting, .failed])

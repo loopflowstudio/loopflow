@@ -1,29 +1,26 @@
 ---
-description: Keep GOAL.md computable for the wave loop.
+description: Keep the Wave objective and portfolio computable.
 default_agent: codex
 action_style: procedural
 ---
-Clarify the wave artifact: `wave/<wave>/GOAL.md`.
+Clarify the Wave before choosing more work.
 
-## Orientation
+Read the exact Wave's GOAL/MEMORY, recent human conversation, cache-only PM
+snapshot, and current Project/Task state. A Wave owns its durable objective,
+memory, cadence, budget, and Project selection. Each Project belongs to exactly
+one Wave and owns its own KRs.
 
-Read the wave GOAL/MEMORY, `lf pm show --wave <wave> --json --no-sync`, recent chat, and
-worker state. The wave owns the operating context and project selection, not a
-planning mirror.
-Each project belongs to exactly one wave and owns KRs, not memory or cadence.
+- Reconcile new human direction with the current objective and portfolio.
+- Correct `GOAL.md` only when the Wave objective, measures, bounds, or cadence
+  no longer ask the honest question.
+- Correct Project definitions or KRs through `lf pm project update`; Linear is
+  authoritative. KRs state observable proof, not tasks or implementation
+  receipts.
+- Demote individual cleanup into a Task under a broader Project. Promote a
+  durable independent operating context into a Wave, never a child Project.
+- Do not implement repository changes. Every file-writing change begins as a
+  Linear Task under a Project.
 
-## Work
-
-- Edit GOAL.md when the objective, measures, bounds, or cron intent have
-  drifted.
-- Update the authoritative Linear Project, then run `lf pm sync`, when a project
-  definition or KR set has drifted. KRs should read as proof under duration:
-  counted, unattended, endurance-shaped end states on real work — not backlog
-  bullets, issue ids, status, or implementation receipts.
-- If a "project" is really individual cleanup work, file or keep it as a task
-  under a broader project instead of preserving it as a project.
-- If the next move is ambiguous, ask the thread directly and record the
-  assumption in `scratch/questions.md` before proceeding.
-
-Do not implement product work in this phase unless it is a trivial correction
-to the wave artifact itself.
+Leave a concise statement of the current objective and the one or two tensions
+the pursuit phase should act on. The Wave runner advances the flow; write no
+loop bit.

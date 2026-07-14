@@ -1,6 +1,6 @@
 import Foundation
 
-// Live client for a wave's chat server. A running `lf serve <name>` publishes its
+// Live client for a wave's chat server. A running `lf wave <name>` publishes its
 // loopback address to `wave/<name>/.wave-endpoint`; this client discovers it,
 // consumes the unified `GET /events` SSE stream (turn + state + memory frames,
 // thread replay on connect), and posts messages back. When the pointer file is
@@ -151,28 +151,6 @@ struct PostMessageResponse: Decodable {
     let state: String
 }
 
-/// One `op` SSE frame — this wave's operational motion: a worker run starting
-/// or finishing, observed by the wave server's `StoreObserver`. Mirrors Rust
-/// `OpFrame` (`wave/wire.rs`); `kind` reuses the `run_events` ledger vocabulary
-/// 1:1 (`run.started`, `run.completed`, `run.errored`) so the live frame and a
-/// `lf runs` history row fold with one code path. Live-only — never replayed;
-/// history is the query. The dashboard card for a wave reads its run/flow/skill
-/// motion from these frames on the same connection that drives the chat pane.
-public struct WaveOpFrame: Decodable, Equatable, Sendable {
-    public let kind: String
-    public let runID: String
-    public let flow: String?
-    public let task: String?
-    public let summary: String?
-    public let timestamp: String
-
-    enum CodingKeys: String, CodingKey {
-        case kind, flow, task, summary
-        case runID = "run_id"
-        case timestamp = "ts"
-    }
-}
-
 /// Observable connection to one wave's chat server: the live thread plus a phase
 /// the UI renders (not running / connecting / live).
 @MainActor
@@ -198,11 +176,6 @@ public final class WaveChatConnection {
     /// Last `memory` frame's summary — the wave's most recent MEMORY.md
     /// curation. Live-only (no replay); exposed for the UI to adopt later.
     public private(set) var memorySummary: String?
-    /// Last `op` frame — this wave's most recent run/flow/skill motion. Live-only
-    /// (no replay); the dashboard card lights up from this alongside the chat
-    /// pane, both off this one connection. History is a `lf runs` query.
-    public private(set) var lastOp: WaveOpFrame?
-
     private var currentEndpoint: String?
     private var loop: Task<Void, Never>?
     private let session: URLSession
@@ -262,37 +235,6 @@ public final class WaveChatConnection {
         }
     }
 
-    public func enqueue(_ flow: String) async throws {
-        let trimmed = flow.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        playhead = try await postPlayhead(
-            path: "/playhead/enqueue",
-            body: ["flow": trimmed]
-        )
-    }
-
-    public func skip() async throws {
-        playhead = try await postPlayhead(path: "/playhead/skip", body: nil)
-    }
-
-    private func postPlayhead(path: String, body: [String: String]?) async throws -> PlayheadView {
-        guard let endpoint = currentEndpoint,
-              let url = URL(string: "http://\(endpoint)\(path)") else {
-            throw WaveChatError.notRunning
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        }
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw WaveChatError.badStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
-        return try decoder.decode(PlayheadView.self, from: data)
-    }
-
     // MARK: - Discovery + streaming loop
 
     private func run() async {
@@ -336,7 +278,6 @@ public final class WaveChatConnection {
         turns = []
         loopState = .idle
         playhead = nil
-        lastOp = nil
         phase = .live
 
         // Raw bytes, not `bytes.lines`: AsyncLineSequence drops the empty
@@ -374,17 +315,11 @@ public final class WaveChatConnection {
             memorySummary = data
             return
         }
-        if event == "op" {
-            guard let json = data.data(using: .utf8),
-                  let frame = try? decoder.decode(WaveOpFrame.self, from: json) else { return }
-            lastOp = frame
-            return
-        }
         guard event.isEmpty || event == "turn", let json = data.data(using: .utf8) else { return }
         do {
             upsert(try decoder.decode(ChatTurn.self, from: json))
         } catch {
-            LoggingService.lfd("wave chat: dropped turn frame (\(error)): \(data.prefix(200))")
+            LoggingService.wave("wave chat: dropped turn frame (\(error)): \(data.prefix(200))")
             assertionFailure("wave chat turn frame failed to decode: \(error)")
         }
     }

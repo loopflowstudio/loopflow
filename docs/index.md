@@ -22,8 +22,8 @@ lf debug -c                       # fix it
 
 ```bash
 # author wave/engbot/GOAL.md, then:
-lf serve engbot       # start the wave agent (Ctrl-C to stop)
-tmux ls              # live sessions — the wave agent and its workers
+lf wave engbot        # start the Wave (Ctrl-C to stop)
+tmux ls              # live Wave, Project, and Task Sessions
 tmux attach -r -t <name>  # inspect one work
 ```
 
@@ -50,20 +50,19 @@ Skills are atomic. Flows are how work actually gets done.
 design → implement → polish
 ```
 
-**Parallel flows** branch and join:
+**Branching flows** choose a path from explicit criteria:
 ```
-design ──┬──> impl-api ──┬──> integrate
-         └──> impl-ui ───┘
-```
-
-**Fork** explores multiple approaches and synthesizes:
-```
-Fork ──┬──> impl (infra) ──┐
-       ├──> impl (ux)    ──┼──> synthesize
-       └──> impl (ceo)   ──┘
+xor ──┬──> fix ──> gate
+      └──> ship
 ```
 
-The synthesizer doesn't just pick a winner—it documents why approaches differed.
+**Looping flows** repeat a bounded body until an exit condition holds:
+```
+loop(code → review, exit: gate)
+```
+
+Parallel implementation is several Linear Tasks. Each Task owns its worktree;
+a flow never creates temporary branches or worktrees.
 
 ---
 
@@ -84,25 +83,20 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 A wave is a named agent with a goal. Everything that defines its durable
 operating context — goal, memory, routing judgment, crons — is authored in the
 repo. Projects and concrete tasks live in Linear. Crons live in `GOAL.md`
-frontmatter and are fired by the wave's resident loop. lfd serves wave
-status and live sessions to clients.
+frontmatter and are fired by the Wave's resident loop.
 
 ```markdown
----
-workers: 2
----
-
 ## Objective
 
-Run one loop iteration for this wave.
+Make first-run onboarding self-explanatory.
 
 ## Measures
 
-- **Key Results**: backlog is empty.
+- **Key Results**: five new users complete setup without help.
 
 ## Process
 
-Read the live tasks, pick the next useful move, and dispatch the appropriate flow.
+Clarify the portfolio, direct the next Project or Task, and judge the evidence.
 ```
 
 ---
@@ -249,4 +243,4 @@ Every skill sees your agent doc (`AGENTS.md` / `CLAUDE.md` / `STYLE.md`), `LOOPF
 
 ## Reference
 
-[`lf` commands](lf.md) · [`lf` operations](ops.md) · [`lfd` commands](lfd.md) · [Configuration](config.md)
+[`lf` commands](lf.md) · [`lf` operations](ops.md) · [Configuration](config.md)
